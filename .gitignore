@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Env
+.env
+.env.*
+
+# Node
+node_modules/
+
+# Supabase local artifacts
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+
+# Ephemeral agent task declaration (see .agents/hooks/path-guard.mjs)
+.agents/task.json
