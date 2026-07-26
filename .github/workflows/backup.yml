@@ -1,0 +1,36 @@
+name: backup
+
+# Nightly encrypted dump of the prod database. Doubles as database activity,
+# which keeps the Supabase free-tier project from pausing after 7 idle days.
+# The age private key never touches CI — decryption happens offline.
+on:
+  schedule:
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    if: vars.BACKUP_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    container: postgres:17
+    steps:
+      - name: Install age
+        run: apt-get update -qq && apt-get install -y -qq age
+      - name: Dump and encrypt
+        env:
+          PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          AGE_PUBLIC_KEY: ${{ vars.AGE_PUBLIC_KEY }}
+        run: |
+          pg_dump --format=custom --no-owner --schema=public \
+            --file=lifeos.dump "$PROD_DATABASE_URL"
+          age -r "$AGE_PUBLIC_KEY" -o lifeos.dump.age lifeos.dump
+          rm lifeos.dump
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lifeos-backup-${{ github.run_id }}
+          path: lifeos.dump.age
+          retention-days: 30
+          if-no-files-found: error

@@ -1,0 +1,99 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e .[dev]
+      - run: ruff check .
+      - run: mypy
+      - name: Apply migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'create schema if not exists extensions'
+          for f in supabase/migrations/*.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+      - run: pytest
+
+  build:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:main
+            ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Apply migrations
+        run: supabase db push --db-url "${{ secrets.PROD_DATABASE_URL }}" --include-all --yes
+      - name: Join tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      # Auth to the VPS is Tailscale SSH: the ephemeral tag:ci node is allowed
+      # to reach tag:prod as `deploy` by the tailnet ACL — no SSH key secrets.
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          scp -o StrictHostKeyChecking=accept-new compose.yaml deploy@"$DEPLOY_HOST":lifeos/compose.yaml
+          ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" \
+            'cd lifeos && docker compose pull --quiet && docker compose up -d --wait && curl -fsS http://127.0.0.1:8000/healthz'
