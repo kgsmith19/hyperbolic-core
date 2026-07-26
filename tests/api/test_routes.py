@@ -68,6 +68,26 @@ def test_edges_roundtrip(note_type: dict[str, Any]) -> None:
     assert edge.json()["relation"] == "references"
 
 
+def test_forget_route_redacts_pii(seeded: dict[str, UUID]) -> None:
+    captured = client.post(
+        "/capture",
+        json={
+            "type_name": "person",
+            "attributes": {"full_name": "Api Forget", "emails": ["api-forget@example.com"]},
+        },
+    )
+    assert captured.status_code == 200, captured.text
+    entity_id = captured.json()["entity_id"]
+
+    forgotten = client.post(f"/entities/{entity_id}/forget", json={})
+    assert forgotten.status_code == 200, forgotten.text
+    assert set(forgotten.json()["fields"]) == {"full_name", "emails", "birthday"}
+    assert "emails" not in client.get(f"/entities/{entity_id}").json()["entity"]["attributes"]
+
+    refused = client.post(f"/entities/{entity_id}/forget", json={"fields": ["shoe_size"]})
+    assert refused.status_code == 422
+
+
 def test_error_mapping(note_type: dict[str, Any]) -> None:
     missing = client.get("/entities/00000000-0000-0000-0000-000000000000")
     assert missing.status_code == 404

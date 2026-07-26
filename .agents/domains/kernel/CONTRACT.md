@@ -11,8 +11,12 @@ Public surface = application services in `src/kernel/services/`; import from
 - `get_entity(ctx, entity_id) -> EntityView`
 - `find(ctx, type_name=None, filters=None, text=None) -> list[Entity]`
 - `history(ctx, entity_id) -> list[Event]`
+- `forget(ctx, entity_id, fields=None, actor="kyle") -> ForgetResult` — erasure by
+  redaction (invariant 9, ADR 007); `fields=None` means every `x-pii` field the
+  entity's types declare. Needs write on every domain the entity belongs to.
 - `ping() -> bool` — health checks only; touches no data, the one call without an AccessContext
 
 Errors: `kernel.access.ScopeError` (missing scope), `LookupError` (unknown
 type/entity/edge), `jsonschema.SchemaError` / `jsonschema.ValidationError`
-(invalid schema / attributes), `ValueError` (bad x-identity/x-pii, double supersede).
+(invalid schema / attributes), `ValueError` (bad x-identity/x-pii, double
+supersede, forget on a non-PII field or an entity with no PII flags).

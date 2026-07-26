@@ -12,19 +12,21 @@ from typing import Annotated, Any
 from uuid import UUID
 
 import jsonschema
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from api.auth import AuthError, AuthUnavailableError, authenticate
 from api.auth import settings as auth_settings
-from api.dtos import CaptureIn, DefineTypeIn, RelateIn
+from api.dtos import CaptureIn, DefineTypeIn, ForgetIn, RelateIn
 from kernel.access import AccessContext, ScopeError
 from kernel.models import Edge, Entity, EntityView, Event, TypeDefinition
 from kernel.services import (
     CaptureResult,
+    ForgetResult,
     capture,
     define_type,
     find,
+    forget,
     get_entity,
     history,
     ping,
@@ -115,6 +117,15 @@ def post_edges(body: RelateIn, context: Ctx) -> Edge:
 @app.get("/entities/{entity_id}")
 def get_entity_route(entity_id: UUID, context: Ctx) -> EntityView:
     return get_entity(context, entity_id)
+
+
+@app.post("/entities/{entity_id}/forget")
+def post_forget(entity_id: UUID, body: ForgetIn, context: Ctx) -> ForgetResult:
+    """Erasure by redaction (ADR 007). Send `{}` to erase every flagged field."""
+    try:
+        return forget(context, entity_id, fields=body.fields, actor=body.actor)
+    except ValueError as exc:  # unflagged field, or an entity with nothing flagged
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/entities/{entity_id}/history")

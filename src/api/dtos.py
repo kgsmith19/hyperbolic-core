@@ -29,3 +29,10 @@ class RelateIn(BaseModel):
     to_id: UUID
     valid_from: datetime
     attributes: dict[str, Any] | None = None
+
+
+class ForgetIn(BaseModel):
+    """`fields=None` erases every x-pii field the entity's types declare."""
+
+    fields: list[str] | None = None
+    actor: str = DEFAULT_ACTOR
