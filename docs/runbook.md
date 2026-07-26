@@ -81,9 +81,16 @@ In the admin console: disable key expiry for the VPS node. The API is then
    `sslmode=require`), `LIFEOS_SUPABASE_URL`, `LIFEOS_OWNER_USER_ID`,
    `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` (from Tailscale step 2.3).
 3. Organization → Identities → create `github-actions` with **OIDC Auth**:
-   issuer `https://token.actions.githubusercontent.com`, subject bound to
-   `repo:kgsmith19/lifeos:*`. Add it to project `lifeos` with read-only
-   access to `prod`, and copy the identity ID.
+   discovery URL and issuer `https://token.actions.githubusercontent.com`.
+   The bound subject must be the exact string GitHub issues, which embeds
+   immutable account/repo IDs:
+   `repo:kgsmith19@64936641/lifeos@1311515887:ref:refs/heads/main`
+   (audience `https://github.com/kgsmith19`, or leave audiences empty).
+   Then add the identity to project `lifeos` (Access Control → Machine
+   Identities) with the read-only Viewer role — membership is separate
+   from the org-level identity — and copy the identity ID. If auth fails
+   with "subject not allowed", decode the runner's OIDC token in a one-off
+   workflow to see the live claims.
 4. Optionally mirror lifeos-test values into `dev` for future use.
 
 ### 5. GitHub repo configuration — human required (Settings → Secrets and variables → Actions)
