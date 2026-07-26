@@ -77,11 +77,17 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      packages: read
     concurrency:
       group: deploy-production
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       # Secrets come from Infisical via OIDC at run time — GitHub stores none (ADR 009).
       - uses: Infisical/secrets-action@v1.0.12
         with:
@@ -103,16 +109,20 @@ jobs:
           tags: tag:ci
       # Auth to the VPS is Tailscale SSH: the ephemeral tag:ci node is allowed
       # to reach tag:prod as `deploy` by the tailnet ACL — no SSH key secrets.
-      # The runtime .env is rendered from Infisical on every deploy, so key
-      # rotation is: edit the secret in Infisical, re-run this job.
+      # The image streams over that same channel (docker save | docker load),
+      # so the VPS holds no registry credentials either. The runtime .env is
+      # rendered from Infisical on every deploy; rotation = edit + re-run.
       - name: Deploy
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
         run: |
           umask 077
           printf 'DATABASE_URL=%s\nLIFEOS_SUPABASE_URL=%s\nLIFEOS_OWNER_USER_ID=%s\n' \
             "$DATABASE_URL" "$LIFEOS_SUPABASE_URL" "$LIFEOS_OWNER_USER_ID" > .env.prod
+          docker pull --quiet "$IMAGE"
+          docker save "$IMAGE" | gzip | ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" 'gunzip | docker load'
           scp -o StrictHostKeyChecking=accept-new compose.yaml deploy@"$DEPLOY_HOST":lifeos/compose.yaml
           scp -o StrictHostKeyChecking=accept-new .env.prod deploy@"$DEPLOY_HOST":lifeos/.env
           ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" \
-            'cd lifeos && chmod 600 .env && docker compose pull --quiet && docker compose up -d --wait && curl -fsS http://127.0.0.1:8000/healthz'
+            "cd lifeos && chmod 600 .env && LIFEOS_IMAGE=$IMAGE docker compose up -d --wait && curl -fsS http://127.0.0.1:8000/healthz"

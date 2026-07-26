@@ -64,10 +64,10 @@ ufw allow in on tailscale0 && ufw enable
 ```
 Then as `deploy`:
 ```bash
-# GHCR pull auth: fine-grained PAT with read:packages only
-docker login ghcr.io -u kgsmith19
-# No manual .env here: every deploy renders lifeos/.env from Infisical
-# (chmod 600) — see the Infisical section below.
+# No registry auth needed: CI streams images over Tailscale SSH
+# (docker save | docker load), so the VPS holds no GHCR credentials.
+# No manual .env here either: every deploy renders lifeos/.env from
+# Infisical (chmod 600) — see the Infisical section below.
 ```
 In the admin console: disable key expiry for the VPS node. The API is then
 `https://<vps-name>.<tailnet>.ts.net` on every signed-in device (that name is
