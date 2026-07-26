@@ -5,6 +5,7 @@ temporarily disabling the append-only trigger — an owner-level maintenance
 action available only here; application code can never do this.
 """
 
+import os
 import sys
 from pathlib import Path
 from uuid import UUID
@@ -16,6 +17,20 @@ sys.path.insert(0, str(ROOT))
 
 from kernel import db  # noqa: E402
 from kernel.access import AccessContext  # noqa: E402
+from kernel.env import read_env  # noqa: E402
+
+# The session wipes whatever database it points at, so it must be impossible
+# to aim at production. TEST_DATABASE_URL (lifeos-test locally, unset in CI
+# where DATABASE_URL is an ephemeral localhost Postgres) wins over
+# DATABASE_URL, and the production project ref is refused outright.
+_PROD_REF = "vhbzblllaohuljtareza"
+_test_url = read_env("TEST_DATABASE_URL")
+if _test_url:
+    os.environ["DATABASE_URL"] = _test_url
+if _PROD_REF in db.database_url():
+    raise RuntimeError(
+        "refusing to run tests against the production database; set TEST_DATABASE_URL"
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
