@@ -12,6 +12,7 @@ Commands (venv at `.venv`, DB creds in `.env`):
 - run: `.venv\Scripts\python -m uvicorn api.main:app --reload` — local dev sets
   `LIFEOS_AUTH_MODE=disabled` in `.env`; deployed runs verify Supabase JWTs (ADR 008).
 - deploy: merge to main → GitHub Actions checks, builds, migrates, deploys (docs/runbook.md).
+- review: `/lean-review` (five-lens codebase review; headless: `claude -p "/lean-review"`).
 
 Engineering standards:
 - Simplest solution that fully works; fewest lines that stay clear. Never
