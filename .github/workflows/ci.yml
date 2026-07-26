@@ -71,7 +71,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
     needs: build
     runs-on: ubuntu-latest
-    environment: production
+    # No `environment:` here — it would change the OIDC subject to
+    # environment:production, splitting it from backup.yml's ref-based
+    # subject; one exact Infisical binding covers every job this way.
     permissions:
       contents: read
       id-token: write
