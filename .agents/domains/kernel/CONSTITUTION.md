@@ -7,3 +7,4 @@ Owns: `src/kernel/**`, `supabase/migrations/**`, `tests/kernel/**`.
 - Migrations are kernel-only; review every migration against invariant 1
   before it lands.
 - The projection rebuild test must pass before any kernel merge.
+- Every kernel behavior change lands with a test in `tests/kernel/`.

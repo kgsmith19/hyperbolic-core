@@ -13,5 +13,21 @@ Commands (venv at `.venv`, DB creds in `.env`):
   `LIFEOS_AUTH_MODE=disabled` in `.env`; deployed runs verify Supabase JWTs (ADR 008).
 - deploy: merge to main → GitHub Actions checks, builds, migrates, deploys (docs/runbook.md).
 
+Engineering standards:
+- Simplest solution that fully works; fewest lines that stay clear. Never
+  trade functionality for brevity.
+- Reuse before adding. No new abstraction, file, dependency, or layer without
+  a present need; delete code a change makes dead.
+- Idiomatic current-stack code (Python 3.12, FastAPI, Pydantic v2). ruff and
+  mypy gate CI — keep them clean.
+- Every behavior change ships with tests in the matching tier: unit (pure
+  logic, no I/O), integration (service ↔ Postgres, `tests/kernel/`), e2e
+  (HTTP → app → DB, `tests/api/`).
+- CI runs lint, types, migrations, and the full suite on every PR. Merge only
+  on green — there is no server-side branch protection; this rule is the gate.
+- Tests are lean too: assert behavior, not implementation; one concern per
+  test; reuse conftest fixtures.
+- When a web UI lands, Playwright e2e joins CI as a merge gate.
+
 Rules: `.agents/invariants.md` (project invariants), `.agents/domains/` (per-cell constitutions).
 Classify task tier per folder-level rules before any code.
