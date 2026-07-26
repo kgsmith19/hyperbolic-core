@@ -1,10 +1,13 @@
 """Thin FastAPI passthrough to kernel services (interface constitution).
 
-The single-user AccessContext is built here — this is the seam where scoped
-agent contexts bolt on later (invariant 5) without touching the kernel.
+The AccessContext is built here from the verified request identity — this is
+the seam where scoped agent contexts bolt on later (invariant 5) without
+touching the kernel. Token verification lives in api.auth (ADR 008).
 """
 
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -12,6 +15,8 @@ import jsonschema
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from api.auth import AuthError, AuthUnavailableError, authenticate
+from api.auth import settings as auth_settings
 from api.dtos import CaptureIn, DefineTypeIn, RelateIn
 from kernel.access import AccessContext, ScopeError
 from kernel.models import Edge, Entity, EntityView, Event, TypeDefinition
@@ -22,17 +27,39 @@ from kernel.services import (
     find,
     get_entity,
     history,
+    ping,
     relate,
 )
 
-app = FastAPI(title="lifeos")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    auth_settings()  # fail fast on misconfigured auth before serving traffic
+    yield
 
 
-def ctx() -> AccessContext:
-    return AccessContext.all()
+app = FastAPI(title="lifeos", lifespan=lifespan)
+
+
+def ctx(request: Request) -> AccessContext:
+    return authenticate(request)
 
 
 Ctx = Annotated[AccessContext, Depends(ctx)]
+
+
+@app.exception_handler(AuthError)
+def auth_error(request: Request, exc: AuthError) -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"detail": str(exc)},
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+@app.exception_handler(AuthUnavailableError)
+def auth_unavailable(request: Request, exc: AuthUnavailableError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 @app.exception_handler(ScopeError)
@@ -48,6 +75,13 @@ def lookup_error(request: Request, exc: LookupError) -> JSONResponse:
 @app.exception_handler(jsonschema.ValidationError)
 def schema_validation_error(request: Request, exc: jsonschema.ValidationError) -> JSONResponse:
     return JSONResponse(status_code=422, content={"detail": exc.message})
+
+
+@app.get("/healthz")
+def get_healthz() -> dict[str, str]:
+    """Liveness for deploys and the compose healthcheck. Touches no data."""
+    ping()
+    return {"status": "ok"}
 
 
 @app.post("/types")

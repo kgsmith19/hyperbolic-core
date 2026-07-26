@@ -77,6 +77,14 @@ def find(
         return entities
 
 
+def ping() -> bool:
+    """Liveness for health checks: the database answers. Touches no data,
+    so it is the one service without an AccessContext."""
+    with db.connect() as conn:
+        conn.execute("select 1")
+    return True
+
+
 def history(ctx: AccessContext, entity_id: UUID) -> list[Event]:
     with db.connect() as conn:
         load_entity(conn, entity_id)

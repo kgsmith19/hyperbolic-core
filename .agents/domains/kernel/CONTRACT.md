@@ -11,6 +11,7 @@ Public surface = application services in `src/kernel/services/`; import from
 - `get_entity(ctx, entity_id) -> EntityView`
 - `find(ctx, type_name=None, filters=None, text=None) -> list[Entity]`
 - `history(ctx, entity_id) -> list[Event]`
+- `ping() -> bool` — health checks only; touches no data, the one call without an AccessContext
 
 Errors: `kernel.access.ScopeError` (missing scope), `LookupError` (unknown
 type/entity/edge), `jsonschema.SchemaError` / `jsonschema.ValidationError`

@@ -11,7 +11,10 @@ MIGRATIONS = Path(__file__).resolve().parents[2] / "supabase" / "migrations"
 
 def test_only_the_kernel_migration_exists(seeded: dict[str, UUID]) -> None:
     names = sorted(f.name for f in MIGRATIONS.glob("*.sql"))
-    assert names == ["20260724000000_kernel.sql"]
+    assert names == [
+        "20260724000000_kernel.sql",
+        "20260726004147_security_lockdown.sql",
+    ]
 
 
 def test_seeded_domains_exist_as_data(seeded: dict[str, UUID], ctx: AccessContext) -> None:
