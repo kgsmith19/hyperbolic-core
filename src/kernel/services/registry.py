@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from jsonschema.validators import validator_for
+from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 
 from kernel import db
@@ -40,14 +41,17 @@ def define_type(
             parent_id = parent_row["id"]
         now = tx_now(conn)
         type_id = uuid4()
-        conn.execute(
-            """
-            insert into type_definition (id, name, domain, json_schema, parent_type_id,
-                                         is_active, created_at)
-            values (%s, %s, %s, %s, %s, true, %s)
-            """,
-            (type_id, name, domain, Jsonb(json_schema), parent_id, now),
-        )
+        try:
+            conn.execute(
+                """
+                insert into type_definition (id, name, domain, json_schema, parent_type_id,
+                                             is_active, created_at)
+                values (%s, %s, %s, %s, %s, true, %s)
+                """,
+                (type_id, name, domain, Jsonb(json_schema), parent_id, now),
+            )
+        except UniqueViolation as exc:
+            raise ValueError(f"type already defined: {name}") from exc
         append_event(
             conn,
             entity_id=None,

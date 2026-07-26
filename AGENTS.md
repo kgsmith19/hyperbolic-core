@@ -30,4 +30,3 @@ Engineering standards:
 - When a web UI lands, Playwright e2e joins CI as a merge gate.
 
 Rules: `.agents/invariants.md` (project invariants), `.agents/domains/` (per-cell constitutions).
-Classify task tier per folder-level rules before any code.

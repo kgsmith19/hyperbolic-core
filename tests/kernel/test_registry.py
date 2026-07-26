@@ -17,6 +17,12 @@ def test_bad_identity_extension_rejected(seeded: object, ctx: AccessContext) -> 
         define_type(ctx, "broken2", "journal", {"type": "object", "x-identity": "emails"})
 
 
+def test_duplicate_type_rejected(seeded: object, ctx: AccessContext) -> None:
+    define_type(ctx, "dup_type", "journal", {"type": "object"})
+    with pytest.raises(ValueError, match="already defined"):
+        define_type(ctx, "dup_type", "journal", {"type": "object"})
+
+
 def test_unknown_type_rejected(seeded: object, ctx: AccessContext) -> None:
     with pytest.raises(LookupError, match="unknown type"):
         capture(ctx, "no_such_type", {})

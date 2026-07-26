@@ -95,3 +95,13 @@ def test_error_mapping(note_type: dict[str, Any]) -> None:
         "/capture", json={"type_name": "note", "attributes": {"text": 5}}
     )
     assert invalid.status_code == 422
+    dup = client.post(
+        "/types", json={"name": "note", "domain": "journal", "json_schema": {"type": "object"}}
+    )
+    assert dup.status_code == 422
+    bad_schema = client.post(
+        "/types", json={"name": "broken", "domain": "journal", "json_schema": {"type": "nope"}}
+    )
+    assert bad_schema.status_code == 422
+    assert client.get("/search", params={"filters": "not-json"}).status_code == 422
+    assert client.get("/search", params={"filters": "[1, 2]"}).status_code == 422

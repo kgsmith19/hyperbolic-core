@@ -12,7 +12,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 import jsonschema
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from api.auth import AuthError, AuthUnavailableError, authenticate
@@ -79,6 +79,18 @@ def schema_validation_error(request: Request, exc: jsonschema.ValidationError) -
     return JSONResponse(status_code=422, content={"detail": exc.message})
 
 
+@app.exception_handler(jsonschema.SchemaError)
+def schema_error(request: Request, exc: jsonschema.SchemaError) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"detail": exc.message})
+
+
+# CONTRACT: ValueError is client input the kernel refused (bad x-flags,
+# duplicate type, double supersede, forget on unflagged fields).
+@app.exception_handler(ValueError)
+def value_error(request: Request, exc: ValueError) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
 @app.get("/healthz")
 def get_healthz() -> dict[str, str]:
     """Liveness for deploys and the compose healthcheck. Touches no data."""
@@ -122,10 +134,7 @@ def get_entity_route(entity_id: UUID, context: Ctx) -> EntityView:
 @app.post("/entities/{entity_id}/forget")
 def post_forget(entity_id: UUID, body: ForgetIn, context: Ctx) -> ForgetResult:
     """Erasure by redaction (ADR 007). Send `{}` to erase every flagged field."""
-    try:
-        return forget(context, entity_id, fields=body.fields, actor=body.actor)
-    except ValueError as exc:  # unflagged field, or an entity with nothing flagged
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return forget(context, entity_id, fields=body.fields, actor=body.actor)
 
 
 @app.get("/entities/{entity_id}/history")
@@ -140,5 +149,7 @@ def get_search(
     text: str | None = None,
     filters: str | None = None,
 ) -> list[Entity]:
-    parsed: dict[str, Any] | None = json.loads(filters) if filters else None
+    parsed: Any = json.loads(filters) if filters else None
+    if parsed is not None and not isinstance(parsed, dict):
+        raise ValueError("filters must be a JSON object")
     return find(context, type_name=type_name, filters=parsed, text=text)
