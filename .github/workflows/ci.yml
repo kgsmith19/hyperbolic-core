@@ -72,28 +72,45 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: read
+      id-token: write
     concurrency:
       group: deploy-production
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+      # Secrets come from Infisical via OIDC at run time — GitHub stores none (ADR 009).
+      - uses: Infisical/secrets-action@v1.0.12
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          domain: https://app.infisical.com
       - uses: supabase/setup-cli@v1
         with:
           version: latest
       - name: Apply migrations
-        run: supabase db push --db-url "${{ secrets.PROD_DATABASE_URL }}" --include-all --yes
+        run: supabase db push --db-url "$DATABASE_URL" --include-all --yes
       - name: Join tailnet
         uses: tailscale/github-action@v3
         with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
           tags: tag:ci
       # Auth to the VPS is Tailscale SSH: the ephemeral tag:ci node is allowed
       # to reach tag:prod as `deploy` by the tailnet ACL — no SSH key secrets.
+      # The runtime .env is rendered from Infisical on every deploy, so key
+      # rotation is: edit the secret in Infisical, re-run this job.
       - name: Deploy
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
         run: |
+          umask 077
+          printf 'DATABASE_URL=%s\nLIFEOS_SUPABASE_URL=%s\nLIFEOS_OWNER_USER_ID=%s\n' \
+            "$DATABASE_URL" "$LIFEOS_SUPABASE_URL" "$LIFEOS_OWNER_USER_ID" > .env.prod
           scp -o StrictHostKeyChecking=accept-new compose.yaml deploy@"$DEPLOY_HOST":lifeos/compose.yaml
+          scp -o StrictHostKeyChecking=accept-new .env.prod deploy@"$DEPLOY_HOST":lifeos/.env
           ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" \
-            'cd lifeos && docker compose pull --quiet && docker compose up -d --wait && curl -fsS http://127.0.0.1:8000/healthz'
+            'cd lifeos && chmod 600 .env && docker compose pull --quiet && docker compose up -d --wait && curl -fsS http://127.0.0.1:8000/healthz'

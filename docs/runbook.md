@@ -66,25 +66,33 @@ Then as `deploy`:
 ```bash
 # GHCR pull auth: fine-grained PAT with read:packages only
 docker login ghcr.io -u kgsmith19
-# /home/deploy/lifeos/.env  (chmod 600) — values from the sections above:
-#   DATABASE_URL=postgresql://lifeos_app.vhbzblllaohuljtareza:<password>@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require
-#   LIFEOS_SUPABASE_URL=https://vhbzblllaohuljtareza.supabase.co
-#   LIFEOS_OWNER_USER_ID=<owner uuid>
+# No manual .env here: every deploy renders lifeos/.env from Infisical
+# (chmod 600) — see the Infisical section below.
 ```
 In the admin console: disable key expiry for the VPS node. The API is then
 `https://<vps-name>.<tailnet>.ts.net` on every signed-in device (that name is
 `DEPLOY_HOST`).
 
-### 4. GitHub repo configuration — human required (Settings → Secrets and variables → Actions)
-Secrets:
-| Name | Value |
-|---|---|
-| `PROD_DATABASE_URL` | prod lifeos_app session-pooler URL (as in VPS `.env`) |
-| `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` | from Tailscale step 2.3 |
+### 4. Infisical — human required (the one protected spot, ADR 009)
+1. Sign up at https://app.infisical.com (free tier), create org + project
+   `lifeos` (note the project slug) with environments `prod` and `dev`.
+2. In `prod`, add these secrets (names must match exactly — they export as
+   env vars in CI): `DATABASE_URL` (prod lifeos_app session-pooler URL with
+   `sslmode=require`), `LIFEOS_SUPABASE_URL`, `LIFEOS_OWNER_USER_ID`,
+   `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` (from Tailscale step 2.3).
+3. Organization → Identities → create `github-actions` with **OIDC Auth**:
+   issuer `https://token.actions.githubusercontent.com`, subject bound to
+   `repo:kgsmith19/lifeos:*`. Add it to project `lifeos` with read-only
+   access to `prod`, and copy the identity ID.
+4. Optionally mirror lifeos-test values into `dev` for future use.
 
-Variables:
-| Name | Value |
+### 5. GitHub repo configuration — human required (Settings → Secrets and variables → Actions)
+**No Actions secrets — variables only.** All are non-secret: the Infisical
+identity is bound to this repo's OIDC claims, so leaking them grants nothing.
+| Variable | Value |
 |---|---|
+| `INFISICAL_PROJECT_SLUG` | from Infisical step 1 |
+| `INFISICAL_IDENTITY_ID` | from Infisical step 3 |
 | `DEPLOY_ENABLED` | `true` once the VPS exists (until then the deploy job skips) |
 | `DEPLOY_HOST` | the VPS tailnet DNS name |
 | `BACKUP_ENABLED` | `true` to turn on nightly dumps |
@@ -93,7 +101,7 @@ Variables:
 Create a `production` environment (Settings → Environments) so deploy history
 is visible; add required reviewers later if wanted.
 
-### 5. Backup key — human required, key stays offline
+### 6. Backup key — human required, key stays offline
 ```bash
 age-keygen -o lifeos-backup.key     # prints the public key
 ```
@@ -104,7 +112,8 @@ only way to read backups and must never enter the repo or CI.
 ## Deploys
 Merge to `main` → `ci.yml`: checks (ruff, mypy, pytest against ephemeral
 pgvector Postgres with all migrations applied) → image to GHCR (`:main` +
-`:sha-<commit>`) → migrations via `supabase db push` → compose pull/up over
+`:sha-<commit>`) → fetch prod secrets from Infisical via OIDC → migrations
+via `supabase db push` → render + ship the VPS `.env` → compose pull/up over
 Tailscale SSH → `/healthz` smoke check (verifies DB connectivity).
 
 Rollback: on the VPS as `deploy`:
@@ -134,9 +143,11 @@ LIFEOS_AUTH_MODE=disabled
 LIFEOS_SUPABASE_URL=https://vhbzblllaohuljtareza.supabase.co
 LIFEOS_SUPABASE_PUBLISHABLE_KEY=sb_publishable_rF0kYJWAjj1w9uwD4fr7ug_khrchuXJ
 ```
-Point `DATABASE_URL` at the **lifeos-test** project only. Calling the deployed
-API: `python scripts/get_token.py` prints a bearer token (sign-in with the
-owner email/password); pass it as `Authorization: Bearer <token>`.
+Point `DATABASE_URL` at the **lifeos-test** project only. (Optional later:
+`infisical run --env=dev -- <cmd>` can replace the local file entirely.)
+Calling the deployed API: `python scripts/get_token.py` prints a bearer token
+(sign-in with the owner email/password); pass it as
+`Authorization: Bearer <token>`.
 
 ## Costs
 VPS ~$6/mo. Tailscale, GitHub (private repo, Actions, GHCR), Supabase free

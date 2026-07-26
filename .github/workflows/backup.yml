@@ -16,16 +16,26 @@ jobs:
     if: vars.BACKUP_ENABLED == 'true'
     runs-on: ubuntu-latest
     container: postgres:17
+    permissions:
+      contents: read
+      id-token: write
     steps:
+      # DATABASE_URL comes from Infisical via OIDC — GitHub stores no secrets (ADR 009).
+      - uses: Infisical/secrets-action@v1.0.12
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          domain: https://app.infisical.com
       - name: Install age
         run: apt-get update -qq && apt-get install -y -qq age
       - name: Dump and encrypt
         env:
-          PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
           AGE_PUBLIC_KEY: ${{ vars.AGE_PUBLIC_KEY }}
         run: |
           pg_dump --format=custom --no-owner --schema=public \
-            --file=lifeos.dump "$PROD_DATABASE_URL"
+            --file=lifeos.dump "$DATABASE_URL"
           age -r "$AGE_PUBLIC_KEY" -o lifeos.dump.age lifeos.dump
           rm lifeos.dump
       - uses: actions/upload-artifact@v4
