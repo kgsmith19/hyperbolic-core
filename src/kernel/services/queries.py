@@ -6,18 +6,13 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 
 from kernel import db
-from kernel.access import AccessContext, ScopeError, require
+from kernel.access import AccessContext, has, require
 from kernel.models import Edge, Entity, EntityView, Event
 from kernel.services.common import entity_domains, entity_type_names, load_entity, load_type
 
 
 def _readable(ctx: AccessContext, domains: set[str]) -> bool:
-    try:
-        for domain in domains:
-            require(ctx, f"{domain}:read")
-    except ScopeError:
-        return False
-    return True
+    return all(has(ctx, f"{domain}:read") for domain in domains)
 
 
 def get_entity(ctx: AccessContext, entity_id: UUID) -> EntityView:

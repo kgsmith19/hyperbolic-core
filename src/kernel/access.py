@@ -30,7 +30,10 @@ class AccessContext:
         return cls(scopes=frozenset(scopes))
 
 
+def has(ctx: AccessContext, scope: str) -> bool:
+    return ALL_SCOPES in ctx.scopes or scope in ctx.scopes
+
+
 def require(ctx: AccessContext, scope: str) -> None:
-    if ALL_SCOPES in ctx.scopes or scope in ctx.scopes:
-        return
-    raise ScopeError(scope)
+    if not has(ctx, scope):
+        raise ScopeError(scope)

@@ -5,7 +5,7 @@ from kernel.services.capture import CaptureResult, capture
 from kernel.services.edges import relate, supersede_edge
 from kernel.services.privacy import ForgetResult, forget
 from kernel.services.queries import find, get_entity, history, ping
-from kernel.services.registry import define_type
+from kernel.services.registry import define_type, list_types
 
 __all__ = [
     "CaptureResult",
@@ -16,6 +16,7 @@ __all__ = [
     "forget",
     "get_entity",
     "history",
+    "list_types",
     "ping",
     "relate",
     "supersede_edge",

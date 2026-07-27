@@ -5,6 +5,7 @@ Public surface = application services in `src/kernel/services/`; import from
 `require()` (invariant 5). Nothing outside the kernel touches tables (invariant 7).
 
 - `define_type(ctx, name, domain, json_schema, parent=None) -> TypeDefinition`
+- `list_types(ctx) -> list[TypeDefinition]` — active types in domains ctx can read
 - `capture(ctx, type_name, attributes, valid_time=None, actor="kyle", resolver=None) -> CaptureResult`
   — requires write on the captured type's domain only, even when resolution
   merges onto a shared multi-domain entity (revisit when agent scopes land)

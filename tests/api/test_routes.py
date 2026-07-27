@@ -88,6 +88,25 @@ def test_forget_route_redacts_pii(seeded: dict[str, UUID]) -> None:
     assert refused.status_code == 422
 
 
+def test_types_route_lists_readable_types(note_type: dict[str, Any]) -> None:
+    response = client.get("/types")
+    assert response.status_code == 200
+    assert "note" in {t["name"] for t in response.json()}
+
+
+def test_cors_preflight_allows_ui_origin(seeded: object) -> None:
+    response = client.options(
+        "/search",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
 def test_error_mapping(note_type: dict[str, Any]) -> None:
     missing = client.get("/entities/00000000-0000-0000-0000-000000000000")
     assert missing.status_code == 404

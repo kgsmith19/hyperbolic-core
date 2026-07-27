@@ -9,9 +9,19 @@ from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 
 from kernel import db
-from kernel.access import AccessContext, require
+from kernel.access import AccessContext, has, require
 from kernel.events import DEFAULT_ACTOR, append_event, iso, tx_now
 from kernel.models import TypeDefinition
+
+
+def list_types(ctx: AccessContext) -> list[TypeDefinition]:
+    """Active type definitions in domains the context can read (UI pickers)."""
+    with db.connect() as conn:
+        rows = conn.execute(
+            "select * from type_definition where is_active order by domain, name"
+        ).fetchall()
+    types = (TypeDefinition.model_validate(row) for row in rows)
+    return [t for t in types if has(ctx, f"{t.domain}:read")]
 
 
 def define_type(

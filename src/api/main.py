@@ -13,12 +13,14 @@ from uuid import UUID
 
 import jsonschema
 from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api.auth import AuthError, AuthUnavailableError, authenticate
 from api.auth import settings as auth_settings
 from api.dtos import CaptureIn, DefineTypeIn, ForgetIn, RelateIn
 from kernel.access import AccessContext, ScopeError
+from kernel.env import read_env
 from kernel.models import Edge, Entity, EntityView, Event, TypeDefinition
 from kernel.services import (
     CaptureResult,
@@ -29,6 +31,7 @@ from kernel.services import (
     forget,
     get_entity,
     history,
+    list_types,
     ping,
     relate,
 )
@@ -41,6 +44,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="lifeos", lifespan=lifespan)
+
+# Browser clients (the lifeos-ui SPA). Bearer tokens, no cookies, tailnet-only
+# exposure — so a static allowlist is enough; LIFEOS_CORS_ORIGINS overrides.
+_UI_ORIGINS = "http://localhost:5173,https://lifeos-prod.taile48c9b.ts.net:8443"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=(read_env("LIFEOS_CORS_ORIGINS") or _UI_ORIGINS).split(","),
+    allow_methods=["*"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 def ctx(request: Request) -> AccessContext:
@@ -101,6 +114,11 @@ def get_healthz() -> dict[str, str]:
 @app.post("/types")
 def post_types(body: DefineTypeIn, context: Ctx) -> TypeDefinition:
     return define_type(context, body.name, body.domain, body.json_schema, parent=body.parent)
+
+
+@app.get("/types")
+def get_types(context: Ctx) -> list[TypeDefinition]:
+    return list_types(context)
 
 
 @app.post("/capture")

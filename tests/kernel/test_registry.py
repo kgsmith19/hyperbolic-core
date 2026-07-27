@@ -4,7 +4,14 @@ import jsonschema
 import pytest
 
 from kernel.access import AccessContext
-from kernel.services import capture, define_type
+from kernel.services import capture, define_type, list_types
+
+
+def test_list_types_filters_by_read_scope(seeded: object, ctx: AccessContext) -> None:
+    assert {"person", "workout"} <= {t.name for t in list_types(ctx)}
+    health_only = {t.name for t in list_types(AccessContext.of("health:read"))}
+    assert "workout" in health_only
+    assert "person" not in health_only
 
 
 def test_invalid_json_schema_rejected(seeded: object, ctx: AccessContext) -> None:
