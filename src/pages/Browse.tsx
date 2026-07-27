@@ -65,10 +65,10 @@ export default function Browse() {
             </Link>
           </li>
         ))}
-        {results.data?.length === 0 && (
-          <p className="text-sm text-zinc-500">No results.</p>
-        )}
       </ul>
+      {results.data?.length === 0 && (
+        <p className="text-sm text-zinc-500">No results.</p>
+      )}
     </div>
   );
 }
