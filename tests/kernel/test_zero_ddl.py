@@ -15,6 +15,7 @@ KERNEL_MIGRATIONS = [
     "20260724000000_kernel.sql",
     "20260725000000_pii_redaction.sql",
     "20260726004147_security_lockdown.sql",
+    "20260726200000_fk_indexes.sql",
 ]
 
 
