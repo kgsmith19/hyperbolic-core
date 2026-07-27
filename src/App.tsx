@@ -1,0 +1,88 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router";
+
+import { supabase } from "./auth/supabase";
+import { useSession } from "./auth/useSession";
+import HealthDot from "./components/HealthDot";
+import Browse from "./pages/Browse";
+import Capture from "./pages/Capture";
+import EntityDetail from "./pages/EntityDetail";
+import Login from "./pages/Login";
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: 1 } },
+});
+
+function Shell({ children }: { children: ReactNode }) {
+  return (
+    <div className="min-h-screen bg-zinc-50 text-zinc-900">
+      <header className="flex items-center gap-4 border-b border-zinc-200 bg-white px-4 py-2">
+        <Link to="/" className="font-semibold">
+          lifeos
+        </Link>
+        <nav className="flex gap-3 text-sm">
+          <Link to="/" className="hover:underline">
+            Browse
+          </Link>
+          <Link to="/capture" className="hover:underline">
+            Capture
+          </Link>
+        </nav>
+        <div className="ml-auto flex items-center gap-3">
+          <HealthDot />
+          <button
+            onClick={() => void supabase.auth.signOut()}
+            className="text-sm text-zinc-500 hover:underline"
+          >
+            Sign out
+          </button>
+        </div>
+      </header>
+      <main className="mx-auto max-w-3xl p-4">{children}</main>
+    </div>
+  );
+}
+
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { session, loading } = useSession();
+  if (loading) return null;
+  if (!session) return <Navigate to="/login" replace />;
+  return <Shell>{children}</Shell>;
+}
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <Browse />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/capture"
+            element={
+              <RequireAuth>
+                <Capture />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/entities/:id"
+            element={
+              <RequireAuth>
+                <EntityDetail />
+              </RequireAuth>
+            }
+          />
+        </Routes>
+      </BrowserRouter>
+    </QueryClientProvider>
+  );
+}
