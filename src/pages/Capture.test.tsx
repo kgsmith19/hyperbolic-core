@@ -14,7 +14,11 @@ vi.mock("../api/client", () => ({
       domain: "journal",
       json_schema: {
         type: "object",
-        properties: { text: { type: "string" }, tags: { type: "array" } },
+        properties: {
+          text: { type: "string" },
+          tags: { type: "array" },
+          duration: { type: "number" },
+        },
         required: ["text"],
       },
     },
@@ -47,6 +51,26 @@ describe("Capture", () => {
       attributes: { text: "ship the UI", tags: ["dev"] },
     });
     expect(await screen.findByText("entity page")).toBeInTheDocument();
+  });
+
+  it("rejects non-numeric input in number fields without calling the API", async () => {
+    renderWithProviders(
+      <Routes>
+        <Route path="/capture" element={<Capture />} />
+      </Routes>,
+      { route: "/capture" },
+    );
+    const typeSelect = screen.getByRole("combobox");
+    await screen.findByRole("option", { name: /note/ });
+    await userEvent.selectOptions(typeSelect, "note");
+    await userEvent.type(screen.getByLabelText(/text/i), "x");
+    await userEvent.type(screen.getByLabelText(/duration/i), "abc");
+    await userEvent.click(screen.getByRole("button", { name: /capture/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /duration must be a number/i,
+    );
+    expect(vi.mocked(captureEntity)).not.toHaveBeenCalled();
   });
 
   it("rejects invalid JSON in non-scalar fields without calling the API", async () => {

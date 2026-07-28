@@ -36,9 +36,14 @@ export default function Capture() {
         for (const [name, field] of Object.entries(fields)) {
           const raw = String(form.get(name) ?? "").trim();
           if (!raw) continue;
-          if (field.type === "number" || field.type === "integer")
-            attributes[name] = Number(raw);
-          else if (field.type === "string") attributes[name] = raw;
+          if (field.type === "number" || field.type === "integer") {
+            const parsed = Number(raw);
+            if (Number.isNaN(parsed)) {
+              setError(`${name} must be a number`);
+              return;
+            }
+            attributes[name] = parsed;
+          } else if (field.type === "string") attributes[name] = raw;
           else attributes[name] = JSON.parse(raw);
         }
       } else {
