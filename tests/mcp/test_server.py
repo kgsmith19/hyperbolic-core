@@ -74,6 +74,16 @@ def test_write_scoped_call_is_refused(
 
 
 def test_fails_closed_without_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LIFEOS_AGENT_TOKEN", raising=False)
+    """No token anywhere — env or .env fallback — refuses every call."""
+    monkeypatch.setattr(server, "read_env", lambda name: None)
     with pytest.raises(AgentTokenError, match="must be set"):
+        server.access_context()
+
+
+def test_fails_closed_on_garbage_token(
+    install_token: Callable[..., str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_token("health:read")  # valid public key in env
+    monkeypatch.setenv("LIFEOS_AGENT_TOKEN", "not-a-token")
+    with pytest.raises(AgentTokenError, match="invalid"):
         server.access_context()

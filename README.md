@@ -18,37 +18,22 @@ A read-only stdio MCP server wraps the kernel services — `list_types`, `find`,
 explicit `<domain>:read` scopes: writes cannot be expressed, and a domain added
 later stays invisible until a re-mint.
 
-One-time setup:
+Setup — two clicks in the Guards GUI, nothing to copy:
 
-1. Generate the signing keypair: run `lifeos-agent-keygen.ps1` from the Guards
-   GUI ("Claude's requests" tab). It appends `LIFEOS_AGENT_JWT_PRIVATE_KEY` and
-   `LIFEOS_AGENT_JWT_PUBLIC_KEY` (base64-wrapped PEM) to the repo `.env` and
-   prints no key material.
-2. Mint a token (repeat `--scope` per domain; re-run when a new domain lands):
+1. `lifeos-agent-keygen.ps1` (one-time) — generates the ES256 signing keypair
+   into the repo `.env`; prints no key material.
+2. `lifeos-mcp-setup.ps1` (standing) — mints a 30-day read-only token into
+   `.env` as `LIFEOS_AGENT_TOKEN` and registers the server in Claude Desktop's
+   config; restart Claude Desktop. Re-run on expiry or key rotation; when a new
+   domain lands, update the script's `--scope` list deliberately — it is the
+   operator-reviewed allowlist.
 
-   ```
-   .venv\Scripts\python scripts/mint_agent_token.py --scope relationships:read --scope health:read
-   ```
-
-3. Claude Desktop → Settings → Developer → Edit Config:
-
-   ```json
-   {
-     "mcpServers": {
-       "lifeos": {
-         "command": "C:\\code\\lifeos\\.venv\\Scripts\\python.exe",
-         "args": ["-m", "mcp_server"],
-         "env": {
-           "LIFEOS_AGENT_TOKEN": "<output of scripts/mint_agent_token.py>",
-           "LIFEOS_AGENT_JWT_PUBLIC_KEY": "<LIFEOS_AGENT_JWT_PUBLIC_KEY value from .env>",
-           "DATABASE_URL": "<optional: prod session-pooler URL for real data>"
-         }
-       }
-     }
-   }
-   ```
-
-Omit `DATABASE_URL` to fall back to the repo `.env` (the lifeos-test database,
-which `pytest` wipes). Every tool result carries the provenance envelope
-(ADR 010): the entity/event ids it was built from, the producing method, and a
-confidence.
+The server resolves `LIFEOS_AGENT_TOKEN`, `LIFEOS_AGENT_JWT_PUBLIC_KEY`, and
+`DATABASE_URL` from its environment with fallback to the repo `.env`, so the
+Claude Desktop entry holds no secrets. By default the agent sees the `.env`
+database (lifeos-test, which `pytest` wipes); to point it elsewhere add an
+`env: {"DATABASE_URL": ...}` block to the `lifeos` entry — the setup script
+preserves it. For other MCP clients, `scripts/mint_agent_token.py` without
+`--install` prints the token instead. Every tool result carries the provenance
+envelope (ADR 010): the entity/event ids it was built from, the producing
+method, and a confidence.
