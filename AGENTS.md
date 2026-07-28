@@ -14,7 +14,8 @@ Commands (venv at `.venv`, DB creds in `.env`):
 - mcp: `.venv\Scripts\python -m mcp_server` — read-only stdio MCP server for
   agent clients; needs a minted agent token (README "Agent access over MCP").
 - deploy: merge to main → GitHub Actions checks, builds, migrates, deploys (docs/runbook.md).
-- review: `/lean-review` (five-lens codebase review; headless: `claude -p "/lean-review"`).
+- review: `/lean-review` (five-lens codebase review; headless: `claude -p "/lean-review"`);
+  `/diff-review` for just the working diff or current branch.
 
 Engineering standards:
 - Simplest solution that fully works; fewest lines that stay clear. Never
@@ -30,7 +31,8 @@ Engineering standards:
   on green — there is no server-side branch protection; this rule is the gate.
 - Tests are lean too: assert behavior, not implementation; one concern per
   test; reuse conftest fixtures.
-- When a web UI lands, Playwright e2e joins CI as a merge gate.
+- The web UI lives in the sibling `lifeos-ui` repo; its Playwright e2e gate
+  runs in that repo's CI (this repo's CI stays lint/types/migrations/pytest).
 
 Provenance convention (ADR 010): every agent-facing tool result carries
 `{source_entity_ids, source_event_ids, method, confidence}`. Direct kernel
