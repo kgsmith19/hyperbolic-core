@@ -32,6 +32,7 @@ Engineering standards:
 
 Rules: `.agents/invariants.md` (project invariants), `.agents/domains/` (per-cell constitutions).
 
-Roadmap context: `docs/research/lifeos-research-final.md` (v2 synthesis, point-in-time
+Roadmap: `docs/roadmap.md` (living slice queue + prompts; updated every slice PR).
+Context: `docs/research/lifeos-research-final.md` (v2 synthesis, point-in-time
 snapshot — ADRs win on conflict) and `docs/golden-questions.md` (behavior-scored
 grounding regression bar; run after the chat and calendar slices).
