@@ -118,8 +118,8 @@ jobs:
           IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
         run: |
           umask 077
-          printf 'DATABASE_URL=%s\nLIFEOS_SUPABASE_URL=%s\nLIFEOS_OWNER_USER_ID=%s\n' \
-            "$DATABASE_URL" "$LIFEOS_SUPABASE_URL" "$LIFEOS_OWNER_USER_ID" > .env.prod
+          printf 'DATABASE_URL=%s\nLIFEOS_SUPABASE_URL=%s\nLIFEOS_OWNER_USER_ID=%s\nANTHROPIC_API_KEY=%s\n' \
+            "$DATABASE_URL" "$LIFEOS_SUPABASE_URL" "$LIFEOS_OWNER_USER_ID" "$ANTHROPIC_API_KEY" > .env.prod
           docker pull --quiet "$IMAGE"
           docker save "$IMAGE" | gzip | ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" 'gunzip | docker load'
           scp -o StrictHostKeyChecking=accept-new compose.yaml deploy@"$DEPLOY_HOST":lifeos/compose.yaml
