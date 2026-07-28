@@ -28,7 +28,9 @@ Pre-made decisions in prompts are not relitigated.
 ## Milestones and slice queue
 
 ### A — Grounded answers
-- [ ] A1 Read-only MCP server + first scoped agent token (ADR-010)
+- [x] A1 Read-only MCP server + first scoped agent token (ADR-010) — done
+  2026-07-28 (PR #23); operator steps: run the guards keygen runbox, mint a
+  token, wire Claude Desktop (README), then score golden questions Q8/9/13/14
 - [ ] A2 Grounded chat with citations (ADR-011)
 - [ ] A2.5 Daily check-in micro-slice (wellbeing `daily_checkin` type + capture
   form; starts the 14-day capture-sustainability experiment)
@@ -90,28 +92,7 @@ Open flag for A2/ADR-011: ADR 009 puts provider LLM keys in a LiteLLM gateway
 at first LLM usage; pre-slice wiring put `ANTHROPIC_API_KEY` in the app `.env`
 render. Adjudicate gateway-vs-direct in ADR-011.
 
-## Slice prompts (next three)
-
-### Slice 1 — A1
-
-```
-# lifeos Slice 1: read-only MCP server + first scoped agent token (ADR-010)
-Read AGENTS.md, .agents/invariants.md, and the kernel constitution first.
-Build: a stdio MCP server wrapping existing application services only —
-list_types, find, get_entity, history. Every call carries an AccessContext
-built from the token's scopes; mint the first read-only agent JWT (scopes
-strip all writes). No raw SQL, no raw tables, no new kernel DDL.
-Provenance convention starts here: every tool result includes the entity/
-event ids it was built from ({source_event_ids, method, confidence} where
-derived). Document the convention where type authors will see it.
-Deliverables: MCP server module + token-minting helper (secrets via
-Infisical/guards, never in chat or code) + README section with the dedicated
-Claude Desktop setup snippet + ADR-010 + tests in the matching tiers.
-Acceptance: pytest green; a Claude Desktop session over the server answers
-golden questions Q8/9/13/14 at their behavior bars (abstains where data is
-absent); a write-scoped call is refused. Merge on green only.
-Out of scope: chat endpoint, UI, ingestion, embeddings, any write tool.
-```
+## Slice prompts (queue)
 
 ### Slice 2 — A2 (+ A2.5 rider)
 

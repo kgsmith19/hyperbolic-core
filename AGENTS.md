@@ -11,6 +11,8 @@ Commands (venv at `.venv`, DB creds in `.env`):
 - lint: `.venv\Scripts\python -m ruff check .` then `.venv\Scripts\python -m mypy`
 - run: `.venv\Scripts\python -m uvicorn api.main:app --reload` — local dev sets
   `LIFEOS_AUTH_MODE=disabled` in `.env`; deployed runs verify Supabase JWTs (ADR 008).
+- mcp: `.venv\Scripts\python -m mcp_server` — read-only stdio MCP server for
+  agent clients; needs a minted agent token (README "Agent access over MCP").
 - deploy: merge to main → GitHub Actions checks, builds, migrates, deploys (docs/runbook.md).
 - review: `/lean-review` (five-lens codebase review; headless: `claude -p "/lean-review"`).
 
@@ -29,6 +31,12 @@ Engineering standards:
 - Tests are lean too: assert behavior, not implementation; one concern per
   test; reuse conftest fixtures.
 - When a web UI lands, Playwright e2e joins CI as a merge gate.
+
+Provenance convention (ADR 010): every agent-facing tool result carries
+`{source_entity_ids, source_event_ids, method, confidence}`. Direct kernel
+reads are confidence 1.0; anything derived — rollups, links, extractions, and
+the events they emit — must cite the event ids it was built from, its method,
+and an honest confidence.
 
 Rules: `.agents/invariants.md` (project invariants), `.agents/domains/` (per-cell constitutions).
 
