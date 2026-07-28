@@ -29,8 +29,9 @@ Pre-made decisions in prompts are not relitigated.
 
 ### A — Grounded answers
 - [x] A1 Read-only MCP server + first scoped agent token (ADR-010) — done
-  2026-07-28 (PR #23); operator steps: run the two guards setup scripts
-  (README "Agent access over MCP"), then score golden questions Q8/9/13/14
+  2026-07-28 (PR #23); acceptance complete same day: Claude Desktop over the
+  server scored golden questions Q8/9/13/14 at their behavior bars (all pass,
+  first baseline)
 - [ ] A2 Grounded chat with citations (ADR-011)
 - [ ] A2.5 Daily check-in micro-slice (wellbeing `daily_checkin` type + capture
   form; starts the 14-day capture-sustainability experiment)
