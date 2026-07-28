@@ -4,8 +4,10 @@ upsert and Claude Desktop registration are idempotent and preserving."""
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.mint_agent_token import upsert_env
-from scripts.setup_claude_desktop import VENV_PYTHON, register
+from scripts.setup_claude_desktop import VENV_PYTHON, config_path, register
 
 
 def test_upsert_env_appends_then_replaces(tmp_path: Path) -> None:
@@ -21,6 +23,26 @@ def test_upsert_env_creates_missing_file(tmp_path: Path) -> None:
     env = tmp_path / ".env"
     upsert_env(env, "LIFEOS_AGENT_TOKEN", "t1")
     assert env.read_text(encoding="utf-8") == "LIFEOS_AGENT_TOKEN=t1\n"
+
+
+def test_config_path_prefers_store_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    sandbox = (
+        tmp_path / "Local" / "Packages" / "Claude_abc123" / "LocalCache" / "Roaming" / "Claude"
+    )
+    sandbox.mkdir(parents=True)
+    assert config_path() == sandbox / "claude_desktop_config.json"
+
+
+def test_config_path_falls_back_to_appdata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    assert config_path() == tmp_path / "Roaming" / "Claude" / "claude_desktop_config.json"
 
 
 def test_register_creates_config(tmp_path: Path) -> None:

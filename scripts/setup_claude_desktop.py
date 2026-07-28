@@ -15,9 +15,18 @@ VENV_PYTHON = Path(__file__).resolve().parents[1] / ".venv" / "Scripts" / "pytho
 
 
 def config_path() -> Path:
+    """Claude Desktop's config location. The Microsoft Store build sandboxes
+    %APPDATA% into its package dir and never reads the standard path, so
+    prefer an existing Store sandbox over %APPDATA%."""
     appdata = os.environ.get("APPDATA")
     if not appdata:
         raise RuntimeError("APPDATA is not set; Claude Desktop config location is unknown")
+    localappdata = os.environ.get("LOCALAPPDATA")
+    if localappdata:
+        for package in sorted((Path(localappdata) / "Packages").glob("Claude_*")):
+            sandbox = package / "LocalCache" / "Roaming" / "Claude"
+            if sandbox.is_dir():
+                return sandbox / "claude_desktop_config.json"
     return Path(appdata) / "Claude" / "claude_desktop_config.json"
 
 
