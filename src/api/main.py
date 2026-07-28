@@ -56,11 +56,7 @@ app.add_middleware(
 )
 
 
-def ctx(request: Request) -> AccessContext:
-    return authenticate(request)
-
-
-Ctx = Annotated[AccessContext, Depends(ctx)]
+Ctx = Annotated[AccessContext, Depends(authenticate)]
 
 
 @app.exception_handler(AuthError)

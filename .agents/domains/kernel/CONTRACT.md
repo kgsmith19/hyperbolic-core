@@ -12,7 +12,8 @@ Public surface = application services in `src/kernel/services/`; import from
 - `relate(ctx, from_id, relation, to_id, valid_from, attributes=None, actor="kyle") -> Edge`
 - `supersede_edge(ctx, edge_id, valid_to, actor="kyle") -> Edge`
 - `get_entity(ctx, entity_id) -> EntityView`
-- `find(ctx, type_name=None, filters=None, text=None) -> list[Entity]`
+- `find(ctx, type_name=None, filters=None, text=None) -> list[Entity]` — returns
+  only entities every domain of which ctx can read (same rule as `get_entity`)
 - `history(ctx, entity_id) -> list[Event]`
 - `forget(ctx, entity_id, fields=None, actor="kyle") -> ForgetResult` — erasure by
   redaction (invariant 9, ADR 007); `fields=None` means every `x-pii` field the

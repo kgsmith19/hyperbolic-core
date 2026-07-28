@@ -65,11 +65,9 @@ def find(
             params,
         ).fetchall()
         entities = [Entity.model_validate(r) for r in rows]
-        if type_name is None:
-            entities = [
-                e for e in entities if _readable(ctx, entity_domains(conn, e.id))
-            ]
-        return entities
+        # Same rule as get_entity: every domain the entity belongs to must be
+        # readable, or a typed find would leak multi-domain entities.
+        return [e for e in entities if _readable(ctx, entity_domains(conn, e.id))]
 
 
 def ping() -> bool:
