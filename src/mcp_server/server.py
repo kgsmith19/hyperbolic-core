@@ -78,7 +78,9 @@ def find(
     text: str | None = None,
 ) -> dict[str, Any]:
     """Search entities by type name, exact attribute filters, and/or full
-    text. An empty result means no matching record exists — report that as
+    text. Results carry attributes only — relationships never appear here;
+    call get_entity before claiming what an entity is or is not linked to.
+    An empty result means no matching record exists — report that as
     'no data', never guess."""
     entities = services.find(access_context(), type_name=type_name, filters=filters, text=text)
     return {
