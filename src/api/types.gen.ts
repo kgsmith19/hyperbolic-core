@@ -73,11 +73,16 @@ export interface paths {
     put?: never;
     /**
      * Post Capture
-     * @description Generic capture. Bills take one extra check on the way in (ADR 017):
-     *     `status: "verified"` is the reconciliation verifier's to write, and a
-     *     verified record is not editable by hand, because `capture` merges and the
-     *     verified status would survive an edit to the numbers under it. The decision
-     *     lives in the domain; this is the dispatch.
+     * @description Generic capture. Two domains lock this door on the way in, and both
+     *     locks are on the record the write would land on, not the type name it
+     *     claims. Bills (ADR 017): `status: "verified"` is the reconciliation
+     *     verifier's to write, and a verified record is not editable by hand, because
+     *     `capture` merges and the verified status would survive an edit to the
+     *     numbers under it. Documents (ADR 015): `document` records exist only
+     *     through the upload and erasure paths, and a foreign type carrying the
+     *     `sha256` identity key would merge into a real document — dangling its refs
+     *     or forging its tombstone. The decisions live in the domains; this is the
+     *     dispatch.
      */
     post: operations["post_capture_capture_post"];
     delete?: never;
@@ -257,8 +262,18 @@ export interface paths {
      *
      *     Documents: most of a document's personal data is in the stored file, which
      *     `forget()` cannot reach, so redacting attributes alone would report an
-     *     erasure that left the bill on disk (ADR 015). The response carries
-     *     `blobs_deleted`, so the claim is checkable.
+     *     erasure that left the bill on disk (ADR 015). And the bill/eob candidates
+     *     extracted FROM the document (C2) are separate bills-domain entities whose
+     *     issuer, references, dates and amounts came out of it, linked only by the
+     *     provenance citation — so forgetting a document routes every candidate
+     *     citing it through the bills domain's own forget path first (which cascades
+     *     to verification receipts and authority digests). First, because over-erasing
+     *     a derived record is the safe direction: a failure part-way must not leave
+     *     the candidates as the only survivors, and a retry can finish the job (the
+     *     `forget_bill` precedent). Composed here so the documents domain never
+     *     imports bills; each decision stays in its domain, this is the dispatch. The
+     *     response carries `blobs_deleted`, `candidates_erased` and
+     *     `receipts_redacted`, so the claim is checkable.
      *
      *     Bills and EOBs: a candidate's verification receipts hold numbers derived
      *     from its amounts, in a different entity that `forget()` — which is strictly
@@ -426,6 +441,29 @@ export interface components {
       };
       /** Parent */
       parent?: string | null;
+    };
+    /**
+     * DocumentForgetResponse
+     * @description The one-endpoint composition: a document's own erasure plus the bills
+     *     cascade over every candidate extracted from it. The counts are the claim's
+     *     evidence — a caller can check completeness instead of trusting the 200.
+     */
+    DocumentForgetResponse: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Fields */
+      fields: string[];
+      /** Events Redacted */
+      events_redacted: number;
+      /** Blobs Deleted */
+      blobs_deleted: number;
+      /** Candidates Erased */
+      candidates_erased: number;
+      /** Receipts Redacted */
+      receipts_redacted: number;
     };
     /**
      * DocumentForgetResult
@@ -1126,6 +1164,7 @@ export interface operations {
         };
         content: {
           "application/json":
+            | components["schemas"]["DocumentForgetResponse"]
             | components["schemas"]["DocumentForgetResult"]
             | components["schemas"]["BillForgetResult"]
             | components["schemas"]["ForgetResult"];
