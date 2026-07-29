@@ -13,6 +13,9 @@ Commands (venv at `.venv`, DB creds in `.env`):
   `LIFEOS_AUTH_MODE=disabled` in `.env`; deployed runs verify Supabase JWTs (ADR 008).
 - mcp: `.venv\Scripts\python -m mcp_server` — read-only stdio MCP server for
   agent clients; needs a minted agent token (README "Agent access over MCP").
+- jobs: `.venv\Scripts\python -m domains.calendar.ingest` / `.calendar.autolink` /
+  `.ops.briefing` — the scheduled trio, run in that order; each leaves an
+  `execution_receipt` and only `ok` exits 0 (ADR 014, docs/runbook.md).
 - deploy: merge to main → GitHub Actions checks, builds, migrates, deploys (docs/runbook.md).
 - review: `/lean-review` (five-lens codebase review; headless: `claude -p "/lean-review"`);
   `/diff-review` for just the working diff or current branch.

@@ -18,7 +18,12 @@ Owns: `src/domains/calendar/**`, `tests/calendar/**`.
 - Runs under a narrow code-built AccessContext, never `AccessContext.all()`:
   `calendar:read`/`write` for ingestion (ADR 012), plus
   `relationships:read`/`write` for the auto-link pass, whose edges span both
-  domains (ADR 013).
+  domains (ADR 013), plus `ops:read`/`write` for the run's own execution
+  receipt and nothing else (ADR 014).
+- Both CLIs are scheduled entry points: they run inside `ops.receipts.run_job`,
+  so every run leaves a receipt (ok/failed/skipped) and only `ok` exits 0.
+  Receipts carry counts and exception class names — never feed text, never an
+  exception message (ADR 012/014).
 - Auto-link is deterministic and exact — no LLM, no fuzzy matching, no name
   matching; it emits edges and review items only, never merges or rewrites the
   person spine (invariant 4, ADR 013). Ambiguity goes to `link_review`, which

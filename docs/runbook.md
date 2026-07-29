@@ -19,6 +19,30 @@ Project references:
 | `LIFEOS_OWNER_USER_ID` | UUID of the single allowed Supabase Auth user. |
 | `LIFEOS_AUTH_AUDIENCE` | Optional, defaults to `authenticated`. |
 | `LIFEOS_SUPABASE_PUBLISHABLE_KEY` | Only for `scripts/get_token.py`. |
+| `LIFEOS_ICS_URLS` | Comma-separated ICS feed URLs for the ingestion job (ADR 012). |
+| `LIFEOS_BRIEFING_TZ` | Optional IANA zone deciding the briefing's "today"; defaults to UTC. |
+
+## Scheduled jobs (ADR 014)
+
+Three CLIs, run in order once a day, each leaving an `execution_receipt`
+entity (`ok` / `failed` / `skipped`; only `ok` exits 0):
+
+```bash
+docker compose run --rm --no-deps api python -m domains.calendar.ingest
+docker compose run --rm --no-deps api python -m domains.calendar.autolink
+docker compose run --rm --no-deps api python -m domains.ops.briefing
+```
+
+The schedule is **not** installed by a deploy — it is operator-installed on the
+box (`deploy` user crontab + `~/lifeos/run-scheduled-jobs.sh`, both managed by
+the `install-lifeos-cron.ps1` runbox script). A failing job never stops the next
+one; the wrapper still exits non-zero. "Did the cron run?" is a query, not an
+ssh session: `find(ctx, type_name="execution_receipt")`.
+
+Note that every deploy re-renders `lifeos/.env`, so job-only variables
+(`LIFEOS_ICS_URLS`, `LIFEOS_BRIEFING_TZ`) belong in Infisical `prod` **and** in
+the Deploy step's `printf`; `~/lifeos/.env.jobs` is the interim home the runbox
+script writes.
 
 ## One-time setup
 

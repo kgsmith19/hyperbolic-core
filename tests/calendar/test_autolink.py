@@ -16,6 +16,7 @@ from domains.calendar.autolink import (
     REASON_AMBIGUOUS,
     REASON_CONFLICT,
     autolink_context,
+    main,
     normalize_email,
     run_autolink,
 )
@@ -155,6 +156,14 @@ def test_linking_without_relationships_write_fails_closed(link_ctx: AccessContex
     read_only = AccessContext.of("calendar:read", "calendar:write", "relationships:read")
     with pytest.raises(ScopeError):
         run_autolink(read_only)
+
+
+def test_cli_emits_an_execution_receipt(link_ctx: AccessContext) -> None:
+    """The scheduler's audit trail: the B2 pass records every run (ADR 014)."""
+    assert main() == 0
+    receipts = find(link_ctx, type_name="execution_receipt", filters={"job": METHOD})
+    assert receipts and receipts[-1].attributes["status"] == "ok"
+    assert receipts[-1].attributes["summary"].startswith("autolink:")
 
 
 # Runs last on purpose: forgetting the attendee strips the email later tests

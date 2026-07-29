@@ -23,6 +23,7 @@ from domains.calendar.ingest import (
     SameHostRedirects,
     ingest_content,
     ingest_context,
+    main,
 )
 from domains.calendar.types import define_calendar_types
 from kernel import db
@@ -179,6 +180,16 @@ def test_same_host_redirect_allowed() -> None:
     )
     assert followed is not None
     assert followed.get_full_url() == "https://calendar.example.test/moved.ics"
+
+
+def test_cli_without_feeds_emits_a_skipped_receipt(
+    cal_ctx: AccessContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing feed list is a misconfiguration, not a quiet no-op (ADR 014)."""
+    monkeypatch.setattr("domains.calendar.ingest.read_env", lambda _: None)
+    assert main() == 1
+    receipts = find(cal_ctx, type_name="execution_receipt", filters={"job": METHOD})
+    assert receipts and receipts[-1].attributes["status"] == "skipped"
 
 
 # Runs last on purpose: forgetting rob's email removes the attendee's identity

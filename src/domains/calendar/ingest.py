@@ -8,8 +8,10 @@ receipt is hash-plus-metadata only — verbatim feed text is never retained,
 because it cannot be erased per-subject (invariant 9, ADR 012).
 
 Runs as ``python -m domains.calendar.ingest`` (deploy-box scheduler) under a
-code-built AccessContext of exactly ``calendar:read`` + ``calendar:write`` —
-narrow by construction; agent tokens stay read-only (ADR 010/012). Feed URLs
+code-built AccessContext of exactly ``calendar:read`` + ``calendar:write`` plus
+``ops:read``/``ops:write`` for its own execution receipt — narrow by
+construction; agent tokens stay read-only (ADR 010/012/014). Every run leaves an
+``execution_receipt`` (ok, failed or skipped) and only ``ok`` exits 0. Feed URLs
 come from ``LIFEOS_ICS_URLS`` (comma-separated) and are never stored or
 logged — they can embed private tokens — only a redacted host + url hash.
 """
@@ -24,6 +26,7 @@ from uuid import UUID
 
 from domains.calendar.parse import Occurrence, parse_ics
 from domains.calendar.types import define_calendar_types
+from domains.ops.receipts import STATUS_FAILED, STATUS_OK, STATUS_SKIPPED, JobResult, run_job
 from kernel import services
 from kernel.access import AccessContext
 from kernel.env import read_env
@@ -231,29 +234,46 @@ def _link_attendees(
 
 
 def ingest_context() -> AccessContext:
-    """Exactly the scopes ingestion needs — narrow by construction (ADR 012)."""
-    return AccessContext.of("calendar:read", "calendar:write")
+    """Exactly the scopes ingestion needs — narrow by construction (ADR 012);
+    ``ops`` is its execution receipt and nothing else (ADR 014)."""
+    return AccessContext.of("calendar:read", "calendar:write", "ops:read", "ops:write")
 
 
-def main() -> int:
+def _job(ctx: AccessContext) -> JobResult:
     raw = read_env("LIFEOS_ICS_URLS")
     urls = [u.strip() for u in (raw or "").split(",") if u.strip()]
     if not urls:
+        # Skipped, and still a non-zero exit: a missing feed list is a
+        # misconfiguration, not a quiet "nothing to do" (ADR 014).
         print("LIFEOS_ICS_URLS is not set; nothing to ingest (fail-closed)")
-        return 1
-    ctx = ingest_context()
+        return JobResult(status=STATUS_SKIPPED, summary="LIFEOS_ICS_URLS is not set")
     for name in define_calendar_types(ctx):
         print(f"defined type {name} (domain: calendar)")
     failures = 0
+    created = updated = 0
+    produced: list[UUID] = []
     for url in urls:
         host, url_hash = _source_ref(url)
         try:
             report = ingest_content(ctx, fetch_feed(url), url)
             print(report.line())
+            created += report.created
+            updated += report.updated
+            if report.receipt_id is not None:
+                produced.append(report.receipt_id)
         except Exception as exc:  # keep other feeds going; redact the URL
             failures += 1
             print(f"{host} [{url_hash[:12]}]: FAILED - {type(exc).__name__}: {exc}")
-    return 1 if failures else 0
+    return JobResult(
+        status=STATUS_FAILED if failures else STATUS_OK,
+        # counts only: feed text and exception messages never enter a receipt
+        summary=f"feeds={len(urls)} created={created} updated={updated} failed={failures}",
+        produced=produced,
+    )
+
+
+def main() -> int:
+    return run_job(ingest_context(), METHOD, _job)
 
 
 if __name__ == "__main__":

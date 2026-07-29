@@ -18,18 +18,21 @@ re-run against unchanged data emits zero new events.
 
 Runs as ``python -m domains.calendar.autolink`` on the same scheduler path as
 ingestion, under a code-built AccessContext of exactly ``calendar:read`` +
-``calendar:write`` + ``relationships:read`` + ``relationships:write`` — narrow
-by construction; ``relate`` requires write on every domain the edge's
-endpoints belong to, and agent tokens stay read-only (ADR 010/012).
+``calendar:write`` + ``relationships:read`` + ``relationships:write``, plus
+``ops:read``/``ops:write`` for its own execution receipt — narrow by
+construction; ``relate`` requires write on every domain the edge's endpoints
+belong to, and agent tokens stay read-only (ADR 010/012/014). Every run leaves
+an ``execution_receipt`` and only ``ok`` exits 0.
 """
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from domains.calendar.types import define_calendar_types
+from domains.ops.receipts import JobResult, run_job
 from kernel import services
 from kernel.access import AccessContext
 
@@ -69,6 +72,7 @@ class AutolinkReport:
     linked: int = 0
     ambiguous: int = 0
     skipped: int = 0
+    produced: list[UUID] = field(default_factory=list)  # review items opened
 
     def line(self) -> str:
         return f"autolink: linked={self.linked} ambiguous={self.ambiguous} skipped={self.skipped}"
@@ -101,7 +105,7 @@ def _open_review(
     if existing and existing[0].attributes.get("candidate_person_ids") == candidate_ids:
         report.skipped += 1  # same open question, already queued
         return
-    services.capture(
+    result = services.capture(
         ctx,
         "link_review",
         {
@@ -114,6 +118,7 @@ def _open_review(
         },
         actor=METHOD,
     )
+    report.produced.append(result.entity_id)
     report.ambiguous += 1
 
 
@@ -167,18 +172,28 @@ def run_autolink(ctx: AccessContext) -> AutolinkReport:
 def autolink_context() -> AccessContext:
     """Exactly the scopes the pass needs: it reads both domains and writes an
     edge whose endpoints span both, and `relate` requires write on every domain
-    an endpoint belongs to (ADR 013)."""
+    an endpoint belongs to (ADR 013); ``ops`` is its execution receipt and
+    nothing else (ADR 014)."""
     return AccessContext.of(
-        "calendar:read", "calendar:write", "relationships:read", "relationships:write"
+        "calendar:read",
+        "calendar:write",
+        "relationships:read",
+        "relationships:write",
+        "ops:read",
+        "ops:write",
     )
 
 
-def main() -> int:
-    ctx = autolink_context()
+def _job(ctx: AccessContext) -> JobResult:
     for name in define_calendar_types(ctx):
         print(f"defined type {name} (domain: calendar)")
-    print(run_autolink(ctx).line())
-    return 0
+    report = run_autolink(ctx)
+    print(report.line())
+    return JobResult(summary=report.line(), produced=report.produced)
+
+
+def main() -> int:
+    return run_job(autolink_context(), METHOD, _job)
 
 
 if __name__ == "__main__":
