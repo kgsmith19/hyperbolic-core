@@ -122,12 +122,15 @@ test("chat streams an answer with citation chips", async ({ page }) => {
 
 // The briefing cites entity ids and stores no text (ADR 014), so the page is
 // only correct if it resolves each id through /entities/{id} at read time.
+// Dated in the past on purpose: the backend keys briefings in its own timezone,
+// so the page must render the briefing that exists, labelled with its own date,
+// rather than look for one keyed to the browser's today.
 const BRIEFING = {
   id: "b1",
   name: null,
   attributes: {
-    briefing_key: "2026-07-29",
-    date: "2026-07-29",
+    briefing_key: "2020-01-03",
+    date: "2020-01-03",
     appointment_ids: ["a2", "a1"], // deliberately not in start order
     open_review_ids: ["r1"],
     latest_checkin_id: "c1",
@@ -157,9 +160,16 @@ test("tomorrow resolves the briefing's ids into a readable cockpit", async ({
   await page.route(`${API}/healthz`, (route) =>
     route.fulfill({ json: { status: "ok" } }),
   );
-  await page.route(`${API}/search**`, (route) =>
-    route.fulfill({ json: [BRIEFING] }),
-  );
+  // Match filters the way the server does, so asking for a briefing_key that
+  // was never written returns nothing instead of today's briefing.
+  await page.route(`${API}/search**`, (route) => {
+    const filters = new URL(route.request().url()).searchParams.get("filters");
+    const key = filters
+      ? (JSON.parse(filters) as { briefing_key?: string }).briefing_key
+      : undefined;
+    const match = !key || key === BRIEFING.attributes.briefing_key;
+    return route.fulfill({ json: match ? [BRIEFING] : [] });
+  });
   await page.route(`${API}/entities/*`, (route) => {
     const id = new URL(route.request().url()).pathname.split("/").pop() ?? "";
     const cited = CITED[id];
@@ -180,6 +190,7 @@ test("tomorrow resolves the briefing's ids into a readable cockpit", async ({
   });
 
   await page.goto("/tomorrow");
+  await expect(page.getByText("Briefing for 2020-01-03")).toBeVisible();
   const rows = page.locator("ul > li");
   await expect(rows.nth(0)).toContainText("Standup");
   await expect(rows.nth(1)).toContainText("Dentist");

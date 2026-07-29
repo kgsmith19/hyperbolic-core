@@ -11,22 +11,24 @@ type Turn = {
 
 export default function Chat() {
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<string | null>(null);
   const [activity, setActivity] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = event.currentTarget;
-    const question = String(new FormData(form).get("question") ?? "").trim();
+    const question = draft.trim();
     if (!question || pending !== null) return;
-    form.reset();
+    setDraft("");
     setError(null);
-    const history = [...turns, { role: "user" as const, content: question }];
+    const before = turns;
+    const history = [...before, { role: "user" as const, content: question }];
     setTurns(history);
     setPending("");
 
     let text = "";
+    let failed = false;
     let citations: ChatCitations | undefined;
     try {
       await streamChat(
@@ -40,18 +42,32 @@ export default function Chat() {
           } else if (frame.type === "done") {
             citations = frame.citations;
           } else {
+            failed = true;
             setError(frame.detail);
           }
         },
       );
-      setTurns([...history, { role: "assistant", content: text, citations }]);
     } catch (requestError) {
+      failed = true;
       setError(String(requestError));
-      setTurns(history);
     } finally {
       setPending(null);
       setActivity(null);
     }
+
+    // Only a real answer may enter the history. An error frame (or a stream
+    // that ends with no text) would otherwise leave an empty assistant turn
+    // behind, and /chat rejects empty content — every later send would 422.
+    if (!failed && text) {
+      setTurns([...history, { role: "assistant", content: text, citations }]);
+      return;
+    }
+    // Nothing usable came back: roll the turn back out of the history and hand
+    // the question back to the box. A transient failure must not eat what the
+    // owner typed — there is no undo for that.
+    setTurns(before);
+    setDraft(question);
+    if (!failed) setError("No answer came back — ask again.");
   }
 
   return (
@@ -103,6 +119,8 @@ export default function Chat() {
       <form onSubmit={(event) => void onSubmit(event)} className="flex gap-2">
         <input
           name="question"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
           placeholder="Ask about your data…"
           autoComplete="off"
           className="flex-1 rounded border border-zinc-300 px-2 py-1.5"

@@ -50,21 +50,38 @@ const ENTITIES: Record<string, { name?: string; attributes: object }> = {
   },
 };
 
-/** The briefing cites ids only (ADR 014); the page resolves them one by one. */
-function mockBriefing(attributes: object | null) {
-  vi.mocked(searchEntities).mockResolvedValue(
+/**
+ * The briefing cites ids only (ADR 014); the page resolves them one by one.
+ *
+ * Search is mocked the way the server behaves — a `briefing_key` filter matches
+ * exactly — so a page that guesses the key from the browser's clock gets the
+ * empty result a real deployment would give it.
+ */
+function mockBriefing(attributes: object | object[] | null) {
+  const briefings = (
     attributes === null
       ? []
-      : [
-          {
-            id: "ffffffff-0000-0000-0000-000000000001",
-            name: null,
-            attributes: attributes as Record<string, unknown>,
-            created_at: "2026-07-29T06:00:00Z",
-            updated_at: "2026-07-29T06:00:00Z",
-          },
-        ],
-  );
+      : Array.isArray(attributes)
+        ? attributes
+        : [attributes]
+  ).map((set, index) => {
+    const day = (set as { date?: string }).date ?? "2026-07-29";
+    return {
+      id: `ffffffff-0000-0000-0000-00000000000${index + 1}`,
+      name: null,
+      attributes: set as Record<string, unknown>,
+      created_at: `${day}T06:00:00Z`,
+      updated_at: `${day}T06:00:00Z`,
+    };
+  });
+  vi.mocked(searchEntities).mockImplementation(({ filters }) => {
+    const wanted = filters?.briefing_key;
+    return Promise.resolve(
+      wanted
+        ? briefings.filter((b) => b.attributes.briefing_key === wanted)
+        : briefings,
+    );
+  });
   vi.mocked(getEntity).mockImplementation((id: string) => {
     const found = ENTITIES[id];
     if (!found) return Promise.reject(new Error("not found"));
@@ -141,13 +158,39 @@ describe("Tomorrow", () => {
     expect(screen.getByText(/ship B4/)).toBeInTheDocument();
   });
 
-  it("says plainly when no briefing exists for today", async () => {
-    mockBriefing(null);
+  // The backend keys briefings in LIFEOS_BRIEFING_TZ, so any date this browser
+  // computes can miss a briefing that exists — and read as "nothing assembled".
+  it("asks for briefings without a browser-computed date key", async () => {
+    mockBriefing(FULL);
+    renderWithProviders(<Tomorrow />);
+
+    expect(await screen.findByText(/briefing for/i)).toBeInTheDocument();
+    expect(searchEntities).toHaveBeenCalledWith({ type_name: "briefing" });
+  });
+
+  it("renders the newest briefing, labelled with its own date", async () => {
+    const older = { ...FULL, briefing_key: "2020-01-02", date: "2020-01-02" };
+    const newer = {
+      ...FULL,
+      briefing_key: "2020-01-03",
+      date: "2020-01-03",
+      appointment_ids: [APPOINTMENT_EARLY],
+    };
+    mockBriefing([newer, older]);
     renderWithProviders(<Tomorrow />);
 
     expect(
-      await screen.findByText(/no briefing for today yet/i),
+      await screen.findByText("Briefing for 2020-01-03"),
     ).toBeInTheDocument();
+    expect(await screen.findByText("Standup")).toBeInTheDocument();
+    expect(screen.queryByText("Dentist")).not.toBeInTheDocument();
+  });
+
+  it("says plainly when no briefing exists at all", async () => {
+    mockBriefing(null);
+    renderWithProviders(<Tomorrow />);
+
+    expect(await screen.findByText(/no briefing yet/i)).toBeInTheDocument();
     expect(screen.queryByText(/appointments/i)).not.toBeInTheDocument();
     expect(getEntity).not.toHaveBeenCalled();
   });

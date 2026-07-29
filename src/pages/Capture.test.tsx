@@ -1,11 +1,10 @@
 import { screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import Capture from "./Capture";
 import { captureEntity } from "../api/client";
-import { renderWithProviders } from "../test-utils";
+import { renderWithProviders, setupUser } from "../test-utils";
 
 vi.mock("../api/client", () => ({
   listTypes: vi.fn().mockResolvedValue([
@@ -32,6 +31,7 @@ describe("Capture", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("renders schema-driven fields and submits parsed attributes", async () => {
+    const user = setupUser();
     renderWithProviders(
       <Routes>
         <Route path="/capture" element={<Capture />} />
@@ -41,10 +41,10 @@ describe("Capture", () => {
     );
     const typeSelect = screen.getByRole("combobox");
     await screen.findByRole("option", { name: /note/ });
-    await userEvent.selectOptions(typeSelect, "note");
-    await userEvent.type(screen.getByLabelText(/text/i), "ship the UI");
-    await userEvent.type(screen.getByLabelText(/tags/i), '[["dev"]');
-    await userEvent.click(screen.getByRole("button", { name: /capture/i }));
+    await user.selectOptions(typeSelect, "note");
+    await user.type(screen.getByLabelText(/text/i), "ship the UI");
+    await user.type(screen.getByLabelText(/tags/i), '[["dev"]');
+    await user.click(screen.getByRole("button", { name: /capture/i }));
 
     expect(vi.mocked(captureEntity).mock.calls[0][0]).toEqual({
       type_name: "note",
@@ -54,6 +54,7 @@ describe("Capture", () => {
   });
 
   it("rejects non-numeric input in number fields without calling the API", async () => {
+    const user = setupUser();
     renderWithProviders(
       <Routes>
         <Route path="/capture" element={<Capture />} />
@@ -62,10 +63,10 @@ describe("Capture", () => {
     );
     const typeSelect = screen.getByRole("combobox");
     await screen.findByRole("option", { name: /note/ });
-    await userEvent.selectOptions(typeSelect, "note");
-    await userEvent.type(screen.getByLabelText(/text/i), "x");
-    await userEvent.type(screen.getByLabelText(/duration/i), "abc");
-    await userEvent.click(screen.getByRole("button", { name: /capture/i }));
+    await user.selectOptions(typeSelect, "note");
+    await user.type(screen.getByLabelText(/text/i), "x");
+    await user.type(screen.getByLabelText(/duration/i), "abc");
+    await user.click(screen.getByRole("button", { name: /capture/i }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /duration must be a number/i,
@@ -74,6 +75,7 @@ describe("Capture", () => {
   });
 
   it("rejects invalid JSON in non-scalar fields without calling the API", async () => {
+    const user = setupUser();
     renderWithProviders(
       <Routes>
         <Route path="/capture" element={<Capture />} />
@@ -82,10 +84,10 @@ describe("Capture", () => {
     );
     const typeSelect = screen.getByRole("combobox");
     await screen.findByRole("option", { name: /note/ });
-    await userEvent.selectOptions(typeSelect, "note");
-    await userEvent.type(screen.getByLabelText(/text/i), "x");
-    await userEvent.type(screen.getByLabelText(/tags/i), "not-json");
-    await userEvent.click(screen.getByRole("button", { name: /capture/i }));
+    await user.selectOptions(typeSelect, "note");
+    await user.type(screen.getByLabelText(/text/i), "x");
+    await user.type(screen.getByLabelText(/tags/i), "not-json");
+    await user.click(screen.getByRole("button", { name: /capture/i }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/invalid json/i);
     expect(vi.mocked(captureEntity)).not.toHaveBeenCalled();
