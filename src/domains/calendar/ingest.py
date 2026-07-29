@@ -7,6 +7,12 @@ a ``derived_from`` edge carrying ``{method, confidence}`` (ADR 010). The
 receipt is hash-plus-metadata only — verbatim feed text is never retained,
 because it cannot be erased per-subject (invariant 9, ADR 012).
 
+Erasure is durable: the source feed still carries every title, location and
+address a subject asked us to erase, so ingestion re-reads them on every run.
+It resolves attendees by a non-PII key (``email_hash``) and refuses to write
+back any field an entity's history records as redacted (ADR 012 "Durable
+erasure"). Without both, a later VEVENT edit silently undid forget().
+
 Runs as ``python -m domains.calendar.ingest`` (deploy-box scheduler) under a
 code-built AccessContext of exactly ``calendar:read`` + ``calendar:write`` plus
 ``ops:read``/``ops:write`` for its own execution receipt — narrow by
@@ -25,7 +31,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from domains.calendar.parse import Occurrence, parse_ics
-from domains.calendar.types import define_calendar_types
+from domains.calendar.types import define_calendar_types, email_hash
 from domains.ops.receipts import STATUS_FAILED, STATUS_OK, STATUS_SKIPPED, JobResult, run_job
 from kernel import services
 from kernel.access import AccessContext
@@ -116,6 +122,27 @@ def _provenance(feed_sha: str) -> dict[str, Any]:
     return {"method": METHOD, "confidence": 1.0, "source_sha256": feed_sha}
 
 
+def _redacted_fields(ctx: AccessContext, entity_id: UUID) -> set[str]:
+    """Fields already erased from this entity, per its own ``pii.redacted``
+    events (the payload forget() appends: ``{"fields": [...]}``).
+
+    Ingestion must never write these back. The feed is unchanged by erasure —
+    it still names the title, location and address that were erased — and
+    capture merges new attributes over old, so one later VEVENT edit would
+    re-materialize them on the very same entity (invariant 9, ADR 012)."""
+    fields: set[str] = set()
+    for event in services.history(ctx, entity_id):
+        if event.event_type == "pii.redacted":
+            fields |= {f for f in event.payload.get("fields", []) if isinstance(f, str)}
+    return fields
+
+
+def _writable(ctx: AccessContext, entity_id: UUID, attributes: dict[str, Any]) -> dict[str, Any]:
+    """`attributes` minus everything this entity has had erased."""
+    redacted = _redacted_fields(ctx, entity_id)
+    return {k: v for k, v in attributes.items() if k not in redacted}
+
+
 def ingest_content(
     ctx: AccessContext,
     content: bytes,
@@ -172,7 +199,10 @@ def ingest_content(
         )
         if matches and matches[0].attributes.get("vevent_hash") == occurrence.vevent_hash:
             continue  # unchanged VEVENT: emit nothing
-        result = services.capture(ctx, "appointment", occurrence.attributes, actor=METHOD)
+        attributes = occurrence.attributes
+        if matches:
+            attributes = _writable(ctx, matches[0].id, attributes)
+        result = services.capture(ctx, "appointment", attributes, actor=METHOD)
         if matches:
             report.updated += 1  # entity.updated event; prior state stays in history
         else:
@@ -203,13 +233,20 @@ def _link_attendees(
     view = services.get_entity(ctx, appointment_id)
     linked = {e.to_entity for e in view.edges_out if e.relation == HAS_ATTENDEE}
     for attendee in occurrence.attendees:
-        found = services.find(ctx, type_name="attendee", filters={"email": attendee.email})
+        digest = email_hash(attendee.email)
+        attributes: dict[str, Any] = {"email_hash": digest, "email": attendee.email}
+        if attendee.name:
+            attributes["name"] = attendee.name
+        # Keyed by the hash, not the address: an erased attendee is still found
+        # here, so a changed feed updates it instead of creating a fresh entity
+        # carrying the address again (invariant 9, ADR 012).
+        found = services.find(ctx, type_name="attendee", filters={"email_hash": digest})
         if found:
             attendee_id = found[0].id
+            attributes = _writable(ctx, attendee_id, attributes)
+            if any(found[0].attributes.get(k) != v for k, v in attributes.items()):
+                services.capture(ctx, "attendee", attributes, actor=METHOD)  # e.g. a renamed CN
         else:
-            attributes: dict[str, Any] = {"email": attendee.email}
-            if attendee.name:
-                attributes["name"] = attendee.name
             attendee_id = services.capture(ctx, "attendee", attributes, actor=METHOD).entity_id
             report.attendees_created += 1
             services.relate(

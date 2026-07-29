@@ -63,10 +63,57 @@ unvetted feed junk cannot land in attributes. Parsing uses the `icalendar` +
 `recurring-ical-events` libraries (recurrence/timezone/EXDATE/override
 handling is bought, not authored).
 
-**No auto-link.** The attendee identity field is deliberately `email`
-(singular), distinct from person's `emails`, so exact-identity resolution
-never merges feed attendees onto the person spine. Linking attendees to
-people is B2's explicit auto-link pass, on purpose.
+**No auto-link.** The attendee identity field is deliberately attendee-private
+(`email_hash`, see "Durable erasure"), never the person spine's `emails`, so
+exact-identity resolution never merges feed attendees onto the spine. Linking
+attendees to people is B2's explicit auto-link pass, on purpose.
+
+**Durable erasure (slice 7).** The original design made `email` both the
+attendee's `x-identity` field and an `x-pii` field. `forget()` strips x-pii,
+so an erased attendee stopped being findable — and because the ICS feed is
+unchanged by erasure, the next feed edit re-captured the same address as a
+**brand-new attendee entity**. The same shape hit appointments: `forget()`
+strips `title`/`location`, and any later VEVENT edit re-materialized them onto
+the same entity through capture's merge. Erasure silently undid itself, which
+is precisely what invariant 9 ("a working deletion path") exists to prevent.
+The double-run idempotency test passed throughout, because it never erased,
+and the erasure test passed, because it never re-ingested. Three decisions:
+
+- *Identity must be non-PII.* `attendee`'s `x-identity` becomes `email_hash`
+  (sha256 of the lowercased, stripped address, hex); `email` stays an
+  attribute and stays `x-pii`. `email_hash` is derived from PII but is **not**
+  erasable by `forget()` — that is the point: it is the key that survives.
+  Stated plainly: hashing an email is **not anonymization**. An address is a
+  known, small, guessable domain, so anyone holding a candidate address can
+  confirm a match by hashing it. `email_hash` is a *stable join key*, and it
+  is acceptable here only because it never leaves the system (no API, MCP or
+  UI surface renders it) and the app cannot turn it back into an address. It
+  is also why nothing else may key on it as if it were anonymous.
+- *Never write back a redacted field.* Before capturing over an existing
+  appointment or attendee, ingestion reads that entity's `pii.redacted` events
+  and strips every field they name from the attributes it is about to write
+  (`_redacted_fields` in `ingest.py`). Non-PII fields keep updating normally —
+  an erased appointment still tracks its `starts_at` — so the fix does not
+  freeze ordinary updates. `title` is therefore no longer `required` on
+  `appointment`, and `email` no longer `required` on `attendee`: an erased
+  entity must still be capturable.
+- *Migration, without kernel DDL.* `type_definition.name` is unique and
+  `define_type` refuses a duplicate, so there is no "supersede with a second
+  row" path and `define_missing` never touches an existing type — a database
+  that already ran ingestion would keep the old schemas forever. Adding a
+  redefinition service is a kernel change and out of scope. The path is
+  therefore the operator-script pattern:
+  `scripts/migrate_calendar_durable_erasure.py` rewrites the `attendee` and
+  `appointment` schemas in place (with a `type.redefined` audit event) and
+  backfills `email_hash` onto existing attendees as real `entity.updated`
+  events plus projections, so a rebuild reproduces them. It is idempotent and
+  runs once per environment before the new ingestion code. Existing attendees
+  that still hold an `email` keep their id, edges and history and simply gain
+  the key. Attendees erased *before* the migration cannot be re-keyed — the
+  address is gone by design and no hash can be derived from nothing — so they
+  keep their id, edges and history but will never match a feed again, and one
+  further feed edit will mint a fresh attendee for that address; the script
+  counts and warns about exactly those rows.
 
 **Config.** Feed URLs come from `LIFEOS_ICS_URLS` (comma-separated) via
 `kernel.env.read_env`; nothing is hardcoded and no real URL or feed content
@@ -76,7 +123,16 @@ enters the repo — test fixtures are synthetic.
 
 - The calendar cell (`.agents/domains/calendar/`) exists per invariant 10.
 - Double-run idempotency is a standing test
-  (`tests/calendar/test_ingest.py::test_double_run_emits_nothing_new`).
+  (`tests/calendar/test_ingest.py::test_double_run_emits_nothing_new`), and so
+  is durable erasure: erase, then re-ingest a *changed* feed that still names
+  the subject
+  (`::test_erased_attendee_is_not_recreated_by_a_changed_feed` and
+  `::test_erased_appointment_fields_stay_erased_across_a_changed_feed`),
+  alongside the proof that ordinary entities still update
+  (`::test_changed_feed_updates_ordinary_appointments_and_attendees`).
+- Re-keying costs one `history()` read per existing entity a changed VEVENT
+  touches. Cheap at feed scale; it joins the "per-event `find` round-trips"
+  revisit trigger below if attendee volume ever makes it measurable.
 - Receipts make every calendar fact attributable to the exact fetch that
   produced it (content hash, source host, time); byte-level audit means
   re-fetching and comparing hashes, since payloads are not retained.

@@ -38,6 +38,30 @@ BASE = (FIXTURES / "base.ics").read_bytes()
 UPDATED = (FIXTURES / "updated.ics").read_bytes()
 
 
+def dentist_feed(
+    sequence: int, summary: str, hour: int, cn: str = "Dana Example", extra: str | None = None
+) -> bytes:
+    """A one-VEVENT variant of the dentist fixture: a real feed edit, so the
+    occurrence's vevent_hash moves and ingestion re-captures the appointment."""
+    attendees = f"ATTENDEE;CN={cn}:mailto:dana@fixture.test\r\n"
+    if extra:
+        attendees += f"ATTENDEE:mailto:{extra}\r\n"
+    return (
+        "BEGIN:VCALENDAR\r\n"
+        "VERSION:2.0\r\n"
+        "PRODID:-//lifeos tests//synthetic fixture//EN\r\n"
+        "BEGIN:VEVENT\r\n"
+        "UID:dentist-1@fixture.test\r\n"
+        f"DTSTART:20260730T{hour:02d}0000Z\r\n"
+        f"DTEND:20260730T{hour:02d}3000Z\r\n"
+        f"SUMMARY:{summary}\r\n"
+        "LOCATION:12 Example Street\r\n"
+        "STATUS:CONFIRMED\r\n"
+        f"SEQUENCE:{sequence}\r\n" + attendees + "END:VEVENT\r\n"
+        "END:VCALENDAR\r\n"
+    ).encode()
+
+
 @pytest.fixture(scope="module")
 def cal_ctx() -> AccessContext:
     """The exact production context: calendar read+write and nothing else."""
@@ -53,6 +77,16 @@ def ingest(ctx: AccessContext, content: bytes, url: str) -> FeedReport:
 def event_count() -> int:
     with db.connect() as conn:
         row = conn.execute("select count(*) as n from event").fetchone()
+        assert row is not None
+        return int(row["n"])
+
+
+def events_mentioning(needle: str) -> int:
+    """Events whose payload still contains a string anywhere — the erasure bar."""
+    with db.connect() as conn:
+        row = conn.execute(
+            "select count(*) as n from event where payload::text like %s", (f"%{needle}%",)
+        ).fetchone()
         assert row is not None
         return int(row["n"])
 
@@ -192,6 +226,26 @@ def test_cli_without_feeds_emits_a_skipped_receipt(
     assert receipts and receipts[-1].attributes["status"] == "skipped"
 
 
+def test_changed_feed_updates_ordinary_appointments_and_attendees(cal_ctx: AccessContext) -> None:
+    """Never-rewrite-redacted-fields must not freeze ordinary updates."""
+    (dana_before,) = find(cal_ctx, type_name="attendee", filters={"email": "dana@fixture.test"})
+    attendees_before = {a.id for a in find(cal_ctx, type_name="attendee")}
+
+    ingest(
+        cal_ctx,
+        dentist_feed(2, "Dentist appointment (moved)", 17, cn="Dana Renamed"),
+        "https://calendar.example.test/ordinary.ics",
+    )
+
+    (dentist,) = find(cal_ctx, type_name="appointment", filters={"uid": "dentist-1@fixture.test"})
+    assert dentist.attributes["title"] == "Dentist appointment (moved)"
+    assert dentist.attributes["starts_at"] == "2026-07-30T17:00:00+00:00"
+    (dana_after,) = find(cal_ctx, type_name="attendee", filters={"email": "dana@fixture.test"})
+    assert dana_after.id == dana_before.id  # same entity, not a duplicate
+    assert dana_after.attributes["name"] == "Dana Renamed"
+    assert {a.id for a in find(cal_ctx, type_name="attendee")} == attendees_before
+
+
 # Runs last on purpose: forgetting rob's email removes the attendee's identity
 # field, and earlier tests assert on the full attendee set.
 def test_forgotten_attendee_email_unfindable_everywhere(cal_ctx: AccessContext) -> None:
@@ -204,3 +258,56 @@ def test_forgotten_attendee_email_unfindable_everywhere(cal_ctx: AccessContext) 
     assert "email" not in get_entity(cal_ctx, rob.id).entity.attributes
     for receipt in find(cal_ctx, type_name="source_receipt"):
         assert "rob@fixture.test" not in str(receipt.attributes)
+
+
+def test_erased_attendee_is_not_recreated_by_a_changed_feed(cal_ctx: AccessContext) -> None:
+    """Invariant 9: erasure must be durable. Re-ingesting a feed that still
+    names an erased attendee must update the erased entity, never mint a fresh
+    one carrying the address again."""
+    email = "sam@fixture.test"
+    ingest(
+        cal_ctx,
+        dentist_feed(3, "Dentist appointment (sam)", 18, extra=email),
+        "https://calendar.example.test/erase-attendee-1.ics",
+    )
+    (sam,) = find(cal_ctx, type_name="attendee", filters={"email": email})
+    forget(cal_ctx, sam.id)
+    attendees_before = {a.id for a in find(cal_ctx, type_name="attendee")}
+
+    ingest(
+        cal_ctx,
+        dentist_feed(4, "Dentist appointment (sam, moved)", 19, extra=email),
+        "https://calendar.example.test/erase-attendee-2.ics",
+    )
+
+    assert {a.id for a in find(cal_ctx, type_name="attendee")} == attendees_before
+    assert find(cal_ctx, type_name="attendee", filters={"email": email}) == []
+    assert find(cal_ctx, text=email) == []
+    assert events_mentioning(email) == 0
+    # still the same entity behind the appointment link, just without the address
+    (dentist,) = find(cal_ctx, type_name="appointment", filters={"uid": "dentist-1@fixture.test"})
+    linked = {e.to_entity for e in get_entity(cal_ctx, dentist.id).edges_out}
+    assert sam.id in linked
+
+
+def test_erased_appointment_fields_stay_erased_across_a_changed_feed(
+    cal_ctx: AccessContext,
+) -> None:
+    """Same rule for the appointment's own PII: a later VEVENT edit must not
+    re-materialize an erased title or location, while non-PII still updates."""
+    title = "Dentist appointment privatemarker"
+    ingest(cal_ctx, dentist_feed(5, title, 20), "https://calendar.example.test/erase-appt-1.ics")
+    (dentist,) = find(cal_ctx, type_name="appointment", filters={"uid": "dentist-1@fixture.test"})
+    assert dentist.attributes["title"] == title  # not vacuous
+    forget(cal_ctx, dentist.id)  # strips the x-pii fields: title + location
+
+    ingest(cal_ctx, dentist_feed(6, title, 21), "https://calendar.example.test/erase-appt-2.ics")
+
+    (after,) = find(cal_ctx, type_name="appointment", filters={"uid": "dentist-1@fixture.test"})
+    assert after.id == dentist.id
+    assert "title" not in after.attributes and "location" not in after.attributes
+    assert after.attributes["starts_at"] == "2026-07-30T21:00:00+00:00"  # non-PII still updates
+    assert after.attributes["sequence"] == 6
+    assert find(cal_ctx, text="privatemarker") == []
+    assert events_mentioning("privatemarker") == 0
+    assert events_mentioning("12 Example Street") == 0

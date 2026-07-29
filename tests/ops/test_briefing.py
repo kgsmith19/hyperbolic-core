@@ -11,7 +11,7 @@ from uuid import UUID
 
 import pytest
 
-from domains.calendar.types import define_calendar_types
+from domains.calendar.types import define_calendar_types, email_hash
 from domains.ops.briefing import (
     METHOD,
     _optional_find,
@@ -113,7 +113,10 @@ def test_briefing_cites_reviews_checkin_and_provenance(
 
 
 def test_briefing_copies_no_third_party_text(ctx: AccessContext, brief_ctx: AccessContext) -> None:
-    capture(ctx, "attendee", {"email": "briefing-witness@fixture.test", "name": "B Witness"})
+    witness = "briefing-witness@fixture.test"
+    capture(
+        ctx, "attendee", {"email_hash": email_hash(witness), "email": witness, "name": "B Witness"}
+    )
     make_appointment(ctx, "brief-pii", "2031-03-04T11:00:00+00:00")
     run_briefing(brief_ctx, DAY, UTC)
     briefing = stored(brief_ctx, DAY)

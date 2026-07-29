@@ -20,7 +20,7 @@ from domains.calendar.autolink import (
     normalize_email,
     run_autolink,
 )
-from domains.calendar.types import define_calendar_types
+from domains.calendar.types import define_calendar_types, email_hash
 from kernel import db
 from kernel.access import AccessContext, ScopeError
 from kernel.services import capture, find, forget, get_entity, history, relate
@@ -39,7 +39,8 @@ def make_person(ctx: AccessContext, name: str, *emails: str) -> UUID:
 
 
 def make_attendee(ctx: AccessContext, email: str) -> UUID:
-    return capture(ctx, "attendee", {"email": email}).entity_id
+    # email_hash is the identity field, exactly as ingestion writes it
+    return capture(ctx, "attendee", {"email_hash": email_hash(email), "email": email}).entity_id
 
 
 def links_of(ctx: AccessContext, attendee_id: UUID) -> list[UUID]:

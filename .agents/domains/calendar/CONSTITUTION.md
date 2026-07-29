@@ -13,6 +13,10 @@ Owns: `src/domains/calendar/**`, `tests/calendar/**`.
 - Receipts are hash-plus-metadata only: never store verbatim feed payloads
   or any third-party text that cannot be erased per-subject via forget()
   (invariant 9, ADR 012).
+- An identity field is never a PII field. `forget()` strips x-pii, so keying
+  on PII makes an erased entity unfindable and the next feed change resurrects
+  it as a new entity; ingestion also never writes back a field the entity's
+  `pii.redacted` history names (invariant 9, ADR 012 "Durable erasure").
 - Every derived entity links to its source receipt via a `derived_from` edge
   carrying `{method, confidence}` (ADR 010 provenance convention, ADR 012).
 - Runs under a narrow code-built AccessContext, never `AccessContext.all()`:

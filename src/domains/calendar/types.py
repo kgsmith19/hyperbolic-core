@@ -2,12 +2,17 @@
 
 Schemas bound every text field (feed content is untrusted) and close
 ``additionalProperties`` so unvetted feed junk cannot land in attributes.
-The attendee identity field is deliberately ``email`` (singular) — distinct
-from person's ``emails`` — so ingestion never merges onto the person spine;
-attendees are linked to people by the auto-link pass instead, which emits an
-edge and never rewrites the spine (``autolink.py``, ADR 013).
+The attendee identity field is ``email_hash`` (see below) and never the
+person spine's ``emails``, so ingestion never merges onto the spine; attendees
+are linked to people by the auto-link pass instead, which emits an edge and
+never rewrites the spine (``autolink.py``, ADR 013).
+
+PII fields are never identity fields here: an identity field must survive
+``forget()`` or erasure undoes itself on the next feed edit (invariant 9,
+ADR 012 "Durable erasure").
 """
 
+from hashlib import sha256
 from typing import Any
 
 from kernel.access import AccessContext
@@ -34,21 +39,45 @@ APPOINTMENT_SCHEMA: dict[str, Any] = {
         "all_day": {"type": "boolean"},
         "vevent_hash": _SHA256,
     },
-    "required": ["ics_key", "uid", "title", "starts_at", "vevent_hash"],
+    # `title` is x-pii, so it cannot be required: forget() removes it from live
+    # state, and an erased appointment must still be capturable on the next
+    # feed edit (that is how its non-PII fields keep updating).
+    "required": ["ics_key", "uid", "starts_at", "vevent_hash"],
     "additionalProperties": False,
     "x-identity": ["ics_key"],
     "x-pii": ["title", "location"],
 }
 
+
+def email_hash(email: str) -> str:
+    """The attendee identity key: sha256 of the normalized address, hex.
+
+    Hashing an email is NOT anonymization — an address is a known, small,
+    guessable domain, so anyone holding a candidate address can confirm a
+    match. It is a stable join key, acceptable here only because it never
+    leaves the system and the app cannot render it back to an address.
+
+    What it buys is durable erasure. The identity field is the one attribute
+    ingestion must be able to look an entity up by, and PII is exactly what
+    forget() removes; keying on the address itself meant a redacted attendee
+    became unfindable and the next feed change minted a brand-new entity
+    carrying the same address (invariant 9, ADR 012 "Durable erasure").
+    """
+    return sha256(email.strip().lower().encode()).hexdigest()
+
+
 ATTENDEE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
+        "email_hash": _SHA256,
         "email": {"type": "string", "maxLength": 255},
         "name": {"type": "string", "maxLength": 255},
     },
-    "required": ["email"],
+    # Only the non-PII identity key is required; an erased attendee has no
+    # `email` left and must still resolve to its existing entity.
+    "required": ["email_hash"],
     "additionalProperties": False,
-    "x-identity": ["email"],
+    "x-identity": ["email_hash"],
     "x-pii": ["email", "name"],
 }
 
