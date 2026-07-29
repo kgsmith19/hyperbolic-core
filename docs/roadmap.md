@@ -54,7 +54,16 @@ Pre-made decisions in prompts are not relitigated.
   dot/plus aliases, not generalized), one candidate → `is_person` edge with the
   ADR-010 envelope, 2+ or conflicting → `link_review` item, none → nothing;
   edges only, the identity spine is never rewritten (ADR-013)
-- [ ] B3 Daily briefing cron + execution receipts + trigger_feedback
+- [x] B3 Daily briefing cron + execution receipts + trigger_feedback — done
+  2026-07-29 (PR #38, ADR-014): `ops` domain with a zero-LLM assembled
+  briefing (cites entity ids, copies no third-party text), reusable
+  execution receipts on every scheduled CLI (a failed run still receipts
+  and exits non-zero), and `trigger_feedback` for a human verdict. The
+  schedule itself is NOT installed: it is a guards runbox script
+  (`install-lifeos-cron.ps1`) awaiting the operator, and needs vault key
+  `LIFEOS_DEPLOY_HOST` plus a tailnet ACL rule for a non-CI device.
+  Ingestion also stays inert until `LIFEOS_ICS_URLS` is set (it receipts
+  `skipped` — visible, not silent), so golden Q1 is not yet runnable.
 - [x] B4 `/tomorrow` page (lifeos-ui) — done 2026-07-29 (lifeos-ui PR #7): the
   Tomorrow Cockpit resolves the briefing's cited entity IDs at read time
   through the existing `/entities/{id}` route, so no display text is copied out
