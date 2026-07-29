@@ -44,7 +44,10 @@ Pre-made decisions in prompts are not relitigated.
   zero UI changes (schema-driven Capture form renders it)
 
 ### B — Tomorrow Cockpit
-- [ ] B1 ICS calendar ingestion with source receipts (ADR-012)
+- [x] B1 ICS calendar ingestion with source receipts (ADR-012) — done
+  2026-07-28 (PR #36): calendar domain as registry data + src/domains/calendar/
+  CLI ingestion, idempotent by VEVENT hash, raw-feed source receipts linked via
+  derived_from edges; golden Q1 acceptance runs through chat on deploy
 - [ ] B2 Zero-LLM auto-link (exact/alias match vs identity spine → typed edge
   events + dedup-review queue)
 - [ ] B3 Daily briefing cron + execution receipts + trigger_feedback

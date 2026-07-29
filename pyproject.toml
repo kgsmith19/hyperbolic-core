@@ -16,6 +16,8 @@ dependencies = [
     "pyjwt[crypto]>=2.9",
     "mcp>=2",
     "anthropic>=0.60",
+    "icalendar>=6",
+    "recurring-ical-events>=3",
 ]
 
 [project.optional-dependencies]
@@ -45,6 +47,10 @@ check_untyped_defs = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = "recurring_ical_events.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
