@@ -105,7 +105,31 @@ Pre-made decisions in prompts are not relitigated.
   flagged type is withheld from the shared agent-tool surface, so bills never
   reach a model through a generic read tool (enforcement is domain-shaped).
   Write scope is checked before the text leaves the box.
-- [ ] C3 Deterministic reconciliation verifier + verification_receipts
+- [x] C3 Deterministic reconciliation verifier + verification_receipts — done
+  2026-07-29 (PR #45, ADR-017): `python -m domains.bills.verify` with **no
+  model anywhere in the path** — nine deterministic checks over one document's
+  candidates (line items sum to the total; the EOB identity `plan_paid +
+  patient_resp == allowed` and `allowed <= billed` per line; non-negative
+  amounts; coherent dates; duplicate line items across the document's
+  candidates; one currency; nothing left flagged `low_confidence`; and a bill
+  and its EOB agreeing on what the patient owes), each reported independently,
+  money compared as `Decimal` within an explicit one-cent tolerance. A
+  `verification_receipt` per document carries entity ids, check verdicts, line
+  indices and *differences* — never a value copied from the document — and may
+  honestly claim `confidence: 1.0` because it is arithmetic over kernel state.
+  `status` earned its second member: `verified` is granted only when every
+  check on a candidate passes, and it is protected three ways — the type
+  refuses `verified` unless the record cites the receipt that granted it,
+  `POST /capture` dispatches to a domain guard keyed on the record a capture
+  would LAND on (entity resolution matches identity fields by name across types,
+  so a payload carrying a bills identity key must be a capture of the type that
+  owns it; receipts and extraction records are not route-writable at all), and
+  every run re-judges what it promoted so anything that stops passing is
+  demoted. Erasing a candidate cascades to its receipts synchronously through
+  the same `/forget` endpoint, because a delta equals an amount whenever the
+  other operand is zero. Zero kernel changes; existing databases need
+  `scripts/migrate_bill_status_verified.py` once (the registry has no
+  redefinition path).
 - [ ] C4 Approval-gated dispute draft (action_proposal → approval mints
   authority_receipt; terminates at an approved on-screen draft)
 - [ ] C5 Branch-explore — only if a real ambiguous case appears in actual bills

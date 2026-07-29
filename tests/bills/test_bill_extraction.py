@@ -184,9 +184,11 @@ def test_extraction_captures_flagged_candidates_citing_the_document(
 def test_a_candidate_can_never_look_like_a_verified_fact(
     bills_ctx: AccessContext, store: BlobStore, make_document: DocumentFactory
 ) -> None:
-    """C3 owns verification. Until it lands, neither a "verified" status nor a
-    confidence of 1.0 is expressible — the type schema refuses both, so an LLM
-    guess cannot be mistaken for a checked fact (ADR 010)."""
+    """C3 owns verification, and extraction still cannot reach it. A model's
+    self-reported certainty is capped below 1.0, which the schema refuses
+    outright, and `"verified"` — expressible since C3 — is refused unless the
+    record cites the receipt that granted it, which only the verifier has
+    (ADR 010/017)."""
     marker = "billsc2fact"
     document_id = make_document(marker)
     # A model claiming certainty is capped, not believed.

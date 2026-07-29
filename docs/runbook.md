@@ -69,12 +69,62 @@ transient error never turns into an automatic second send of a medical bill.
 
 What comes back are **candidates**, not facts: `status: "candidate"`,
 `method: "llm_extraction"`, confidence below 1.0. Do not treat a `bill` as money
-owed — C3's verifier is what turns a candidate into a checked fact.
+owed until the verifier below has promoted it.
 
 Erasing a bill is `POST /entities/{id}/forget` like any other entity; erasing the
 document it came from is the document path above. Erasing one does not erase the
 other, and a re-run over a still-present document will not re-write an erased
 candidate's fields.
+
+## Bill verification — what turns a candidate into a fact (ADR 017)
+
+**One-time, per environment, before the first run** (the type registry has no
+redefinition path, so an existing database still holds C2's schemas):
+
+```bash
+docker compose run --rm --no-deps api python scripts/migrate_bill_status_verified.py
+```
+
+Then:
+
+```bash
+docker compose run --rm --no-deps api python -m domains.bills.verify            # sweep
+docker compose run --rm --no-deps api python -m domains.bills.verify <doc-id>   # one document
+```
+
+**This sends nothing anywhere and uses no model.** It reads the candidates
+derived from a document, does arithmetic on them — line items against the stated
+total, the EOB's `plan_paid + patient_resp == allowed` per line, `allowed <=
+billed`, coherent dates, duplicate line items, one currency, nothing still
+flagged low-confidence, and a bill agreeing with its EOB on what the patient owes
+— and records a `verification_receipt` per document naming which check said what
+about which candidate. Money is compared as decimal within one cent.
+
+A candidate is promoted to `status: "verified"` only when **every** check on it
+passes; anything else stays a `candidate` and the receipt says what failed. A
+failing candidate is a normal result, not a failed run — the job exits 0.
+
+Safe to re-run at any time, and worth re-running after anything changes: it emits
+zero events when the ruling is unchanged, and it demotes anything that has
+stopped passing.
+
+`status: "verified"` cannot be set by hand: `POST /capture` refuses it on a
+`bill`/`eob`, refuses to edit a record that already carries it, refuses any
+payload carrying a bills identity key under some other type name, and refuses to
+write a `verification_receipt` or a `bill_extraction` at all. To correct a
+verified bill, erase it (or re-extract) and verify again.
+
+**Erasing a bill or EOB is `POST /entities/{id}/forget`, the same one endpoint,
+and it now clears more than the record.** A verification receipt holds numbers
+derived from the bill's amounts, and a difference equals an amount whenever the
+other operand is zero — so the route redacts `checks` on every receipt naming
+that record too, in live state and in event payloads. The response carries
+`receipts_redacted`; do not erase a bill by any other route.
+
+Two counters on the report line mean look, not shrug: `errors` is a document the
+run could not judge, and `invalid` is a record whose stored state no longer
+matches its own type — which normally means something merged a foreign field onto
+it. Both exit non-zero.
 
 ## Scheduled jobs (ADR 014)
 

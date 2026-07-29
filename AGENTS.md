@@ -19,6 +19,12 @@ Commands (venv at `.venv`, DB creds in `.env`):
 - extract: `.venv\Scripts\python -m domains.bills.extract [document_id ...]` —
   operator-run, not scheduled: it sends a captured document's text to Anthropic
   and captures candidate bills/EOBs (ADR 016). Same receipt contract.
+- verify: `.venv\Scripts\python -m domains.bills.verify [document_id ...]` —
+  the deterministic reconciliation pass over those candidates (ADR 017). No
+  model, no network: it leaves a `verification_receipt` per document and
+  promotes a candidate to `status: "verified"` only when every check passes.
+  Same receipt contract. An existing database needs
+  `scripts/migrate_bill_status_verified.py` once before the first run.
 - deploy: merge to main → GitHub Actions checks, builds, migrates, deploys (docs/runbook.md).
 - review: `/lean-review` (five-lens codebase review; headless: `claude -p "/lean-review"`);
   `/diff-review` for just the working diff or current branch.

@@ -20,6 +20,7 @@ from api.auth import AuthError, AuthUnavailableError, authenticate
 from api.auth import settings as auth_settings
 from api.chat import router as chat_router
 from api.dtos import CaptureIn, DefineTypeIn, ForgetIn, RelateIn
+from domains.bills.verify import BillForgetResult, forget_bill, guard_capture, is_bill_record
 from domains.documents.capture import (
     MAX_UPLOAD_BYTES,
     DocumentErased,
@@ -184,6 +185,12 @@ def get_types(context: Ctx) -> list[TypeDefinition]:
 
 @app.post("/capture")
 def post_capture(body: CaptureIn, context: Ctx) -> CaptureResult:
+    """Generic capture. Bills take one extra check on the way in (ADR 017):
+    `status: "verified"` is the reconciliation verifier's to write, and a
+    verified record is not editable by hand, because `capture` merges and the
+    verified status would survive an edit to the numbers under it. The decision
+    lives in the domain; this is the dispatch."""
+    guard_capture(context, body.type_name, body.attributes)
     return capture(
         context,
         body.type_name,
@@ -240,18 +247,27 @@ def get_entity_route(entity_id: UUID, context: Ctx) -> EntityView:
 @app.post("/entities/{entity_id}/forget")
 def post_forget(
     entity_id: UUID, body: ForgetIn, context: Ctx
-) -> DocumentForgetResult | ForgetResult:
+) -> DocumentForgetResult | BillForgetResult | ForgetResult:
     """Erasure by redaction (ADR 007). Send `{}` to erase every flagged field.
 
-    Documents take the documents-domain path instead: most of a document's
-    personal data is in the stored file, which `forget()` cannot reach, so
-    redacting attributes alone would report an erasure that left the bill on
-    disk (ADR 015). The dispatch is here so there is one erasure endpoint and
-    no under-erasing trap; the behavior lives in the domain module. A document
-    response also carries `blobs_deleted`, so the claim is checkable.
+    Two domains own more of an entity's personal data than `forget()` can see,
+    and both dispatch here so there is one erasure endpoint and no under-erasing
+    trap; the behavior lives in the domain module either way.
+
+    Documents: most of a document's personal data is in the stored file, which
+    `forget()` cannot reach, so redacting attributes alone would report an
+    erasure that left the bill on disk (ADR 015). The response carries
+    `blobs_deleted`, so the claim is checkable.
+
+    Bills and EOBs: a candidate's verification receipts hold numbers derived
+    from its amounts, in a different entity that `forget()` — which is strictly
+    per-entity — never touches (ADR 017). The response carries
+    `receipts_redacted` for the same reason.
     """
     if is_document(context, entity_id):
         return forget_document(context, entity_id, fields=body.fields, actor=body.actor)
+    if is_bill_record(context, entity_id):
+        return forget_bill(context, entity_id, fields=body.fields, actor=body.actor)
     return forget(context, entity_id, fields=body.fields, actor=body.actor)
 
 
