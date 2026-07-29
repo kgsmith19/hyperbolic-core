@@ -111,20 +111,79 @@ stopped passing.
 `status: "verified"` cannot be set by hand: `POST /capture` refuses it on a
 `bill`/`eob`, refuses to edit a record that already carries it, refuses any
 payload carrying a bills identity key under some other type name, and refuses to
-write a `verification_receipt` or a `bill_extraction` at all. To correct a
-verified bill, erase it (or re-extract) and verify again.
+write a `verification_receipt`, a `bill_extraction`, an `action_proposal` or an
+`authority_receipt` at all. To correct a verified bill, erase it (or re-extract)
+and verify again.
 
 **Erasing a bill or EOB is `POST /entities/{id}/forget`, the same one endpoint,
 and it now clears more than the record.** A verification receipt holds numbers
 derived from the bill's amounts, and a difference equals an amount whenever the
 other operand is zero — so the route redacts `checks` on every receipt naming
-that record too, in live state and in event payloads. The response carries
+that record too, in live state and in event payloads. It does the same to
+`draft_digest` on every authority receipt naming it (ADR 018), which also
+revokes any approval resting on that text. The response carries
 `receipts_redacted`; do not erase a bill by any other route.
 
 Two counters on the report line mean look, not shrug: `errors` is a document the
 run could not judge, and `invalid` is a record whose stored state no longer
 matches its own type — which normally means something merged a foreign field onto
 it. Both exit non-zero.
+
+## Dispute drafts — proposed, never sent (ADR 018)
+
+**One-time, per environment, before the first run.** The two new types are
+defined automatically, but `bill`/`eob` gain a character-class bound on their
+dates and the registry has no redefinition path:
+
+```bash
+docker compose run --rm --no-deps api python scripts/migrate_bill_date_charset.py
+```
+
+Then:
+
+```bash
+docker compose run --rm --no-deps api python -m domains.bills.dispute            # sweep
+docker compose run --rm --no-deps api python -m domains.bills.dispute <doc-id>   # one document
+```
+
+**This sends nothing anywhere, and nothing in lifeos can.** It turns a *failed*
+`verification_receipt` into a `proposed` `action_proposal`: the ids, the failing
+checks, and a count of what it is deliberately not stating. The letter itself is
+never stored — it is rendered from the bill when you read it — so a bill you
+erase takes its draft with it.
+
+Review and decide over HTTP:
+
+```bash
+curl -s $API/action-proposals?state=proposed          # the drafts, rendered, each with a draft_digest
+curl -s -XPOST $API/action-proposals/<id>/approve -d '{"draft_digest":"<the digest you were shown>"}'
+curl -s -XPOST $API/action-proposals/<id>/reject -d '{}'
+curl -s $API/action-proposals/<id>/draft              # the approved draft; 403/409 without authority
+```
+
+Approving mints an `authority_receipt` recording who approved, when, which
+proposal, the digest of the exact text, and a grant good for seven days. The
+digest is required and must be the one you were shown: if the bill changed
+between reading and approving, the approval is refused rather than binding you
+to text you never saw. `/draft` refuses — and writes nothing — unless a valid,
+matching, unexpired receipt covers that exact text.
+
+**The listing shows the letter only while a proposal is `proposed`.** Once you
+have decided, `body` and `draft_digest` come back `null` and the draft is
+available from `/draft` alone — one door, so a lapsed or mismatched grant cannot
+be worked around by listing instead. Everything else about the proposal (state,
+points, subject ids, the authority id) stays visible.
+
+Approving requires the owner's own session: it is refused under any token
+carrying a `scopes` claim, however wide, and the receipt's `granted_via` records
+whether the identity was verified (`owner_session`) or the box was running with
+auth off (`local_dev`).
+
+Report-line counters: `undisputable` is a receipt that failed only on checks
+about what *lifeos* could not read (never sent to a provider as an accusation),
+`unreadable` is a receipt whose verdicts were erased or are knowingly partial
+(`checks_truncated`), `held` is a proposal a human already decided, `withdrawn`
+is one whose bill now reconciles. Only `errors` exits non-zero.
 
 ## Scheduled jobs (ADR 014)
 

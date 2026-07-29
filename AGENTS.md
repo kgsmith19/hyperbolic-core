@@ -25,6 +25,14 @@ Commands (venv at `.venv`, DB creds in `.env`):
   promotes a candidate to `status: "verified"` only when every check passes.
   Same receipt contract. An existing database needs
   `scripts/migrate_bill_status_verified.py` once before the first run.
+- dispute: `.venv\Scripts\python -m domains.bills.dispute [document_id ...]` —
+  operator-run: turns a FAILED `verification_receipt` into a *proposed*
+  `action_proposal` (ADR 018). It drafts and nothing else. **Nothing is sent
+  and nothing here can send**: an approval (`POST
+  /action-proposals/{id}/approve`, echoing the draft's sha256) mints an
+  `authority_receipt`, and the gate refuses to emit a draft without a valid,
+  matching, unexpired one. Same receipt contract. An existing database needs
+  `scripts/migrate_bill_date_charset.py` once before the first run.
 - deploy: merge to main → GitHub Actions checks, builds, migrates, deploys (docs/runbook.md).
 - review: `/lean-review` (five-lens codebase review; headless: `claude -p "/lean-review"`);
   `/diff-review` for just the working diff or current branch.
@@ -57,6 +65,14 @@ withheld from the shared agent-tool surface, so its records never reach an LLM
 through a generic read tool. Enforcement is domain-shaped (scopes are), so
 flagging one type withholds every type in its domain — put sensitive types in a
 domain of their own.
+
+Approval and authority (ADR 018): nothing outward-facing happens without an
+`authority_receipt`, which only an explicit human approval mints, bound to the
+sha256 of the exact draft that was read. A component proposing an outward action
+must name the invariant-8 leg it lacks (today: (b) external communication —
+there is no transport in this repo outside `domains.bills.extract`'s Anthropic
+call, and the grant's `permits`/`channel` are one-member enums so "send" is not
+expressible).
 
 Rules: `.agents/invariants.md` (project invariants), `.agents/domains/` (per-cell constitutions).
 

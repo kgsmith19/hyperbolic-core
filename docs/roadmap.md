@@ -130,8 +130,36 @@ Pre-made decisions in prompts are not relitigated.
   other operand is zero. Zero kernel changes; existing databases need
   `scripts/migrate_bill_status_verified.py` once (the registry has no
   redefinition path).
-- [ ] C4 Approval-gated dispute draft (action_proposal → approval mints
-  authority_receipt; terminates at an approved on-screen draft)
+- [x] C4 Approval-gated dispute draft (action_proposal → approval mints
+  authority_receipt; terminates at an approved on-screen draft) — done
+  2026-07-29 (PR #48, ADR-018): `python -m domains.bills.dispute` turns a
+  FAILED verification receipt into a `proposed` `action_proposal`, and nothing
+  else in the system can act on it. **The draft body is never stored**: the
+  proposal holds ids, check enum names and one count, and the letter is
+  rendered on demand from the candidates it cites (`render_draft`), because a
+  dispute letter in a searchable attribute is the B1/C1/C2 finding a fourth
+  time — so erasing a candidate empties the draft by construction rather than
+  by a cascade nothing schedules. Only failures where the DOCUMENT disagrees
+  with itself become points; `unchecked` never does, and everything not stated
+  is counted on the record and named in the letter, so "my records could not
+  read this" can never read as "you overcharged me". Approval is an explicit
+  `POST .../approve` that must echo the sha256 of the exact draft it read, mints
+  an `authority_receipt` recording who/when/what/until-when, and takes
+  `granted_by` from the verified request rather than the body. The gate
+  (`emit_draft`) refuses without a valid, matching, unexpired receipt whose
+  grant actually permits this act on a channel this system can serve, and
+  records nothing when it refuses — and it is the ONLY reader of a decided
+  proposal's letter, since the listing renders one only while it is `proposed`
+  (a state nothing returns to), so the gate has no ungated twin. Minting
+  authority needs the owner's own unrestricted session, and `granted_by` /
+  `granted_via` come from the claims verified for that request rather than from
+  configuration. **Invariant 8: the leg this whole path lacks is (b) external
+  communication** — no transport exists, and the authority type's
+  `permits`/`channel` are one-member enums, so a grant to send is not
+  expressible without a schema change, a migration and an ADR. Zero kernel
+  changes; existing databases need `scripts/migrate_bill_date_charset.py` once
+  (C4 made `service_date` prose in an outward-facing letter, so it is now
+  bounded by character class as well as length).
 - [ ] C5 Branch-explore — only if a real ambiguous case appears in actual bills
 
 ### D — Memory that compounds
@@ -154,7 +182,10 @@ Pre-made decisions in prompts are not relitigated.
   from A1 tool outputs and every derived event after.
 - Execution receipts + trigger_feedback — with the first cron job (B3).
 - `as_of` threading, `what_changed`, `superseded_by` chains — milestone D.
-- Approval/authority receipts — first external-action slice (C4).
+- Approval/authority receipts — landed C4 (ADR 018): `action_proposal` +
+  `authority_receipt`, minted only by an explicit human approval bound to the
+  digest of the draft that was read, with a gate that refuses to emit without
+  one. Nothing can be sent: `permits`/`channel` are one-member enums.
 - Drop-and-rebuild determinism — a standing test, not a daemon.
 - Golden questions (`docs/golden-questions.md`) — the living regression suite;
   grows every slice.

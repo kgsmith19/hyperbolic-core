@@ -44,6 +44,7 @@ from jsonschema import validate
 from domains.bills.types import (
     CATEGORIES,
     CATEGORY_MEDICAL,
+    DATE_PATTERN,
     DOMAIN,
     EXTRACTION_EMPTY,
     EXTRACTION_FAILED,
@@ -97,6 +98,7 @@ _FIELD_NAME = re.compile(r"^[a-z_]{1,32}$")
 # derived from the value that is actually stored.
 _ORG = re.compile(ORG_PATTERN)
 _REF = re.compile(REF_PATTERN)
+_DATE = re.compile(DATE_PATTERN)
 
 
 class ModelCallFailed(RuntimeError):
@@ -321,8 +323,17 @@ def _amount(raw: Any) -> float | None:
 
 
 def _date(raw: Any) -> str | None:
+    """A date the document stated, held to a charset as well as a parse.
+
+    `date.fromisoformat` already emits nothing outside digits, `-` and `W`, so
+    the pattern turns nothing away that would otherwise land. It is here because
+    this cell's rule is that every stored string is bounded in the type *and* in
+    the coercion, and a date is now composed verbatim into a letter addressed to
+    a third party (ADR 018) — a value reaching that path on the strength of one
+    parser's behaviour is one library change away from being prose.
+    """
     value = _clean(raw)
-    if value is None or len(value) > 32:
+    if value is None or len(value) > 32 or not _DATE.match(value):
         return None
     try:
         date.fromisoformat(value)

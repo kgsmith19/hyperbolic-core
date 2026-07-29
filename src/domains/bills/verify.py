@@ -66,9 +66,11 @@ from domains.bills.types import (
     RESULT_UNCHECKED,
     STATUS_CANDIDATE,
     STATUS_VERIFIED,
+    TYPE_AUTHORITY,
     TYPE_BILL,
     TYPE_EOB,
     TYPE_EXTRACTION,
+    TYPE_PROPOSAL,
     TYPE_VERIFICATION,
     define_bills_types,
 )
@@ -688,8 +690,8 @@ def run_verification(
 
 
 class BillForgetResult(ForgetResult):
-    """A `ForgetResult` that also accounts for the receipts, so a caller can see
-    that the numbers derived from the erased record went with it."""
+    """A `ForgetResult` that also accounts for the derived records, so a caller
+    can see that the numbers derived from the erased record went with it."""
 
     receipts_redacted: int
 
@@ -700,12 +702,19 @@ def is_bill_record(ctx: AccessContext, entity_id: UUID) -> bool:
     return bool(set(services.get_entity(ctx, entity_id).types) & {TYPE_BILL, TYPE_EOB})
 
 
-def _citing_receipts(ctx: AccessContext, entity_id: UUID) -> list[UUID]:
-    """Every verification receipt that named this candidate."""
+# Every record this cell derives from a candidate, and the one field on it that
+# carries something derived from the candidate's `x-pii` amounts. `forget()` is
+# strictly per-entity, so each of these needs reaching by name or the erasure
+# stops at the record the caller happened to hand in (ADR 017/018).
+DERIVED_PII = ((TYPE_VERIFICATION, "checks"), (TYPE_AUTHORITY, "draft_digest"))
+
+
+def _citing_records(ctx: AccessContext, type_name: str, entity_id: UUID) -> list[UUID]:
+    """Every record of this type whose `subject_ids` named this candidate."""
     return [
-        receipt.id
-        for receipt in services.find(ctx, type_name=TYPE_VERIFICATION)
-        if str(entity_id) in (receipt.attributes.get("subject_ids") or [])
+        record.id
+        for record in services.find(ctx, type_name=type_name)
+        if str(entity_id) in (record.attributes.get("subject_ids") or [])
     ]
 
 
@@ -715,7 +724,7 @@ def forget_bill(
     fields: list[str] | None = None,
     actor: str = DEFAULT_ACTOR,
 ) -> BillForgetResult:
-    """Erase a candidate **and the numbers its receipts derived from it**.
+    """Erase a candidate **and everything this cell derived from its numbers**.
 
     `forget()` is strictly per-entity and strips only the fields flagged on the
     entity it is given. A `verification_receipt` is a different entity, so
@@ -726,22 +735,30 @@ def forget_bill(
     the other, so a bill with `total: 0` and one line item leaves the line's
     exact amount behind.
 
-    So the cascade is synchronous and runs **first**, before the candidate's own
-    redaction: over-erasing a receipt is the safe direction, and a failure
-    part-way must not leave the derived numbers as the only survivors. Write
-    scope is required before either (the C1 precedent).
+    An `authority_receipt` is the second such entity (ADR 018). Its
+    `draft_digest` is sha256 over a letter that quoted this candidate's issuer
+    and amounts — guessable content, so the digest is a confirmation oracle, and
+    it must not outlive what it digests. Losing it also makes the approval it
+    recorded unusable, which is the correct direction: an approval of text that
+    no longer exists authorises nothing.
 
-    Deliberately not conditional on *which* fields are being erased. `checks` is
-    derived from the candidate as a whole, and working out which delta came from
-    which attribute is exactly the kind of cleverness an erasure path must not
-    have.
+    So the cascade is synchronous and runs **first**, before the candidate's own
+    redaction: over-erasing a derived record is the safe direction, and a
+    failure part-way must not leave the derived numbers as the only survivors.
+    Write scope is required before either (the C1 precedent).
+
+    Deliberately not conditional on *which* fields are being erased. Both
+    derived values are built from the candidate as a whole, and working out
+    which one came from which attribute is exactly the kind of cleverness an
+    erasure path must not have.
     """
     require(ctx, f"{DOMAIN}:write")
     redacted = 0
-    for receipt_id in _citing_receipts(ctx, entity_id):
-        if "checks" in services.get_entity(ctx, receipt_id).entity.attributes:
-            services.forget(ctx, receipt_id, fields=["checks"], actor=actor)
-            redacted += 1
+    for type_name, field_name in DERIVED_PII:
+        for record_id in _citing_records(ctx, type_name, entity_id):
+            if field_name in services.get_entity(ctx, record_id).entity.attributes:
+                services.forget(ctx, record_id, fields=[field_name], actor=actor)
+                redacted += 1
     result = services.forget(ctx, entity_id, fields=fields, actor=actor)
     return BillForgetResult(**result.model_dump(), receipts_redacted=redacted)
 
@@ -751,22 +768,35 @@ class PromotionRefused(ValueError):
     a verified record."""
 
 
-# The records this cell will not accept from the generic capture route at all:
-# the evidence a promotion rests on, and the audit record of PHI leaving the box.
-# Both are written in-process by the job that performed the thing they attest to,
-# so a hand-written one is a forged attestation rather than a correction, and
-# neither has a legitimate route caller.
-UNWRITABLE_TYPES = (TYPE_VERIFICATION, TYPE_EXTRACTION)
+# The records this cell will not accept from the generic capture route at all.
+# Each attests to something a specific in-process job did, so a hand-written one
+# is a forged attestation rather than a correction, and none has a legitimate
+# route caller:
+#
+# - `verification_receipt` is the evidence a promotion rests on;
+# - `bill_extraction` is the audit record of PHI leaving the box;
+# - `authority_receipt` is the artifact proving a HUMAN said yes (ADR 018) —
+#   evidence in exactly the same sense, and the one thing standing between a
+#   draft and an action, so a caller who could author one could authorise
+#   themselves;
+# - `action_proposal` is what an approval then points at. A hand-written one
+#   could name any subjects and any check names, so approving it would mint
+#   authority over records nothing ever verified. Proposals come from
+#   `dispute.generate_proposals`, and their state changes from `approve_proposal`
+#   / `reject_proposal` — never from a generic capture.
+UNWRITABLE_TYPES = (TYPE_VERIFICATION, TYPE_EXTRACTION, TYPE_PROPOSAL, TYPE_AUTHORITY)
 
 # Identity field name -> the type that owns it. Entity resolution matches on the
 # identity field *name* across every type declaring it, so carrying one of these
 # values is exactly what makes a capture land on that record, whatever type the
-# payload claims to be.
+# payload claims to be. `authority_receipt` is absent on purpose: it declares no
+# identity field at all, so nothing can resolve onto one (ADR 018).
 OWNED_KEYS = {
     KEY_FIELDS[TYPE_BILL]: TYPE_BILL,
     KEY_FIELDS[TYPE_EOB]: TYPE_EOB,
     "verification_key": TYPE_VERIFICATION,
     "extraction_key": TYPE_EXTRACTION,
+    "proposal_key": TYPE_PROPOSAL,
 }
 
 

@@ -1,6 +1,7 @@
-"""Bill types as registry data (invariant 1, ADR 016/017). Zero kernel DDL.
+"""Bill types as registry data (invariant 1, ADR 016/017/018). Zero kernel DDL.
 
-Four types, one generic and one medical instance beside it:
+Six types: one generic obligation, one medical instance beside it, and the
+records of what each job did to them.
 
 - ``bill`` is the GENERIC obligation — issuer, account reference, service and
   due dates, line items, total, currency — discriminated by ``category``. A
@@ -18,6 +19,16 @@ Four types, one generic and one medical instance beside it:
   gave which verdict, and by how much an arithmetic check missed. No model is
   involved in producing it, so unlike a candidate it may honestly carry
   ``confidence: 1.0``.
+- ``action_proposal`` is a DRAFT outward-facing action that a failed
+  verification suggests (ADR 018) — proposed, never taken. It holds the ids and
+  the failing check names it rests on and **no draft text at all**: the letter
+  is rendered on demand from the records it cites, so no prose about a medical
+  bill is ever stored in a full-text-indexed attribute.
+- ``authority_receipt`` is what an explicit human approval mints (ADR 018): who
+  approved, when, which proposal, the digest of the exact draft they read, and
+  the constraints of the grant. Its ``permits`` and ``channel`` are one-member
+  enums, so "send this somewhere" is **not expressible** — the same trick C2
+  used to make ``"verified"`` inexpressible until something could earn it.
 
 ``status`` gained its second member here. C2 shipped a one-value enum so that
 "verified" was inexpressible; C3 is what earns ``"verified"``, and only through
@@ -120,6 +131,63 @@ RESULTS = (RESULT_PASS, RESULT_FAIL, RESULT_UNCHECKED)
 
 MAX_CHECKS = 500
 
+# --- proposals and authority (ADR 018) --------------------------------------
+
+# What an action_proposal proposes. One member today; a second one is a new
+# ADR, because every kind is a new thing this system might do in the world.
+KIND_DISPUTE_DRAFT = "dispute_draft"
+PROPOSAL_KINDS = (KIND_DISPUTE_DRAFT,)
+
+# A proposal's lifecycle. `proposed` authorizes nothing; `approved` is the only
+# state that has an authority receipt behind it, and the schema below binds the
+# two together exactly as `verified` is bound to its verification receipt.
+STATE_PROPOSED = "proposed"
+STATE_APPROVED = "approved"
+STATE_REJECTED = "rejected"
+STATE_WITHDRAWN = "withdrawn"
+PROPOSAL_STATES = (STATE_PROPOSED, STATE_APPROVED, STATE_REJECTED, STATE_WITHDRAWN)
+
+# What an approval may authorize, and where the result may go. BOTH are
+# one-member enums on purpose (invariant 8, ADR 018): there is no outbound
+# channel anywhere in this system, and an authority artifact that could say
+# "email this" would be a lie the type system is happy to tell. Adding a member
+# is a schema change, a migration and a design review — which is exactly the
+# friction that should stand between a draft and a sent letter.
+ACT_DISPLAY_DRAFT = "display_draft"
+GRANTED_ACTS = (ACT_DISPLAY_DRAFT,)
+CHANNEL_ON_SCREEN = "on_screen"
+CHANNELS = (CHANNEL_ON_SCREEN,)
+
+# How the approving principal was established. Recorded rather than inferred,
+# because an authority receipt is the system's only artifact distinguishing a
+# human decision from an automated one, and "the environment said so" is a
+# weaker claim than "a verified session said so". A third member — an agent
+# token holding an approve grant — is a decision nobody has made.
+GRANT_VIA_OWNER_SESSION = "owner_session"
+GRANT_VIA_LOCAL_DEV = "local_dev"
+GRANT_VIAS = (GRANT_VIA_OWNER_SESSION, GRANT_VIA_LOCAL_DEV)
+
+# The checks a proposal may quote back at a third party. A failed check is only
+# disputable when it means the DOCUMENT disagrees with itself; a check that
+# failed because this system could not read the document is our problem, not
+# the provider's, and presenting it as an accusation would be dishonest. The
+# rest are counted on the proposal and named in the draft as "not stated here"
+# (the C3 "a check that cannot run says so" precedent, pointed outward).
+DISPUTABLE_CHECKS = (
+    CHECK_LINE_ITEMS_SUM,
+    CHECK_EOB_LINE_SPLIT,
+    CHECK_EOB_ALLOWED_WITHIN_BILLED,
+    CHECK_EOB_AMOUNTS_NON_NEGATIVE,
+    CHECK_NO_DUPLICATE_LINES,
+    CHECK_BILL_EOB_PATIENT_RESP,
+)
+
+MAX_POINTS = 50
+# Bounded identifier for the approving principal: the owner's Supabase user id
+# in a deployed run, or an explicit local-dev sentinel. Not free text.
+MAX_PRINCIPAL = 128
+PRINCIPAL_PATTERN = "^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$"
+
 # Bounds tight enough that these cannot hold a sentence, and enforced by a
 # character class as well as a length: an "issuer" is a company name, not prose.
 MAX_NAME = 64
@@ -127,13 +195,20 @@ MAX_REF = 48
 MAX_CODE = 16
 ORG_PATTERN = "^[A-Za-z0-9][A-Za-z0-9 .,&'()/-]{0,63}$"
 REF_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._/-]{0,47}$"
+DATE_PATTERN = "^[0-9][0-9W-]{0,31}$"
 MAX_LINE_ITEMS = 100
 MAX_IDS = 100
 MAX_FLAGGED_FIELDS = 12
 
 _SHA256 = {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}
 _TIMESTAMP = {"type": "string", "maxLength": 64}
-_DATE = {"type": "string", "maxLength": 32}
+# Bounded in charset as well as length, exactly as `_ORG`/`_REF` are: this cell's
+# rule is that a string is held to both in the type *and* in the coercion, and a
+# date is now composed verbatim into a letter addressed to a third party
+# (ADR 018). `date.fromisoformat` — the only writer — emits nothing outside
+# digits, `-` and `W`, so this excludes prose without narrowing what is already
+# storable; `extract._date` re-checks the same pattern.
+_DATE = {"type": "string", "maxLength": 32, "pattern": DATE_PATTERN}
 _MONEY = {"type": "number"}
 _CURRENCY = {"type": "string", "maxLength": 3, "pattern": "^[A-Z]{3}$"}
 _UUID = {
@@ -366,6 +441,147 @@ VERIFICATION_RECEIPT_SCHEMA: dict[str, Any] = {
     # the same reasoning `bill_extraction` was left unflagged under (ADR 016).
 }
 
+# One thing a draft would say, in the receipt's own vocabulary: which check
+# failed, about which record, on which line. No `delta` and no `fields` —
+# unlike `verification_receipt.checks` this array carries no arithmetic at all,
+# so it holds nothing erasable and the proposal needs no erasure path of its
+# own. The numbers a draft quotes are read from the candidates at render time.
+_POINT = {
+    "type": "object",
+    "properties": {
+        "check": {"type": "string", "enum": list(DISPUTABLE_CHECKS)},
+        "subject_id": _UUID,
+        "line_index": {"type": "integer", "minimum": 0, "maximum": MAX_LINE_ITEMS},
+    },
+    "required": ["check", "subject_id"],
+    "additionalProperties": False,
+}
+
+# An approval is bound to the exact authority that granted it, exactly as a
+# promotion is bound to the receipt that granted it. `"approved"` is never a
+# one-word edit, and every approved proposal resolves to the artifact proving a
+# human said yes.
+_APPROVAL_CITES_ITS_AUTHORITY: dict[str, Any] = {
+    "if": {"properties": {"state": {"const": STATE_APPROVED}}, "required": ["state"]},
+    "then": {"required": ["authority_receipt_id", "decided_at"]},
+}
+
+# A proposed outward-facing action (ADR 018). Keyed on the verification receipt
+# it rests on plus its kind, so re-running the generator supersedes rather than
+# piling up duplicate drafts and the earlier proposal stays in history.
+#
+# **There is no draft body here.** The letter is rendered on demand from the
+# records this cites (`dispute.render_draft`), because a dispute letter names
+# the provider, the account and the amounts — free text that in an attribute
+# would be tsvector-indexed and erasable only per entity (ADR 015/016, the
+# binding B1/C1/C2 finding). Rendering instead of storing means erasing a
+# candidate empties the draft by construction rather than by a cascade someone
+# has to remember to run.
+#
+# `unresolved_count` is the number of verdicts on these subjects that did not
+# pass and are NOT stated as points. It is on the record, and in the rendered
+# draft, so an approver can never mistake "we could not check this" for "this
+# is a proven error".
+ACTION_PROPOSAL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "proposal_key": _SHA256,
+        "kind": {"type": "string", "enum": list(PROPOSAL_KINDS)},
+        "state": {"type": "string", "enum": list(PROPOSAL_STATES)},
+        "document_id": _UUID,
+        "verification_receipt_id": _UUID,
+        "subject_ids": {"type": "array", "items": _UUID, "maxItems": MAX_IDS},
+        "points": {"type": "array", "items": _POINT, "maxItems": MAX_POINTS},
+        "unresolved_count": {"type": "integer", "minimum": 0},
+        "authority_receipt_id": _UUID,
+        "proposed_at": _TIMESTAMP,
+        "decided_at": _TIMESTAMP,
+        "provenance": _PROVENANCE_DIRECT,
+    },
+    "required": [
+        "proposal_key",
+        "kind",
+        "state",
+        "document_id",
+        "verification_receipt_id",
+        "subject_ids",
+        "proposed_at",
+        "provenance",
+    ],
+    "additionalProperties": False,
+    "allOf": [_APPROVAL_CITES_ITS_AUTHORITY],
+    "x-identity": ["proposal_key"],
+    # no x-pii: ids, enums and counts only. Nothing here is a value from a
+    # document, which is the whole point of not storing the draft body.
+}
+
+# What an explicit human approval mints (ADR 018): the artifact that proves a
+# human said yes, to what, when, and within which limits.
+#
+# **No x-identity, deliberately.** Every approval is a distinct act and must
+# never resolve onto an earlier one — the `execution_receipt` precedent
+# (ADR 014). Nothing can merge into an authority receipt because nothing can
+# match one.
+#
+# `granted_by` is the verified subject of the request that approved, and
+# `granted_via` says how that subject was established. Both are recorded because
+# this record's whole job is to be the evidence a human decided; neither is
+# `x-pii` — a pseudonymous owner identifier is the same category as an event
+# actor, which this repo has never flagged.
+#
+# `draft_digest` is sha256 over the exact text the approver read. It is what
+# makes the grant specific: the gate re-renders and refuses if the draft has
+# changed since. It is derived from `x-pii` amounts on the candidates, so it is
+# `x-pii` too and `verify.forget_bill` cascades to it — a digest over guessable
+# content is a confirmation oracle, and it must not outlive what it digests. It
+# is therefore not `required`: an erased authority receipt is an honest husk
+# saying "this proposal was approved by this principal at this time", and the
+# gate refuses to emit against a husk rather than guessing.
+AUTHORITY_RECEIPT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "proposal_id": _UUID,
+        "verification_receipt_id": _UUID,
+        "subject_ids": {"type": "array", "items": _UUID, "maxItems": MAX_IDS},
+        "draft_digest": _SHA256,
+        "granted_by": {
+            "type": "string",
+            "maxLength": MAX_PRINCIPAL,
+            "pattern": PRINCIPAL_PATTERN,
+        },
+        "granted_via": {"type": "string", "enum": list(GRANT_VIAS)},
+        "granted_at": _TIMESTAMP,
+        "expires_at": _TIMESTAMP,
+        # `minItems: 1` because an empty array is a grant that authorises
+        # nothing, and a grant that authorises nothing must not be storable as
+        # an authority — a reader that only checks "is there a receipt" would
+        # treat it as one. `dispute.emit_draft` checks the contents too; this is
+        # the write-time half of the same rule.
+        "permits": {
+            "type": "array",
+            "items": {"type": "string", "enum": list(GRANTED_ACTS)},
+            "minItems": 1,
+            "maxItems": len(GRANTED_ACTS),
+        },
+        "channel": {"type": "string", "enum": list(CHANNELS)},
+        "provenance": _PROVENANCE_DIRECT,
+    },
+    "required": [
+        "proposal_id",
+        "verification_receipt_id",
+        "subject_ids",
+        "granted_by",
+        "granted_via",
+        "granted_at",
+        "expires_at",
+        "permits",
+        "channel",
+        "provenance",
+    ],
+    "additionalProperties": False,
+    "x-pii": ["draft_digest"],
+}
+
 BILL_PII_FIELDS: tuple[str, ...] = tuple(BILL_SCHEMA["x-pii"])
 EOB_PII_FIELDS: tuple[str, ...] = tuple(EOB_SCHEMA["x-pii"])
 
@@ -373,6 +589,8 @@ TYPE_BILL = "bill"
 TYPE_EOB = "eob"
 TYPE_EXTRACTION = "bill_extraction"
 TYPE_VERIFICATION = "verification_receipt"
+TYPE_PROPOSAL = "action_proposal"
+TYPE_AUTHORITY = "authority_receipt"
 
 # The identity field each candidate type is keyed on, so the verifier can write
 # back to the record it just judged without caring which of the two it holds.
@@ -383,6 +601,8 @@ _TYPES = {
     TYPE_EOB: EOB_SCHEMA,
     TYPE_EXTRACTION: BILL_EXTRACTION_SCHEMA,
     TYPE_VERIFICATION: VERIFICATION_RECEIPT_SCHEMA,
+    TYPE_PROPOSAL: ACTION_PROPOSAL_SCHEMA,
+    TYPE_AUTHORITY: AUTHORITY_RECEIPT_SCHEMA,
 }
 
 

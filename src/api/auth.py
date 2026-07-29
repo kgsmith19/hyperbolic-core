@@ -7,6 +7,7 @@ context — the same path future agent tokens take with less than every scope.
 Verification is local (cached public keys); no round-trip to Supabase.
 """
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -102,7 +103,49 @@ def authenticate(request: Request) -> AccessContext:
         raise AuthError(f"invalid token: {exc}") from exc
     if claims.get("sub") != conf.owner_user_id:
         raise AuthError("unknown subject")
+    # Stashed for `principal()`: a route that must record WHO acted reads the
+    # verified claims of this request rather than re-deriving an identity from
+    # configuration, which is not the same thing (ADR 018).
+    request.state.claims = claims
     return _context_from(claims)
+
+
+# What an approval records when the box is running with auth off (local dev
+# only). Not a fallback that pretends to be an owner: an authority receipt minted
+# on an unauthenticated box says so, permanently and in the record itself.
+LOCAL_DEV_PRINCIPAL = "local-dev-auth-disabled"
+
+# A subject identifier is opaque, but it is written into a record, so it is
+# bounded here rather than trusted for being signed.
+_SUBJECT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$")
+
+
+def principal(request: Request) -> tuple[str, bool]:
+    """Who this request is, and whether that was verified.
+
+    Read from the claims `authenticate` verified for **this request**, not from
+    configuration. The first version returned `settings().owner_user_id`, which
+    is the same string in the ordinary case and is not the same *claim*: it says
+    who the owner is, never who acted. An authority receipt (ADR 018) is the
+    system's only artifact distinguishing a human decision from an automated
+    one, so it must not be built from an answer the request had no part in.
+
+    Fails closed. With auth enabled, absent claims mean this was called outside
+    the authenticated dependency and there is no subject to record; with auth
+    disabled the returned identity is explicitly unverified and the caller is
+    told so. The domain never imports this module — the route passes the result
+    in.
+    """
+    conf = settings()
+    claims = getattr(request.state, "claims", None)
+    if not isinstance(claims, dict):
+        if conf.mode == MODE_DISABLED:
+            return LOCAL_DEV_PRINCIPAL, False
+        raise AuthError("no verified identity on this request")
+    subject = claims.get("sub")
+    if not isinstance(subject, str) or not _SUBJECT.match(subject):
+        raise AuthError("verified subject is not a usable principal identifier")
+    return subject, True
 
 
 def _context_from(claims: dict[str, Any]) -> AccessContext:

@@ -2,10 +2,11 @@
 
 Owns: `src/domains/bills/**`, `tests/bills/**`.
 
-- A life domain, not kernel: `bill`, `eob`, `bill_extraction` and
-  `verification_receipt` are registry data (invariant 1) and every state change
-  goes through kernel application services — capture/find/get_entity/history,
-  never raw tables or SQL (invariant 7).
+- A life domain, not kernel: `bill`, `eob`, `bill_extraction`,
+  `verification_receipt`, `action_proposal` and `authority_receipt` are registry
+  data (invariant 1) and every state change goes through kernel application
+  services — capture/find/get_entity/history, never raw tables or SQL
+  (invariant 7).
 - **Everything the EXTRACTOR writes is a candidate, never a fact.** `status` is
   `"candidate"` there, provenance carries `method: "llm_extraction"`, and the
   schema refuses confidence 1.0 — reserved for what was not inferred (ADR 010).
@@ -30,10 +31,83 @@ Owns: `src/domains/bills/**`, `tests/bills/**`.
   claims.** Entity resolution matches on the identity field *name* across every
   type declaring it, and `capture` validates the incoming payload against the
   incoming type and then merges — so a payload carrying `bill_key`, `eob_key`,
-  `verification_key` or `extraction_key` must be a capture of the type that owns
-  it, whatever it calls itself. `verification_receipt` and `bill_extraction` are
-  not route-writable at all: they attest to work a job did, and a hand-written
-  one is a forgery, not a correction.
+  `verification_key`, `extraction_key` or `proposal_key` must be a capture of
+  the type that owns it, whatever it calls itself. **Any new identity key in
+  this cell is added to `verify.OWNED_KEYS` in the same commit that defines
+  it.** `verification_receipt`, `bill_extraction`, `action_proposal` and
+  `authority_receipt` are not route-writable at all: they attest to work a job
+  or a human did, and a hand-written one is a forgery, not a correction.
+
+- **Nothing leaves this system, and nothing here could make it.** `dispute.py`
+  drafts; only an explicit human approval mints an `authority_receipt`; only
+  `emit_draft` hands a draft out, and only against a valid, matching, unexpired
+  receipt for *that* proposal (ADR 018). The leg this whole path lacks is
+  invariant 8's (b) external communication, and it is structural: no module here
+  constructs an HTTP, mail or socket client, and `authority_receipt.permits` /
+  `.channel` are one-member enums, so "send this" is not expressible. A second
+  member is a schema change, a migration and a new ADR — never an edit.
+
+- **"`emit_draft` is the one function that hands a draft out" is a claim, and
+  every renderer is a candidate to break it.** `proposal_view` renders the same
+  bytes, so it does so only for a `proposed` proposal — the state where reading
+  is a prerequisite to deciding, and a state nothing ever returns to. **Any new
+  caller of `render_draft` either restricts itself to `proposed` or goes through
+  the gate.** A second ungated reader is the whole control defeated from the
+  next route along, and it will look like a convenience.
+
+- **A gate checks the grant, it does not echo it.** `emit_draft` asserts the
+  permit is present and the channel is one it can serve, and returns the
+  constants it checked rather than the values it read. That the enums have one
+  member each is a WRITE-time constraint and must never be the reason a
+  read-time check is skipped — `permits: []` was schema-valid once and emitted a
+  draft. When `CHANNELS` gains a second member, `approve_proposal` must stop
+  hard-coding the channel: the approver chooses it, the receipt records the
+  choice, and the gate compares the grant to the request.
+
+- **An authority receipt may be minted only under the owner's own unrestricted
+  session.** `bills:write` is necessary and not sufficient: a context that
+  enumerates its own scopes is the shape a token takes (`api.auth._context_from`
+  narrows on a `scopes` claim), and a credential is not a person. `granted_by`
+  comes from the claims verified for THAT request — never from a request body,
+  never from environment configuration, which says who the owner is rather than
+  who acted — and `granted_via` records which it was. Letting an agent token
+  approve is a new `GRANT_VIAS` member and an ADR.
+
+- **A draft is rendered, never stored.** A dispute letter names the provider and
+  the amounts, so storing one would put exactly the free text this cell forbids
+  into a tsvector-indexed attribute. `action_proposal` holds ids, check enum
+  names and counts; `render_draft` composes the letter from the candidates it
+  cites at read time, so erasing a candidate empties the draft by construction.
+  The one derived value that must be erased is `authority_receipt.draft_digest`
+  — a digest over guessable content is a confirmation oracle — and
+  `verify.forget_bill` cascades to it through `DERIVED_PII`. **A new derived
+  record that carries anything computed from a candidate's amounts joins that
+  table in the same commit.**
+
+- **A check that could not run is never quoted at a third party.** Only
+  `DISPUTABLE_CHECKS` failures — where the document disagrees with itself —
+  become points. `unchecked`, `dates_coherent`, `currency_consistent` and
+  `no_low_confidence_fields` are about what THIS system could not read, and
+  presenting one as an accusation is a claim nobody can back. Everything not
+  stated is counted in `unresolved_count` and named in the letter, and a receipt
+  with nothing disputable produces no proposal and a counted, printed
+  `undisputable`.
+
+- **A partial record is never the basis of an accusation.** A
+  `verification_receipt` whose `checks` were erased, or that is flagged
+  `checks_truncated`, cannot say why the document failed, so no letter follows
+  it: counted as `unreadable`, printed, no proposal. Stating some discrepancies
+  and then claiming *with a number* to have accounted for the rest is worse than
+  saying nothing.
+
+- **An approval is granted by a human, to one exact text.** `approve_proposal`
+  refuses unless the caller echoes the sha256 of the draft it read, so approving
+  cannot happen without reading and the facts cannot move underneath it;
+  `granted_by` comes from the verified request, never from a request body; write
+  scope is checked first; and no GET route writes anything, so approval is never
+  a side effect of reading. A job never rewrites a proposal a human decided — an
+  approved one is held, a rejected one is not resurrected — and a proposal whose
+  basis stops failing is withdrawn, approved or not.
 - **A receipt names ids, verdicts, line indices and differences — never a value
   from the document.** `checks` carries a `delta` and is `x-pii`, because a
   difference equals an amount whenever the other operand is zero.
@@ -61,6 +135,10 @@ Owns: `src/domains/bills/**`, `tests/bills/**`.
   in-charset string still lands. The layering — `x-pii` so it is erasable,
   `x-sensitive` so no model reads it — is what makes that survivable, and no
   document from this cell may claim more.
+  **Dates are strings too.** `service_date`/`due_date` carry `DATE_PATTERN` as
+  well as a length, because C4 made a date something composed verbatim into a
+  letter for a third party. A field that a parser happens to constrain is not a
+  bounded field — the bound goes in the schema and in the coercion, both.
 - An identity field is never a PII field. `bill_key` and `eob_key` are sha256
   digests over the source document's hash plus the identifying values, so they
   survive `forget()` — keying on `claim_no` or `account_ref` directly would let
@@ -104,20 +182,20 @@ Owns: `src/domains/bills/**`, `tests/bills/**`.
 - **An execution receipt is not a place for counts of medical records.** It
   lives in `ops`, which stays model-readable so the briefing works. Every job in
   this cell puts its name and status there and nothing else; counts and produced
-  ids belong in `bill_extraction` / `verification_receipt`, inside the withheld
-  domain, and on stdout.
+  ids belong in `bill_extraction` / `verification_receipt` / `action_proposal`,
+  inside the withheld domain, and on stdout.
 - Every job runs under a narrow code-built AccessContext, never
   `AccessContext.all()`, and asks for the least it can: extraction takes
   `bills:read`/`write` + `documents:read` (never `documents:write` — this cell
   must not be able to unlink a bill's blobs) + `ops:read`/`write`; verification
   drops `documents:read` too, because it judges candidates already in the graph
-  and never opens the document.
+  and never opens the document, and proposing takes the same narrow set.
 - Each CLI is a scheduled entry point: it runs inside `ops.receipts.run_job`, so
   every run leaves a receipt and only `ok` exits 0 (ADR 014). A candidate that
   fails verification is a RESULT, not a failed run — finding the discrepancy is
   the job working.
 - Behavior changes land with tests in `tests/bills/` (unit for parsing, bounds
-  and arithmetic, integration for extraction, verification and erasure). Tests
-  never call the real Anthropic API — inject a fake client, and for verification
-  there is nothing to inject. Fixtures are synthetic; no real medical document
+  and arithmetic, integration for extraction, verification, proposals and
+  erasure). Tests never call the real Anthropic API — inject a fake client, and
+  for verification and proposals there is nothing to inject. Fixtures are synthetic; no real medical document
   and no real PHI ever enters this repo.

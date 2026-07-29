@@ -31,6 +31,24 @@ class RelateIn(BaseModel):
     attributes: dict[str, Any] | None = None
 
 
+class ApproveIn(BaseModel):
+    """Approving a proposal means approving one exact draft (ADR 018).
+
+    `draft_digest` is the sha256 the caller was shown, echoed back. It is
+    required, so an approval cannot be issued by anything that has not read the
+    draft, and a draft whose facts moved in between is refused rather than
+    approved on the strength of text nobody saw. `granted_by` is deliberately
+    NOT here: who approved comes from the verified request, never from the body.
+    """
+
+    draft_digest: str
+    actor: str = DEFAULT_ACTOR
+
+
+class DecideIn(BaseModel):
+    actor: str = DEFAULT_ACTOR
+
+
 class ForgetIn(BaseModel):
     """`fields=None` erases every x-pii field the entity's types declare."""
 
