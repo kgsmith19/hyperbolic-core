@@ -16,6 +16,9 @@ build/
 .env
 .env.*
 
+# Document blob store (ADR 015) — never committed, ever
+var/
+
 # Node
 node_modules/
 

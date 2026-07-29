@@ -72,8 +72,21 @@ Pre-made decisions in prompts are not relitigated.
   as "needs your decision" with no resolve action (ADR 013)
 
 ### C — Bills v1 (first verified write path)
-- [ ] C1 Document capture (upload → storage ref → extracted text → sha256
-  document event)
+- [x] C1 Document capture (upload → storage ref → extracted text → sha256
+  document event) — done 2026-07-29 (PR #43, ADR-015): `documents` domain with
+  a `document` type keyed on the content sha256. Bytes and extracted text live
+  in a content-addressed filesystem blob store (`LIFEOS_BLOB_ROOT`, the
+  `lifeos-blobs` compose volume), never in `entity.attributes` — attributes are
+  tsvector-indexed and erased only per entity, so a bill's text there would be
+  searchable by anything with read scope and un-erasable in practice.
+  `POST /documents` takes a multipart upload under the normal owner auth, caps
+  at 10 MiB before the body is parsed, sniffs the MIME from magic bytes, and
+  extracts PDF text with pymupdf → pdfplumber, recording a failure rather than
+  crashing. Re-uploading the same bytes resolves to the same document and emits
+  zero events; `POST /entities/{id}/forget` on a document also unlinks its
+  blobs and leaves an `erased_at` tombstone, so a re-upload of erased bytes is
+  refused (409) instead of silently reinstated. No LLM and no bill parsing —
+  C2 owns those, and the deferred `x-sensitive` decision.
 - [ ] C2 Generic bill/obligation types + medical instance (x-sensitive from day
   one) + LLM extraction to flagged candidate events
 - [ ] C3 Deterministic reconciliation verifier + verification_receipts

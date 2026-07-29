@@ -21,6 +21,23 @@ Project references:
 | `LIFEOS_SUPABASE_PUBLISHABLE_KEY` | Only for `scripts/get_token.py`. |
 | `LIFEOS_ICS_URLS` | Comma-separated ICS feed URLs for the ingestion job (ADR 012). |
 | `LIFEOS_BRIEFING_TZ` | Optional IANA zone deciding the briefing's "today"; defaults to UTC. |
+| `LIFEOS_BLOB_ROOT` | Optional document blob store root (ADR 015); defaults to `var/blobs` beside the process, which compose mounts as the `lifeos-blobs` volume. |
+
+## Document blobs (ADR 015)
+
+Uploaded documents keep their bytes and extracted text on the box, under the
+`lifeos-blobs` volume — never in `entity.attributes`, because attributes are
+full-text indexed and erased only per entity. Two operator consequences:
+
+- **The nightly `pg_dump` does not back these up.** The event log restores
+  every `document` entity, but a restored database points at files that a lost
+  box no longer has. Losing the VPS loses the documents; the owner's own copies
+  are the source. Adding blobs to the backup is a deliberate future decision,
+  not an oversight.
+- **Erasure is not just a database write.** `POST /entities/{id}/forget` on a
+  document unlinks its blobs as well; do not erase a document by any other
+  route, and never restore an old volume snapshot over a live one — that would
+  resurrect files an erasure destroyed.
 
 ## Scheduled jobs (ADR 014)
 

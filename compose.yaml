@@ -8,6 +8,11 @@ services:
     env_file: .env
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      # Document bytes and extracted text (ADR 015). They deliberately do not
+      # live in Postgres, so the nightly pg_dump does not cover them — see
+      # docs/runbook.md.
+      - lifeos-blobs:/app/var/blobs
     healthcheck:
       test:
         - CMD
@@ -23,3 +28,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  lifeos-blobs:

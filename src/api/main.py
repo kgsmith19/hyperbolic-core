@@ -6,13 +6,13 @@ touching the kernel. Token verification lives in api.auth (ADR 008).
 """
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 from uuid import UUID
 
 import jsonschema
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, File, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -20,6 +20,17 @@ from api.auth import AuthError, AuthUnavailableError, authenticate
 from api.auth import settings as auth_settings
 from api.chat import router as chat_router
 from api.dtos import CaptureIn, DefineTypeIn, ForgetIn, RelateIn
+from domains.documents.capture import (
+    MAX_UPLOAD_BYTES,
+    DocumentErased,
+    DocumentForgetResult,
+    DocumentTooLarge,
+    ErasureUnverified,
+    UnsupportedMedia,
+    capture_document,
+    forget_document,
+    is_document,
+)
 from kernel.access import AccessContext, ScopeError
 from kernel.env import read_env
 from kernel.models import Edge, Entity, EntityView, Event, TypeDefinition
@@ -45,6 +56,33 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="lifeos", lifespan=lifespan)
+
+# Multipart boundary + part headers around the file itself.
+_MULTIPART_SLACK = 8 * 1024
+_UPLOAD_CHUNK = 64 * 1024
+
+
+@app.middleware("http")
+async def cap_upload_size(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Refuse an oversized upload from its declared length, before the body is
+    parsed at all — a route-level check runs only after FastAPI has already
+    consumed the multipart body. A client that lies or streams chunked still
+    meets the counted read in `post_documents`; this is the first gate, not
+    the only one. Registered before CORS so the 413 still carries CORS headers.
+    """
+    if request.method == "POST" and request.url.path == "/documents":
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES + _MULTIPART_SLACK:
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "detail": f"declared body exceeds the {MAX_UPLOAD_BYTES} byte cap",
+                },
+            )
+    return await call_next(request)
+
 
 # Browser clients (the lifeos-ui SPA). Bearer tokens, no cookies, tailnet-only
 # exposure — so a static allowlist is enough; LIFEOS_CORS_ORIGINS overrides.
@@ -103,6 +141,30 @@ def value_error(request: Request, exc: ValueError) -> JSONResponse:
     return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
+# Upload refusals are ValueErrors too, but they have their own HTTP meanings.
+@app.exception_handler(DocumentTooLarge)
+def document_too_large(request: Request, exc: DocumentTooLarge) -> JSONResponse:
+    return JSONResponse(status_code=413, content={"detail": str(exc)})
+
+
+@app.exception_handler(UnsupportedMedia)
+def unsupported_media(request: Request, exc: UnsupportedMedia) -> JSONResponse:
+    return JSONResponse(status_code=415, content={"detail": str(exc)})
+
+
+@app.exception_handler(DocumentErased)
+def document_erased(request: Request, exc: DocumentErased) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+# Not client input: the document's pointers and the blob store disagree, so the
+# erasure could not be verified. 500 is the honest answer — refusing loudly is
+# the point, since a 200 here would claim a file was destroyed that was not.
+@app.exception_handler(ErasureUnverified)
+def erasure_unverified(request: Request, exc: ErasureUnverified) -> JSONResponse:
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
 @app.get("/healthz")
 def get_healthz() -> dict[str, str]:
     """Liveness for deploys and the compose healthcheck. Touches no data."""
@@ -131,6 +193,33 @@ def post_capture(body: CaptureIn, context: Ctx) -> CaptureResult:
     )
 
 
+async def _read_capped(upload: UploadFile) -> bytes:
+    """Read the part with a running total, so a client that under-declares its
+    Content-Length still cannot push past the cap."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await upload.read(_UPLOAD_CHUNK):
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise DocumentTooLarge(f"document exceeds the {MAX_UPLOAD_BYTES} byte cap")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@app.post("/documents")
+async def post_documents(context: Ctx, file: Annotated[UploadFile, File()]) -> EntityView:
+    """Capture one uploaded document (ADR 015): the bytes and the extracted
+    text go to the blob store, the entity keeps identity plus pointers. The
+    same bytes uploaded twice resolve to the same document."""
+    entity_id = capture_document(
+        context,
+        await _read_capped(file),
+        filename=file.filename,
+        declared_mime=file.content_type,
+    )
+    return get_entity(context, entity_id)
+
+
 @app.post("/edges")
 def post_edges(body: RelateIn, context: Ctx) -> Edge:
     return relate(
@@ -149,8 +238,20 @@ def get_entity_route(entity_id: UUID, context: Ctx) -> EntityView:
 
 
 @app.post("/entities/{entity_id}/forget")
-def post_forget(entity_id: UUID, body: ForgetIn, context: Ctx) -> ForgetResult:
-    """Erasure by redaction (ADR 007). Send `{}` to erase every flagged field."""
+def post_forget(
+    entity_id: UUID, body: ForgetIn, context: Ctx
+) -> DocumentForgetResult | ForgetResult:
+    """Erasure by redaction (ADR 007). Send `{}` to erase every flagged field.
+
+    Documents take the documents-domain path instead: most of a document's
+    personal data is in the stored file, which `forget()` cannot reach, so
+    redacting attributes alone would report an erasure that left the bill on
+    disk (ADR 015). The dispatch is here so there is one erasure endpoint and
+    no under-erasing trap; the behavior lives in the domain module. A document
+    response also carries `blobs_deleted`, so the claim is checkable.
+    """
+    if is_document(context, entity_id):
+        return forget_document(context, entity_id, fields=body.fields, actor=body.actor)
     return forget(context, entity_id, fields=body.fields, actor=body.actor)
 
 

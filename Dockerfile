@@ -8,6 +8,10 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
 RUN pip install . && useradd --system lifeos
+# The document blob store (ADR 015). Created owned by `lifeos` so the compose
+# named volume mounted here inherits that ownership and the non-root app can
+# write to it.
+RUN mkdir -p /app/var/blobs && chown -R lifeos /app/var
 
 USER lifeos
 EXPOSE 8000
