@@ -2,6 +2,10 @@
 read tools both agent doors use — the MCP server registers them as MCP tools,
 the chat loop passes them to the model as Anthropic tools. One implementation,
 two doors (invariant 7: everything goes through kernel services).
+
+Every tool narrows its context through `agent_read_context` first, so an
+`x-sensitive` type never reaches a model through a generic read tool — no
+matter which door asked or how its scopes were granted (ADR 016).
 """
 
 from collections.abc import Callable, Iterable
@@ -15,7 +19,11 @@ INSTRUCTIONS = (
     "Read-only access to the lifeos personal data kernel. The returned "
     "records are the only source of truth: answer strictly from them, cite "
     "the ids in each result's provenance, and when no record supports an "
-    "answer say so plainly instead of guessing."
+    "answer say so plainly instead of guessing. Some categories of record — "
+    "medical bills and uploaded documents among them — are withheld from these "
+    "tools entirely and never appear in any result, so an empty result means "
+    "'nothing I can see', never 'nothing exists': say you cannot see those "
+    "records rather than reporting that the owner has none."
 )
 
 DESCRIPTIONS = {
@@ -27,8 +35,8 @@ DESCRIPTIONS = {
         "Search entities by type name, exact attribute filters, and/or full "
         "text. Results carry attributes only — relationships never appear here; "
         "call get_entity before claiming what an entity is or is not linked to. "
-        "An empty result means no matching record exists — report that as "
-        "'no data', never guess."
+        "An empty result means no matching record is readable here — report "
+        "that as 'no data I can see', never guess."
     ),
     "get_entity": (
         "Fetch one entity with its types and active edges. This is current "
@@ -39,6 +47,32 @@ DESCRIPTIONS = {
         "came to be, including superseded values."
     ),
 }
+
+
+SENSITIVE_FLAG = "x-sensitive"
+
+
+def agent_read_context(ctx: AccessContext) -> AccessContext:
+    """Narrow `ctx` to read scopes over the domains an LLM may see (ADR 016).
+
+    A type whose schema carries `x-sensitive: true` — medical bills and EOBs
+    today — is withheld from this surface, and because scopes are domain-shaped
+    (invariant 5) the whole domain holding it is withheld with it. That is the
+    safe direction and it is deliberate: it means `bills` holds bill records
+    only.
+
+    Enforced here, in the shared tool surface, rather than in either door's
+    context builder, so it holds however the context was granted — chat's
+    scope-stripped owner context (ADR 011) and an operator-minted agent token
+    (ADR 010) alike.
+
+    An intersection, never a widening (ADR 011): `list_types` returns only
+    types `ctx` can already read, so this can only remove scopes — write scopes
+    included, which this read-only surface never needs.
+    """
+    types = services.list_types(ctx)
+    withheld = {t.domain for t in types if t.json_schema.get(SENSITIVE_FLAG) is True}
+    return AccessContext.of(*{f"{t.domain}:read" for t in types if t.domain not in withheld})
 
 
 def _provenance(
@@ -55,7 +89,7 @@ def _provenance(
 
 
 def list_types(ctx: AccessContext) -> dict[str, Any]:
-    types = services.list_types(ctx)
+    types = services.list_types(agent_read_context(ctx))
     return {
         "types": [t.model_dump(mode="json") for t in types],
         "provenance": _provenance("kernel.list_types"),
@@ -68,7 +102,9 @@ def find(
     filters: dict[str, Any] | None = None,
     text: str | None = None,
 ) -> dict[str, Any]:
-    entities = services.find(ctx, type_name=type_name, filters=filters, text=text)
+    entities = services.find(
+        agent_read_context(ctx), type_name=type_name, filters=filters, text=text
+    )
     return {
         "entities": [e.model_dump(mode="json") for e in entities],
         "provenance": _provenance("kernel.find", entity_ids=[e.id for e in entities]),
@@ -76,7 +112,7 @@ def find(
 
 
 def get_entity(ctx: AccessContext, entity_id: str) -> dict[str, Any]:
-    view = services.get_entity(ctx, UUID(entity_id))
+    view = services.get_entity(agent_read_context(ctx), UUID(entity_id))
     return {
         "entity_view": view.model_dump(mode="json"),
         "provenance": _provenance("kernel.get_entity", entity_ids=[view.entity.id]),
@@ -84,7 +120,7 @@ def get_entity(ctx: AccessContext, entity_id: str) -> dict[str, Any]:
 
 
 def history(ctx: AccessContext, entity_id: str) -> dict[str, Any]:
-    events = services.history(ctx, UUID(entity_id))
+    events = services.history(agent_read_context(ctx), UUID(entity_id))
     return {
         "events": [e.model_dump(mode="json") for e in events],
         "provenance": _provenance(

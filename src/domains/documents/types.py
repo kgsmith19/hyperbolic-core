@@ -10,6 +10,9 @@ text placed in an attribute would stay full-text searchable (reachable through
 chat, which reads every active domain) and could never be removed from the
 places it leaked to (ADR 012/013/014 all found the same edge).
 
+The type is `x-sensitive` (ADR 016): `original_filename` is PHI in the graph,
+so the shared agent-tool surface withholds this domain from both LLM doors.
+
 `sha256` is the identity field and is deliberately not `x-pii`: `forget()`
 strips PII, so keying on an erasable field makes an erased entity unfindable
 and the next upload of the same bytes mints a brand-new entity carrying the
@@ -85,6 +88,14 @@ DOCUMENT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
     "x-identity": ["sha256"],
     "x-pii": ["original_filename"],
+    # Withheld from the shared agent-tool surface (ADR 016). C1 reasoned that
+    # documents were safe to expose to chat because the bytes and the text are
+    # not in the graph — but `original_filename` is, and it routinely reads
+    # `EOB_Jane_Doe_2026-03.pdf`. That is the same PHI the `bills` types are
+    # flagged for, one hop earlier and with no extraction run to record it, so
+    # the flag belongs here too. Enforcement is domain-shaped, so this withholds
+    # the whole `documents` domain from both LLM doors.
+    "x-sensitive": True,
 }
 
 PII_FIELDS: tuple[str, ...] = tuple(DOCUMENT_SCHEMA["x-pii"])

@@ -22,6 +22,8 @@ Project references:
 | `LIFEOS_ICS_URLS` | Comma-separated ICS feed URLs for the ingestion job (ADR 012). |
 | `LIFEOS_BRIEFING_TZ` | Optional IANA zone deciding the briefing's "today"; defaults to UTC. |
 | `LIFEOS_BLOB_ROOT` | Optional document blob store root (ADR 015); defaults to `var/blobs` beside the process, which compose mounts as the `lifeos-blobs` volume. |
+| `LIFEOS_EXTRACT_MODEL` | Optional model for bill extraction (ADR 016); defaults to `claude-opus-5`. |
+| `LIFEOS_EXTRACT_EFFORT` | Optional effort for bill extraction; defaults to `medium`. |
 
 ## Document blobs (ADR 015)
 
@@ -38,6 +40,41 @@ full-text indexed and erased only per entity. Two operator consequences:
   document unlinks its blobs as well; do not erase a document by any other
   route, and never restore an old volume snapshot over a live one — that would
   resurrect files an erasure destroyed.
+
+## Bill extraction — the one job that sends a document off the box (ADR 016)
+
+```bash
+docker compose run --rm --no-deps api python -m domains.bills.extract            # sweep
+docker compose run --rm --no-deps api python -m domains.bills.extract <doc-id>   # one document
+```
+
+**This sends the full extracted text of a captured document to the Anthropic
+Messages API** — for a medical bill, that is the patient's name, provider, dates
+of service, codes and amounts. Nothing else in the system does that, and nothing
+does it automatically: an upload never triggers it, and it is deliberately
+**not** on the cron schedule. Run it when you mean to.
+
+Every run leaves an audit trail on both sides: an `execution_receipt` like any
+other job — deliberately carrying only the job name and status, since receipts
+live in the model-readable `ops` domain — plus a `bill_extraction` entity per
+document recording which document (id + sha256), which model, when, how many
+characters were sent and what came back. Those records carry no PII and survive
+the erasure of the bills they produced, so "was this document ever sent to
+Anthropic?" stays answerable: `find(ctx, type_name="bill_extraction")`.
+
+A run that transmitted and then failed is recorded as `status: "failed"`, and
+that document then drops out of the no-argument sweep — retrying it is
+deliberately an explicit `python -m domains.bills.extract <doc-id>`, so a
+transient error never turns into an automatic second send of a medical bill.
+
+What comes back are **candidates**, not facts: `status: "candidate"`,
+`method: "llm_extraction"`, confidence below 1.0. Do not treat a `bill` as money
+owed — C3's verifier is what turns a candidate into a checked fact.
+
+Erasing a bill is `POST /entities/{id}/forget` like any other entity; erasing the
+document it came from is the document path above. Erasing one does not erase the
+other, and a re-run over a still-present document will not re-write an erased
+candidate's fields.
 
 ## Scheduled jobs (ADR 014)
 

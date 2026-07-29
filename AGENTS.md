@@ -16,6 +16,9 @@ Commands (venv at `.venv`, DB creds in `.env`):
 - jobs: `.venv\Scripts\python -m domains.calendar.ingest` / `.calendar.autolink` /
   `.ops.briefing` — the scheduled trio, run in that order; each leaves an
   `execution_receipt` and only `ok` exits 0 (ADR 014, docs/runbook.md).
+- extract: `.venv\Scripts\python -m domains.bills.extract [document_id ...]` —
+  operator-run, not scheduled: it sends a captured document's text to Anthropic
+  and captures candidate bills/EOBs (ADR 016). Same receipt contract.
 - deploy: merge to main → GitHub Actions checks, builds, migrates, deploys (docs/runbook.md).
 - review: `/lean-review` (five-lens codebase review; headless: `claude -p "/lean-review"`);
   `/diff-review` for just the working diff or current branch.
@@ -42,6 +45,12 @@ Provenance convention (ADR 010): every agent-facing tool result carries
 reads are confidence 1.0; anything derived — rollups, links, extractions, and
 the events they emit — must cite the event ids it was built from, its method,
 and an honest confidence.
+
+Sensitive types (ADR 016): a `type_definition` carrying `x-sensitive: true` is
+withheld from the shared agent-tool surface, so its records never reach an LLM
+through a generic read tool. Enforcement is domain-shaped (scopes are), so
+flagging one type withholds every type in its domain — put sensitive types in a
+domain of their own.
 
 Rules: `.agents/invariants.md` (project invariants), `.agents/domains/` (per-cell constitutions).
 

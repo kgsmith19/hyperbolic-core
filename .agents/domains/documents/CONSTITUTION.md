@@ -11,6 +11,12 @@ Owns: `src/domains/documents/**`, `tests/documents/**`.
   `forget()` is per-entity, so text in an attribute is searchable by anything
   with read scope (chat included) and un-erasable in practice (invariant 9,
   ADR 012/015).
+- **`document` is `x-sensitive` (ADR 016), so this whole domain is withheld
+  from the shared agent-tool surface.** C1 reasoned that exposing documents to
+  chat was safe because the bytes and the extracted text are not in the graph.
+  That was incomplete: `original_filename` is, and it routinely reads
+  `EOB_Jane_Doe_2026-03.pdf`. Anything added to this domain's attributes is
+  reachable by whatever can read the domain, so assume a filename is PHI.
 - An identity field is never a PII field. `sha256` keys a document because it
   survives `forget()`; a filename does not, and keying on one would let the
   next upload of the same content mint a fresh entity carrying it (ADR 012
@@ -43,6 +49,11 @@ Owns: `src/domains/documents/**`, `tests/documents/**`.
 - Blob refs are re-validated against the store's key space before they become
   a path, every time. They come out of the database, which is not a reason to
   trust them.
+- **The store is this cell's private business.** Another domain that needs a
+  document's text asks `read_document_text` (read scope required, erased
+  documents refused) and never constructs a `BlobStore` of its own — otherwise
+  the ref validation, the scope check and the tombstone check all become
+  optional (ADR 015/016).
 - No outbound requests from this domain. If one is ever added, the B1 SSRF rule
   (no cross-host redirects) applies to it.
 - Behavior changes land with tests in `tests/documents/` (unit for the store

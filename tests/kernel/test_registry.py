@@ -37,6 +37,16 @@ def test_bad_identity_extension_rejected(seeded: object, ctx: AccessContext) -> 
         define_type(ctx, "broken2", "journal", {"type": "object", "x-identity": "emails"})
 
 
+def test_bad_sensitive_extension_rejected(seeded: object, ctx: AccessContext) -> None:
+    """`x-sensitive` gates a real control and readers test it with `is True`,
+    so a truthy near-miss must fail loudly rather than register and protect
+    nothing (ADR 016)."""
+    for bad in ("true", 1, ["true"]):
+        with pytest.raises(ValueError, match="x-sensitive"):
+            define_type(ctx, "broken3", "journal", {"type": "object", "x-sensitive": bad})
+    define_type(ctx, "sensitive_ok", "journal", {"type": "object", "x-sensitive": True})
+
+
 def test_duplicate_type_rejected(seeded: object, ctx: AccessContext) -> None:
     define_type(ctx, "dup_type", "journal", {"type": "object"})
     with pytest.raises(ValueError, match="already defined"):

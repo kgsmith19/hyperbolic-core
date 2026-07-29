@@ -13,6 +13,7 @@ import pytest
 from domains.documents.capture import (
     MAX_UPLOAD_BYTES,
     DocumentErased,
+    DocumentTextUnavailable,
     DocumentTooLarge,
     ErasureUnverified,
     UnsupportedMedia,
@@ -20,6 +21,7 @@ from domains.documents.capture import (
     clean_filename,
     forget_document,
     is_document,
+    read_document_text,
 )
 from domains.documents.storage import KIND_BYTES, BlobStore, ref_for
 from domains.documents.types import (
@@ -184,6 +186,33 @@ def test_is_document_only_says_yes_for_documents(
     assert is_document(doc_ctx, entity_id) is True
 
 
+def test_read_document_text_is_the_seam_other_domains_use(
+    doc_ctx: AccessContext, store: BlobStore, make_pdf: PdfFactory
+) -> None:
+    """C2 needs the extracted text and must not open the blob store itself."""
+    entity_id = capture_document(doc_ctx, make_pdf("Balance documentsc1seam 42.00"), store=store)
+    assert "documentsc1seam" in read_document_text(doc_ctx, entity_id, store=store)
+
+
+def test_read_document_text_refuses_when_there_is_no_text(
+    doc_ctx: AccessContext, store: BlobStore
+) -> None:
+    """An image is stored but never read (extraction_status "unsupported"), so
+    there is nothing to hand C2 — say so rather than returning an empty string
+    a caller would treat as an empty bill."""
+    entity_id = capture_document(doc_ctx, PNG, filename="bill.png", store=store)
+    with pytest.raises(DocumentTextUnavailable, match="no extracted text"):
+        read_document_text(doc_ctx, entity_id, store=store)
+
+
+def test_read_document_text_needs_read_scope(
+    doc_ctx: AccessContext, store: BlobStore, make_pdf: PdfFactory
+) -> None:
+    entity_id = capture_document(doc_ctx, make_pdf("documentsc1textscope"), store=store)
+    with pytest.raises(ScopeError):
+        read_document_text(AccessContext.of("calendar:read"), entity_id, store=store)
+
+
 def test_partial_field_erasure_is_refused(
     doc_ctx: AccessContext, store: BlobStore, make_pdf: PdfFactory
 ) -> None:
@@ -298,3 +327,15 @@ def test_erased_document_is_not_reinstated_by_re_uploading_the_same_bytes(
         capture_document(doc_ctx, erasable, filename="again.pdf", store=store)
     assert {d.id for d in find(doc_ctx, type_name="document")} == documents_before
     assert find(doc_ctx, text="again.pdf") == []
+
+
+def test_erased_document_text_cannot_be_read_back(
+    doc_ctx: AccessContext, store: BlobStore, erasable: bytes
+) -> None:
+    """The other half of that rule: erasure must also close the read seam C2
+    uses, or a later extraction run would quote a destroyed bill."""
+    (document,) = find(
+        doc_ctx, type_name="document", filters={"sha256": sha256(erasable).hexdigest()}
+    )
+    with pytest.raises(DocumentErased, match="was erased"):
+        read_document_text(doc_ctx, document.id, store=store)

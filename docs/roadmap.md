@@ -87,8 +87,24 @@ Pre-made decisions in prompts are not relitigated.
   blobs and leaves an `erased_at` tombstone, so a re-upload of erased bytes is
   refused (409) instead of silently reinstated. No LLM and no bill parsing —
   C2 owns those, and the deferred `x-sensitive` decision.
-- [ ] C2 Generic bill/obligation types + medical instance (x-sensitive from day
-  one) + LLM extraction to flagged candidate events
+- [x] C2 Generic bill/obligation types + medical instance (x-sensitive from day
+  one) + LLM extraction to flagged candidate events — done 2026-07-29
+  (PR #44, ADR-016): `bills` domain with a GENERIC `bill` (discriminated by
+  `category`, so a utility bill needs no new type), the medical `eob` instance
+  beside it, and `bill_extraction` — the per-document record of which document's
+  text went to which model, when. `python -m domains.bills.extract` reads a
+  captured document's text through the documents domain, asks Anthropic under a
+  JSON schema (structured outputs, refusal fallback, model via
+  `LIFEOS_EXTRACT_MODEL`), and captures CANDIDATES: `status` is a one-value enum,
+  provenance carries `method: "llm_extraction"`, and the schema itself refuses
+  confidence 1.0, so nothing here can look like a verified fact — C3 owns that.
+  Keys are hashes, never `claim_no`/`account_ref` (ADR 012 durable erasure), no
+  free-text field exists in the domain, and the document text reaches Anthropic
+  and nothing else: not the log, not an exception message, not an attribute.
+  `x-sensitive` is **defined and enforced** rather than deferred again: a
+  flagged type is withheld from the shared agent-tool surface, so bills never
+  reach a model through a generic read tool (enforcement is domain-shaped).
+  Write scope is checked before the text leaves the box.
 - [ ] C3 Deterministic reconciliation verifier + verification_receipts
 - [ ] C4 Approval-gated dispute draft (action_proposal → approval mints
   authority_receipt; terminates at an approved on-screen draft)
@@ -132,7 +148,11 @@ self-promotes; verifiers are fixed at task start.
 
 Open flag for A2/ADR-011: ADR 009 puts provider LLM keys in a LiteLLM gateway
 at first LLM usage; pre-slice wiring put `ANTHROPIC_API_KEY` in the app `.env`
-render. Adjudicate gateway-vs-direct in ADR-011.
+render. Adjudicate gateway-vs-direct in ADR-011. Re-checked in C2 (ADR-016):
+bill extraction is the second LLM consumer, but it shares the key, the client
+construction and the process, so it is not the "second consumer" ADR 009's
+extraction rule is about. The LiteLLM trigger stands at a real budget,
+usage-tracking or multi-provider need.
 
 ## Slice prompts (queue)
 

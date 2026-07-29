@@ -52,6 +52,13 @@ def define_type(
             not isinstance(value, list) or not all(isinstance(f, str) for f in value)
         ):
             raise ValueError(f"{key} must be a list of field names")
+    # A flag readers test with `is True` (the agent-tool surface withholds a
+    # sensitive domain, ADR 016). A truthy near-miss like the string "true"
+    # would register happily and protect nothing, so a typo fails here instead
+    # of silently disabling a control.
+    sensitive = json_schema.get("x-sensitive")
+    if sensitive is not None and not isinstance(sensitive, bool):
+        raise ValueError("x-sensitive must be a boolean")
 
     with db.connect() as conn:
         parent_id: UUID | None = None

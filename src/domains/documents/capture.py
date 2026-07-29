@@ -81,6 +81,11 @@ class ErasureUnverified(RuntimeError):
     reported as complete. Not client input — the system is inconsistent."""
 
 
+class DocumentTextUnavailable(ValueError):
+    """This document has no extracted text to read (never extracted, extraction
+    failed, or the blob is gone)."""
+
+
 class DocumentForgetResult(ForgetResult):
     """A `ForgetResult` that also accounts for the blobs, so a caller can
     verify the file is gone instead of taking the 200 on trust."""
@@ -160,6 +165,41 @@ def capture_document(
 
 def is_document(ctx: AccessContext, entity_id: UUID) -> bool:
     return TYPE_NAME in services.get_entity(ctx, entity_id).types
+
+
+def read_document_text(ctx: AccessContext, entity_id: UUID, store: BlobStore | None = None) -> str:
+    """The extracted text of one document, read from the blob store.
+
+    The blob store is this cell's private business: it takes no AccessContext,
+    its keys are re-validated here, and a ref that came back out of the
+    database is not trusted until it does. Another domain that needs a
+    document's text asks through this function — never by constructing a
+    `BlobStore` of its own (ADR 015, invariant 7 in spirit).
+
+    Read scope is required, and an erased document stays erased: `erased_at`
+    survives `forget()` precisely so a later reader cannot resurrect content
+    the owner asked us to destroy.
+    """
+    require(ctx, f"{DOMAIN}:read")
+    view = services.get_entity(ctx, entity_id)
+    if TYPE_NAME not in view.types:
+        raise ValueError(f"entity {entity_id} is not a document")
+    attributes = view.entity.attributes
+    if "erased_at" in attributes:
+        raise DocumentErased(f"document {entity_id} was erased; its text is gone")
+    ref = attributes.get("text_ref")
+    if not isinstance(ref, str):
+        # The status is an enum this module wrote, never document content.
+        raise DocumentTextUnavailable(
+            f"document {entity_id} has no extracted text "
+            f"(extraction_status: {attributes.get('extraction_status')})"
+        )
+    store = store or BlobStore()
+    if not store.exists(ref):
+        raise DocumentTextUnavailable(f"document {entity_id} points at a text blob that is gone")
+    # `errors="replace"` because the bytes came from a parser reading a hostile
+    # file: an undecodable byte must not raise out of a read path.
+    return store.read(ref).decode("utf-8", errors="replace")
 
 
 def forget_document(
