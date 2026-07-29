@@ -46,7 +46,9 @@ class ChatIn(BaseModel):
 
 
 def get_model_client() -> anthropic.Anthropic:
-    return anthropic.Anthropic()
+    # Follow the repo secret convention (env var or repo .env via read_env) —
+    # the SDK's own resolution only looks at process env.
+    return anthropic.Anthropic(api_key=read_env("ANTHROPIC_API_KEY"))
 
 
 def read_only_context() -> AccessContext:

@@ -117,6 +117,11 @@ def test_tool_error_returns_to_model_not_wire(seeded: object) -> None:
     assert follow_up["content"][0]["is_error"] is True
 
 
+def test_model_client_resolves_key_via_read_env(monkeypatch: Any) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-value")
+    assert chat.get_model_client().api_key == "test-key-value"
+
+
 def test_read_only_context_carries_only_read_scopes(seeded: object) -> None:
     ctx = read_only_context()
     assert has(ctx, "relationships:read") and has(ctx, "health:read")
