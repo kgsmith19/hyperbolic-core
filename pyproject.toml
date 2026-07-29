@@ -15,6 +15,7 @@ dependencies = [
     "uvicorn>=0.30",
     "pyjwt[crypto]>=2.9",
     "mcp>=2",
+    "anthropic>=0.60",
 ]
 
 [project.optional-dependencies]

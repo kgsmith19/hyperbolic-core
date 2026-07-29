@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 
 from api.auth import AuthError, AuthUnavailableError, authenticate
 from api.auth import settings as auth_settings
+from api.chat import router as chat_router
 from api.dtos import CaptureIn, DefineTypeIn, ForgetIn, RelateIn
 from kernel.access import AccessContext, ScopeError
 from kernel.env import read_env
@@ -55,6 +56,8 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
+
+app.include_router(chat_router)
 
 Ctx = Annotated[AccessContext, Depends(authenticate)]
 

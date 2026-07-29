@@ -32,7 +32,9 @@ Pre-made decisions in prompts are not relitigated.
   2026-07-28 (PR #23); acceptance complete same day: Claude Desktop over the
   server scored golden questions Q8/9/13/14 at their behavior bars (all pass,
   first baseline)
-- [ ] A2 Grounded chat with citations (ADR-011)
+- [x] A2 Grounded chat with citations (ADR-011) — done 2026-07-28
+  (lifeos + lifeos-ui slice-2 PRs); golden-question scoring recorded below
+  on deploy
 - [ ] A2.5 Daily check-in micro-slice (wellbeing `daily_checkin` type + capture
   form; starts the 14-day capture-sustainability experiment)
 
