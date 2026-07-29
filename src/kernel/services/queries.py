@@ -30,11 +30,22 @@ def get_entity(ctx: AccessContext, entity_id: UUID) -> EntityView:
             f"select * from edge where to_entity = %s and {active} order by recorded_at",
             (entity_id,),
         ).fetchall()
+        # Same rule as find: an edge is visible only when every domain of its
+        # other endpoint is readable, or a scoped context would see relation
+        # names and attributes from domains it was never granted.
         return EntityView(
             entity=entity,
             types=types,
-            edges_out=[Edge.model_validate(r) for r in out_rows],
-            edges_in=[Edge.model_validate(r) for r in in_rows],
+            edges_out=[
+                Edge.model_validate(r)
+                for r in out_rows
+                if _readable(ctx, entity_domains(conn, r["to_entity"]))
+            ],
+            edges_in=[
+                Edge.model_validate(r)
+                for r in in_rows
+                if _readable(ctx, entity_domains(conn, r["from_entity"]))
+            ],
         )
 
 
