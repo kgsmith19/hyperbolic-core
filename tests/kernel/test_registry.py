@@ -4,7 +4,7 @@ import jsonschema
 import pytest
 
 from kernel.access import AccessContext
-from kernel.services import capture, define_type, list_types
+from kernel.services import active_domains, capture, define_missing, define_type, list_types
 
 
 def test_list_types_filters_by_read_scope(seeded: object, ctx: AccessContext) -> None:
@@ -12,6 +12,19 @@ def test_list_types_filters_by_read_scope(seeded: object, ctx: AccessContext) ->
     health_only = {t.name for t in list_types(AccessContext.of("health:read"))}
     assert "workout" in health_only
     assert "person" not in health_only
+
+
+def test_active_domains_filters_by_read_scope(seeded: object, ctx: AccessContext) -> None:
+    assert {"relationships", "health"} <= active_domains(ctx)
+    assert active_domains(AccessContext.of("health:read")) == {"health"}
+    assert active_domains(AccessContext.of("health:write")) == set()
+
+
+def test_define_missing_is_idempotent(seeded: object, ctx: AccessContext) -> None:
+    schemas = {"missing_a": {"type": "object"}, "missing_b": {"type": "object"}}
+    assert define_missing(ctx, "journal", schemas) == ["missing_a", "missing_b"]
+    assert define_missing(ctx, "journal", schemas) == []
+    assert {t.domain for t in list_types(ctx) if t.name in schemas} == {"journal"}
 
 
 def test_invalid_json_schema_rejected(seeded: object, ctx: AccessContext) -> None:

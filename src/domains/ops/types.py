@@ -10,7 +10,7 @@ scope into a door onto the other's content (ADR 014).
 from typing import Any
 
 from kernel.access import AccessContext
-from kernel.services import define_type, list_types
+from kernel.services import define_missing
 
 DOMAIN = "ops"
 
@@ -115,10 +115,4 @@ _TYPES = {
 
 def define_ops_types(ctx: AccessContext) -> list[str]:
     """Define any missing ops types. Idempotent; returns what it defined."""
-    existing = {t.name for t in list_types(ctx)}
-    defined = []
-    for name, schema in _TYPES.items():
-        if name not in existing:
-            define_type(ctx, name, DOMAIN, schema)
-            defined.append(name)
-    return defined
+    return define_missing(ctx, DOMAIN, _TYPES)

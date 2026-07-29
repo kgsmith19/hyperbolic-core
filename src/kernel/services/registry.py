@@ -24,6 +24,19 @@ def list_types(ctx: AccessContext) -> list[TypeDefinition]:
     return [t for t in types if has(ctx, f"{t.domain}:read")]
 
 
+def active_domains(ctx: AccessContext) -> set[str]:
+    """Domains of active type definitions the context can read.
+
+    The scope vocabulary itself: callers that need to enumerate `<domain>:read`
+    scopes (chat's read-only context) ask here instead of reading the table.
+    """
+    with db.connect() as conn:
+        rows = conn.execute(
+            "select distinct domain from type_definition where is_active"
+        ).fetchall()
+    return {row["domain"] for row in rows if has(ctx, f"{row['domain']}:read")}
+
+
 def define_type(
     ctx: AccessContext,
     name: str,
@@ -90,3 +103,20 @@ def define_type(
             is_active=True,
             created_at=now,
         )
+
+
+def define_missing(
+    ctx: AccessContext, domain: str, schemas: dict[str, dict[str, Any]]
+) -> list[str]:
+    """Define whichever of `schemas` is not registered yet, in a single domain.
+
+    The registration step every domain module runs at startup. Idempotent;
+    returns the names it defined, so a caller can log what it added.
+    """
+    existing = {t.name for t in list_types(ctx)}
+    defined = []
+    for name, schema in schemas.items():
+        if name not in existing:
+            define_type(ctx, name, domain, schema)
+            defined.append(name)
+    return defined

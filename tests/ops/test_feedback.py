@@ -29,8 +29,12 @@ def briefing_id(ctx: AccessContext) -> UUID:
     return run_briefing(briefing_context(), DAY, UTC).briefing_id
 
 
-def test_verdicts_are_the_three_the_adr_names() -> None:
-    assert VERDICTS == ("useful", "noise", "wrong")
+def test_every_named_verdict_is_accepted_and_round_trips(briefing_id: UUID) -> None:
+    ctx = feedback_context()
+    assert set(VERDICTS) == {"useful", "noise", "wrong"}  # the three ADR 014 names
+    for verdict in VERDICTS:
+        feedback = record_feedback(ctx, briefing_id, verdict)
+        assert get_entity(ctx, feedback).entity.attributes["verdict"] == verdict
 
 
 def test_records_a_verdict_against_the_briefing(briefing_id: UUID) -> None:

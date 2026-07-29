@@ -137,7 +137,11 @@ def run_briefing(
     attributes = assemble(ctx, day, zone)
 
     existing = services.find(ctx, type_name="briefing", filters={"briefing_key": day.isoformat()})
-    if existing and existing[0].attributes == attributes:
+    # Compare only the keys assemble produced: capture MERGES onto an identity
+    # match, so a key it stops emitting (latest_checkin_id, when no check-in is
+    # visible) lingers on the stored entity forever. Whole-dict equality would
+    # then never hold again and the briefing would re-capture on every run.
+    if existing and {k: existing[0].attributes.get(k) for k in attributes} == attributes:
         return BriefingReport(
             date=day.isoformat(),
             briefing_id=existing[0].id,

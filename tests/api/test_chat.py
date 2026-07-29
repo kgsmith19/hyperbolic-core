@@ -67,4 +67,6 @@ def test_chat_mid_stream_failure_emits_error_frame(seeded: object) -> None:
         app.dependency_overrides.pop(chat.get_model_client)
     events = _sse_events(response.text)
     assert events[-1][0] == "error"
-    assert "model unavailable" in events[-1][1]
+    # a stable message, never the exception text: it could quote SQL or tables
+    assert chat.ERROR_MSG in events[-1][1]
+    assert "model unavailable" not in events[-1][1]

@@ -93,6 +93,9 @@ def test_turn_cap_stops_a_tool_loop(seeded: object) -> None:
     frames = _frames(client)
     assert len(client.calls) == chat.MAX_TURNS
     assert _events(frames)[-1] == "done"
+    # a capped loop still says something: never an empty assistant bubble
+    assert chat.TURN_CAP_MSG in "".join(frames)
+    assert '"stop_reason": "max_turns"' in frames[-1]
 
 
 def test_refusal_renders_abstention(seeded: object) -> None:
@@ -123,6 +126,23 @@ def test_model_client_resolves_key_via_read_env(monkeypatch: Any) -> None:
 
 
 def test_read_only_context_carries_only_read_scopes(seeded: object) -> None:
-    ctx = read_only_context()
+    ctx = read_only_context(AccessContext.all())
     assert has(ctx, "relationships:read") and has(ctx, "health:read")
     assert not has(ctx, "relationships:write") and not has(ctx, "health:write")
+
+
+def test_read_only_context_intersects_a_narrowed_owner(seeded: object) -> None:
+    """Scope-stripping may narrow, never widen: a token scoped to one domain
+    must not read every domain through /chat (ADR 011, ADR 008)."""
+    ctx = read_only_context(AccessContext.of("health:read"))
+
+    assert ctx.scopes == {"health:read"}
+    assert not has(ctx, "relationships:read")
+
+
+def test_read_only_context_never_grants_write(seeded: object) -> None:
+    owner = AccessContext.of("health:read", "health:write", "relationships:write")
+    ctx = read_only_context(owner)
+
+    assert ctx.scopes == {"health:read"}  # write scopes are dropped, not mirrored
+    assert not any(scope.endswith(":write") for scope in ctx.scopes)

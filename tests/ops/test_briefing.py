@@ -28,6 +28,7 @@ from scripts.define_daily_checkin import define_daily_checkin
 
 DAY = date(2031, 3, 4)
 EMPTY_DAY = date(2031, 3, 7)
+DROP_DAY = date(2031, 5, 2)
 TITLE = "Quarterly review with the accountant"
 
 
@@ -171,6 +172,29 @@ def test_briefing_without_ops_write_fails_closed() -> None:
     read_only = AccessContext.of("calendar:read", "wellbeing:read", "ops:read")
     with pytest.raises(ScopeError):
         run_briefing(read_only, EMPTY_DAY, UTC)
+
+
+def test_a_key_assemble_stops_emitting_stays_idempotent(
+    ctx: AccessContext, brief_ctx: AccessContext
+) -> None:
+    """capture MERGES on identity, so `latest_checkin_id` lingers on the stored
+    briefing after assemble stops emitting it — comparing whole attribute dicts
+    would make the run re-capture forever."""
+    capture(
+        ctx,
+        "daily_checkin",
+        {"date": "2031-05-02", "mood": 3, "energy": 3, "stress": 3, "sleep_quality": 3},
+    )
+    assert run_briefing(brief_ctx, DROP_DAY, UTC).has_checkin
+
+    # the same day seen without wellbeing:read: no check-in, so no key
+    blind = AccessContext.of("calendar:read", "ops:read", "ops:write")
+    second = run_briefing(blind, DROP_DAY, UTC)
+    assert not second.unchanged and not second.has_checkin
+
+    before = event_count()
+    assert run_briefing(blind, DROP_DAY, UTC).unchanged
+    assert event_count() == before
 
 
 def test_cli_emits_an_execution_receipt(brief_ctx: AccessContext) -> None:

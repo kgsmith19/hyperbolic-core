@@ -9,12 +9,15 @@ agent-tool surface in `mcp_server.tools` — the same four provenance-wrapped
 read services the MCP server registers (ADR 010), factored out when chat
 became their second consumer. The verified owner context is replaced by a
 scope-stripped context of `<domain>:read` over active type domains, so the
-loop is read-only by construction (invariant 5). Every answer's `done` frame
-carries the union of tool-result provenance (entity ids, event ids, methods)
-as citations, plus `model_ms/tool_ms/total_ms` latency, which is also logged
-for the p95 < ~4s bar. The system prompt is the MCP server's grounding
-instructions (answer strictly from records; abstain plainly), so both agent
-doors speak with one voice.
+loop is read-only by construction (invariant 5). Stripping intersects, never
+widens: the chat context holds only the `<domain>:read` scopes the
+authenticated context already had, so a narrowed `scopes` token (ADR 008)
+stays narrow through /chat. Every answer's `done` frame carries the union of
+tool-result provenance (entity ids, event ids, methods) as citations, plus
+`model_ms/tool_ms/total_ms` latency, which is also logged for the p95 < ~4s
+bar. The system prompt is the MCP server's grounding instructions (answer
+strictly from records; abstain plainly), so both agent doors speak with one
+voice.
 
 **Model.** `claude-opus-5`, streaming, `output_config.effort: "low"` for the
 latency bar, overridable via `LIFEOS_CHAT_MODEL` / `LIFEOS_CHAT_EFFORT` —

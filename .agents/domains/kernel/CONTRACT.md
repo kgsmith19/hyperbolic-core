@@ -6,6 +6,10 @@ Public surface = application services in `src/kernel/services/`; import from
 
 - `define_type(ctx, name, domain, json_schema, parent=None) -> TypeDefinition`
 - `list_types(ctx) -> list[TypeDefinition]` — active types in domains ctx can read
+- `active_domains(ctx) -> set[str]` — distinct domains of active types ctx can
+  read; the scope vocabulary, so callers never read `type_definition` themselves
+- `define_missing(ctx, domain, schemas) -> list[str]` — define whichever of
+  `{name: json_schema}` is not registered yet; idempotent, returns what it defined
 - `capture(ctx, type_name, attributes, valid_time=None, actor="kyle", resolver=None) -> CaptureResult`
   — requires write on the captured type's domain only, even when resolution
   merges onto a shared multi-domain entity (revisit when agent scopes land)
