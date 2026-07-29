@@ -77,6 +77,9 @@ expressible).
 Rules: `.agents/invariants.md` (project invariants), `.agents/domains/` (per-cell constitutions).
 
 Roadmap: `docs/roadmap.md` (living slice queue + prompts; updated every slice PR).
-Context: `docs/research/lifeos-research-final.md` (v2 synthesis, point-in-time
-snapshot — ADRs win on conflict) and `docs/golden-questions.md` (behavior-scored
-grounding regression bar; run after the chat and calendar slices).
+Context: `docs/research/lifeos-research-final.md` (v2 synthesis) and
+`docs/research/lifeos-research-2026-07-29.md` (v3 synthesis, behind the
+2026-07-29 queue revision and ADR 019) — both point-in-time snapshots, ADRs win
+on conflict — and `docs/golden-questions.md` (behavior-scored grounding
+regression bar; check-in questions runnable now, calendar questions once real
+feed data exists).

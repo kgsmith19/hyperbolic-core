@@ -2,14 +2,18 @@
 
 Living document — the canonical slice queue and historical record. Every slice
 PR updates its status line here. ADRs win on conflict. Background:
-`docs/research/lifeos-research-final.md` (v2 synthesis, point-in-time) and the
-v3 adjudication (2026-07-28): keep the kernel skeleton, harvest mechanisms into
-small slices, reject mega-slices.
+`docs/research/lifeos-research-final.md` (v2 synthesis, point-in-time) and
+`docs/research/lifeos-research-2026-07-29.md` (v3 synthesis — the second
+research pass behind the 2026-07-29 queue revision). The full evidence base
+behind v3 lives in ecosystem-root working files outside git
+(`NEXT-DIRECTION-RESEARCH-2026-07-29.md`, `ROADMAP-PROPOSAL-2026-07-29.md`);
+cite them by name, never copy their content here.
 
 Milestones are product moments; each slice is one focused Claude Code session,
 launched from the repo being changed, branch + PR, merge on green. Kickoff:
 paste the slice prompt below into a fresh session, or say "run slice N".
-Pre-made decisions in prompts are not relitigated.
+Pre-made decisions in prompts are not relitigated. Event-triggered entries
+start on their trigger, never on their turn.
 
 ## Repos & services
 
@@ -27,7 +31,7 @@ Pre-made decisions in prompts are not relitigated.
 
 ## Milestones and slice queue
 
-### A — Grounded answers
+### A — Grounded answers (SHIPPED)
 - [x] A1 Read-only MCP server + first scoped agent token (ADR-010) — done
   2026-07-28 (PR #23); acceptance complete same day: Claude Desktop over the
   server scored golden questions Q8/9/13/14 at their behavior bars (all pass,
@@ -43,7 +47,7 @@ Pre-made decisions in prompts are not relitigated.
   (PR #35): type is pure registry data via `scripts/define_daily_checkin.py`,
   zero UI changes (schema-driven Capture form renders it)
 
-### B — Tomorrow Cockpit
+### B — Tomorrow Cockpit (SHIPPED)
 - [x] B1 ICS calendar ingestion with source receipts (ADR-012) — done
   2026-07-28 (PR #36): calendar domain as registry data + src/domains/calendar/
   CLI ingestion, idempotent by VEVENT hash, raw-feed source receipts linked via
@@ -71,7 +75,7 @@ Pre-made decisions in prompts are not relitigated.
   that no longer resolves renders as gone, and `link_review` items still show
   as "needs your decision" with no resolve action (ADR 013)
 
-### C — Bills v1 (first verified write path)
+### C — Bills v1 (SHIPPED through C4; the rest is event-triggered)
 - [x] C1 Document capture (upload → storage ref → extracted text → sha256
   document event) — done 2026-07-29 (PR #43, ADR-015): `documents` domain with
   a `document` type keyed on the content sha256. Bytes and extracted text live
@@ -160,15 +164,93 @@ Pre-made decisions in prompts are not relitigated.
   changes; existing databases need `scripts/migrate_bill_date_charset.py` once
   (C4 made `service_date` prose in an outward-facing letter, so it is now
   bounded by character class as well as length).
-- [ ] C5 Branch-explore — only if a real ambiguous case appears in actual bills
+- [x] Milestone-C boundary fixes — done 2026-07-29 (PR #49 review must-fixes,
+  PR #50 `run-scheduled-jobs` on-demand execution of the nightly trio)
+- C5 Branch-explore — moved to the event-triggered list below (unchanged gate:
+  only on a real ambiguous case in actual bills)
 
-### D — Memory that compounds
-- [ ] Summaries with supersede chains → hybrid retrieval (derived content only)
-  → `as_of` / `what_changed` / compare-period rollups → health ingestion
+### The committed queue (2026-07-29 revision; in order)
 
-### E — Prospective copilot
-- [ ] Intentions (deterministic triggers, display-only) → relationship copilot
-  (draft-never-send) → PWA + share target + quick capture
+Reconciled from the second research pass (see Background). Operator-fit design
+rules for everything below: ADR-019. Committed set ends at D1; the utility
+gate bounds everything after it.
+
+- [ ] INT1 Intentions in the cockpit — intention type + priority-list import +
+  focus-3 rule (service-enforced max 3 focus), briefing *recomposition* on the
+  existing ops briefing (ADR-014; composition spec in the prompt), and the
+  check-in rider fields the briefing consumes (1-tap practice completions,
+  appreciation-expressed, phone-free-block-kept, caffeine mg + last-cup-time,
+  no-dairy kept — define script, zero code). Display-only: no triggers, no
+  scheduler (E1 owns those). Prompt §INT1 below.
+- [ ] H1 Apple Health webhook — weight + activity + workouts via Health Auto
+  Export REST push to a tailnet-only endpoint. **/security-review pre-merge**
+  (first inbound webhook). Operator pre-req: Health Auto Export + Tailscale on
+  the phone. Prompt §H1 below.
+- [ ] H2 CPAP ingestion + rolling compliance service — SleepHQ public API v1
+  (ez Share SD pull as documented fallback) → cpap_session events + one
+  deterministic 30-day compliance service feeding the briefing. Operator
+  pre-req: SleepHQ account; credentials via the guards vault, never chat.
+  Registry rider: lab_log type (operator-tracked labs; next-due from cadence
+  config) lands here or with the briefing tickler that consumes it.
+  Prompt §H2 below.
+- [ ] EP1 Episode support — episode + playbook types (**x-sensitive from the
+  first migration**), deterministic evidence-card service, chat/briefing lines.
+  Pull-only; no notification path may exist in code. Prompt §EP1 below.
+- [ ] C0 Transaction ingestion — SimpleFIN Bridge access-URL pull
+  (user-triggered CLI, never a daemon) + bank-CSV import.
+  **/security-review pre-merge MANDATORY** (financial data). Operator pre-req:
+  SimpleFIN Bridge account; access-URL via the guards vault, never stored or
+  logged. Prompt §C0 below.
+- [ ] C0.5 Recurring charges + pay periods — deterministic detector, review
+  queue, pay_period windows from paycheck deposits. Rider: months-of-cover
+  (weekly review only). Prompt §C0.5 below.
+- [ ] D1 Adherence rollup pack — EWMA weight trend with %/week bands, weekly
+  quota scoring with freezes and a repair window, lapse-resume gap summary.
+  Registry rider: elimination_window type (its comparison rollup is the
+  consumer). Prompt §D1 below.
+
+Order rationale (one line each): INT1 first because the briefing is thin
+without intentions and everything downstream reads them; H before C because the
+current season is health-primary and H2 concentrates three needs at once
+(personal goal + DME billing math + call prep); EP1 after H2 so perturbation
+flags have CPAP data behind them; C0/C0.5 immediately after because they are
+days-scale and power the weekly money block; D1 as soon as H data flows.
+
+### Event-triggered (never scheduled)
+
+These start on their trigger, not on their turn — a trigger firing outranks
+the committed queue's tail.
+
+- [ ] C2b DME rental ledger — rider on the shipped C2 types: payments vs
+  13-month cap vs cash price vs compliance status, fed by H2.
+  TRIGGER: first real bill / EOB / DME statement arrives.
+- [ ] C4b Call-script packs — rider on the shipped C4 machinery: the approval
+  gate produces a call-script pack alongside (or instead of) a dispute letter.
+  TRIGGER: first real bill / EOB / DME statement arrives.
+- [ ] C5 Branch-explore — TRIGGER: a real ambiguous case appears in actual
+  bills (unchanged gate).
+- [ ] D2 Memory that compounds — summaries with supersede chains → hybrid
+  retrieval (derived content only) → `as_of` / `what_changed` / compare-period
+  rollups (the original D scope minus health ingestion, which moved to H;
+  embedding/retrieval decisions follow the v2 research adjudications).
+  TRIGGER: two-plus domains have months of data.
+
+### UTILITY GATE (standing, from here down)
+
+Nothing below starts until check-in + briefing + weekly review show **≥5
+days/wk use for 4 consecutive weeks**, computed from kernel data (the briefing
+can report gate status itself). ADR-019 rule 9. F is additionally gated on its
+own triggers, as ever.
+
+### E — Prospective copilot (post-gate; anything that writes is also post-C4,
+which has shipped — write verbs reuse its machinery)
+- [ ] E1 Intention triggers/reminders (deterministic, display-only) + chat
+  verbs decompose / prep / eval-prep upgraded from draft-text to one-click
+  approval-writes via the C4 action_proposal → authority_receipt machinery +
+  initiate with scheduled check-back
+- [ ] E2 Relationship copilot (own-behavior only; other people appear as
+  untyped name strings; draft-never-send) + PWA + share target + quick capture
+  (rider: voice dictation via VPS ASR → proposed entity)
 
 ### F — Instrumentation (gated, not scheduled)
 - [ ] Trace ingestion/search — gate: a recurring failure pattern documented ≥3×
@@ -176,16 +258,26 @@ Pre-made decisions in prompts are not relitigated.
   regression
 - [ ] Offline PR-only lab — gate: all of the above exist
 
+### Queue end
+
+- [ ] Full ecosystem `/lean-review` + one system-wide `/security-review` —
+  runs when the committed queue is empty, before the utility gate opens
+  anything new.
+
 ## Mechanisms and where they land
 
 - Provenance payload `{source_event_ids, method, confidence}` — schema-enforced
   from A1 tool outputs and every derived event after.
 - Execution receipts + trigger_feedback — with the first cron job (B3).
-- `as_of` threading, `what_changed`, `superseded_by` chains — milestone D.
+- `as_of` threading, `what_changed`, `superseded_by` chains — D2 (event-
+  triggered).
 - Approval/authority receipts — landed C4 (ADR 018): `action_proposal` +
   `authority_receipt`, minted only by an explicit human approval bound to the
   digest of the draft that was read, with a gate that refuses to emit without
   one. Nothing can be sent: `permits`/`channel` are one-member enums.
+- Operator-fit rules (push/pull split, quotas-not-streaks, focus-3,
+  code-computes-model-narrates, utility gate) — ADR-019, binding on every
+  slice from INT1 on.
 - Drop-and-rebuild determinism — a standing test, not a daemon.
 - Golden questions (`docs/golden-questions.md`) — the living regression suite;
   grows every slice.
@@ -196,6 +288,28 @@ No second graph substrate; no external memory framework as runtime; no
 per-domain services/APIs; no second task manager; no ambient always-on capture;
 no multi-tenant anything. Proactivity ceiling until the prospective-copilot
 milestone: watch / summarize / remind / draft only.
+
+Deliberately not doing (2026-07-29 additions, one line each; rationale in the
+v3 research file §4):
+
+- No prediction or risk scoring of mood, episodes, or relationship outcomes;
+  no "detected" alerts; no live physiology dashboards.
+- No symptom-shaped push notifications of any kind — plans may be pushed;
+  feelings are pull-only.
+- No unlimited reassurance chat: repeated same-day wellbeing queries return
+  the playbook verbatim, never fresh generated comfort.
+- No high-frequency in-episode prompting; no emoji-only mood scores.
+- No fields modeling another person's state, no relationship scores or ratio
+  counters, no model-drafted intimate or apologetic messages, no mid-conflict
+  coaching.
+- No absolute-delta goal lines for trending quantities, no formula anchored to
+  the wrong quantity, no nutrient database or barcode scanner, no
+  medical-advice engine, no device write-back.
+- No auto-apply bots, resume optimizers, job-search CRMs, or
+  application-volume tooling.
+- No business infrastructure ahead of a first paying client.
+- No exposure-coaching that initiates exercises — compile drafts for the
+  clinician only.
 
 Standing rule (record now, enters `.agents/invariants.md` when the first
 optimizer exists): no optimizer may rewrite its own evaluator; nothing
@@ -211,43 +325,163 @@ usage-tracking or multi-provider need.
 
 ## Slice prompts (queue)
 
-### Slice 2 — A2 (+ A2.5 rider)
+Prompts for the committed queue, copied verbatim from the 2026-07-29 proposal
+(authored against a pre-C1 snapshot; slice names in prompt headers are the
+proposal's — the mapping note above each block is authoritative). Prompts for
+event-triggered entries and E1/E2 are authored when those come due.
+
+### INT1 — intention type + import + briefing recomposition
+
+Authored as "B2.5" plus a "B3 addendum" before C1-C4 shipped. B3 is live
+(PR #38, ADR-014), so the composition block below applies as a
+*recomposition* of the existing ops briefing, and the check-in rider fields
+land in this slice via define script (the recomposed briefing is their
+consumer).
 
 ```
-# lifeos Slice 2: grounded chat with citations (ADR-011)
-Read AGENTS.md and the Slice 1 MCP/service seam; reuse it — the chat loop
-calls the same read services/tools, never the DB.
-Build: POST /chat (SSE) with a sidecar agent loop, read-only by scope-
-stripping; structured tool outputs only; every factual answer cites the
-entities/events used; abstains when data is absent. lifeos-ui chat page per
-its AGENTS.md: all HTTP through src/api/client.ts, run gen:api and commit
-types.gen.ts, unit + Playwright e2e (route-mocked to the API host).
-Instrument latency; target p95 < ~4s over tailnet.
-Deliverables: endpoint + SPA page + ADR-011 + tests both repos.
-Acceptance: both CI gates green; runnable golden questions pass their
-behavior bars with citations visible; an unanswerable question abstains.
-Out of scope: writes, proactive anything, embeddings, calendar.
-Micro-slice if time remains (else next session): wellbeing domain
-daily_checkin type_definition (date identity key; mood/energy/stress/
-sleep_quality 1-5; top_priorities; optional note) + existing capture form
-wired — starts the 14-day capture-sustainability experiment.
+# lifeos Slice B2.5: intention type + priority-list import (display-only)
+Registry-only domain rows + one service rule. intention type (title,
+kind: task|project|habit_quota|research_errand|recurring_commitment,
+status, focus bool, floor string nullable, next_action, source).
+Service enforces max 3 focus=true (reject the 4th). Import script seeds
+the operator's current priority list; LLM-proposed kind/next_action land
+as FLAGGED candidate events, operator confirms via existing capture UI.
+Pre-made decisions: no triggers, no scheduler, no recurrence, no
+completion analytics (E1 owns all of those); floors are plain strings.
+Acceptance: CI green; import idempotent; golden Qs "What are my 3 focus
+goals?" and "What is the floor version of <habit>?" pass with citations;
+4th-focus rejection is a service test.
 ```
 
-### Slice 3 — B1
+```
+Briefing composition (pre-made decisions for the B3 prompt):
+ONE morning digest. Order: 3 focus intentions with floors and next
+physical actions (restart-neutral copy; never overdue counts), calendar
+context, then nothing else until data exists (compliance calendar joins
+after H2; co-occurrence line after EP1; talking points after H2 rider).
+Plans may be pushed; feelings are pull-only: no mood/symptom prompts in
+any notification path. Weekly edition adds: quota scores, months-of-
+cover (after C0.5 rider), gate status. Check-in registry riders (1-tap
+practices, appreciation, phone-free, caffeine mg/last-cup, no-dairy)
+land here via define script since the briefing consumes them.
+```
+
+### H1 — Apple Health webhook
 
 ```
-# lifeos Slice 3: ICS calendar ingestion with source receipts (ADR-012)
-Read AGENTS.md and invariants; new domain = type_definition rows + module
-under src/domains/, zero kernel DDL.
-Build: read-only ICS pull from configured URLs; appointment/attendee types;
-idempotent by VEVENT hash (re-runs emit nothing new); raw source receipt
-stored and linked to every derived entity/event; ingestion runs under a
-schedule-scoped token (fail-closed; re-mint per settled decision).
-No auto-link pass in this slice — that is the next slice, on purpose.
-Deliverables: ingestion service + types + ADR-012 + unit/integration tests
-(fixture ICS files: recurrence, timezone, an updated event superseding).
-Acceptance: CI green; double-run produces zero duplicates; golden question
-Q1 (today's calendar, chronological) passes through chat with citations;
-every calendar entity resolves to its source receipt.
-Out of scope: Google OAuth, email enrichment, auto-link, briefing cron.
+# lifeos Slice H1: Apple Health ingestion (Health Auto Export webhook)
+Tailnet-only FastAPI endpoint for Health Auto Export REST pushes (phone
+on Tailscale). Types: weight_measurement, activity_summary; workout
+extends existing type. Idempotent by (metric, timestamp, value) hash;
+receipts sha256+metadata; schema-validated, additionalProperties false,
+size caps, shared-secret header (rotation documented). ADR-012 hostile-
+input rules apply. /security-review pre-merge (first inbound webhook).
+Pre-made decisions: no sleep_session (CPAP covers sleep signal); no
+Withings/Oura; no trend math (D1 owns it); no charts.
+Acceptance: CI green; replayed export emits zero duplicates; per-day
+weight answers with citations; trend questions abstain pending D1.
+```
+
+### H2 — CPAP ingestion + rolling compliance
+
+```
+# lifeos Slice H2: CPAP usage ingestion + rolling compliance service
+Source: SleepHQ public API v1 (client-credentials; ez Share SD pull is
+the documented fallback) → cpap_session events (date, usage_min, AHI,
+leak_95p, pressure_95p, central_ahi?). One deterministic service:
+rolling 30-consecutive-day window → nights ≥4h and ≥8h, %-of-nights,
+full-month streak status, DME-style compliance boolean (≥4h on ≥70% of
+nights). Feeds briefing.
+Pre-made decisions: no EDF parsing, no myAir, no pressure suggestions,
+no prediction, no interpretation copy anywhere.
+Acceptance: CI green; fixture months compute exactly; double-run
+idempotent; golden Qs "How many of the last 30 nights ≥4h?", "Am I on
+track for a full month?" pass with citations; "Will I have a bad night
+tomorrow?" abstains.
+Rider if time remains: config table {metric threshold → one clinician/
+DME talking point} rendered as a briefing line (e.g., leak >24 L/min on
+≥4 of 7 nights → cushion-fit conversation). Talking points only.
+```
+
+### EP1 — episode support (x-sensitive)
+
+```
+# lifeos Slice EP1: episode log + playbook + evidence card (pull-only)
+Types (x-sensitive from first migration): episode (onset_date,
+perturbation_tags[], intensity 0-10, function_impact bool,
+feared_duration_days, end_date, retro_note) and playbook (owner-
+authored versioned if-then steps). Daily in-episode intensity is a
+plain entity update via existing capture; the append-only history IS
+the time series (no new UI). One deterministic evidence-card service:
+episode count, median/trend of durations, feared-vs-actual gap,
+perturbation co-occurrence counts. Chat prompt lines: at episode open,
+cite playbook verbatim + evidence card; repeated same-day wellbeing
+queries return the playbook, never fresh reassurance. Briefing may show
+ONE descriptive line ("2 of your usual perturbations present this
+week"), historical language only.
+Pre-made decisions: no prediction, no risk scores, no physiology
+dashboards, no push prompts, no exposure coaching, no clinical advice;
+playbook and episodes are operator-authored via capture, never
+generated.
+Acceptance: CI green; evidence card computes fixture ledgers exactly;
+golden Qs "What does my playbook say?" (verbatim, cited), "How long did
+episodes actually last vs feared?" (computed, cited), "Will I have an
+episode next week?" (abstains); no notification path exists in code.
+```
+
+### C0 — transaction ingestion
+
+```
+# lifeos Slice C0: transaction ingestion with source receipts
+New domain money as registry rows + src/domains/money/: transaction,
+account. Sources: SimpleFIN Bridge access-URL pull (user-triggered CLI,
+never a daemon) and bank-CSV import. Idempotent by (account,
+posted_date, amount, normalized_desc) hash; receipts sha256+metadata
+only (no verbatim statements). Access-URL is a bearer credential:
+vault/env only, never stored or logged. ADR-012 same-host redirect rule
+on outbound fetch. /security-review pre-merge MANDATORY.
+Pre-made decisions: no recurring detection (C0.5), no budgets, no
+documents, no auto-sync, no balances-forecasting.
+Acceptance: CI green; double-run emits nothing new; per-date spend
+queries answer with citations.
+```
+
+### C0.5 — recurring + pay periods
+
+```
+# lifeos Slice C0.5: recurring charges + pay-period windows (pure code)
+Deterministic detector over transaction events: normalized merchant +
+amount tolerance + cadence regularity (7/14/30/365 ± slack) →
+recurring_charge entities with provenance; review queue, no auto-
+cancel. pay_period derived from paycheck deposit events; spend and
+recurring queries take a period parameter. No ML, no new deps.
+Pre-made decisions: no envelopes, no forecasts, no cancellation
+actions, no investment anything.
+Acceptance: CI green; fixtures detect known subscriptions, zero false
+merges; idempotent; golden Qs "What recurring charges hit last pay
+period?", "What did I spend since my last paycheck?" pass with
+citations.
+Rider if time remains: months_of_cover = liquid balances ÷ one
+operator-set essential-monthly-baseline config value; weekly review
+only, never the daily briefing.
+```
+
+### D1 — adherence rollup pack
+
+```
+# lifeos Slice D1: deterministic adherence rollups
+Three read services over H1/H2/check-in/intention data, model narrates:
+(1) weight: EWMA trend + rolling %-of-current-weight/week vs bands
+(green 0.5-1%/wk) + taper-expected annotation + goal ETA recompute;
+never a fixed lb/wk goal line; protein anchor notes goal weight.
+(2) quotas: weekly counts vs habit_quota intentions (lifting, walking,
+practices) with 1-2 freezes and 24h repair window; no daily streaks.
+(3) lapse-resume: on any ≥7-day capture gap, a welcome-back summary
+(what happened in the gap, zero guilt, no backfill demand).
+Pre-made decisions: every formula names its anchor; no causal language;
+elimination_window type lands here via define script (its comparison
+rollup is the consumer).
+Acceptance: CI green; fixtures compute exactly; golden Qs "What is my
+weight trend and is this pace expected?", "Did I hit my lifting quota
+this week?", "What did I miss while away?" pass with citations.
 ```
