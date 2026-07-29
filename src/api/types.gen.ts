@@ -71,8 +71,133 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Post Capture */
+    /**
+     * Post Capture
+     * @description Generic capture. Bills take one extra check on the way in (ADR 017):
+     *     `status: "verified"` is the reconciliation verifier's to write, and a
+     *     verified record is not editable by hand, because `capture` merges and the
+     *     verified status would survive an edit to the numbers under it. The decision
+     *     lives in the domain; this is the dispatch.
+     */
     post: operations["post_capture_capture_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/documents": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Post Documents
+     * @description Capture one uploaded document (ADR 015): the bytes and the extracted
+     *     text go to the blob store, the entity keeps identity plus pointers. The
+     *     same bytes uploaded twice resolve to the same document.
+     */
+    post: operations["post_documents_documents_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/action-proposals": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Action Proposals
+     * @description Drafts this system is proposing, with the letter rendered from live
+     *     records (ADR 018). Reading is only reading: no route below GET writes
+     *     anything, so nothing here can approve a proposal as a side effect. Each view
+     *     carries the `draft_digest` an approval must echo back.
+     */
+    get: operations["get_action_proposals_action_proposals_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/action-proposals/{proposal_id}/approve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Post Approve Proposal
+     * @description The one action that mints an authority receipt (ADR 018).
+     *
+     *     Deliberately explicit in three ways: it is its own POST, it refuses unless
+     *     the caller echoes the digest of the draft it read, and who approved comes
+     *     from the claims verified for *this request* rather than from the body or
+     *     from configuration — a caller cannot say who approved, and neither can the
+     *     environment. `granted_via` records which of those two it was; the domain
+     *     refuses a scope-narrowed context outright.
+     */
+    post: operations["post_approve_proposal_action_proposals__proposal_id__approve_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/action-proposals/{proposal_id}/reject": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Post Reject Proposal
+     * @description Say no. Mints nothing — there is no authority in a refusal.
+     */
+    post: operations["post_reject_proposal_action_proposals__proposal_id__reject_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/action-proposals/{proposal_id}/draft": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Approved Draft
+     * @description The approved draft, on screen — the terminal state of C4.
+     *
+     *     This is the gate: it refuses unless a valid, matching, unexpired authority
+     *     receipt covers this exact text. There is no send here and no transport
+     *     anywhere in this system, so the far side of the gate is the screen; the gate
+     *     is built and exercised anyway, because the check that matters is "did a
+     *     human authorise *this text*" and that is not something to add later.
+     */
+    get: operations["get_approved_draft_action_proposals__proposal_id__draft_get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -125,6 +250,20 @@ export interface paths {
     /**
      * Post Forget
      * @description Erasure by redaction (ADR 007). Send `{}` to erase every flagged field.
+     *
+     *     Two domains own more of an entity's personal data than `forget()` can see,
+     *     and both dispatch here so there is one erasure endpoint and no under-erasing
+     *     trap; the behavior lives in the domain module either way.
+     *
+     *     Documents: most of a document's personal data is in the stored file, which
+     *     `forget()` cannot reach, so redacting attributes alone would report an
+     *     erasure that left the bill on disk (ADR 015). The response carries
+     *     `blobs_deleted`, so the claim is checkable.
+     *
+     *     Bills and EOBs: a candidate's verification receipts hold numbers derived
+     *     from its amounts, in a different entity that `forget()` — which is strictly
+     *     per-entity — never touches (ADR 017). The response carries
+     *     `receipts_redacted` for the same reason.
      */
     post: operations["post_forget_entities__entity_id__forget_post"];
     delete?: never;
@@ -171,6 +310,48 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /**
+     * ApproveIn
+     * @description Approving a proposal means approving one exact draft (ADR 018).
+     *
+     *     `draft_digest` is the sha256 the caller was shown, echoed back. It is
+     *     required, so an approval cannot be issued by anything that has not read the
+     *     draft, and a draft whose facts moved in between is refused rather than
+     *     approved on the strength of text nobody saw. `granted_by` is deliberately
+     *     NOT here: who approved comes from the verified request, never from the body.
+     */
+    ApproveIn: {
+      /** Draft Digest */
+      draft_digest: string;
+      /**
+       * Actor
+       * @default kyle
+       */
+      actor: string;
+    };
+    /**
+     * BillForgetResult
+     * @description A `ForgetResult` that also accounts for the derived records, so a caller
+     *     can see that the numbers derived from the erased record went with it.
+     */
+    BillForgetResult: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Fields */
+      fields: string[];
+      /** Events Redacted */
+      events_redacted: number;
+      /** Receipts Redacted */
+      receipts_redacted: number;
+    };
+    /** Body_post_documents_documents_post */
+    Body_post_documents_documents_post: {
+      /** File */
+      file: string;
+    };
     /** CaptureIn */
     CaptureIn: {
       /** Type Name */
@@ -211,6 +392,28 @@ export interface components {
       /** Content */
       content: string;
     };
+    /** DecideIn */
+    DecideIn: {
+      /**
+       * Actor
+       * @default kyle
+       */
+      actor: string;
+    };
+    /** DecisionResult */
+    DecisionResult: {
+      /**
+       * Proposal Id
+       * Format: uuid
+       */
+      proposal_id: string;
+      /** State */
+      state: string;
+      /** Authority Receipt Id */
+      authority_receipt_id?: string | null;
+      /** Expires At */
+      expires_at?: string | null;
+    };
     /** DefineTypeIn */
     DefineTypeIn: {
       /** Name */
@@ -223,6 +426,24 @@ export interface components {
       };
       /** Parent */
       parent?: string | null;
+    };
+    /**
+     * DocumentForgetResult
+     * @description A `ForgetResult` that also accounts for the blobs, so a caller can
+     *     verify the file is gone instead of taking the 200 on trust.
+     */
+    DocumentForgetResult: {
+      /**
+       * Entity Id
+       * Format: uuid
+       */
+      entity_id: string;
+      /** Fields */
+      fields: string[];
+      /** Events Redacted */
+      events_redacted: number;
+      /** Blobs Deleted */
+      blobs_deleted: number;
     };
     /** Edge */
     Edge: {
@@ -261,6 +482,34 @@ export interface components {
       recorded_at: string;
       /** Superseded At */
       superseded_at?: string | null;
+    };
+    /**
+     * EmittedDraft
+     * @description The terminal artifact of this slice: an approved draft, on a screen.
+     *
+     *     `channel` can only ever be `on_screen` and `permits` only `display_draft` —
+     *     the types have no other members. This model is what a transmitting slice
+     *     would have to change, and changing it is meant to be visible.
+     */
+    EmittedDraft: {
+      /**
+       * Proposal Id
+       * Format: uuid
+       */
+      proposal_id: string;
+      /**
+       * Authority Receipt Id
+       * Format: uuid
+       */
+      authority_receipt_id: string;
+      /** Channel */
+      channel: string;
+      /** Permits */
+      permits: string[];
+      /** Expires At */
+      expires_at: string;
+      /** Body */
+      body: string;
     };
     /** Entity */
     Entity: {
@@ -353,6 +602,58 @@ export interface components {
     HTTPValidationError: {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
+    };
+    /**
+     * ProposalView
+     * @description One proposal as a reviewer sees it.
+     *
+     *     `body` and `draft_digest` are present **only while the proposal is
+     *     `proposed`**, and that is a security property rather than an optimisation.
+     *     Rendering a draft is exactly the act an `authority_receipt` grants
+     *     (`permits: ["display_draft"], channel: "on_screen"`), so a listing that
+     *     returned the body in every state would be an ungated twin of `emit_draft`:
+     *     approve, let the grant lapse, and the gate would 403 while the listing
+     *     served the same bytes at 200. Every row of ADR 018's refusal table would be
+     *     defeated by the adjacent route.
+     *
+     *     Reading is a prerequisite to deciding, so a `proposed` draft is readable —
+     *     an approver cannot approve text they may not see. Once decided it is
+     *     reachable only through `emit_draft`, and no state transition ever returns a
+     *     proposal to `proposed` (`propose_for_receipt` holds anything already
+     *     decided), so a lapsed grant can never fall back into the readable state.
+     */
+    ProposalView: {
+      /**
+       * Proposal Id
+       * Format: uuid
+       */
+      proposal_id: string;
+      /** Kind */
+      kind: string;
+      /** State */
+      state: string;
+      /** Subject Ids */
+      subject_ids: string[];
+      /** Verification Receipt Id */
+      verification_receipt_id?: string | null;
+      /**
+       * Points
+       * @default []
+       */
+      points: {
+        [key: string]: unknown;
+      }[];
+      /**
+       * Unresolved Count
+       * @default 0
+       */
+      unresolved_count: number;
+      /** Authority Receipt Id */
+      authority_receipt_id?: string | null;
+      /** Body */
+      body?: string | null;
+      /** Draft Digest */
+      draft_digest?: string | null;
     };
     /** RelateIn */
     RelateIn: {
@@ -574,6 +875,171 @@ export interface operations {
       };
     };
   };
+  post_documents_documents_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_post_documents_documents_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EntityView"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_action_proposals_action_proposals_get: {
+    parameters: {
+      query?: {
+        state?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProposalView"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  post_approve_proposal_action_proposals__proposal_id__approve_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        proposal_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApproveIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DecisionResult"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  post_reject_proposal_action_proposals__proposal_id__reject_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        proposal_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DecideIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DecisionResult"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_approved_draft_action_proposals__proposal_id__draft_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        proposal_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EmittedDraft"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   post_edges_edges_post: {
     parameters: {
       query?: never;
@@ -659,7 +1125,10 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ForgetResult"];
+          "application/json":
+            | components["schemas"]["DocumentForgetResult"]
+            | components["schemas"]["BillForgetResult"]
+            | components["schemas"]["ForgetResult"];
         };
       };
       /** @description Validation Error */
