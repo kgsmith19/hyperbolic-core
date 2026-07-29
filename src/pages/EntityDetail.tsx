@@ -84,6 +84,9 @@ export default function EntityDetail() {
         <h2 className="mb-1 text-sm font-semibold uppercase text-zinc-500">
           History
         </h2>
+        {events.isError && (
+          <p className="text-sm text-red-600">{String(events.error)}</p>
+        )}
         <ol className="space-y-1 text-sm">
           {events.data?.map((event) => (
             <li

@@ -4,7 +4,7 @@ import { Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import EntityDetail from "./EntityDetail";
-import { forgetEntity } from "../api/client";
+import { forgetEntity, getHistory } from "../api/client";
 import { renderWithProviders } from "../test-utils";
 
 vi.mock("../api/client", () => ({
@@ -55,6 +55,13 @@ describe("EntityDetail", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("person")).toBeInTheDocument();
     expect(await screen.findByText("entity.created")).toBeInTheDocument();
+  });
+
+  it("surfaces a history load failure instead of an empty section", async () => {
+    vi.mocked(getHistory).mockRejectedValueOnce(new Error("boom"));
+    renderDetail();
+    await screen.findByRole("heading", { name: "Kyle Smith" });
+    expect(await screen.findByText(/boom/)).toBeInTheDocument();
   });
 
   it("forgets PII only after confirmation", async () => {
