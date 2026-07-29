@@ -35,8 +35,13 @@ Pre-made decisions in prompts are not relitigated.
 - [x] A2 Grounded chat with citations (ADR-011) — done 2026-07-28
   (lifeos + lifeos-ui slice-2 PRs); golden-question scoring recorded below
   on deploy
-- [ ] A2.5 Daily check-in micro-slice (wellbeing `daily_checkin` type + capture
-  form; starts the 14-day capture-sustainability experiment)
+  A2 acceptance 2026-07-28: golden Q8/9/13/14 pass behavior bars with
+  citations via /chat; latency p95 bar pending prod measurement — documented
+  lever is LIFEOS_CHAT_MODEL=claude-sonnet-5 (config, no code).
+- [x] A2.5 Daily check-in micro-slice (wellbeing `daily_checkin` type + capture
+  form; starts the 14-day capture-sustainability experiment) — done 2026-07-28
+  (PR #35): type is pure registry data via `scripts/define_daily_checkin.py`,
+  zero UI changes (schema-driven Capture form renders it)
 
 ### B — Tomorrow Cockpit
 - [ ] B1 ICS calendar ingestion with source receipts (ADR-012)
