@@ -10,6 +10,7 @@ import Capture from "./pages/Capture";
 import Chat from "./pages/Chat";
 import EntityDetail from "./pages/EntityDetail";
 import Login from "./pages/Login";
+import Tomorrow from "./pages/Tomorrow";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1 } },
@@ -31,6 +32,9 @@ function Shell({ children }: { children: ReactNode }) {
           </Link>
           <Link to="/chat" className="hover:underline">
             Chat
+          </Link>
+          <Link to="/tomorrow" className="hover:underline">
+            Tomorrow
           </Link>
         </nav>
         <div className="ml-auto flex items-center gap-3">
@@ -82,6 +86,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <Chat />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/tomorrow"
+            element={
+              <RequireAuth>
+                <Tomorrow />
               </RequireAuth>
             }
           />

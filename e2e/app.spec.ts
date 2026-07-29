@@ -120,6 +120,79 @@ test("chat streams an answer with citation chips", async ({ page }) => {
   );
 });
 
+// The briefing cites entity ids and stores no text (ADR 014), so the page is
+// only correct if it resolves each id through /entities/{id} at read time.
+const BRIEFING = {
+  id: "b1",
+  name: null,
+  attributes: {
+    briefing_key: "2026-07-29",
+    date: "2026-07-29",
+    appointment_ids: ["a2", "a1"], // deliberately not in start order
+    open_review_ids: ["r1"],
+    latest_checkin_id: "c1",
+  },
+  created_at: "2026-07-29T06:00:00Z",
+  updated_at: "2026-07-29T06:00:00Z",
+};
+
+const CITED: Record<string, { name: string | null; attributes: object }> = {
+  a1: { name: "Standup", attributes: { starts_at: "2026-07-29T08:00:00Z" } },
+  a2: { name: "Dentist", attributes: { starts_at: "2026-07-29T15:00:00Z" } },
+  r1: {
+    name: null,
+    attributes: {
+      attendee_id: "att1",
+      candidate_person_ids: ["p1"],
+      reason: "ambiguous_email_match",
+    },
+  },
+  c1: { name: null, attributes: { date: "2026-07-29", mood: 4 } },
+};
+
+test("tomorrow resolves the briefing's ids into a readable cockpit", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route(`${API}/healthz`, (route) =>
+    route.fulfill({ json: { status: "ok" } }),
+  );
+  await page.route(`${API}/search**`, (route) =>
+    route.fulfill({ json: [BRIEFING] }),
+  );
+  await page.route(`${API}/entities/*`, (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").pop() ?? "";
+    const cited = CITED[id];
+    if (!cited) return route.fulfill({ status: 404, json: { detail: "gone" } });
+    return route.fulfill({
+      json: {
+        entity: {
+          id,
+          ...cited,
+          created_at: "2026-07-29T06:00:00Z",
+          updated_at: "2026-07-29T06:00:00Z",
+        },
+        types: ["thing"],
+        edges_out: [],
+        edges_in: [],
+      },
+    });
+  });
+
+  await page.goto("/tomorrow");
+  const rows = page.locator("ul > li");
+  await expect(rows.nth(0)).toContainText("Standup");
+  await expect(rows.nth(1)).toContainText("Dentist");
+  await expect(
+    page.getByRole("heading", { name: /needs your decision/i }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "att1" })).toHaveAttribute(
+    "href",
+    "/entities/att1",
+  );
+  await expect(page.getByText("mood 4/5")).toBeVisible();
+});
+
 test("capture posts schema-driven attributes", async ({ page }) => {
   await signIn(page);
   await mockApi(page);

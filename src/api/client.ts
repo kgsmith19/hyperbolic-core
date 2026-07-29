@@ -49,11 +49,17 @@ export const getEntity = (id: string) => api<EntityView>(`/entities/${id}`);
 export const getHistory = (id: string) =>
   api<Event[]>(`/entities/${id}/history`);
 
-export function searchEntities(params: { type_name?: string; text?: string }) {
+export function searchEntities(params: {
+  type_name?: string;
+  text?: string;
+  filters?: Record<string, string>;
+}) {
+  const { filters, ...rest } = params;
   const query = new URLSearchParams(
-    Object.entries(params).filter((entry): entry is [string, string] =>
-      Boolean(entry[1]),
-    ),
+    Object.entries({
+      ...rest,
+      ...(filters ? { filters: JSON.stringify(filters) } : {}),
+    }).filter((entry): entry is [string, string] => Boolean(entry[1])),
   );
   return api<Entity[]>(`/search?${query}`);
 }
