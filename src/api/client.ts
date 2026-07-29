@@ -74,3 +74,72 @@ export function forgetEntity(id: string) {
     body: JSON.stringify({}),
   });
 }
+
+export type ChatCitations = {
+  entity_ids: string[];
+  event_ids: string[];
+  methods: string[];
+};
+export type ChatFrame =
+  | { type: "text"; delta: string }
+  | { type: "tool"; name: string }
+  | {
+      type: "done";
+      citations: ChatCitations;
+      latency: { model_ms: number; tool_ms: number; total_ms: number };
+      model: string;
+      stop_reason: string;
+    }
+  | { type: "error"; detail: string };
+
+export function parseSseChunk(
+  buffer: string,
+  emit: (frame: ChatFrame) => void,
+): string {
+  const blocks = buffer.split("\n\n");
+  const rest = blocks.pop() ?? "";
+  for (const block of blocks) {
+    let event = "";
+    let data = "";
+    for (const line of block.split("\n")) {
+      if (line.startsWith("event: ")) event = line.slice(7);
+      else if (line.startsWith("data: ")) data = line.slice(6);
+    }
+    if (event && data) emit({ type: event, ...JSON.parse(data) } as ChatFrame);
+  }
+  return rest;
+}
+
+export async function streamChat(
+  messages: { role: "user" | "assistant"; content: string }[],
+  onFrame: (frame: ChatFrame) => void,
+): Promise<void> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/chat`, {
+    method: "POST",
+    body: JSON.stringify({ messages }),
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (response.status === 401) {
+    await supabase.auth.signOut();
+    window.location.assign("/login");
+    throw new ApiError(401, "signed out");
+  }
+  if (!response.ok || !response.body)
+    throw new ApiError(response.status, response.statusText);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer = parseSseChunk(
+      buffer + decoder.decode(value, { stream: true }),
+      onFrame,
+    );
+  }
+}

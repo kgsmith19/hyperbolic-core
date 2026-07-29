@@ -7,6 +7,7 @@ import { useSession } from "./auth/useSession";
 import HealthDot from "./components/HealthDot";
 import Browse from "./pages/Browse";
 import Capture from "./pages/Capture";
+import Chat from "./pages/Chat";
 import EntityDetail from "./pages/EntityDetail";
 import Login from "./pages/Login";
 
@@ -27,6 +28,9 @@ function Shell({ children }: { children: ReactNode }) {
           </Link>
           <Link to="/capture" className="hover:underline">
             Capture
+          </Link>
+          <Link to="/chat" className="hover:underline">
+            Chat
           </Link>
         </nav>
         <div className="ml-auto flex items-center gap-3">
@@ -70,6 +74,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <Capture />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/chat"
+            element={
+              <RequireAuth>
+                <Chat />
               </RequireAuth>
             }
           />

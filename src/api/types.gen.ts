@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+  "/chat": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Post Chat
+     * @description Grounded chat: the owner authenticates, the loop runs read-only.
+     */
+    post: operations["post_chat_chat_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/healthz": {
     parameters: {
       query?: never;
@@ -175,6 +195,21 @@ export interface components {
        */
       entity_id: string;
       resolution: components["schemas"]["Resolution"];
+    };
+    /** ChatIn */
+    ChatIn: {
+      /** Messages */
+      messages: components["schemas"]["ChatMessage"][];
+    };
+    /** ChatMessage */
+    ChatMessage: {
+      /**
+       * Role
+       * @enum {string}
+       */
+      role: "user" | "assistant";
+      /** Content */
+      content: string;
     };
     /** DefineTypeIn */
     DefineTypeIn: {
@@ -398,6 +433,39 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  post_chat_chat_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChatIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_healthz_healthz_get: {
     parameters: {
       query?: never;

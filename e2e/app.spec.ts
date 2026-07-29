@@ -96,6 +96,30 @@ test("browse -> entity detail round trip", async ({ page }) => {
   await expect(page.getByText("entity.created")).toBeVisible();
 });
 
+test("chat streams an answer with citation chips", async ({ page }) => {
+  await signIn(page);
+  await mockApi(page);
+  await page.route(`${API}/chat`, (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body:
+        [
+          'event: tool\ndata: {"name": "find"}',
+          'event: text\ndata: {"delta": "Two workouts."}',
+          'event: done\ndata: {"citations": {"entity_ids": ["e1"], "event_ids": ["ev1"], "methods": ["kernel.find"]}, "latency": {"model_ms": 1, "tool_ms": 1, "total_ms": 2}, "model": "test", "stop_reason": "end_turn"}',
+        ].join("\n\n") + "\n\n",
+    }),
+  );
+  await page.goto("/chat");
+  await page.getByPlaceholder(/ask about your data/i).fill("workouts?");
+  await page.getByRole("button", { name: /send/i }).click();
+  await expect(page.getByText("Two workouts.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "e1" })).toHaveAttribute(
+    "href",
+    "/entities/e1",
+  );
+});
+
 test("capture posts schema-driven attributes", async ({ page }) => {
   await signIn(page);
   await mockApi(page);
