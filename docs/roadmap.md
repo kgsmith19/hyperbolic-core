@@ -55,7 +55,12 @@ Pre-made decisions in prompts are not relitigated.
   ADR-010 envelope, 2+ or conflicting → `link_review` item, none → nothing;
   edges only, the identity spine is never rewritten (ADR-013)
 - [ ] B3 Daily briefing cron + execution receipts + trigger_feedback
-- [ ] B4 `/tomorrow` page (lifeos-ui)
+- [x] B4 `/tomorrow` page (lifeos-ui) — done 2026-07-29 (lifeos-ui PR #7): the
+  Tomorrow Cockpit resolves the briefing's cited entity IDs at read time
+  through the existing `/entities/{id}` route, so no display text is copied out
+  of the entities that own it (ADR 014) and no API surface was added; an id
+  that no longer resolves renders as gone, and `link_review` items still show
+  as "needs your decision" with no resolve action (ADR 013)
 
 ### C — Bills v1 (first verified write path)
 - [ ] C1 Document capture (upload → storage ref → extracted text → sha256
