@@ -340,6 +340,54 @@ def test_a_negative_amount_is_caught_without_quoting_it(verify_ctx: AccessContex
     assert "delta" not in negative
 
 
+def test_a_negative_amount_on_a_partial_line_is_still_caught(verify_ctx: AccessContext) -> None:
+    """A line with an absent amount skips the arithmetic checks, and used to
+    skip the negativity scan with them — a false PASS inside a confidence-1.0
+    receipt. The amounts that ARE present get scanned."""
+    document_id = uuid4()
+    line = {
+        "code": "99213",
+        "quantity": "1",
+        # billed is absent: the extractor dropped what it could not parse
+        "allowed": "150.00",
+        "plan_paid": "170.00",
+        "patient_resp": "-20.00",
+    }
+    eob_id = candidate(verify_ctx, document_id, TYPE_EOB, eob_record(line_items=[line]))
+
+    receipt = receipt_of(verify_ctx, verify_document(verify_ctx, document_id).receipt_id)
+
+    negative = result_of(receipt, eob_id, CHECK_EOB_AMOUNTS_NON_NEGATIVE)
+    assert (negative["result"], negative["line_index"]) == (RESULT_FAIL, 0)
+    assert "delta" not in negative
+    assert result_of(receipt, eob_id, CHECK_EOB_LINE_SPLIT)["result"] == RESULT_UNCHECKED
+
+
+def test_a_partial_line_with_no_negative_found_is_unchecked_not_passed(
+    verify_ctx: AccessContext,
+) -> None:
+    """A check that could not fully run says so: with an amount absent, "no
+    negative found" is not a finding, and `pass` here would be a receipt
+    affirming what it never scanned."""
+    document_id = uuid4()
+    line = {
+        "code": "99213",
+        "quantity": "1",
+        "allowed": "150.00",
+        "plan_paid": "120.00",
+        "patient_resp": "30.00",
+    }
+    eob_id = candidate(verify_ctx, document_id, TYPE_EOB, eob_record(line_items=[line]))
+
+    verdict = verify_document(verify_ctx, document_id)
+
+    receipt = receipt_of(verify_ctx, verdict.receipt_id)
+    unchecked = result_of(receipt, eob_id, CHECK_EOB_AMOUNTS_NON_NEGATIVE)
+    assert unchecked["result"] == RESULT_UNCHECKED
+    assert "line_index" not in unchecked
+    assert verdict.promoted == 0
+
+
 def test_a_service_date_after_the_due_date_is_incoherent(verify_ctx: AccessContext) -> None:
     document_id = uuid4()
     bill_id = candidate(

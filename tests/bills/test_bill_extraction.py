@@ -455,6 +455,34 @@ def test_a_failed_model_call_is_still_recorded_before_it_raises(
     assert document_id not in extract._pending_documents(bills_ctx)  # noqa: SLF001
 
 
+def test_a_failure_after_a_successful_call_is_still_recorded(
+    bills_ctx: AccessContext,
+    store: BlobStore,
+    make_document: DocumentFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same audit hole, one step later: the call SUCCEEDED — the text left
+    the box — and then the post-call write-back failed. A guard that covered
+    only the call would skip the `bill_extraction` record here, and the sweep,
+    seeing none, would silently re-send the same medical document next run."""
+    document_id = make_document("billsc2postcall")
+    client = FakeClient([json_response(payload("billsc2postcall"))])
+
+    def boom(ctx: AccessContext, type_name: str, document_id: UUID) -> set[str]:
+        raise RuntimeError("redaction lookup failed")
+
+    monkeypatch.setattr(extract, "_document_redactions", boom)
+
+    with pytest.raises(RuntimeError):
+        extract_document(bills_ctx, document_id, client=client, store=store)
+
+    run = only(
+        find(bills_ctx, type_name=TYPE_EXTRACTION, filters={"extraction_key": str(document_id)})
+    )
+    assert run.attributes["status"] == EXTRACTION_FAILED
+    assert document_id not in extract._pending_documents(bills_ctx)  # noqa: SLF001
+
+
 def test_the_execution_receipt_carries_no_count_of_medical_records(
     bills_ctx: AccessContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:

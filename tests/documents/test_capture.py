@@ -6,7 +6,9 @@ its test — identical bytes are the *same* document by design.
 """
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from hashlib import sha256
+from pathlib import Path
 
 import pytest
 
@@ -167,12 +169,34 @@ def test_filename_is_display_text_not_a_path() -> None:
     assert clean_filename(None) is None
 
 
-def test_capture_without_write_scope_fails_closed(
-    doc_ctx: AccessContext, store: BlobStore, make_pdf: PdfFactory
-) -> None:
+def test_capture_without_write_scope_fails_closed(tmp_path: Path, make_pdf: PdfFactory) -> None:
+    """The scope check runs before the filesystem is touched: `BlobStore`
+    takes no AccessContext, so a read-only token must be turned away before a
+    single byte lands in the store — never by the scope check inside the later
+    kernel capture, which would run after the blobs were already written."""
+    fresh = BlobStore(tmp_path)
     read_only = AccessContext.of("documents:read")
     with pytest.raises(ScopeError):
-        capture_document(read_only, make_pdf("documentsc1scope"), store=store)
+        capture_document(read_only, make_pdf("documentsc1scope"), store=fresh)
+    assert list(tmp_path.rglob("*")) == []  # the store was never touched
+
+
+def test_a_failed_capture_does_not_strand_blobs(
+    doc_ctx: AccessContext, tmp_path: Path, make_pdf: PdfFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crash between the blob writes and the entity capture would otherwise
+    leave files outside every erasure path — the entity holding the refs never
+    existed. The freshly written blobs are unlinked before the failure
+    surfaces."""
+    fresh = BlobStore(tmp_path)
+
+    def failing_capture(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("kernel capture failed")
+
+    monkeypatch.setattr("domains.documents.capture.services.capture", failing_capture)
+    with pytest.raises(RuntimeError, match="kernel capture failed"):
+        capture_document(doc_ctx, make_pdf("documentsc1stranded"), store=fresh)
+    assert [p for p in tmp_path.rglob("*") if p.is_file()] == []
 
 
 def test_type_definition_is_idempotent_registry_data(doc_ctx: AccessContext) -> None:
@@ -265,6 +289,40 @@ def test_erasure_refuses_when_a_ref_names_no_blob(
     # there for an operator to reconnect
     assert "erased_at" not in get_entity(doc_ctx, entity_id).entity.attributes
     assert store.read(real_ref) == data
+
+
+def test_a_crashed_erasure_is_resumed_not_refused(
+    doc_ctx: AccessContext, store: BlobStore, make_pdf: PdfFactory
+) -> None:
+    """ADR 015: a retry after a mid-erasure failure must still be able to
+    finish the job. `erased_at` set with one blob already gone is a crashed
+    erasure, not drift — the retry deletes the survivor and completes the
+    redaction, instead of raising ErasureUnverified forever."""
+    entity_id = capture_document(
+        doc_ctx,
+        make_pdf("Balance documentsc1resumetext 55.00"),
+        filename="EOB documentsc1resumee 2026.pdf",
+        store=store,
+    )
+    attributes = dict(get_entity(doc_ctx, entity_id).entity.attributes)
+    assert entity_id in {e.id for e in find(doc_ctx, text="documentsc1resumee")}  # not vacuous
+    # Simulate the crash: tombstone captured, bytes blob unlinked, text blob
+    # still on disk — exactly the state a failure between the two unlinks leaves.
+    tombstone = {k: v for k, v in attributes.items() if k != "original_filename"}
+    tombstone["erased_at"] = datetime.now(UTC).isoformat()
+    capture(doc_ctx, "document", tombstone)
+    assert store.delete(attributes["storage_ref"]) is True
+
+    result = forget_document(doc_ctx, entity_id, store=store)
+
+    assert result.blobs_deleted == 1  # the survivor, honestly counted
+    with pytest.raises(FileNotFoundError):
+        store.read(attributes["text_ref"])
+    assert "original_filename" not in get_entity(doc_ctx, entity_id).entity.attributes
+    assert find(doc_ctx, text="documentsc1resumee") == []
+    # and a further retry is the genuinely-already-erased case, refused as such
+    with pytest.raises(DocumentErased, match="already erased"):
+        forget_document(doc_ctx, entity_id, store=store)
 
 
 @pytest.fixture(scope="module")

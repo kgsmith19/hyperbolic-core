@@ -199,6 +199,9 @@ DATE_PATTERN = "^[0-9][0-9W-]{0,31}$"
 MAX_LINE_ITEMS = 100
 MAX_IDS = 100
 MAX_FLAGGED_FIELDS = 12
+# The one shape a flagged field name may take, shared by the schema below and
+# the coercions in extract.py / verify.py so the three can never drift apart.
+FIELD_NAME_PATTERN = "^[a-z_]{1,32}$"
 
 _SHA256 = {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}
 _TIMESTAMP = {"type": "string", "maxLength": 64}
@@ -245,7 +248,7 @@ _PROVENANCE_DIRECT = _provenance_schema({"maximum": 1})
 _FLAGGED_FIELDS = {
     "type": "array",
     "maxItems": MAX_FLAGGED_FIELDS,
-    "items": {"type": "string", "maxLength": 32, "pattern": "^[a-z_]{1,32}$"},
+    "items": {"type": "string", "maxLength": 32, "pattern": FIELD_NAME_PATTERN},
 }
 
 # A bounded billing code (CPT/HCPCS/revenue/tariff) and amounts. There is no

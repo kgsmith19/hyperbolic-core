@@ -1,11 +1,13 @@
 """Unit: the blob store's key space and its delete (ADR 015)."""
 
+import re
 from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
 from domains.documents.storage import KIND_BYTES, KIND_TEXT, BlobStore, blob_root, ref_for
+from domains.documents.types import DOCUMENT_SCHEMA
 
 DIGEST = sha256(b"a bill").hexdigest()
 
@@ -48,6 +50,17 @@ def test_refs_outside_the_key_space_are_refused(tmp_path: Path, ref: str) -> Non
         store.read(ref)
     with pytest.raises(ValueError):
         store.delete(ref)
+
+
+def test_a_ref_with_a_trailing_newline_is_rejected(tmp_path: Path) -> None:
+    """`$` also matches before a trailing newline, so both pattern gates use
+    `\\Z`: `ab/<digest>.bin\\n` must never become a path."""
+    newline_ref = f"{DIGEST[:2]}/{DIGEST}.bin\n"
+    store = BlobStore(tmp_path)
+    with pytest.raises(ValueError, match="malformed blob ref"):
+        store.read(newline_ref)
+    pattern = DOCUMENT_SCHEMA["properties"]["storage_ref"]["pattern"]
+    assert re.search(pattern, newline_ref) is None  # the schema gate agrees
 
 
 def test_ref_for_rejects_a_non_digest() -> None:

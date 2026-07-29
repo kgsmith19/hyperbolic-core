@@ -33,9 +33,7 @@ def supabase_mode(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("LIFEOS_OWNER_USER_ID", OWNER)
     # Env vars only — a developer's repo .env must not leak into these tests.
     monkeypatch.setattr(auth, "read_env", lambda name: os.environ.get(name))
-    stub = SimpleNamespace(
-        get_signing_key_from_jwt=lambda token: SimpleNamespace(key=_PUBLIC_KEY)
-    )
+    stub = SimpleNamespace(get_signing_key_from_jwt=lambda token: SimpleNamespace(key=_PUBLIC_KEY))
     monkeypatch.setattr(auth, "_jwks_client", lambda url: stub)
     yield
 
@@ -71,6 +69,14 @@ def test_scopes_claim_narrows_context() -> None:
 @pytest.mark.parametrize("scopes", ["journal:read", [1, 2], {"a": 1}])
 def test_malformed_scopes_rejected(scopes: Any) -> None:
     with pytest.raises(auth.AuthError, match="scopes"):
+        auth.authenticate(request_with(make_token(scopes=scopes)))
+
+
+@pytest.mark.parametrize("scopes", [["*"], ["bills:*"], ["*:write"], ["journal:read", "*"]])
+def test_wildcard_scopes_rejected(scopes: list[str]) -> None:
+    """A scopes claim VALUE asserting everything must not become the owner
+    context — only the absence of the claim grants that (ADR 018)."""
+    with pytest.raises(auth.AuthError, match="wildcard"):
         auth.authenticate(request_with(make_token(scopes=scopes)))
 
 
@@ -141,3 +147,32 @@ def test_route_rejects_request_without_token() -> None:
     forged = make_token(key=_OTHER_KEY)
     response = client.get("/search", headers={"Authorization": f"Bearer {forged}"})
     assert response.status_code == 401
+
+
+def test_principal_reads_the_claims_verified_for_this_request() -> None:
+    """`authenticate` stashes the verified claims; `principal` answers from
+    them — who acted, verified — not from configuration (ADR 018)."""
+    request = request_with(make_token())
+    auth.authenticate(request)
+    assert request.state.claims["sub"] == OWNER
+    assert auth.principal(request) == (OWNER, True)
+
+
+def test_principal_fails_closed_without_verified_claims() -> None:
+    with pytest.raises(auth.AuthError, match="no verified identity"):
+        auth.principal(request_with(None))
+
+
+def test_principal_disabled_mode_is_explicitly_unverified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LIFEOS_AUTH_MODE", "disabled")
+    assert auth.principal(request_with(None)) == (auth.LOCAL_DEV_PRINCIPAL, False)
+
+
+@pytest.mark.parametrize("subject", [None, "", "not a principal; <script>", "-leading-dash"])
+def test_principal_rejects_an_unbounded_subject(subject: Any) -> None:
+    request = request_with(None)
+    request.state.claims = {"sub": subject}
+    with pytest.raises(auth.AuthError, match="usable principal"):
+        auth.principal(request)

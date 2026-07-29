@@ -268,6 +268,14 @@ def render_draft(ctx: AccessContext, attributes: dict[str, Any]) -> str:
         else UNAVAILABLE
     )
     service_date = _text(header.attributes.get("service_date")) if header else UNAVAILABLE
+    # Every cited candidate's currency, in the body and therefore inside the
+    # digest: a letter quoting bare "140.00" to a third party is ambiguous, and
+    # a currency that changed after the approval must invalidate it exactly as
+    # a changed amount does.
+    currencies = sorted(
+        {s.attributes["currency"] for s in ordered if isinstance(s.attributes.get("currency"), str)}
+    )
+    currency = ", ".join(currencies) if currencies else UNAVAILABLE
 
     points = attributes.get("points") or []
     lines = [f"  {n}. {_sentence(p, subjects)}" for n, p in enumerate(points, start=1)]
@@ -286,6 +294,7 @@ def render_draft(ctx: AccessContext, attributes: dict[str, Any]) -> str:
             f"To: {addressee}",
             f"Reference: {reference}",
             f"Service date: {service_date}",
+            f"Currency: {currency}",
             "",
             "To whom it may concern,",
             "",

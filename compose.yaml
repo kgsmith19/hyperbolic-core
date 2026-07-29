@@ -3,7 +3,12 @@
 # nothing is reachable from the public internet.
 services:
   api:
-    image: ${LIFEOS_IMAGE:-ghcr.io/kgsmith19/lifeos:main}
+    # Every deploy records LIFEOS_IMAGE (a sha tag) in the project-directory
+    # .env, which compose reads for interpolation — deploy, the scheduled-jobs
+    # cron, and manual runs all resolve the same image. No fallback tag: the
+    # box only ever loads sha-tagged images over SSH (no registry creds), so a
+    # default like `:main` is an image it never has — fail loudly instead.
+    image: ${LIFEOS_IMAGE:?recorded in ./.env by every deploy (ci.yml Deploy step)}
     restart: unless-stopped
     env_file: .env
     ports:

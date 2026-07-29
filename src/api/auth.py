@@ -149,9 +149,23 @@ def principal(request: Request) -> tuple[str, bool]:
 
 
 def _context_from(claims: dict[str, Any]) -> AccessContext:
+    """Narrow the context by the token's ``scopes`` claim, if it carries one.
+
+    The unscoped owner context comes only from the *absence* of that claim —
+    the owner's own session, which names no powers. A claim *value* asserting
+    everything is refused: ``AccessContext.of("*")`` would be indistinguishable
+    downstream from ``AccessContext.all()`` (the ADR 018 approval guard checks
+    for exactly that member), so a wildcard-bearing scope would let a
+    credential that names its own powers impersonate the session that names
+    none. Real scopes are ``<domain>:<read|write>`` and never contain ``*``.
+    """
     scopes = claims.get("scopes")
     if scopes is None:
         return AccessContext.all()
     if not isinstance(scopes, list) or not all(isinstance(s, str) for s in scopes):
         raise AuthError("malformed scopes claim")
+    if any("*" in scope for scope in scopes):
+        raise AuthError(
+            "wildcard scopes are not grantable; the owner token carries no scopes claim"
+        )
     return AccessContext.of(*scopes)

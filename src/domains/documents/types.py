@@ -45,11 +45,13 @@ MAX_FILENAME = 255
 _SHA256 = {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}
 _TIMESTAMP = {"type": "string", "maxLength": 64}
 # `<first two hex>/<digest>.<bin|txt>` — the store's own key space, so a ref
-# read back out of the database can never address a path outside it.
+# read back out of the database can never address a path outside it. `\Z`, not
+# `$` (jsonschema compiles this with Python `re`): `$` also matches before a
+# trailing newline, which would admit a ref naming a path the store never wrote.
 _BLOB_REF = {
     "type": "string",
     "maxLength": 128,
-    "pattern": "^[0-9a-f]{2}/[0-9a-f]{64}\\.(bin|txt)$",
+    "pattern": "^[0-9a-f]{2}/[0-9a-f]{64}\\.(bin|txt)\\Z",
 }
 
 DOCUMENT_SCHEMA: dict[str, Any] = {

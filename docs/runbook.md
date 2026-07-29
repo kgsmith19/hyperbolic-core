@@ -310,9 +310,11 @@ pgvector Postgres with all migrations applied) → image to GHCR (`:main` +
 via `supabase db push` → render + ship the VPS `.env` → compose pull/up over
 Tailscale SSH → `/healthz` smoke check (verifies DB connectivity).
 
-Rollback: on the VPS as `deploy`:
+Rollback: on the VPS as `deploy` — edit the recorded image rather than
+overriding it inline, so the scheduled-jobs cron (which reads the same
+`.env`) follows the rollback too:
 ```bash
-cd ~/lifeos && LIFEOS_IMAGE=ghcr.io/kgsmith19/lifeos:sha-<previous sha> docker compose up -d
+cd ~/lifeos && sed -i 's|^LIFEOS_IMAGE=.*|LIFEOS_IMAGE=ghcr.io/kgsmith19/lifeos:sha-<previous sha>|' .env && docker compose up -d
 ```
 Database changes roll forward (append-only log); never down-migrate.
 

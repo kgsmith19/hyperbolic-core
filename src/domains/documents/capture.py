@@ -76,6 +76,11 @@ class DocumentErased(ValueError):
     """These exact bytes were erased; re-uploading them would undo that."""
 
 
+class DocumentCaptureRefused(ValueError):
+    """A generic capture tried to write a document record, or to merge into
+    one through its identity field."""
+
+
 class ErasureUnverified(RuntimeError):
     """The store and the entity's pointers disagree, so an erasure cannot be
     reported as complete. Not client input — the system is inconsistent."""
@@ -126,7 +131,14 @@ def capture_document(
     """Store one uploaded document and return its entity id.
 
     Re-uploading identical bytes returns the existing entity untouched.
+
+    Write scope is required **first**, before anything is persisted. This
+    function writes blobs before the entity capture, and `BlobStore` takes no
+    AccessContext — relying on the scope check inside `services.capture` would
+    let a `documents:read` token write files onto the box (the
+    `forget_document` rule, pointed at the write path).
     """
+    require(ctx, f"{DOMAIN}:write")
     if len(data) > MAX_UPLOAD_BYTES:
         raise DocumentTooLarge(f"document exceeds the {MAX_UPLOAD_BYTES} byte cap")
     mime = sniff_mime(data, declared_mime)
@@ -160,7 +172,54 @@ def capture_document(
     cleaned = clean_filename(filename)
     if cleaned:
         attributes["original_filename"] = cleaned
-    return services.capture(ctx, TYPE_NAME, attributes, actor=METHOD).entity_id
+    try:
+        return services.capture(ctx, TYPE_NAME, attributes, actor=METHOD).entity_id
+    except BaseException:
+        # A capture that fails here would strand the blobs just written outside
+        # every erasure path: the entity holding the refs was never created.
+        # Unlink them — safe, because the `find` above proved no other entity
+        # holds this digest — then let the failure surface.
+        for key in ("storage_ref", "text_ref"):
+            ref = attributes.get(key)
+            if isinstance(ref, str):
+                store.delete(ref)
+        raise
+
+
+# The identity field `document` is keyed on. Entity resolution matches on the
+# identity field *name* across every type declaring it, so a payload carrying
+# this key is what makes a capture land on a document record, whatever type the
+# payload claims to be (the bills OWNED_KEYS precedent, ADR 017).
+IDENTITY_KEY = "sha256"
+
+
+def guard_capture(type_name: str, attributes: dict[str, Any]) -> None:
+    """Refuse a `POST /capture` that would land on a document record.
+
+    Mirrors `domains.bills.verify.guard_capture`, and in the same order: the
+    lock is on the record the write would land on, not on the type name it
+    claims. `ExactIdentityResolver` matches on the identity field *name* across
+    every type that declares it, and `capture` validates the *incoming* payload
+    against the *incoming* type's schema before merging — so a fresh type
+    declaring `x-identity: ["sha256"]` could carry a real document's digest,
+    never meet `DOCUMENT_SCHEMA`, and replace `storage_ref`/`text_ref` with
+    dangling refs or forge `erased_at` onto the real document.
+
+    And `document` itself is never a generic capture: its records are written
+    by `capture_document` (`POST /documents`), which is what puts the bytes the
+    refs point at into the store, and by `forget_document`, which is the only
+    thing entitled to write a tombstone.
+    """
+    if IDENTITY_KEY in attributes and type_name != TYPE_NAME:
+        raise DocumentCaptureRefused(
+            f"'{IDENTITY_KEY}' is the identity field of '{TYPE_NAME}'; a capture of "
+            f"'{type_name}' carrying it would merge into that record"
+        )
+    if type_name == TYPE_NAME:
+        raise DocumentCaptureRefused(
+            "'document' records are written by the upload path (POST /documents) "
+            "and the erasure path, never by a direct capture"
+        )
 
 
 def is_document(ctx: AccessContext, entity_id: UUID) -> bool:
@@ -242,28 +301,36 @@ def forget_document(
     store = store or BlobStore()
     refs = [attributes[key] for key in ("storage_ref", "text_ref") if key in attributes]
     absent = [ref for ref in refs if not store.exists(ref)]
-    if absent and len(absent) == len(refs) and "erased_at" in attributes:
+    tombstoned = "erased_at" in attributes
+    if absent and len(absent) == len(refs) and tombstoned:
         # Already fully erased. Distinct from drift, and distinct from success:
         # this call deleted nothing and says so.
         raise DocumentErased(f"document {entity_id} was already erased")
-    if absent:
+    if absent and not tombstoned:
         # Checked before anything is written or unlinked, so a document whose
         # pointers have drifted is left exactly as it was for an operator to
-        # look at, rather than tombstoned with its bill still on disk. A
-        # partially-absent set is deliberately *not* treated as "already
-        # erased": that would strand the remaining blob.
+        # look at, rather than tombstoned with its bill still on disk.
         raise ErasureUnverified(
             f"document {entity_id} points at {len(absent)} blob(s) that are not in the store; "
             "refusing to report an erasure that deleted nothing"
         )
+    if absent:
+        # The tombstone is set and only some blobs are gone: a prior erasure
+        # crashed between the unlinks (the tombstone lands before them). A
+        # retry after a mid-erasure failure must still be able to finish the
+        # job (ADR 015), so RESUME — delete the survivors below — rather than
+        # refusing forever and leaving a blob no erasure path can reach.
+        refs = [ref for ref in refs if ref not in absent]
 
-    # The tombstone repeats the entity's non-PII attributes because `capture`
-    # validates the dict it is handed against the whole schema, not the merged
-    # result. It drops the PII outright, and it lands *before* the redaction so
-    # that even so, forget() scrubs this event too.
-    tombstone = {k: v for k, v in attributes.items() if k not in PII_FIELDS}
-    tombstone["erased_at"] = datetime.now(UTC).isoformat()
-    services.capture(ctx, TYPE_NAME, tombstone, actor=METHOD)
+    if not tombstoned:
+        # The tombstone repeats the entity's non-PII attributes because
+        # `capture` validates the dict it is handed against the whole schema,
+        # not the merged result. It drops the PII outright, and it lands
+        # *before* the redaction so that even so, forget() scrubs this event
+        # too. A resumed erasure already has its tombstone and skips this.
+        tombstone = {k: v for k, v in attributes.items() if k not in PII_FIELDS}
+        tombstone["erased_at"] = datetime.now(UTC).isoformat()
+        services.capture(ctx, TYPE_NAME, tombstone, actor=METHOD)
 
     deleted = 0
     for ref in refs:

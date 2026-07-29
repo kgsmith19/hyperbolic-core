@@ -30,7 +30,9 @@ from kernel.env import read_env
 KIND_BYTES = "bin"
 KIND_TEXT = "txt"
 
-REF_PATTERN = re.compile(r"^[0-9a-f]{2}/[0-9a-f]{64}\.(bin|txt)$")
+# `\Z`, not `$`: `$` also matches before a trailing newline, which would admit
+# `ab/<digest>.bin\n` — a "valid" ref naming a path the store never wrote.
+REF_PATTERN = re.compile(r"^[0-9a-f]{2}/[0-9a-f]{64}\.(bin|txt)\Z")
 DEFAULT_ROOT = "var/blobs"
 
 

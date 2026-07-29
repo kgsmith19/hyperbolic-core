@@ -333,6 +333,18 @@ def test_the_proposal_stores_no_word_of_the_draft(dispute_ctx: AccessContext) ->
     assert view.proposal_id not in {e.id for e in find(dispute_ctx, text=marker)}
 
 
+def test_the_draft_states_the_currency_its_amounts_are_in(dispute_ctx: AccessContext) -> None:
+    """A letter quoting bare "140.00" to a third party is ambiguous, so the
+    header names the currency — which also puts it inside the approval digest."""
+    document_id, _ = failing_document(dispute_ctx, "c4currency", total="140.00")
+    generate_proposals(dispute_ctx, document_ids=[document_id])
+
+    view = sole_proposal(dispute_ctx, document_id)
+
+    assert view.body is not None
+    assert "Currency: USD" in view.body
+
+
 def test_a_rerun_over_unchanged_records_emits_nothing(dispute_ctx: AccessContext) -> None:
     document_id, _ = failing_document(dispute_ctx, "c4rerun", total="140.00")
     generate_proposals(dispute_ctx, document_ids=[document_id])
@@ -712,6 +724,26 @@ def test_an_authority_for_a_different_proposal_does_not_authorize_this_one(
     assert event_count() == after_forgery > before  # the refusal recorded nothing
     # the real grant still works, so the refusal is about the mismatch
     assert emit_draft(dispute_ctx, granted.proposal_id).proposal_id == granted.proposal_id
+
+
+def test_a_currency_change_after_approval_is_refused_at_the_gate(
+    dispute_ctx: AccessContext,
+    owner_ctx: AccessContext,
+) -> None:
+    """The amounts can stay identical while the currency moves underneath the
+    approval — a different letter wearing the same numbers. The currency is in
+    the rendered body, so the digest moves with it and the gate refuses."""
+    document_id, bill_id = failing_document(dispute_ctx, "c4curmoved", total="140.00")
+    generate_proposals(dispute_ctx, document_ids=[document_id])
+    view = sole_proposal(dispute_ctx, document_id)
+    approve(owner_ctx, view)
+    assert emit_draft(dispute_ctx, view.proposal_id).body == view.body  # not vacuous
+
+    stored = get_entity(dispute_ctx, bill_id).entity.attributes
+    capture(dispute_ctx, TYPE_BILL, {**stored, "currency": "EUR"})
+
+    with pytest.raises(DraftChanged):
+        emit_draft(dispute_ctx, view.proposal_id)
 
 
 def test_an_expired_authority_does_not_authorize(

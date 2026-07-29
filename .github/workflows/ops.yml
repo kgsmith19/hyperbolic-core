@@ -22,6 +22,7 @@ on:
           - define-daily-checkin      # A2.5: wellbeing daily_checkin type
           - migrate-durable-erasure   # slice 7 / ADR 012: attendee email_hash identity
           - migrate-bill-status       # C3 / ADR 017: bill+eob gain status "verified"
+          - migrate-bill-date-charset # C4 / ADR 018: service_date/due_date gain a charset pattern
           - install-scheduled-jobs    # B3 / ADR 014: cron for ingest -> autolink -> briefing
 
 permissions:
@@ -39,7 +40,7 @@ jobs:
       - uses: actions/checkout@v7
 
       # Secrets come from Infisical via OIDC at run time — GitHub stores none.
-      - uses: Infisical/secrets-action@v1.0.16
+      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_IDENTITY_ID }}
@@ -70,9 +71,13 @@ jobs:
         if: inputs.task == 'migrate-bill-status'
         run: python scripts/migrate_bill_status_verified.py
 
+      - name: Migrate bill/eob schemas for the date charset bound
+        if: inputs.task == 'migrate-bill-date-charset'
+        run: python scripts/migrate_bill_date_charset.py
+
       - name: Join tailnet
         if: inputs.task == 'install-scheduled-jobs'
-        uses: tailscale/github-action@v4
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4.1.2
         with:
           oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ env.TS_OAUTH_SECRET }}
@@ -81,8 +86,14 @@ jobs:
       # Tailscale SSH as `deploy`, the same channel the deploy job uses — the
       # ACL already allows tag:ci -> tag:prod, so no rule has to be widened for
       # a personal device. The wrapper runs each job in its own throwaway
-      # container from the deployed image; one failing job never stops the next,
-      # and each writes its own execution_receipt (ADR 014).
+      # container from the exact image the current deploy runs: every deploy
+      # records LIFEOS_IMAGE in ~/lifeos/.env (ci.yml Deploy step) and compose
+      # interpolates it from there, so cron and deploy can never run different
+      # images — the box loads sha-tagged images over SSH only, so the old
+      # `:main` registry-tag fallback was an image the box never had. One
+      # failing job never stops the next, and each writes its own
+      # execution_receipt (ADR 014). The wrapper owns its log and rotates it
+      # at 1 MiB, keeping one previous generation.
       - name: Install the scheduled-jobs cron
         if: inputs.task == 'install-scheduled-jobs'
         env:
@@ -95,7 +106,15 @@ jobs:
           cat > /home/deploy/lifeos/run-scheduled-jobs.sh <<'WRAPPER'
           #!/usr/bin/env bash
           # Managed by .github/workflows/ops.yml (task: install-scheduled-jobs).
+          # LIFEOS_IMAGE comes from ./.env, recorded by every deploy — compose
+          # interpolates it, so these jobs run the image the deploy runs.
           cd /home/deploy/lifeos || exit 1
+          log=/home/deploy/lifeos/jobs.log
+          if [ -f "$log" ] && [ "$(stat -c %s "$log")" -ge 1048576 ]; then
+            mv -f -- "$log" "$log.1"
+          fi
+          exec >>"$log" 2>&1
+          echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) scheduled jobs ==="
           status=0
           for job in domains.calendar.ingest domains.calendar.autolink domains.ops.briefing; do
             docker compose run --rm --no-deps api python -m "$job" || status=1
@@ -110,7 +129,7 @@ jobs:
           { crontab -l 2>/dev/null || true; } | sed '/# >>> lifeos jobs/,/# <<< lifeos jobs/d' > "$tmp"
           {
             echo '# >>> lifeos jobs'
-            echo '15 6 * * *  /home/deploy/lifeos/run-scheduled-jobs.sh >> /home/deploy/lifeos/jobs.log 2>&1'
+            echo '15 6 * * *  /home/deploy/lifeos/run-scheduled-jobs.sh'
             echo '# <<< lifeos jobs'
           } >> "$tmp"
           crontab "$tmp"

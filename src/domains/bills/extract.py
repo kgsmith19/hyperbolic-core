@@ -51,6 +51,7 @@ from domains.bills.types import (
     EXTRACTION_OK,
     EXTRACTION_REFUSED,
     EXTRACTION_UNPARSABLE,
+    FIELD_NAME_PATTERN,
     MAX_CODE,
     MAX_FLAGGED_FIELDS,
     MAX_LINE_ITEMS,
@@ -93,7 +94,7 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _AMOUNT = re.compile(r"^-?\d{1,12}(\.\d{1,4})?$")
 _CODE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,15}$")
 _CURRENCY = re.compile(r"^[A-Za-z]{3}$")
-_FIELD_NAME = re.compile(r"^[a-z_]{1,32}$")
+_FIELD_NAME = re.compile(FIELD_NAME_PATTERN)
 # The same bounds the type schemas carry, applied before capture so the key is
 # derived from the value that is actually stored.
 _ORG = re.compile(ORG_PATTERN)
@@ -614,41 +615,53 @@ def extract_document(
 
     try:
         report.status, payload = _call_model(client or get_model_client(), model, text)
-    except BaseException:
-        record_the_run()  # the request went out; say so, then let it raise
-        raise
 
-    if payload is not None:
-        bills = payload.get("bills") or []
-        eobs = payload.get("eobs") or []
-        # Per-document, so erasure survives the model rewording itself between
-        # runs (see `_document_redactions`).
-        bill_redactions = _document_redactions(ctx, TYPE_BILL, document_id)
-        eob_redactions = _document_redactions(ctx, TYPE_EOB, document_id)
-        for record in bills[:MAX_RECORDS] if isinstance(bills, list) else []:
-            if not isinstance(record, dict):
-                continue
-            provenance = {**provenance_base, "confidence": _confidence(record.get("confidence"))}
-            attributes = _bill_attributes(record, document_sha256, provenance, now)
-            entity_id, written = _capture_record(
-                ctx, TYPE_BILL, "bill_key", attributes, bill_redactions
-            )
-            if written:
-                report.produced.append(entity_id)
-            report.bill_count += 1
-        for record in eobs[:MAX_RECORDS] if isinstance(eobs, list) else []:
-            if not isinstance(record, dict):
-                continue
-            provenance = {**provenance_base, "confidence": _confidence(record.get("confidence"))}
-            attributes = _eob_attributes(record, document_sha256, provenance, now)
-            entity_id, written = _capture_record(
-                ctx, TYPE_EOB, "eob_key", attributes, eob_redactions
-            )
-            if written:
-                report.produced.append(entity_id)
-            report.eob_count += 1
-        if not report.bill_count and not report.eob_count:
-            report.status = EXTRACTION_EMPTY
+        if payload is not None:
+            bills = payload.get("bills") or []
+            eobs = payload.get("eobs") or []
+            # Per-document, so erasure survives the model rewording itself
+            # between runs (see `_document_redactions`).
+            bill_redactions = _document_redactions(ctx, TYPE_BILL, document_id)
+            eob_redactions = _document_redactions(ctx, TYPE_EOB, document_id)
+            for record in bills[:MAX_RECORDS] if isinstance(bills, list) else []:
+                if not isinstance(record, dict):
+                    continue
+                provenance = {
+                    **provenance_base,
+                    "confidence": _confidence(record.get("confidence")),
+                }
+                attributes = _bill_attributes(record, document_sha256, provenance, now)
+                entity_id, written = _capture_record(
+                    ctx, TYPE_BILL, "bill_key", attributes, bill_redactions
+                )
+                if written:
+                    report.produced.append(entity_id)
+                report.bill_count += 1
+            for record in eobs[:MAX_RECORDS] if isinstance(eobs, list) else []:
+                if not isinstance(record, dict):
+                    continue
+                provenance = {
+                    **provenance_base,
+                    "confidence": _confidence(record.get("confidence")),
+                }
+                attributes = _eob_attributes(record, document_sha256, provenance, now)
+                entity_id, written = _capture_record(
+                    ctx, TYPE_EOB, "eob_key", attributes, eob_redactions
+                )
+                if written:
+                    report.produced.append(entity_id)
+                report.eob_count += 1
+            if not report.bill_count and not report.eob_count:
+                report.status = EXTRACTION_EMPTY
+    except BaseException:
+        # The request went out — or may have — so the run is recorded before the
+        # error propagates. This covers the post-call section too: a failure in
+        # the redaction lookup or the capture loops arrives AFTER the text left
+        # the box, and without a record `_pending_documents` would put the
+        # document back into the sweep and silently send it again.
+        report.status = EXTRACTION_FAILED
+        record_the_run()
+        raise
 
     record_the_run()
     return report

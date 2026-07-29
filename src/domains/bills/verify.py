@@ -57,6 +57,7 @@ from domains.bills.types import (
     CHECK_NO_DUPLICATE_LINES,
     CHECK_NO_LOW_CONFIDENCE_FIELDS,
     DOMAIN,
+    FIELD_NAME_PATTERN,
     KEY_FIELDS,
     MAX_CHECKS,
     MAX_FLAGGED_FIELDS,
@@ -102,7 +103,7 @@ WINDOW_FORWARD = timedelta(days=730)
 
 EOB_AMOUNTS = ("billed", "allowed", "plan_paid", "patient_resp")
 _MONEY_FIELDS = ("amount", *EOB_AMOUNTS)
-_FIELD_NAME = re.compile(r"^[a-z_]{1,32}$")
+_FIELD_NAME = re.compile(FIELD_NAME_PATTERN)
 
 
 def _money(raw: Any) -> Decimal | None:
@@ -234,12 +235,20 @@ def _eob_line_checks(subject: Subject) -> list[Check]:
 
     checks: list[Check] = []
     negative_at: int | None = None
+    any_partial = False
     for index, item in enumerate(items):
         billed = _money(item.get("billed"))
         allowed = _money(item.get("allowed"))
         plan_paid = _money(item.get("plan_paid"))
         patient_resp = _money(item.get("patient_resp"))
+        # The negativity scan runs over whatever amounts ARE present, so a
+        # partial line — one the arithmetic checks below must skip — cannot
+        # smuggle a negative amount past this check.
+        present = [a for a in (billed, allowed, plan_paid, patient_resp) if a is not None]
+        if negative_at is None and any(a < 0 for a in present):
+            negative_at = index
         if billed is None or allowed is None or plan_paid is None or patient_resp is None:
+            any_partial = True
             checks.append(Check(CHECK_EOB_LINE_SPLIT, subject_id, RESULT_UNCHECKED, index))
             checks.append(
                 Check(CHECK_EOB_ALLOWED_WITHIN_BILLED, subject_id, RESULT_UNCHECKED, index)
@@ -262,18 +271,18 @@ def _eob_line_checks(subject: Subject) -> list[Check]:
                 delta=over,
             )
         )
-        if negative_at is None and min(billed, allowed, plan_paid, patient_resp) < 0:
-            negative_at = index
+    # A found negative fails regardless of gaps; with no negative found, a line
+    # with an absent amount means the scan could not fully run, and a check that
+    # could not fully run says `unchecked`, never `pass` (the silence precedent).
     # No delta on this one: the number that would prove it is an amount from the
     # document rather than a difference between two of them.
-    checks.append(
-        Check(
-            CHECK_EOB_AMOUNTS_NON_NEGATIVE,
-            subject_id,
-            RESULT_FAIL if negative_at is not None else RESULT_PASS,
-            line_index=negative_at,
-        )
-    )
+    if negative_at is not None:
+        result = RESULT_FAIL
+    elif any_partial:
+        result = RESULT_UNCHECKED
+    else:
+        result = RESULT_PASS
+    checks.append(Check(CHECK_EOB_AMOUNTS_NON_NEGATIVE, subject_id, result, line_index=negative_at))
     return checks
 
 
