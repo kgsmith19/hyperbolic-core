@@ -18,21 +18,30 @@ export class ApiError extends Error {
   }
 }
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+async function authHeader(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+// A 401 means the session is gone; every request path hands the user back to
+// login the same way.
+async function signOutOn401(response: Response): Promise<void> {
+  if (response.status !== 401) return;
+  await supabase.auth.signOut();
+  window.location.assign("/login");
+  throw new ApiError(401, "signed out");
+}
+
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${import.meta.env.VITE_API_URL}${path}`, {
     ...init,
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(await authHeader()),
     },
   });
-  if (response.status === 401) {
-    await supabase.auth.signOut();
-    window.location.assign("/login");
-    throw new ApiError(401, "signed out");
-  }
+  await signOutOn401(response);
   if (!response.ok) {
     const detail = await response
       .json()
@@ -120,21 +129,15 @@ export async function streamChat(
   messages: { role: "user" | "assistant"; content: string }[],
   onFrame: (frame: ChatFrame) => void,
 ): Promise<void> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
   const response = await fetch(`${import.meta.env.VITE_API_URL}/chat`, {
     method: "POST",
     body: JSON.stringify({ messages }),
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(await authHeader()),
     },
   });
-  if (response.status === 401) {
-    await supabase.auth.signOut();
-    window.location.assign("/login");
-    throw new ApiError(401, "signed out");
-  }
+  await signOutOn401(response);
   if (!response.ok || !response.body)
     throw new ApiError(response.status, response.statusText);
   const reader = response.body.getReader();
