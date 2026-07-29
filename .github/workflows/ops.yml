@@ -24,6 +24,7 @@ on:
           - migrate-bill-status       # C3 / ADR 017: bill+eob gain status "verified"
           - migrate-bill-date-charset # C4 / ADR 018: service_date/due_date gain a charset pattern
           - install-scheduled-jobs    # B3 / ADR 014: cron for ingest -> autolink -> briefing
+          - run-scheduled-jobs        # run the nightly trio once, now (end-to-end verification)
 
 permissions:
   contents: read
@@ -49,12 +50,12 @@ jobs:
           domain: https://app.infisical.com
 
       - uses: actions/setup-python@v7
-        if: inputs.task != 'install-scheduled-jobs'
+        if: inputs.task != 'install-scheduled-jobs' && inputs.task != 'run-scheduled-jobs'
         with:
           python-version: "3.14"
           cache: pip
       - run: python -m pip install -e .
-        if: inputs.task != 'install-scheduled-jobs'
+        if: inputs.task != 'install-scheduled-jobs' && inputs.task != 'run-scheduled-jobs'
 
       # The scripts read DATABASE_URL from the environment (kernel.env.read_env
       # prefers it over the repo .env, which does not exist on a runner). None of
@@ -76,7 +77,7 @@ jobs:
         run: python scripts/migrate_bill_date_charset.py
 
       - name: Join tailnet
-        if: inputs.task == 'install-scheduled-jobs'
+        if: inputs.task == 'install-scheduled-jobs' || inputs.task == 'run-scheduled-jobs'
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4.1.2
         with:
           oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
@@ -136,4 +137,28 @@ jobs:
           rm -f "$tmp"
           echo "installed; crontab now:"
           crontab -l | sed -n '/# >>> lifeos jobs/,/# <<< lifeos jobs/p'
+          REMOTE
+
+      # On-demand execution of the exact wrapper cron runs, over the same
+      # channel — the only way to verify the schedule end-to-end without
+      # waiting for 06:15 box time. The wrapper writes its output to
+      # jobs.log, so the step prints the fresh tail; a failing job fails
+      # this run too, exactly as it would fail the cron.
+      - name: Run the scheduled jobs once, now
+        if: inputs.task == 'run-scheduled-jobs'
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          test -x /home/deploy/lifeos/run-scheduled-jobs.sh || {
+            echo "wrapper not installed; run task=install-scheduled-jobs first" >&2
+            exit 1
+          }
+          status=0
+          /home/deploy/lifeos/run-scheduled-jobs.sh || status=$?
+          echo "--- jobs.log tail ---"
+          tail -n 40 /home/deploy/lifeos/jobs.log
+          exit $status
           REMOTE
