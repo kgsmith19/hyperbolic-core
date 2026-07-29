@@ -104,7 +104,10 @@ jobs:
           WRAPPER
           chmod 0755 /home/deploy/lifeos/run-scheduled-jobs.sh
           tmp=$(mktemp)
-          crontab -l 2>/dev/null | sed '/# >>> lifeos jobs/,/# <<< lifeos jobs/d' > "$tmp"
+          # `crontab -l` exits non-zero when the user has no crontab yet, which
+          # under `set -e -o pipefail` killed this script before it printed
+          # anything. A first install is the normal case, not a failure.
+          { crontab -l 2>/dev/null || true; } | sed '/# >>> lifeos jobs/,/# <<< lifeos jobs/d' > "$tmp"
           {
             echo '# >>> lifeos jobs'
             echo '15 6 * * *  /home/deploy/lifeos/run-scheduled-jobs.sh >> /home/deploy/lifeos/jobs.log 2>&1'
