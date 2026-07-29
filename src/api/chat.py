@@ -71,9 +71,13 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def _model() -> str:
+    return read_env("LIFEOS_CHAT_MODEL") or "claude-opus-5"
+
+
 def _stream_params(convo: list[dict[str, Any]]) -> dict[str, Any]:
     return {
-        "model": read_env("LIFEOS_CHAT_MODEL") or "claude-opus-5",
+        "model": _model(),
         "max_tokens": MAX_TOKENS,
         "output_config": {"effort": read_env("LIFEOS_CHAT_EFFORT") or "low"},
         "system": tools.INSTRUCTIONS + CHAT_STYLE,
@@ -160,7 +164,7 @@ def _run(client: anthropic.Anthropic, ctx: AccessContext, body: ChatIn) -> Itera
             {
                 "citations": {key: sorted(values) for key, values in citations.items()},
                 "latency": {"model_ms": model_ms, "tool_ms": tool_ms, "total_ms": total_ms},
-                "model": _stream_params([])["model"],
+                "model": _model(),
                 "stop_reason": stop_reason,
             },
         )

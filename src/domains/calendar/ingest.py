@@ -122,24 +122,15 @@ def _provenance(feed_sha: str) -> dict[str, Any]:
     return {"method": METHOD, "confidence": 1.0, "source_sha256": feed_sha}
 
 
-def _redacted_fields(ctx: AccessContext, entity_id: UUID) -> set[str]:
-    """Fields already erased from this entity, per its own ``pii.redacted``
-    events (the payload forget() appends: ``{"fields": [...]}``).
-
-    Ingestion must never write these back. The feed is unchanged by erasure —
-    it still names the title, location and address that were erased — and
-    capture merges new attributes over old, so one later VEVENT edit would
-    re-materialize them on the very same entity (invariant 9, ADR 012)."""
-    fields: set[str] = set()
-    for event in services.history(ctx, entity_id):
-        if event.event_type == "pii.redacted":
-            fields |= {f for f in event.payload.get("fields", []) if isinstance(f, str)}
-    return fields
-
-
 def _writable(ctx: AccessContext, entity_id: UUID, attributes: dict[str, Any]) -> dict[str, Any]:
-    """`attributes` minus everything this entity has had erased."""
-    redacted = _redacted_fields(ctx, entity_id)
+    """`attributes` minus everything this entity has had erased.
+
+    Ingestion must never write erased fields back: the feed is unchanged by
+    erasure — it still names the title, location and address that were erased —
+    so one later VEVENT edit would re-materialize them on the very same entity
+    (invariant 9, ADR 012).
+    """
+    redacted = services.redacted_fields(ctx, entity_id)
     return {k: v for k, v in attributes.items() if k not in redacted}
 
 

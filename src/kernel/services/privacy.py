@@ -18,6 +18,7 @@ from kernel import db
 from kernel.access import AccessContext, require
 from kernel.events import DEFAULT_ACTOR, append_event, tx_now
 from kernel.services.common import entity_domains, entity_type_names, load_entity, load_type
+from kernel.services.queries import history
 
 
 class ForgetResult(BaseModel):
@@ -52,6 +53,22 @@ def _redact_payload(payload: dict[str, Any], fields: set[str]) -> dict[str, Any]
     if isinstance(entity, dict) and "name" in fields:
         entity["name"] = None
     return out
+
+
+def redacted_fields(ctx: AccessContext, entity_id: UUID) -> set[str]:
+    """Fields already erased from this entity, per its own ``pii.redacted``
+    events (the payload ``forget`` appends: ``{"fields": [...]}``).
+
+    The read half of durable erasure (invariant 9, ADR 012): ``capture`` merges
+    new attributes over old, so a writer that re-materializes data from a source
+    erasure never touched — a feed, a stored document — must strip these fields
+    first, or its next run would silently write the erasure back.
+    """
+    fields: set[str] = set()
+    for event in history(ctx, entity_id):
+        if event.event_type == "pii.redacted":
+            fields |= {f for f in event.payload.get("fields", []) if isinstance(f, str)}
+    return fields
 
 
 def forget(

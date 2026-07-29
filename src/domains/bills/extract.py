@@ -472,22 +472,6 @@ def _eob_attributes(
     return attributes
 
 
-def _redacted_fields(ctx: AccessContext, entity_id: UUID) -> set[str]:
-    """Fields already erased from this candidate, per its own ``pii.redacted``
-    events (the payload ``forget()`` appends: ``{"fields": [...]}``).
-
-    Extraction must never write these back. Erasing a candidate does not touch
-    the source document, so re-running extraction would otherwise re-materialize
-    the issuer, the total and every line item on the very same entity — the
-    ADR 012 "Durable erasure" failure, one domain over.
-    """
-    fields: set[str] = set()
-    for event in services.history(ctx, entity_id):
-        if event.event_type == "pii.redacted":
-            fields |= {f for f in event.payload.get("fields", []) if isinstance(f, str)}
-    return fields
-
-
 def _document_redactions(ctx: AccessContext, type_name: str, document_id: UUID) -> set[str]:
     """Every field erased from *any* candidate of this type that cites this
     document.
@@ -510,7 +494,7 @@ def _document_redactions(ctx: AccessContext, type_name: str, document_id: UUID) 
         provenance = entity.attributes.get("provenance")
         cited = provenance.get("source_entity_ids", []) if isinstance(provenance, dict) else []
         if str(document_id) in cited:
-            fields |= _redacted_fields(ctx, entity.id)
+            fields |= services.redacted_fields(ctx, entity.id)
     return fields
 
 
@@ -537,7 +521,7 @@ def _capture_record(
     strip = set(redacted or ())
     existing = services.find(ctx, type_name=type_name, filters={key_field: attributes[key_field]})
     if existing:
-        strip |= _redacted_fields(ctx, existing[0].id)
+        strip |= services.redacted_fields(ctx, existing[0].id)
     attributes = {k: v for k, v in attributes.items() if k not in strip}
     if existing:
         stored = existing[0].attributes
