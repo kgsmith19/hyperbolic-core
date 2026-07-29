@@ -48,8 +48,12 @@ Pre-made decisions in prompts are not relitigated.
   2026-07-28 (PR #36): calendar domain as registry data + src/domains/calendar/
   CLI ingestion, idempotent by VEVENT hash, raw-feed source receipts linked via
   derived_from edges; golden Q1 acceptance runs through chat on deploy
-- [ ] B2 Zero-LLM auto-link (exact/alias match vs identity spine → typed edge
-  events + dedup-review queue)
+- [x] B2 Zero-LLM auto-link (exact/alias match vs identity spine → typed edge
+  events + dedup-review queue) — done 2026-07-28 (PR #37): deterministic
+  `python -m domains.calendar.autolink`; exact normalized email only (Google
+  dot/plus aliases, not generalized), one candidate → `is_person` edge with the
+  ADR-010 envelope, 2+ or conflicting → `link_review` item, none → nothing;
+  edges only, the identity spine is never rewritten (ADR-013)
 - [ ] B3 Daily briefing cron + execution receipts + trigger_feedback
 - [ ] B4 `/tomorrow` page (lifeos-ui)
 

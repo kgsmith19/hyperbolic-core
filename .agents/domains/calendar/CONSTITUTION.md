@@ -15,8 +15,14 @@ Owns: `src/domains/calendar/**`, `tests/calendar/**`.
   (invariant 9, ADR 012).
 - Every derived entity links to its source receipt via a `derived_from` edge
   carrying `{method, confidence}` (ADR 010 provenance convention, ADR 012).
-- Runs under a narrow code-built AccessContext (`calendar:read` +
-  `calendar:write`), never `AccessContext.all()` (ADR 012).
+- Runs under a narrow code-built AccessContext, never `AccessContext.all()`:
+  `calendar:read`/`write` for ingestion (ADR 012), plus
+  `relationships:read`/`write` for the auto-link pass, whose edges span both
+  domains (ADR 013).
+- Auto-link is deterministic and exact — no LLM, no fuzzy matching, no name
+  matching; it emits edges and review items only, never merges or rewrites the
+  person spine (invariant 4, ADR 013). Ambiguity goes to `link_review`, which
+  stores entity IDs and a reason code and never third-party PII.
 - Secrets stay out: never log or store a feed URL (it may embed a token) —
   redacted host + hashes only.
 - Behavior changes land with tests in `tests/calendar/` (unit for parsing,

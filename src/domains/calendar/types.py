@@ -4,7 +4,8 @@ Schemas bound every text field (feed content is untrusted) and close
 ``additionalProperties`` so unvetted feed junk cannot land in attributes.
 The attendee identity field is deliberately ``email`` (singular) — distinct
 from person's ``emails`` — so ingestion never merges onto the person spine;
-linking attendees to people is the B2 auto-link slice, on purpose.
+attendees are linked to people by the auto-link pass instead, which emits an
+edge and never rewrites the spine (``autolink.py``, ADR 013).
 """
 
 from typing import Any
@@ -80,10 +81,43 @@ SOURCE_RECEIPT_SCHEMA: dict[str, Any] = {
     "x-identity": ["receipt_key"],
 }
 
+_UUID = {
+    "type": "string",
+    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+}
+
+# The dedup-review queue (ADR 013): what the auto-link pass refused to guess at.
+# It holds entity IDs and a reason code and NOTHING else — deliberately no
+# email, no display name, no free text. `entity.search` is a generated tsvector
+# over `attributes::text` and forget() is strictly per-entity, so an email
+# copied here would survive erasure of the attendee it belongs to and stay
+# full-text searchable (reachable through chat, which reads every domain).
+# The attendee's own record stays the single place its email lives; a reviewer
+# resolves the item by reading the referenced entities.
+LINK_REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "review_key": {"type": "string", "maxLength": 128},
+        "attendee_id": _UUID,
+        "candidate_person_ids": {"type": "array", "items": _UUID, "maxItems": 50},
+        "reason": {
+            "type": "string",
+            "enum": ["ambiguous_email_match", "conflicting_existing_link"],
+        },
+        "method": {"type": "string", "maxLength": 64},
+        "detected_at": _TIMESTAMP,
+    },
+    "required": ["review_key", "attendee_id", "candidate_person_ids", "reason"],
+    "additionalProperties": False,
+    "x-identity": ["review_key"],
+    # no x-pii: this type carries no person-identifying value, by design
+}
+
 _TYPES = {
     "appointment": APPOINTMENT_SCHEMA,
     "attendee": ATTENDEE_SCHEMA,
     "source_receipt": SOURCE_RECEIPT_SCHEMA,
+    "link_review": LINK_REVIEW_SCHEMA,
 }
 
 
