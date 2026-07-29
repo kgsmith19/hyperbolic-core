@@ -11,7 +11,8 @@ Public surface = application services in `src/kernel/services/`; import from
   merges onto a shared multi-domain entity (revisit when agent scopes land)
 - `relate(ctx, from_id, relation, to_id, valid_from, attributes=None, actor="kyle") -> Edge`
 - `supersede_edge(ctx, edge_id, valid_to, actor="kyle") -> Edge`
-- `get_entity(ctx, entity_id) -> EntityView`
+- `get_entity(ctx, entity_id) -> EntityView` — edges appear only when every
+  domain of the edge's other endpoint is readable (same rule as `find`)
 - `find(ctx, type_name=None, filters=None, text=None) -> list[Entity]` — returns
   only entities every domain of which ctx can read (same rule as `get_entity`)
 - `history(ctx, entity_id) -> list[Event]`
