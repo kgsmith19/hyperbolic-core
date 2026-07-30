@@ -12,7 +12,7 @@ from kernel.access import AccessContext, require
 from kernel.events import DEFAULT_ACTOR, append_event, iso, tx_now
 from kernel.projections import apply_event
 from kernel.resolution import EntityResolver, ExactIdentityResolver, Resolution
-from kernel.services.common import entity_type_names, load_type
+from kernel.services.common import entity_domains, entity_type_names, load_type
 
 _default_resolver = ExactIdentityResolver()
 
@@ -44,6 +44,15 @@ def capture(
         if result.resolution is Resolution.MATCH:
             assert result.entity_id is not None
             entity_id = result.entity_id
+            # Identity resolution crosses types (resolver matches on the field
+            # name across every type declaring it), so a MATCH may merge this
+            # write into a record that spans other domains. Guard the record the
+            # write lands on, not just the claimed type's domain — mirroring
+            # relate() and forget(). Without this, a token scoped to write only
+            # the incoming domain could rewrite a record in a domain it holds no
+            # write on (invariant 5: agent scoping without rework).
+            for domain in sorted(entity_domains(conn, entity_id)):
+                require(ctx, f"{domain}:write")
             existing = conn.execute(
                 "select attributes, created_at from entity where id = %s", (entity_id,)
             ).fetchone()

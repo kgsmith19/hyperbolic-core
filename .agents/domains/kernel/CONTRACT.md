@@ -11,8 +11,10 @@ Public surface = application services in `src/kernel/services/`; import from
 - `define_missing(ctx, domain, schemas) -> list[str]` — define whichever of
   `{name: json_schema}` is not registered yet; idempotent, returns what it defined
 - `capture(ctx, type_name, attributes, valid_time=None, actor="kyle", resolver=None) -> CaptureResult`
-  — requires write on the captured type's domain only, even when resolution
-  merges onto a shared multi-domain entity (revisit when agent scopes land)
+  — requires write on the captured type's domain; on a resolution MATCH that
+  merges onto a shared multi-domain entity, also requires write on every domain
+  that record already belongs to (guard the record, not the claimed type — same
+  rule as `relate`/`forget`)
 - `relate(ctx, from_id, relation, to_id, valid_from, attributes=None, actor="kyle") -> Edge`
 - `supersede_edge(ctx, edge_id, valid_to, actor="kyle") -> Edge`
 - `get_entity(ctx, entity_id) -> EntityView` — edges appear only when every
