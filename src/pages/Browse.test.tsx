@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import Browse from "./Browse";
+import { searchEntities } from "../api/client";
 import { renderWithProviders } from "../test-utils";
 
 vi.mock("../api/client", () => ({
@@ -31,5 +32,11 @@ describe("Browse", () => {
       "href",
       "/entities/4f6f1a5e-0000-0000-0000-000000000001",
     );
+  });
+
+  it("says plainly when the search matches nothing", async () => {
+    vi.mocked(searchEntities).mockResolvedValueOnce([]);
+    renderWithProviders(<Browse />);
+    expect(await screen.findByText("No results.")).toBeInTheDocument();
   });
 });

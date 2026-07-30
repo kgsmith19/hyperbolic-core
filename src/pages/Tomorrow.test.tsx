@@ -232,6 +232,16 @@ describe("Tomorrow", () => {
     expect(screen.getByText(/no focus goals yet/i)).toBeInTheDocument();
   });
 
+  it("shows a still-resolving citation as loading, never as gone", async () => {
+    mockBriefing(FULL);
+    vi.mocked(getEntity).mockImplementation(() => new Promise(() => {}));
+    renderWithProviders(<Tomorrow />);
+
+    expect(await screen.findByText("Focus goals")).toBeInTheDocument();
+    expect(screen.getAllByText("Loading…")).toHaveLength(4);
+    expect(screen.queryByText(/no longer available/i)).not.toBeInTheDocument();
+  });
+
   it("reports a cited id that no longer resolves instead of guessing", async () => {
     mockBriefing({
       ...FULL,
