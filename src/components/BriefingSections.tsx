@@ -1,12 +1,14 @@
-// The three section bodies of the Tomorrow cockpit (page: pages/Tomorrow.tsx).
+// The section bodies of the Tomorrow cockpit (page: pages/Tomorrow.tsx).
 //
 // Each one renders ids the briefing cited and the page already resolved
 // (ADR 014): an id that no longer resolves is shown as gone, never guessed at.
+// INT1 composition order: focus intentions, then appointments, then nothing
+// else; the Monday edition's gate is inline counts, so it resolves nothing.
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
 import type { EntityView } from "../api/client";
-import { asIds, asString, type Attributes } from "../attributes";
+import { asString, type Attributes, type Gate } from "../attributes";
 
 export type Resolved = {
   id: string;
@@ -20,20 +22,6 @@ function timeLabel(attributes: Attributes): string {
   const at = startsAt ? new Date(startsAt) : undefined;
   if (!at || Number.isNaN(at.getTime())) return "Time unknown";
   return at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-const REASONS: Record<string, string> = {
-  ambiguous_email_match: "More than one person matches this attendee.",
-  conflicting_existing_link: "This attendee is already linked to someone else.",
-};
-
-/** A cited id is the only handle the briefing gives us; short form stays readable. */
-function EntityLink({ id, label }: { id: string; label?: string }) {
-  return (
-    <Link to={`/entities/${id}`} className="mr-2 text-blue-700 hover:underline">
-      {label ?? id.slice(0, 8)}
-    </Link>
-  );
 }
 
 function Gone({ id, noun }: { id: string; noun: string }) {
@@ -56,6 +44,49 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       </h2>
       {children}
     </section>
+  );
+}
+
+export function FocusIntentions({ items }: { items: Resolved[] }) {
+  return (
+    <Section title="Focus goals">
+      {items.length === 0 ? (
+        <Empty>
+          No focus goals yet — mark up to three intentions as focus.
+        </Empty>
+      ) : (
+        <ul className="space-y-2">
+          {items.map(({ id, entity, missing }) =>
+            missing || !entity ? (
+              <Gone key={id} id={id} noun="intention" />
+            ) : (
+              <li key={id}>
+                <Link
+                  to={`/entities/${id}`}
+                  className="block rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-400"
+                >
+                  <span className="text-sm font-medium">
+                    {entity.name ??
+                      asString(entity.attributes.title) ??
+                      id.slice(0, 8)}
+                  </span>
+                  {asString(entity.attributes.next_action) && (
+                    <span className="mt-0.5 block text-xs text-zinc-600">
+                      Next: {asString(entity.attributes.next_action)}
+                    </span>
+                  )}
+                  {asString(entity.attributes.floor) && (
+                    <span className="mt-0.5 block text-xs text-zinc-500">
+                      Floor: {asString(entity.attributes.floor)}
+                    </span>
+                  )}
+                </Link>
+              </li>
+            ),
+          )}
+        </ul>
+      )}
+    </Section>
   );
 }
 
@@ -105,94 +136,16 @@ export function Appointments({ items }: { items: Resolved[] }) {
   );
 }
 
-export function OpenReviews({ items }: { items: Resolved[] }) {
+/** Monday edition only (ADR 019 rule 9): check-in days per week over the four
+ * complete weeks behind it — counts and a verdict, no narration. */
+export function GateStatus({ gate }: { gate?: Gate }) {
+  if (!gate) return null;
   return (
-    <Section title="Needs your decision">
-      {items.length === 0 ? (
-        <Empty>Nothing is waiting on you.</Empty>
-      ) : (
-        <ul className="space-y-2">
-          {items.map(({ id, entity, missing }) =>
-            missing || !entity ? (
-              <Gone key={id} id={id} noun="review item" />
-            ) : (
-              <li
-                key={id}
-                className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm"
-              >
-                <p>
-                  {REASONS[asString(entity.attributes.reason) ?? ""] ??
-                    "This link needs a human decision."}
-                </p>
-                <p className="mt-1 text-xs text-zinc-600">
-                  Attendee:{" "}
-                  {asString(entity.attributes.attendee_id) ? (
-                    <EntityLink
-                      id={asString(entity.attributes.attendee_id) ?? ""}
-                    />
-                  ) : (
-                    "unknown"
-                  )}
-                  {asIds(entity.attributes.candidate_person_ids).length > 0 && (
-                    <>
-                      · Candidates:{" "}
-                      {asIds(entity.attributes.candidate_person_ids).map(
-                        (personId) => (
-                          <EntityLink key={personId} id={personId} />
-                        ),
-                      )}
-                    </>
-                  )}
-                  <EntityLink id={id} label="review item" />
-                </p>
-              </li>
-            ),
-          )}
-        </ul>
-      )}
-    </Section>
-  );
-}
-
-export function LatestCheckin({ item }: { item?: Resolved }) {
-  return (
-    <Section title="Latest check-in">
-      {!item ? (
-        <Empty>No check-in recorded yet.</Empty>
-      ) : item.missing || !item.entity ? (
-        <ul>
-          <Gone id={item.id} noun="check-in" />
-        </ul>
-      ) : (
-        <Link
-          to={`/entities/${item.id}`}
-          className="block rounded-lg border border-zinc-200 bg-white p-3 text-sm hover:border-zinc-400"
-        >
-          <span className="font-medium">
-            {asString(item.entity.attributes.date) ?? "Check-in"}
-          </span>
-          <span className="mt-1 block text-zinc-600">
-            {(["mood", "energy", "stress", "sleep_quality"] as const)
-              .filter((key) => item.entity?.attributes[key] != null)
-              .map(
-                (key) =>
-                  `${key.replace("_", " ")} ${String(item.entity?.attributes[key])}/5`,
-              )
-              .join(" · ")}
-          </span>
-          {asIds(item.entity.attributes.top_priorities).length > 0 && (
-            <span className="mt-1 block text-zinc-600">
-              Priorities:{" "}
-              {asIds(item.entity.attributes.top_priorities).join(", ")}
-            </span>
-          )}
-          {asString(item.entity.attributes.note) && (
-            <span className="mt-1 block text-zinc-500">
-              {asString(item.entity.attributes.note)}
-            </span>
-          )}
-        </Link>
-      )}
+    <Section title="Utility gate">
+      <p className="text-sm text-zinc-600">
+        {gate.met ? "Met" : "Open"} — check-in days per week:{" "}
+        {gate.weeks.join(" · ")}
+      </p>
     </Section>
   );
 }

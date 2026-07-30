@@ -73,16 +73,18 @@ export interface paths {
     put?: never;
     /**
      * Post Capture
-     * @description Generic capture. Two domains lock this door on the way in, and both
-     *     locks are on the record the write would land on, not the type name it
-     *     claims. Bills (ADR 017): `status: "verified"` is the reconciliation
-     *     verifier's to write, and a verified record is not editable by hand, because
-     *     `capture` merges and the verified status would survive an edit to the
-     *     numbers under it. Documents (ADR 015): `document` records exist only
-     *     through the upload and erasure paths, and a foreign type carrying the
-     *     `sha256` identity key would merge into a real document — dangling its refs
-     *     or forging its tombstone. The decisions live in the domains; this is the
-     *     dispatch.
+     * @description Generic capture. Three domains lock this door on the way in; the
+     *     decisions live in the domains, this is the dispatch. Two locks are on the
+     *     record the write would land on, not the type name it claims. Bills
+     *     (ADR 017): `status: "verified"` is the reconciliation verifier's to write,
+     *     and a verified record is not editable by hand, because `capture` merges and
+     *     the verified status would survive an edit to the numbers under it.
+     *     Documents (ADR 015): `document` records exist only through the upload and
+     *     erasure paths, and a foreign type carrying the `sha256` identity key would
+     *     merge into a real document — dangling its refs or forging its tombstone.
+     *     Intentions (INT1): at most three intentions carry focus=true — the focus-3
+     *     rule counts current records and refuses a capture that would make a
+     *     fourth.
      */
     post: operations["post_capture_capture_post"];
     delete?: never;

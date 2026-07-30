@@ -131,9 +131,10 @@ const BRIEFING = {
   attributes: {
     briefing_key: "2020-01-03",
     date: "2020-01-03",
+    focus_intention_ids: ["i1"],
     appointment_ids: ["a2", "a1"], // deliberately not in start order
-    open_review_ids: ["r1"],
-    latest_checkin_id: "c1",
+    open_review_ids: ["r1"], // an old-composition leftover: must be ignored
+    gate: { weeks: [5, 5, 4, 5], met: false }, // the Monday (weekly) edition
   },
   created_at: "2026-07-29T06:00:00Z",
   updated_at: "2026-07-29T06:00:00Z",
@@ -142,15 +143,17 @@ const BRIEFING = {
 const CITED: Record<string, { name: string | null; attributes: object }> = {
   a1: { name: "Standup", attributes: { starts_at: "2026-07-29T08:00:00Z" } },
   a2: { name: "Dentist", attributes: { starts_at: "2026-07-29T15:00:00Z" } },
-  r1: {
+  i1: {
     name: null,
     attributes: {
-      attendee_id: "att1",
-      candidate_person_ids: ["p1"],
-      reason: "ambiguous_email_match",
+      title: "Strength training",
+      kind: "habit_quota",
+      status: "active",
+      focus: true,
+      floor: "one set of squats at home",
+      next_action: "load the Monday plan",
     },
   },
-  c1: { name: null, attributes: { date: "2026-07-29", mood: 4 } },
 };
 
 test("tomorrow resolves the briefing's ids into a readable cockpit", async ({
@@ -192,16 +195,17 @@ test("tomorrow resolves the briefing's ids into a readable cockpit", async ({
   await page.goto("/tomorrow");
   await expect(page.getByText("Briefing for 2020-01-03")).toBeVisible();
   const rows = page.locator("ul > li");
-  await expect(rows.nth(0)).toContainText("Standup");
-  await expect(rows.nth(1)).toContainText("Dentist");
+  await expect(rows.nth(0)).toContainText("Strength training"); // focus leads
+  await expect(rows.nth(0)).toContainText("Floor: one set of squats at home");
+  await expect(rows.nth(1)).toContainText("Standup");
+  await expect(rows.nth(2)).toContainText("Dentist");
+  await expect(
+    page.getByText("Open — check-in days per week: 5 · 5 · 4 · 5"),
+  ).toBeVisible();
+  // the old composition's keys resolve to nothing rendered, not a section
   await expect(
     page.getByRole("heading", { name: /needs your decision/i }),
-  ).toBeVisible();
-  await expect(page.getByRole("link", { name: "att1" })).toHaveAttribute(
-    "href",
-    "/entities/att1",
-  );
-  await expect(page.getByText("mood 4/5")).toBeVisible();
+  ).toHaveCount(0);
 });
 
 test("capture posts schema-driven attributes", async ({ page }) => {

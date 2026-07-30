@@ -12,9 +12,9 @@ vi.mock("../api/client", () => ({
 
 const APPOINTMENT_LATE = "aaaaaaaa-0000-0000-0000-000000000001";
 const APPOINTMENT_EARLY = "aaaaaaaa-0000-0000-0000-000000000002";
+const INTENTION_FULL = "11111111-0000-0000-0000-000000000001";
+const INTENTION_BARE = "11111111-0000-0000-0000-000000000002";
 const REVIEW = "bbbbbbbb-0000-0000-0000-000000000001";
-const ATTENDEE = "cccccccc-0000-0000-0000-000000000001";
-const PERSON = "dddddddd-0000-0000-0000-000000000001";
 const CHECKIN = "eeeeeeee-0000-0000-0000-000000000001";
 
 const ENTITIES: Record<string, { name?: string; attributes: object }> = {
@@ -30,22 +30,22 @@ const ENTITIES: Record<string, { name?: string; attributes: object }> = {
       location: "Zoom",
     },
   },
-  [REVIEW]: {
+  [INTENTION_FULL]: {
     attributes: {
-      review_key: "r1",
-      attendee_id: ATTENDEE,
-      candidate_person_ids: [PERSON],
-      reason: "ambiguous_email_match",
+      title: "Strength training",
+      kind: "habit_quota",
+      status: "active",
+      focus: true,
+      floor: "one set of squats at home",
+      next_action: "load the Monday plan",
     },
   },
-  [CHECKIN]: {
+  [INTENTION_BARE]: {
     attributes: {
-      date: "2026-07-29",
-      mood: 4,
-      energy: 3,
-      stress: 2,
-      sleep_quality: 5,
-      top_priorities: ["ship B4"],
+      title: "Ship the slice",
+      kind: "task",
+      status: "active",
+      focus: true,
     },
   },
 };
@@ -103,13 +103,31 @@ function mockBriefing(attributes: object | object[] | null) {
 const FULL = {
   briefing_key: "2026-07-29",
   date: "2026-07-29",
+  focus_intention_ids: [INTENTION_FULL, INTENTION_BARE],
   appointment_ids: [APPOINTMENT_LATE, APPOINTMENT_EARLY],
-  open_review_ids: [REVIEW],
-  latest_checkin_id: CHECKIN,
 };
 
 describe("Tomorrow", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("leads with the focus intentions, floor and next action shown", async () => {
+    mockBriefing(FULL);
+    renderWithProviders(<Tomorrow />);
+
+    expect(await screen.findByText("Strength training")).toBeInTheDocument();
+    expect(screen.getByText(/floor: one set of squats/i)).toBeInTheDocument();
+    expect(screen.getByText(/next: load the monday plan/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /strength training/i }),
+    ).toHaveAttribute("href", `/entities/${INTENTION_FULL}`);
+    // composition order (ADR 019 rule 1): focus first, appointments second
+    const headings = screen
+      .getAllByRole("heading")
+      .map((heading) => heading.textContent);
+    expect(headings.indexOf("Focus goals")).toBeLessThan(
+      headings.indexOf("Appointments"),
+    );
+  });
 
   it("resolves cited ids and orders appointments chronologically", async () => {
     mockBriefing(FULL);
@@ -129,33 +147,37 @@ describe("Tomorrow", () => {
     );
   });
 
-  it("renders an open link_review as needing a decision, with entity links", async () => {
-    mockBriefing(FULL);
+  it("renders the Monday gate counts and verdict", async () => {
+    mockBriefing({ ...FULL, gate: { weeks: [5, 5, 4, 5], met: false } });
     renderWithProviders(<Tomorrow />);
 
-    expect(await screen.findByText(/needs your decision/i)).toBeInTheDocument();
+    expect(await screen.findByText(/utility gate/i)).toBeInTheDocument();
     expect(
-      await screen.findByText(/more than one person matches/i),
+      screen.getByText(/open — check-in days per week: 5 · 5 · 4 · 5/i),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: ATTENDEE.slice(0, 8) }),
-    ).toHaveAttribute("href", `/entities/${ATTENDEE}`);
-    expect(
-      screen.getByRole("link", { name: PERSON.slice(0, 8) }),
-    ).toHaveAttribute("href", `/entities/${PERSON}`);
-    expect(screen.getByRole("link", { name: "review item" })).toHaveAttribute(
-      "href",
-      `/entities/${REVIEW}`,
-    );
   });
 
-  it("shows the latest check-in when the briefing cites one", async () => {
+  it("carries no gate section on a daily edition", async () => {
     mockBriefing(FULL);
     renderWithProviders(<Tomorrow />);
 
-    expect(await screen.findByText("2026-07-29")).toBeInTheDocument();
-    expect(screen.getByText(/mood 4\/5/)).toBeInTheDocument();
-    expect(screen.getByText(/ship B4/)).toBeInTheDocument();
+    expect(await screen.findByText("Standup")).toBeInTheDocument();
+    expect(screen.queryByText(/utility gate/i)).not.toBeInTheDocument();
+  });
+
+  it("ignores keys an old-composition briefing left behind", async () => {
+    mockBriefing({
+      ...FULL,
+      open_review_ids: [REVIEW],
+      latest_checkin_id: CHECKIN,
+    });
+    renderWithProviders(<Tomorrow />);
+
+    expect(await screen.findByText("Standup")).toBeInTheDocument();
+    expect(screen.queryByText(/needs your decision/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/check-in/i)).not.toBeInTheDocument();
+    expect(getEntity).not.toHaveBeenCalledWith(REVIEW);
+    expect(getEntity).not.toHaveBeenCalledWith(CHECKIN);
   });
 
   // The backend keys briefings in LIFEOS_BRIEFING_TZ, so any date this browser
@@ -199,16 +221,15 @@ describe("Tomorrow", () => {
     mockBriefing({
       briefing_key: "2026-07-29",
       date: "2026-07-29",
+      focus_intention_ids: [],
       appointment_ids: [],
-      open_review_ids: [],
     });
     renderWithProviders(<Tomorrow />);
 
     expect(
       await screen.findByText("No appointments today."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Nothing is waiting on you.")).toBeInTheDocument();
-    expect(screen.getByText("No check-in recorded yet.")).toBeInTheDocument();
+    expect(screen.getByText(/no focus goals yet/i)).toBeInTheDocument();
   });
 
   it("reports a cited id that no longer resolves instead of guessing", async () => {

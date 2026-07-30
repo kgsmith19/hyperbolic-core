@@ -6,15 +6,21 @@
 // entities, and this page resolves every id at read time through /entities/{id}.
 // A briefing is a pointer: an id that no longer resolves is shown as gone
 // rather than guessed at. Read-only — this page writes nothing.
+//
+// Recomposed in INT1 (ADR 019 rule 1): the one morning digest — the focus
+// intentions first, today's appointments second, nothing else. The Monday
+// edition adds the utility-gate counts, which are numbers the briefing
+// computed, not ids. Keys an old-composition briefing left behind
+// (open_review_ids, latest_checkin_id) are ignored: feelings are pull-only.
 import { useQueries, useQuery } from "@tanstack/react-query";
 
 import { getEntity, searchEntities, type Entity } from "../api/client";
-import { asIds, asString, type Attributes } from "../attributes";
+import { asGate, asIds, asString, type Attributes } from "../attributes";
 import {
   Appointments,
   Empty,
-  LatestCheckin,
-  OpenReviews,
+  FocusIntentions,
+  GateStatus,
   type Resolved,
 } from "../components/BriefingSections";
 
@@ -42,14 +48,9 @@ export default function Tomorrow() {
   });
 
   const attributes: Attributes | undefined = newest(briefings.data)?.attributes;
+  const focusIds = asIds(attributes?.focus_intention_ids);
   const appointmentIds = asIds(attributes?.appointment_ids);
-  const reviewIds = asIds(attributes?.open_review_ids);
-  const checkinId = asString(attributes?.latest_checkin_id);
-  const citedIds = [
-    ...appointmentIds,
-    ...reviewIds,
-    ...(checkinId ? [checkinId] : []),
-  ];
+  const citedIds = [...focusIds, ...appointmentIds];
 
   const results = useQueries({
     queries: citedIds.map((id) => ({
@@ -94,9 +95,9 @@ export default function Tomorrow() {
         </Empty>
       ) : (
         <>
+          <FocusIntentions items={focusIds.map(resolve)} />
           <Appointments items={appointmentIds.map(resolve)} />
-          <OpenReviews items={reviewIds.map(resolve)} />
-          <LatestCheckin item={checkinId ? resolve(checkinId) : undefined} />
+          <GateStatus gate={asGate(attributes.gate)} />
         </>
       )}
     </div>
