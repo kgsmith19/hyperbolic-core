@@ -19,10 +19,11 @@ on:
         required: true
         type: choice
         options:
-          - define-daily-checkin      # A2.5: wellbeing daily_checkin type
+          - define-daily-checkin      # A2.5: wellbeing daily_checkin type (INT1: re-run adds the rider fields)
           - migrate-durable-erasure   # slice 7 / ADR 012: attendee email_hash identity
           - migrate-bill-status       # C3 / ADR 017: bill+eob gain status "verified"
           - migrate-bill-date-charset # C4 / ADR 018: service_date/due_date gain a charset pattern
+          - migrate-briefing-composition # INT1 / ADR 019: briefing becomes focus + calendar (+ Monday gate)
           - install-scheduled-jobs    # B3 / ADR 014: cron for ingest -> autolink -> briefing
           - run-scheduled-jobs        # run the nightly trio once, now (end-to-end verification)
 
@@ -76,6 +77,10 @@ jobs:
         if: inputs.task == 'migrate-bill-date-charset'
         run: python scripts/migrate_bill_date_charset.py
 
+      - name: Migrate the briefing to the INT1 composition
+        if: inputs.task == 'migrate-briefing-composition'
+        run: python scripts/migrate_briefing_composition.py
+
       - name: Join tailnet
         if: inputs.task == 'install-scheduled-jobs' || inputs.task == 'run-scheduled-jobs'
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4.1.2
@@ -95,13 +100,18 @@ jobs:
       # failing job never stops the next, and each writes its own
       # execution_receipt (ADR 014). The wrapper owns its log and rotates it
       # at 1 MiB, keeping one previous generation.
+      # Remote stdout from the tailnet SSH steps has not reliably reached the
+      # runner log (2026-07-29: a verified-green run showed none) — so each step
+      # captures it and re-prints it from the runner shell, and publishes it to
+      # the step summary, where the proof survives whatever eats the live stream.
       - name: Install the scheduled-jobs cron
         if: inputs.task == 'install-scheduled-jobs'
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          status=0
+          out=$(ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           mkdir -p /home/deploy/lifeos
           cat > /home/deploy/lifeos/run-scheduled-jobs.sh <<'WRAPPER'
@@ -138,6 +148,10 @@ jobs:
           echo "installed; crontab now:"
           crontab -l | sed -n '/# >>> lifeos jobs/,/# <<< lifeos jobs/p'
           REMOTE
+          ) || status=$?
+          printf '%s\n' "$out"
+          { echo '### install-scheduled-jobs'; echo '```'; printf '%s\n' "$out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
       # On-demand execution of the exact wrapper cron runs, over the same
       # channel — the only way to verify the schedule end-to-end without
@@ -150,7 +164,8 @@ jobs:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          status=0
+          out=$(ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           test -x /home/deploy/lifeos/run-scheduled-jobs.sh || {
             echo "wrapper not installed; run task=install-scheduled-jobs first" >&2
@@ -162,3 +177,7 @@ jobs:
           tail -n 40 /home/deploy/lifeos/jobs.log
           exit $status
           REMOTE
+          ) || status=$?
+          printf '%s\n' "$out"
+          { echo '### run-scheduled-jobs'; echo '```'; printf '%s\n' "$out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
