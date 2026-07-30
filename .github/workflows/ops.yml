@@ -24,6 +24,7 @@ on:
           - migrate-bill-status       # C3 / ADR 017: bill+eob gain status "verified"
           - migrate-bill-date-charset # C4 / ADR 018: service_date/due_date gain a charset pattern
           - migrate-briefing-composition # INT1 / ADR 019: briefing becomes focus + calendar (+ Monday gate)
+          - migrate-document-ref-anchor # FIX-1 / ADR 015: document.storage_ref anchored with \Z, not $
           - install-scheduled-jobs    # B3 / ADR 014: cron for ingest -> autolink -> briefing
           - run-scheduled-jobs        # run the nightly trio once, now (end-to-end verification)
 
@@ -80,6 +81,10 @@ jobs:
       - name: Migrate the briefing to the INT1 composition
         if: inputs.task == 'migrate-briefing-composition'
         run: python scripts/migrate_briefing_composition.py
+
+      - name: Migrate the document schema to the anchored storage_ref pattern
+        if: inputs.task == 'migrate-document-ref-anchor'
+        run: python scripts/migrate_document_ref_anchor.py
 
       - name: Join tailnet
         if: inputs.task == 'install-scheduled-jobs' || inputs.task == 'run-scheduled-jobs'

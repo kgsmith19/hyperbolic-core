@@ -7,6 +7,8 @@ action available only here; application code can never do this.
 
 import os
 import sys
+import time
+from collections.abc import Iterator
 from pathlib import Path
 from uuid import UUID
 
@@ -33,8 +35,53 @@ if _PROD_REF in db.database_url():
     )
 
 
+# Locally every run points at the ONE shared lifeos-test database, and the
+# session below wipes it on start. Two runs at once — two agents, or a stray
+# local run beside one — delete each other's rows mid-test, which surfaces as
+# unrelated failures and exhausted pooler connections rather than as the
+# collision it is. Serialize on a session-level advisory lock: the second run
+# waits, then says plainly what holds the database. Free in CI, where
+# DATABASE_URL is an ephemeral Postgres nobody else touches.
+#
+# REQUIRES SESSION-MODE POOLING. An advisory lock lives on the backend session,
+# so this holds only while one client connection owns one backend for its whole
+# life -- true direct, and true of the Supabase pooler on 5432, which is what
+# .env uses. On the transaction pooler (6543) statements are multiplexed across
+# backends: the lock would be taken and lost between statements, every run would
+# sail past this fixture, and concurrent wipes would corrupt each other again
+# with this code still in place looking correct. Do not move the test URL to
+# 6543 without replacing this mechanism.
+SESSION_LOCK = 0x11FE05
+_LOCK_WAIT_SECONDS = 300
+
+
 @pytest.fixture(scope="session", autouse=True)
-def clean_database() -> None:
+def exclusive_database() -> Iterator[int]:
+    conn = db.connect()
+    conn.autocommit = True  # a session lock outlives transactions; hold no tx
+    deadline = time.monotonic() + _LOCK_WAIT_SECONDS
+    while True:
+        row = conn.execute("select pg_try_advisory_lock(%s) as ok", (SESSION_LOCK,)).fetchone()
+        if row is not None and row["ok"]:
+            break
+        if time.monotonic() >= deadline:
+            conn.close()
+            raise RuntimeError(
+                "another pytest session holds the test database (advisory lock "
+                f"{SESSION_LOCK}). It wipes on start, so this run would corrupt it. "
+                "Wait for that run to finish, or point TEST_DATABASE_URL at a "
+                "database of your own."
+            )
+        time.sleep(1)
+    try:
+        yield SESSION_LOCK  # the id, so a test can prove the lock is held
+    finally:
+        conn.execute("select pg_advisory_unlock(%s)", (SESSION_LOCK,))
+        conn.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def clean_database(exclusive_database: int) -> None:
     with db.connect() as conn:
         conn.execute("alter table event disable trigger event_append_only_row")
         conn.execute("alter table event disable trigger event_append_only_stmt")
