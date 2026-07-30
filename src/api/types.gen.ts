@@ -73,8 +73,8 @@ export interface paths {
     put?: never;
     /**
      * Post Capture
-     * @description Generic capture. Three domains lock this door on the way in; the
-     *     decisions live in the domains, this is the dispatch. Two locks are on the
+     * @description Generic capture. Four domains lock this door on the way in; the
+     *     decisions live in the domains, this is the dispatch. Three locks are on the
      *     record the write would land on, not the type name it claims. Bills
      *     (ADR 017): `status: "verified"` is the reconciliation verifier's to write,
      *     and a verified record is not editable by hand, because `capture` merges and
@@ -84,7 +84,9 @@ export interface paths {
      *     merge into a real document — dangling its refs or forging its tombstone.
      *     Intentions (INT1): at most three intentions carry focus=true — the focus-3
      *     rule counts current records and refuses a capture that would make a
-     *     fourth.
+     *     fourth. Episodes (EP1): intensity within 0-10, end_date never before
+     *     onset_date, feared_duration_days positive, playbook versions append-only,
+     *     and the `onset_date` identity key embargoed to the episode type.
      */
     post: operations["post_capture_capture_post"];
     delete?: never;
