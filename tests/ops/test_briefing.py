@@ -14,6 +14,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from domains.calendar.types import define_calendar_types, email_hash
+from domains.episodes.types import define_episode_types
 from domains.intentions.focus import capture_intention
 from domains.intentions.types import define_intention_types
 from domains.ops.briefing import (
@@ -327,17 +328,78 @@ def test_migration_then_merge_over_an_old_composition_briefing(
     assert migrate() == {"types_updated": 0}  # second migration run: no-op
 
 
+EPISODE_DAY = date(2032, 6, 9)  # a Wednesday; only this module's episodes land in its week
+NO_EPISODE_DAY = date(2032, 9, 1)
+
+
+@pytest.fixture(scope="module")
+def episode_week(ctx: AccessContext, brief_ctx: AccessContext) -> list[UUID]:
+    """Synthetic episodes making two tags usual (>= 2 episodes each) and
+    present in EPISODE_DAY's week, plus a one-off tag that must not count.
+    2032-* onset dates: nothing merges with other modules (identity)."""
+    define_episode_types(ctx)
+    history = capture(
+        ctx,
+        "episode",
+        {"onset_date": "2032-01-10", "perturbation_tags": ["brief-tag-a", "brief-tag-b"]},
+    ).entity_id
+    in_week = [
+        capture(
+            ctx, "episode", {"onset_date": "2032-06-04", "perturbation_tags": ["brief-tag-a"]}
+        ).entity_id,
+        capture(
+            ctx,
+            "episode",
+            {"onset_date": "2032-06-07", "perturbation_tags": ["brief-tag-b", "brief-tag-once"]},
+        ).entity_id,
+    ]
+    return [history, *in_week]
+
+
+def test_briefing_carries_one_descriptive_episodes_line(
+    ctx: AccessContext, brief_ctx: AccessContext, episode_week: list[UUID]
+) -> None:
+    """Roadmap §EP1: ONE line, historical language, a count in words — never a
+    tag name — and the contributing episodes cited like every other section."""
+    run_briefing(brief_ctx, EPISODE_DAY, UTC)
+    attributes = stored(brief_ctx, EPISODE_DAY)
+
+    assert attributes["episodes_line"] == "2 of your usual perturbations present this week"
+    assert "brief-tag" not in str(attributes)  # counts only: no tag text anywhere
+    provenance = attributes["provenance"]
+    assert {str(i) for i in episode_week} <= set(provenance["source_entity_ids"])
+    assert len(provenance["source_event_ids"]) == len(provenance["source_entity_ids"])
+
+
+def test_briefing_without_usual_perturbations_has_no_episodes_line(
+    brief_ctx: AccessContext, episode_week: list[UUID]
+) -> None:
+    """Zero is silence, not a zero-count line: a daily '0 of your usual...'
+    would put episode salience on a schedule (the episodes cell is pull-only)."""
+    run_briefing(brief_ctx, NO_EPISODE_DAY, UTC)
+    assert "episodes_line" not in stored(brief_ctx, NO_EPISODE_DAY)
+
+
+def test_briefing_context_reads_episodes_without_write() -> None:
+    scopes = briefing_context().scopes
+    assert "episodes:read" in scopes and "episodes:write" not in scopes
+
+
 def test_absent_type_is_an_empty_section_not_a_crash(brief_ctx: AccessContext) -> None:
     assert _optional_find(brief_ctx, "no_such_type_yet") == []
 
 
-def test_briefing_cannot_write_what_it_reads(brief_ctx: AccessContext) -> None:
+def test_briefing_cannot_write_what_it_reads(
+    brief_ctx: AccessContext, episode_week: list[UUID]
+) -> None:
     with pytest.raises(ScopeError):  # read-only on calendar by construction
         make_appointment(brief_ctx, "brief-forbidden", "2031-03-04T12:00:00+00:00")
     with pytest.raises(ScopeError):  # and read-only on intentions
         capture_intention(
             brief_ctx, {"title": "Forbidden", "kind": "task", "status": "active", "focus": False}
         )
+    with pytest.raises(ScopeError):  # and read-only on episodes (EP1)
+        capture(brief_ctx, "episode", {"onset_date": "2032-12-01"})
 
 
 def test_briefing_without_ops_write_fails_closed() -> None:

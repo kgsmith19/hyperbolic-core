@@ -46,3 +46,23 @@ budget/usage-tracking need, or multi-provider routing.
 A second LLM consumer or a budget need appears (LiteLLM trigger), p95 misses
 the 4s bar after effort tuning (model choice revisited with the operator),
 or agent-scoped chat (non-owner tokens) lands.
+
+## Amended 2026-07-30 (roadmap §EP1)
+
+Episode-shaped messages never enter the tool loop. The episodes domain is
+x-sensitive and withheld from the shared agent-tool surface (ADR 016), so the
+route dispatches to `domains.episodes.lines.deterministic_reply` before any
+model call: while an episode is open, playbook and wellbeing questions stream
+the operator's playbook verbatim plus the evidence card (kernel-side
+composition, exact and cited in the `done` frame with
+`model: "deterministic"`); prediction-shaped episode questions abstain before
+any read. The routing decision and the composition live in the episodes cell —
+the route only dispatches and renders. Everything else flows to the model loop
+unchanged — over a replay-scrubbed history: the chat protocol is stateless and
+the client resends prior turns, so before any model call the route drops every
+routed user turn and the assistant turn(s) that answered it. A deterministic
+reply quotes x-sensitive record content, and replaying it as ordinary
+assistant text must not carry that content into a later model request
+(security review of PR #55). The final user message always survives the
+scrub: a routed message that composed nothing (no open episode, no scope) is
+the ordinary model path.

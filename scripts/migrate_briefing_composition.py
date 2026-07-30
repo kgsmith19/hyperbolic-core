@@ -9,6 +9,10 @@ redefinition path, so any environment that already ran B3's briefing keeps the
 old schema and would refuse every recomposed capture (`additionalProperties`
 is false and `open_review_ids` was required).
 
+It syncs the stored schema to the current ``BRIEFING_SCHEMA``, so later
+composition amendments reuse it: EP1 adds the optional ``episodes_line`` —
+re-run once per environment after EP1 lands.
+
 Idempotent operator script, run once per environment BEFORE the first
 recomposed briefing run, against whatever DATABASE_URL kernel.env resolves:
 
@@ -33,8 +37,8 @@ from kernel.events import append_event, tx_now
 
 ACTOR = "scripts.migrate_briefing_composition"
 _REASON = (
-    "roadmap INT1: the digest is focus intentions + calendar context only; "
-    "the Monday edition adds utility-gate status"
+    "roadmap INT1/EP1: the digest is focus intentions + calendar context, plus "
+    "the EP1 episodes line when present; the Monday edition adds utility-gate status"
 )
 
 

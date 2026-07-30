@@ -22,6 +22,8 @@ from domains.bills.types import (
 )
 from domains.documents.capture import capture_document
 from domains.documents.storage import BlobStore
+from domains.episodes.types import DOMAIN as EPISODES_DOMAIN
+from domains.episodes.types import TYPE_EPISODE, TYPE_PLAYBOOK, define_episode_types
 from kernel.access import AccessContext, ScopeError, has
 from kernel.services import capture, find
 from mcp_server import tools
@@ -129,3 +131,76 @@ def test_an_all_scopes_operator_context_is_narrowed_too(candidate: UUID) -> None
     assert TYPE_BILL not in {t["name"] for t in tools.list_types(every_scope)["types"]}
     with pytest.raises(ScopeError):
         tools.get_entity(every_scope, str(candidate))
+
+
+# --- episodes (EP1): x-sensitive from the first definition -------------------
+
+EPISODES_CTX = AccessContext.of(
+    f"{EPISODES_DOMAIN}:read", f"{EPISODES_DOMAIN}:write", "relationships:read"
+)
+
+
+@pytest.fixture(scope="module")
+def episode(seeded: dict[str, UUID]) -> UUID:
+    """One synthetic episode and one synthetic playbook version, invented, so
+    the episodes domain has something to withhold. Defined and captured in one
+    breath: the flag is in the first definition, so there is no unflagged
+    moment for these records to be readable in."""
+    define_episode_types(EPISODES_CTX)
+    capture(
+        EPISODES_CTX,
+        TYPE_PLAYBOOK,
+        {
+            "name": "steady days mcpplaybook",
+            "version": 1,
+            "steps": [{"if": "an early warning sign", "then": "run the checklist"}],
+        },
+    )
+    attributes: dict[str, Any] = {
+        "onset_date": "2026-03-01",
+        "perturbation_tags": ["mcpepisodetag"],
+        "intensity": 5,
+    }
+    return capture(EPISODES_CTX, TYPE_EPISODE, attributes).entity_id
+
+
+def test_the_scopes_really_do_reach_the_episode_without_the_tools(episode: UUID) -> None:
+    """Not vacuous: the owner reads episodes fine through the kernel services;
+    only the model-facing surface is narrowed."""
+    assert episode in {e.id for e in find(EPISODES_CTX, type_name=TYPE_EPISODE)}
+    assert has(EPISODES_CTX, f"{EPISODES_DOMAIN}:read")
+
+
+def test_agent_read_context_drops_the_episodes_domain(episode: UUID) -> None:
+    narrowed = tools.agent_read_context(EPISODES_CTX)
+    assert "relationships:read" in narrowed.scopes
+    assert not any(scope.startswith(f"{EPISODES_DOMAIN}:") for scope in narrowed.scopes)
+
+
+def test_the_agent_tools_withhold_both_episode_types(episode: UUID) -> None:
+    """Both types carry the flag themselves — neither rides along on the
+    other's — and the whole domain is withheld, whichever context asks."""
+    listed = {t["name"] for t in tools.list_types(AccessContext.all())["types"]}
+    assert TYPE_EPISODE not in listed
+    assert TYPE_PLAYBOOK not in listed
+
+    with pytest.raises(ScopeError):
+        tools.find(EPISODES_CTX, type_name=TYPE_EPISODE)
+    with pytest.raises(ScopeError):
+        tools.find(EPISODES_CTX, type_name=TYPE_PLAYBOOK)
+    with pytest.raises(ScopeError):
+        tools.history(EPISODES_CTX, str(episode))
+    with pytest.raises(ScopeError):
+        tools.get_entity(AccessContext.all(), str(episode))
+
+
+def test_an_untyped_or_text_search_cannot_reach_an_episode(episode: UUID) -> None:
+    """A model that does not name the type still must not stumble onto an
+    episode or a playbook through a broad search."""
+    every_scope = AccessContext.all()
+    assert str(episode) not in {e["id"] for e in tools.find(every_scope)["entities"]}
+    assert tools.find(every_scope, text="mcpepisodetag")["entities"] == []
+    assert tools.find(every_scope, text="mcpplaybook")["entities"] == []
+    # not vacuous: the owner's own context finds both by those very words
+    assert find(EPISODES_CTX, text="mcpepisodetag")
+    assert find(EPISODES_CTX, text="mcpplaybook")

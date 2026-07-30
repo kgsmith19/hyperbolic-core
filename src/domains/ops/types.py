@@ -97,9 +97,12 @@ _GATE = {
 # slices' data exists. The open-review and latest-check-in pointers B3 shipped
 # left the digest with that recomposition — feelings are pull-only, and the
 # digest carries no backlog counts. `gate` appears on the Monday (weekly)
-# edition only. An existing database needs
-# `scripts/migrate_briefing_composition.py` once before the first recomposed
-# run. `briefing_key` is the local date, and is deliberately NOT named `date`:
+# edition only. EP1 adds `episodes_line` — the ONE descriptive episodes line
+# (roadmap §EP1): a count in words, historical language only, never a tag name
+# or a date, and absent entirely when there is nothing to say. An existing
+# database needs `scripts/migrate_briefing_composition.py` once before the
+# first recomposed run (and re-run once after EP1 for `episodes_line`).
+# `briefing_key` is the local date, and is deliberately NOT named `date`:
 # ExactIdentityResolver matches on identity field *name* across types and
 # daily_checkin already claims `date`, so a briefing keyed on `date` would
 # resolve onto that day's check-in and merge into it.
@@ -110,6 +113,7 @@ BRIEFING_SCHEMA: dict[str, Any] = {
         "date": {"type": "string", "maxLength": 32},
         "focus_intention_ids": _UUID_LIST,
         "appointment_ids": _UUID_LIST,
+        "episodes_line": {"type": "string", "maxLength": 80},
         "gate": _GATE,
         "provenance": _PROVENANCE,
     },

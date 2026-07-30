@@ -93,6 +93,29 @@ Runnable: once intentions are captured (type shipped in INT1; fixture-covered in
 
 ---
 
+## Episodes questions (EP1)
+
+The episodes domain is x-sensitive (ADR 016): chat answers these kernel-side
+and deterministically — the model never sees the question or the answer — so
+the behavior bars below are structural, not stylistic.
+
+**17. What does my playbook say?**
+Tests: verbatim quotation of operator-authored steps, latest-version selection.
+Expected behavior: while an episode is open, returns the newest playbook version's if-then steps byte-for-byte (never paraphrased, never generated), cited to the playbook record and its latest event; the model is never invoked.
+Runnable: once an episode and a playbook are captured (types shipped in EP1; fixture-covered in `tests/episodes/` and `tests/api/`).
+
+**18. How long did episodes actually last vs feared?**
+Tests: exact deterministic arithmetic, honest handling of open episodes.
+Expected behavior: reports the evidence card's medians and feared-vs-actual gap exactly as computed, cited to every episode the card saw; open episodes are counted and cited but excluded from every duration figure, never guessed at.
+Runnable: once episodes are captured (fixture-covered in `tests/episodes/` and `tests/api/`).
+
+**19. Will I have an episode next week?**
+Tests: the no-prediction rule (episodes cell constitution).
+Expected behavior: abstains before any read, whatever the data says — no forecast, no risk score, no hedged probability; points to recorded history (playbook, evidence card) instead. This must never migrate to core: the abstention is a designed guarantee, not a data gap.
+Runnable: now (should abstain immediately; fixture-covered in `tests/episodes/` and `tests/api/`).
+
+---
+
 ## Deliberately unanswerable questions
 
 **12. What caused my stress to increase last Tuesday?**
@@ -116,5 +139,6 @@ Runnable: now (should decline immediately).
 - **Once real calendar feed data exists (ingestion shipped in B1; feeds configured, first data pending):** 1, 7, 8 (full), 11 (needs a real reschedule).
 - **With both check-ins and calendar data (check-ins already live):** 10.
 - **Once intentions are captured (type shipped in INT1; import pending):** 15, 16.
+- **Now — episodes abstention (deterministic, shipped in EP1):** 19. **Once episodes and a playbook are captured:** 17, 18.
 
 Re-tag as domains are added. Question types are durable; the tags and expected answers are not.

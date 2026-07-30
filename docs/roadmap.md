@@ -195,7 +195,7 @@ gate bounds everything after it.
   Registry rider: lab_log type (operator-tracked labs; next-due from cadence
   config) lands here or with the briefing tickler that consumes it.
   Prompt §H2 below.
-- [ ] EP1 Episode support — episode + playbook types (**x-sensitive from the
+- [x] EP1 Episode support — episode + playbook types (**x-sensitive from the
   first migration**), deterministic evidence-card service, chat/briefing lines.
   Pull-only; no notification path may exist in code. Prompt §EP1 below.
 - [ ] C0 Transaction ingestion — SimpleFIN Bridge access-URL pull

@@ -46,6 +46,7 @@ from domains.documents.capture import (
     is_document,
 )
 from domains.documents.capture import guard_capture as guard_document_capture
+from domains.episodes.capture import guard_capture as guard_episode_capture
 from domains.intentions.focus import guard_capture as guard_intention_capture
 from kernel.access import AccessContext, ScopeError
 from kernel.env import read_env
@@ -216,8 +217,8 @@ def get_types(context: Ctx) -> list[TypeDefinition]:
 
 @app.post("/capture")
 def post_capture(body: CaptureIn, context: Ctx) -> CaptureResult:
-    """Generic capture. Three domains lock this door on the way in; the
-    decisions live in the domains, this is the dispatch. Two locks are on the
+    """Generic capture. Four domains lock this door on the way in; the
+    decisions live in the domains, this is the dispatch. Three locks are on the
     record the write would land on, not the type name it claims. Bills
     (ADR 017): `status: "verified"` is the reconciliation verifier's to write,
     and a verified record is not editable by hand, because `capture` merges and
@@ -227,9 +228,12 @@ def post_capture(body: CaptureIn, context: Ctx) -> CaptureResult:
     merge into a real document — dangling its refs or forging its tombstone.
     Intentions (INT1): at most three intentions carry focus=true — the focus-3
     rule counts current records and refuses a capture that would make a
-    fourth."""
+    fourth. Episodes (EP1): intensity within 0-10, end_date never before
+    onset_date, feared_duration_days positive, playbook versions append-only,
+    and the `onset_date` identity key embargoed to the episode type."""
     guard_bill_capture(context, body.type_name, body.attributes)
     guard_document_capture(body.type_name, body.attributes)
+    guard_episode_capture(context, body.type_name, body.attributes)
     guard_intention_capture(context, body.type_name, body.attributes)
     return capture(
         context,

@@ -141,3 +141,18 @@ gate status per rule 9, days-with-a-check-in per week over the four complete
 Mon–Sun weeks behind it, counts and a met boolean only. `domains.ops.briefing`
 now also holds `intentions:read` (still no write scope on anything it reads).
 An existing database runs `scripts/migrate_briefing_composition.py` once.
+
+## Amended 2026-07-30 (roadmap §EP1)
+
+The digest gains at most ONE episodes line, `episodes_line`: a count in words
+("2 of your usual perturbations present this week"), historical language only,
+computed by the episodes cell (`domains.episodes.lines.usual_present`) — never
+a tag name, never a date, and when the count is zero the key is absent
+entirely (a scheduled zero-count would put episode salience on a
+notification-adjacent path; the episodes cell is pull-only). Contributing
+episodes are cited by id like every other section; ids are opaque and the
+episodes domain stays withheld from the agent-tool surface (ADR 016).
+`domains.ops.briefing` now also holds `episodes:read` (still no write scope on
+anything it reads). An existing database re-runs
+`scripts/migrate_briefing_composition.py` once — it syncs the stored briefing
+schema to the current composition.

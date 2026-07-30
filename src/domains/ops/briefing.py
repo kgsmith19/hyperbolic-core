@@ -3,9 +3,14 @@
 Deterministic and zero-LLM — the ONE morning digest (ADR 019 rule 1), in the
 roadmap §INT1 composition order: the focus intentions first (at most three by
 the focus rule; their entities carry the floors and next physical actions),
-then today's appointments in chronological order, then nothing else until the
-data for later sections exists (CPAP compliance joins after H2, co-occurrence
-after EP1). The open-review and latest-check-in pointers B3 shipped left the
+then today's appointments in chronological order, then the EP1 episodes line
+when it has something to say — ONE descriptive line, a count in words computed
+by the episodes cell (`domains.episodes.lines.usual_present`), historical
+language only, never a tag name; when the count is zero the key is absent
+entirely, because a scheduled zero-count would put episode salience on a
+notification-adjacent path (the episodes cell is pull-only) — then nothing
+else until the data for later sections exists (CPAP compliance joins after
+H2). The open-review and latest-check-in pointers B3 shipped left the
 digest with that recomposition: feelings are pull-only, so nothing on a
 notification path references mood or symptoms (rule 1), and the digest carries
 no overdue or backlog counts (rule 2 — restart-neutral). The Monday edition
@@ -29,9 +34,9 @@ only the run's own execution receipt is new.
 
 Runs as ``python -m domains.ops.briefing`` (deploy-box scheduler) under a
 code-built AccessContext of exactly ``intentions:read`` + ``calendar:read`` +
-``wellbeing:read`` + ``ops:read`` + ``ops:write`` — no write scope on anything
-it reads, so it cannot modify intention, calendar or wellbeing data by
-construction (ADR 014, amended by INT1).
+``wellbeing:read`` + ``episodes:read`` + ``ops:read`` + ``ops:write`` — no
+write scope on anything it reads, so it cannot modify intention, calendar,
+wellbeing or episode data by construction (ADR 014, amended by INT1 and EP1).
 """
 
 from dataclasses import dataclass
@@ -40,6 +45,7 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from domains.episodes.lines import usual_present
 from domains.ops.receipts import JobResult, run_job
 from domains.ops.types import GATE_DAYS_PER_WEEK, GATE_WEEKS
 from kernel import services
@@ -154,6 +160,15 @@ def assemble(ctx: AccessContext, day: date, zone: tzinfo) -> dict[str, Any]:
         "focus_intention_ids": [str(i.id) for i in focus],
         "appointment_ids": [str(a.id) for a in appointments],
     }
+    # The EP1 episodes line: a count in words, or no key at all (see the
+    # module docstring). The semantics live in the episodes cell; this job
+    # only reads and stores — the line carries no tag, no date, no id, and
+    # the contributing episodes are cited like every other section.
+    episode_line = usual_present(_optional_find(ctx, "episode"), day)
+    if episode_line is not None:
+        text, contributing = episode_line
+        attributes["episodes_line"] = text
+        cited += [e.id for e in contributing]
     if day.isoweekday() == 1:  # Monday: the weekly edition
         gate, counted = _gate_status(ctx, day)
         attributes["gate"] = gate
@@ -204,9 +219,14 @@ def run_briefing(
 
 def briefing_context() -> AccessContext:
     """Exactly the scopes the briefing needs: read on the domains it summarizes,
-    write only on its own (ADR 014, amended by INT1)."""
+    write only on its own (ADR 014, amended by INT1 and EP1)."""
     return AccessContext.of(
-        "intentions:read", "calendar:read", "wellbeing:read", "ops:read", "ops:write"
+        "intentions:read",
+        "calendar:read",
+        "wellbeing:read",
+        "episodes:read",
+        "ops:read",
+        "ops:write",
     )
 
 
