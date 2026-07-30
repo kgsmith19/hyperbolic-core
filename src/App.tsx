@@ -1,16 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router";
 
 import { supabase } from "./auth/supabase";
 import { useSession } from "./auth/useSession";
 import HealthDot from "./components/HealthDot";
-import Browse from "./pages/Browse";
-import Capture from "./pages/Capture";
-import Chat from "./pages/Chat";
-import EntityDetail from "./pages/EntityDetail";
 import Login from "./pages/Login";
-import Tomorrow from "./pages/Tomorrow";
+
+// Login is the only page on the first-paint path, so it stays eager and the
+// authenticated pages split into their own chunks — the initial bundle no
+// longer grows with every page added to the app.
+const Browse = lazy(() => import("./pages/Browse"));
+const Capture = lazy(() => import("./pages/Capture"));
+const Chat = lazy(() => import("./pages/Chat"));
+const EntityDetail = lazy(() => import("./pages/EntityDetail"));
+const Tomorrow = lazy(() => import("./pages/Tomorrow"));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1 } },
@@ -56,7 +60,14 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const { session, loading } = useSession();
   if (loading) return null;
   if (!session) return <Navigate to="/login" replace />;
-  return <Shell>{children}</Shell>;
+  // The shell stays put while a route chunk arrives — the nav never blinks.
+  return (
+    <Shell>
+      <Suspense fallback={<p className="text-sm text-zinc-500">Loading…</p>}>
+        {children}
+      </Suspense>
+    </Shell>
+  );
 }
 
 export default function App() {

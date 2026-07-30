@@ -157,6 +157,30 @@ describe("Tomorrow", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders the episodes line the briefing composed", async () => {
+    mockBriefing({ ...FULL, episodes_line: "Two headaches this past week." });
+    renderWithProviders(<Tomorrow />);
+
+    expect(
+      await screen.findByText("Two headaches this past week."),
+    ).toBeInTheDocument();
+    // EP1 order: after the appointments, before the Monday gate.
+    const headings = screen
+      .getAllByRole("heading")
+      .map((heading) => heading.textContent);
+    expect(headings.indexOf("Appointments")).toBeLessThan(
+      headings.indexOf("Episodes"),
+    );
+  });
+
+  it("carries no episodes section when the briefing wrote no line", async () => {
+    mockBriefing(FULL);
+    renderWithProviders(<Tomorrow />);
+
+    expect(await screen.findByText("Standup")).toBeInTheDocument();
+    expect(screen.queryByText(/episodes/i)).not.toBeInTheDocument();
+  });
+
   it("carries no gate section on a daily edition", async () => {
     mockBriefing(FULL);
     renderWithProviders(<Tomorrow />);

@@ -8,9 +8,10 @@
 // rather than guessed at. Read-only — this page writes nothing.
 //
 // Recomposed in INT1 (ADR 019 rule 1): the one morning digest — the focus
-// intentions first, today's appointments second, nothing else. The Monday
-// edition adds the utility-gate counts, which are numbers the briefing
-// computed, not ids. Keys an old-composition briefing left behind
+// intentions first, today's appointments second, then the EP1 episodes line on
+// the days the job wrote one. The Monday edition adds the utility-gate counts.
+// The episodes line and the gate are both values the briefing computed, not
+// ids, so neither resolves anything. Keys an old-composition briefing left behind
 // (open_review_ids, latest_checkin_id) are ignored: feelings are pull-only.
 import { useQueries, useQuery } from "@tanstack/react-query";
 
@@ -19,6 +20,7 @@ import { asGate, asIds, asString, type Attributes } from "../attributes";
 import {
   Appointments,
   Empty,
+  Episodes,
   FocusIntentions,
   GateStatus,
   type Resolved,
@@ -97,6 +99,7 @@ export default function Tomorrow() {
         <>
           <FocusIntentions items={focusIds.map(resolve)} />
           <Appointments items={appointmentIds.map(resolve)} />
+          <Episodes line={asString(attributes.episodes_line)} />
           <GateStatus gate={asGate(attributes.gate)} />
         </>
       )}

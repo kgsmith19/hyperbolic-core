@@ -8,23 +8,15 @@ list to zero.
 
 ## Open
 
-## OI-001 Tomorrow cockpit drops the briefing `episodes_line`
-- opened: 2026-07-30
-- where: Tomorrow cockpit view
-- what: the cockpit renders enumerated sections only, so the stored briefing's
-  `episodes_line` never reaches the screen
-- why open: judged in-contract and deferred to "a future lifeos-ui touch"
-- done when: `episodes_line` renders as its own section when present, absent
-  cleanly when not, with a test covering both
-
-## OI-002 Bundle chunk warning at ~494kB
-- opened: 2026-07-30
-- where: Vite build output
-- what: the main chunk trips the size warning
-- why open: deferred with "split when it grows again"
-- done when: the build emits no chunk-size warning and the app still loads
-  clean
+_(none)_
 
 ## Resolved
 
-_(none yet)_
+- 2026-07-30 — OI-001 cockpit `episodes_line` — FIXED. `Episodes` section in
+  `BriefingSections.tsx`, rendered between Appointments and the Monday gate
+  (the composition order `domains/ops/briefing.py` writes), absent entirely
+  when the job wrote no line. Two tests in `Tomorrow.test.tsx`.
+- 2026-07-30 — OI-002 bundle chunk warning — FIXED. Route-level `lazy()` for
+  the five authenticated pages; Login stays eager as the only first-paint
+  page. One 493kB chunk became a 240kB entry + 236kB supabase client + five
+  route chunks under 8kB. No new dependency.

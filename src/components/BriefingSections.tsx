@@ -149,6 +149,18 @@ export function Appointments({ items }: { items: Resolved[] }) {
   );
 }
 
+/** EP1: the one descriptive episodes line the briefing already composed — a
+ * count in words, historical language only. Text the job wrote, not ids, so
+ * there is nothing to resolve; absent entirely when there is nothing to say. */
+export function Episodes({ line }: { line?: string }) {
+  if (!line) return null;
+  return (
+    <Section title="Episodes">
+      <p className="text-sm text-zinc-600">{line}</p>
+    </Section>
+  );
+}
+
 /** Monday edition only (ADR 019 rule 9): check-in days per week over the four
  * complete weeks behind it — counts and a verdict, no narration. */
 export function GateStatus({ gate }: { gate?: Gate }) {
