@@ -46,6 +46,7 @@ from domains.documents.capture import (
     is_document,
 )
 from domains.documents.capture import guard_capture as guard_document_capture
+from domains.intentions.focus import guard_capture as guard_intention_capture
 from kernel.access import AccessContext, ScopeError
 from kernel.env import read_env
 from kernel.models import Edge, Entity, EntityView, Event, TypeDefinition
@@ -215,18 +216,21 @@ def get_types(context: Ctx) -> list[TypeDefinition]:
 
 @app.post("/capture")
 def post_capture(body: CaptureIn, context: Ctx) -> CaptureResult:
-    """Generic capture. Two domains lock this door on the way in, and both
-    locks are on the record the write would land on, not the type name it
-    claims. Bills (ADR 017): `status: "verified"` is the reconciliation
-    verifier's to write, and a verified record is not editable by hand, because
-    `capture` merges and the verified status would survive an edit to the
-    numbers under it. Documents (ADR 015): `document` records exist only
-    through the upload and erasure paths, and a foreign type carrying the
-    `sha256` identity key would merge into a real document — dangling its refs
-    or forging its tombstone. The decisions live in the domains; this is the
-    dispatch."""
+    """Generic capture. Three domains lock this door on the way in; the
+    decisions live in the domains, this is the dispatch. Two locks are on the
+    record the write would land on, not the type name it claims. Bills
+    (ADR 017): `status: "verified"` is the reconciliation verifier's to write,
+    and a verified record is not editable by hand, because `capture` merges and
+    the verified status would survive an edit to the numbers under it.
+    Documents (ADR 015): `document` records exist only through the upload and
+    erasure paths, and a foreign type carrying the `sha256` identity key would
+    merge into a real document — dangling its refs or forging its tombstone.
+    Intentions (INT1): at most three intentions carry focus=true — the focus-3
+    rule counts current records and refuses a capture that would make a
+    fourth."""
     guard_bill_capture(context, body.type_name, body.attributes)
     guard_document_capture(body.type_name, body.attributes)
+    guard_intention_capture(context, body.type_name, body.attributes)
     return capture(
         context,
         body.type_name,

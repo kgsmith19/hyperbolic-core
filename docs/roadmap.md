@@ -175,13 +175,15 @@ Reconciled from the second research pass (see Background). Operator-fit design
 rules for everything below: ADR-019. Committed set ends at D1; the utility
 gate bounds everything after it.
 
-- [ ] INT1 Intentions in the cockpit — intention type + priority-list import +
+- [x] INT1 Intentions in the cockpit — intention type + priority-list import +
   focus-3 rule (service-enforced max 3 focus), briefing *recomposition* on the
   existing ops briefing (ADR-014; composition spec in the prompt), and the
   check-in rider fields the briefing consumes (1-tap practice completions,
   appreciation-expressed, phone-free-block-kept, caffeine mg + last-cup-time,
   no-dairy kept — define script, zero code). Display-only: no triggers, no
-  scheduler (E1 owns those). Prompt §INT1 below.
+  scheduler (E1 owns those). Prompt §INT1 below. — done 2026-07-29 (PR #53;
+  existing databases run `scripts/migrate_briefing_composition.py` once, and
+  re-run `scripts/define_daily_checkin.py` for the rider fields)
 - [ ] H1 Apple Health webhook — weight + activity + workouts via Health Auto
   Export REST push to a tailnet-only endpoint. **/security-review pre-merge**
   (first inbound webhook). Operator pre-req: Health Auto Export + Tailscale on

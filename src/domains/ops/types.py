@@ -65,11 +65,41 @@ _PROVENANCE = {
     "additionalProperties": False,
 }
 
+# The utility gate (ADR 019 rule 9): the briefing reports its own usage bar —
+# days-with-a-check-in per week over the GATE_WEEKS complete weeks behind a
+# Monday, and whether every week reached GATE_DAYS_PER_WEEK. Counts and a
+# boolean only, restart-neutral (rule 2): the narration is the reader's.
+GATE_WEEKS = 4
+GATE_DAYS_PER_WEEK = 5
+
+_GATE = {
+    "type": "object",
+    "properties": {
+        "weeks": {
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0, "maximum": 7},
+            "minItems": GATE_WEEKS,
+            "maxItems": GATE_WEEKS,
+        },
+        "met": {"type": "boolean"},
+    },
+    "required": ["weeks", "met"],
+    "additionalProperties": False,
+}
+
 # The assembled daily briefing: IDs only, never the text they point at. No
 # titles, no locations, no attendee emails, no note text — so this type carries
 # no x-pii and needs no erasure path of its own, and a briefing that outlives an
 # erasure still resolves to correctly redacted entities (ADR 014).
-# `briefing_key` is the local date, and is deliberately NOT named `date`:
+# Recomposed in INT1 (roadmap §INT1, ADR 019 rule 1) into the one morning
+# digest, in order: the focus intentions (their entities carry floors and next
+# physical actions), then today's appointments, then nothing else until later
+# slices' data exists. The open-review and latest-check-in pointers B3 shipped
+# left the digest with that recomposition — feelings are pull-only, and the
+# digest carries no backlog counts. `gate` appears on the Monday (weekly)
+# edition only. An existing database needs
+# `scripts/migrate_briefing_composition.py` once before the first recomposed
+# run. `briefing_key` is the local date, and is deliberately NOT named `date`:
 # ExactIdentityResolver matches on identity field *name* across types and
 # daily_checkin already claims `date`, so a briefing keyed on `date` would
 # resolve onto that day's check-in and merge into it.
@@ -78,12 +108,12 @@ BRIEFING_SCHEMA: dict[str, Any] = {
     "properties": {
         "briefing_key": {"type": "string", "maxLength": 32},
         "date": {"type": "string", "maxLength": 32},
+        "focus_intention_ids": _UUID_LIST,
         "appointment_ids": _UUID_LIST,
-        "open_review_ids": _UUID_LIST,
-        "latest_checkin_id": _UUID,
+        "gate": _GATE,
         "provenance": _PROVENANCE,
     },
-    "required": ["briefing_key", "date", "appointment_ids", "open_review_ids", "provenance"],
+    "required": ["briefing_key", "date", "focus_intention_ids", "appointment_ids", "provenance"],
     "additionalProperties": False,
     "x-identity": ["briefing_key"],
 }

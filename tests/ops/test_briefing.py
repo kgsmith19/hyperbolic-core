@@ -1,7 +1,8 @@
-"""Integration: the assembled daily briefing (ADR 014, roadmap B3).
+"""Integration: the assembled daily briefing (ADR 014, recomposed in INT1).
 
 Everything here is synthetic and dated far from the calendar fixtures, so the
-day under test contains exactly what each test put there.
+day under test contains exactly what each test put there. Daily test dates are
+deliberately not Mondays; the weekly-edition tests use one.
 """
 
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -10,8 +11,11 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from psycopg.types.json import Jsonb
 
 from domains.calendar.types import define_calendar_types, email_hash
+from domains.intentions.focus import capture_intention
+from domains.intentions.types import define_intention_types
 from domains.ops.briefing import (
     METHOD,
     _optional_find,
@@ -25,21 +29,70 @@ from kernel import db
 from kernel.access import AccessContext, ScopeError
 from kernel.services import capture, find, history
 from scripts.define_daily_checkin import define_daily_checkin
+from scripts.migrate_briefing_composition import migrate
 
-DAY = date(2031, 3, 4)
+DAY = date(2031, 3, 4)  # a Tuesday: the daily edition
 EMPTY_DAY = date(2031, 3, 7)
-DROP_DAY = date(2031, 5, 2)
+LEGACY_DAY = date(2031, 5, 2)
+WEEKLY_DAY = date(2031, 8, 4)  # a Monday: the weekly edition
 TITLE = "Quarterly review with the accountant"
+FOCUS_TITLE = "Briefing focus A"
+
+# The composition B3 shipped (ADR 014; value constraints elided), which an
+# un-migrated database still enforces: reviews and a check-in pointer in,
+# focus intentions out.
+OLD_BRIEFING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "briefing_key": {"type": "string", "maxLength": 32},
+        "date": {"type": "string", "maxLength": 32},
+        "appointment_ids": {"type": "array", "items": {"type": "string"}},
+        "open_review_ids": {"type": "array", "items": {"type": "string"}},
+        "latest_checkin_id": {"type": "string"},
+        "provenance": {"type": "object"},
+    },
+    "required": ["briefing_key", "date", "appointment_ids", "open_review_ids", "provenance"],
+    "additionalProperties": False,
+    "x-identity": ["briefing_key"],
+}
 
 
 @pytest.fixture(scope="module")
 def brief_ctx(ctx: AccessContext) -> AccessContext:
     """The exact production context; `ctx` (all scopes) only arranges data."""
     define_calendar_types(ctx)
+    define_intention_types(ctx)
     define_daily_checkin(ctx)
     context = briefing_context()
     define_ops_types(context)
     return context
+
+
+@pytest.fixture(scope="module")
+def focus_goals(ctx: AccessContext, brief_ctx: AccessContext) -> list[str]:
+    """Three focus intentions (ids sorted by title) plus one backlog item.
+
+    Clears any focus flag left behind by earlier test modules first, so the
+    assertions below are exact whatever order the session ran in.
+    """
+    for entity in find(ctx, type_name="intention", filters={"focus": True}):
+        capture_intention(ctx, {**entity.attributes, "focus": False})
+    goals = [
+        {
+            "title": FOCUS_TITLE,
+            "kind": "project",
+            "status": "active",
+            "focus": True,
+            "floor": "the floor version",
+            "next_action": "the next physical action",
+        },
+        {"title": "Briefing focus B", "kind": "habit_quota", "status": "active", "focus": True},
+        {"title": "Briefing focus C", "kind": "task", "status": "active", "focus": True},
+    ]
+    ids = [str(capture_intention(ctx, goal).entity_id) for goal in goals]
+    backlog = {"title": "Briefing backlog", "kind": "task", "status": "someday", "focus": False}
+    capture_intention(ctx, backlog)
+    return ids
 
 
 def make_appointment(ctx: AccessContext, key: str, starts_at: str) -> UUID:
@@ -53,6 +106,14 @@ def make_appointment(ctx: AccessContext, key: str, starts_at: str) -> UUID:
             "starts_at": starts_at,
             "vevent_hash": sha256(key.encode()).hexdigest(),
         },
+    ).entity_id
+
+
+def make_checkin(ctx: AccessContext, on: date) -> UUID:
+    return capture(
+        ctx,
+        "daily_checkin",
+        {"date": on.isoformat(), "mood": 3, "energy": 3, "stress": 3, "sleep_quality": 3},
     ).entity_id
 
 
@@ -81,9 +142,29 @@ def test_briefing_lists_todays_appointments_chronologically(
     assert stored(brief_ctx, DAY)["appointment_ids"] == [str(early), str(late)]
 
 
-def test_briefing_cites_reviews_checkin_and_provenance(
-    ctx: AccessContext, brief_ctx: AccessContext
+def test_focus_intentions_lead_the_digest(
+    ctx: AccessContext, brief_ctx: AccessContext, focus_goals: list[str]
 ) -> None:
+    """Roadmap §INT1 composition: the (at most three, service-enforced) focus
+    intentions come first, cited with provenance; the backlog stays out."""
+    report = run_briefing(brief_ctx, DAY, UTC)
+    attributes = stored(brief_ctx, DAY)
+
+    assert report.focus == 3
+    assert attributes["focus_intention_ids"] == focus_goals
+    provenance = attributes["provenance"]
+    assert provenance["method"] == METHOD and provenance["confidence"] == 1.0
+    assert set(focus_goals) <= set(provenance["source_entity_ids"])
+    # every cited entity contributes the event that produced the state we saw
+    assert len(provenance["source_event_ids"]) == len(provenance["source_entity_ids"])
+
+
+def test_daily_digest_carries_nothing_else(
+    ctx: AccessContext, brief_ctx: AccessContext, focus_goals: list[str]
+) -> None:
+    """Feelings are pull-only and the digest is focus + calendar + nothing else
+    (roadmap §INT1, ADR 019 rules 1/2): an open link_review and a same-day
+    check-in exist, and neither enters the briefing; a Tuesday carries no gate."""
     review = capture(
         ctx,
         "link_review",
@@ -94,25 +175,20 @@ def test_briefing_cites_reviews_checkin_and_provenance(
             "reason": "ambiguous_email_match",
         },
     ).entity_id
-    checkin = capture(
-        ctx,
-        "daily_checkin",
-        {"date": "2031-03-04", "mood": 4, "energy": 4, "stress": 2, "sleep_quality": 4},
-    ).entity_id
+    checkin = make_checkin(ctx, DAY)
 
     run_briefing(brief_ctx, DAY, UTC)
     attributes = stored(brief_ctx, DAY)
 
-    assert str(review) in attributes["open_review_ids"]
-    assert attributes["latest_checkin_id"] == str(checkin)  # the most recent one
-    provenance = attributes["provenance"]
-    assert provenance["method"] == METHOD and provenance["confidence"] == 1.0
-    assert str(checkin) in provenance["source_entity_ids"]
-    # every cited entity contributes the event that produced the state we saw
-    assert len(provenance["source_event_ids"]) == len(provenance["source_entity_ids"])
+    assert "open_review_ids" not in attributes and "latest_checkin_id" not in attributes
+    assert "gate" not in attributes
+    cited = attributes["provenance"]["source_entity_ids"]
+    assert str(review) not in cited and str(checkin) not in cited
 
 
-def test_briefing_copies_no_third_party_text(ctx: AccessContext, brief_ctx: AccessContext) -> None:
+def test_briefing_copies_no_third_party_text(
+    ctx: AccessContext, brief_ctx: AccessContext, focus_goals: list[str]
+) -> None:
     witness = "briefing-witness@fixture.test"
     capture(
         ctx, "attendee", {"email_hash": email_hash(witness), "email": witness, "name": "B Witness"}
@@ -121,10 +197,11 @@ def test_briefing_copies_no_third_party_text(ctx: AccessContext, brief_ctx: Acce
     run_briefing(brief_ctx, DAY, UTC)
     briefing = stored(brief_ctx, DAY)
 
-    # IDs, never the text they point at: a copied title would survive the
-    # erasure of its appointment (invariant 9, ADR 012/014)
+    # IDs, never the text they point at: a copied title, floor or next action
+    # would survive the erasure of its entity (invariant 9, ADR 012/014)
     body = str({k: v for k, v in briefing.items() if k != "id"})
     assert TITLE not in body
+    assert FOCUS_TITLE not in body and "the floor version" not in body
     assert "briefing-witness@fixture.test" not in body
     # and the briefing never surfaces on the appointment's own text search
     assert briefing["id"] not in {e.id for e in find(brief_ctx, text=TITLE)}
@@ -162,6 +239,94 @@ def test_local_timezone_decides_the_day(ctx: AccessContext, brief_ctx: AccessCon
     assert str(appointment) in assemble(brief_ctx, date(2031, 3, 6), UTC)["appointment_ids"]
 
 
+@pytest.fixture(scope="module")
+def gate_checkins(ctx: AccessContext, brief_ctx: AccessContext) -> list[UUID]:
+    """Check-ins on 5/5/4/5 days of the four complete weeks before WEEKLY_DAY,
+    plus two just outside the window that must never be counted."""
+    window_start = WEEKLY_DAY - timedelta(days=28)
+    counted = [
+        make_checkin(ctx, window_start + timedelta(days=7 * week + day))
+        for week, days in enumerate((5, 5, 4, 5))
+        for day in range(days)
+    ]
+    make_checkin(ctx, window_start - timedelta(days=1))  # before the window
+    make_checkin(ctx, WEEKLY_DAY)  # the Monday itself is not a complete week
+    return counted
+
+
+def test_monday_edition_reports_gate_status(
+    ctx: AccessContext, brief_ctx: AccessContext, focus_goals: list[str], gate_checkins: list[UUID]
+) -> None:
+    """ADR 019 rule 9: per-week days-of-use counts over the four complete weeks
+    behind the Monday, computed from kernel data — counts and a boolean,
+    restart-neutral, citing the check-ins it counted."""
+    report = run_briefing(brief_ctx, WEEKLY_DAY, UTC)
+    attributes = stored(brief_ctx, WEEKLY_DAY)
+
+    assert attributes["gate"] == {"weeks": [5, 5, 4, 5], "met": False}
+    assert report.gate == "open" and "gate=open" in report.line()
+    cited = set(attributes["provenance"]["source_entity_ids"])
+    assert {str(c) for c in gate_checkins} <= cited
+    assert len(cited) == len(focus_goals) + len(gate_checkins)  # nothing outside the window
+
+
+def test_gate_met_when_every_week_reaches_five_days(
+    ctx: AccessContext, brief_ctx: AccessContext, focus_goals: list[str], gate_checkins: list[UUID]
+) -> None:
+    # the missing fifth day of the third week
+    make_checkin(ctx, WEEKLY_DAY - timedelta(days=28) + timedelta(days=7 * 2 + 4))
+
+    report = run_briefing(brief_ctx, WEEKLY_DAY, UTC)
+
+    assert report.gate == "met" and "gate=met" in report.line()
+    assert stored(brief_ctx, WEEKLY_DAY)["gate"] == {"weeks": [5, 5, 5, 5], "met": True}
+
+
+def test_migration_then_merge_over_an_old_composition_briefing(
+    ctx: AccessContext, brief_ctx: AccessContext, focus_goals: list[str]
+) -> None:
+    """An existing database keeps B3's schema until the operator runs
+    `scripts/migrate_briefing_composition.py`; the first recomposed run then
+    merges onto the stored briefing, whose stale keys linger without defeating
+    idempotency."""
+    with db.connect() as conn:
+        conn.execute(
+            "update type_definition set json_schema = %s where name = 'briefing'",
+            (Jsonb(OLD_BRIEFING_SCHEMA),),
+        )
+    try:
+        capture(
+            ctx,
+            "briefing",
+            {
+                "briefing_key": LEGACY_DAY.isoformat(),
+                "date": LEGACY_DAY.isoformat(),
+                "appointment_ids": [],
+                "open_review_ids": [str(UUID(int=9))],
+                "provenance": {
+                    "source_entity_ids": [],
+                    "source_event_ids": [],
+                    "method": METHOD,
+                    "confidence": 1.0,
+                },
+            },
+            actor=METHOD,
+        )
+    finally:
+        assert migrate() == {"types_updated": 1}  # restores the INT1 schema
+
+    first = run_briefing(brief_ctx, LEGACY_DAY, UTC)
+    attributes = stored(brief_ctx, LEGACY_DAY)
+    assert not first.unchanged
+    assert attributes["focus_intention_ids"] == focus_goals
+    assert attributes["open_review_ids"] == [str(UUID(int=9))]  # lingers on the merged entity
+
+    before = event_count()
+    assert run_briefing(brief_ctx, LEGACY_DAY, UTC).unchanged  # the lingering key is ignored
+    assert event_count() == before
+    assert migrate() == {"types_updated": 0}  # second migration run: no-op
+
+
 def test_absent_type_is_an_empty_section_not_a_crash(brief_ctx: AccessContext) -> None:
     assert _optional_find(brief_ctx, "no_such_type_yet") == []
 
@@ -169,35 +334,16 @@ def test_absent_type_is_an_empty_section_not_a_crash(brief_ctx: AccessContext) -
 def test_briefing_cannot_write_what_it_reads(brief_ctx: AccessContext) -> None:
     with pytest.raises(ScopeError):  # read-only on calendar by construction
         make_appointment(brief_ctx, "brief-forbidden", "2031-03-04T12:00:00+00:00")
+    with pytest.raises(ScopeError):  # and read-only on intentions
+        capture_intention(
+            brief_ctx, {"title": "Forbidden", "kind": "task", "status": "active", "focus": False}
+        )
 
 
 def test_briefing_without_ops_write_fails_closed() -> None:
-    read_only = AccessContext.of("calendar:read", "wellbeing:read", "ops:read")
+    read_only = AccessContext.of("intentions:read", "calendar:read", "wellbeing:read", "ops:read")
     with pytest.raises(ScopeError):
         run_briefing(read_only, EMPTY_DAY, UTC)
-
-
-def test_a_key_assemble_stops_emitting_stays_idempotent(
-    ctx: AccessContext, brief_ctx: AccessContext
-) -> None:
-    """capture MERGES on identity, so `latest_checkin_id` lingers on the stored
-    briefing after assemble stops emitting it — comparing whole attribute dicts
-    would make the run re-capture forever."""
-    capture(
-        ctx,
-        "daily_checkin",
-        {"date": "2031-05-02", "mood": 3, "energy": 3, "stress": 3, "sleep_quality": 3},
-    )
-    assert run_briefing(brief_ctx, DROP_DAY, UTC).has_checkin
-
-    # the same day seen without wellbeing:read: no check-in, so no key
-    blind = AccessContext.of("calendar:read", "ops:read", "ops:write")
-    second = run_briefing(blind, DROP_DAY, UTC)
-    assert not second.unchanged and not second.has_checkin
-
-    before = event_count()
-    assert run_briefing(blind, DROP_DAY, UTC).unchanged
-    assert event_count() == before
 
 
 def test_cli_emits_an_execution_receipt(brief_ctx: AccessContext) -> None:

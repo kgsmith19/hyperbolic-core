@@ -1,9 +1,21 @@
-"""The daily briefing: assembled, never generated (ADR 014, roadmap B3).
+"""The daily briefing: assembled, never generated (ADR 014; recomposed in INT1).
 
-Deterministic and zero-LLM — today's appointments in chronological order, every
-open ``link_review`` item awaiting a human, and the most recent
-``daily_checkin`` if one exists. Display-only: no notification, no email, no
-outbound request of any kind, and it writes nothing to anything it read.
+Deterministic and zero-LLM — the ONE morning digest (ADR 019 rule 1), in the
+roadmap §INT1 composition order: the focus intentions first (at most three by
+the focus rule; their entities carry the floors and next physical actions),
+then today's appointments in chronological order, then nothing else until the
+data for later sections exists (CPAP compliance joins after H2, co-occurrence
+after EP1). The open-review and latest-check-in pointers B3 shipped left the
+digest with that recomposition: feelings are pull-only, so nothing on a
+notification path references mood or symptoms (rule 1), and the digest carries
+no overdue or backlog counts (rule 2 — restart-neutral). The Monday edition
+additionally reports utility-gate status (rule 9): days-with-a-check-in per
+week over the four complete weeks behind it, counts and a met boolean, computed
+from kernel data — quota scores wait on D1 and months-of-cover on the C0.5
+rider. Display-only: no notification, no email, no outbound request of any
+kind, and it writes nothing to anything it read. An existing database needs
+``scripts/migrate_briefing_composition.py`` once before the first recomposed
+run.
 
 It cites entity IDs and never copies the text they point at: no titles, no
 locations, no attendee emails, no note text. An entity outlives what it quotes,
@@ -16,18 +28,20 @@ Idempotent: a re-run assembles the same attributes and skips the capture, so
 only the run's own execution receipt is new.
 
 Runs as ``python -m domains.ops.briefing`` (deploy-box scheduler) under a
-code-built AccessContext of exactly ``calendar:read`` + ``wellbeing:read`` +
-``ops:read`` + ``ops:write`` — no write scope on anything it reads, so it cannot
-modify calendar or wellbeing data by construction (ADR 014).
+code-built AccessContext of exactly ``intentions:read`` + ``calendar:read`` +
+``wellbeing:read`` + ``ops:read`` + ``ops:write`` — no write scope on anything
+it reads, so it cannot modify intention, calendar or wellbeing data by
+construction (ADR 014, amended by INT1).
 """
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, tzinfo
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from domains.ops.receipts import JobResult, run_job
+from domains.ops.types import GATE_DAYS_PER_WEEK, GATE_WEEKS
 from kernel import services
 from kernel.access import AccessContext
 from kernel.env import read_env
@@ -40,17 +54,17 @@ METHOD = "domains.ops.briefing"
 class BriefingReport:
     date: str
     briefing_id: UUID
+    focus: int
     appointments: int
-    open_reviews: int
-    has_checkin: bool
+    gate: str | None = None  # "met" | "open" on the Monday (weekly) edition
     unchanged: bool = False
 
     def line(self) -> str:
         state = "unchanged" if self.unchanged else f"briefing={self.briefing_id}"
+        gate = f" gate={self.gate}" if self.gate else ""
         return (
-            f"briefing {self.date}: appointments={self.appointments} "
-            f"open_reviews={self.open_reviews} checkin={'yes' if self.has_checkin else 'none'} "
-            f"({state})"
+            f"briefing {self.date}: focus={self.focus} "
+            f"appointments={self.appointments}{gate} ({state})"
         )
 
 
@@ -94,38 +108,77 @@ def _latest_event_ids(ctx: AccessContext, entity_ids: list[UUID]) -> list[str]:
     return latest
 
 
+def _gate_status(ctx: AccessContext, day: date) -> tuple[dict[str, Any], list[Entity]]:
+    """Utility-gate status (ADR 019 rule 9) for the Monday edition: days of use
+    per week over the GATE_WEEKS complete Mon-Sun weeks before `day`, and
+    whether every week reached GATE_DAYS_PER_WEEK. "Use" is a day with a
+    ``daily_checkin`` — the only operator-authored daily record in kernel data
+    today; widen the signal when other surfaces record operator actions. One
+    entity per date by identity, so counting entities counts days. Returns the
+    status and the check-ins it counted, so they can be cited (ADR 010)."""
+    window_start = day - timedelta(days=7 * GATE_WEEKS)
+    counts = [0] * GATE_WEEKS
+    counted: list[Entity] = []
+    for checkin in _optional_find(ctx, "daily_checkin"):
+        raw = checkin.attributes.get("date")
+        if not isinstance(raw, str):
+            continue
+        try:
+            offset = (date.fromisoformat(raw) - window_start).days
+        except ValueError:
+            continue
+        if 0 <= offset < 7 * GATE_WEEKS:
+            counts[offset // 7] += 1
+            counted.append(checkin)
+    met = all(count >= GATE_DAYS_PER_WEEK for count in counts)
+    return {"weeks": counts, "met": met}, counted
+
+
 def assemble(ctx: AccessContext, day: date, zone: tzinfo) -> dict[str, Any]:
-    """Build one day's briefing attributes from kernel reads only."""
+    """Build one day's briefing attributes from kernel reads only, in the
+    roadmap §INT1 composition order: focus intentions, then calendar context,
+    then nothing else (the Monday edition appends gate status)."""
+    focus = sorted(
+        (i for i in _optional_find(ctx, "intention") if i.attributes.get("focus") is True),
+        key=lambda i: str(i.attributes.get("title", "")),
+    )
     appointments = sorted(
         (a for a in _optional_find(ctx, "appointment") if _starts_on(a, day, zone)),
         key=lambda a: str(a.attributes.get("starts_at", "")),
     )
-    # Every link_review item is open: ADR 013 shipped the queue without a
-    # resolve path, so nothing is closed yet. The filter lands with that path.
-    reviews = _optional_find(ctx, "link_review")
-    checkins = sorted(
-        _optional_find(ctx, "daily_checkin"),
-        key=lambda c: str(c.attributes.get("date", "")),
-    )
 
-    cited = [a.id for a in appointments] + [r.id for r in reviews]
-    if checkins:
-        cited.append(checkins[-1].id)
+    cited = [i.id for i in focus] + [a.id for a in appointments]
     attributes: dict[str, Any] = {
         "briefing_key": day.isoformat(),
         "date": day.isoformat(),
+        "focus_intention_ids": [str(i.id) for i in focus],
         "appointment_ids": [str(a.id) for a in appointments],
-        "open_review_ids": [str(r.id) for r in reviews],
-        "provenance": {
-            "source_entity_ids": [str(i) for i in cited],
-            "source_event_ids": _latest_event_ids(ctx, cited),
-            "method": METHOD,
-            "confidence": 1.0,
-        },
     }
-    if checkins:
-        attributes["latest_checkin_id"] = str(checkins[-1].id)
+    if day.isoweekday() == 1:  # Monday: the weekly edition
+        gate, counted = _gate_status(ctx, day)
+        attributes["gate"] = gate
+        cited += [c.id for c in counted]
+    attributes["provenance"] = {
+        "source_entity_ids": [str(i) for i in cited],
+        "source_event_ids": _latest_event_ids(ctx, cited),
+        "method": METHOD,
+        "confidence": 1.0,
+    }
     return attributes
+
+
+def _report(
+    day: date, briefing_id: UUID, attributes: dict[str, Any], unchanged: bool = False
+) -> BriefingReport:
+    gate = attributes.get("gate")
+    return BriefingReport(
+        date=day.isoformat(),
+        briefing_id=briefing_id,
+        focus=len(attributes["focus_intention_ids"]),
+        appointments=len(attributes["appointment_ids"]),
+        gate=None if gate is None else ("met" if gate["met"] else "open"),
+        unchanged=unchanged,
+    )
 
 
 def run_briefing(
@@ -138,32 +191,23 @@ def run_briefing(
 
     existing = services.find(ctx, type_name="briefing", filters={"briefing_key": day.isoformat()})
     # Compare only the keys assemble produced: capture MERGES onto an identity
-    # match, so a key it stops emitting (latest_checkin_id, when no check-in is
-    # visible) lingers on the stored entity forever. Whole-dict equality would
-    # then never hold again and the briefing would re-capture on every run.
+    # match, so a key assemble no longer emits (the B3 composition's
+    # open_review_ids / latest_checkin_id, on a briefing stored before the
+    # INT1 recomposition) lingers on the stored entity forever. Whole-dict
+    # equality would then never hold again and the briefing would re-capture
+    # on every run.
     if existing and {k: existing[0].attributes.get(k) for k in attributes} == attributes:
-        return BriefingReport(
-            date=day.isoformat(),
-            briefing_id=existing[0].id,
-            appointments=len(attributes["appointment_ids"]),
-            open_reviews=len(attributes["open_review_ids"]),
-            has_checkin="latest_checkin_id" in attributes,
-            unchanged=True,
-        )
+        return _report(day, existing[0].id, attributes, unchanged=True)
     result = services.capture(ctx, "briefing", attributes, actor=METHOD)
-    return BriefingReport(
-        date=day.isoformat(),
-        briefing_id=result.entity_id,
-        appointments=len(attributes["appointment_ids"]),
-        open_reviews=len(attributes["open_review_ids"]),
-        has_checkin="latest_checkin_id" in attributes,
-    )
+    return _report(day, result.entity_id, attributes)
 
 
 def briefing_context() -> AccessContext:
     """Exactly the scopes the briefing needs: read on the domains it summarizes,
-    write only on its own (ADR 014)."""
-    return AccessContext.of("calendar:read", "wellbeing:read", "ops:read", "ops:write")
+    write only on its own (ADR 014, amended by INT1)."""
+    return AccessContext.of(
+        "intentions:read", "calendar:read", "wellbeing:read", "ops:read", "ops:write"
+    )
 
 
 def _job(ctx: AccessContext) -> JobResult:

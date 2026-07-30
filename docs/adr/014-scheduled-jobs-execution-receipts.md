@@ -128,3 +128,16 @@ all) and no high-consequence write (one `ops` entity, display-only).
 consumer needs receipts as a metric series rather than entities, a scheduled job
 needs to write outside its own domain, or feedback volume justifies a UI
 (currently service + tests only, deliberately).
+
+## Amended 2026-07-29 (roadmap §INT1, ADR 019)
+
+The briefing was recomposed into the one morning digest of ADR 019 rule 1:
+`focus_intention_ids` leads (the at-most-three focus intentions, whose entities
+carry the floors and next physical actions), `appointment_ids` follows, and
+nothing else until later slices' data exists — the `open_review_ids` and
+`latest_checkin_id` pointers left the digest (feelings are pull-only; no
+overdue or backlog counts, rule 2). The Monday edition adds `gate`: utility-
+gate status per rule 9, days-with-a-check-in per week over the four complete
+Mon–Sun weeks behind it, counts and a met boolean only. `domains.ops.briefing`
+now also holds `intentions:read` (still no write scope on anything it reads).
+An existing database runs `scripts/migrate_briefing_composition.py` once.

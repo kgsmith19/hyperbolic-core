@@ -79,6 +79,20 @@ Runnable: once a real reschedule exists in ingested calendar data.
 
 ---
 
+## Intentions questions (INT1)
+
+**15. What are my 3 focus goals?**
+Tests: registry-typed retrieval, focus-flag filtering, the service-enforced focus-3 cap.
+Expected behavior: lists exactly the intentions with focus=true (at most three, by service rule), cited to their records; never pads with non-focus intentions.
+Runnable: once intentions are captured (type shipped in INT1; fixture-covered in `tests/intentions/`, prod data lands with the priority-list import).
+
+**16. What is the floor version of [habit]?**
+Tests: single-record retrieval, floor-string faithfulness.
+Expected behavior: resolves the named intention and returns its floor string verbatim, cited; abstains when no floor is recorded rather than inventing a smaller habit.
+Runnable: once intentions are captured (type shipped in INT1; fixture-covered in `tests/intentions/`).
+
+---
+
 ## Deliberately unanswerable questions
 
 **12. What caused my stress to increase last Tuesday?**
@@ -101,5 +115,6 @@ Runnable: now (should decline immediately).
 - **Now — seed data / abstain-decline behavior:** 8 (partial), 9 (low signal), 13, 14.
 - **Once real calendar feed data exists (ingestion shipped in B1; feeds configured, first data pending):** 1, 7, 8 (full), 11 (needs a real reschedule).
 - **With both check-ins and calendar data (check-ins already live):** 10.
+- **Once intentions are captured (type shipped in INT1; import pending):** 15, 16.
 
 Re-tag as domains are added. Question types are durable; the tags and expected answers are not.

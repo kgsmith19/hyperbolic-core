@@ -15,7 +15,17 @@ Commands (venv at `.venv`, DB creds in `.env`):
   agent clients; needs a minted agent token (README "Agent access over MCP").
 - jobs: `.venv\Scripts\python -m domains.calendar.ingest` / `.calendar.autolink` /
   `.ops.briefing` — the scheduled trio, run in that order; each leaves an
-  `execution_receipt` and only `ok` exits 0 (ADR 014, docs/runbook.md).
+  `execution_receipt` and only `ok` exits 0 (ADR 014, docs/runbook.md). The
+  briefing is the INT1 morning digest (focus intentions, then calendar, then
+  nothing else; Mondays add utility-gate status); an existing database needs
+  `scripts/migrate_briefing_composition.py` once before the first recomposed
+  run.
+- import: `.venv\Scripts\python -m domains.intentions.import_priorities <path>` —
+  operator-run, not scheduled: reads a priority list from a LOCAL text file
+  (one item per line; the file never enters the repo), asks Anthropic to
+  propose kind/next_action, and seeds FLAGGED `status: "candidate"` intentions
+  the operator confirms via the capture UI. Idempotent: existing titles are
+  skipped before anything is sent. Same receipt contract.
 - extract: `.venv\Scripts\python -m domains.bills.extract [document_id ...]` —
   operator-run, not scheduled: it sends a captured document's text to Anthropic
   and captures candidate bills/EOBs (ADR 016). Same receipt contract.
