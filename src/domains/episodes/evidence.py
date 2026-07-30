@@ -44,7 +44,6 @@ from datetime import date
 from itertools import combinations
 from statistics import median
 from typing import Any
-from uuid import UUID
 
 from domains.episodes.capture import _number, _parsed_date
 from domains.episodes.types import TYPE_EPISODE
@@ -129,25 +128,13 @@ def compute_card(episodes: list[Entity]) -> dict[str, Any]:
     }
 
 
-def _latest_event_ids(ctx: AccessContext, entity_ids: list[UUID]) -> list[str]:
-    """The last event of each cited episode (the briefing.py provenance
-    pattern): the exact state this card saw is replayable from the log
-    (ADR 010, invariants 2/3)."""
-    latest = []
-    for entity_id in entity_ids:
-        events = services.history(ctx, entity_id)
-        if events:
-            latest.append(str(events[-1].id))
-    return latest
-
-
 def evidence_card(ctx: AccessContext) -> dict[str, Any]:
     """Compute the card over every episode record, cited. Reads only."""
     episodes = services.find(ctx, type_name=TYPE_EPISODE)
     card = compute_card(episodes)
     card["provenance"] = {
         "source_entity_ids": [str(episode.id) for episode in episodes],
-        "source_event_ids": _latest_event_ids(ctx, [episode.id for episode in episodes]),
+        "source_event_ids": services.latest_event_ids(ctx, [e.id for e in episodes]),
         "method": METHOD,
         "confidence": 1.0,
     }

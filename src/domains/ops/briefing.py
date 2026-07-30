@@ -84,10 +84,14 @@ def briefing_zone() -> tzinfo:
 def _optional_find(ctx: AccessContext, type_name: str) -> list[Entity]:
     """Entities of a type that may not be defined yet — a fresh box has no
     calendar or wellbeing data until those slices' jobs have run. Absent type
-    means an empty section, not a crashed briefing."""
-    if type_name not in {t.name for t in services.list_types(ctx)}:
+    means an empty section, not a crashed briefing; a missing SCOPE on a
+    defined type propagates as ScopeError instead of composing an empty
+    section forever (the PR #49 precedent: a scope-filtered view like
+    `list_types` answers "visible", never "defined")."""
+    try:
+        return services.find(ctx, type_name=type_name)
+    except LookupError:
         return []
-    return services.find(ctx, type_name=type_name)
 
 
 def _starts_on(appointment: Entity, day: date, zone: tzinfo) -> bool:
@@ -101,17 +105,6 @@ def _starts_on(appointment: Entity, day: date, zone: tzinfo) -> bool:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     return moment.astimezone(zone).date() == day
-
-
-def _latest_event_ids(ctx: AccessContext, entity_ids: list[UUID]) -> list[str]:
-    """The last event of each cited entity: the exact state this briefing saw is
-    replayable from the log (ADR 010 provenance, invariants 2/3)."""
-    latest = []
-    for entity_id in entity_ids:
-        events = services.history(ctx, entity_id)
-        if events:
-            latest.append(str(events[-1].id))
-    return latest
 
 
 def _gate_status(ctx: AccessContext, day: date) -> tuple[dict[str, Any], list[Entity]]:
@@ -175,7 +168,7 @@ def assemble(ctx: AccessContext, day: date, zone: tzinfo) -> dict[str, Any]:
         cited += [c.id for c in counted]
     attributes["provenance"] = {
         "source_entity_ids": [str(i) for i in cited],
-        "source_event_ids": _latest_event_ids(ctx, cited),
+        "source_event_ids": services.latest_event_ids(ctx, cited),
         "method": METHOD,
         "confidence": 1.0,
     }

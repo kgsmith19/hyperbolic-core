@@ -243,12 +243,9 @@ def deterministic_reply(ctx: AccessContext, message: str) -> dict[str, Any] | No
     playbooks = latest_playbooks(services.find(ctx, type_name=TYPE_PLAYBOOK))
     card = evidence_card(ctx)
     entity_ids = list(card["provenance"]["source_entity_ids"])
+    entity_ids += [str(playbook.id) for playbook in playbooks]
     event_ids = list(card["provenance"]["source_event_ids"])
-    for playbook in playbooks:
-        entity_ids.append(str(playbook.id))
-        events = services.history(ctx, playbook.id)
-        if events:
-            event_ids.append(str(events[-1].id))
+    event_ids += services.latest_event_ids(ctx, [playbook.id for playbook in playbooks])
     return {
         "lines": playbook_lines(playbooks) + card_lines(card),
         "provenance": {

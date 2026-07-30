@@ -4,7 +4,7 @@ server — goes through these services and nothing else (invariant 7)."""
 from kernel.services.capture import CaptureResult, capture
 from kernel.services.edges import relate, supersede_edge
 from kernel.services.privacy import ForgetResult, forget, redacted_fields
-from kernel.services.queries import find, get_entity, history, ping
+from kernel.services.queries import find, get_entity, history, latest_event_ids, ping
 from kernel.services.registry import active_domains, define_missing, define_type, list_types
 
 __all__ = [
@@ -18,6 +18,7 @@ __all__ = [
     "forget",
     "get_entity",
     "history",
+    "latest_event_ids",
     "list_types",
     "ping",
     "redacted_fields",

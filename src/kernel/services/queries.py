@@ -81,6 +81,18 @@ def find(
         return [e for e in entities if _readable(ctx, entity_domains(conn, e.id))]
 
 
+def latest_event_ids(ctx: AccessContext, entity_ids: list[UUID]) -> list[str]:
+    """The last event id of each entity, stringified for a provenance envelope
+    (ADR 010): the exact state a derived read saw is replayable from the log
+    (invariants 2/3)."""
+    latest = []
+    for entity_id in entity_ids:
+        events = history(ctx, entity_id)
+        if events:
+            latest.append(str(events[-1].id))
+    return latest
+
+
 def ping() -> bool:
     """Liveness for health checks: the database answers. Touches no data,
     so it is the one service without an AccessContext."""

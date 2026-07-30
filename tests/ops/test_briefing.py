@@ -389,6 +389,14 @@ def test_absent_type_is_an_empty_section_not_a_crash(brief_ctx: AccessContext) -
     assert _optional_find(brief_ctx, "no_such_type_yet") == []
 
 
+def test_scoped_out_type_refuses_rather_than_composing_empty(brief_ctx: AccessContext) -> None:
+    """Visibility is not existence (the PR #49 precedent): a DEFINED type the
+    context cannot read is a ScopeError, never a silently empty section — a
+    mis-built context must crash the run, not hollow out the digest."""
+    with pytest.raises(ScopeError):
+        _optional_find(AccessContext.of("ops:read"), "intention")
+
+
 def test_briefing_cannot_write_what_it_reads(
     brief_ctx: AccessContext, episode_week: list[UUID]
 ) -> None:
