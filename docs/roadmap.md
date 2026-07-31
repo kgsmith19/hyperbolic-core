@@ -184,10 +184,14 @@ gate bounds everything after it.
   scheduler (E1 owns those). Prompt §INT1 below. — done 2026-07-29 (PR #53;
   existing databases run `scripts/migrate_briefing_composition.py` once, and
   re-run `scripts/define_daily_checkin.py` for the rider fields)
-- [ ] H1 Apple Health webhook — weight + activity + workouts via Health Auto
-  Export REST push to a tailnet-only endpoint. **/security-review pre-merge**
-  (first inbound webhook). Operator pre-req: Health Auto Export + Tailscale on
-  the phone. Prompt §H1 below.
+- [ ] H1 Health Connect webhook (Android) — weight + activity + workouts pushed
+  from the phone's Health Connect store to a tailnet-only endpoint.
+  **/security-review pre-merge** (first inbound webhook). Operator pre-req: the
+  Health Connect Webhook app installed and pointed at the endpoint (Tailscale
+  already installed), and at least one source writing into Health Connect — a
+  Withings scale for weight (its Health Mate app has first-class Health Connect
+  support; it is also D1's only weight input) and the phone's own Fitbit app for
+  steps/activity. Prompt §H1 below.
 - [ ] H2 CPAP ingestion + rolling compliance service — SleepHQ public API v1
   (ez Share SD pull as documented fallback) → cpap_session events + one
   deterministic 30-day compliance service feeding the briefing. Operator
@@ -368,20 +372,49 @@ practices, appreciation, phone-free, caffeine mg/last-cup, no-dairy)
 land here via define script since the briefing consumes them.
 ```
 
-### H1 — Apple Health webhook
+### H1 — Health Connect webhook (Android)
+
+Re-authored 2026-07-30: the original prompt named Health Auto Export, which
+reads Apple HealthKit and does not exist on Android. The operator is on a
+Pixel, so the source is now the **Health Connect Webhook** app
+(`com.hcwebhook.app`, open source at `mcnaveen/health-connect-webhook`), which
+reads Google Health Connect on-device and POSTs to an arbitrary URL. Health
+Connect has no cloud API by design, so an on-device pusher is the only path.
+The endpoint's security posture and the types are unchanged from the original.
 
 ```
-# lifeos Slice H1: Apple Health ingestion (Health Auto Export webhook)
-Tailnet-only FastAPI endpoint for Health Auto Export REST pushes (phone
-on Tailscale). Types: weight_measurement, activity_summary; workout
-extends existing type. Idempotent by (metric, timestamp, value) hash;
-receipts sha256+metadata; schema-validated, additionalProperties false,
-size caps, shared-secret header (rotation documented). ADR-012 hostile-
-input rules apply. /security-review pre-merge (first inbound webhook).
-Pre-made decisions: no sleep_session (CPAP covers sleep signal); no
-Withings/Oura; no trend math (D1 owns it); no charts.
-Acceptance: CI green; replayed export emits zero duplicates; per-day
-weight answers with citations; trend questions abstain pending D1.
+# lifeos Slice H1: Health Connect ingestion (Android webhook push)
+Tailnet-only FastAPI endpoint receiving pushes from the Health Connect
+Webhook Android app (phone on Tailscale). Types: weight_measurement,
+activity_summary; workout extends existing type. Receipts sha256+
+metadata; schema-validated, additionalProperties false, size caps,
+shared-secret header (the app sets custom headers per webhook URL;
+rotation documented). ADR-012 hostile-input rules apply.
+/security-review pre-merge MANDATORY (first inbound webhook): the app
+provides no signature or built-in auth, so that header plus the tailnet
+are the entire perimeter.
+
+Payload: ONE JSON object per delivery, with `timestamp` and
+`app_version` at the root plus optional snake_case arrays per data type
+(absent when empty). `weight` items are {kilograms, time} — weight
+arrives in KILOGRAMS, fixed by the source; convert on read, never
+mutate at the edge. `exercise` items are {type, start_time, end_time,
+duration_seconds, distance_meters?, steps?, avg_cadence_spm?,
+max_cadence_spm?, stride_length_m?}. Ignore unknown arrays rather than
+rejecting the delivery; reject unknown FIELDS within a known array.
+
+Idempotency is the core of this slice, not a defence. The app carries
+NO per-record id, reads a rolling 48-hour window, and retries failed
+deliveries with backoff — so duplicate and overlapping delivery is the
+normal case. Key each record on a content hash of (metric, timestamp,
+value). Delivery cadence is app-side config (interval, fixed times, or
+manual Sync Now); lifeos schedules nothing here (ADR-019 push/pull).
+Pre-made decisions: no sleep_session (CPAP covers sleep signal); ONE
+ingestion path (Health Connect) and no second cloud health API, whoever
+the device vendor is; no trend math (D1 owns it); no charts.
+Acceptance: CI green; replaying the SAME 48h window twice and then an
+OVERLAPPING window emits zero duplicates; per-day weight answers with
+citations; trend questions abstain pending D1.
 ```
 
 ### H2 — CPAP ingestion + rolling compliance
