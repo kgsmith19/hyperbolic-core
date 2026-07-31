@@ -5,8 +5,9 @@ PR updates its status line here. ADRs win on conflict. Background:
 `docs/research/lifeos-research-final.md` (v2 synthesis, point-in-time) and
 `docs/research/lifeos-research-2026-07-29.md` (v3 synthesis — the second
 research pass behind the 2026-07-29 queue revision). The full evidence base
-behind v3 lives in ecosystem-root working files outside git
-(`NEXT-DIRECTION-RESEARCH-2026-07-29.md`, `ROADMAP-PROPOSAL-2026-07-29.md`);
+behind v3 lives in working files outside git, in the ecosystem `notes/` folder
+(`notes/NEXT-DIRECTION-RESEARCH-2026-07-29.md`,
+`notes/ROADMAP-PROPOSAL-2026-07-29.md`);
 cite them by name, never copy their content here.
 
 Milestones are product moments; each slice is one focused Claude Code session,
