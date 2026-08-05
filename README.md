@@ -4,16 +4,30 @@ Finds out **which layer** is breaking your LLM API connections — your Wi-Fi,
 your router's DNS, your ISP, or the far end — and proves it with data instead
 of a hunch.
 
-Pure Python 3 standard library. Nothing to install.
+## Quick start
+
+Pure Python 3 standard library — nothing to install, no `pip`, no build step.
 
 ```bash
-python -m netcheck watch      # leave this running
-python -m netcheck serve      # dashboard at http://127.0.0.1:8787
-python -m netcheck diagnose   # ranked causes, in the terminal
-python -m netcheck full-check # one-shot sweep across all 15 hypotheses
+git clone https://github.com/kgsmith19/network-checker
+cd network-checker
+python -m netcheck full-check --format quick    # one-shot check, right now
 ```
 
-New to this? See `docs/QUICKSTART.md`.
+That alone gives you a snapshot. For a problem that comes and goes, leave a
+monitor running so the *next* failure gets caught with data next to it:
+
+```bash
+python -m netcheck watch      # leave running in a terminal, tmux pane, etc.
+python -m netcheck diagnose   # ranked causes, once watch has a few samples
+python -m netcheck serve      # dashboard at http://127.0.0.1:8787
+```
+
+`watch` also reads Claude Code's own error logs and tells you which of your
+past API errors were actually your network, and which weren't.
+
+New to this? `docs/QUICKSTART.md` walks through every command with real
+sample output. Running in a container? See `docs/DEPLOYMENT.md`.
 
 ## Why it exists
 
