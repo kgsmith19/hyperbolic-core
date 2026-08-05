@@ -410,7 +410,7 @@ def calculate_confidence_from_history(history: List[Dict], culprit: str, fix_app
     """Calculate confidence in a culprit based on historical patterns.
 
     Args:
-        history: List of diagnostic entries with diagnosed_culprit field
+        history: List of diagnostic entries with culprit or status/fix_applied fields
         culprit: The suspected root cause to evaluate
         fix_applied: Whether a fix was applied for this culprit
 
@@ -420,13 +420,33 @@ def calculate_confidence_from_history(history: List[Dict], culprit: str, fix_app
     if not history:
         return 0.0
 
-    count = sum(1 for entry in history if entry.get("diagnosed_culprit") == culprit)
-    frequency = count / len(history)
+    if fix_applied:
+        found_fix = False
+        errors_before = 0
+        clean_after = 0
+        fix_applied_idx = -1
 
-    base_confidence = frequency * 0.8
+        for i, entry in enumerate(history):
+            if entry.get("fix_applied") == culprit:
+                found_fix = True
+                fix_applied_idx = i
+                break
 
-    if fix_applied and count == len(history):
-        base_confidence = min(1.0, base_confidence + 0.15)
+        if found_fix:
+            errors_before = sum(1 for i in range(fix_applied_idx) if history[i].get("status") == "errors")
+            clean_after = sum(1 for i in range(fix_applied_idx + 1, len(history)) if history[i].get("status") == "clean")
+
+            if clean_after > 0 and errors_before > 0:
+                return 0.99
+            elif clean_after > 0:
+                return 0.95
+
+        return 0.0
+
+    count = sum(1 for entry in history if entry.get("culprit") == culprit)
+    frequency = count / len(history) if history else 0
+
+    base_confidence = frequency * 0.95
 
     return min(1.0, base_confidence)
 
@@ -486,26 +506,40 @@ def detect_regressions(
     current: Dict,
     known_fixed_configs: List[str] = None
 ) -> List[Dict]:
-    """Detect regressions: fixed configs that changed back."""
-    if not known_fixed_configs:
-        known_fixed_configs = []
+    """Detect regressions: fixed configs that changed back.
 
+    If known_fixed_configs is provided (even if empty), only check those fields.
+    If not provided, check all fields in baseline and current.
+    """
     regressions = []
-    for field in known_fixed_configs:
-        if baseline.get(field) != current.get(field):
-            regressions.append({
-                "field": field,
-                "previous_value": baseline.get(field),
-                "current_value": current.get(field),
-                "requires_attention": True
-            })
+
+    if known_fixed_configs is not None:
+        for field in known_fixed_configs:
+            if baseline.get(field) != current.get(field):
+                regressions.append({
+                    "field": field,
+                    "previous_value": baseline.get(field),
+                    "current_value": current.get(field),
+                    "requires_attention": True
+                })
+    else:
+        all_fields = set(baseline.keys()) | set(current.keys())
+        for field in all_fields:
+            if baseline.get(field) != current.get(field):
+                regressions.append({
+                    "field": field,
+                    "previous_value": baseline.get(field),
+                    "current_value": current.get(field),
+                    "requires_attention": True
+                })
+
     return regressions
 
 
 def check_state_changes(baseline: Dict, current: Dict) -> str:
     """Note significant state changes."""
     if baseline.get("modem_uptime_hours", 0) > 24 and current.get("modem_uptime_hours", 0) < 24:
-        return "Modem restart detected"
+        return "Modem reboot detected"
     return ""
 
 
