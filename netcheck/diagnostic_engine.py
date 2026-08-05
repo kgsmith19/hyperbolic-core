@@ -43,30 +43,117 @@ class DiagnosticRule:
     condition: Optional[str] = None  # Python condition to check before running
 
     def should_run(self, results: 'DiagnosisResult') -> bool:
-        """Check if conditions are met to run this rule."""
+        """Check if conditions are met to run this rule.
+
+        Evaluates simple conditions like:
+        - results.get('key') == 'value'
+        - results.get('key') != 'value' and results.get('other') == 'ok'
+
+        Uses safe parsing without eval() - no arbitrary code execution.
+        """
         if not self.condition:
             return True
-        # Safe evaluation: only supports results.get() calls and basic comparisons
-        # Not arbitrary code execution like eval()
+
+        # Extract all .get() calls and replace with actual values
+        import re
+        condition = self.condition
+
+        # Find all results.get('key') patterns and replace with values
+        for match in re.finditer(r"results\.get\('([^']+)'\)", condition):
+            key = match.group(1)
+            value = results.get(key) if isinstance(results, dict) else getattr(results, key, None)
+            # Convert to safe comparison string
+            if value is None:
+                safe_value = "None"
+            elif isinstance(value, bool):
+                safe_value = str(value)
+            elif isinstance(value, str):
+                safe_value = f"'{value}'"
+            else:
+                safe_value = repr(value)
+            condition = condition.replace(match.group(0), safe_value)
+
+        # Safely evaluate the condition by checking for dangerous patterns
+        # Only allow: alphanumeric, quotes, parentheses, comparison operators, logical operators
+        if not re.match(r"^['\"\w\s()=!<>&|+-]*$", condition):
+            return False
+
+        # Replace logical operators with Python equivalents
+        condition = condition.replace(" and ", " and ")  # Already correct
+        condition = condition.replace(" or ", " or ")    # Already correct
+
         try:
-            # Replace results.get() calls with actual lookups
-            import re
-            condition = self.condition
-            for match in re.finditer(r"results\.get\('([^']+)'\)", condition):
-                key = match.group(1)
-                value = results.get(key) if isinstance(results, dict) else getattr(results, key, None)
-                # Replace with string representation for evaluation
-                if isinstance(value, str):
-                    condition = condition.replace(match.group(0), f"'{value}'")
-                else:
-                    condition = condition.replace(match.group(0), repr(value))
-            # Only allow safe operators: ==, !=, and, or, not, parentheses
-            if not re.match(r"^['\"\w\s()=!&|]*$", condition):
-                return False  # Reject unsafe conditions
-            # Safely evaluate using only built-in comparisons
-            return bool(eval(condition))
+            # No eval() - instead use ast.literal_eval for safety,
+            # then manually check comparisons
+            # For now, use a restricted globals dict
+            return _safe_eval_condition(condition)
         except Exception:
-            return False  # On any error, don't run the rule
+            return False
+
+
+def _safe_eval_condition(condition: str) -> bool:
+    """Safely evaluate a condition string without using eval()."""
+    # This is a simple recursive descent parser for basic boolean expressions
+    # Supports: 'value' == 'value', 'value' != 'value', and, or, not, parentheses
+    import re
+
+    # Recursively evaluate AND (lowest precedence)
+    if " and " in condition:
+        parts = condition.split(" and ")
+        return all(_safe_eval_condition(p.strip()) for p in parts)
+
+    # Recursively evaluate OR
+    if " or " in condition:
+        parts = condition.split(" or ")
+        return any(_safe_eval_condition(p.strip()) for p in parts)
+
+    # Handle NOT
+    if condition.strip().startswith("not "):
+        return not _safe_eval_condition(condition[4:].strip())
+
+    # Handle parentheses
+    if condition.startswith("(") and condition.endswith(")"):
+        return _safe_eval_condition(condition[1:-1])
+
+    # Handle comparisons: 'value' == 'value'
+    for op in ["!=", "=="]:
+        if op in condition:
+            left, right = condition.split(op, 1)
+            left = left.strip()
+            right = right.strip()
+
+            # Parse string literals
+            left_val = _parse_value(left)
+            right_val = _parse_value(right)
+
+            if op == "==":
+                return left_val == right_val
+            else:  # !=
+                return left_val != right_val
+
+    return False
+
+
+def _parse_value(s: str):
+    """Parse a value string (handles string literals and None/True/False)."""
+    s = s.strip()
+    if s == "None":
+        return None
+    elif s == "True":
+        return True
+    elif s == "False":
+        return False
+    elif s.startswith("'") and s.endswith("'"):
+        return s[1:-1]
+    elif s.startswith('"') and s.endswith('"'):
+        return s[1:-1]
+    else:
+        # Try to parse as literal
+        try:
+            import ast
+            return ast.literal_eval(s)
+        except (ValueError, SyntaxError):
+            return s
 
 
 @dataclass
