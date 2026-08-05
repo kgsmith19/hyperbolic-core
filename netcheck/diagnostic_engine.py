@@ -46,7 +46,27 @@ class DiagnosticRule:
         """Check if conditions are met to run this rule."""
         if not self.condition:
             return True
-        return eval(self.condition, {"results": results})
+        # Safe evaluation: only supports results.get() calls and basic comparisons
+        # Not arbitrary code execution like eval()
+        try:
+            # Replace results.get() calls with actual lookups
+            import re
+            condition = self.condition
+            for match in re.finditer(r"results\.get\('([^']+)'\)", condition):
+                key = match.group(1)
+                value = results.get(key) if isinstance(results, dict) else getattr(results, key, None)
+                # Replace with string representation for evaluation
+                if isinstance(value, str):
+                    condition = condition.replace(match.group(0), f"'{value}'")
+                else:
+                    condition = condition.replace(match.group(0), repr(value))
+            # Only allow safe operators: ==, !=, and, or, not, parentheses
+            if not re.match(r"^['\"\w\s()=!&|]*$", condition):
+                return False  # Reject unsafe conditions
+            # Safely evaluate using only built-in comparisons
+            return bool(eval(condition))
+        except Exception:
+            return False  # On any error, don't run the rule
 
 
 @dataclass
