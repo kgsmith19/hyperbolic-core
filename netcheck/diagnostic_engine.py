@@ -1573,3 +1573,175 @@ def measure_buffer_efficiency(buffer_events: List[Dict]) -> Dict:
         "wasted_bytes_retransmitted": wasted_retransmits,
         "buffer_efficiency_percent": efficiency
     }
+
+
+def synthesize_diagnosis(layer_results: Dict[str, Dict]) -> Dict:
+    """Synthesize findings from all network layers into single diagnosis."""
+    if not layer_results:
+        return {
+            "primary_culprit": None,
+            "contributing_layers": [],
+            "synthesis_confidence": 0.0
+        }
+
+    culprits = []
+    for layer, result in layer_results.items():
+        if result.get("culprit_found"):
+            culprits.append({
+                "layer": layer,
+                "confidence": result.get("confidence", 0.5),
+                "metric": result.get("metric")
+            })
+
+    if not culprits:
+        return {
+            "primary_culprit": None,
+            "contributing_layers": [],
+            "synthesis_confidence": 0.0
+        }
+
+    # Sort by confidence, highest first
+    culprits_sorted = sorted(culprits, key=lambda x: x["confidence"], reverse=True)
+    primary = culprits_sorted[0]
+
+    return {
+        "primary_culprit": primary["layer"],
+        "contributing_layers": [c["layer"] for c in culprits_sorted[1:]],
+        "synthesis_confidence": primary["confidence"]
+    }
+
+
+def rank_root_causes(findings: List[Dict]) -> List[Dict]:
+    """Rank root causes by likelihood and confidence."""
+    if not findings:
+        return []
+
+    ranked = []
+    for finding in findings:
+        confidence = finding.get("confidence", 0.5)
+        frequency = finding.get("frequency", 0)  # How often observed
+        impact = finding.get("impact", 1)  # How much it affects performance
+
+        # Score: confidence * frequency * impact
+        score = confidence * max(0.1, frequency) * impact
+
+        ranked.append({
+            "cause": finding.get("cause"),
+            "score": score,
+            "confidence": confidence,
+            "frequency": frequency,
+            "impact": impact,
+            "evidence": finding.get("evidence", [])
+        })
+
+    return sorted(ranked, key=lambda x: x["score"], reverse=True)
+
+
+def calculate_confidence_score(observations: List[Dict]) -> float:
+    """Calculate confidence in diagnosis from observations."""
+    if not observations:
+        return 0.0
+
+    consistent_count = 0
+    for obs in observations:
+        if obs.get("consistent", False):
+            consistent_count += 1
+
+    consistency_score = consistent_count / len(observations)
+
+    # Confidence increases with more observations and consistency
+    observation_factor = min(1.0, len(observations) / 10.0)
+    return consistency_score * observation_factor
+
+
+def detect_cascade_failures(layer_states: Dict[str, str]) -> Dict:
+    """Identify cascading failures (one layer failure causes downstream issues)."""
+    layers_in_order = ["gateway", "isp", "dns", "tls", "application"]
+
+    failed_layers = [layer for layer, state in layer_states.items() if state == "fail"]
+
+    if not failed_layers:
+        return {
+            "cascade_detected": False,
+            "cascade_chain": [],
+            "root_layer": None
+        }
+
+    # Check if failures form a cascade (all downstream layers fail after root)
+    cascade_chains = []
+    for potential_root in layers_in_order:
+        if potential_root not in failed_layers:
+            continue
+
+        root_idx = layers_in_order.index(potential_root)
+        downstream = layers_in_order[root_idx + 1:]
+
+        # Check if all downstream layers in the list are also failed
+        downstream_failures = [l for l in downstream if l in failed_layers]
+        if downstream_failures:
+            cascade_chains.append({
+                "root": potential_root,
+                "downstream": downstream_failures
+            })
+
+    if cascade_chains:
+        # Return the longest cascade (most likely root cause)
+        longest = max(cascade_chains, key=lambda x: len(x["downstream"]))
+        return {
+            "cascade_detected": True,
+            "cascade_chain": [longest["root"]] + longest["downstream"],
+            "root_layer": longest["root"]
+        }
+
+    return {
+        "cascade_detected": False,
+        "cascade_chain": [],
+        "root_layer": None
+    }
+
+
+def generate_synthesis_report(synthesis: Dict, root_causes: List[Dict]) -> Dict:
+    """Generate actionable report from diagnosis synthesis."""
+    if not root_causes or not synthesis["primary_culprit"]:
+        return {
+            "summary": "No clear network issue detected",
+            "primary_issue": None,
+            "recommendations": [],
+            "priority": "low"
+        }
+
+    top_cause = root_causes[0]
+    culprit = synthesis["primary_culprit"]
+
+    # Map culprits to actionable recommendations
+    recommendations_map = {
+        "gateway": "Check Wi-Fi signal strength and adapter driver version",
+        "isp": "Contact ISP and provide modem DOCSIS stats from the timestamps",
+        "dns": "Add public DNS servers (1.1.1.1, 8.8.8.8) to adapter settings",
+        "tls": "Verify certificate validity and check for TLS interception",
+        "application": "Verify API endpoint is reachable and check server logs",
+    }
+
+    priority_map = {
+        "gateway": "high",
+        "isp": "high",
+        "dns": "medium",
+        "tls": "medium",
+        "application": "low"
+    }
+
+    return {
+        "summary": f"Primary issue: {culprit}",
+        "primary_issue": culprit,
+        "confidence": synthesis["synthesis_confidence"],
+        "contributing_layers": synthesis["contributing_layers"],
+        "recommendations": [
+            {
+                "action": recommendations_map.get(culprit, "Investigate further"),
+                "effort": "low" if culprit in ["dns", "gateway"] else "medium",
+                "expected_impact": top_cause.get("impact", 1)
+            }
+        ],
+        "priority": priority_map.get(culprit, "medium"),
+        "evidence_summary": f"Observed in {top_cause.get('frequency', 0):.0%} of measurements"
+    }
