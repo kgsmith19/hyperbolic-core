@@ -5,6 +5,7 @@ need credentials must go quiet, not loud, when they have none.
 """
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from netcheck import diagnose, environ
 
@@ -28,6 +29,35 @@ class CredentialGateTest(unittest.TestCase):
                 "router": {"state": "unavailable", "reason": "no credentials"},
                 "driver": {"state": "unavailable", "reason": "not Windows"}}
         self.assertEqual(diagnose.rank([], [], scan), [])
+
+
+class WifiPlatformDispatchTest(unittest.TestCase):
+    """wifi() shells out to a different tool per platform; each parser is
+    tested on its own merits in test_probes.py, so this only checks that
+    the right tool gets called and its output reaches the right parser."""
+
+    def test_macos_uses_airport_and_the_airport_parser(self):
+        with patch("netcheck.environ.MACOS", True), \
+             patch("netcheck.probes._run", return_value=("state: running\nSSID: x\nchannel: 44,80\n", "ok")) as mock_run:
+            result = environ.wifi()
+
+        self.assertEqual(result["state"], "ok")
+        self.assertEqual(result["ssid"], "x")
+        self.assertIn("airport", mock_run.call_args[0][0][0])
+
+    def test_macos_missing_airport_binary_is_unavailable_not_fail(self):
+        with patch("netcheck.environ.MACOS", True), \
+             patch("netcheck.probes._run", return_value=("", "unavailable")):
+            result = environ.wifi()
+
+        self.assertEqual(result["state"], "unavailable")
+
+    def test_non_macos_still_uses_netsh(self):
+        with patch("netcheck.environ.MACOS", False), \
+             patch("netcheck.probes._run", return_value=("State : disconnected\n", "ok")) as mock_run:
+            environ.wifi()
+
+        self.assertEqual(mock_run.call_args[0][0][0], "netsh")
 
 
 class DriverFindingsTest(unittest.TestCase):

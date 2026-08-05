@@ -5,6 +5,7 @@ on:
     branches: [main, 'claude/**']
   pull_request:
     branches: [main]
+  workflow_call:  # so release.yml can run the same suite before tagging an image
 
 jobs:
   test:

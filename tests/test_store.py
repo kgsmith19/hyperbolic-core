@@ -75,6 +75,72 @@ class StoreTest(unittest.TestCase):
                              {"ts": "z", "gw_typo_ms": 1.0})
 
 
+class SchemaMigrationTest(unittest.TestCase):
+    """An existing user's on-disk database predates whatever columns get
+    added to schema.sql after they first installed. executescript's
+    CREATE TABLE IF NOT EXISTS is a no-op on a table that already exists, so
+    without an explicit migration step those users would never receive new
+    columns -- this is the upgrade path."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.path = Path(self.dir.name) / "old.db"
+
+    def _make_old_database(self):
+        """A stand-in for a database created by a much earlier version of
+        schema.sql: only the columns that existed before wifi/culprit/loss
+        tracking was added."""
+        conn = sqlite3.connect(self.path)
+        conn.execute("""
+            CREATE TABLE hosts (
+              id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+              os TEXT NOT NULL, first_seen TEXT NOT NULL)""")
+        conn.execute("""
+            CREATE TABLE samples (
+              id INTEGER PRIMARY KEY, host_id INTEGER NOT NULL, ts TEXT NOT NULL,
+              gw_state TEXT, gw_ms REAL, synced INTEGER NOT NULL DEFAULT 0,
+              UNIQUE (host_id, ts))""")
+        conn.execute("INSERT INTO hosts (id, name, os, first_seen) VALUES (1, 'old-host', 'Windows', 't0')")
+        conn.execute("INSERT INTO samples (host_id, ts, gw_state, gw_ms) VALUES (1, 't1', 'ok', 12.5)")
+        conn.commit()
+        conn.close()
+
+    def test_missing_columns_are_added_without_losing_existing_data(self):
+        self._make_old_database()
+
+        conn = store.open_db(self.path)
+        self.addCleanup(conn.close)
+
+        current_columns = store.columns(conn, "samples")
+        for expected in ("gw_loss", "wifi_signal", "wifi_bssid", "culprit", "http_code"):
+            self.assertIn(expected, current_columns,
+                         f"schema.sql column {expected!r} was not migrated in")
+
+        row = conn.execute("SELECT * FROM samples WHERE ts='t1'").fetchone()
+        self.assertEqual(row["gw_state"], "ok")
+        self.assertEqual(row["gw_ms"], 12.5)
+        self.assertIsNone(row["culprit"], "new columns on old rows must be NULL, not fabricated")
+
+    def test_migrated_database_accepts_new_writes_normally(self):
+        self._make_old_database()
+        conn = store.open_db(self.path)
+        self.addCleanup(conn.close)
+        host = store.host_id(conn, "old-host", "Windows")
+
+        store.add_sample(conn, host, {"ts": "t2", "gw_state": "ok", "culprit": None,
+                                      "wifi_signal": 80})
+        got = [r for r in store.samples(conn) if r["ts"] == "t2"][0]
+        self.assertEqual(got["wifi_signal"], 80)
+
+    def test_fresh_database_is_unaffected(self):
+        """No pre-existing tables to migrate -- executescript alone already
+        creates the current schema in full."""
+        conn = store.open_db(self.path)
+        self.addCleanup(conn.close)
+        self.assertIn("culprit", store.columns(conn, "samples"))
+
+
 class MirrorTest(unittest.TestCase):
     """Criterion 11: pushing is idempotent and never loses local data."""
 

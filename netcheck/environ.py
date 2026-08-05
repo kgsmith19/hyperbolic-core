@@ -14,6 +14,14 @@ from datetime import datetime, timezone
 from . import probes
 
 WINDOWS = probes.WINDOWS
+MACOS = probes.MACOS
+
+# Apple removed the standalone `airport` CLI from the PATH in the Big Sur
+# era; it still exists at this fixed path through at least macOS 13. If a
+# future release drops it entirely, this call degrades to `unavailable` via
+# probes._run's FileNotFoundError handling, same as any other missing tool.
+_AIRPORT = ("/System/Library/PrivateFrameworks/Apple80211.framework/"
+            "Versions/Current/Resources/airport")
 
 
 def _ps(script, timeout=25):
@@ -50,6 +58,11 @@ def _unavailable(reason):
 
 
 def wifi():
+    if MACOS:
+        text, state = probes._run([_AIRPORT, "-I"])
+        if state != "ok":
+            return _unavailable("airport unavailable")
+        return probes.parse_airport_info(text)
     text, state = probes._run(["netsh", "wlan", "show", "interfaces"])
     if state != "ok":
         return _unavailable("netsh unavailable")

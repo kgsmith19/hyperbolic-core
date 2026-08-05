@@ -13,7 +13,8 @@ This is a reference, not a tutorial. For "how do I run this," see
 
 ## Module map
 
-21 modules split into six groups by what they do:
+21 diagnostic modules split into six groups by what they do, plus one small
+shared utility (`cache`):
 
 | Group | Modules |
 |---|---|
@@ -23,6 +24,7 @@ This is a reference, not a tutorial. For "how do I run this," see
 | Fixes | `fix_engine`, `fix_application` |
 | Verification & monitoring | `verification_engine`, `monitoring_engine` |
 | Runner, CLI, transport | `all_diagnostics`, `__main__`, `server` |
+| Shared utility | `cache` |
 
 ---
 
@@ -36,12 +38,20 @@ gather that output. This is what runs every tick of `netcheck watch`.
 - `parse_ping(text) -> dict` — loss and round-trip times from Windows or
   BSD/Linux `ping` output. Returns `{"loss_pct", "min_ms", "avg_ms", "max_ms"}`.
 - `parse_wlan_interfaces(text) -> dict` — link state for the connected Wi-Fi
-  interface from `netsh wlan show interfaces`.
+  interface from `netsh wlan show interfaces` (Windows).
+- `parse_airport_info(text) -> dict` — link state from macOS's `airport -I`.
+  Partial field mapping compared to the Windows parser (no signal
+  percentage, no separate rx/tx rate, no radio-type string — those come back
+  `None`). Built against Apple's documented format, not a live capture; see
+  `OPEN-ISSUES.md` #9.
 - `parse_wlan_networks(text, channel, own_bssid=None) -> dict` — counts
   competing radios near our channel, excluding our own AP.
 - `ping(host, count=2) -> dict` — shells out and parses with `parse_ping`.
-- `resolve(host, server=None) -> dict` — resolves `host`, optionally against a
-  specific DNS server (used to compare router DNS against public DNS).
+- `resolve(host, server=None, attempts=2, backoff_s=0.3) -> dict` — resolves
+  `host`, optionally against a specific DNS server (used to compare router
+  DNS against public DNS). Retries once on failure before reporting it — a
+  single dropped UDP query is common and isn't itself evidence the resolver
+  is broken.
 - `tls_connect(host, port=443, timeout=8) -> dict` — real TLS handshake,
   timed.
 - `http_check(host, path="/v1/models", timeout=10) -> dict` — one real HTTPS
@@ -62,8 +72,13 @@ gather that output. This is what runs every tick of `netcheck watch`.
 ### `netcheck/environ.py` — what this machine can tell us about its stack
 
 - `wifi() -> dict` — SSID, BSSID, band, channel, RSSI, link rate, radio type.
+  Dispatches on `probes.MACOS`: `airport -I` + `parse_airport_info` on macOS,
+  `netsh wlan show interfaces` + `parse_wlan_interfaces` everywhere else.
 - `congestion(channel, own_bssid=None) -> dict` — how many other radios
-  contend for our airtime on the same or an overlapping channel.
+  contend for our airtime on the same or an overlapping channel. Windows
+  only for now (`netsh wlan show networks`) — no macOS path yet, since
+  `airport -s` requires disassociating on modern macOS, a poor fit for a
+  passive scan (`OPEN-ISSUES.md` #9).
 - `driver(name="Wi-Fi") -> dict` — adapter identity plus the settings that
   actually cause intermittent drops (power management, roaming
   aggressiveness, 802.11 mode).
@@ -106,8 +121,14 @@ gather that output. This is what runs every tick of `netcheck watch`.
 
 ### `netcheck/store.py` — SQLite source of truth
 
-- `open_db(path) -> sqlite3.Connection` — opens/creates the DB and applies
-  `schema.sql`.
+- `open_db(path) -> sqlite3.Connection` — opens/creates the DB, applies
+  `schema.sql`, then runs `_migrate()`.
+- `_migrate(conn)` — the upgrade path for existing users: adds any column
+  `schema.sql` has that an already-existing on-disk table doesn't (via
+  `ALTER TABLE ... ADD COLUMN`, diffed against a throwaway in-memory build
+  of the current schema rather than a hand-rolled SQL parser). Added columns
+  are always nullable, regardless of `schema.sql`'s `NOT NULL` — see
+  `docs/DEPLOYMENT.md`.
 - `host_id(conn, name, os_name) -> int` — upserts the host row, returns its id.
 - `add_sample(conn, host, row)`, `add_event(conn, host, row)`,
   `add_error(conn, host, row)`, `add_scan(conn, host, payload)` — inserts,
@@ -121,6 +142,16 @@ gather that output. This is what runs every tick of `netcheck watch`.
 - `mirror(conn, url=None, key=None, host_name=None) -> dict` — pushes
   unsynced rows to Supabase PostgREST. Never blocks local capture: a failed
   push leaves rows unsynced, never marks them done.
+
+### `netcheck/cache.py` — shared TTL cache (not a diagnostic module itself)
+
+- `ttl_cache(seconds=30.0) -> decorator` — caches a callable's return value
+  (including `None`) for `seconds`, keyed on its args/kwargs.
+  `decorated_fn.cache_clear()` empties it. Used to dedupe identical
+  network-bound lookups called from more than one module in the same run —
+  e.g. `nat_diagnostics.get_wan_ip()` and `cgnat_diagnostics.get_wan_ip()`
+  (the latter now just calls the former) share one `api.ipify.org` request
+  instead of two.
 
 ---
 
@@ -247,13 +278,15 @@ Class `ModemDiagnostics`: `detect_modem_reachable()`,
 `detect_uncorrectable_codewords()`.
 
 ### `netcheck/nat_diagnostics.py` — double NAT (Phase 17 addition)
-Functions: `get_local_ip()`, `get_wan_ip()`, `is_private_ip(ip)`,
+Functions: `get_local_ip()`, `get_wan_ip()` (`@cache.ttl_cache`-decorated;
+`cgnat_diagnostics.get_wan_ip` is this same function), `is_private_ip(ip)`,
 `detect_double_nat()`.
 Class `NATDiagnostics`: `detect_double_nat()`, `detect_nat_type()`
 (open/moderate/strict), `get_network_topology()`.
 
 ### `netcheck/cgnat_diagnostics.py` — Carrier-Grade NAT (Phase 18 addition)
-Functions: `get_wan_ip()`, `is_cgnat_ip(ip)` (100.64.0.0/10, RFC 6598).
+Functions: `get_wan_ip()` (re-exported from `nat_diagnostics`, same cached
+lookup), `is_cgnat_ip(ip)` (100.64.0.0/10, RFC 6598).
 Class `CGNATDiagnostics`: `detect_cgnat()`, `check_cgnat_implications()`.
 
 ### `netcheck/interference_diagnostics.py` — Wi-Fi interference (Phase 20 addition)
@@ -324,8 +357,11 @@ flattens the result:
   `run_phase_19_anthropic()`, `run_phase_20_interference()`,
   `run_phase_21_router()`, `run_phase_15_wifi()` — one hypothesis each,
   callable individually.
-- `run_all() -> dict` — all seven, keyed by phase name. This is what
-  `netcheck full-check --format json` prints.
+- `run_all() -> dict` — all seven, keyed by phase name, run concurrently via
+  `concurrent.futures.ThreadPoolExecutor` (each phase is independent I/O, so
+  wall time is bounded by the slowest phase rather than their sum — see
+  `tools/profile_diagnostics.py`). This is what `netcheck full-check
+  --format json` prints.
 - `get_quick_diagnosis() -> str` — a short human-readable summary. This is
   what `netcheck full-check --format quick` prints.
 
@@ -342,13 +378,18 @@ not additional numbered entries within it.
 See `QUICKSTART.md` for usage. `main(argv=None) -> int` parses `sys.argv`
 (or `argv` for tests) and dispatches to `cmd_probe`, `cmd_watch`,
 `cmd_scan`, `cmd_diagnose`, `cmd_serve`, `cmd_sync`, or `cmd_full_check`.
+`--version` prints `netcheck.__version__` and exits before subcommand
+dispatch (works with no subcommand given).
 
 ### `netcheck/server.py` — dashboard transport
-- `payload(conn, limit=500) -> dict`, `dashboard_payload(db, limit=500) -> dict`
-  — everything the dashboard renders, in one round trip.
-- `get_api_data(db, limit=500)`, `get_api_configuration_snapshot(db)`,
-  `get_api_diagnostic_history(db, limit=10)` — narrower views used by
-  individual dashboard panels.
+- `payload(conn, limit=500) -> dict` — everything the dashboard renders, in
+  one round trip. This is the function actually behind `/api/data`.
 - `Handler` — stdlib `BaseHTTPRequestHandler` subclass; `do_GET` routes
-  `/api/data` and serves `ui.html` for everything else.
+  `/api/data` (calls `payload()`) and serves `ui.html`/vendored Alpine for
+  everything else. Malformed `?limit=` returns 400, not a crash.
 - `serve(conn, port=8787) -> HTTPServer` — used by `netcheck serve`.
+- `dashboard_payload(db, limit=500)`, `get_api_data(db, limit=500)`,
+  `get_api_configuration_snapshot(db)`, `get_api_diagnostic_history(db, limit=10)`
+  — **not wired into `Handler`/`ui.html`; dead code that returns fabricated
+  data** (`wifi_mode: None`, `system_uptime: 0`, etc., regardless of the
+  actual database). See `OPEN-ISSUES.md` #10 before building on these.

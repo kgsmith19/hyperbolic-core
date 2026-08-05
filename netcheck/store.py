@@ -23,7 +23,43 @@ def open_db(path):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA.read_text())
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn):
+    """Upgrade path for existing users: add any column schema.sql has that an
+    already-existing on-disk table doesn't.
+
+    `CREATE TABLE IF NOT EXISTS` only creates a table the first time — a
+    column added to schema.sql later would otherwise be silently missing
+    from every database created before that change, forever. Rather than
+    hand-parsing schema.sql's column list, build it fresh in a throwaway
+    in-memory connection (where IF NOT EXISTS always creates every table)
+    and let SQLite's own column metadata drive the diff.
+
+    Added columns are never NOT NULL, regardless of what schema.sql says:
+    SQLite requires a non-NULL default to add a NOT NULL column to a table
+    that already has rows, and a migration that could fail on a pre-existing
+    database defeats the purpose of having one.
+    """
+    scratch = sqlite3.connect(":memory:")
+    scratch.row_factory = sqlite3.Row
+    scratch.executescript(SCHEMA.read_text())
+    tables = [r[0] for r in scratch.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")]
+    for table in tables:
+        have = columns(conn, table)
+        if not have:
+            continue  # table doesn't exist yet here either; nothing to add
+        for col in scratch.execute(f"PRAGMA table_info({table})").fetchall():
+            if col["name"] in have:
+                continue
+            stmt = f"ALTER TABLE {table} ADD COLUMN {col['name']} {col['type'] or 'TEXT'}"
+            if col["dflt_value"] is not None:
+                stmt += f" DEFAULT {col['dflt_value']}"
+            conn.execute(stmt)
+    scratch.close()
 
 
 def columns(conn, table):

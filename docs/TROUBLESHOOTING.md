@@ -130,7 +130,8 @@ The most common causes:
 | `modem` | `MODEM_HOST`, `MODEM_USER`, `MODEM_PASS` in `.env` |
 | `router` | `ROUTER_HOST`, `ROUTER_USER`, `ROUTER_PASS` in `.env` |
 | `tailscale` | Tailscale CLI installed |
-| Wi-Fi driver/event log sections | Windows (these shell out to `netsh`/PowerShell) |
+| `driver`, `events`, `tcp_globals`, `congestion` | Windows (these shell out to `netsh`/PowerShell) |
+| `wifi` | Windows (`netsh`) or macOS (`airport`) — no Linux path yet |
 
 ## Applying and verifying a fix
 

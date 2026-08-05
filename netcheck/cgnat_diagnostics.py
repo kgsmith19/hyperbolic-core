@@ -3,19 +3,9 @@
 Phase 18 diagnostic module (additional to the canonical 15-hypothesis list in
 docs/TROUBLESHOOTING.md): CGNAT congestion on the ISP side.
 """
-import json
 from typing import Optional, Dict
-from urllib.request import urlopen
 
-
-def get_wan_ip() -> Optional[str]:
-    """Get WAN IP address."""
-    try:
-        response = urlopen("https://api.ipify.org?format=json", timeout=5)
-        data = json.loads(response.read().decode())
-        return data.get('ip')
-    except Exception:
-        return None
+from .nat_diagnostics import get_wan_ip
 
 
 def is_cgnat_ip(ip: str) -> bool:

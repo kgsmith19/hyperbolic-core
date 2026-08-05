@@ -3,6 +3,7 @@
 Super-easy-to-use CLI interface with recommendations and fix guidance.
 """
 from typing import Dict, List, Tuple
+import concurrent.futures
 import json
 
 from . import (
@@ -116,16 +117,25 @@ class AllDiagnostics:
         }
 
     def run_all(self) -> Dict:
-        """Run all diagnostics and return comprehensive results."""
-        return {
-            "phase_16_modem": self.run_phase_16_modem(),
-            "phase_17_nat": self.run_phase_17_nat(),
-            "phase_18_cgnat": self.run_phase_18_cgnat(),
-            "phase_19_anthropic": self.run_phase_19_anthropic(),
-            "phase_20_interference": self.run_phase_20_interference(),
-            "phase_21_router": self.run_phase_21_router(),
-            "phase_15_wifi": self.run_phase_15_wifi(),
+        """Run all diagnostics and return comprehensive results.
+
+        Each phase does its own independent I/O (HTTP requests, subprocess
+        calls, each with its own timeout), so they run concurrently rather
+        than one after another -- `full-check`'s wall time is bounded by the
+        slowest single phase, not the sum of all seven.
+        """
+        phases = {
+            "phase_16_modem": self.run_phase_16_modem,
+            "phase_17_nat": self.run_phase_17_nat,
+            "phase_18_cgnat": self.run_phase_18_cgnat,
+            "phase_19_anthropic": self.run_phase_19_anthropic,
+            "phase_20_interference": self.run_phase_20_interference,
+            "phase_21_router": self.run_phase_21_router,
+            "phase_15_wifi": self.run_phase_15_wifi,
         }
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(phases)) as pool:
+            futures = {name: pool.submit(fn) for name, fn in phases.items()}
+            return {name: future.result() for name, future in futures.items()}
 
     def get_quick_diagnosis(self) -> str:
         """Return a quick human-friendly diagnosis summary."""

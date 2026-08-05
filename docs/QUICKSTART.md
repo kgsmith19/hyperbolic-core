@@ -105,9 +105,17 @@ python -m netcheck serve
 ```
 
 Opens `http://127.0.0.1:8787` in your browser: layer-status pills, ranked
-causes, a timeline of samples, and the LLM error table. Single HTML file,
-no CDN — it renders fully offline, which matters because it needs to work
-*during* the outage it's diagnosing.
+causes, a latency timeline, a packet-loss/jitter timeline, and the LLM error
+table. Single HTML file, no CDN — it renders fully offline, which matters
+because it needs to work *during* the outage it's diagnosing.
+
+Click any entry under "Most likely causes" to drill down into the specific
+samples behind it. Use the toolbar to export the current view as JSON or
+CSV, or "print / save PDF" (this project has no PDF-generation library —
+stdlib only — so this uses the browser's own print-to-PDF instead of a
+fabricated report format). The page refreshes itself every 15 seconds; there
+is no push/streaming update yet, so a manual "refresh" is also there for
+right after you've just run something.
 
 ## Everything else
 

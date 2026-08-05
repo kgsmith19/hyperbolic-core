@@ -18,6 +18,7 @@ import webbrowser
 from pathlib import Path
 
 from . import diagnose, environ, llmlog, probes, server, store, all_diagnostics
+from . import __version__
 
 DB = Path(os.environ.get("NETCHECK_DB", Path.home() / ".netcheck" / "netcheck.db"))
 TARGET = os.environ.get("NETCHECK_TARGET", "api.anthropic.com")
@@ -174,6 +175,8 @@ def main(argv=None):
     load_env()
     p = argparse.ArgumentParser(prog="netcheck", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--version", action="version",
+                   version=f"netcheck {__version__}")
     p.add_argument("--target", default=TARGET)
     sub = p.add_subparsers(dest="cmd", required=True)
 

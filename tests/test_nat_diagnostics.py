@@ -1,6 +1,7 @@
 """NAT diagnostics tests: double NAT, NAT type detection."""
 import unittest
-from netcheck import nat_diagnostics
+from unittest.mock import patch, MagicMock
+from netcheck import nat_diagnostics, cgnat_diagnostics
 
 
 class PrivateIPDetectionTest(unittest.TestCase):
@@ -68,6 +69,23 @@ class DoubleNATDetectionTest(unittest.TestCase):
         result = diag.get_network_topology()
         self.assertIsInstance(result, dict)
         self.assertIn('topology', result)
+
+
+class WanIpCachingTest(unittest.TestCase):
+    """nat_diagnostics and cgnat_diagnostics both need the WAN IP; they should
+    share one cached lookup instead of hitting api.ipify.org twice per run."""
+
+    def setUp(self):
+        nat_diagnostics.get_wan_ip.cache_clear()
+
+    def test_cgnat_get_wan_ip_reuses_nat_diagnostics_cache(self):
+        response = MagicMock()
+        response.read.return_value = b'{"ip": "203.0.113.5"}'
+        with patch("netcheck.nat_diagnostics.urlopen", return_value=response) as mock_open:
+            self.assertEqual(nat_diagnostics.get_wan_ip(), "203.0.113.5")
+            self.assertEqual(cgnat_diagnostics.get_wan_ip(), "203.0.113.5")
+
+        mock_open.assert_called_once()
 
 
 if __name__ == "__main__":

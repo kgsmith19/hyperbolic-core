@@ -116,7 +116,7 @@ done.
 python -m unittest discover -s tests -t .
 ```
 
-380 tests, hermetic — no network, no real API calls. Parsers are tested against
+405 tests, hermetic — no network, no real API calls. Parsers are tested against
 real command output captured from a live machine, in `tests/fixtures/`.
 
 The adversarial cases in `test_llmlog.py` are the ones worth knowing about:
@@ -133,4 +133,6 @@ flag instead.
 - `docs/ARCHITECTURE.md` — module map, decision trees, module interactions
 - `docs/CONTRIBUTING.md` — adding a new diagnostic, PDD/SDD/TDD standards
 - `docs/DEVELOPMENT.md` — local dev setup, test commands, code-quality gates
+- `docs/DEPLOYMENT.md` — local, container, and cloud deployment; releases; upgrade path
+- `CHANGELOG.md` — what changed, by version
 - `OPEN-ISSUES.md` — problems surfaced but not yet fixed

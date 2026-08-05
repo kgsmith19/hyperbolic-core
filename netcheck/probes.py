@@ -18,6 +18,7 @@ import subprocess
 import time
 
 WINDOWS = __import__("platform").system() == "Windows"
+MACOS = __import__("platform").system() == "Darwin"
 
 
 # --------------------------------------------------------------------------
@@ -91,6 +92,42 @@ def parse_wlan_interfaces(text):
     }
 
 
+def parse_airport_info(text):
+    """Link state from macOS's `airport -I` output.
+
+    Field-for-field this is a different tool than `netsh wlan show
+    interfaces`, so the mapping is partial: `airport` gives no signal
+    percentage, no separate rx/tx rates (just one link rate), and no radio
+    type string, so those come back `None` rather than a guess. Built
+    against Apple's long-documented output format -- see
+    tests/fixtures/airport_info.txt for the caveat that this is not yet
+    verified against a live capture the way the Windows parser is
+    (OPEN-ISSUES.md #9).
+    """
+    if "AirPort: Off" in text or not text.strip():
+        return {"state": "unavailable", "reason": "Wi-Fi off or no interface"}
+
+    f = _fields(text)
+    channel = _num((f.get("channel") or "").split(",")[0], int)
+    band = None
+    if channel is not None:
+        band = "2.4 GHz" if channel <= 14 else "5 GHz" if channel < 149 else "6 GHz"
+
+    connected = f.get("state") == "running" and bool(f.get("SSID"))
+    return {
+        "state": "ok" if connected else "fail",
+        "ssid": f.get("SSID"),
+        "bssid": f.get("BSSID"),
+        "band": band,
+        "channel": channel,
+        "signal_pct": None,
+        "rssi_dbm": _num(f.get("agrCtlRSSI"), int),
+        "rx_mbps": None,
+        "tx_mbps": _num(f.get("lastTxRate")),
+        "radio": None,
+    }
+
+
 def _block(channel):
     """Index of the 80 MHz block a 5 GHz channel sits in.
 
@@ -155,13 +192,27 @@ def ping(host, count=2):
     return dict(parse_ping(text), host=host)
 
 
-def resolve(host, server=None):
+def resolve(host, server=None, attempts=2, backoff_s=0.3):
     """Resolve `host`, optionally against a specific DNS server.
 
     The server-specific path is what separates 'the router's DNS is broken'
     from 'DNS is broken', which is the single most useful split on this network
     because the router is the configured resolver.
+
+    Retries once on failure before reporting it: a single dropped UDP query
+    is common and is not, by itself, evidence the resolver is broken.
     """
+    result = None
+    for attempt in range(attempts):
+        result = _resolve_once(host, server)
+        if result["state"] == "ok":
+            return result
+        if attempt + 1 < attempts:
+            time.sleep(backoff_s)
+    return result
+
+
+def _resolve_once(host, server):
     t0 = time.monotonic()
     try:
         if server:

@@ -24,7 +24,7 @@ The primary, always-available test runner is `unittest`:
 python -m unittest discover -s tests -t .
 ```
 
-380 tests, hermetic — no live network calls, no sleeps beyond a probe's own
+405 tests, hermetic — no live network calls, no sleeps beyond a probe's own
 timing. This is the command in `AGENTS.md` and the one to run before every
 commit.
 
@@ -126,7 +126,7 @@ AST-based static checks — see `tools/README.md` for rules and intensity
 levels.
 
 ### `tests/`
-380 tests. Fixtures for real captured command output live in
+405 tests. Fixtures for real captured command output live in
 `tests/fixtures/`. `tests/test_llmlog.py` holds the adversarial cases
 worth reading first — the ones that catch substring-matching mistakes that
 previously overcounted real errors ~200x.
@@ -164,6 +164,11 @@ Automated checks run on all pushes and pull requests
 
 All checks must pass before merging to main.
 
+Tag pushes matching `v*` additionally run **Release** (`release.yml`): the
+full suite, a Docker image build, a smoke test of that image, and a draft
+GitHub Release. See `docs/DEPLOYMENT.md` for the release process and
+`tools/release.py` for the version-bump/changelog-draft helper.
+
 ## Making Changes
 
 ### Adding a New Diagnostic Rule
@@ -193,6 +198,14 @@ See `CONTRIBUTING.md` — it walks through the full shape (pure functions,
 
 ## Performance Considerations
 
+- `all_diagnostics.AllDiagnostics.run_all()` (`netcheck full-check`) runs its
+  seven phases concurrently via `concurrent.futures.ThreadPoolExecutor` —
+  each phase is independent I/O with its own timeout, so wall time is
+  bounded by the slowest phase, not their sum.
+- `netcheck/cache.py` provides a small TTL cache used to dedupe identical
+  network-bound lookups shared across modules (e.g. `nat_diagnostics` and
+  `cgnat_diagnostics` both need the WAN IP; they now share one cached
+  lookup instead of two independent `api.ipify.org` round trips).
 - `diagnostic_engine.ConfigurationMatrix` bounds burst history so repeated
   analysis stays cheap as the dataset grows.
 - `store.py` writes are append-only with a unique `(host, ts)` index, so
@@ -201,6 +214,22 @@ See `CONTRIBUTING.md` — it walks through the full shape (pure functions,
   blocks indefinitely on an unreachable device.
 - `llmlog.scan`/`scan_all` resume from stored file offsets, so repeated
   ingestion only reads what's new.
+
+### Profiling
+
+```bash
+python tools/profile_diagnostics.py            # per-phase runtime + memory, run_all() speedup
+python tools/profile_diagnostics.py --suite     # also time the full test suite
+python tools/profile_diagnostics.py -f json     # machine-readable
+```
+
+Uses `tracemalloc` for memory (stdlib, cross-platform — the Unix-only
+`resource` module isn't an option since Windows is this project's primary
+target). On a typical dev machine with no real modem/router credentials
+configured, the seven phases fail fast (`unavailable`/`None`) and the
+concurrency speedup is modest; on a live network with real devices to query,
+the sequential-vs-concurrent gap widens with the slowest phase's actual
+latency.
 
 ## Security
 

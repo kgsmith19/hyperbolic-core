@@ -188,16 +188,20 @@ into command execution.
 
 ---
 
-## 6. Client input crashes a request instead of returning 400 (security, low)
+## 6. ~~Client input crashes a request instead of returning 400~~ — RESOLVED (found already fixed 2026-08-05)
 
 **Surfaced:** 2026-08-05, `/security-review-kgs`.
 
-`netcheck/server.py:56` does `int(parse_qs(...)["limit"])` unguarded, so
-`GET /api/data?limit=abc` raises ValueError, dropping the connection and
-printing a traceback to stderr. An expected client error surfaces as a crash.
-Loopback-only, and nothing is disclosed to the client.
+`netcheck/server.py:56` did `int(parse_qs(...)["limit"])` unguarded, so
+`GET /api/data?limit=abc` raised ValueError, dropping the connection and
+printing a traceback to stderr. An expected client error surfaced as a crash.
+Loopback-only, and nothing was disclosed to the client.
 
-**Fix:** wrap in try/except and return 400.
+**Found already fixed** during the Phase 27 dashboard review: `do_GET` now
+wraps the `int()` call in try/except and returns 400, and
+`test_server.py::ApiTest::test_invalid_limit_parameter_returns_400_not_crash`
+already covers it. This entry was never retired when the fix landed —
+recorded so a stale open issue doesn't get mistaken for a live one.
 
 ---
 
@@ -224,12 +228,103 @@ Accepted, recorded so it is a decision rather than an oversight.
 
 ---
 
-## 9. macOS is unimplemented
+## 9. macOS is partially implemented — PARTIALLY RESOLVED 2026-08-05
 
 **Surfaced:** 2026-08-05.
 
-`environ.py` is Windows-only (netsh, PowerShell, Windows event log).
-`probes.py` is already cross-platform, and the parsers take text, so this is
-additive rather than a rewrite. The original brief mentioned a Mac.
+`environ.py` was entirely Windows-only (netsh, PowerShell, Windows event
+log) — the module behind `watch`/`scan`/`diagnose`. `probes.py` was already
+cross-platform, and the parsers take text, so this is additive rather than a
+rewrite. The original brief mentioned a Mac.
 
-**Retire when:** a macOS backend exists, or the Mac is confirmed out of scope.
+Separately, `wifi_diagnostics.py` (the Phase 15 module behind `full-check`)
+already had Darwin/Linux branches for its own Wi-Fi functions predating this
+entry — but with no test coverage of those branches (no fixtures, no
+mocking of `platform.system()`/`subprocess`), so they're exercised only when
+actually run on that platform. That gap is unrelated to `environ.py` and is
+out of scope for this entry; noted here so it isn't mistaken for "macOS is
+untouched everywhere."
+
+**Done:** `environ.wifi()` now dispatches to macOS's `airport -I` (via
+`probes.parse_airport_info`) when `probes.MACOS` is set, same
+`unavailable`-on-missing-binary behavior as the Windows path. **Caveat:**
+unlike every Windows parser in this codebase, `parse_airport_info` was built
+against Apple's long-documented `airport -I` field format, not a real
+capture — this project has no Mac to capture one from. Its fixture
+(`tests/fixtures/airport_info.txt`) is hand-built and says so. Treat this
+parser as needing verification against a live machine before trusting it the
+way `parse_wlan_interfaces` is trusted.
+
+**Still Windows-only:** `driver()` (adapter/power-management settings),
+`events()` (Windows Event Log), `tcp_globals()`, `tailscale()` all still
+report `unavailable` on macOS (`_ps` explicitly checks `WINDOWS` first;
+`tcp_globals()`'s `netsh` call fails over to `unavailable` the same way any
+missing binary does). `congestion()` (neighbouring-AP scan) also has no
+macOS path yet — `airport -s` requires disassociating from the current
+network on modern macOS, which isn't a fit for a passive scan.
+
+**Retire when:** `parse_airport_info` is verified against a real capture,
+and/or a macOS path exists for `driver()`/`congestion()`, or those are
+confirmed out of scope.
+
+---
+
+## 10. `server.py` carries a second, disconnected dashboard-payload API that returns fabricated data
+
+**Surfaced:** 2026-08-05, Phase 27 dashboard review.
+
+`server.py` defines `dashboard_payload()`, `get_api_data()`,
+`get_api_configuration_snapshot()`, and `get_api_diagnostic_history()` —
+roughly 70 lines, backed by ~30 tests in `test_diagnostic_website.py`. None
+of them are reachable from `Handler.do_GET`: the live `/api/data` route
+calls `payload()` (a different, real function a few lines above them), and
+`ui.html` only ever fetches `/api/data`. This second API path is dead code.
+
+Worse than merely dead: if it were ever wired in, it would render
+fabricated values as if real — `dashboard_payload()` hardcodes
+`wifi_mode: None`, `system_uptime: 0`, `culprit_summary: {}`,
+`regressions: []`, `diagnostic_history` with a single made-up
+"unmonitored" placeholder entry — regardless of what's actually in the
+database. That is exactly the "silent fallback" pattern `AGENTS.md`
+prohibits (a missing measurement must read as `unavailable`, never as a
+faked `ok`-shaped value), just one layer further from a real probe.
+
+Left as-is for this phase rather than deleted: removing ~30 passing tests
+and a chunk of implementation is a bigger call than "add a dashboard
+feature," the task this entry was found under. Flagging it here instead so
+it's a decision, not an oversight.
+
+**Fix:** either wire `dashboard_payload()` up to real data (pulling from
+`store`/`diagnose` the way `payload()` does) and point `ui.html` at it if
+its richer shape (config snapshots, regressions, applied-fixes history) is
+still wanted, or delete it and `test_diagnostic_website.py` along with it if
+`payload()` already covers what the dashboard needs.
+
+**Retire when:** one of the above happens.
+
+---
+
+## 11. Two pre-existing, minor `ui.html` rough edges found during Playwright testing
+
+**Surfaced:** 2026-08-05, Phase 27 (found while visually verifying the new
+dashboard features in a real browser — pre-dates this phase's changes,
+confirmed by testing against the version of `ui.html` from the initial
+commit).
+
+1. **Console errors on load/refresh.** Chromium logs `<rect> attribute x:
+   Unexpected end of attribute` (x2) and `ReferenceError: b is not defined`
+   (x2) plus an `importNode` TypeError, around the failure-band rectangles
+   in the latency chart (`x-for="b in chart.bands"`). Cosmetic — the chart
+   still renders correctly in every screenshot taken — but real console
+   noise, likely an Alpine/SVG namespaced-attribute morphing quirk.
+2. **"Recent samples" table needs horizontal scroll at narrow widths**, and
+   nothing hints that it scrolls: at the card's default ~283px width, only
+   `when` + part of `verdict` fit before the `.scroll` div's overflow-x
+   kicks in, so `gw`/`inet`/`dns`/`tls` are scrolled off with no visible
+   scrollbar affordance in a quick glance.
+
+Neither blocks reading the dashboard. Recorded rather than fixed here since
+both are pre-existing and outside a "add dashboard features" phase's scope.
+
+**Retire when:** the console errors are root-caused and fixed, and/or the
+table gets a scroll-hint (e.g. a fade edge or narrower default columns).

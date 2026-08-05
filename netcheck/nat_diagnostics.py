@@ -10,6 +10,8 @@ from typing import Optional, Dict
 from urllib.request import urlopen
 import json
 
+from .cache import ttl_cache
+
 
 def get_local_ip() -> Optional[str]:
     """Get local LAN IP address."""
@@ -23,8 +25,14 @@ def get_local_ip() -> Optional[str]:
         return None
 
 
+@ttl_cache()
 def get_wan_ip() -> Optional[str]:
-    """Get WAN IP (external IP seen by internet)."""
+    """Get WAN IP (external IP seen by internet).
+
+    Cached briefly: cgnat_diagnostics.get_wan_ip() calls back into this
+    function so the two modules share one lookup per run instead of each
+    hitting api.ipify.org independently.
+    """
     try:
         response = urlopen("https://api.ipify.org?format=json", timeout=5)
         data = json.loads(response.read().decode())

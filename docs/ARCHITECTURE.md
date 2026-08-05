@@ -128,6 +128,14 @@ holds the adversarial cases.
 through a small recursive-descent parser (`_safe_eval_condition`), never
 Python's `eval()`.
 
+### Bounded retries for genuinely transient failures
+A single dropped UDP packet isn't evidence a resolver is broken —
+`probes.resolve()` retries once (short, bounded backoff) before reporting
+`fail`. This is deliberately narrow: it's not a general retry-everything
+policy. Probes that already carry their own timeout/backoff semantics
+(`idle_hold`, the DF-bit walk in `environ.mtu`) aren't wrapped in a second
+layer of retries on top.
+
 ### SQLite is the source of truth
 A cloud database cannot record an outage while the outage is happening.
 Supabase (`store.mirror`) is an idempotent mirror keyed on `(host, ts)`; a
@@ -163,6 +171,7 @@ netcheck/
 ├── llmlog.py                   Claude Code transcript scraping + classification
 ├── store.py                    SQLite schema, writes, Supabase mirror
 ├── schema.sql                  SQLite DDL
+├── cache.py                    shared TTL cache for repeated network-bound checks
 ├── diagnose.py                 lightweight always-on ranker
 ├── diagnostic_engine.py        decision-tree engine, historical confidence
 ├── all_diagnostics.py          unified full-check runner (Phase 22)
@@ -183,11 +192,16 @@ netcheck/
 
 supabase/migrations/            Postgres DDL mirroring schema.sql
 
+Dockerfile, .dockerignore       container packaging (docs/DEPLOYMENT.md)
+CHANGELOG.md                    Keep a Changelog-format release history
+
 tools/
 ├── code_simplification.py      function-length/complexity scanner
 ├── security_review.py          secrets/injection/unsafe-call scanner
 ├── documentation_check.py       docstring/README/scaffolding scanner
 ├── fixer.py                     cross-platform OS-level network fixer
+├── profile_diagnostics.py       per-phase runtime/memory profiling
+├── release.py                   version bump + changelog-draft helper
 └── *.sh                          platform-specific fix scripts
 
 tests/
@@ -210,7 +224,7 @@ Primary test runner is `unittest` (stdlib, matching the "no pip" constraint):
 python -m unittest discover -s tests -t .
 ```
 
-380 tests, hermetic — no live network calls, no sleeps beyond a probe's own
+405 tests, hermetic — no live network calls, no sleeps beyond a probe's own
 timing (`test_e2e_faults.py`'s live-fault-injection tests are the one
 exception; they need `tc`/`sudo` and skip gracefully without them). CI
 (`.github/workflows/tests.yml`) additionally installs `pytest` to run the

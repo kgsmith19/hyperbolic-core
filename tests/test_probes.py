@@ -7,6 +7,7 @@ house through Wi-Fi geolocation databases, so it does not belong in a repo.
 """
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from netcheck import probes
 
@@ -153,6 +154,41 @@ class ParseWlanNetworksTest(unittest.TestCase):
         self.assertEqual(got["state"], "unavailable")
 
 
+class ParseAirportInfoTest(unittest.TestCase):
+    """macOS `airport -I` parser. Unlike the other fixtures here, this one is
+    hand-built from Apple's documented output format rather than captured
+    from a live Mac -- see OPEN-ISSUES.md #9. Treat this parser as needing
+    real-machine verification before being trusted the way the Windows
+    parsers are."""
+
+    def test_extracts_link_fields(self):
+        result = probes.parse_airport_info(fixture("airport_info.txt"))
+        self.assertEqual(result["state"], "ok")
+        self.assertEqual(result["ssid"], "ExampleNet")
+        self.assertEqual(result["bssid"], "a1:b2:c3:d4:e5:f6")
+        self.assertEqual(result["channel"], 44)
+        self.assertEqual(result["band"], "5 GHz")
+        self.assertEqual(result["rssi_dbm"], -52)
+
+    def test_2ghz_channel_reports_2point4_band(self):
+        result = probes.parse_airport_info("state: running\nSSID: x\nchannel: 6\n")
+        self.assertEqual(result["band"], "2.4 GHz")
+
+    def test_not_associated_is_fail_not_unavailable(self):
+        """Radio is on and working, just not joined to a network -- a real
+        (if uninteresting) measurement, not a missing one."""
+        result = probes.parse_airport_info("state: init\n")
+        self.assertEqual(result["state"], "fail")
+
+    def test_wifi_off_is_unavailable(self):
+        result = probes.parse_airport_info("     AirPort: Off\n")
+        self.assertEqual(result["state"], "unavailable")
+
+    def test_empty_output_is_unavailable(self):
+        result = probes.parse_airport_info("")
+        self.assertEqual(result["state"], "unavailable")
+
+
 class ParseTracerouteTest(unittest.TestCase):
     """Real output from this machine: the ISP's edge is on RFC1918 space, and
     hop 2 does not answer at all."""
@@ -194,6 +230,42 @@ class ParseTracerouteTest(unittest.TestCase):
                "  2    13 ms  172.16.1.1 \n")
         self.assertEqual(
             probes.parse_traceroute(raw, "192.168.50.1", "1.1.1.1"), "172.16.1.1")
+
+
+class ResolveRetryTest(unittest.TestCase):
+    """A single dropped UDP query to a resolver is common and is not itself
+    evidence the resolver is broken -- resolve() retries once before giving
+    up. time.sleep is patched so the retry backoff costs nothing in tests."""
+
+    def test_succeeds_first_try_without_retrying(self):
+        with patch("netcheck.probes._resolve_via", return_value=["1.2.3.4"]) as mock_via, \
+             patch("netcheck.probes.time.sleep") as mock_sleep:
+            result = probes.resolve("api.anthropic.com", server="192.168.1.1")
+
+        self.assertEqual(result["state"], "ok")
+        self.assertEqual(result["addrs"], ["1.2.3.4"])
+        mock_via.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    def test_retries_once_after_a_transient_failure_then_succeeds(self):
+        with patch("netcheck.probes._resolve_via",
+                   side_effect=[TimeoutError("timed out"), ["1.2.3.4"]]) as mock_via, \
+             patch("netcheck.probes.time.sleep") as mock_sleep:
+            result = probes.resolve("api.anthropic.com", server="192.168.1.1")
+
+        self.assertEqual(result["state"], "ok")
+        self.assertEqual(mock_via.call_count, 2)
+        mock_sleep.assert_called_once()
+
+    def test_gives_up_and_reports_fail_after_exhausting_retries(self):
+        with patch("netcheck.probes._resolve_via",
+                   side_effect=TimeoutError("timed out")) as mock_via, \
+             patch("netcheck.probes.time.sleep"):
+            result = probes.resolve("api.anthropic.com", server="192.168.1.1")
+
+        self.assertEqual(result["state"], "fail")
+        self.assertIn("TimeoutError", result["reason"])
+        self.assertEqual(mock_via.call_count, 2)  # default attempts, not unbounded
 
 
 class _PlainCtx:

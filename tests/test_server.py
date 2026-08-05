@@ -29,6 +29,14 @@ class OfflineAssetTest(unittest.TestCase):
         self.assertTrue(alpine.exists(), "Alpine must be vendored, not fetched")
         self.assertGreater(alpine.stat().st_size, 10_000)
 
+    def test_export_and_drilldown_controls_are_present(self):
+        """Phase 27: export buttons and the click-to-see-evidence drill-down
+        must actually be wired into the page, not just planned."""
+        html = server.UI.read_text(encoding="utf-8")
+        for needle in ("exportJson()", "exportCsv()", "toggleEvidence(",
+                       "matchingSamples(", "lossChart"):
+            self.assertIn(needle, html, f"missing dashboard control: {needle}")
+
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
