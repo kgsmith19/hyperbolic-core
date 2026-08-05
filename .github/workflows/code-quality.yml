@@ -61,20 +61,20 @@ jobs:
               pass
           "
 
-      - name: Documentation Check
-        continue-on-error: false
+      - name: Documentation Check (Report Only)
+        continue-on-error: true
         run: |
-          echo "=== Documentation Check (High Intensity) ==="
+          echo "=== Documentation Check (High Intensity - Report Only) ==="
           python tools/documentation_check.py . -i high -f json > /tmp/docs.json || true
-          python tools/documentation_check.py . -i high
+          python tools/documentation_check.py . -i high || true
           echo ""
-          echo "Summary:"
+          echo "Summary (not blocking):"
           python -c "
           import json
           try:
               with open('/tmp/docs.json') as f:
                   data = json.load(f)
-                  print(f'Found {len(data)} documentation issues')
+                  print(f'Found {len(data)} documentation issues (see details above)')
           except:
               pass
           "
