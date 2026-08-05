@@ -4,6 +4,34 @@ Problems surfaced but not fixed. Append; do not delete without a resolution.
 
 ---
 
+## Current Diagnosis Summary (2026-08-05)
+
+**Root cause of 14 API errors:** Unknown; no monitoring was running when they occurred.
+
+**Most likely culprit:** Wi-Fi adapter pinned to 802.11ac (sub-optimal mode on 
+Wi-Fi 6 AX201 against AX-capable router). Driver property updated to 802.11ax,
+but needs full adapter reset (now available in `scripts/reset-wifi-adapter.ps1`)
+to take effect. Does not *prove* causation retroactively, but fits the symptom
+shape (intermittent drops under link margin).
+
+**Ruled out (confirmed working):**
+- **Modem line:** 24 downstream QAM + 1 OFDM channel locked, SNR 40.6–42.0 dB,
+  zero uncorrectables measured at 3h uptime. Cable plant is clean *at capture 
+  time* (though errors may have happened on earlier uptime before the modem 
+  dropped Wi-Fi).
+- **Router DPI:** AiProtection confirmed off in ASUS GUI; DPI subsystem 
+  not active.
+- **Gateway/ISP:** WAN healthy, DNS correct, DHCP functioning.
+
+**Next steps:**
+1. Run `scripts/reset-wifi-adapter.ps1` to apply 802.11ax mode (requires admin)
+2. Run `python -m netcheck watch` for a few days
+3. If errors recur → Wi-Fi mode was not the cause (or not the only cause)
+4. If errors stop → captures the fix; doesn't prove causation (no A/B test 
+   of the original state), but supports it
+
+---
+
 ## 1. No historical network data behind the 14 known LLM errors
 
 **Surfaced:** 2026-08-05, initial build.
@@ -82,6 +110,10 @@ read `802.11ac` even after the reconnect, meaning a profile-level
 disconnect/reconnect is not enough — the driver needs a full adapter cycle.
 Left as `netcheck-reset-wifi-adapter.ps1` in the runbox (also admin-gated, and
 deliberately not attempted live again tonight after the incident above).
+
+**Script available:** `scripts/reset-wifi-adapter.ps1` disables and re-enables the
+adapter to force WLAN AutoConfig to renegotiate at the new mode. Requires admin.
+Includes before/after verification of wireless mode.
 
 **Retire when:** the adapter-reset script has been run, `Radio type` reads
 `802.11ax` live, and either errors recur (rules it out) or a clean stretch
