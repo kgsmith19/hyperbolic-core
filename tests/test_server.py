@@ -71,11 +71,22 @@ class ApiTest(unittest.TestCase):
         self.assertIn(b"Alpine", body)
 
     def test_data_route_returns_everything_the_page_needs(self):
+        """Criterion 13: data exists and is correct, not just keys present."""
         status, body = self.get("/api/data")
         self.assertEqual(status, 200)
         data = json.loads(body)
+
+        # Keys must exist
         for key in ("samples", "errors", "causes", "bursts", "scan", "live"):
-            self.assertIn(key, data)
+            self.assertIn(key, data, f"missing key: {key}")
+
+        # Data must be non-empty and correct
+        self.assertEqual(len(data["samples"]), 1, "sample not in data")
+        self.assertEqual(data["samples"][0]["culprit"], "internet",
+                        "culprit not propagated to samples")
+        self.assertEqual(len(data["errors"]), 1, "error not in data")
+        self.assertEqual(data["errors"][0]["verdict"], "internet",
+                        "error not correlated with sample")
 
     def test_stored_error_is_correlated_against_the_stored_sample(self):
         """End to end: an error 30s after a failing sample inherits its verdict."""
@@ -88,6 +99,14 @@ class ApiTest(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             self.get("/nope")
         self.assertEqual(cm.exception.code, 404)
+
+    def test_invalid_limit_parameter_returns_400_not_crash(self):
+        """Criterion 6: client input must not crash the server.
+        Malformed limit parameter should return 400, not 500."""
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self.get("/api/data?limit=abc")
+        self.assertEqual(cm.exception.code, 400,
+                        "malformed limit should be client error, not server crash")
 
 
 if __name__ == "__main__":

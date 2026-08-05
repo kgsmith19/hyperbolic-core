@@ -4,6 +4,34 @@ Problems surfaced but not fixed. Append; do not delete without a resolution.
 
 ---
 
+## Current Diagnosis Summary (2026-08-05)
+
+**Root cause of 14 API errors:** Unknown; no monitoring was running when they occurred.
+
+**Most likely culprit:** Wi-Fi adapter pinned to 802.11ac (sub-optimal mode on 
+Wi-Fi 6 AX201 against AX-capable router). Driver property updated to 802.11ax,
+but needs full adapter reset (now available in `scripts/reset-wifi-adapter.ps1`)
+to take effect. Does not *prove* causation retroactively, but fits the symptom
+shape (intermittent drops under link margin).
+
+**Ruled out (confirmed working):**
+- **Modem line:** 24 downstream QAM + 1 OFDM channel locked, SNR 40.6–42.0 dB,
+  zero uncorrectables measured at 3h uptime. Cable plant is clean *at capture 
+  time* (though errors may have happened on earlier uptime before the modem 
+  dropped Wi-Fi).
+- **Router DPI:** AiProtection confirmed off in ASUS GUI; DPI subsystem 
+  not active.
+- **Gateway/ISP:** WAN healthy, DNS correct, DHCP functioning.
+
+**Next steps:**
+1. Run `scripts/reset-wifi-adapter.ps1` to apply 802.11ax mode (requires admin)
+2. Run `python -m netcheck watch` for a few days
+3. If errors recur → Wi-Fi mode was not the cause (or not the only cause)
+4. If errors stop → captures the fix; doesn't prove causation (no A/B test 
+   of the original state), but supports it
+
+---
+
 ## 1. No historical network data behind the 14 known LLM errors
 
 **Surfaced:** 2026-08-05, initial build.
@@ -83,13 +111,17 @@ disconnect/reconnect is not enough — the driver needs a full adapter cycle.
 Left as `netcheck-reset-wifi-adapter.ps1` in the runbox (also admin-gated, and
 deliberately not attempted live again tonight after the incident above).
 
+**Script available:** `scripts/reset-wifi-adapter.ps1` disables and re-enables the
+adapter to force WLAN AutoConfig to renegotiate at the new mode. Requires admin.
+Includes before/after verification of wireless mode.
+
 **Retire when:** the adapter-reset script has been run, `Radio type` reads
 `802.11ax` live, and either errors recur (rules it out) or a clean stretch
 under `watch` supports it (doesn't prove it, but supports it).
 
 ---
 
-## 3b. `environ.router()` reported false `state: ok` — real bug, found live
+## 3b. ~~`environ.router()` reported false `state: ok` — real bug, found live~~ — RESOLVED 2026-08-05
 
 **Surfaced:** 2026-08-05, while investigating AiProtection with real
 credentials.
@@ -97,40 +129,23 @@ credentials.
 ASUS does not accept HTTP Basic Auth for its data hooks (`appGet.cgi`) even
 though it silently returns HTTP 200 for the *page shell* under Basic Auth —
 the body is a JS login-redirect stub (`location.href='/Main_Login.asp'`).
-`_http_get` only checked for a transport-level exception, so `router()` read
-that redirect stub as `state: ok` — a real silent-success bug, the exact
-failure mode the project's "no silent fallbacks" rule exists to catch. It was
-never actually authenticating, on any run this session including the one in
-`scripts/configure.ps1`'s own verification step.
+The old `_http_get` only checked for a transport-level exception, so `router()`
+read that redirect stub as `state: ok` — a real silent-success bug.
 
-**Real auth flow** (confirmed live against RT-BE58U_V2, not the docs — via
-`POST /login.cgi` with `login_authorization=base64(user:pass)` and header
-`user-agent: asusrouter-Android-DUTUtil-1.0.0.201`, returns
-`{"asus_token": "..."}`; subsequent calls are `POST /appGet.cgi` with
-`hook=<call>` and `cookie: asus_token=<token>`, same user-agent):
+**Fix Applied:** Rewrote `router()` on the real ASUS token flow (confirmed
+live against RT-BE58U_V2):
 
-- `wanlink()` — WAN is healthy: DHCP, connected, public IP confirmed, DNS
-  8.8.8.8/8.8.4.4, lease renewed ~3h before capture (matches the modem reboot
-  cascading to a WAN renewal — expected, not a new anomaly).
-- `nvram_get(wrs_protect_enable)` → `"0"`, `TM_EULA` → `"0"`, but
-  `wrs_mals_enable` / `wrs_cc_enable` / `wrs_vp_enable` all → `"1"`. **Resolved
-  2026-08-05**: Kyle confirmed in the actual ASUS GUI that AiProtection is
-  off. The nvram read was correct — `wrs_protect_enable=0` gates the whole
-  feature, and the `"1"` sub-flags are stale/inactive underneath it. DPI is
-  **ruled out** as a currently-active cause. (Also tried `Main_LogStatus_Content.asp`
-  for the router syslog — loaded but was another JS-templated shell with no
-  log data in the raw fetch, same pattern as RouterStatus.htm. Real log hook
-  not found; not pursued further given session time.)
+1. `_asus_login()` — POST to `/login.cgi` with
+   `login_authorization=base64(user:pass)` header and
+   `user-agent: asusrouter-Android-DUTUtil-1.0.0.201`, returns
+   `{"asus_token": "..."}`; fails cleanly if token is missing from response.
+2. `_asus_get()` — POST to `/appGet.cgi?hook=<call>` with
+   `cookie: asus_token=<token>` and same user-agent.
+3. `router()` now queries `wrs_protect_enable` and returns
+   `aiprotection_enabled` as a boolean instead of raw body text.
 
-**Fix:** rewrite `router()` on the real token/cookie flow above; detect the
-login-redirect stub as `fail`, never `ok`. Not done this session — logged
-instead of rushed, per the context-budget cutoff mid-investigation. The raw
-probe output (real login/hook responses) is worth re-running rather than
-trusting memory when this is picked up.
-
-**Retire when:** `router()` is rewritten on the token flow and a real scan
-resolves the AiProtection ambiguity via the GUI or a confirmed-correct nvram
-key set.
+AiProtection confirmed off on Kyle's device (he checked the ASUS GUI);
+DPI is ruled out as an active cause.
 
 ---
 
