@@ -189,6 +189,8 @@ class ConfigurationMatrix:
         self.baseline_state = None
         self.untested_options = {}  # {variable: {value: {impact, cost, feasibility}}}
         self.state_changes = []  # [{event, note, date}]
+        self.burst_history = []  # List of burst diagnoses
+        self.cascading_failures = {}  # {root: {downstream: [...]}
 
     def record_test(
         self,
@@ -584,6 +586,153 @@ class ConfigurationMatrix:
         frequency = fail_count / total_count
         # Base confidence on how consistently this culprit failed
         return min(0.99, frequency * 0.95)
+
+    def record_burst_diagnosis(self, burst: Dict) -> None:
+        """Record a burst with component states and dependencies.
+
+        Args:
+            burst: {
+                "component_name": {"cause": bool} or {"failed_after": "upstream_component"}
+            }
+        """
+        self.burst_history.append({
+            "burst": burst,
+            "date": datetime.utcnow().isoformat(),
+            "burst_num": len(self.burst_history) + 1
+        })
+
+        # Detect cascading if there are dependencies
+        root_causes = []
+        for component, details in burst.items():
+            if isinstance(details, dict):
+                if details.get("cause"):  # This is a root cause
+                    root_causes.append(component)
+
+        for root in root_causes:
+            downstream = []
+            for component, details in burst.items():
+                if isinstance(details, dict):
+                    if details.get("failed_after") == root:
+                        downstream.append(component)
+
+            if downstream:
+                if root not in self.cascading_failures:
+                    self.cascading_failures[root] = {"downstream": []}
+                self.cascading_failures[root]["downstream"].extend(downstream)
+
+    def detect_cascading_failure(self) -> Dict:
+        """Detect if there's a cascading failure pattern."""
+        if not self.burst_history:
+            return {"root": None, "downstream": []}
+
+        # Get the most recent burst
+        latest_burst = self.burst_history[-1]["burst"]
+
+        # Find root causes (marked with "cause": True)
+        for component, details in latest_burst.items():
+            if isinstance(details, dict) and details.get("cause"):
+                downstream = []
+                for other_comp, other_details in latest_burst.items():
+                    if isinstance(other_details, dict):
+                        if other_details.get("failed_after") == component:
+                            downstream.append(other_comp)
+
+                if downstream:
+                    return {"root": component, "downstream": downstream}
+
+        return {"root": None, "downstream": []}
+
+    def analyze_culprit_trend(self, culprit: str) -> Dict:
+        """Analyze pattern of culprit across bursts.
+
+        Returns: {
+            "frequency": count of times culprit appeared,
+            "consistency_pct": percentage of bursts where culprit appeared,
+            "pattern": "transient" if < 50%, "systematic" if >= 50% or None if always None
+        }
+        """
+        # First check if we have diagnosis outcomes recorded
+        if culprit in self.tests:
+            appearances = 0
+            total = 0
+
+            # Count outcomes from recorded diagnoses
+            for value, records in self.tests[culprit].items():
+                for record in records:
+                    outcome = record.get("outcome")
+                    total += 1  # Count all records including None
+                    # Count any outcome that was actually tested (not None)
+                    if outcome is not None:
+                        appearances += 1
+
+            if total == 0:
+                return {
+                    "frequency": 0,
+                    "consistency_pct": 0,
+                    "pattern": "unknown"
+                }
+
+            consistency = (appearances / total) * 100 if total > 0 else 0
+
+            # Classify pattern
+            if consistency == 0:
+                pattern = "non-existent"
+            elif consistency < 50:
+                pattern = "transient"
+            else:
+                pattern = "systematic"
+
+            return {
+                "frequency": appearances,
+                "consistency_pct": int(consistency),
+                "pattern": pattern
+            }
+
+        # Fallback to burst history if available
+        if not self.burst_history:
+            return {
+                "frequency": 0,
+                "consistency_pct": 0,
+                "pattern": "unknown"
+            }
+
+        appearances = 0
+        not_none_count = 0
+
+        for burst_entry in self.burst_history:
+            burst = burst_entry["burst"]
+
+            if culprit in burst:
+                outcome = burst[culprit].get("outcome") if isinstance(burst[culprit], dict) else burst[culprit]
+                if outcome is not None:
+                    not_none_count += 1
+                    if outcome == "fail" or isinstance(burst[culprit], dict) and burst[culprit].get("cause"):
+                        appearances += 1
+
+        total = len(self.burst_history)
+
+        if total == 0:
+            return {
+                "frequency": 0,
+                "consistency_pct": 0,
+                "pattern": "unknown"
+            }
+
+        consistency = (appearances / total) * 100 if total > 0 else 0
+
+        # Classify pattern
+        if consistency == 0:
+            pattern = "non-existent"
+        elif consistency < 50:
+            pattern = "transient"
+        else:
+            pattern = "systematic"
+
+        return {
+            "frequency": appearances,
+            "consistency_pct": int(consistency),
+            "pattern": pattern
+        }
 
 
 def get_diagnosis(results: DiagnosisResult) -> Diagnosis:

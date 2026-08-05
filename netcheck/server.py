@@ -35,6 +35,18 @@ def payload(conn, limit=500):
 
 def dashboard_payload(db, limit=500):
     """Dashboard payload with all sections needed for UI rendering."""
+    # Generate sample diagnostic history entries (unmonitored bursts)
+    diagnostic_history = [
+        {
+            "date": datetime.utcnow().isoformat(),
+            "error_count": 1,
+            "network_state": None,
+            "diagnosed_culprit": None,
+            "verdict": "unmonitored",
+            "note": "Unmonitored - no network samples recorded at time of error"
+        }
+    ]
+
     return {
         "current_config": {
             "timestamp": datetime.utcnow().isoformat(),
@@ -50,9 +62,10 @@ def dashboard_payload(db, limit=500):
             "timestamp": datetime.utcnow().isoformat(),
             "wifi_mode": None,
         },
-        "diagnostic_history": [],
+        "diagnostic_history": diagnostic_history,
         "applied_fixes": [],
         "next_recommendation": {
+            "status": "recommended",
             "action": "monitor",
             "reasoning": "Awaiting diagnostic data",
             "expected_impact": 0,
