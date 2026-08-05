@@ -1201,122 +1201,22 @@ def rank_recommendations(candidates: List[Dict]) -> List[Dict]:
 
 
 def classify_packet_loss_pattern(loss_samples: List[float]) -> Dict:
-    """Classify packet loss pattern based on loss rate measurements.
-
-    Args:
-        loss_samples: List of packet loss percentages (0-100)
-
-    Returns:
-        Dict with classification and pattern analysis:
-        {
-            "classification": "healthy" | "steady_low" | "burst_loss" |
-                             "intermittent" | "severe",
-            "avg_loss_pct": float,
-            "min_loss_pct": float,
-            "max_loss_pct": float,
-            "loss_variance": float,
-            "has_loss": bool,
-            "has_burst_loss": bool,
-            "has_steady_degradation": bool,
-            "requires_immediate_attention": bool,
-            "is_uncertain": bool,  # < 3 samples
-            "burst_windows": list,  # indices of burst periods
-            "classification_reason": str
-        }
-    """
+    """Classify packet loss pattern based on loss rate measurements."""
     import statistics
 
     if not loss_samples:
-        return {
-            "classification": "unknown",
-            "avg_loss_pct": None,
-            "min_loss_pct": None,
-            "max_loss_pct": None,
-            "loss_variance": None,
-            "has_loss": False,
-            "has_burst_loss": False,
-            "has_steady_degradation": False,
-            "requires_immediate_attention": False,
-            "is_uncertain": True,
-            "burst_windows": [],
-            "classification_reason": "No measurements provided"
-        }
+        return _empty_loss_result()
 
+    avg_loss, min_loss, max_loss, variance = _calculate_loss_stats(loss_samples)
     is_uncertain = len(loss_samples) < 3
-    avg_loss = statistics.mean(loss_samples)
-    min_loss = min(loss_samples)
-    max_loss = max(loss_samples)
-
-    # Variance of loss rates
-    if len(loss_samples) > 1:
-        variance = statistics.variance(loss_samples)
-    else:
-        variance = 0.0
-
-    has_loss = avg_loss > 1.0  # >1% considered "has loss"
-
-    # Detect burst loss: sudden spikes with recovery
+    has_loss = avg_loss > 1.0
     burst_windows = _detect_burst_windows(loss_samples)
-    has_burst_loss = len(burst_windows) > 0
+    has_steady_degradation = _is_steady_degradation(avg_loss, loss_samples, variance)
 
-    # Detect steady degradation: consistently high loss
-    # All samples above threshold with low variance
-    steady_threshold = 1.0  # 1% or more
-    is_steady = (
-        avg_loss >= steady_threshold and
-        all(l >= steady_threshold * 0.5 for l in loss_samples) and
-        variance < 25  # Low variance around the steady state
+    classification, reason, attention = _classify_loss_pattern(
+        has_loss, max_loss, avg_loss, has_steady_degradation,
+        burst_windows, min_loss, variance
     )
-    has_steady_degradation = is_steady
-
-    # Classify based on patterns
-    if not has_loss:
-        classification = "healthy"
-        reason = f"No significant packet loss: avg={avg_loss:.2f}%"
-        requires_immediate_attention = False
-
-    elif max_loss > 50 or avg_loss > 15:
-        classification = "severe"
-        reason = f"Severe packet loss: avg={avg_loss:.2f}%, peak={max_loss:.2f}%"
-        requires_immediate_attention = True
-
-    elif has_steady_degradation:
-        if avg_loss < 5:
-            classification = "steady_low"
-            reason = f"Steady low loss: avg={avg_loss:.2f}% (consistent degradation)"
-        else:
-            classification = "steady_high"
-            reason = f"Steady high loss: avg={avg_loss:.2f}% (consistent degradation)"
-        requires_immediate_attention = avg_loss > 5
-
-    elif has_burst_loss:
-        # Distinguish between burst and intermittent:
-        # Burst: clear baseline (low min), spikes (high max), few distinct windows
-        # Intermittent: frequent random spikes throughout (many small windows)
-        num_bursts = len(burst_windows)
-        is_clear_burst = (
-            min_loss < 5 and  # Clear baseline near zero
-            max_loss > 20 and  # Significant spike
-            num_bursts <= 2  # Few distinct bursts
-        )
-        if is_clear_burst:
-            classification = "burst_loss"
-            reason = f"Burst pattern: {num_bursts} bursts detected, peak={max_loss:.2f}%"
-            requires_immediate_attention = max_loss > 30
-        else:  # Many spikes = intermittent
-            classification = "intermittent"
-            reason = f"Intermittent loss: {num_bursts} bursts, variance={variance:.1f}"
-            requires_immediate_attention = avg_loss > 5
-
-    elif variance > 20:
-        classification = "intermittent"
-        reason = f"Intermittent loss: avg={avg_loss:.2f}%, variance={variance:.1f}"
-        requires_immediate_attention = avg_loss > 5
-
-    else:
-        classification = "healthy"
-        reason = f"No significant packet loss: avg={avg_loss:.2f}%"
-        requires_immediate_attention = False
 
     return {
         "classification": classification,
@@ -1325,13 +1225,79 @@ def classify_packet_loss_pattern(loss_samples: List[float]) -> Dict:
         "max_loss_pct": round(max_loss, 2),
         "loss_variance": round(variance, 2),
         "has_loss": has_loss,
-        "has_burst_loss": has_burst_loss,
+        "has_burst_loss": len(burst_windows) > 0,
         "has_steady_degradation": has_steady_degradation,
-        "requires_immediate_attention": requires_immediate_attention,
+        "requires_immediate_attention": attention,
         "is_uncertain": is_uncertain,
         "burst_windows": burst_windows,
         "classification_reason": reason
     }
+
+
+def _empty_loss_result() -> Dict:
+    """Return empty result for no samples."""
+    return {
+        "classification": "unknown",
+        "avg_loss_pct": None,
+        "min_loss_pct": None,
+        "max_loss_pct": None,
+        "loss_variance": None,
+        "has_loss": False,
+        "has_burst_loss": False,
+        "has_steady_degradation": False,
+        "requires_immediate_attention": False,
+        "is_uncertain": True,
+        "burst_windows": [],
+        "classification_reason": "No measurements provided"
+    }
+
+
+def _calculate_loss_stats(loss_samples: List[float]) -> Tuple[float, float, float, float]:
+    """Calculate loss statistics from samples."""
+    import statistics
+    avg = statistics.mean(loss_samples)
+    min_val = min(loss_samples)
+    max_val = max(loss_samples)
+    var = statistics.variance(loss_samples) if len(loss_samples) > 1 else 0.0
+    return avg, min_val, max_val, var
+
+
+def _is_steady_degradation(avg_loss: float, loss_samples: List[float], variance: float) -> bool:
+    """Check if loss shows steady degradation pattern."""
+    threshold = 1.0
+    return (avg_loss >= threshold and
+            all(l >= threshold * 0.5 for l in loss_samples) and
+            variance < 25)
+
+
+def _classify_loss_pattern(
+    has_loss: bool, max_loss: float, avg_loss: float,
+    has_steady: bool, bursts: List, min_loss: float, variance: float
+) -> Tuple[str, str, bool]:
+    """Classify loss pattern and return (classification, reason, attention)."""
+    if not has_loss:
+        return "healthy", f"No significant packet loss: avg={avg_loss:.2f}%", False
+
+    if max_loss > 50 or avg_loss > 15:
+        return "severe", f"Severe packet loss: avg={avg_loss:.2f}%, peak={max_loss:.2f}%", True
+
+    if has_steady:
+        if avg_loss < 5:
+            return "steady_low", f"Steady low loss: avg={avg_loss:.2f}%", False
+        else:
+            return "steady_high", f"Steady high loss: avg={avg_loss:.2f}%", True
+
+    if len(bursts) > 0:
+        is_clear = min_loss < 5 and max_loss > 20 and len(bursts) <= 2
+        if is_clear:
+            return "burst_loss", f"Burst: {len(bursts)} detected, peak={max_loss:.2f}%", max_loss > 30
+        else:
+            return "intermittent", f"Intermittent: {len(bursts)} bursts", avg_loss > 5
+
+    if variance > 20:
+        return "intermittent", f"Intermittent: avg={avg_loss:.2f}%, var={variance:.1f}", avg_loss > 5
+
+    return "healthy", f"No significant packet loss: avg={avg_loss:.2f}%", False
 
 
 def _detect_burst_windows(loss_samples: List[float], threshold: float = 10.0) -> List[Tuple[int, int]]:
