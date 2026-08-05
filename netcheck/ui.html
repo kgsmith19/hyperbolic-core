@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>netcheck</title>
+<script defer src="/vendor/alpine.min.js"></script>
+<style>
+/* Everything is local. No CDN, no webfont, no remote asset — the dashboard has
+   to render during the outage it is diagnosing. */
+@layer tokens, base, components;
+
+@layer tokens {
+  :root {
+    color-scheme: light dark;
+    --bg:      light-dark(#f6f7f9, #0d1117);
+    --surface: light-dark(#ffffff, #161b22);
+    --line:    light-dark(#e3e6ea, #262d36);
+    --text:    light-dark(#1a1d21, #e6edf3);
+    --muted:   light-dark(#5b6570, #8b949e);
+    --ok:      light-dark(#1a7f4b, #3fb950);
+    --warn:    light-dark(#9a6700, #d29922);
+    --bad:     light-dark(#c02828, #f85149);
+    --idle:    light-dark(#8b949e, #6e7681);
+    --accent:  light-dark(#0b62d6, #58a6ff);
+    --radius: 10px;
+  }
+}
+
+@layer base {
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem;
+    background: var(--bg); color: var(--text);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 1.35rem; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: .07em;
+       color: var(--muted); margin: 0 0 .75rem; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+  th { text-align: left; color: var(--muted); font-weight: 600;
+       padding: .4rem .6rem; border-bottom: 1px solid var(--line); }
+  td { padding: .4rem .6rem; border-bottom: 1px solid var(--line);
+       white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+}
+
+@layer components {
+  .wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 1.25rem; }
+  header { display: flex; align-items: baseline; gap: .9rem; flex-wrap: wrap; }
+  header .sub { color: var(--muted); font-size: .85rem; }
+  header .spacer { margin-left: auto; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 1rem 1.1rem;
+  }
+  .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+
+  /* Layer status: the fastest read on the page. */
+  .pills { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .pill {
+    display: grid; gap: .15rem; padding: .6rem .85rem; min-width: 118px;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: color-mix(in oklab, var(--tone) 9%, var(--surface));
+    border-color: color-mix(in oklab, var(--tone) 35%, var(--line));
+  }
+  .pill b { font-size: .95rem; color: var(--tone); }
+  .pill span { font-size: .7rem; text-transform: uppercase;
+               letter-spacing: .06em; color: var(--muted); }
+  .t-ok   { --tone: var(--ok); }
+  .t-fail { --tone: var(--bad); }
+  .t-una  { --tone: var(--idle); }
+
+  .cause { display: grid; gap: .3rem; padding: .8rem 0; border-bottom: 1px solid var(--line); }
+  .cause:last-child { border-bottom: 0; }
+  .cause h3 { margin: 0; font-size: .95rem; display: flex; gap: .5rem; align-items: center; }
+  .cause p { margin: 0; font-size: .85rem; color: var(--muted); }
+  .cause .fix { color: var(--text); }
+
+  .tag { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em;
+         padding: .1rem .45rem; border-radius: 999px; font-weight: 600;
+         background: color-mix(in oklab, var(--tone) 18%, transparent);
+         color: var(--tone); border: 1px solid color-mix(in oklab, var(--tone) 40%, transparent); }
+  .high { --tone: var(--bad); } .medium { --tone: var(--warn); } .low { --tone: var(--idle); }
+  .network { --tone: var(--bad); } .server { --tone: var(--warn); }
+  .client { --tone: var(--accent); } .unknown { --tone: var(--idle); }
+
+  .scroll { overflow-x: auto; max-height: 340px; overflow-y: auto; }
+  .empty { color: var(--muted); font-size: .87rem; padding: .4rem 0; }
+  .muted { color: var(--muted); }
+
+  button {
+    font: inherit; font-size: .85rem; cursor: pointer;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px; padding: .35rem .8rem;
+    &:hover { border-color: var(--accent); color: var(--accent); }
+  }
+  .chart { width: 100%; height: 150px; display: block; }
+  .legend { display: flex; gap: 1rem; font-size: .75rem; color: var(--muted); margin-top: .4rem; }
+  .legend i { display: inline-block; width: 9px; height: 2px; vertical-align: middle;
+              margin-right: .3rem; }
+}
+</style>
+</head>
+<body x-data="netcheck()" x-init="load(); setInterval(load, 15000)">
+<div class="wrap">
+
+  <header>
+    <h1>netcheck</h1>
+    <span class="sub" x-text="subtitle"></span>
+    <span class="spacer"></span>
+    <button @click="load()" x-text="loading ? 'refreshing…' : 'refresh'"></button>
+  </header>
+
+  <!-- Which layer is healthy right now -->
+  <section class="card">
+    <h2>Layers — last sample</h2>
+    <template x-if="!d.live"><p class="empty">No samples yet. Run <code>netcheck watch</code>.</p></template>
+    <div class="pills" x-show="d.live">
+      <template x-for="l in layers" :key="l.key">
+        <div class="pill" :class="tone(d.live?.[l.key])">
+          <span x-text="l.label"></span>
+          <b x-text="label(d.live?.[l.key])"></b>
+          <span x-text="ms(d.live?.[l.ms])"></span>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <!-- The headline -->
+  <section class="card">
+    <h2>Most likely causes</h2>
+    <template x-if="!d.causes?.length">
+      <p class="empty">Nothing identified yet — that is a good sign, but it also
+        means nothing has been caught in the act. Leave <code>netcheck watch</code>
+        running so the next failure lands beside a measured sample.</p>
+    </template>
+    <template x-for="c in d.causes" :key="c.cause">
+      <div class="cause">
+        <h3><span x-text="c.cause.replace(/_/g,' ')"></span>
+            <span class="tag" :class="c.confidence" x-text="c.confidence"></span></h3>
+        <p x-text="c.evidence"></p>
+        <p class="fix" x-text="c.fix"></p>
+      </div>
+    </template>
+  </section>
+
+  <div class="grid">
+    <!-- Latency over time -->
+    <section class="card" style="grid-column: 1 / -1;">
+      <h2>Latency &amp; failures</h2>
+      <template x-if="chart.points.gw">
+        <svg class="chart" :viewBox="`0 0 ${chart.w} ${chart.h}`" preserveAspectRatio="none">
+          <template x-for="b in chart.bands" :key="b.x">
+            <rect :x="b.x" y="0" :width="b.w" :height="chart.h"
+                  fill="var(--bad)" opacity=".16"></rect>
+          </template>
+          <polyline :points="chart.points.gw"   fill="none" stroke="var(--ok)"     stroke-width="1.5"></polyline>
+          <polyline :points="chart.points.inet" fill="none" stroke="var(--accent)" stroke-width="1.5"></polyline>
+          <polyline :points="chart.points.tls"  fill="none" stroke="var(--warn)"   stroke-width="1.5"></polyline>
+        </svg>
+      </template>
+      <template x-if="!chart.points.gw"><p class="empty">Not enough samples to chart.</p></template>
+      <div class="legend">
+        <span><i style="background:var(--ok)"></i>gateway</span>
+        <span><i style="background:var(--accent)"></i>internet</span>
+        <span><i style="background:var(--warn)"></i>TLS to target</span>
+        <span><i style="background:var(--bad);height:8px"></i>failure</span>
+        <span class="spacer" x-text="`${d.samples?.length||0} samples`"></span>
+      </div>
+    </section>
+
+    <!-- LLM errors, with the verdict that matters -->
+    <section class="card" style="grid-column: 1 / -1;">
+      <h2>LLM connection errors <span class="muted" x-text="burstNote"></span></h2>
+      <template x-if="!d.errors?.length"><p class="empty">None found.</p></template>
+      <div class="scroll" x-show="d.errors?.length">
+        <table>
+          <thead><tr><th>when</th><th>source</th><th>kind</th><th>verdict</th><th>detail</th></tr></thead>
+          <tbody>
+            <template x-for="e in d.errors" :key="e.ts + e.detail">
+              <tr>
+                <td x-text="when(e.ts)"></td>
+                <td class="muted" x-text="e.source"></td>
+                <td><span class="tag" :class="e.kind" x-text="e.kind"></span></td>
+                <td x-text="e.verdict.replace(/_/g,' ')"
+                    :class="e.verdict==='not_local' ? 'muted' : ''"></td>
+                <td class="muted" x-text="e.detail"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Environment -->
+    <section class="card">
+      <h2>Wi-Fi &amp; adapter</h2>
+      <template x-if="!d.scan?.wifi"><p class="empty">Run <code>netcheck scan</code>.</p></template>
+      <table x-show="d.scan?.wifi">
+        <tbody>
+          <template x-for="[k,v] in envRows" :key="k">
+            <tr><td class="muted" x-text="k"></td><td x-text="v"></td></tr>
+          </template>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Recent samples</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>when</th><th>verdict</th><th>gw</th><th>inet</th><th>dns</th><th>tls</th></tr></thead>
+          <tbody>
+            <template x-for="s in (d.samples||[]).slice(0,60)" :key="s.ts">
+              <tr>
+                <td x-text="when(s.ts)"></td>
+                <td x-text="s.culprit || 'ok'" :class="s.culprit ? '' : 'muted'"></td>
+                <td x-text="ms(s.gw_ms)"></td>
+                <td x-text="ms(s.inet_ms)"></td>
+                <td x-text="ms(s.dns_router_ms)"></td>
+                <td x-text="ms(s.tls_ms)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+function netcheck() {
+  return {
+    d: {}, loading: false,
+    layers: [
+      { key: 'gw_state',         ms: 'gw_ms',         label: 'LAN / Wi-Fi' },
+      { key: 'hop_state',        ms: 'hop_ms',        label: 'ISP hop' },
+      { key: 'inet_state',       ms: 'inet_ms',       label: 'Internet' },
+      { key: 'dns_router_state', ms: 'dns_router_ms', label: 'Router DNS' },
+      { key: 'dns_public_state', ms: 'dns_public_ms', label: 'Public DNS' },
+      { key: 'tls_state',        ms: 'tls_ms',        label: 'TLS target' },
+    ],
+
+    async load() {
+      this.loading = true;
+      try { this.d = await (await fetch('/api/data')).json(); }
+      finally { this.loading = false; }
+    },
+
+    tone(s) { return s === 'ok' ? 't-ok' : s === 'fail' ? 't-fail' : 't-una'; },
+    label(s) { return s === 'ok' ? 'OK' : s === 'fail' ? 'FAIL' : 'n/a'; },
+    ms(v) { return (v === null || v === undefined) ? '—' : `${Math.round(v)} ms`; },
+    when(ts) { return ts ? new Date(ts).toLocaleString(undefined,
+      { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''; },
+
+    get subtitle() {
+      if (!this.d.live) return 'no data yet';
+      const c = this.d.live.culprit;
+      return c ? `last sample blamed: ${c.replace(/_/g,' ')}` : 'last sample healthy';
+    },
+    get burstNote() {
+      const b = this.d.bursts || [];
+      return b.length ? `— ${this.d.errors.length} errors in ${b.length} bursts` : '';
+    },
+    get envRows() {
+      const s = this.d.scan || {}, w = s.wifi || {}, dr = s.driver || {}, c = s.congestion || {};
+      return Object.entries({
+        SSID: w.ssid, Signal: w.rssi_dbm != null ? `${w.rssi_dbm} dBm (${w.signal_pct}%)` : '—',
+        Band: w.band, Channel: w.channel, Radio: w.radio,
+        'Rx / Tx': (w.rx_mbps && w.tx_mbps) ? `${w.rx_mbps} / ${w.tx_mbps} Mbps` : '—',
+        'Co-channel APs': c.state === 'ok' ? `${c.cochannel} (${c.same_block} in 80MHz block)` : 'n/a',
+        Adapter: dr.adapter, Driver: dr.driver && `${dr.driver} (${dr.driver_date})`,
+        'Wireless mode': dr.wireless_mode, Roaming: dr.roaming,
+      }).filter(([, v]) => v !== undefined && v !== null && v !== '');
+    },
+
+    // Hand-rolled SVG: a charting library would be a second dependency to draw
+    // three polylines, and it could not be loaded offline anyway.
+    get chart() {
+      const w = 900, h = 150, out = { w, h, points: {}, bands: [] };
+      const rows = (this.d.samples || []).slice(0, 180).reverse();
+      if (rows.length < 2) return out;
+
+      const all = rows.flatMap(r => [r.gw_ms, r.inet_ms, r.tls_ms]).filter(v => v != null);
+      const max = Math.max(50, ...all);
+      const x = i => (i / (rows.length - 1)) * w;
+      const y = v => h - (v / max) * (h - 8) - 4;
+
+      for (const k of ['gw_ms', 'inet_ms', 'tls_ms']) {
+        const pts = rows.map((r, i) => r[k] == null ? null : `${x(i).toFixed(1)},${y(r[k]).toFixed(1)}`)
+                        .filter(Boolean).join(' ');
+        out.points[k.replace('_ms', '')] = pts;
+      }
+      rows.forEach((r, i) => { if (r.culprit) out.bands.push({ x: x(i) - 2, w: 4 }); });
+      return out;
+    },
+  };
+}
+</script>
+</body>
+</html>

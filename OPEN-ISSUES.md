@@ -1,0 +1,79 @@
+# Open issues — netcheck
+
+Problems surfaced but not fixed. Append; do not delete without a resolution.
+
+---
+
+## 1. No historical network data behind the 14 known LLM errors
+
+**Surfaced:** 2026-08-05, initial build.
+
+All 14 real connection errors found in the Claude Code transcripts
+(2026-07-29 → 2026-08-05) correlate to verdict `unmonitored` — nothing was
+sampling the network when they happened, so the tool cannot say what broke.
+
+This is inherent to starting now, not a defect. It resolves itself once
+`netcheck watch` has been running across a few failures. Recorded so the empty
+diagnosis is not mistaken for a clean bill of health.
+
+**Retire when:** at least one error burst lands with a verdict other than
+`unmonitored`.
+
+---
+
+## 2. Modem and router internals are dark
+
+**Surfaced:** 2026-08-05.
+
+`192.168.100.1` answers 401 and `192.168.50.1` is an ASUS, but neither has
+credentials in `.env`, so DOCSIS line quality and the AiProtection/DPI setting
+are unknown. Both are high-value: uncorrectable codewords are the best ISP
+evidence, and ASUS DPI is a documented cause of long-lived TLS streams dying.
+
+The modem parser (`environ.modem`) is written against generic Arris/Motorola
+markup and is **unverified against the actual device** — it may need adjusting
+once real output is available.
+
+**Retire when:** credentials are set and one real scan is confirmed parsing.
+
+---
+
+## 3. Wi-Fi adapter is pinned below its capability
+
+**Surfaced:** 2026-08-05.
+
+`802.11n/ac/ax Wireless Mode = 3. 802.11ac` on an Intel Wi-Fi 6 AX201, against
+an AP advertising `802.11be`. `Roaming Aggressiveness = 1. Lowest` is also
+non-default. Both look like earlier hand-tuning.
+
+Not yet linked to any failure — `netcheck diagnose` surfaces it as a
+medium-confidence finding, not a cause. Changing it is a live experiment, so it
+is left to the user rather than recommended outright.
+
+**Retire when:** either the setting is restored to default and errors are
+re-measured, or monitoring shows it is unrelated.
+
+---
+
+## 4. `dns_router_ms` reads 0.0 ms
+
+**Surfaced:** 2026-08-05.
+
+Router DNS resolution repeatedly times at 0.0 ms — plausible for a cached
+answer over loopback-speed LAN, but suspiciously round. May indicate the timing
+is measuring less than intended, or that the resolver is answering from cache
+without a real lookup.
+
+**Retire when:** confirmed against a cold cache, or the timing is corrected.
+
+---
+
+## 5. macOS is unimplemented
+
+**Surfaced:** 2026-08-05.
+
+`environ.py` is Windows-only (netsh, PowerShell, Windows event log).
+`probes.py` is already cross-platform, and the parsers take text, so this is
+additive rather than a rewrite. The original brief mentioned a Mac.
+
+**Retire when:** a macOS backend exists, or the Mac is confirmed out of scope.

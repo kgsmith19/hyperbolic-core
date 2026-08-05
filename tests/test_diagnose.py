@@ -1,0 +1,145 @@
+"""Culprit rules and error correlation.
+
+The rules read across one sample row. A row is a snapshot of every layer at the
+same instant, so 'which things failed together' is the whole diagnostic.
+"""
+import unittest
+
+from netcheck import diagnose
+
+
+def row(**kw):
+    """A healthy row, overridden per test. Defaults matter: a rule that only
+    fires because a field was missing is a rule that fires on everything."""
+    base = {"ts": "2026-08-05T00:00:00Z", "gw_state": "ok", "hop_state": "ok",
+            "inet_state": "ok", "dns_router_state": "ok", "dns_public_state": "ok",
+            "tls_state": "ok", "http_state": "ok"}
+    base.update(kw)
+    return base
+
+
+class CulpritTest(unittest.TestCase):
+    def test_healthy_row_blames_nobody(self):
+        self.assertIsNone(diagnose.culprit(row()))
+
+    def test_gateway_down_is_lan(self):
+        self.assertEqual(diagnose.culprit(row(gw_state="fail", hop_state="fail",
+                                              inet_state="fail")), "lan")
+
+    def test_gateway_up_but_hop_down_is_isp(self):
+        self.assertEqual(diagnose.culprit(row(hop_state="fail",
+                                              inet_state="fail")), "isp")
+
+    def test_hop_up_but_internet_down_is_upstream(self):
+        self.assertEqual(diagnose.culprit(row(inet_state="fail")), "internet")
+
+    def test_router_dns_failing_while_public_dns_works_is_router_dns(self):
+        """The highest-value rule on this network: the router is the resolver,
+        so isolating it from DNS-in-general is what makes the finding actionable."""
+        self.assertEqual(diagnose.culprit(row(dns_router_state="fail")), "router_dns")
+
+    def test_both_resolvers_failing_is_not_blamed_on_the_router(self):
+        self.assertEqual(diagnose.culprit(row(dns_router_state="fail",
+                                              dns_public_state="fail")), "dns")
+
+    def test_everything_reachable_but_tls_failing_is_app_layer(self):
+        """Path is fine and the endpoint is not. Points at interception, DPI,
+        or the far side — never at the Wi-Fi."""
+        self.assertEqual(diagnose.culprit(row(tls_state="fail")), "app")
+
+    def test_unavailable_never_produces_a_culprit(self):
+        """Criterion 9: not measuring a layer is not evidence against it."""
+        self.assertIsNone(diagnose.culprit(row(gw_state="unavailable")))
+        self.assertIsNone(diagnose.culprit(row(hop_state="unavailable")))
+        self.assertIsNone(diagnose.culprit(row(dns_router_state="unavailable")))
+
+    def test_lan_wins_over_downstream_symptoms(self):
+        """A dead gateway makes every later probe fail; reporting five causes
+        for one break would bury the real one."""
+        self.assertEqual(
+            diagnose.culprit(row(gw_state="fail", hop_state="fail",
+                                 inet_state="fail", dns_router_state="fail",
+                                 tls_state="fail", http_state="fail")), "lan")
+
+
+class CorrelateTest(unittest.TestCase):
+    def setUp(self):
+        self.samples = [row(ts="2026-08-05T00:05:00Z", gw_state="fail",
+                            hop_state="fail", inet_state="fail")]
+
+    def err(self, ts):
+        return {"ts": ts, "kind": "network", "detail": "ECONNRESET"}
+
+    def test_error_inside_the_window_takes_the_sample_verdict(self):
+        got = diagnose.correlate([self.err("2026-08-05T00:06:00Z")], self.samples)
+        self.assertEqual(got[0]["verdict"], "lan")
+
+    def test_boundary_is_inclusive_at_exactly_the_window(self):
+        """Criterion 8."""
+        got = diagnose.correlate([self.err("2026-08-05T00:07:00Z")], self.samples)
+        self.assertEqual(got[0]["verdict"], "lan")
+
+    def test_just_outside_the_window_counts_as_unmonitored(self):
+        """Having samples elsewhere in the database is not the same as having
+        been watching *then*, so this must not read as a clean verdict."""
+        got = diagnose.correlate([self.err("2026-08-05T00:07:01Z")], self.samples)
+        self.assertEqual(got[0]["verdict"], "unmonitored")
+
+    def test_error_during_a_healthy_sample_is_not_our_network(self):
+        """The finding that stops you rebuilding a working network."""
+        got = diagnose.correlate([self.err("2026-08-05T00:05:10Z")], [row(
+            ts="2026-08-05T00:05:00Z")])
+        self.assertEqual(got[0]["verdict"], "not_local")
+
+    def test_error_with_no_samples_at_all_is_unmonitored(self):
+        """Distinct from 'unexplained': we were not watching, so we cannot say."""
+        got = diagnose.correlate([self.err("2026-08-05T00:05:10Z")], [])
+        self.assertEqual(got[0]["verdict"], "unmonitored")
+
+
+class BurstTest(unittest.TestCase):
+    def test_errors_within_the_gap_form_one_burst(self):
+        """Real outages produce clusters. Counting 4 errors from one 20-second
+        dropout as 4 incidents overstates how often the link breaks."""
+        errs = [{"ts": f"2026-08-05T00:00:0{s}Z"} for s in (1, 2, 3)]
+        self.assertEqual(len(diagnose.bursts(errs, gap_s=60)), 1)
+
+    def test_errors_beyond_the_gap_are_separate_bursts(self):
+        errs = [{"ts": "2026-08-05T00:00:01Z"}, {"ts": "2026-08-05T02:00:00Z"}]
+        self.assertEqual(len(diagnose.bursts(errs, gap_s=60)), 2)
+
+    def test_burst_reports_its_span_and_size(self):
+        errs = [{"ts": "2026-08-05T00:00:00Z"}, {"ts": "2026-08-05T00:00:20Z"}]
+        b = diagnose.bursts(errs, gap_s=60)[0]
+        self.assertEqual(b["count"], 2)
+        self.assertEqual(b["span_s"], 20)
+
+
+class RankTest(unittest.TestCase):
+    def test_repeated_router_dns_failures_are_ranked_and_actionable(self):
+        samples = [row(ts=f"2026-08-05T00:0{i}:00Z", dns_router_state="fail")
+                   for i in range(5)]
+        causes = diagnose.rank(samples, [], {})
+        self.assertEqual(causes[0]["cause"], "router_dns")
+        self.assertIn("evidence", causes[0])
+        self.assertTrue(causes[0]["fix"])
+
+    def test_a_healthy_history_reports_no_causes(self):
+        self.assertEqual(diagnose.rank([row()] * 5, [], {}), [])
+
+    def test_unavailable_sections_are_never_cited_as_evidence(self):
+        """Criterion 9 through to the report."""
+        causes = diagnose.rank([row(gw_state="unavailable")] * 5, [], {})
+        self.assertEqual(causes, [])
+
+    def test_wireless_mode_pinned_below_capability_is_surfaced(self):
+        """A Wi-Fi 6 card pinned to 802.11ac is a deliberate setting worth
+        reporting; it is invisible unless something looks for it."""
+        causes = diagnose.rank([row()], [], {
+            "driver": {"state": "ok", "adapter": "Intel(R) Wi-Fi 6 AX201 160MHz",
+                       "wireless_mode": "3. 802.11ac"}})
+        self.assertTrue(any(c["cause"] == "wifi_mode_pinned" for c in causes))
+
+
+if __name__ == "__main__":
+    unittest.main()
