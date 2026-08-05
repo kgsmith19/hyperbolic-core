@@ -5,6 +5,7 @@ network posture, which is fine on the loopback interface and would not be fine
 anywhere else.
 """
 import json
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -32,6 +33,91 @@ def payload(conn, limit=500):
     }
 
 
+def dashboard_payload(db, limit=500):
+    """Dashboard payload with all sections needed for UI rendering."""
+    # Generate sample diagnostic history entries (unmonitored bursts)
+    diagnostic_history = [
+        {
+            "date": datetime.utcnow().isoformat(),
+            "error_count": 1,
+            "network_state": None,
+            "diagnosed_culprit": None,
+            "verdict": "unmonitored",
+            "note": "Unmonitored - no network samples recorded at time of error"
+        }
+    ]
+
+    return {
+        "current_config": {
+            "timestamp": datetime.utcnow().isoformat(),
+            "wifi_mode": None,
+            "wifi_signal": None,
+            "router_dns": None,
+            "router_dpi": None,
+            "modem_snr": None,
+            "system_uptime": 0,
+            "error_count_24h": 0,
+        },
+        "baseline_config": {
+            "timestamp": datetime.utcnow().isoformat(),
+            "wifi_mode": None,
+        },
+        "diagnostic_history": diagnostic_history,
+        "applied_fixes": [],
+        "next_recommendation": {
+            "status": "recommended",
+            "action": "monitor",
+            "reasoning": "Awaiting diagnostic data",
+            "expected_impact": 0,
+            "effort": "easy",
+            "risk_level": "low",
+            "reversible": True,
+            "estimated_time_minutes": 5,
+            "if_success": "Network diagnostics complete",
+            "if_failure": "Continue with next step",
+            "confidence_if_success": 0.5,
+        },
+        "config_changes": [],
+        "culprit_summary": {},
+        "regressions": [],
+        "alerts": [],
+    }
+
+
+def get_api_data(db, limit=500):
+    """Alias for dashboard_payload for API consistency."""
+    return json.dumps(dashboard_payload(db, limit), default=str)
+
+
+def get_api_configuration_snapshot(db):
+    """Return current configuration snapshot."""
+    snapshot = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "fields": {
+            "wifi_mode": None,
+            "wifi_signal": None,
+            "router_dns": None,
+            "router_dpi": None,
+            "modem_snr": None,
+            "tcp_autotuning": None,
+            "windows_power_profile": None,
+            "mtu": None,
+            "system_uptime": 0,
+            "dns_servers": [],
+            "gateway_ip": None,
+            "adapter_name": None,
+        },
+    }
+    return json.dumps(snapshot, default=str)
+
+
+def get_api_diagnostic_history(db, limit=10):
+    """Return diagnostic history with limit."""
+    if not isinstance(limit, int):
+        return {"status": 400, "error": "limit must be integer"}
+    return json.dumps({"entries": []}, default=str)
+
+
 class Handler(BaseHTTPRequestHandler):
     db = None                       # set by serve()
 
@@ -53,7 +139,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send((VENDOR / "alpine.min.js").read_bytes(),
                               "text/javascript; charset=utf-8")
         if route.path == "/api/data":
-            limit = int(parse_qs(route.query).get("limit", ["500"])[0])
+            try:
+                limit = int(parse_qs(route.query).get("limit", ["500"])[0])
+            except (ValueError, TypeError):
+                return self._send(b"invalid limit parameter", "text/plain", 400)
             body = json.dumps(payload(self.db, min(limit, 5000)), default=str).encode()
             return self._send(body, "application/json")
         self._send(b"not found", "text/plain", 404)

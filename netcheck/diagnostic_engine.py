@@ -1,0 +1,1747 @@
+"""Diagnostic decision tree engine for network troubleshooting.
+
+Core principle: Systematic elimination. Every test reduces the search space.
+Never blame what we couldn't measure. Terminal conditions stop testing.
+"""
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple, Union
+from datetime import datetime, timedelta
+from enum import Enum
+
+
+class TestState(Enum):
+    """Possible test outcomes."""
+    OK = "ok"
+    FAIL = "fail"
+    TIMEOUT = "timeout"
+    UNAVAILABLE = "unavailable"
+
+
+class Culprit(Enum):
+    """Possible root causes for network issues."""
+    GATEWAY_FAILURE = "gateway_failure"
+    ISP_FAILURE = "isp_failure"
+    DNS_ROUTER = "router_dns"
+    DNS_GENERAL = "dns"
+    INTERNET_UPSTREAM = "upstream"
+    TLS_INTERCEPTION = "tls_interception"
+    CONNECTION_REAPING = "connection_reaping"
+    WIFI_MODE = "wifi_mode"
+    WIFI_INTERFERENCE = "interference"
+    ROUTER_DPI = "router_dpi"
+    MODEM_ISSUE = "modem"
+    NONE = None
+
+
+@dataclass
+class DiagnosticRule:
+    """One rule in the decision tree."""
+    id: str
+    priority: int  # Lower = runs first
+    name: str
+    is_drill_down: bool = False
+    condition: Optional[str] = None  # Python condition to check before running
+
+    def should_run(self, results: 'DiagnosisResult') -> bool:
+        """Check if conditions are met to run this rule.
+
+        Evaluates simple conditions like:
+        - results.get('key') == 'value'
+        - results.get('key') != 'value' and results.get('other') == 'ok'
+
+        Uses safe parsing without eval() - no arbitrary code execution.
+        """
+        if not self.condition:
+            return True
+
+        # Extract all .get() calls and replace with actual values
+        import re
+        condition = self.condition
+
+        # Find all results.get('key') patterns and replace with values
+        for match in re.finditer(r"results\.get\('([^']+)'\)", condition):
+            key = match.group(1)
+            # Call the results.get() method (works for both dict and DiagnosisResult)
+            value = results.get(key)
+            # Convert to safe comparison string
+            if value is None:
+                safe_value = "None"
+            elif isinstance(value, bool):
+                safe_value = str(value)
+            elif isinstance(value, str):
+                safe_value = f"'{value}'"
+            else:
+                safe_value = repr(value)
+            condition = condition.replace(match.group(0), safe_value)
+
+        # Safely evaluate the condition by checking for dangerous patterns
+        # Only allow: alphanumeric, quotes, parentheses, comparison operators, logical operators
+        if not re.match(r"^['\"\w\s()=!<>&|+-]*$", condition):
+            return False
+
+        # Replace logical operators with Python equivalents
+        condition = condition.replace(" and ", " and ")  # Already correct
+        condition = condition.replace(" or ", " or ")    # Already correct
+
+        try:
+            # No eval() - instead use safe condition evaluator
+            return _safe_eval_condition(condition)
+        except Exception:
+            return False
+
+
+def _safe_eval_condition(condition: str) -> bool:
+    """Safely evaluate a condition string without using eval()."""
+    # This is a simple recursive descent parser for basic boolean expressions
+    # Supports: 'value' == 'value', 'value' != 'value', and, or, not, parentheses
+    import re
+
+    # Recursively evaluate AND (lowest precedence)
+    if " and " in condition:
+        parts = condition.split(" and ")
+        return all(_safe_eval_condition(p.strip()) for p in parts)
+
+    # Recursively evaluate OR
+    if " or " in condition:
+        parts = condition.split(" or ")
+        return any(_safe_eval_condition(p.strip()) for p in parts)
+
+    # Handle NOT
+    if condition.strip().startswith("not "):
+        return not _safe_eval_condition(condition[4:].strip())
+
+    # Handle parentheses
+    if condition.startswith("(") and condition.endswith(")"):
+        return _safe_eval_condition(condition[1:-1])
+
+    # Handle comparisons: 'value' == 'value'
+    for op in ["!=", "=="]:
+        if op in condition:
+            left, right = condition.split(op, 1)
+            left = left.strip()
+            right = right.strip()
+
+            # Parse string literals
+            left_val = _parse_value(left)
+            right_val = _parse_value(right)
+
+            if op == "==":
+                return left_val == right_val
+            else:  # !=
+                return left_val != right_val
+
+    return False
+
+
+def _parse_value(s: str):
+    """Parse a value string (handles string literals and None/True/False)."""
+    s = s.strip()
+    if s == "None":
+        return None
+    elif s == "True":
+        return True
+    elif s == "False":
+        return False
+    elif s.startswith("'") and s.endswith("'"):
+        return s[1:-1]
+    elif s.startswith('"') and s.endswith('"'):
+        return s[1:-1]
+    else:
+        # Try to parse as literal
+        try:
+            import ast
+            return ast.literal_eval(s)
+        except (ValueError, SyntaxError):
+            return s
+
+
+@dataclass
+class DiagnosticTestResult:
+    """Result of one diagnostic test."""
+    layer: str
+    state: TestState
+    culprit: Optional[Culprit] = None
+    confidence: float = 1.0
+    reason: Optional[str] = None
+    is_terminal: bool = False  # If true, stop testing
+
+
+@dataclass
+class Diagnosis:
+    """Complete diagnosis with hypothesis ranking."""
+    culprit: Optional[str] = None
+    confidence: float = 0.0
+    is_definitive: bool = False
+    should_continue_testing: bool = True
+    hypotheses: List[Dict] = field(default_factory=list)
+    note: Optional[str] = None
+
+
+class DiagnosticTree:
+    """Ordered decision tree for systematic network diagnosis."""
+
+    def __init__(self):
+        self.rules = self._build_rules()
+
+    def _build_rules(self) -> List[DiagnosticRule]:
+        """Build ordered rule set: basics before drill-downs."""
+        return [
+            DiagnosticRule(
+                id="layer_1_gateway",
+                priority=1,
+                name="Is the gateway reachable?",
+                condition=None
+            ),
+            DiagnosticRule(
+                id="layer_2_isp",
+                priority=2,
+                name="Is the ISP hop responding?",
+                condition=None
+            ),
+            DiagnosticRule(
+                id="layer_3_dns",
+                priority=3,
+                name="DNS: router vs public",
+                condition=None
+            ),
+            DiagnosticRule(
+                id="layer_4_tls",
+                priority=4,
+                name="Can TLS handshake complete?",
+                condition=None
+            ),
+            DiagnosticRule(
+                id="layer_5_idle_hold",
+                priority=5,
+                name="Do long-lived connections get reaped?",
+                condition=None
+            ),
+            # Drill-downs: only run if conditions met
+            DiagnosticRule(
+                id="drill_wifi_mode",
+                priority=6,
+                name="Is adapter truly on 802.11ax?",
+                is_drill_down=True,
+                condition="results.get('layer_3_dns') == 'ok' and results.get('layer_4_tls') != 'ok'"
+            ),
+            DiagnosticRule(
+                id="drill_interference",
+                priority=7,
+                name="Is there co-channel interference?",
+                is_drill_down=True,
+                condition="results.get('drill_wifi_mode') != 'ok' and results.get('layer_3_dns') == 'ok'"
+            ),
+            DiagnosticRule(
+                id="drill_router_dpi",
+                priority=8,
+                name="Is router DPI actively filtering?",
+                is_drill_down=True,
+                condition="results.get('layer_4_tls') == 'fail' and results.get('layer_3_dns').get('public') == 'ok'"
+            ),
+        ]
+
+    def get_rules_in_order(self) -> List[DiagnosticRule]:
+        """Return rules sorted by priority (execution order)."""
+        return sorted(self.rules, key=lambda r: r.priority)
+
+    def get_rule(self, rule_id: str) -> Optional[DiagnosticRule]:
+        """Get rule by ID."""
+        return next((r for r in self.rules if r.id == rule_id), None)
+
+    def get_remaining_rules(self, results: 'DiagnosisResult') -> List[DiagnosticRule]:
+        """Rules still to run, given current results."""
+        remaining = []
+        for rule in self.get_rules_in_order():
+            if rule.id not in results.completed:
+                if rule.should_run(results):
+                    remaining.append(rule)
+        return remaining
+
+
+class DiagnosisResult:
+    """Accumulator for test results."""
+
+    def __init__(self):
+        self.tests = {}  # rule_id -> result
+        self.completed = []
+        self.terminal = False
+        self.primary_culprit = None
+
+    def add(self, rule_id: str, state: Union[str, Dict]):
+        """Record a test result."""
+        if isinstance(state, str):
+            self.tests[rule_id] = {"state": state}
+        else:
+            self.tests[rule_id] = state
+        self.completed.append(rule_id)
+
+    def get(self, rule_id: str) -> Optional[str]:
+        """Get test result."""
+        return self.tests.get(rule_id, {}).get("state")
+
+    def clear(self):
+        """Reset results."""
+        self.tests = {}
+        self.completed = []
+        self.terminal = False
+
+
+class ConfigurationMatrix:
+    """Track tested configurations and guide next testing."""
+
+    def __init__(self):
+        self.tests = {}  # {variable: {value: [results]}}
+        self.fixes_applied = {}  # {variable: fix_record}
+        self.baseline_state = None
+        self.untested_options = {}  # {variable: {value: {impact, cost, feasibility}}}
+        self.state_changes = []  # [{event, note, date}]
+        self.burst_history = []  # List of burst diagnoses
+        self.cascading_failures = {}  # {root: {downstream: [...]}
+
+    def record_test(
+        self,
+        variable: str,
+        value: str,
+        outcome: str,
+        error_count: int = None,
+        duration_hours: float = 0,
+        date: str = None,
+        notes: str = "",
+        **kwargs
+    ):
+        """Record a configuration test result."""
+        if variable not in self.tests:
+            self.tests[variable] = {}
+        if value not in self.tests[variable]:
+            self.tests[variable][value] = []
+
+        # Handle missing error_count
+        if error_count is None:
+            error_count_val = None
+            impact = self._calculate_impact_score(0, outcome)
+        else:
+            error_count_val = error_count
+            impact = self._calculate_impact_score(error_count, outcome)
+
+        record = {
+            "variable": variable,
+            "value": value,
+            "outcome": outcome,
+            "error_count": error_count_val,
+            "duration_hours": duration_hours,
+            "date": date or datetime.utcnow().isoformat(),
+            "tested": True,
+            "notes": notes,
+            "impact_score": impact,
+            "data_complete": error_count is not None,
+            **kwargs
+        }
+        self.tests[variable][value].append(record)
+
+    def _calculate_impact_score(self, error_count: int, outcome: str) -> float:
+        """Score impact: 0-100."""
+        if outcome == "success" and error_count == 0:
+            return 95.0
+        elif outcome == "fail":
+            return min(80 + error_count / 2, 99.0)
+        else:
+            return 50.0
+
+    def _cost_to_effort(self, cost: float) -> str:
+        """Convert numeric cost to effort level."""
+        if cost <= 1:
+            return "easy"
+        elif cost <= 2:
+            return "medium"
+        else:
+            return "hard"
+
+    def get_test_record(self, variable: str, value: str) -> Optional[Dict]:
+        """Get latest test result for variable/value."""
+        if variable not in self.tests or value not in self.tests[variable]:
+            return None
+        records = self.tests[variable][value]
+        return records[-1] if records else None
+
+    def get_history(self, variable: str, value: str) -> List[Dict]:
+        """Get all test results for variable/value."""
+        if variable not in self.tests or value not in self.tests[variable]:
+            return []
+        return self.tests[variable][value]
+
+    def record_diagnosis_outcome(self, culprit: str, outcome: str = "fail", diagnosis: Dict = None, **kwargs) -> None:
+        """Record a diagnosed culprit as a test outcome."""
+        confidence = diagnosis.get("confidence", 0.0) if diagnosis else 0.0
+        # Use appropriate value for each culprit type
+        value_map = {
+            "router_dns": "enabled",
+            "gateway": "up",
+            "isp": "responding",
+            "dns": "enabled",
+            "wifi_mode": "tested",
+            "modem": "working"
+        }
+        value = value_map.get(culprit, "tested")
+
+        # Build notes including extra context like burst_num
+        notes_parts = [f"Diagnosed with confidence {confidence}"]
+        if "burst_num" in kwargs:
+            notes_parts.append(f"(burst {kwargs['burst_num']})")
+
+        self.record_test(
+            variable=culprit,
+            value=value,
+            outcome=outcome,
+            notes=", ".join(notes_parts),
+        )
+        if diagnosis and "confidence" in diagnosis:
+            self.tests.setdefault(culprit, {}).setdefault(value, [])[-1]["confidence"] = confidence
+
+    def track_untested_option(self, variable: str, value: str, impact: float, cost: float, feasibility: float = 1.0) -> None:
+        """Track an untested option with its expected impact and cost."""
+        if variable not in self.untested_options:
+            self.untested_options[variable] = {}
+        self.untested_options[variable][value] = {
+            "impact": impact,
+            "cost": cost,
+            "feasibility": feasibility
+        }
+
+    def note_state_change(self, event: str, note: str = "") -> None:
+        """Record when network state changes (e.g., modem restart)."""
+        self.state_changes.append({
+            "event": event,
+            "note": note,
+            "date": datetime.utcnow().isoformat()
+        })
+
+    def note_errors_during_test(self, variable: str, value: str, error_count: int) -> None:
+        """Record errors that occurred during a specific test."""
+        record = self.get_test_record(variable, value)
+        if record:
+            record["errors_during_test"] = error_count
+            # Flag contradiction if outcome was ok but errors occurred
+            if record.get("outcome") == "ok" and error_count > 0:
+                record["unexpected_outcome"] = True
+                record["note"] = "Inconclusive: outcome marked ok but errors still occurring"
+
+    def suggest_next_tests(self, limit: int = 3, context: str = None) -> List[Dict]:
+        """Return ranked list of suggested next tests (up to limit)."""
+        suggestions = []
+
+        # If matrix is empty, suggest baseline
+        if not self.tests and not self.untested_options:
+            return [{
+                "type": "baseline",
+                "variable": "all_layers",
+                "value": "baseline_diagnostic",
+                "effort": "medium",
+                "reason": "Run baseline diagnostic (all network layers)"
+            }]
+
+        # Build suggestions from untested options
+        for variable, values in self.untested_options.items():
+            for value, config in values.items():
+                roi = (config["impact"] * config["feasibility"]) / max(config["cost"], 1)
+                suggestions.append({
+                    "variable": variable,
+                    "value": value,
+                    "expected_impact": config["impact"],
+                    "effort": self._cost_to_effort(config["cost"]),
+                    "roi_score": roi,
+                    "expected_outcome_if_success": f"If fixes errors -> {variable} is causal",
+                    "expected_outcome_if_failure": f"If errors continue -> {variable} ruled out"
+                })
+
+        # Build suggestions from tested variables that had failures
+        for variable, values in self.tests.items():
+            for value, records in values.items():
+                latest = records[-1] if records else None
+                if latest and latest.get("outcome") == "fail":
+                    # Find untested values for this variable
+                    tested_values = set(self.tests.get(variable, {}).keys())
+                    high_impact_vars = {
+                        "wifi_mode": ["802.11ax", "802.11ac", "802.11n"],
+                        "router_dns": ["enabled", "disabled"],
+                        "modem": ["restart", "no_restart"],
+                    }
+                    if variable in high_impact_vars:
+                        for alt_value in high_impact_vars[variable]:
+                            if alt_value not in tested_values:
+                                roi = 85 / 1  # High impact, low cost
+                                suggestions.append({
+                                    "variable": variable,
+                                    "value": alt_value,
+                                    "expected_impact": 85,
+                                    "effort": "easy",
+                                    "roi_score": roi,
+                                    "expected_outcome_if_success": f"If fixes errors -> {variable}={alt_value} is causal",
+                                    "expected_outcome_if_failure": f"If errors continue -> {variable} ruled out"
+                                })
+
+        # Sort by ROI and return top N
+        ranked = sorted(suggestions, key=lambda s: -s.get("roi_score", 0))
+        return ranked[:limit]
+
+    def suggest_next_test(self, context: str = None) -> Dict:
+        """Recommend highest-impact untested combination.
+
+        Args:
+            context: Optional context like "modem_restarted" to allow retesting
+        """
+        # If matrix is empty, suggest baseline
+        if not self.tests and not self.untested_options:
+            return {
+                "type": "baseline",
+                "variable": "all_layers",
+                "value": "baseline_diagnostic",
+                "effort": "medium",
+                "reason": "Run baseline diagnostic (all network layers)"
+            }
+
+        high_impact_vars = {
+            "wifi_mode": {
+                "impact": 95,
+                "possible_values": ["802.11ac", "802.11ax", "802.11n", "802.11a"],
+                "effort": "easy"
+            },
+            "router_dns": {
+                "impact": 90,
+                "possible_values": ["enabled", "disabled"],
+                "effort": "easy"
+            },
+            "modem": {
+                "impact": 85,
+                "possible_values": ["restart", "no_restart"],
+                "effort": "medium"
+            },
+        }
+
+        # First pass: suggest retesting failed variables
+        for var, config in high_impact_vars.items():
+            if var in self.tests:
+                tested_values = set(self.tests[var].keys())
+
+                # Check if any value succeeded
+                any_succeeded = any(
+                    records[-1]["outcome"] == "success"
+                    for records in self.tests[var].values() if records
+                )
+
+                # Don't suggest retesting if any value succeeded (problem already fixed)
+                # Unless network state changed significantly
+                if any_succeeded and context != "modem_restarted":
+                    continue
+
+                any_failed = any(
+                    records[-1]["outcome"] == "fail"
+                    for records in self.tests[var].values() if records
+                )
+
+                if any_failed:
+                    untested = [v for v in config["possible_values"] if v not in tested_values]
+                    if untested:
+                        return {
+                            "variable": var,
+                            "value": untested[0],
+                            "expected_impact": config["impact"],
+                            "effort": config["effort"],
+                            "expected_outcome_if_success": f"If fixes errors -> {var} is causal",
+                            "expected_outcome_if_failure": f"If errors continue -> {var} ruled out"
+                        }
+
+        # If network state changed (modem restart), suggest retesting key variables
+        if context == "modem_restarted":
+            # Retest router_dns after major network change
+            if "router_dns" in self.tests:
+                return {
+                    "variable": "router_dns",
+                    "value": "queried",
+                    "expected_impact": 90,
+                    "effort": "easy",
+                    "expected_outcome_if_success": "If works -> DNS recovered after restart",
+                    "expected_outcome_if_failure": "If fails -> DNS issue persists after restart"
+                }
+
+        # Second pass: if no failures found, suggest untested high-impact variables
+        for var, config in high_impact_vars.items():
+            if var not in self.tests:
+                # Variable not tested yet, suggest testing it
+                return {
+                    "variable": var,
+                    "value": config["possible_values"][0],
+                    "expected_impact": config["impact"],
+                    "effort": config["effort"],
+                    "expected_outcome_if_success": f"If fixes errors -> {var} is causal",
+                    "expected_outcome_if_failure": f"If errors continue -> {var} ruled out"
+                }
+
+        return {"action": "monitor"}
+
+    def record_fix_applied(
+        self,
+        variable: str,
+        from_value: str,
+        to_value: str,
+        method: str = "manual",
+        date: str = None
+    ):
+        """Record a fix application."""
+        self.fixes_applied[variable] = {
+            "from": from_value,
+            "to": to_value,
+            "method": method,
+            "date": date or datetime.utcnow().isoformat(),
+            "status": "pending"
+        }
+
+    def record_post_fix_outcome(
+        self,
+        variable: str,
+        errors_after: int,
+        duration_hours: float,
+        verdict: str = None,
+        date: str = None
+    ):
+        """Record outcome after fix applied."""
+        if variable in self.fixes_applied:
+            # Infer verdict from errors_after if not provided
+            if verdict is None:
+                verdict = "success" if errors_after == 0 else "partial" if errors_after < 5 else "failed"
+
+            self.fixes_applied[variable].update({
+                "errors_after": errors_after,
+                "duration_hours": duration_hours,
+                "verdict": verdict,
+                "status": verdict,
+                "outcome_date": date or datetime.utcnow().isoformat()
+            })
+
+    def get_fix_record(self, variable: str) -> Optional[Dict]:
+        """Get fix record for variable."""
+        return self.fixes_applied.get(variable)
+
+    def get_fix_outcome(self, variable: str) -> Optional[Dict]:
+        """Get outcome of applied fix."""
+        if variable not in self.fixes_applied:
+            return None
+        return {k: v for k, v in self.fixes_applied[variable].items()
+                if k in ["verdict", "errors_after", "duration_hours"]}
+
+    def detect_regression_in_field(self, variable: str, current_value: str) -> bool:
+        """Check if previously-fixed variable reverted."""
+        if variable not in self.fixes_applied:
+            return False
+        fix = self.fixes_applied[variable]
+        return current_value != fix.get("to")
+
+    def calculate_improvement(self, variable: str) -> Dict:
+        """Calculate pre-fix vs post-fix improvement."""
+        if variable not in self.fixes_applied:
+            return {}
+
+        fix = self.fixes_applied[variable]
+        # Find pre-fix error count
+        pre_records = self.get_history(variable, fix["from"])
+        pre_errors = pre_records[-1]["error_count"] if pre_records else 0
+
+        post_errors = fix.get("errors_after", 0)
+        reduction = 100 * (pre_errors - post_errors) / max(pre_errors, 1)
+
+        # Higher confidence for complete reduction
+        if reduction >= 100:
+            confidence = 0.99
+        elif reduction >= 80:
+            confidence = 0.95
+        else:
+            confidence = 0.5 + reduction / 100
+
+        return {
+            "error_reduction_pct": reduction,
+            "confidence": min(0.99, confidence),
+        }
+
+    def analyze_culprit_trend(self, culprit: str) -> Dict:
+        """Analyze pattern of culprit across bursts."""
+        # Placeholder: would scan diagnostic history
+        return {
+            "frequency": 0,
+            "consistency_pct": 0,
+            "pattern": "unknown"
+        }
+
+    def calculate_confidence(self, culprit: str) -> float:
+        """Calculate confidence in a culprit based on historical frequency."""
+        if culprit not in self.tests:
+            return 0.0
+
+        # Count how many times this culprit was diagnosed
+        outcomes = self.tests[culprit]
+        fail_count = 0
+        total_count = 0
+
+        for value, records in outcomes.items():
+            for record in records:
+                total_count += 1
+                if record.get("outcome") == "fail":
+                    fail_count += 1
+
+        if total_count == 0:
+            return 0.0
+
+        frequency = fail_count / total_count
+        # Base confidence on how consistently this culprit failed
+        return min(0.99, frequency * 0.95)
+
+    def record_burst_diagnosis(self, burst: Dict) -> None:
+        """Record a burst with component states and dependencies.
+
+        Args:
+            burst: {
+                "component_name": {"cause": bool} or {"failed_after": "upstream_component"}
+            }
+        """
+        self.burst_history.append({
+            "burst": burst,
+            "date": datetime.utcnow().isoformat(),
+            "burst_num": len(self.burst_history) + 1
+        })
+
+        # Detect cascading if there are dependencies
+        root_causes = []
+        for component, details in burst.items():
+            if isinstance(details, dict):
+                if details.get("cause"):  # This is a root cause
+                    root_causes.append(component)
+
+        for root in root_causes:
+            downstream = []
+            for component, details in burst.items():
+                if isinstance(details, dict):
+                    if details.get("failed_after") == root:
+                        downstream.append(component)
+
+            if downstream:
+                if root not in self.cascading_failures:
+                    self.cascading_failures[root] = {"downstream": []}
+                self.cascading_failures[root]["downstream"].extend(downstream)
+
+    def detect_cascading_failure(self) -> Dict:
+        """Detect if there's a cascading failure pattern."""
+        if not self.burst_history:
+            return {"root": None, "downstream": []}
+
+        # Get the most recent burst
+        latest_burst = self.burst_history[-1]["burst"]
+
+        # Find root causes (marked with "cause": True)
+        for component, details in latest_burst.items():
+            if isinstance(details, dict) and details.get("cause"):
+                downstream = []
+                for other_comp, other_details in latest_burst.items():
+                    if isinstance(other_details, dict):
+                        if other_details.get("failed_after") == component:
+                            downstream.append(other_comp)
+
+                if downstream:
+                    return {"root": component, "downstream": downstream}
+
+        return {"root": None, "downstream": []}
+
+    def analyze_culprit_trend(self, culprit: str) -> Dict:
+        """Analyze pattern of culprit across bursts.
+
+        Returns: {
+            "frequency": count of times culprit appeared,
+            "consistency_pct": percentage of bursts where culprit appeared,
+            "pattern": "transient" if < 50%, "systematic" if >= 50% or None if always None
+        }
+        """
+        # First check if we have diagnosis outcomes recorded
+        if culprit in self.tests:
+            appearances = 0
+            total = 0
+
+            # Count outcomes from recorded diagnoses
+            for value, records in self.tests[culprit].items():
+                for record in records:
+                    outcome = record.get("outcome")
+                    total += 1  # Count all records including None
+                    # Count any outcome that was actually tested (not None)
+                    if outcome is not None:
+                        appearances += 1
+
+            if total == 0:
+                return {
+                    "frequency": 0,
+                    "consistency_pct": 0,
+                    "pattern": "unknown"
+                }
+
+            consistency = (appearances / total) * 100 if total > 0 else 0
+
+            # Classify pattern
+            if consistency == 0:
+                pattern = "non-existent"
+            elif consistency < 50:
+                pattern = "transient"
+            else:
+                pattern = "systematic"
+
+            return {
+                "frequency": appearances,
+                "consistency_pct": int(consistency),
+                "pattern": pattern
+            }
+
+        # Fallback to burst history if available
+        if not self.burst_history:
+            return {
+                "frequency": 0,
+                "consistency_pct": 0,
+                "pattern": "unknown"
+            }
+
+        appearances = 0
+        not_none_count = 0
+
+        for burst_entry in self.burst_history:
+            burst = burst_entry["burst"]
+
+            if culprit in burst:
+                outcome = burst[culprit].get("outcome") if isinstance(burst[culprit], dict) else burst[culprit]
+                if outcome is not None:
+                    not_none_count += 1
+                    if outcome == "fail" or isinstance(burst[culprit], dict) and burst[culprit].get("cause"):
+                        appearances += 1
+
+        total = len(self.burst_history)
+
+        if total == 0:
+            return {
+                "frequency": 0,
+                "consistency_pct": 0,
+                "pattern": "unknown"
+            }
+
+        consistency = (appearances / total) * 100 if total > 0 else 0
+
+        # Classify pattern
+        if consistency == 0:
+            pattern = "non-existent"
+        elif consistency < 50:
+            pattern = "transient"
+        else:
+            pattern = "systematic"
+
+        return {
+            "frequency": appearances,
+            "consistency_pct": int(consistency),
+            "pattern": pattern
+        }
+
+
+def get_diagnosis(results: DiagnosisResult) -> Diagnosis:
+    """Convert results to diagnosis with culprit ranking."""
+    diagnosis = Diagnosis()
+
+    if results.tests:
+        all_unavailable = all(
+            result_data.get("state") == "unavailable" if isinstance(result_data, dict) else result_data == "unavailable"
+            for result_data in results.tests.values()
+        )
+        if all_unavailable and len(results.tests) >= 5:
+            diagnosis.note = "inconclusive"
+            return diagnosis
+
+    gw_state = results.get("layer_1_gateway")
+    if gw_state == "fail":
+        diagnosis.culprit = "lan"
+        diagnosis.is_definitive = True
+        diagnosis.should_continue_testing = False
+    elif gw_state == "timeout":
+        diagnosis.note = "lan_slow"
+        diagnosis.is_definitive = True
+        diagnosis.should_continue_testing = False
+    elif gw_state == "unreachable":
+        diagnosis.note = "lan_down"
+        diagnosis.is_definitive = True
+        diagnosis.should_continue_testing = False
+
+    elif results.get("layer_2_isp") == "fail":
+        diagnosis.culprit = "isp"
+        diagnosis.is_definitive = True
+
+    elif results.get("layer_3_dns") == "both_fail":
+        diagnosis.culprit = "dns"
+        diagnosis.is_definitive = True
+        diagnosis.should_continue_testing = False
+
+    else:
+        dns_test = results.tests.get("layer_3_dns", {})
+
+        if isinstance(dns_test, dict):
+            router_info = dns_test.get("router", {})
+            public_info = dns_test.get("public", {})
+
+            router_state = router_info.get("state") if isinstance(router_info, dict) else router_info
+            public_state = public_info.get("state") if isinstance(public_info, dict) else public_info
+
+            if router_state == "fail" and public_state not in ["fail"]:
+                diagnosis.culprit = "router_dns"
+                diagnosis.confidence = 0.95 if public_state == "ok" else 0.80
+            elif router_state == "unavailable" and public_state == "ok":
+                diagnosis.culprit = None
+                diagnosis.note = "Router DNS unavailable; only public DNS tested"
+
+    if results.get("layer_5_idle_hold") == "closed_by_peer":
+        diagnosis.culprit = "connection_reaping"
+        diagnosis.is_definitive = True
+
+    # If local layers ok but far end fails, it's upstream
+    if (results.get("layer_1_gateway") == "ok" and
+        results.get("layer_2_isp") == "ok" and
+        results.get("layer_3_dns") == "ok" and
+        results.get("layer_4_tls") == "fail"):
+        diagnosis.culprit = "upstream"
+        diagnosis.is_definitive = True
+
+    if (results.get("layer_1_gateway") == "ok" and
+        results.get("layer_2_isp") == "ok" and
+        results.get("layer_3_dns") == "ok" and
+        results.get("layer_4_tls") == "ok" and
+        results.get("layer_5_idle_hold") == "still_alive"):
+        diagnosis.note = "not_local"
+
+    return diagnosis
+
+
+def rank_hypotheses(results: DiagnosisResult) -> List[Dict]:
+    """Rank possible causes by evidence quality.
+
+    Ranking: specificity > frequency > reversibility > confidence
+    """
+    hypotheses = []
+
+    if results.get("layer_1_gateway") == "fail":
+        hypotheses.append({
+            "cause": "lan",
+            "confidence": "high",
+            "specificity": 10,
+            "evidence": "Gateway unreachable",
+        })
+
+    if results.get("layer_2_isp") == "fail":
+        hypotheses.append({
+            "cause": "isp",
+            "confidence": "high",
+            "specificity": 9,
+            "evidence": "ISP hop unreachable",
+        })
+
+    # Handle DNS test result - can be string like "router_fail_public_ok" or dict
+    dns_state = results.get("layer_3_dns")
+    if dns_state == "router_fail_public_ok":
+        hypotheses.append({
+            "cause": "router_dns",
+            "confidence": "high",
+            "specificity": 8,
+            "evidence": "Router DNS fails, public DNS works",
+        })
+    elif dns_state == "both_fail":
+        hypotheses.append({
+            "cause": "dns",
+            "confidence": "high",
+            "specificity": 7,
+            "evidence": "Both DNS resolvers fail",
+        })
+    elif dns_state == "router_unavailable_public_ok":
+        # Router unavailable means we can't measure it, never blame it
+        pass
+    else:
+        # Also handle dict format for DNS results
+        dns_test = results.tests.get("layer_3_dns", {})
+        if isinstance(dns_test, dict) and "state" not in dns_test:  # dict format with router/public keys
+            router_info = dns_test.get("router", {})
+            public_info = dns_test.get("public", {})
+            router_state = router_info.get("state") if isinstance(router_info, dict) else router_info
+            public_state = public_info.get("state") if isinstance(public_info, dict) else public_info
+
+            if router_state == "fail" and public_state == "ok":
+                hypotheses.append({
+                    "cause": "router_dns",
+                    "confidence": "high",
+                    "specificity": 8,
+                    "evidence": "Router DNS fails, public DNS works",
+                })
+
+    if results.get("drill_wifi_mode") == "fail":
+        hypotheses.append({
+            "cause": "wifi_mode",
+            "confidence": "medium",
+            "specificity": 8,
+            "evidence": "Wi-Fi adapter not on optimal mode",
+        })
+
+    if results.get("drill_interference") in ["high", "detected"]:
+        hypotheses.append({
+            "cause": "interference",
+            "confidence": "medium",
+            "specificity": 7,
+            "evidence": "Co-channel interference detected",
+        })
+
+    if results.get("layer_4_tls") == "fail":
+        hypotheses.append({
+            "cause": "tls_interception",
+            "confidence": "low",
+            "specificity": 5,
+            "evidence": "TLS handshake fails",
+        })
+
+    if results.get("layer_5_idle_hold") == "closed_by_peer":
+        hypotheses.append({
+            "cause": "connection_reaping",
+            "confidence": "high",
+            "specificity": 9,
+            "evidence": "Long-lived connections terminated",
+        })
+
+    confidence_order = {"high": 0, "medium": 1, "low": 2}
+    return sorted(hypotheses, key=lambda h: (-h.get("specificity", 0), confidence_order.get(h.get("confidence"), 2)))
+
+
+def calculate_confidence_from_history(history: List[Dict], culprit: str, fix_applied: bool = False) -> float:
+    """Calculate confidence in a culprit based on historical patterns.
+
+    Args:
+        history: List of diagnostic entries with culprit or status/fix_applied fields
+        culprit: The suspected root cause to evaluate
+        fix_applied: Whether a fix was applied for this culprit
+
+    Returns:
+        Confidence score from 0 to 1
+    """
+    if not history:
+        return 0.0
+
+    if fix_applied:
+        found_fix = False
+        errors_before = 0
+        clean_after = 0
+        fix_applied_idx = -1
+
+        for i, entry in enumerate(history):
+            if entry.get("fix_applied") == culprit:
+                found_fix = True
+                fix_applied_idx = i
+                break
+
+        if found_fix:
+            errors_before = sum(1 for i in range(fix_applied_idx) if history[i].get("status") == "errors")
+            clean_after = sum(1 for i in range(fix_applied_idx + 1, len(history)) if history[i].get("status") == "clean")
+
+            if clean_after > 0 and errors_before > 0:
+                return 0.99
+            elif clean_after > 0:
+                return 0.95
+
+        return 0.0
+
+    count = sum(1 for entry in history if entry.get("culprit") == culprit)
+    frequency = count / len(history) if history else 0
+
+    base_confidence = frequency * 0.95
+
+    return min(1.0, base_confidence)
+
+
+def correlate_with_history(
+    errors: List[Dict],
+    samples: List[Dict]
+) -> List[Dict]:
+    """Correlate errors with network samples."""
+    correlations = []
+    for error in errors:
+        if not samples:
+            correlations.append({"error": error, "verdict": "unmonitored"})
+        else:
+            # Find sample near error time (within ±120 seconds)
+            for sample in samples:
+                # Simplified correlation
+                correlations.append({
+                    "error": error,
+                    "sample": sample,
+                    "verdict": "correlated"
+                })
+    return correlations
+
+
+def capture_baseline_snapshot() -> Dict:
+    """Capture full system state snapshot."""
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "wifi_mode": None,
+        "router_dpi": None,
+        "modem_snr": None,
+        "windows_power_profile": None,
+        "tcp_autotuning": None,
+        "mtu": None,
+        "system_uptime": 0,
+        "dns_servers": [],
+    }
+
+
+def compare_snapshots(snap1: Dict, snap2: Dict) -> Dict:
+    """Find differences between snapshots."""
+    delta = {"changed": {}, "unchanged": {}}
+    for key in snap1:
+        if snap1[key] != snap2.get(key):
+            delta["changed"][key] = {
+                "from": snap1[key],
+                "to": snap2.get(key)
+            }
+        else:
+            delta["unchanged"][key] = snap1[key]
+    return delta
+
+
+def detect_regressions(
+    baseline: Dict,
+    current: Dict,
+    known_fixed_configs: List[str] = None
+) -> List[Dict]:
+    """Detect regressions: fixed configs that changed back.
+
+    If known_fixed_configs is provided (even if empty), only check those fields.
+    If not provided, check all fields in baseline and current.
+    """
+    regressions = []
+
+    if known_fixed_configs is not None:
+        for field in known_fixed_configs:
+            if baseline.get(field) != current.get(field):
+                regressions.append({
+                    "field": field,
+                    "previous_value": baseline.get(field),
+                    "current_value": current.get(field),
+                    "requires_attention": True
+                })
+    else:
+        all_fields = set(baseline.keys()) | set(current.keys())
+        for field in all_fields:
+            if baseline.get(field) != current.get(field):
+                regressions.append({
+                    "field": field,
+                    "previous_value": baseline.get(field),
+                    "current_value": current.get(field),
+                    "requires_attention": True
+                })
+
+    return regressions
+
+
+def check_state_changes(baseline: Dict, current: Dict) -> str:
+    """Note significant state changes."""
+    if baseline.get("modem_uptime_hours", 0) > 24 and current.get("modem_uptime_hours", 0) < 24:
+        return "Modem reboot detected"
+    return ""
+
+
+def generate_recommendation(diagnosis: Dict, matrix: ConfigurationMatrix) -> Dict:
+    """Generate next recommended action."""
+    if not diagnosis:
+        return {"action": "monitor"}
+
+    if diagnosis.get("culprit") == "router_dns":
+        return {
+            "action": "verify_router_dns",
+            "primary": "router_dns",
+            "target": "router",
+            "instruction": "Check router DNS settings and ensure public DNS is configured"
+        }
+
+    if matrix:
+        next_test = matrix.suggest_next_test()
+        if next_test.get("variable"):
+            value = next_test.get("value")
+            variable = next_test["variable"]
+            instruction = f"Test {variable} = {value}"
+
+            # Calculate confidence based on error rate history
+            total_errors = 0
+            if variable in matrix.tests:
+                for value_records in matrix.tests[variable].values():
+                    for record in value_records:
+                        if record.get("error_count"):
+                            total_errors += record["error_count"]
+            confidence_level = "high" if total_errors >= 10 else "medium" if total_errors >= 5 else "low"
+
+            return {
+                "action": "apply_fix",
+                "primary": variable,
+                "target": variable,
+                "value": value,
+                "instruction": instruction,
+                "effort": next_test.get("effort", "unknown"),
+                "confidence": confidence_level
+            }
+
+    return {"action": "monitor"}
+
+
+def rank_recommendations(candidates: List[Dict]) -> List[Dict]:
+    """Rank recommendations by ROI."""
+    def roi_score(c):
+        impact = {"high": 3, "medium": 2, "low": 1}.get(c.get("impact"), 0)
+        cost = {"low": 3, "medium": 2, "high": 1, "very_high": 0}.get(c.get("cost"), 0)
+        return impact * cost
+
+    return sorted(candidates, key=roi_score, reverse=True)
+
+
+def analyze_dual_stack(ipv4_result: Dict, ipv6_result: Dict) -> Dict:
+    """Analyze IPv4/IPv6 dual-stack connectivity."""
+    ipv4_ok = ipv4_result.get("reachable", False)
+    ipv6_ok = ipv6_result.get("reachable", False)
+    asymmetric = ipv4_ok != ipv6_ok
+
+    affected = None
+    if asymmetric:
+        affected = "ipv6" if not ipv6_ok else "ipv4"
+
+    latency_diff = 0
+    if ipv4_ok and ipv6_ok:
+        ipv4_latency = ipv4_result.get("latency_ms", 0)
+        ipv6_latency = ipv6_result.get("latency_ms", 0)
+        latency_diff = abs(ipv6_latency - ipv4_latency)
+
+    return {
+        "ipv4_working": ipv4_ok,
+        "ipv6_working": ipv6_ok,
+        "asymmetric": asymmetric,
+        "affected_stack": affected,
+        "both_working": ipv4_ok and ipv6_ok,
+        "latency_asymmetry": latency_diff > 50,
+        "latency_differential_ms": latency_diff
+    }
+
+
+def detect_happy_eyeballs(events: List[Dict]) -> Dict:
+    """Detect Happy Eyeballs fallback behavior (RFC 8305)."""
+    ipv6_fail = None
+    ipv4_success = None
+    ipv6_recover = None
+
+    for event in events:
+        ts = event.get("timestamp", 0)
+        proto = event.get("protocol", "")
+        status = event.get("status", "")
+
+        if proto == "ipv6" and status == "timeout" and ipv6_fail is None:
+            ipv6_fail = ts
+        if proto == "ipv4" and status == "success" and ipv4_success is None:
+            ipv4_success = ts
+        if proto == "ipv6" and status == "connected" and ipv6_recover is None:
+            ipv6_recover = ts
+
+    active = ipv6_fail is not None and ipv4_success is not None
+    fallback_delay = ipv4_success - ipv6_fail if (ipv6_fail and ipv4_success) else 0
+
+    return {
+        "happy_eyeballs_active": active,
+        "fallback_to": "ipv4" if active else None,
+        "fallback_delay_ms": fallback_delay,
+        "ipv6_recovered": ipv6_recover is not None
+    }
+    mtu_type = standards.get(mtu, "non_standard")
+    is_standard = mtu in standards
+    return mtu_type, is_standard
+
+
+def detect_dual_stack_preference(events: List[Dict]) -> Dict:
+    """Detect which protocol is preferred in dual-stack."""
+    ipv6_success = [e for e in events if e.get("protocol") == "ipv6" and e.get("status") == "success"]
+    ipv4_success = [e for e in events if e.get("protocol") == "ipv4" and e.get("status") == "success"]
+
+    preferred = "unknown"
+    following_rfc = False
+
+    if ipv6_success and ipv4_success:
+        ipv6_latency = sum(e.get("latency", 0) for e in ipv6_success) / len(ipv6_success)
+        ipv4_latency = sum(e.get("latency", 0) for e in ipv4_success) / len(ipv4_success)
+        preferred = "ipv6" if ipv6_latency <= ipv4_latency else "ipv4"
+        following_rfc = preferred == "ipv6"  # RFC 8305 prefers IPv6
+
+    return {
+        "preferred_protocol": preferred,
+        "following_rfc8305": following_rfc
+    }
+
+
+def detect_nat64_translation(ipv6_addrs: List[str]) -> Dict:
+    """Detect NAT64/DNS64 translation (synthetic IPv6)."""
+    nat64_prefix = "64:ff9b::"
+    translated = [addr for addr in ipv6_addrs if nat64_prefix in addr]
+
+    return {
+        "nat64_detected": len(translated) > 0,
+        "translated_addresses": translated,
+        "translation_type": "nat64" if translated else "none"
+    }
+
+
+def analyze_routing_path(ipv4_path: List[Dict], ipv6_path: List[Dict]) -> Dict:
+    """Analyze routing asymmetry between IPv4 and IPv6 paths."""
+    ipv4_hops = len([h for h in ipv4_path if h.get("responsive", False)])
+    ipv6_hops = len([h for h in ipv6_path if h.get("responsive", False)])
+
+    ipv4_first_fail = next((i for i, h in enumerate(ipv4_path) if not h.get("responsive", False)), None)
+    ipv6_first_fail = next((i for i, h in enumerate(ipv6_path) if not h.get("responsive", False)), None)
+
+    asymmetric = ipv4_first_fail != ipv6_first_fail
+    affected_stack = None
+    if asymmetric:
+        if ipv4_first_fail is not None and (ipv6_first_fail is None or ipv4_first_fail < ipv6_first_fail):
+            affected_stack = "ipv4"
+        elif ipv6_first_fail is not None:
+            affected_stack = "ipv6"
+
+    return {
+        "ipv4_hops_responding": ipv4_hops,
+        "ipv6_hops_responding": ipv6_hops,
+        "ipv4_first_failure_at_hop": ipv4_first_fail,
+        "ipv6_first_failure_at_hop": ipv6_first_fail,
+        "path_asymmetry": asymmetric,
+        "affected_stack": affected_stack,
+        "total_divergence": abs(ipv4_hops - ipv6_hops)
+    }
+
+
+def detect_route_flapping(events: List[Dict]) -> Dict:
+    """Detect route changes or BGP flapping."""
+    route_changes = []
+    last_route = None
+    last_time = None
+
+    for event in sorted(events, key=lambda e: e.get("timestamp", 0)):
+        current_route = event.get("route", None)
+        current_time = event.get("timestamp", 0)
+
+        if current_route and current_route != last_route and last_route is not None:
+            if last_time:
+                time_delta = current_time - last_time
+                route_changes.append({"time_since_last_change": time_delta})
+
+        if current_route:
+            last_route = current_route
+            last_time = current_time
+
+    flapping = len(route_changes) > 2  # More than 2 changes indicates flapping
+    change_frequency = len(route_changes) / max(1, (events[-1].get("timestamp", 1) - events[0].get("timestamp", 0)))
+
+    return {
+        "route_changes_detected": len(route_changes),
+        "flapping": flapping,
+        "change_frequency_per_minute": change_frequency * 60 if events else 0,
+        "last_route_change_ago": route_changes[-1]["time_since_last_change"] if route_changes else None
+    }
+
+
+def classify_hop_latency(latencies: List[int]) -> str:
+    """Classify hop-level latency pattern."""
+    if not latencies or len(latencies) < 2:
+        return "insufficient_data"
+
+    valid_latencies = [l for l in latencies if l > 0]
+    if not valid_latencies:
+        return "all_unresponsive"
+
+    avg = sum(valid_latencies) / len(valid_latencies)
+    max_lat = max(valid_latencies)
+
+    if max_lat > 500:
+        return "distant_or_congested"
+    if avg > 100:
+        return "high_latency_hops"
+    if max_lat - (sum(valid_latencies) / len(valid_latencies) if valid_latencies else 0) > 200:
+        return "latency_spike"
+    if avg < 10:
+        return "local_network"
+    return "normal"
+
+
+def measure_hop_stability(hop_samples: List[Dict]) -> Dict:
+    """Measure how stable a hop's latency is."""
+    latencies = [s.get("latency_ms", 0) for s in hop_samples if s.get("latency_ms", 0) > 0]
+    if not latencies or len(latencies) < 2:
+        return {"stability": "unknown", "jitter": 0, "variance": 0}
+
+    avg = sum(latencies) / len(latencies)
+    variance = sum((x - avg) ** 2 for x in latencies) / len(latencies)
+    stddev = variance ** 0.5
+
+    if stddev < 5:
+        stability = "very_stable"
+    elif stddev < 20:
+        stability = "stable"
+    elif stddev < 50:
+        stability = "variable"
+    else:
+        stability = "unstable"
+
+    return {
+        "stability": stability,
+        "jitter_ms": stddev,
+        "variance": variance,
+        "average_latency_ms": avg
+    }
+
+
+def detect_blackhole_route(path: List[Dict]) -> Dict:
+    """Detect potential blackhole routing (no response, no error)."""
+    unresponsive_hops = [h for h in path if not h.get("responsive", False)]
+    silent_failures = [h for h in unresponsive_hops if h.get("error_response", False) is False]
+
+    return {
+        "potential_blackhole": len(silent_failures) > 0,
+        "silent_failure_hops": len(silent_failures),
+        "responsive_hops": len([h for h in path if h.get("responsive", False)])
+    }
+
+
+def measure_tls_handshake(events: List[Dict]) -> Dict:
+    """Measure TLS handshake quality and duration."""
+    client_hello_time = None
+    server_hello_time = None
+    certificate_time = None
+    finished_time = None
+
+    for event in sorted(events, key=lambda e: e.get("timestamp", 0)):
+        msg_type = event.get("message_type", "")
+        if msg_type == "client_hello" and client_hello_time is None:
+            client_hello_time = event.get("timestamp")
+        elif msg_type == "server_hello" and server_hello_time is None:
+            server_hello_time = event.get("timestamp")
+        elif msg_type == "certificate" and certificate_time is None:
+            certificate_time = event.get("timestamp")
+        elif msg_type == "finished" and finished_time is None:
+            finished_time = event.get("timestamp")
+
+    duration = 0
+    if client_hello_time and finished_time:
+        duration = finished_time - client_hello_time
+
+    return {
+        "handshake_complete": finished_time is not None,
+        "duration_ms": duration,
+        "phases": {
+            "to_server_hello": (server_hello_time - client_hello_time) if (client_hello_time and server_hello_time) else 0,
+            "to_certificate": (certificate_time - client_hello_time) if (client_hello_time and certificate_time) else 0,
+            "total": duration
+        }
+    }
+
+
+def detect_tls_version(handshake: Dict) -> str:
+    """Detect negotiated TLS version."""
+    version = handshake.get("tls_version", "unknown")
+    version_map = {
+        "0x0301": "TLS1.0",
+        "0x0302": "TLS1.1",
+        "0x0303": "TLS1.2",
+        "0x0304": "TLS1.3"
+    }
+    return version_map.get(version, version)
+
+
+def detect_cipher_strength(cipher: str) -> str:
+    """Classify cipher suite strength."""
+    if "GCM" in cipher or "ChaCha" in cipher:
+        return "strong"
+    elif "CBC" in cipher:
+        return "weak"
+    else:
+        return "unknown"
+
+
+def analyze_http_protocol(responses: List[Dict]) -> Dict:
+    """Analyze HTTP protocol version and features."""
+    http2_count = sum(1 for r in responses if r.get("http_version") == "2.0")
+    http3_count = sum(1 for r in responses if r.get("http_version") == "3.0")
+    http1_count = len(responses) - http2_count - http3_count
+
+    return {
+        "http1_responses": http1_count,
+        "http2_responses": http2_count,
+        "http3_responses": http3_count,
+        "preferred_protocol": "http3" if http3_count > 0 else ("http2" if http2_count > 0 else "http1")
+    }
+
+
+def detect_connection_multiplexing(streams: List[Dict]) -> Dict:
+    """Detect multiplexing capability and efficiency."""
+    parallel_streams = sum(1 for s in streams if s.get("concurrent", False))
+    total_streams = len(streams)
+    utilization = (parallel_streams / total_streams * 100) if total_streams else 0
+
+    return {
+        "supports_multiplexing": parallel_streams > 0,
+        "concurrent_streams": parallel_streams,
+        "multiplexing_efficiency": utilization
+    }
+
+
+def detect_buffer_saturation(window_events: List[Dict]) -> Dict:
+    """Detect if TCP send/receive buffers are saturated."""
+    saturated_sends = [e for e in window_events if e.get("send_buffer_percent", 0) >= 90]
+    saturated_recvs = [e for e in window_events if e.get("recv_buffer_percent", 0) >= 90]
+    saturated_any = [e for e in window_events if e.get("send_buffer_percent", 0) >= 90 or e.get("recv_buffer_percent", 0) >= 90]
+
+    return {
+        "send_buffer_saturated": len(saturated_sends) > 0,
+        "recv_buffer_saturated": len(saturated_recvs) > 0,
+        "saturation_events": len(saturated_sends) + len(saturated_recvs),
+        "saturation_frequency": len(saturated_any) / max(1, len(window_events))
+    }
+
+
+def measure_queue_depth(packets: List[Dict]) -> Dict:
+    """Measure application and network queue depths over time."""
+    if not packets:
+        return {"avg_depth": 0, "max_depth": 0, "queue_jitter": 0}
+    
+    depths = [p.get("queue_depth", 0) for p in packets]
+    avg_depth = sum(depths) / len(depths) if depths else 0
+    max_depth = max(depths) if depths else 0
+    
+    # Jitter: variance in queue depth
+    if len(depths) > 1:
+        variance = sum((d - avg_depth) ** 2 for d in depths) / len(depths)
+        jitter = variance ** 0.5
+    else:
+        jitter = 0
+    
+    return {
+        "avg_depth": avg_depth,
+        "max_depth": max_depth,
+        "queue_jitter": jitter
+    }
+
+
+def analyze_backpressure(events: List[Dict]) -> Dict:
+    """Detect backpressure signals from flow control."""
+    tcp_zero_window = [e for e in events if e.get("tcp_window", 1) == 0]
+    acks_delayed = [e for e in events if e.get("ack_delay_ms", 0) > 40]
+    retransmits = [e for e in events if e.get("flags", "").find("R") >= 0]
+    
+    backpressure_events = len(tcp_zero_window) + len(acks_delayed) + len(retransmits)
+    
+    return {
+        "backpressure_detected": backpressure_events > 0,
+        "zero_window_events": len(tcp_zero_window),
+        "delayed_ack_events": len(acks_delayed),
+        "retransmit_events": len(retransmits),
+        "total_backpressure_events": backpressure_events
+    }
+
+
+def classify_congestion_signal(metrics: Dict) -> str:
+    """Classify the type of congestion detected."""
+    if metrics.get("send_buffer_saturated") or metrics.get("recv_buffer_saturated"):
+        return "buffer_exhaustion"
+    if metrics.get("backpressure_detected"):
+        return "flow_control"
+    if metrics.get("queue_jitter", 0) > 10:
+        return "queue_instability"
+    if metrics.get("max_depth", 0) > 100:
+        return "deep_queue_buildup"
+    return "healthy"
+
+
+def measure_buffer_efficiency(buffer_events: List[Dict]) -> Dict:
+    """Analyze buffer utilization and efficiency."""
+    useful_bytes = sum(e.get("bytes_acknowledged", 0) for e in buffer_events)
+    wasted_retransmits = sum(e.get("retransmitted_bytes", 0) for e in buffer_events)
+    
+    efficiency = 100.0 if (useful_bytes + wasted_retransmits) == 0 else (
+        useful_bytes / (useful_bytes + wasted_retransmits) * 100
+    )
+    
+    return {
+        "useful_bytes_transmitted": useful_bytes,
+        "wasted_bytes_retransmitted": wasted_retransmits,
+        "buffer_efficiency_percent": efficiency
+    }
+
+
+def synthesize_diagnosis(layer_results: Dict[str, Dict]) -> Dict:
+    """Synthesize findings from all network layers into single diagnosis."""
+    if not layer_results:
+        return {
+            "primary_culprit": None,
+            "contributing_layers": [],
+            "synthesis_confidence": 0.0
+        }
+
+    culprits = []
+    for layer, result in layer_results.items():
+        if result.get("culprit_found"):
+            culprits.append({
+                "layer": layer,
+                "confidence": result.get("confidence", 0.5),
+                "metric": result.get("metric")
+            })
+
+    if not culprits:
+        return {
+            "primary_culprit": None,
+            "contributing_layers": [],
+            "synthesis_confidence": 0.0
+        }
+
+    # Sort by confidence, highest first
+    culprits_sorted = sorted(culprits, key=lambda x: x["confidence"], reverse=True)
+    primary = culprits_sorted[0]
+
+    return {
+        "primary_culprit": primary["layer"],
+        "contributing_layers": [c["layer"] for c in culprits_sorted[1:]],
+        "synthesis_confidence": primary["confidence"]
+    }
+
+
+def rank_root_causes(findings: List[Dict]) -> List[Dict]:
+    """Rank root causes by likelihood and confidence."""
+    if not findings:
+        return []
+
+    ranked = []
+    for finding in findings:
+        confidence = finding.get("confidence", 0.5)
+        frequency = finding.get("frequency", 0)  # How often observed
+        impact = finding.get("impact", 1)  # How much it affects performance
+
+        # Score: confidence * frequency * impact
+        score = confidence * max(0.1, frequency) * impact
+
+        ranked.append({
+            "cause": finding.get("cause"),
+            "score": score,
+            "confidence": confidence,
+            "frequency": frequency,
+            "impact": impact,
+            "evidence": finding.get("evidence", [])
+        })
+
+    return sorted(ranked, key=lambda x: x["score"], reverse=True)
+
+
+def calculate_confidence_score(observations: List[Dict]) -> float:
+    """Calculate confidence in diagnosis from observations."""
+    if not observations:
+        return 0.0
+
+    consistent_count = 0
+    for obs in observations:
+        if obs.get("consistent", False):
+            consistent_count += 1
+
+    consistency_score = consistent_count / len(observations)
+
+    # Confidence increases with more observations and consistency
+    observation_factor = min(1.0, len(observations) / 10.0)
+    return consistency_score * observation_factor
+
+
+def detect_cascade_failures(layer_states: Dict[str, str]) -> Dict:
+    """Identify cascading failures (one layer failure causes downstream issues)."""
+    layers_in_order = ["gateway", "isp", "dns", "tls", "application"]
+
+    failed_layers = [layer for layer, state in layer_states.items() if state == "fail"]
+
+    if not failed_layers:
+        return {
+            "cascade_detected": False,
+            "cascade_chain": [],
+            "root_layer": None
+        }
+
+    # Check if failures form a cascade (all downstream layers fail after root)
+    cascade_chains = []
+    for potential_root in layers_in_order:
+        if potential_root not in failed_layers:
+            continue
+
+        root_idx = layers_in_order.index(potential_root)
+        downstream = layers_in_order[root_idx + 1:]
+
+        # Check if all downstream layers in the list are also failed
+        downstream_failures = [l for l in downstream if l in failed_layers]
+        if downstream_failures:
+            cascade_chains.append({
+                "root": potential_root,
+                "downstream": downstream_failures
+            })
+
+    if cascade_chains:
+        # Return the longest cascade (most likely root cause)
+        longest = max(cascade_chains, key=lambda x: len(x["downstream"]))
+        return {
+            "cascade_detected": True,
+            "cascade_chain": [longest["root"]] + longest["downstream"],
+            "root_layer": longest["root"]
+        }
+
+    return {
+        "cascade_detected": False,
+        "cascade_chain": [],
+        "root_layer": None
+    }
+
+
+def generate_synthesis_report(synthesis: Dict, root_causes: List[Dict]) -> Dict:
+    """Generate actionable report from diagnosis synthesis."""
+    if not root_causes or not synthesis["primary_culprit"]:
+        return {
+            "summary": "No clear network issue detected",
+            "primary_issue": None,
+            "recommendations": [],
+            "priority": "low"
+        }
+
+    top_cause = root_causes[0]
+    culprit = synthesis["primary_culprit"]
+
+    # Map culprits to actionable recommendations
+    recommendations_map = {
+        "gateway": "Check Wi-Fi signal strength and adapter driver version",
+        "isp": "Contact ISP and provide modem DOCSIS stats from the timestamps",
+        "dns": "Add public DNS servers (1.1.1.1, 8.8.8.8) to adapter settings",
+        "tls": "Verify certificate validity and check for TLS interception",
+        "application": "Verify API endpoint is reachable and check server logs",
+    }
+
+    priority_map = {
+        "gateway": "high",
+        "isp": "high",
+        "dns": "medium",
+        "tls": "medium",
+        "application": "low"
+    }
+
+    return {
+        "summary": f"Primary issue: {culprit}",
+        "primary_issue": culprit,
+        "confidence": synthesis["synthesis_confidence"],
+        "contributing_layers": synthesis["contributing_layers"],
+        "recommendations": [
+            {
+                "action": recommendations_map.get(culprit, "Investigate further"),
+                "effort": "low" if culprit in ["dns", "gateway"] else "medium",
+                "expected_impact": top_cause.get("impact", 1)
+            }
+        ],
+        "priority": priority_map.get(culprit, "medium"),
+        "evidence_summary": f"Observed in {top_cause.get('frequency', 0):.0%} of measurements"
+    }
