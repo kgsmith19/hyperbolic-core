@@ -1,0 +1,94 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Code Simplification Check
+        continue-on-error: false
+        run: |
+          echo "=== Code Simplification (High Intensity) ==="
+          python tools/code_simplification.py netcheck -i high -f json > /tmp/simplification.json || true
+          python tools/code_simplification.py netcheck -i high
+          echo ""
+          echo "Summary:"
+          python -c "
+          import json
+          try:
+              with open('/tmp/simplification.json') as f:
+                  data = json.load(f)
+                  print(f'Found {len(data)} code complexity issues')
+          except:
+              pass
+          "
+
+      - name: Security Review
+        continue-on-error: false
+        run: |
+          echo "=== Security Review (High Intensity) ==="
+          python tools/security_review.py . -i high -f json > /tmp/security.json || true
+          python tools/security_review.py . -i high
+          echo ""
+          echo "Checking for HIGH severity issues..."
+          python -c "
+          import json
+          try:
+              with open('/tmp/security.json') as f:
+                  data = json.load(f)
+                  high_severity = [x for x in data if x.get('severity') == 'high']
+                  if high_severity:
+                      print(f'ERROR: Found {len(high_severity)} HIGH severity security issues!')
+                      for issue in high_severity:
+                          print(f'  - {issue.get(\"pattern\")}: {issue.get(\"message\")}')
+                      exit(1)
+                  else:
+                      print('✓ No HIGH severity security issues found')
+          except:
+              pass
+          "
+
+      - name: Documentation Check
+        continue-on-error: false
+        run: |
+          echo "=== Documentation Check (High Intensity) ==="
+          python tools/documentation_check.py . -i high -f json > /tmp/docs.json || true
+          python tools/documentation_check.py . -i high
+          echo ""
+          echo "Summary:"
+          python -c "
+          import json
+          try:
+              with open('/tmp/docs.json') as f:
+                  data = json.load(f)
+                  print(f'Found {len(data)} documentation issues')
+          except:
+              pass
+          "
+
+      - name: Quality Report
+        if: always()
+        run: |
+          echo "## Code Quality Report"
+          echo ""
+          echo "### Simplification"
+          [ -f /tmp/simplification.json ] && python -c "import json; data=json.load(open('/tmp/simplification.json')); print(f'- Issues: {len(data)}')" || echo "- No report"
+          echo ""
+          echo "### Security"
+          [ -f /tmp/security.json ] && python -c "import json; data=json.load(open('/tmp/security.json')); print(f'- Issues: {len(data)}'); high=[x for x in data if x.get('severity')=='high']; print(f'- HIGH severity: {len(high)}')" || echo "- No report"
+          echo ""
+          echo "### Documentation"
+          [ -f /tmp/docs.json ] && python -c "import json; data=json.load(open('/tmp/docs.json')); print(f'- Issues: {len(data)}')" || echo "- No report"
