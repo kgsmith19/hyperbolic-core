@@ -68,7 +68,69 @@ without a real lookup.
 
 ---
 
-## 5. macOS is unimplemented
+## 5. PowerShell command built by string interpolation (security, latent)
+
+**Surfaced:** 2026-08-05, `/security-review-kgs`.
+
+`environ.driver(name)` and `environ.tailscale(target)` interpolate a
+caller-supplied string into a PowerShell command
+(`netcheck/environ.py:83`, `:164`). The value sits inside single quotes
+(`-Name '%s'`), so a value containing `'` escapes and appends arbitrary
+PowerShell.
+
+**Not exploitable as written.** Both are called with no arguments from
+`scan()`, so the values are always the literal defaults, and `NETCHECK_TARGET`
+reaches only `probes.sample` / `idle_hold`, which use argv lists and sockets —
+never a shell string.
+
+It is logged because the parameters invite the bug: wiring `--target` through
+to `tailscale()` is a one-line change that would turn an environment variable
+into command execution.
+
+**Fix:** pass values as PowerShell parameters (`-Command "param($n) ..."` with
+`-Args`) rather than interpolating, or validate against a strict charset.
+
+**Retire when:** the interpolation is replaced or the parameters are removed.
+
+---
+
+## 6. Client input crashes a request instead of returning 400 (security, low)
+
+**Surfaced:** 2026-08-05, `/security-review-kgs`.
+
+`netcheck/server.py:56` does `int(parse_qs(...)["limit"])` unguarded, so
+`GET /api/data?limit=abc` raises ValueError, dropping the connection and
+printing a traceback to stderr. An expected client error surfaces as a crash.
+Loopback-only, and nothing is disclosed to the client.
+
+**Fix:** wrap in try/except and return 400.
+
+---
+
+## 7. Raw router output stored and mirrored (security, low)
+
+**Surfaced:** 2026-08-05, `/security-review-kgs`.
+
+`environ.router()` returns `body[:400]` verbatim into `env_scans.payload`,
+which syncs to Supabase. The current query (`nvram_get(productid)`) returns a
+product string, but the code stores whatever the device replies — including
+anything sensitive if the endpoint or firmware changes. Not rendered in the UI.
+
+**Fix:** parse the specific fields wanted instead of keeping the raw body.
+
+---
+
+## 8. Basic auth over plaintext HTTP to modem and router (accepted risk)
+
+**Surfaced:** 2026-08-05, `/security-review-kgs`.
+
+`environ._http_get` sends credentials base64-encoded (not encrypted) over HTTP.
+These devices do not offer HTTPS, and the traffic stays on the local segment.
+Accepted, recorded so it is a decision rather than an oversight.
+
+---
+
+## 9. macOS is unimplemented
 
 **Surfaced:** 2026-08-05.
 
