@@ -1200,115 +1200,92 @@ def rank_recommendations(candidates: List[Dict]) -> List[Dict]:
     return sorted(candidates, key=roi_score, reverse=True)
 
 
-def track_tcp_handshake(events: List[Dict]) -> Dict:
-    """Track TCP 3-way handshake progress."""
-    complete = False
-    timeout = False
-    final_state = "closed"
-    duration = 0
-    failed_at = None
+def analyze_dual_stack(ipv4_result: Dict, ipv6_result: Dict) -> Dict:
+    """Analyze IPv4/IPv6 dual-stack connectivity."""
+    ipv4_ok = ipv4_result.get("reachable", False)
+    ipv6_ok = ipv6_result.get("reachable", False)
+    asymmetric = ipv4_ok != ipv6_ok
 
-    start_time = events[0].get("timestamp", 0) if events else 0
+    affected = None
+    if asymmetric:
+        affected = "ipv6" if not ipv6_ok else "ipv4"
 
-    for event in events:
-        evt_type = event.get("event")
-        ts = event.get("timestamp", 0)
-
-        if evt_type == "syn_sent":
-            start_time = ts
-        elif evt_type == "syn_ack_received":
-            final_state = "syn_received"
-        elif evt_type == "ack_sent":
-            complete = True
-            final_state = "established"
-            duration = ts - start_time
-        elif evt_type == "timeout":
-            timeout = True
-            failed_at = "syn_ack_wait"
-            duration = ts - start_time
+    latency_diff = 0
+    if ipv4_ok and ipv6_ok:
+        ipv4_latency = ipv4_result.get("latency_ms", 0)
+        ipv6_latency = ipv6_result.get("latency_ms", 0)
+        latency_diff = abs(ipv6_latency - ipv4_latency)
 
     return {
-        "handshake_complete": complete,
-        "handshake_duration_ms": duration,
-        "handshake_timeout": timeout,
-        "final_state": final_state,
-        "failed_at_stage": failed_at
+        "ipv4_working": ipv4_ok,
+        "ipv6_working": ipv6_ok,
+        "asymmetric": asymmetric,
+        "affected_stack": affected,
+        "both_working": ipv4_ok and ipv6_ok,
+        "latency_asymmetry": latency_diff > 50,
+        "latency_differential_ms": latency_diff
     }
 
 
-def track_tcp_connection(events: List[Dict]) -> Dict:
-    """Track TCP connection lifecycle."""
-    termination_reason = "active"
-    abnormal = False
-    duration = 0
-    start_time = events[0].get("timestamp", 0) if events else 0
+def detect_happy_eyeballs(events: List[Dict]) -> Dict:
+    """Detect Happy Eyeballs fallback behavior (RFC 8305)."""
+    ipv6_fail = None
+    ipv4_success = None
+    ipv6_recover = None
 
     for event in events:
-        evt_type = event.get("event")
         ts = event.get("timestamp", 0)
+        proto = event.get("protocol", "")
+        status = event.get("status", "")
 
-        if evt_type == "established":
-            start_time = ts
-        elif evt_type == "fin_sent" or evt_type == "fin_received":
-            termination_reason = "normal_close"
-            abnormal = False
-            duration = ts - start_time
-        elif evt_type == "rst_received":
-            termination_reason = "reset_by_peer"
-            abnormal = True
-            duration = ts - start_time
-        elif evt_type == "timeout":
-            termination_reason = "timeout"
-            abnormal = True
-            duration = ts - start_time
+        if proto == "ipv6" and status == "timeout" and ipv6_fail is None:
+            ipv6_fail = ts
+        if proto == "ipv4" and status == "success" and ipv4_success is None:
+            ipv4_success = ts
+        if proto == "ipv6" and status == "connected" and ipv6_recover is None:
+            ipv6_recover = ts
+
+    active = ipv6_fail is not None and ipv4_success is not None
+    fallback_delay = ipv4_success - ipv6_fail if (ipv6_fail and ipv4_success) else 0
 
     return {
-        "termination_reason": termination_reason,
-        "abnormal_termination": abnormal,
-        "connection_duration_ms": duration
+        "happy_eyeballs_active": active,
+        "fallback_to": "ipv4" if active else None,
+        "fallback_delay_ms": fallback_delay,
+        "ipv6_recovered": ipv6_recover is not None
     }
     mtu_type = standards.get(mtu, "non_standard")
     is_standard = mtu in standards
     return mtu_type, is_standard
 
 
-def analyze_retransmission_pattern(events: List[Dict]) -> Dict:
-    """Analyze TCP retransmission patterns."""
-    retransmits = sum(1 for e in events if e.get("event") == "retransmit")
-    sends = sum(1 for e in events if e.get("event") in ("data_sent", "retransmit"))
+def detect_dual_stack_preference(events: List[Dict]) -> Dict:
+    """Detect which protocol is preferred in dual-stack."""
+    ipv6_success = [e for e in events if e.get("protocol") == "ipv6" and e.get("status") == "success"]
+    ipv4_success = [e for e in events if e.get("protocol") == "ipv4" and e.get("status") == "success"]
 
-    rate = 100 * retransmits / max(sends, 1) if sends > 0 else 0
-    excessive = retransmits >= 2
+    preferred = "unknown"
+    following_rfc = False
+
+    if ipv6_success and ipv4_success:
+        ipv6_latency = sum(e.get("latency", 0) for e in ipv6_success) / len(ipv6_success)
+        ipv4_latency = sum(e.get("latency", 0) for e in ipv4_success) / len(ipv4_success)
+        preferred = "ipv6" if ipv6_latency <= ipv4_latency else "ipv4"
+        following_rfc = preferred == "ipv6"  # RFC 8305 prefers IPv6
 
     return {
-        "retransmit_count": retransmits,
-        "retransmit_rate_pct": round(rate, 1),
-        "excessive_retransmits": excessive
+        "preferred_protocol": preferred,
+        "following_rfc8305": following_rfc
     }
 
 
-def detect_window_stall(events: List[Dict]) -> Dict:
-    """Detect TCP receive window stall."""
-    stall_start = None
-    stall_duration = 0
-    last_time = 0
-
-    for event in events:
-        ts = event.get("timestamp", 0)
-        window = event.get("window")
-        last_time = ts
-
-        if window == 0 and stall_start is None:
-            stall_start = ts
-        elif window and window > 0 and stall_start is not None:
-            stall_duration = ts - stall_start
-            stall_start = None
-
-    # If still stalled at end, calculate duration to last event
-    if stall_start is not None:
-        stall_duration = last_time - stall_start
+def detect_nat64_translation(ipv6_addrs: List[str]) -> Dict:
+    """Detect NAT64/DNS64 translation (synthetic IPv6)."""
+    nat64_prefix = "64:ff9b::"
+    translated = [addr for addr in ipv6_addrs if nat64_prefix in addr]
 
     return {
-        "window_stalled": stall_start is not None,
-        "stall_duration_ms": stall_duration
+        "nat64_detected": len(translated) > 0,
+        "translated_addresses": translated,
+        "translation_type": "nat64" if translated else "none"
     }

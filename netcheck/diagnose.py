@@ -23,10 +23,10 @@ from .diagnostic_engine import (
     rank_hypotheses,
     correlate_with_history,
     calculate_confidence_from_history,
-    track_tcp_handshake,
-    track_tcp_connection,
-    analyze_retransmission_pattern,
-    detect_window_stall,
+    analyze_dual_stack,
+    detect_happy_eyeballs,
+    detect_dual_stack_preference,
+    detect_nat64_translation,
 )
 
 WINDOW_S = 120
