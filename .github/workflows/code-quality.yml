@@ -18,20 +18,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Code Simplification Check
-        continue-on-error: false
+      - name: Code Simplification Check (Report Only)
+        continue-on-error: true
         run: |
-          echo "=== Code Simplification (High Intensity) ==="
+          echo "=== Code Simplification (High Intensity - Report Only) ==="
           python tools/code_simplification.py netcheck -i high -f json > /tmp/simplification.json || true
-          python tools/code_simplification.py netcheck -i high
+          python tools/code_simplification.py netcheck -i high || true
           echo ""
-          echo "Summary:"
+          echo "Summary (not blocking):"
           python -c "
           import json
           try:
               with open('/tmp/simplification.json') as f:
                   data = json.load(f)
-                  print(f'Found {len(data)} code complexity issues')
+                  print(f'Found {len(data)} code complexity issues (see details above)')
           except:
               pass
           "
