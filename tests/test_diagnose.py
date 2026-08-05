@@ -23,8 +23,15 @@ class CulpritTest(unittest.TestCase):
         self.assertIsNone(diagnose.culprit(row()))
 
     def test_gateway_down_is_lan(self):
+        """Gateway failure alone (before ISP hop) means local link."""
         self.assertEqual(diagnose.culprit(row(gw_state="fail", hop_state="fail",
                                               inet_state="fail")), "lan")
+
+    def test_only_gateway_failing_is_lan(self):
+        """Criterion: gateway is the first hop. If ONLY gw fails (hop ok),
+        that proves it's before the ISP — it's the local link/Wi-Fi."""
+        self.assertEqual(diagnose.culprit(row(gw_state="fail", hop_state="ok",
+                                              inet_state="ok")), "lan")
 
     def test_gateway_up_but_hop_down_is_isp(self):
         self.assertEqual(diagnose.culprit(row(hop_state="fail",
@@ -35,12 +42,24 @@ class CulpritTest(unittest.TestCase):
 
     def test_router_dns_failing_while_public_dns_works_is_router_dns(self):
         """The highest-value rule on this network: the router is the resolver,
-        so isolating it from DNS-in-general is what makes the finding actionable."""
-        self.assertEqual(diagnose.culprit(row(dns_router_state="fail")), "router_dns")
+        so isolating it from DNS-in-general is what makes the finding actionable.
+
+        Explicitly test the critical condition: router fails, public works."""
+        self.assertEqual(
+            diagnose.culprit(row(dns_router_state="fail",
+                                dns_public_state="ok")), "router_dns")
 
     def test_both_resolvers_failing_is_not_blamed_on_the_router(self):
+        """Criterion: if BOTH router and public DNS fail, it's not a router problem.
+        It's DNS-in-general or upstream. Router DNS rule only fires if public works."""
         self.assertEqual(diagnose.culprit(row(dns_router_state="fail",
                                               dns_public_state="fail")), "dns")
+
+    def test_router_dns_ok_but_public_fails_is_not_router_dns(self):
+        """Criterion: router DNS working while public fails is not a router problem.
+        This is a public DNS or upstream issue, not the router."""
+        self.assertIsNone(diagnose.culprit(row(dns_router_state="ok",
+                                               dns_public_state="fail")))
 
     def test_everything_reachable_but_tls_failing_is_app_layer(self):
         """Path is fine and the endpoint is not. Points at interception, DPI,
@@ -52,6 +71,20 @@ class CulpritTest(unittest.TestCase):
         self.assertIsNone(diagnose.culprit(row(gw_state="unavailable")))
         self.assertIsNone(diagnose.culprit(row(hop_state="unavailable")))
         self.assertIsNone(diagnose.culprit(row(dns_router_state="unavailable")))
+
+    def test_unavailable_dns_router_does_not_blame_router(self):
+        """Critical: if router DNS is unavailable (no credentials), we cannot
+        blame it. A missing modem password is not a broken modem."""
+        # Router DNS unavailable, public DNS working
+        self.assertIsNone(diagnose.culprit(row(dns_router_state="unavailable",
+                                               dns_public_state="ok")))
+
+    def test_unavailable_public_dns_allows_router_to_be_blamed(self):
+        """Router DNS failing while public DNS is unavailable is still router_dns
+        because we can't rule out the public resolver."""
+        self.assertEqual(
+            diagnose.culprit(row(dns_router_state="fail",
+                                dns_public_state="unavailable")), "router_dns")
 
     def test_lan_wins_over_downstream_symptoms(self):
         """A dead gateway makes every later probe fail; reporting five causes

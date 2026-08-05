@@ -53,7 +53,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send((VENDOR / "alpine.min.js").read_bytes(),
                               "text/javascript; charset=utf-8")
         if route.path == "/api/data":
-            limit = int(parse_qs(route.query).get("limit", ["500"])[0])
+            try:
+                limit = int(parse_qs(route.query).get("limit", ["500"])[0])
+            except (ValueError, TypeError):
+                return self._send(b"invalid limit parameter", "text/plain", 400)
             body = json.dumps(payload(self.db, min(limit, 5000)), default=str).encode()
             return self._send(body, "application/json")
         self._send(b"not found", "text/plain", 404)

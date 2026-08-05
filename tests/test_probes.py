@@ -100,6 +100,28 @@ class ParseWlanNetworksTest(unittest.TestCase):
         self.assertEqual(got["total_bssids"], 1)
         self.assertEqual(got["cochannel"], 0)
 
+    def test_own_bssid_not_found_still_counts_all_networks(self):
+        """If our BSSID is not in the scan (shouldn't happen), treat it as
+        no self to exclude. All networks are counted, none excluded."""
+        text = ("    BSSID 1                 : aa:aa:aa:aa:aa:aa\n"
+                "         Channel            : 44 \n"
+                "    BSSID 2                 : bb:bb:bb:bb:bb:bb\n"
+                "         Channel            : 44 \n")
+        got = probes.parse_wlan_networks(text, channel=44,
+                                         own_bssid="ff:ff:ff:ff:ff:ff")
+        self.assertEqual(got["total_bssids"], 2)
+        self.assertEqual(got["cochannel"], 2)  # Both count as co-channel
+
+    def test_none_own_bssid_counts_all_networks(self):
+        """If own_bssid is None (not provided), all networks are counted."""
+        text = ("    BSSID 1                 : aa:aa:aa:aa:aa:aa\n"
+                "         Channel            : 44 \n"
+                "    BSSID 2                 : bb:bb:bb:bb:bb:bb\n"
+                "         Channel            : 44 \n")
+        got = probes.parse_wlan_networks(text, channel=44, own_bssid=None)
+        self.assertEqual(got["total_bssids"], 2)
+        self.assertEqual(got["cochannel"], 2)
+
     def test_counts_neighbours_on_the_same_channel(self):
         text = ("    BSSID 1                 : aa:aa:aa:aa:aa:aa\n"
                 "         Channel            : 44 \n"
@@ -160,6 +182,18 @@ class ParseTracerouteTest(unittest.TestCase):
     def test_no_hops_at_all_is_none(self):
         self.assertIsNone(probes.parse_traceroute("Trace complete.\n",
                                                   "192.168.50.1", "1.1.1.1"))
+
+    def test_target_as_first_hop_is_none(self):
+        """If the target IS the first responding hop, there's no hop past it."""
+        raw = ("  1    13 ms  1.1.1.1 \n")
+        self.assertIsNone(probes.parse_traceroute(raw, "192.168.50.1", "1.1.1.1"))
+
+    def test_gateway_as_first_hop_still_skips_it(self):
+        """Gateway is by definition hop 1. If it's in the output, skip it."""
+        raw = ("  1     3 ms  192.168.50.1 \n"
+               "  2    13 ms  172.16.1.1 \n")
+        self.assertEqual(
+            probes.parse_traceroute(raw, "192.168.50.1", "1.1.1.1"), "172.16.1.1")
 
 
 class _PlainCtx:
