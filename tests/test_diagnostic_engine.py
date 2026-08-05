@@ -698,115 +698,119 @@ class DualStackIsolationTest(unittest.TestCase):
         self.assertIsNotNone(stored)
         self.assertTrue(stored["both_working"])
 
-    def test_dns_both_resolvers_working(self):
-        """Both DNS resolvers respond successfully."""
-        primary = {"status": "success", "latency_ms": 10}
-        secondary = {"status": "success", "latency_ms": 12}
-        result = diagnose.analyze_dns_resolution(primary, secondary)
+    def test_routing_path_symmetric(self):
+        """Symmetric IPv4/IPv6 routing paths."""
+        ipv4_path = [{"responsive": True}, {"responsive": True}, {"responsive": False}]
+        ipv6_path = [{"responsive": True}, {"responsive": True}, {"responsive": False}]
+        result = diagnose.analyze_routing_path(ipv4_path, ipv6_path)
 
-        self.assertTrue(result["primary_working"])
-        self.assertTrue(result["secondary_working"])
-        self.assertTrue(result["both_working"])
-        self.assertFalse(result["both_failed"])
+        self.assertFalse(result["path_asymmetry"])
+        self.assertEqual(result["ipv4_first_failure_at_hop"], 2)
+        self.assertEqual(result["ipv6_first_failure_at_hop"], 2)
 
-    def test_dns_primary_fails_secondary_works(self):
-        """Asymmetric DNS failure - primary fails, secondary works."""
-        primary = {"status": "fail", "latency_ms": -1}
-        secondary = {"status": "success", "latency_ms": 15}
-        result = diagnose.analyze_dns_resolution(primary, secondary)
+    def test_routing_path_asymmetric_ipv4_fails(self):
+        """Asymmetric routing - IPv4 fails first."""
+        ipv4_path = [{"responsive": True}, {"responsive": False}]
+        ipv6_path = [{"responsive": True}, {"responsive": True}, {"responsive": True}]
+        result = diagnose.analyze_routing_path(ipv4_path, ipv6_path)
 
-        self.assertFalse(result["primary_working"])
-        self.assertTrue(result["secondary_working"])
-        self.assertTrue(result["asymmetric_failure"])
-        self.assertFalse(result["both_failed"])
+        self.assertTrue(result["path_asymmetry"])
+        self.assertEqual(result["affected_stack"], "ipv4")
+        self.assertEqual(result["ipv4_first_failure_at_hop"], 1)
 
-    def test_dns_both_timeout(self):
-        """Both DNS resolvers timeout."""
-        primary = {"status": "timeout", "latency_ms": 5000}
-        secondary = {"status": "timeout", "latency_ms": 5000}
-        result = diagnose.analyze_dns_resolution(primary, secondary)
+    def test_routing_path_asymmetric_ipv6_fails(self):
+        """Asymmetric routing - IPv6 fails first."""
+        ipv4_path = [{"responsive": True}, {"responsive": True}, {"responsive": True}]
+        ipv6_path = [{"responsive": True}, {"responsive": False}]
+        result = diagnose.analyze_routing_path(ipv4_path, ipv6_path)
 
-        self.assertFalse(result["primary_working"])
-        self.assertFalse(result["secondary_working"])
-        self.assertTrue(result["both_timeout"])
+        self.assertTrue(result["path_asymmetry"])
+        self.assertEqual(result["affected_stack"], "ipv6")
 
-    def test_dns_latency_comparison(self):
-        """Measure latency difference between resolvers."""
-        primary = {"status": "success", "latency_ms": 25}
-        secondary = {"status": "success", "latency_ms": 8}
-        result = diagnose.analyze_dns_resolution(primary, secondary)
+    def test_route_flapping_detection(self):
+        """Detect BGP route flapping."""
+        events = [
+            {"timestamp": 0, "route": "AS64512"},
+            {"timestamp": 10, "route": "AS64513"},
+            {"timestamp": 20, "route": "AS64512"},
+            {"timestamp": 30, "route": "AS64513"},
+            {"timestamp": 40, "route": "AS64514"},
+        ]
+        result = diagnose.detect_route_flapping(events)
 
-        self.assertEqual(result["latency_difference"], 17)
+        self.assertTrue(result["flapping"])
+        self.assertGreaterEqual(result["route_changes_detected"], 3)
 
-    def test_dns_failure_classification_nxdomain(self):
-        """Classify NXDOMAIN response."""
-        result = diagnose.classify_dns_failure("fail", "NXDOMAIN", 5)
-        self.assertEqual(result, "nxdomain")
+    def test_route_stability_no_changes(self):
+        """Route stability when no changes occur."""
+        events = [
+            {"timestamp": 0, "route": "AS64512"},
+            {"timestamp": 30, "route": "AS64512"},
+        ]
+        result = diagnose.detect_route_flapping(events)
 
-    def test_dns_failure_classification_servfail(self):
-        """Classify SERVFAIL response."""
-        result = diagnose.classify_dns_failure("fail", "SERVFAIL", 10)
-        self.assertEqual(result, "servfail")
+        self.assertFalse(result["flapping"])
+        self.assertEqual(result["route_changes_detected"], 0)
 
-    def test_dns_failure_classification_timeout(self):
-        """Classify timeout."""
-        result = diagnose.classify_dns_failure("timeout", None, 5000)
-        self.assertEqual(result, "timeout")
+    def test_classify_hop_latency_local(self):
+        """Classify local network latency (< 10ms)."""
+        latencies = [1, 2, 3, 4, 5]
+        result = diagnose.classify_hop_latency(latencies)
+        self.assertEqual(result, "local_network")
 
-    def test_dns_latency_pattern_local_resolver(self):
-        """Detect local resolver (sub-5ms latency)."""
+    def test_classify_hop_latency_distant(self):
+        """Classify distant/congested hop latency (> 500ms)."""
+        latencies = [550, 600, 580]
+        result = diagnose.classify_hop_latency(latencies)
+        self.assertEqual(result, "distant_or_congested")
+
+    def test_measure_hop_stability_stable(self):
+        """Measure stable hop (low jitter)."""
         samples = [
-            {"status": "success", "latency_ms": 2},
-            {"status": "success", "latency_ms": 3},
-            {"status": "success", "latency_ms": 2},
+            {"latency_ms": 20},
+            {"latency_ms": 21},
+            {"latency_ms": 22},
         ]
-        result = diagnose.analyze_dns_latency_pattern(samples)
-        self.assertEqual(result, "local_resolver")
+        result = diagnose.measure_hop_stability(samples)
 
-    def test_dns_latency_pattern_stable_fast(self):
-        """Detect stable fast resolver (5-20ms)."""
+        self.assertIn(result["stability"], ["very_stable", "stable"])
+        self.assertLess(result["jitter_ms"], 20)
+
+    def test_measure_hop_stability_unstable(self):
+        """Measure unstable hop (high jitter)."""
         samples = [
-            {"status": "success", "latency_ms": 10},
-            {"status": "success", "latency_ms": 12},
-            {"status": "success", "latency_ms": 11},
+            {"latency_ms": 5},
+            {"latency_ms": 100},
+            {"latency_ms": 200},
         ]
-        result = diagnose.analyze_dns_latency_pattern(samples)
-        self.assertEqual(result, "stable_fast")
+        result = diagnose.measure_hop_stability(samples)
 
-    def test_dns_latency_pattern_unstable(self):
-        """Detect unstable DNS response times."""
-        samples = [
-            {"status": "success", "latency_ms": 5},
-            {"status": "success", "latency_ms": 50},
-            {"status": "success", "latency_ms": 100},
+        self.assertEqual(result["stability"], "unstable")
+        self.assertGreater(result["jitter_ms"], 50)
+
+    def test_detect_blackhole_route(self):
+        """Detect potential blackhole routing."""
+        path = [
+            {"responsive": True},
+            {"responsive": True},
+            {"responsive": False, "error_response": False},
         ]
-        result = diagnose.analyze_dns_latency_pattern(samples)
-        self.assertEqual(result, "unstable")
+        result = diagnose.detect_blackhole_route(path)
 
-    def test_dns_caching_measurement(self):
-        """Measure DNS caching effectiveness."""
-        queries = [
-            {"cached": True, "latency_ms": 1, "ttl": 300},
-            {"cached": True, "latency_ms": 1, "ttl": 300},
-            {"cached": False, "latency_ms": 15, "ttl": 300},
-        ]
-        result = diagnose.measure_dns_caching(queries)
+        self.assertTrue(result["potential_blackhole"])
+        self.assertEqual(result["silent_failure_hops"], 1)
 
-        self.assertEqual(result["cached_queries"], 2)
-        self.assertEqual(result["ttl_average"], 300)
-        self.assertAlmostEqual(result["cache_effectiveness"], 2/3, places=2)
-
-    def test_dns_integrates_into_results(self):
-        """DNS analysis integrates into DiagnosisResult."""
+    def test_routing_path_integrates_into_results(self):
+        """Routing analysis integrates into DiagnosisResult."""
         results = diagnose.DiagnosisResult()
-        primary = {"status": "success", "latency_ms": 12}
-        secondary = {"status": "success", "latency_ms": 14}
-        dns_result = diagnose.analyze_dns_resolution(primary, secondary)
-        results.add("dns", dns_result)
+        ipv4_path = [{"responsive": True}, {"responsive": False}]
+        ipv6_path = [{"responsive": True}, {"responsive": False}]
+        routing_result = diagnose.analyze_routing_path(ipv4_path, ipv6_path)
+        results.add("routing", routing_result)
 
-        stored = results.tests.get("dns")
+        stored = results.tests.get("routing")
         self.assertIsNotNone(stored)
-        self.assertTrue(stored["both_working"])
+        self.assertFalse(stored["path_asymmetry"])
 
 
 if __name__ == "__main__":
