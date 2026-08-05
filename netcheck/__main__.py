@@ -17,7 +17,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-from . import diagnose, environ, llmlog, probes, server, store
+from . import diagnose, environ, llmlog, probes, server, store, all_diagnostics
 
 DB = Path(os.environ.get("NETCHECK_DB", Path.home() / ".netcheck" / "netcheck.db"))
 TARGET = os.environ.get("NETCHECK_TARGET", "api.anthropic.com")
@@ -158,6 +158,18 @@ def cmd_sync(args):
     return 0 if result.get("state") != "fail" else 1
 
 
+def cmd_full_check(args):
+    """Run comprehensive diagnostics on all 15 hypotheses."""
+    runner = all_diagnostics.AllDiagnostics()
+
+    if args.format == "quick":
+        print(runner.get_quick_diagnosis())
+    else:
+        result = runner.run_all()
+        print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
 def main(argv=None):
     load_env()
     p = argparse.ArgumentParser(prog="netcheck", description=__doc__,
@@ -169,6 +181,11 @@ def main(argv=None):
     sub.add_parser("scan", help="environment snapshot").set_defaults(fn=cmd_scan)
     sub.add_parser("diagnose", help="ranked causes").set_defaults(fn=cmd_diagnose)
     sub.add_parser("sync", help="push to Supabase").set_defaults(fn=cmd_sync)
+
+    fc = sub.add_parser("full-check", help="comprehensive diagnostics")
+    fc.add_argument("--format", choices=["quick", "json"], default="json",
+                    help="output format (quick for summary, json for full)")
+    fc.set_defaults(fn=cmd_full_check)
 
     w = sub.add_parser("watch", help="continuous monitor")
     w.add_argument("--interval", type=int, default=20)
