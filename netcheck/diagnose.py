@@ -23,9 +23,10 @@ from .diagnostic_engine import (
     rank_hypotheses,
     correlate_with_history,
     calculate_confidence_from_history,
-    discover_path_mtu,
-    analyze_fragmentation_impact,
-    calculate_mss_from_mtu,
+    track_tcp_handshake,
+    track_tcp_connection,
+    analyze_retransmission_pattern,
+    detect_window_stall,
 )
 
 WINDOW_S = 120
