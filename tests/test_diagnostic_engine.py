@@ -698,6 +698,116 @@ class DualStackIsolationTest(unittest.TestCase):
         self.assertIsNotNone(stored)
         self.assertTrue(stored["both_working"])
 
+    def test_dns_both_resolvers_working(self):
+        """Both DNS resolvers respond successfully."""
+        primary = {"status": "success", "latency_ms": 10}
+        secondary = {"status": "success", "latency_ms": 12}
+        result = diagnose.analyze_dns_resolution(primary, secondary)
+
+        self.assertTrue(result["primary_working"])
+        self.assertTrue(result["secondary_working"])
+        self.assertTrue(result["both_working"])
+        self.assertFalse(result["both_failed"])
+
+    def test_dns_primary_fails_secondary_works(self):
+        """Asymmetric DNS failure - primary fails, secondary works."""
+        primary = {"status": "fail", "latency_ms": -1}
+        secondary = {"status": "success", "latency_ms": 15}
+        result = diagnose.analyze_dns_resolution(primary, secondary)
+
+        self.assertFalse(result["primary_working"])
+        self.assertTrue(result["secondary_working"])
+        self.assertTrue(result["asymmetric_failure"])
+        self.assertFalse(result["both_failed"])
+
+    def test_dns_both_timeout(self):
+        """Both DNS resolvers timeout."""
+        primary = {"status": "timeout", "latency_ms": 5000}
+        secondary = {"status": "timeout", "latency_ms": 5000}
+        result = diagnose.analyze_dns_resolution(primary, secondary)
+
+        self.assertFalse(result["primary_working"])
+        self.assertFalse(result["secondary_working"])
+        self.assertTrue(result["both_timeout"])
+
+    def test_dns_latency_comparison(self):
+        """Measure latency difference between resolvers."""
+        primary = {"status": "success", "latency_ms": 25}
+        secondary = {"status": "success", "latency_ms": 8}
+        result = diagnose.analyze_dns_resolution(primary, secondary)
+
+        self.assertEqual(result["latency_difference"], 17)
+
+    def test_dns_failure_classification_nxdomain(self):
+        """Classify NXDOMAIN response."""
+        result = diagnose.classify_dns_failure("fail", "NXDOMAIN", 5)
+        self.assertEqual(result, "nxdomain")
+
+    def test_dns_failure_classification_servfail(self):
+        """Classify SERVFAIL response."""
+        result = diagnose.classify_dns_failure("fail", "SERVFAIL", 10)
+        self.assertEqual(result, "servfail")
+
+    def test_dns_failure_classification_timeout(self):
+        """Classify timeout."""
+        result = diagnose.classify_dns_failure("timeout", None, 5000)
+        self.assertEqual(result, "timeout")
+
+    def test_dns_latency_pattern_local_resolver(self):
+        """Detect local resolver (sub-5ms latency)."""
+        samples = [
+            {"status": "success", "latency_ms": 2},
+            {"status": "success", "latency_ms": 3},
+            {"status": "success", "latency_ms": 2},
+        ]
+        result = diagnose.analyze_dns_latency_pattern(samples)
+        self.assertEqual(result, "local_resolver")
+
+    def test_dns_latency_pattern_stable_fast(self):
+        """Detect stable fast resolver (5-20ms)."""
+        samples = [
+            {"status": "success", "latency_ms": 10},
+            {"status": "success", "latency_ms": 12},
+            {"status": "success", "latency_ms": 11},
+        ]
+        result = diagnose.analyze_dns_latency_pattern(samples)
+        self.assertEqual(result, "stable_fast")
+
+    def test_dns_latency_pattern_unstable(self):
+        """Detect unstable DNS response times."""
+        samples = [
+            {"status": "success", "latency_ms": 5},
+            {"status": "success", "latency_ms": 50},
+            {"status": "success", "latency_ms": 100},
+        ]
+        result = diagnose.analyze_dns_latency_pattern(samples)
+        self.assertEqual(result, "unstable")
+
+    def test_dns_caching_measurement(self):
+        """Measure DNS caching effectiveness."""
+        queries = [
+            {"cached": True, "latency_ms": 1, "ttl": 300},
+            {"cached": True, "latency_ms": 1, "ttl": 300},
+            {"cached": False, "latency_ms": 15, "ttl": 300},
+        ]
+        result = diagnose.measure_dns_caching(queries)
+
+        self.assertEqual(result["cached_queries"], 2)
+        self.assertEqual(result["ttl_average"], 300)
+        self.assertAlmostEqual(result["cache_effectiveness"], 2/3, places=2)
+
+    def test_dns_integrates_into_results(self):
+        """DNS analysis integrates into DiagnosisResult."""
+        results = diagnose.DiagnosisResult()
+        primary = {"status": "success", "latency_ms": 12}
+        secondary = {"status": "success", "latency_ms": 14}
+        dns_result = diagnose.analyze_dns_resolution(primary, secondary)
+        results.add("dns", dns_result)
+
+        stored = results.tests.get("dns")
+        self.assertIsNotNone(stored)
+        self.assertTrue(stored["both_working"])
+
 
 if __name__ == "__main__":
     unittest.main()
