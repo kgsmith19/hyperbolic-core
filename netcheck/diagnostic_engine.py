@@ -1200,100 +1200,224 @@ def rank_recommendations(candidates: List[Dict]) -> List[Dict]:
     return sorted(candidates, key=roi_score, reverse=True)
 
 
-def classify_latency(measurements: List[float]) -> Dict:
-    """Classify latency pattern based on round-trip time measurements.
+def classify_packet_loss_pattern(loss_samples: List[float]) -> Dict:
+    """Classify packet loss pattern based on loss rate measurements.
 
     Args:
-        measurements: List of RTT measurements in milliseconds
+        loss_samples: List of packet loss percentages (0-100)
 
     Returns:
-        Dict with classification, statistics, and buffer bloat detection:
+        Dict with classification and pattern analysis:
         {
-            "classification": "stable_low" | "stable_medium" | "variable" |
-                             "high_variance_high_latency" | "buffer_bloat",
-            "avg_latency_ms": float,
-            "min_latency_ms": float,
-            "max_latency_ms": float,
-            "jitter_ms": float,  # standard deviation
-            "is_stable": bool,
+            "classification": "healthy" | "steady_low" | "burst_loss" |
+                             "intermittent" | "severe",
+            "avg_loss_pct": float,
+            "min_loss_pct": float,
+            "max_loss_pct": float,
+            "loss_variance": float,
+            "has_loss": bool,
+            "has_burst_loss": bool,
+            "has_steady_degradation": bool,
+            "requires_immediate_attention": bool,
             "is_uncertain": bool,  # < 3 samples
-            "has_buffer_bloat": bool,
+            "burst_windows": list,  # indices of burst periods
             "classification_reason": str
         }
     """
     import statistics
 
-    if not measurements:
+    if not loss_samples:
         return {
             "classification": "unknown",
-            "avg_latency_ms": None,
-            "min_latency_ms": None,
-            "max_latency_ms": None,
-            "jitter_ms": None,
-            "is_stable": False,
+            "avg_loss_pct": None,
+            "min_loss_pct": None,
+            "max_loss_pct": None,
+            "loss_variance": None,
+            "has_loss": False,
+            "has_burst_loss": False,
+            "has_steady_degradation": False,
+            "requires_immediate_attention": False,
             "is_uncertain": True,
-            "has_buffer_bloat": False,
+            "burst_windows": [],
             "classification_reason": "No measurements provided"
         }
 
-    # Handle small sample sizes
-    is_uncertain = len(measurements) < 3
-    avg_latency = statistics.mean(measurements)
-    min_latency = min(measurements)
-    max_latency = max(measurements)
+    is_uncertain = len(loss_samples) < 3
+    avg_loss = statistics.mean(loss_samples)
+    min_loss = min(loss_samples)
+    max_loss = max(loss_samples)
 
-    # Jitter is standard deviation of RTT
-    if len(measurements) > 1:
-        jitter = statistics.stdev(measurements)
+    # Variance of loss rates
+    if len(loss_samples) > 1:
+        variance = statistics.variance(loss_samples)
     else:
-        jitter = 0.0
+        variance = 0.0
 
-    # Detect buffer bloat: high tail latency (max - min spread) with low baseline
-    tail_latency_spread = max_latency - min_latency
-    has_buffer_bloat = (
-        min_latency < 10 and max_latency > 50 and
-        tail_latency_spread > 40  # Significant spike
+    has_loss = avg_loss > 1.0  # >1% considered "has loss"
+
+    # Detect burst loss: sudden spikes with recovery
+    burst_windows = _detect_burst_windows(loss_samples)
+    has_burst_loss = len(burst_windows) > 0
+
+    # Detect steady degradation: consistently high loss
+    # All samples above threshold with low variance
+    steady_threshold = 1.0  # 1% or more
+    is_steady = (
+        avg_loss >= steady_threshold and
+        all(l >= steady_threshold * 0.5 for l in loss_samples) and
+        variance < 25  # Low variance around the steady state
     )
+    has_steady_degradation = is_steady
 
-    # Classify based on latency characteristics
-    if has_buffer_bloat:
-        classification = "buffer_bloat"
-        reason = f"Buffer bloat detected: min={min_latency:.1f}ms, max={max_latency:.1f}ms (tail spike)"
-        is_stable = False
+    # Classify based on patterns
+    if not has_loss:
+        classification = "healthy"
+        reason = f"No significant packet loss: avg={avg_loss:.2f}%"
+        requires_immediate_attention = False
 
-    elif avg_latency > 100 and jitter > 20:
-        classification = "high_variance_high_latency"
-        reason = f"High baseline + high variance: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
-        is_stable = False
+    elif max_loss > 50 or avg_loss > 15:
+        classification = "severe"
+        reason = f"Severe packet loss: avg={avg_loss:.2f}%, peak={max_loss:.2f}%"
+        requires_immediate_attention = True
 
-    elif avg_latency < 20 and jitter < 2:
-        classification = "stable_low"
-        reason = f"Stable low latency: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
-        is_stable = True
+    elif has_steady_degradation:
+        if avg_loss < 5:
+            classification = "steady_low"
+            reason = f"Steady low loss: avg={avg_loss:.2f}% (consistent degradation)"
+        else:
+            classification = "steady_high"
+            reason = f"Steady high loss: avg={avg_loss:.2f}% (consistent degradation)"
+        requires_immediate_attention = avg_loss > 5
 
-    elif avg_latency < 50 and jitter < 2:
-        classification = "stable_medium"
-        reason = f"Stable medium latency: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
-        is_stable = True
+    elif has_burst_loss:
+        # Distinguish between burst and intermittent:
+        # Burst: clear baseline (low min), spikes (high max), few distinct windows
+        # Intermittent: frequent random spikes throughout (many small windows)
+        num_bursts = len(burst_windows)
+        is_clear_burst = (
+            min_loss < 5 and  # Clear baseline near zero
+            max_loss > 20 and  # Significant spike
+            num_bursts <= 2  # Few distinct bursts
+        )
+        if is_clear_burst:
+            classification = "burst_loss"
+            reason = f"Burst pattern: {num_bursts} bursts detected, peak={max_loss:.2f}%"
+            requires_immediate_attention = max_loss > 30
+        else:  # Many spikes = intermittent
+            classification = "intermittent"
+            reason = f"Intermittent loss: {num_bursts} bursts, variance={variance:.1f}"
+            requires_immediate_attention = avg_loss > 5
 
-    elif avg_latency >= 50 or jitter > 2:
-        classification = "variable"
-        reason = f"Variable latency: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
-        is_stable = False
+    elif variance > 20:
+        classification = "intermittent"
+        reason = f"Intermittent loss: avg={avg_loss:.2f}%, variance={variance:.1f}"
+        requires_immediate_attention = avg_loss > 5
 
     else:
-        classification = "variable"
-        reason = f"Variable pattern: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
-        is_stable = False
+        classification = "healthy"
+        reason = f"No significant packet loss: avg={avg_loss:.2f}%"
+        requires_immediate_attention = False
 
     return {
         "classification": classification,
-        "avg_latency_ms": round(avg_latency, 2),
-        "min_latency_ms": round(min_latency, 2),
-        "max_latency_ms": round(max_latency, 2),
-        "jitter_ms": round(jitter, 2),
-        "is_stable": is_stable,
+        "avg_loss_pct": round(avg_loss, 2),
+        "min_loss_pct": round(min_loss, 2),
+        "max_loss_pct": round(max_loss, 2),
+        "loss_variance": round(variance, 2),
+        "has_loss": has_loss,
+        "has_burst_loss": has_burst_loss,
+        "has_steady_degradation": has_steady_degradation,
+        "requires_immediate_attention": requires_immediate_attention,
         "is_uncertain": is_uncertain,
-        "has_buffer_bloat": has_buffer_bloat,
+        "burst_windows": burst_windows,
         "classification_reason": reason
+    }
+
+
+def _detect_burst_windows(loss_samples: List[float], threshold: float = 10.0) -> List[Tuple[int, int]]:
+    """Detect windows of burst loss (elevated loss followed by recovery).
+
+    Args:
+        loss_samples: List of loss percentages
+        threshold: Loss threshold to consider as "burst" (default 10%)
+
+    Returns:
+        List of (start_idx, end_idx) tuples for burst windows
+    """
+    bursts = []
+    in_burst = False
+    burst_start = 0
+
+    for i, loss in enumerate(loss_samples):
+        if loss > threshold and not in_burst:
+            # Start of burst
+            in_burst = True
+            burst_start = i
+        elif loss <= threshold and in_burst:
+            # End of burst
+            in_burst = False
+            bursts.append((burst_start, i - 1))
+
+    # Handle burst at end of samples
+    if in_burst:
+        bursts.append((burst_start, len(loss_samples) - 1))
+
+    return bursts
+
+
+def detect_asymmetric_loss(downstream_loss: List[float], upstream_loss: List[float]) -> Dict:
+    """Detect if packet loss is asymmetric (one direction only).
+
+    Args:
+        downstream_loss: Loss percentages for outbound path (client->server)
+        upstream_loss: Loss percentages for inbound path (server->client)
+
+    Returns:
+        Dict with asymmetry analysis:
+        {
+            "is_asymmetric": bool,
+            "affected_direction": "downstream" | "upstream" | None,
+            "loss_differential_pct": float,
+            "downstream_avg": float,
+            "upstream_avg": float,
+            "diagnosis": str
+        }
+    """
+    import statistics
+
+    if not downstream_loss or not upstream_loss:
+        return {
+            "is_asymmetric": False,
+            "affected_direction": None,
+            "loss_differential_pct": 0,
+            "downstream_avg": 0,
+            "upstream_avg": 0,
+            "diagnosis": "Insufficient data for asymmetry detection"
+        }
+
+    down_avg = statistics.mean(downstream_loss)
+    up_avg = statistics.mean(upstream_loss)
+
+    # Asymmetric if one direction has significant loss and other doesn't
+    differential = abs(down_avg - up_avg)
+    is_asymmetric = differential > 5  # >5% difference indicates asymmetry
+
+    if is_asymmetric:
+        if down_avg > up_avg:
+            affected = "downstream"
+            diagnosis = f"Outbound path impaired: {down_avg:.1f}% loss vs {up_avg:.1f}% return"
+        else:
+            affected = "upstream"
+            diagnosis = f"Inbound path impaired: {up_avg:.1f}% loss vs {down_avg:.1f}% outbound"
+    else:
+        affected = None
+        diagnosis = "No significant asymmetry detected"
+
+    return {
+        "is_asymmetric": is_asymmetric,
+        "affected_direction": affected,
+        "loss_differential_pct": round(differential, 2),
+        "downstream_avg": round(down_avg, 2),
+        "upstream_avg": round(up_avg, 2),
+        "diagnosis": diagnosis
     }

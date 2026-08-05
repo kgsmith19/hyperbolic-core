@@ -601,98 +601,115 @@ class EdgeCaseCombinationsTest(unittest.TestCase):
                         "Unreachable is LAN problem, likely hardware")
 
 
-class LatencyJitterClassifierTest(unittest.TestCase):
-    """Phase 1: Latency & Jitter Classifier tests."""
+class PacketLossPatternClassifierTest(unittest.TestCase):
+    """Phase 2: Packet Loss Pattern Classifier tests."""
 
-    def test_latency_classifier_stable_low(self):
-        """Stable low latency: <20ms, jitter <2ms.
-        Classification: stable_low."""
-        measurements = [10.5, 11.2, 10.8, 11.5, 10.3]  # ms
-        result = diagnose.classify_latency(measurements)
+    def test_packet_loss_classifier_no_loss(self):
+        """Zero packet loss: healthy path.
+        Classification: healthy."""
+        loss_samples = [0.0, 0.0, 0.0, 0.0, 0.0]  # %
+        result = diagnose.classify_packet_loss_pattern(loss_samples)
 
-        self.assertEqual(result["classification"], "stable_low")
-        self.assertEqual(result["avg_latency_ms"], 10.86)
-        self.assertLess(result["jitter_ms"], 2.0)
-        self.assertTrue(result["is_stable"])
+        self.assertEqual(result["classification"], "healthy")
+        self.assertEqual(result["avg_loss_pct"], 0.0)
+        self.assertFalse(result["has_burst_loss"])
+        self.assertFalse(result["has_steady_degradation"])
 
-    def test_latency_classifier_stable_medium(self):
-        """Stable medium latency: 20-50ms, jitter <5ms.
-        Classification: stable_medium."""
-        measurements = [35.1, 36.2, 35.8, 36.5, 35.3]  # ms
-        result = diagnose.classify_latency(measurements)
+    def test_packet_loss_classifier_steady_low(self):
+        """Steady low packet loss: consistent degradation.
+        Classification: steady_low (0-5% consistently)."""
+        loss_samples = [2.0, 2.5, 2.0, 2.2, 2.1]  # % consistent
+        result = diagnose.classify_packet_loss_pattern(loss_samples)
 
-        self.assertEqual(result["classification"], "stable_medium")
-        self.assertGreaterEqual(result["avg_latency_ms"], 20)
-        self.assertLess(result["avg_latency_ms"], 50)
-        self.assertLess(result["jitter_ms"], 5.0)
-        self.assertTrue(result["is_stable"])
+        self.assertEqual(result["classification"], "steady_low")
+        self.assertTrue(result["has_steady_degradation"])
+        self.assertFalse(result["has_burst_loss"])
+        self.assertAlmostEqual(result["avg_loss_pct"], 2.16, places=1)
 
-    def test_latency_classifier_variable(self):
-        """Variable latency: fluctuates but returns to baseline.
-        Classification: variable."""
-        measurements = [25.0, 30.5, 26.2, 32.1, 27.8, 31.0, 26.5]  # ms
-        result = diagnose.classify_latency(measurements)
+    def test_packet_loss_classifier_burst_loss(self):
+        """Burst packet loss: sudden spikes then recovery.
+        Pattern: mostly zero, then spike to high, then back to zero.
+        Classification: burst_loss."""
+        loss_samples = [0.0, 0.0, 25.5, 28.0, 0.0, 0.0]  # Burst in middle
+        result = diagnose.classify_packet_loss_pattern(loss_samples)
 
-        self.assertEqual(result["classification"], "variable")
-        self.assertGreater(result["jitter_ms"], 2.0)
-        self.assertFalse(result["is_stable"])
+        self.assertEqual(result["classification"], "burst_loss")
+        self.assertTrue(result["has_burst_loss"])
+        self.assertFalse(result["has_steady_degradation"])
+        self.assertGreater(result["max_loss_pct"], 20)
+        self.assertLess(result["min_loss_pct"], 1.0)
 
-    def test_latency_classifier_high_variance_high_latency(self):
-        """High variance + high baseline: >100ms avg, jitter >20ms.
-        Classification: high_variance_high_latency."""
-        measurements = [150.0, 200.5, 120.2, 180.1, 210.0, 140.0]  # ms
-        result = diagnose.classify_latency(measurements)
+    def test_packet_loss_classifier_intermittent_loss(self):
+        """Intermittent loss: random spikes with no clear pattern.
+        Classification: intermittent."""
+        loss_samples = [0.0, 10.0, 0.5, 15.0, 1.0, 5.0, 0.0]  # Random
+        result = diagnose.classify_packet_loss_pattern(loss_samples)
 
-        self.assertEqual(result["classification"], "high_variance_high_latency")
-        self.assertGreater(result["avg_latency_ms"], 100)
-        self.assertGreater(result["jitter_ms"], 20.0)
+        self.assertEqual(result["classification"], "intermittent")
+        self.assertTrue(result["has_loss"])
+        self.assertFalse(result["has_steady_degradation"])
+        # Intermittent should have variable loss
+        self.assertGreater(result["loss_variance"], 20)
 
-    def test_latency_classifier_buffer_bloat(self):
-        """Buffer bloat: latency spikes on data transfer.
-        Detected by: min latency <10ms, max latency >50ms (tail latency).
-        Classification: buffer_bloat."""
-        measurements = [8.0, 9.5, 8.2, 65.3, 9.1, 62.5, 8.8]  # Spikes to 65ms
-        result = diagnose.classify_latency(measurements)
+    def test_packet_loss_classifier_severe_loss(self):
+        """Severe packet loss: >15% avg or peak >50%.
+        Classification: severe."""
+        loss_samples = [45.0, 52.0, 48.0, 50.0, 46.0]  # Sustained high loss
+        result = diagnose.classify_packet_loss_pattern(loss_samples)
 
-        self.assertEqual(result["classification"], "buffer_bloat")
-        self.assertTrue(result["has_buffer_bloat"])
-        # Tail latency (max) should be significantly higher than median
-        self.assertGreater(result["max_latency_ms"], 50)
-        self.assertLess(result["min_latency_ms"], 10)
+        self.assertEqual(result["classification"], "severe")
+        self.assertGreater(result["avg_loss_pct"], 15)
+        self.assertTrue(result["requires_immediate_attention"])
 
-    def test_latency_classifier_with_insufficient_data(self):
+    def test_packet_loss_classifier_asymmetric_path(self):
+        """Asymmetric path detection: loss in one direction only.
+        Detected by: egress packets lost but responses received.
+        Note: This requires bidirectional measurement (simulated here)."""
+        # Simulating downstream (client->server) vs upstream (server->client)
+        downstream_loss = [15.0, 16.0, 14.5]  # High loss going out
+        upstream_loss = [0.0, 0.0, 0.0]  # No loss coming back
+
+        result = diagnose.detect_asymmetric_loss(downstream_loss, upstream_loss)
+
+        self.assertTrue(result["is_asymmetric"])
+        self.assertEqual(result["affected_direction"], "downstream")
+        self.assertGreater(result["loss_differential_pct"], 10)
+
+    def test_packet_loss_classifier_with_small_sample(self):
         """Handle edge case: < 3 samples.
         Should still classify but mark as uncertain."""
-        measurements = [25.0]
-        result = diagnose.classify_latency(measurements)
+        loss_samples = [5.0]
+        result = diagnose.classify_packet_loss_pattern(loss_samples)
 
         self.assertIn("classification", result)
         self.assertTrue(result.get("is_uncertain", False))
 
-    def test_latency_jitter_calculations(self):
-        """Verify jitter is calculated correctly: sample stddev of RTT."""
-        measurements = [10.0, 20.0, 30.0]  # Known stddev
-        result = diagnose.classify_latency(measurements)
+    def test_packet_loss_burst_detection_algorithm(self):
+        """Verify burst detection identifies sudden spikes correctly."""
+        # Pattern: baseline, spike, recovery
+        loss_samples = [0.0, 0.0, 0.5, 30.0, 32.0, 0.0, 0.0]
+        result = diagnose.classify_packet_loss_pattern(loss_samples)
 
-        # Sample stddev of [10, 20, 30] using (N-1) denominator:
-        # sqrt(((10-20)^2 + (20-20)^2 + (30-20)^2) / 2)
-        # = sqrt((100 + 0 + 100) / 2) = sqrt(100) = 10.0
-        expected_jitter = 10.0
-        self.assertAlmostEqual(result["jitter_ms"], expected_jitter, places=1)
+        # Should identify the burst window
+        self.assertTrue(result["has_burst_loss"])
+        self.assertIn("burst_windows", result)
+        # Burst window should be around indices 3-4
+        bursts = result["burst_windows"]
+        self.assertGreater(len(bursts), 0)
 
-    def test_latency_classifier_integrates_into_diagnostic_tree(self):
-        """Latency classification is collected as part of diagnostic results."""
+    def test_packet_loss_integrates_into_diagnostic_tree(self):
+        """Packet loss classification is collected as part of diagnostic results."""
         results = diagnose.DiagnosisResult()
-        measurements = [15.0, 15.5, 15.2, 15.8, 15.1]
+        loss_samples = [0.5, 0.0, 0.5, 0.0, 0.0]
 
-        # Add latency classification to results
-        latency_result = diagnose.classify_latency(measurements)
-        results.add("latency_jitter", latency_result)
+        # Add packet loss classification to results
+        loss_result = diagnose.classify_packet_loss_pattern(loss_samples)
+        results.add("packet_loss_pattern", loss_result)
 
         # Verify it can be retrieved
-        stored = results.tests.get("latency_jitter")
+        stored = results.tests.get("packet_loss_pattern")
         self.assertIsNotNone(stored)
-        self.assertEqual(stored["classification"], "stable_low")
+        self.assertEqual(stored["classification"], "healthy")
 
 
 if __name__ == "__main__":
