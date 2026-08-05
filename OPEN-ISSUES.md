@@ -53,20 +53,69 @@ clean *now*, not that it was clean during the earlier error bursts.
 
 ---
 
-## 3. Wi-Fi adapter is pinned below its capability
-
-**Surfaced:** 2026-08-05.
+## 3. Wi-Fi adapter is pinned below its capability — FIX HANDED OFF 2026-08-05
 
 `802.11n/ac/ax Wireless Mode = 3. 802.11ac` on an Intel Wi-Fi 6 AX201, against
-an AP advertising `802.11be`. `Roaming Aggressiveness = 1. Lowest` is also
-non-default. Both look like earlier hand-tuning.
+an ASUS RT-BE58U_V2 (Wi-Fi 7). `Roaming Aggressiveness = 1. Lowest` also
+non-default. Confirmed valid values are `1. Disabled / 2. 802.11n /
+3. 802.11ac / 4. 802.11ax` (registry `IEEE11nMode`).
 
-Not yet linked to any failure — `netcheck diagnose` surfaces it as a
-medium-confidence finding, not a cause. Changing it is a live experiment, so it
-is left to the user rather than recommended outright.
+This is the single most concrete, actionable anomaly found all session — but
+it does NOT retroactively explain the 14 already-logged errors, since none of
+them had monitoring running alongside them. It fits the *shape* of an
+intermittent-drop symptom (less link margin, more retries under load) but is
+not proven causal.
 
-**Retire when:** either the setting is restored to default and errors are
-re-measured, or monitoring shows it is unrelated.
+Attempted to apply directly (`Set-NetAdapterAdvancedProperty`) with Kyle's
+explicit authorization — blocked by Windows admin rights, which this session
+does not have. Script with before/after verification and a one-line rollback
+left at `C:\code\guards\runbox\netcheck-fix-wifi-mode.ps1` for Kyle to run.
+
+**Retire when:** the runbox script has been run and either errors recur (rules
+it out) or a clean stretch under `watch` supports it (doesn't prove it, but
+supports it).
+
+---
+
+## 3b. `environ.router()` reported false `state: ok` — real bug, found live
+
+**Surfaced:** 2026-08-05, while investigating AiProtection with real
+credentials.
+
+ASUS does not accept HTTP Basic Auth for its data hooks (`appGet.cgi`) even
+though it silently returns HTTP 200 for the *page shell* under Basic Auth —
+the body is a JS login-redirect stub (`location.href='/Main_Login.asp'`).
+`_http_get` only checked for a transport-level exception, so `router()` read
+that redirect stub as `state: ok` — a real silent-success bug, the exact
+failure mode the project's "no silent fallbacks" rule exists to catch. It was
+never actually authenticating, on any run this session including the one in
+`scripts/configure.ps1`'s own verification step.
+
+**Real auth flow** (confirmed live against RT-BE58U_V2, not the docs — via
+`POST /login.cgi` with `login_authorization=base64(user:pass)` and header
+`user-agent: asusrouter-Android-DUTUtil-1.0.0.201`, returns
+`{"asus_token": "..."}`; subsequent calls are `POST /appGet.cgi` with
+`hook=<call>` and `cookie: asus_token=<token>`, same user-agent):
+
+- `wanlink()` — WAN is healthy: DHCP, connected, public IP confirmed, DNS
+  8.8.8.8/8.8.4.4, lease renewed ~3h before capture (matches the modem reboot
+  cascading to a WAN renewal — expected, not a new anomaly).
+- `nvram_get(wrs_protect_enable)` → `"0"`, `TM_EULA` → `"0"`, but
+  `wrs_mals_enable` / `wrs_cc_enable` / `wrs_vp_enable` all → `"1"`. **Genuinely
+  ambiguous** — looks like the AiProtection master switch / EULA may be off
+  while sub-feature flags sit at stale/default `"1"`, but nvram alone can't
+  distinguish "actually filtering traffic" from "leftover flag with no
+  effect." Needs confirming in the actual ASUS GUI, not guessed from nvram.
+
+**Fix:** rewrite `router()` on the real token/cookie flow above; detect the
+login-redirect stub as `fail`, never `ok`. Not done this session — logged
+instead of rushed, per the context-budget cutoff mid-investigation. The raw
+probe output (real login/hook responses) is worth re-running rather than
+trusting memory when this is picked up.
+
+**Retire when:** `router()` is rewritten on the token flow and a real scan
+resolves the AiProtection ambiguity via the GUI or a confirmed-correct nvram
+key set.
 
 ---
 
