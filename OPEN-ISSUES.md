@@ -21,20 +21,38 @@ diagnosis is not mistaken for a clean bill of health.
 
 ---
 
-## 2. Modem and router internals are dark
+## 2. Modem DOCSIS scraper needs a rewrite — device is a router/modem combo
 
-**Surfaced:** 2026-08-05.
+**Surfaced:** 2026-08-05. **Updated:** 2026-08-05, after credentials were set.
 
-`192.168.100.1` answers 401 and `192.168.50.1` is an ASUS, but neither has
-credentials in `.env`, so DOCSIS line quality and the AiProtection/DPI setting
-are unknown. Both are high-value: uncorrectable codewords are the best ISP
-evidence, and ASUS DPI is a documented cause of long-lived TLS streams dying.
+Router (`192.168.50.1`, ASUS) auth and connectivity are confirmed working.
 
-The modem parser (`environ.modem`) is written against generic Arris/Motorola
-markup and is **unverified against the actual device** — it may need adjusting
-once real output is available.
+Modem (`192.168.100.1`) auth also works and is confirmed **not** the earlier
+401 — that was the device's single-session lock rejecting Python's request
+while Kyle was logged in via browser, not a code or credential bug. It cleared
+the moment he logged out. (Ruled out: a CSRF-cookie theory that looked
+plausible but was disproved by testing — a bare Basic Auth request with no
+cookie jar succeeded once the browser session was gone.)
 
-**Retire when:** credentials are set and one real scan is confirmed parsing.
+The real remaining problem: this is a **NETGEAR modem+router combo**
+(the same box Kyle described as having built-in Wi-Fi that was later disabled),
+not a bare cable modem. Its root page links `RouterStatus.htm`,
+`WirelessSettings.htm`, `PortForwarding.htm`, etc. — full router admin, still
+served even with the modem's own Wi-Fi off. `environ.modem()`'s regex parser
+(written against generic Arris/Motorola markup) finds zero matches:
+
+- `DocsisStatus.htm` — 404, does not exist on this firmware
+- `RouterStatus.htm` — loads (50KB) but contains none of SNR / Power Level /
+  Codeword / Downstream / Upstream as literal text — the channel-quality data
+  is almost certainly populated client-side via JavaScript calling a separate
+  endpoint (likely a `.cgi` or JSON API) that has not yet been identified.
+
+**Fix:** find the real data endpoint (browser devtools Network tab while the
+status page loads is the fastest path — capture the XHR request), then point
+`environ.modem()` at it instead of guessing at static HTML.
+
+**Retire when:** a real scan returns non-empty `snr_db` / `power_dbmv` /
+`uncorrectables`.
 
 ---
 
