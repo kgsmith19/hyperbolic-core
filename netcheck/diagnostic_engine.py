@@ -1200,100 +1200,190 @@ def rank_recommendations(candidates: List[Dict]) -> List[Dict]:
     return sorted(candidates, key=roi_score, reverse=True)
 
 
-def classify_latency(measurements: List[float]) -> Dict:
-    """Classify latency pattern based on round-trip time measurements.
+def classify_packet_loss_pattern(loss_samples: List[float]) -> Dict:
+    """Classify packet loss pattern based on loss rate measurements."""
+    import statistics
+
+    if not loss_samples:
+        return _empty_loss_result()
+
+    avg_loss, min_loss, max_loss, variance = _calculate_loss_stats(loss_samples)
+    is_uncertain = len(loss_samples) < 3
+    has_loss = avg_loss > 1.0
+    burst_windows = _detect_burst_windows(loss_samples)
+    has_steady_degradation = _is_steady_degradation(avg_loss, loss_samples, variance)
+
+    classification, reason, attention = _classify_loss_pattern(
+        has_loss, max_loss, avg_loss, has_steady_degradation,
+        burst_windows, min_loss, variance
+    )
+
+    return {
+        "classification": classification,
+        "avg_loss_pct": round(avg_loss, 2),
+        "min_loss_pct": round(min_loss, 2),
+        "max_loss_pct": round(max_loss, 2),
+        "loss_variance": round(variance, 2),
+        "has_loss": has_loss,
+        "has_burst_loss": len(burst_windows) > 0,
+        "has_steady_degradation": has_steady_degradation,
+        "requires_immediate_attention": attention,
+        "is_uncertain": is_uncertain,
+        "burst_windows": burst_windows,
+        "classification_reason": reason
+    }
+
+
+def _empty_loss_result() -> Dict:
+    """Return empty result for no samples."""
+    return {
+        "classification": "unknown",
+        "avg_loss_pct": None,
+        "min_loss_pct": None,
+        "max_loss_pct": None,
+        "loss_variance": None,
+        "has_loss": False,
+        "has_burst_loss": False,
+        "has_steady_degradation": False,
+        "requires_immediate_attention": False,
+        "is_uncertain": True,
+        "burst_windows": [],
+        "classification_reason": "No measurements provided"
+    }
+
+
+def _calculate_loss_stats(loss_samples: List[float]) -> Tuple[float, float, float, float]:
+    """Calculate loss statistics from samples."""
+    import statistics
+    avg = statistics.mean(loss_samples)
+    min_val = min(loss_samples)
+    max_val = max(loss_samples)
+    var = statistics.variance(loss_samples) if len(loss_samples) > 1 else 0.0
+    return avg, min_val, max_val, var
+
+
+def _is_steady_degradation(avg_loss: float, loss_samples: List[float], variance: float) -> bool:
+    """Check if loss shows steady degradation pattern."""
+    threshold = 1.0
+    return (avg_loss >= threshold and
+            all(l >= threshold * 0.5 for l in loss_samples) and
+            variance < 25)
+
+
+def _classify_loss_pattern(
+    has_loss: bool, max_loss: float, avg_loss: float,
+    has_steady: bool, bursts: List, min_loss: float, variance: float
+) -> Tuple[str, str, bool]:
+    """Classify loss pattern and return (classification, reason, attention)."""
+    if not has_loss:
+        return "healthy", f"No significant packet loss: avg={avg_loss:.2f}%", False
+
+    if max_loss > 50 or avg_loss > 15:
+        return "severe", f"Severe packet loss: avg={avg_loss:.2f}%, peak={max_loss:.2f}%", True
+
+    if has_steady:
+        if avg_loss < 5:
+            return "steady_low", f"Steady low loss: avg={avg_loss:.2f}%", False
+        else:
+            return "steady_high", f"Steady high loss: avg={avg_loss:.2f}%", True
+
+    if len(bursts) > 0:
+        is_clear = min_loss < 5 and max_loss > 20 and len(bursts) <= 2
+        if is_clear:
+            return "burst_loss", f"Burst: {len(bursts)} detected, peak={max_loss:.2f}%", max_loss > 30
+        else:
+            return "intermittent", f"Intermittent: {len(bursts)} bursts", avg_loss > 5
+
+    if variance > 20:
+        return "intermittent", f"Intermittent: avg={avg_loss:.2f}%, var={variance:.1f}", avg_loss > 5
+
+    return "healthy", f"No significant packet loss: avg={avg_loss:.2f}%", False
+
+
+def _detect_burst_windows(loss_samples: List[float], threshold: float = 10.0) -> List[Tuple[int, int]]:
+    """Detect windows of burst loss (elevated loss followed by recovery).
 
     Args:
-        measurements: List of RTT measurements in milliseconds
+        loss_samples: List of loss percentages
+        threshold: Loss threshold to consider as "burst" (default 10%)
 
     Returns:
-        Dict with classification, statistics, and buffer bloat detection:
+        List of (start_idx, end_idx) tuples for burst windows
+    """
+    bursts = []
+    in_burst = False
+    burst_start = 0
+
+    for i, loss in enumerate(loss_samples):
+        if loss > threshold and not in_burst:
+            # Start of burst
+            in_burst = True
+            burst_start = i
+        elif loss <= threshold and in_burst:
+            # End of burst
+            in_burst = False
+            bursts.append((burst_start, i - 1))
+
+    # Handle burst at end of samples
+    if in_burst:
+        bursts.append((burst_start, len(loss_samples) - 1))
+
+    return bursts
+
+
+def detect_asymmetric_loss(downstream_loss: List[float], upstream_loss: List[float]) -> Dict:
+    """Detect if packet loss is asymmetric (one direction only).
+
+    Args:
+        downstream_loss: Loss percentages for outbound path (client->server)
+        upstream_loss: Loss percentages for inbound path (server->client)
+
+    Returns:
+        Dict with asymmetry analysis:
         {
-            "classification": "stable_low" | "stable_medium" | "variable" |
-                             "high_variance_high_latency" | "buffer_bloat",
-            "avg_latency_ms": float,
-            "min_latency_ms": float,
-            "max_latency_ms": float,
-            "jitter_ms": float,  # standard deviation
-            "is_stable": bool,
-            "is_uncertain": bool,  # < 3 samples
-            "has_buffer_bloat": bool,
-            "classification_reason": str
+            "is_asymmetric": bool,
+            "affected_direction": "downstream" | "upstream" | None,
+            "loss_differential_pct": float,
+            "downstream_avg": float,
+            "upstream_avg": float,
+            "diagnosis": str
         }
     """
     import statistics
 
-    if not measurements:
+    if not downstream_loss or not upstream_loss:
         return {
-            "classification": "unknown",
-            "avg_latency_ms": None,
-            "min_latency_ms": None,
-            "max_latency_ms": None,
-            "jitter_ms": None,
-            "is_stable": False,
-            "is_uncertain": True,
-            "has_buffer_bloat": False,
-            "classification_reason": "No measurements provided"
+            "is_asymmetric": False,
+            "affected_direction": None,
+            "loss_differential_pct": 0,
+            "downstream_avg": 0,
+            "upstream_avg": 0,
+            "diagnosis": "Insufficient data for asymmetry detection"
         }
 
-    # Handle small sample sizes
-    is_uncertain = len(measurements) < 3
-    avg_latency = statistics.mean(measurements)
-    min_latency = min(measurements)
-    max_latency = max(measurements)
+    down_avg = statistics.mean(downstream_loss)
+    up_avg = statistics.mean(upstream_loss)
 
-    # Jitter is standard deviation of RTT
-    if len(measurements) > 1:
-        jitter = statistics.stdev(measurements)
+    # Asymmetric if one direction has significant loss and other doesn't
+    differential = abs(down_avg - up_avg)
+    is_asymmetric = differential > 5  # >5% difference indicates asymmetry
+
+    if is_asymmetric:
+        if down_avg > up_avg:
+            affected = "downstream"
+            diagnosis = f"Outbound path impaired: {down_avg:.1f}% loss vs {up_avg:.1f}% return"
+        else:
+            affected = "upstream"
+            diagnosis = f"Inbound path impaired: {up_avg:.1f}% loss vs {down_avg:.1f}% outbound"
     else:
-        jitter = 0.0
-
-    # Detect buffer bloat: high tail latency (max - min spread) with low baseline
-    tail_latency_spread = max_latency - min_latency
-    has_buffer_bloat = (
-        min_latency < 10 and max_latency > 50 and
-        tail_latency_spread > 40  # Significant spike
-    )
-
-    # Classify based on latency characteristics
-    if has_buffer_bloat:
-        classification = "buffer_bloat"
-        reason = f"Buffer bloat detected: min={min_latency:.1f}ms, max={max_latency:.1f}ms (tail spike)"
-        is_stable = False
-
-    elif avg_latency > 100 and jitter > 20:
-        classification = "high_variance_high_latency"
-        reason = f"High baseline + high variance: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
-        is_stable = False
-
-    elif avg_latency < 20 and jitter < 2:
-        classification = "stable_low"
-        reason = f"Stable low latency: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
-        is_stable = True
-
-    elif avg_latency < 50 and jitter < 2:
-        classification = "stable_medium"
-        reason = f"Stable medium latency: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
-        is_stable = True
-
-    elif avg_latency >= 50 or jitter > 2:
-        classification = "variable"
-        reason = f"Variable latency: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
-        is_stable = False
-
-    else:
-        classification = "variable"
-        reason = f"Variable pattern: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
-        is_stable = False
+        affected = None
+        diagnosis = "No significant asymmetry detected"
 
     return {
-        "classification": classification,
-        "avg_latency_ms": round(avg_latency, 2),
-        "min_latency_ms": round(min_latency, 2),
-        "max_latency_ms": round(max_latency, 2),
-        "jitter_ms": round(jitter, 2),
-        "is_stable": is_stable,
-        "is_uncertain": is_uncertain,
-        "has_buffer_bloat": has_buffer_bloat,
-        "classification_reason": reason
+        "is_asymmetric": is_asymmetric,
+        "affected_direction": affected,
+        "loss_differential_pct": round(differential, 2),
+        "downstream_avg": round(down_avg, 2),
+        "upstream_avg": round(up_avg, 2),
+        "diagnosis": diagnosis
     }

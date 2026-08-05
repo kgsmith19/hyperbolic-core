@@ -23,7 +23,8 @@ from .diagnostic_engine import (
     rank_hypotheses,
     correlate_with_history,
     calculate_confidence_from_history,
-    classify_latency,
+    classify_packet_loss_pattern,
+    detect_asymmetric_loss,
 )
 
 WINDOW_S = 120
