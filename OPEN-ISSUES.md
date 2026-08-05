@@ -21,38 +21,35 @@ diagnosis is not mistaken for a clean bill of health.
 
 ---
 
-## 2. Modem DOCSIS scraper needs a rewrite — device is a router/modem combo
+## 2. ~~Modem DOCSIS scraper needs a rewrite~~ — RESOLVED 2026-08-05
 
-**Surfaced:** 2026-08-05. **Updated:** 2026-08-05, after credentials were set.
+Device is a NETGEAR CAX80 (modem+router combo, matches the built-in-Wi-Fi box
+Kyle described). The real status page is `DocsisStatusAdv.htm`, reached via
+the UI's "Cable Connection" link — not `DocsisStatus.htm` (404s on this
+firmware) and not `RouterStatus.htm` (a different page entirely).
 
-Router (`192.168.50.1`, ASUS) auth and connectivity are confirmed working.
+The channel tables are never present as HTML text: the firmware assigns a
+pipe-delimited string to a JS `tagValueList` variable inside each of five
+`Init*TagValue()` functions, which the page's own script splits and renders
+client-side. Confirmed against public writeups from people who reverse
+engineered the same firmware family (`hdholm/ModemCheck`,
+`pinowudi/netgear_cm700_status`) before capturing the real page and verifying
+field-for-field.
 
-Modem (`192.168.100.1`) auth also works and is confirmed **not** the earlier
-401 — that was the device's single-session lock rejecting Python's request
-while Kyle was logged in via browser, not a code or credential bug. It cleared
-the moment he logged out. (Ruled out: a CSRF-cookie theory that looked
-plausible but was disproved by testing — a bare Basic Auth request with no
-cookie jar succeeded once the browser session was gone.)
+`environ.parse_docsis_status()` now extracts each function's body by
+brace-matching, strips the stale example assignment every function also
+carries inside a `/* */` comment (a naive regex would grab that instead of the
+live data), and parses the pipe-delimited rows. Pure function, tested against
+a real captured fixture (`tests/fixtures/docsis_status_adv.js`) — 10 new tests
+in `test_environ.py::ParseDocsisStatusTest`.
 
-The real remaining problem: this is a **NETGEAR modem+router combo**
-(the same box Kyle described as having built-in Wi-Fi that was later disabled),
-not a bare cable modem. Its root page links `RouterStatus.htm`,
-`WirelessSettings.htm`, `PortForwarding.htm`, etc. — full router admin, still
-served even with the modem's own Wi-Fi off. `environ.modem()`'s regex parser
-(written against generic Arris/Motorola markup) finds zero matches:
-
-- `DocsisStatus.htm` — 404, does not exist on this firmware
-- `RouterStatus.htm` — loads (50KB) but contains none of SNR / Power Level /
-  Codeword / Downstream / Upstream as literal text — the channel-quality data
-  is almost certainly populated client-side via JavaScript calling a separate
-  endpoint (likely a `.cgi` or JSON API) that has not yet been identified.
-
-**Fix:** find the real data endpoint (browser devtools Network tab while the
-status page loads is the fastest path — capture the XHR request), then point
-`environ.modem()` at it instead of guessing at static HTML.
-
-**Retire when:** a real scan returns non-empty `snr_db` / `power_dbmv` /
-`uncorrectables`.
+Verified against the live device, 3/3 consecutive runs: 24/24 downstream QAM
+channels and 1 active OFDM channel locked, SNR 40.6–42.0 dB, power all within
+spec, **zero uncorrectables everywhere**. The physical cable line is not
+currently the problem. One caveat: uncorrectables reset on modem reboot, and
+this modem had only ~3h uptime at capture time (Kyle disabled its Wi-Fi radio
+at 10:38 PM, which restarted the DOCSIS stack) — so this proves the line is
+clean *now*, not that it was clean during the earlier error bursts.
 
 ---
 
