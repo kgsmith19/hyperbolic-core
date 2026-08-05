@@ -1408,3 +1408,91 @@ def detect_blackhole_route(path: List[Dict]) -> Dict:
         "silent_failure_hops": len(silent_failures),
         "responsive_hops": len([h for h in path if h.get("responsive", False)])
     }
+
+
+def measure_tls_handshake(events: List[Dict]) -> Dict:
+    """Measure TLS handshake quality and duration."""
+    client_hello_time = None
+    server_hello_time = None
+    certificate_time = None
+    finished_time = None
+
+    for event in sorted(events, key=lambda e: e.get("timestamp", 0)):
+        msg_type = event.get("message_type", "")
+        if msg_type == "client_hello" and client_hello_time is None:
+            client_hello_time = event.get("timestamp")
+        elif msg_type == "server_hello" and server_hello_time is None:
+            server_hello_time = event.get("timestamp")
+        elif msg_type == "certificate" and certificate_time is None:
+            certificate_time = event.get("timestamp")
+        elif msg_type == "finished" and finished_time is None:
+            finished_time = event.get("timestamp")
+
+    duration = 0
+    if client_hello_time and finished_time:
+        duration = finished_time - client_hello_time
+
+    return {
+        "handshake_complete": finished_time is not None,
+        "duration_ms": duration,
+        "phases": {
+            "to_server_hello": (server_hello_time - client_hello_time) if (client_hello_time and server_hello_time) else 0,
+            "to_certificate": (certificate_time - client_hello_time) if (client_hello_time and certificate_time) else 0,
+            "total": duration
+        }
+    }
+
+
+def detect_tls_version(handshake: Dict) -> str:
+    """Detect negotiated TLS version."""
+    version = handshake.get("tls_version", "unknown")
+    version_map = {
+        "0x0301": "TLS1.0",
+        "0x0302": "TLS1.1",
+        "0x0303": "TLS1.2",
+        "0x0304": "TLS1.3"
+    }
+    return version_map.get(version, version)
+
+    for event in sorted(events, key=lambda e: e.get("timestamp", 0)):
+        current_route = event.get("route", None)
+        current_time = event.get("timestamp", 0)
+
+def detect_cipher_strength(cipher: str) -> str:
+    """Classify cipher suite strength."""
+    if "GCM" in cipher or "ChaCha" in cipher:
+        return "strong"
+    elif "CBC" in cipher:
+        return "weak"
+    else:
+        return "unknown"
+
+        if current_route:
+            last_route = current_route
+            last_time = current_time
+
+def analyze_http_protocol(responses: List[Dict]) -> Dict:
+    """Analyze HTTP protocol version and features."""
+    http2_count = sum(1 for r in responses if r.get("http_version") == "2.0")
+    http3_count = sum(1 for r in responses if r.get("http_version") == "3.0")
+    http1_count = len(responses) - http2_count - http3_count
+
+    return {
+        "http1_responses": http1_count,
+        "http2_responses": http2_count,
+        "http3_responses": http3_count,
+        "preferred_protocol": "http3" if http3_count > 0 else ("http2" if http2_count > 0 else "http1")
+    }
+
+
+def detect_connection_multiplexing(streams: List[Dict]) -> Dict:
+    """Detect multiplexing capability and efficiency."""
+    parallel_streams = sum(1 for s in streams if s.get("concurrent", False))
+    total_streams = len(streams)
+    utilization = (parallel_streams / total_streams * 100) if total_streams else 0
+
+    return {
+        "supports_multiplexing": parallel_streams > 0,
+        "concurrent_streams": parallel_streams,
+        "multiplexing_efficiency": utilization
+    }
