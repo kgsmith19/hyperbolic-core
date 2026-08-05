@@ -264,14 +264,21 @@ class ConfigurationMatrix:
         for var, config in high_impact_vars.items():
             if var in self.tests:
                 tested_values = set(self.tests[var].keys())
-                untested = [v for v in config["possible_values"] if v not in tested_values]
-                if untested:
-                    return {
-                        "variable": var,
-                        "value": untested[0],
-                        "expected_impact": config["impact"],
-                        "effort": config["effort"],
-                    }
+
+                any_failed = any(
+                    records[-1]["outcome"] == "fail"
+                    for records in self.tests[var].values() if records
+                )
+
+                if any_failed:
+                    untested = [v for v in config["possible_values"] if v not in tested_values]
+                    if untested:
+                        return {
+                            "variable": var,
+                            "value": untested[0],
+                            "expected_impact": config["impact"],
+                            "effort": config["effort"],
+                        }
 
         return {"action": "monitor"}
 
@@ -402,9 +409,9 @@ def get_diagnosis(results: DiagnosisResult) -> Diagnosis:
             router_state = router_info.get("state") if isinstance(router_info, dict) else router_info
             public_state = public_info.get("state") if isinstance(public_info, dict) else public_info
 
-            if router_state == "fail" and public_state == "ok":
+            if router_state == "fail" and public_state not in ["fail"]:
                 diagnosis.culprit = "router_dns"
-                diagnosis.confidence = 0.95
+                diagnosis.confidence = 0.95 if public_state == "ok" else 0.80
             elif router_state == "unavailable" and public_state == "ok":
                 diagnosis.culprit = None
                 diagnosis.note = "Router DNS unavailable; only public DNS tested"
