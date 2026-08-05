@@ -182,6 +182,66 @@ def _http_get(url, user=None, password=None, timeout=6):
         return None, f"{type(e).__name__}: {e}"
 
 
+def _asus_login(host, user, password, timeout=6):
+    """Authenticate to ASUS router via POST /login.cgi token flow.
+
+    Returns (token, error). On success, token is a string; on failure, error
+    explains why and token is None.
+    """
+    import base64, json, urllib.error, urllib.request
+
+    login_auth = base64.b64encode(f"{user}:{password or ''}".encode()).decode()
+    url = f"http://{host}/login.cgi"
+    req = urllib.request.Request(
+        url,
+        method="POST",
+        data=b"",
+        headers={
+            "User-Agent": "asusrouter-Android-DUTUtil-1.0.0.201",
+            "login_authorization": login_auth,
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read().decode("utf-8", "replace")
+            try:
+                data = json.loads(body)
+                token = data.get("asus_token")
+                if not token:
+                    return None, f"no asus_token in response"
+                return token, None
+            except ValueError:
+                return None, f"invalid JSON response: {body[:100]}"
+    except urllib.error.HTTPError as e:
+        return None, f"HTTP {e.code}"
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
+def _asus_get(host, hook, token, timeout=6):
+    """Query ASUS router API with an authenticated token.
+
+    Returns (body, error).
+    """
+    import urllib.error, urllib.request
+
+    url = f"http://{host}/appGet.cgi?hook={hook}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "asusrouter-Android-DUTUtil-1.0.0.201",
+            "Cookie": f"asus_token={token}",
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace"), None
+    except urllib.error.HTTPError as e:
+        return None, f"HTTP {e.code}"
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
 def _js_function_body(js, name):
     """Extract a JS function's body by brace-matching."""
     m = re.search(rf"function\s+{re.escape(name)}\s*\([^)]*\)\s*\{{", js)
@@ -322,11 +382,23 @@ def router(host=None, user=None, password=None):
     if not user:
         return _unavailable("no credentials: set ROUTER_USER / ROUTER_PASS in .env")
 
-    body, err = _http_get(f"http://{host}/appGet.cgi?hook=nvram_get(productid)",
-                          user, password)
+    token, err = _asus_login(host, user, password)
     if err:
         return {"state": "fail", "reason": err}
-    return {"state": "ok", "raw": body[:400]}
+
+    body, err = _asus_get(host, "nvram_get(wrs_protect_enable)", token)
+    if err:
+        return {"state": "fail", "reason": err}
+
+    # Parse nvram response: "nvram_get(key)=value" format, sometimes with multiple lines
+    aiprotection_enabled = False
+    for line in body.split("\n"):
+        if "wrs_protect_enable" in line and "=" in line:
+            value = line.split("=", 1)[1].strip()
+            aiprotection_enabled = value == "1"
+            break
+
+    return {"state": "ok", "aiprotection_enabled": aiprotection_enabled}
 
 
 def scan():
