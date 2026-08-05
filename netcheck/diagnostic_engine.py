@@ -1454,9 +1454,6 @@ def detect_tls_version(handshake: Dict) -> str:
     }
     return version_map.get(version, version)
 
-    for event in sorted(events, key=lambda e: e.get("timestamp", 0)):
-        current_route = event.get("route", None)
-        current_time = event.get("timestamp", 0)
 
 def detect_cipher_strength(cipher: str) -> str:
     """Classify cipher suite strength."""
@@ -1467,9 +1464,6 @@ def detect_cipher_strength(cipher: str) -> str:
     else:
         return "unknown"
 
-        if current_route:
-            last_route = current_route
-            last_time = current_time
 
 def analyze_http_protocol(responses: List[Dict]) -> Dict:
     """Analyze HTTP protocol version and features."""
@@ -1495,4 +1489,87 @@ def detect_connection_multiplexing(streams: List[Dict]) -> Dict:
         "supports_multiplexing": parallel_streams > 0,
         "concurrent_streams": parallel_streams,
         "multiplexing_efficiency": utilization
+    }
+
+
+def detect_buffer_saturation(window_events: List[Dict]) -> Dict:
+    """Detect if TCP send/receive buffers are saturated."""
+    saturated_sends = [e for e in window_events if e.get("send_buffer_percent", 0) >= 90]
+    saturated_recvs = [e for e in window_events if e.get("recv_buffer_percent", 0) >= 90]
+    saturated_any = [e for e in window_events if e.get("send_buffer_percent", 0) >= 90 or e.get("recv_buffer_percent", 0) >= 90]
+
+    return {
+        "send_buffer_saturated": len(saturated_sends) > 0,
+        "recv_buffer_saturated": len(saturated_recvs) > 0,
+        "saturation_events": len(saturated_sends) + len(saturated_recvs),
+        "saturation_frequency": len(saturated_any) / max(1, len(window_events))
+    }
+
+
+def measure_queue_depth(packets: List[Dict]) -> Dict:
+    """Measure application and network queue depths over time."""
+    if not packets:
+        return {"avg_depth": 0, "max_depth": 0, "queue_jitter": 0}
+    
+    depths = [p.get("queue_depth", 0) for p in packets]
+    avg_depth = sum(depths) / len(depths) if depths else 0
+    max_depth = max(depths) if depths else 0
+    
+    # Jitter: variance in queue depth
+    if len(depths) > 1:
+        variance = sum((d - avg_depth) ** 2 for d in depths) / len(depths)
+        jitter = variance ** 0.5
+    else:
+        jitter = 0
+    
+    return {
+        "avg_depth": avg_depth,
+        "max_depth": max_depth,
+        "queue_jitter": jitter
+    }
+
+
+def analyze_backpressure(events: List[Dict]) -> Dict:
+    """Detect backpressure signals from flow control."""
+    tcp_zero_window = [e for e in events if e.get("tcp_window", 1) == 0]
+    acks_delayed = [e for e in events if e.get("ack_delay_ms", 0) > 40]
+    retransmits = [e for e in events if e.get("flags", "").find("R") >= 0]
+    
+    backpressure_events = len(tcp_zero_window) + len(acks_delayed) + len(retransmits)
+    
+    return {
+        "backpressure_detected": backpressure_events > 0,
+        "zero_window_events": len(tcp_zero_window),
+        "delayed_ack_events": len(acks_delayed),
+        "retransmit_events": len(retransmits),
+        "total_backpressure_events": backpressure_events
+    }
+
+
+def classify_congestion_signal(metrics: Dict) -> str:
+    """Classify the type of congestion detected."""
+    if metrics.get("send_buffer_saturated") or metrics.get("recv_buffer_saturated"):
+        return "buffer_exhaustion"
+    if metrics.get("backpressure_detected"):
+        return "flow_control"
+    if metrics.get("queue_jitter", 0) > 10:
+        return "queue_instability"
+    if metrics.get("max_depth", 0) > 100:
+        return "deep_queue_buildup"
+    return "healthy"
+
+
+def measure_buffer_efficiency(buffer_events: List[Dict]) -> Dict:
+    """Analyze buffer utilization and efficiency."""
+    useful_bytes = sum(e.get("bytes_acknowledged", 0) for e in buffer_events)
+    wasted_retransmits = sum(e.get("retransmitted_bytes", 0) for e in buffer_events)
+    
+    efficiency = 100.0 if (useful_bytes + wasted_retransmits) == 0 else (
+        useful_bytes / (useful_bytes + wasted_retransmits) * 100
+    )
+    
+    return {
+        "useful_bytes_transmitted": useful_bytes,
+        "wasted_bytes_retransmitted": wasted_retransmits,
+        "buffer_efficiency_percent": efficiency
     }

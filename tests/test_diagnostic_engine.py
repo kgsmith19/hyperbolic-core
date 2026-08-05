@@ -813,5 +813,275 @@ class DualStackIsolationTest(unittest.TestCase):
         self.assertFalse(stored["path_asymmetry"])
 
 
+class BufferSaturationDetectionTest(unittest.TestCase):
+    """PDD: Buffer saturation invariants hold across window sizes."""
+
+    def test_no_saturation_when_buffers_below_threshold(self):
+        """Healthy buffers (< 90%) are not flagged as saturated."""
+        events = [
+            {"send_buffer_percent": 50, "recv_buffer_percent": 60},
+            {"send_buffer_percent": 70, "recv_buffer_percent": 80},
+        ]
+        result = diagnose.detect_buffer_saturation(events)
+
+        self.assertFalse(result["send_buffer_saturated"])
+        self.assertFalse(result["recv_buffer_saturated"])
+        self.assertEqual(result["saturation_events"], 0)
+
+    def test_saturation_detected_when_above_threshold(self):
+        """Send buffers >= 90% are flagged as saturated."""
+        events = [
+            {"send_buffer_percent": 95, "recv_buffer_percent": 50},
+        ]
+        result = diagnose.detect_buffer_saturation(events)
+
+        self.assertTrue(result["send_buffer_saturated"])
+        self.assertFalse(result["recv_buffer_saturated"])
+        self.assertEqual(result["saturation_events"], 1)
+
+    def test_saturation_frequency_decreases_with_more_healthy_events(self):
+        """Saturation frequency is the ratio of saturated to total events."""
+        healthy = [{"send_buffer_percent": 50, "recv_buffer_percent": 50}] * 9
+        saturated = [{"send_buffer_percent": 95, "recv_buffer_percent": 95}] * 1
+        events = healthy + saturated
+
+        result = diagnose.detect_buffer_saturation(events)
+
+        self.assertTrue(result["send_buffer_saturated"])
+        self.assertEqual(result["saturation_frequency"], 0.1)  # 1 out of 10
+
+
+class QueueDepthAnalysisTest(unittest.TestCase):
+    """SDD: Queue depth measurement scenarios."""
+
+    def test_empty_packets_returns_zeros(self):
+        """Empty packet list returns zero depths and jitter."""
+        result = diagnose.measure_queue_depth([])
+
+        self.assertEqual(result["avg_depth"], 0)
+        self.assertEqual(result["max_depth"], 0)
+        self.assertEqual(result["queue_jitter"], 0)
+
+    def test_queue_depth_captures_max_and_average(self):
+        """Queue depth tracks max and average depth."""
+        packets = [
+            {"queue_depth": 10},
+            {"queue_depth": 20},
+            {"queue_depth": 30},
+        ]
+        result = diagnose.measure_queue_depth(packets)
+
+        self.assertEqual(result["avg_depth"], 20)
+        self.assertEqual(result["max_depth"], 30)
+
+    def test_queue_jitter_reflects_depth_variance(self):
+        """Queue jitter increases with variance in depth."""
+        stable = [{"queue_depth": 15}] * 5
+        result_stable = diagnose.measure_queue_depth(stable)
+
+        variable = [
+            {"queue_depth": 5},
+            {"queue_depth": 15},
+            {"queue_depth": 25},
+        ]
+        result_variable = diagnose.measure_queue_depth(variable)
+
+        self.assertGreater(result_variable["queue_jitter"], result_stable["queue_jitter"])
+
+
+class BackpressureDetectionTest(unittest.TestCase):
+    """SDD: Backpressure scenarios (zero window, delayed acks, retransmits)."""
+
+    def test_no_backpressure_in_healthy_flow(self):
+        """Healthy flow has no zero window, delayed acks, or retransmits."""
+        events = [
+            {"tcp_window": 32768, "ack_delay_ms": 5, "flags": "A"},
+            {"tcp_window": 32768, "ack_delay_ms": 10, "flags": "A"},
+        ]
+        result = diagnose.analyze_backpressure(events)
+
+        self.assertFalse(result["backpressure_detected"])
+        self.assertEqual(result["total_backpressure_events"], 0)
+
+    def test_zero_window_events_counted(self):
+        """Zero window TCP events are detected."""
+        events = [
+            {"tcp_window": 0, "ack_delay_ms": 5, "flags": "A"},
+            {"tcp_window": 1024, "ack_delay_ms": 5, "flags": "A"},
+        ]
+        result = diagnose.analyze_backpressure(events)
+
+        self.assertEqual(result["zero_window_events"], 1)
+        self.assertTrue(result["backpressure_detected"])
+
+    def test_delayed_ack_detection(self):
+        """ACK delays > 40ms indicate backpressure."""
+        events = [
+            {"tcp_window": 32768, "ack_delay_ms": 50, "flags": "A"},
+            {"tcp_window": 32768, "ack_delay_ms": 10, "flags": "A"},
+        ]
+        result = diagnose.analyze_backpressure(events)
+
+        self.assertEqual(result["delayed_ack_events"], 1)
+        self.assertTrue(result["backpressure_detected"])
+
+    def test_retransmit_events_detected(self):
+        """Retransmit flags (R in flags) are counted."""
+        events = [
+            {"tcp_window": 32768, "ack_delay_ms": 5, "flags": "R"},
+            {"tcp_window": 32768, "ack_delay_ms": 5, "flags": "A"},
+        ]
+        result = diagnose.analyze_backpressure(events)
+
+        self.assertEqual(result["retransmit_events"], 1)
+        self.assertTrue(result["backpressure_detected"])
+
+
+class CongestionClassificationTest(unittest.TestCase):
+    """SDD: Congestion scenarios classified by type."""
+
+    def test_buffer_exhaustion_classified(self):
+        """Buffer saturation is classified as buffer_exhaustion."""
+        metrics = {
+            "send_buffer_saturated": True,
+            "recv_buffer_saturated": False,
+            "backpressure_detected": False,
+            "queue_jitter": 2,
+            "max_depth": 10,
+        }
+        result = diagnose.classify_congestion_signal(metrics)
+
+        self.assertEqual(result, "buffer_exhaustion")
+
+    def test_flow_control_classified(self):
+        """Backpressure signals classified as flow_control."""
+        metrics = {
+            "send_buffer_saturated": False,
+            "recv_buffer_saturated": False,
+            "backpressure_detected": True,
+            "queue_jitter": 2,
+            "max_depth": 10,
+        }
+        result = diagnose.classify_congestion_signal(metrics)
+
+        self.assertEqual(result, "flow_control")
+
+    def test_queue_instability_classified(self):
+        """High jitter classified as queue_instability."""
+        metrics = {
+            "send_buffer_saturated": False,
+            "recv_buffer_saturated": False,
+            "backpressure_detected": False,
+            "queue_jitter": 15,
+            "max_depth": 10,
+        }
+        result = diagnose.classify_congestion_signal(metrics)
+
+        self.assertEqual(result, "queue_instability")
+
+    def test_deep_queue_classified(self):
+        """Deep queue buildup (> 100) is recognized."""
+        metrics = {
+            "send_buffer_saturated": False,
+            "recv_buffer_saturated": False,
+            "backpressure_detected": False,
+            "queue_jitter": 5,
+            "max_depth": 150,
+        }
+        result = diagnose.classify_congestion_signal(metrics)
+
+        self.assertEqual(result, "deep_queue_buildup")
+
+    def test_healthy_when_all_metrics_good(self):
+        """All-healthy metrics classify as healthy."""
+        metrics = {
+            "send_buffer_saturated": False,
+            "recv_buffer_saturated": False,
+            "backpressure_detected": False,
+            "queue_jitter": 2,
+            "max_depth": 10,
+        }
+        result = diagnose.classify_congestion_signal(metrics)
+
+        self.assertEqual(result, "healthy")
+
+
+class BufferEfficiencyTest(unittest.TestCase):
+    """PDD: Buffer efficiency is bounded [0, 100]."""
+
+    def test_perfect_efficiency_with_no_retransmits(self):
+        """No retransmits means 100% efficiency."""
+        events = [
+            {"bytes_acknowledged": 1000, "retransmitted_bytes": 0},
+        ]
+        result = diagnose.measure_buffer_efficiency(events)
+
+        self.assertEqual(result["buffer_efficiency_percent"], 100.0)
+        self.assertEqual(result["useful_bytes_transmitted"], 1000)
+        self.assertEqual(result["wasted_bytes_retransmitted"], 0)
+
+    def test_efficiency_decreases_with_retransmits(self):
+        """Efficiency drops as retransmit ratio increases."""
+        few_retransmits = [
+            {"bytes_acknowledged": 1000, "retransmitted_bytes": 100},
+        ]
+        result_few = diagnose.measure_buffer_efficiency(few_retransmits)
+
+        many_retransmits = [
+            {"bytes_acknowledged": 1000, "retransmitted_bytes": 500},
+        ]
+        result_many = diagnose.measure_buffer_efficiency(many_retransmits)
+
+        self.assertGreater(result_few["buffer_efficiency_percent"], result_many["buffer_efficiency_percent"])
+
+    def test_zero_bytes_returns_perfect_efficiency(self):
+        """No data transmitted defaults to 100% (healthy state)."""
+        events = [
+            {"bytes_acknowledged": 0, "retransmitted_bytes": 0},
+        ]
+        result = diagnose.measure_buffer_efficiency(events)
+
+        self.assertEqual(result["buffer_efficiency_percent"], 100.0)
+
+
+class BufferQueueIntegrationTest(unittest.TestCase):
+    """TDD: Buffer/queue analysis integrates into DiagnosisResult."""
+
+    def test_buffer_saturation_integrates(self):
+        """Buffer saturation results stored in DiagnosisResult."""
+        results = diagnose.DiagnosisResult()
+        events = [
+            {"send_buffer_percent": 95, "recv_buffer_percent": 85},
+        ]
+        sat_result = diagnose.detect_buffer_saturation(events)
+        results.add("buffer_saturation", sat_result)
+
+        stored = results.tests.get("buffer_saturation")
+        self.assertIsNotNone(stored)
+        self.assertTrue(stored["send_buffer_saturated"])
+
+    def test_congestion_classification_drives_recommendations(self):
+        """Congestion classification informs actionable fixes."""
+        metrics = {
+            "send_buffer_saturated": True,
+            "recv_buffer_saturated": False,
+            "backpressure_detected": False,
+            "queue_jitter": 2,
+            "max_depth": 10,
+        }
+        congestion_type = diagnose.classify_congestion_signal(metrics)
+
+        # Verify recommendation could be derived from type
+        recommendations = {
+            "buffer_exhaustion": "Increase TCP buffer size (SO_SNDBUF/SO_RCVBUF)",
+            "flow_control": "Check receiver's buffer status; retransmit may help",
+            "queue_instability": "Investigate application queue management",
+            "deep_queue_buildup": "Monitor application processing rate",
+            "healthy": "No action needed"
+        }
+
+        self.assertIn(congestion_type, recommendations)
+
+
 if __name__ == "__main__":
     unittest.main()
