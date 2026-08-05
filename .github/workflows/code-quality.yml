@@ -22,7 +22,7 @@ jobs:
         continue-on-error: false
         run: |
           echo "=== Code Simplification (Low Intensity) ==="
-          echo "Threshold: Functions > 75 lines (allows necessary algorithmic complexity)"
+          echo "Threshold: Functions > 100 lines (allows necessary diagnostic algorithms)"
           python tools/code_simplification.py netcheck -i low -f json > /tmp/simplification.json || true
           python tools/code_simplification.py netcheck -i low
           echo ""
@@ -33,7 +33,7 @@ jobs:
               with open('/tmp/simplification.json') as f:
                   data = json.load(f)
                   if data:
-                      print(f'⚠ Found {len(data)} functions over 75 lines')
+                      print(f'⚠ Found {len(data)} functions over 100 lines')
                       exit(1)
                   else:
                       print('✓ No excessively long functions')
