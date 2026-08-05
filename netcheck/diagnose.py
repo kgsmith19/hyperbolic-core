@@ -27,11 +27,11 @@ from .diagnostic_engine import (
     detect_happy_eyeballs,
     detect_dual_stack_preference,
     detect_nat64_translation,
-    analyze_routing_path,
-    detect_route_flapping,
-    classify_hop_latency,
-    measure_hop_stability,
-    detect_blackhole_route,
+    detect_buffer_saturation,
+    measure_queue_depth,
+    analyze_backpressure,
+    classify_congestion_signal,
+    measure_buffer_efficiency,
 )
 
 WINDOW_S = 120
