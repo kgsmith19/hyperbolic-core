@@ -1289,3 +1289,89 @@ def detect_nat64_translation(ipv6_addrs: List[str]) -> Dict:
         "translated_addresses": translated,
         "translation_type": "nat64" if translated else "none"
     }
+
+
+def analyze_dns_resolution(primary: Dict, secondary: Dict) -> Dict:
+    """Analyze DNS resolver quality and detect failures."""
+    primary_status = primary.get("status", "unavailable")
+    secondary_status = secondary.get("status", "unavailable")
+    primary_latency = primary.get("latency_ms", -1)
+    secondary_latency = secondary.get("latency_ms", -1)
+
+    return {
+        "primary_working": primary_status == "success",
+        "secondary_working": secondary_status == "success",
+        "both_working": primary_status == "success" and secondary_status == "success",
+        "both_failed": primary_status == "fail" and secondary_status == "fail",
+        "both_timeout": primary_status == "timeout" and secondary_status == "timeout",
+        "asymmetric_failure": (primary_status == "fail") != (secondary_status == "fail"),
+        "primary_latency_ms": primary_latency,
+        "secondary_latency_ms": secondary_latency,
+        "latency_difference": abs(primary_latency - secondary_latency) if primary_latency > 0 and secondary_latency > 0 else 0
+    }
+
+
+def classify_dns_failure(status: str, response_code: Optional[str], latency_ms: int) -> str:
+    """Classify DNS query failure type."""
+    if status == "success":
+        return "working"
+    if status == "timeout":
+        return "timeout"
+    if response_code == "NXDOMAIN":
+        return "nxdomain"
+    if response_code == "SERVFAIL":
+        return "servfail"
+    if response_code == "REFUSED":
+        return "refused"
+    if response_code in ("FORMERR", "NOTIMPL"):
+        return "query_error"
+    if latency_ms > 5000:
+        return "slow_timeout"
+    return "failure"
+
+
+def detect_dns_resolver_specific() -> Dict:
+    """Detect if DNS issue is resolver-specific vs upstream."""
+    pass
+
+
+def measure_dns_caching(queries: List[Dict]) -> Dict:
+    """Measure DNS caching behavior and TTL impact."""
+    if not queries:
+        return {"cached_queries": 0, "ttl_average": 0}
+
+    latencies = [q.get("latency_ms", 0) for q in queries if q.get("cached", False)]
+    ttls = [q.get("ttl", 0) for q in queries if q.get("ttl", 0) > 0]
+
+    return {
+        "cached_queries": len(latencies),
+        "ttl_average": sum(ttls) / len(ttls) if ttls else 0,
+        "cache_hit_latency_avg": sum(latencies) / len(latencies) if latencies else 0,
+        "cache_effectiveness": len(latencies) / len(queries) if queries else 0
+    }
+
+
+def analyze_dns_latency_pattern(samples: List[Dict]) -> str:
+    """Classify DNS latency pattern."""
+    if not samples or len(samples) < 3:
+        return "insufficient_data"
+
+    latencies = [s.get("latency_ms", 0) for s in samples if s.get("status") == "success"]
+    if not latencies:
+        return "all_failed"
+
+    avg = sum(latencies) / len(latencies)
+    variance = sum((x - avg) ** 2 for x in latencies) / len(latencies)
+    stddev = variance ** 0.5
+
+    if avg < 5:
+        return "local_resolver"
+    if avg < 20:
+        return "stable_fast"
+    if avg < 100 and stddev < 20:
+        return "stable_normal"
+    if stddev > avg * 0.5:
+        return "unstable"
+    if avg > 500:
+        return "slow_or_distant"
+    return "normal"

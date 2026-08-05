@@ -27,6 +27,10 @@ from .diagnostic_engine import (
     detect_happy_eyeballs,
     detect_dual_stack_preference,
     detect_nat64_translation,
+    analyze_dns_resolution,
+    classify_dns_failure,
+    measure_dns_caching,
+    analyze_dns_latency_pattern,
 )
 
 WINDOW_S = 120
