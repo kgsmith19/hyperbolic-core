@@ -1291,87 +1291,120 @@ def detect_nat64_translation(ipv6_addrs: List[str]) -> Dict:
     }
 
 
-def analyze_dns_resolution(primary: Dict, secondary: Dict) -> Dict:
-    """Analyze DNS resolver quality and detect failures."""
-    primary_status = primary.get("status", "unavailable")
-    secondary_status = secondary.get("status", "unavailable")
-    primary_latency = primary.get("latency_ms", -1)
-    secondary_latency = secondary.get("latency_ms", -1)
+def analyze_routing_path(ipv4_path: List[Dict], ipv6_path: List[Dict]) -> Dict:
+    """Analyze routing asymmetry between IPv4 and IPv6 paths."""
+    ipv4_hops = len([h for h in ipv4_path if h.get("responsive", False)])
+    ipv6_hops = len([h for h in ipv6_path if h.get("responsive", False)])
+
+    ipv4_first_fail = next((i for i, h in enumerate(ipv4_path) if not h.get("responsive", False)), None)
+    ipv6_first_fail = next((i for i, h in enumerate(ipv6_path) if not h.get("responsive", False)), None)
+
+    asymmetric = ipv4_first_fail != ipv6_first_fail
+    affected_stack = None
+    if asymmetric:
+        if ipv4_first_fail is not None and (ipv6_first_fail is None or ipv4_first_fail < ipv6_first_fail):
+            affected_stack = "ipv4"
+        elif ipv6_first_fail is not None:
+            affected_stack = "ipv6"
 
     return {
-        "primary_working": primary_status == "success",
-        "secondary_working": secondary_status == "success",
-        "both_working": primary_status == "success" and secondary_status == "success",
-        "both_failed": primary_status == "fail" and secondary_status == "fail",
-        "both_timeout": primary_status == "timeout" and secondary_status == "timeout",
-        "asymmetric_failure": (primary_status == "fail") != (secondary_status == "fail"),
-        "primary_latency_ms": primary_latency,
-        "secondary_latency_ms": secondary_latency,
-        "latency_difference": abs(primary_latency - secondary_latency) if primary_latency > 0 and secondary_latency > 0 else 0
+        "ipv4_hops_responding": ipv4_hops,
+        "ipv6_hops_responding": ipv6_hops,
+        "ipv4_first_failure_at_hop": ipv4_first_fail,
+        "ipv6_first_failure_at_hop": ipv6_first_fail,
+        "path_asymmetry": asymmetric,
+        "affected_stack": affected_stack,
+        "total_divergence": abs(ipv4_hops - ipv6_hops)
     }
 
 
-def classify_dns_failure(status: str, response_code: Optional[str], latency_ms: int) -> str:
-    """Classify DNS query failure type."""
-    if status == "success":
-        return "working"
-    if status == "timeout":
-        return "timeout"
-    if response_code == "NXDOMAIN":
-        return "nxdomain"
-    if response_code == "SERVFAIL":
-        return "servfail"
-    if response_code == "REFUSED":
-        return "refused"
-    if response_code in ("FORMERR", "NOTIMPL"):
-        return "query_error"
-    if latency_ms > 5000:
-        return "slow_timeout"
-    return "failure"
+def detect_route_flapping(events: List[Dict]) -> Dict:
+    """Detect route changes or BGP flapping."""
+    route_changes = []
+    last_route = None
+    last_time = None
 
+    for event in sorted(events, key=lambda e: e.get("timestamp", 0)):
+        current_route = event.get("route", None)
+        current_time = event.get("timestamp", 0)
 
-def detect_dns_resolver_specific() -> Dict:
-    """Detect if DNS issue is resolver-specific vs upstream."""
-    pass
+        if current_route and current_route != last_route and last_route is not None:
+            if last_time:
+                time_delta = current_time - last_time
+                route_changes.append({"time_since_last_change": time_delta})
 
+        if current_route:
+            last_route = current_route
+            last_time = current_time
 
-def measure_dns_caching(queries: List[Dict]) -> Dict:
-    """Measure DNS caching behavior and TTL impact."""
-    if not queries:
-        return {"cached_queries": 0, "ttl_average": 0}
-
-    latencies = [q.get("latency_ms", 0) for q in queries if q.get("cached", False)]
-    ttls = [q.get("ttl", 0) for q in queries if q.get("ttl", 0) > 0]
+    flapping = len(route_changes) > 2  # More than 2 changes indicates flapping
+    change_frequency = len(route_changes) / max(1, (events[-1].get("timestamp", 1) - events[0].get("timestamp", 0)))
 
     return {
-        "cached_queries": len(latencies),
-        "ttl_average": sum(ttls) / len(ttls) if ttls else 0,
-        "cache_hit_latency_avg": sum(latencies) / len(latencies) if latencies else 0,
-        "cache_effectiveness": len(latencies) / len(queries) if queries else 0
+        "route_changes_detected": len(route_changes),
+        "flapping": flapping,
+        "change_frequency_per_minute": change_frequency * 60 if events else 0,
+        "last_route_change_ago": route_changes[-1]["time_since_last_change"] if route_changes else None
     }
 
 
-def analyze_dns_latency_pattern(samples: List[Dict]) -> str:
-    """Classify DNS latency pattern."""
-    if not samples or len(samples) < 3:
+def classify_hop_latency(latencies: List[int]) -> str:
+    """Classify hop-level latency pattern."""
+    if not latencies or len(latencies) < 2:
         return "insufficient_data"
 
-    latencies = [s.get("latency_ms", 0) for s in samples if s.get("status") == "success"]
-    if not latencies:
-        return "all_failed"
+    valid_latencies = [l for l in latencies if l > 0]
+    if not valid_latencies:
+        return "all_unresponsive"
+
+    avg = sum(valid_latencies) / len(valid_latencies)
+    max_lat = max(valid_latencies)
+
+    if max_lat > 500:
+        return "distant_or_congested"
+    if avg > 100:
+        return "high_latency_hops"
+    if max_lat - (sum(valid_latencies) / len(valid_latencies) if valid_latencies else 0) > 200:
+        return "latency_spike"
+    if avg < 10:
+        return "local_network"
+    return "normal"
+
+
+def measure_hop_stability(hop_samples: List[Dict]) -> Dict:
+    """Measure how stable a hop's latency is."""
+    latencies = [s.get("latency_ms", 0) for s in hop_samples if s.get("latency_ms", 0) > 0]
+    if not latencies or len(latencies) < 2:
+        return {"stability": "unknown", "jitter": 0, "variance": 0}
 
     avg = sum(latencies) / len(latencies)
     variance = sum((x - avg) ** 2 for x in latencies) / len(latencies)
     stddev = variance ** 0.5
 
-    if avg < 5:
-        return "local_resolver"
-    if avg < 20:
-        return "stable_fast"
-    if avg < 100 and stddev < 20:
-        return "stable_normal"
-    if stddev > avg * 0.5:
-        return "unstable"
-    if avg > 500:
-        return "slow_or_distant"
-    return "normal"
+    if stddev < 5:
+        stability = "very_stable"
+    elif stddev < 20:
+        stability = "stable"
+    elif stddev < 50:
+        stability = "variable"
+    else:
+        stability = "unstable"
+
+    return {
+        "stability": stability,
+        "jitter_ms": stddev,
+        "variance": variance,
+        "average_latency_ms": avg
+    }
+
+
+def detect_blackhole_route(path: List[Dict]) -> Dict:
+    """Detect potential blackhole routing (no response, no error)."""
+    unresponsive_hops = [h for h in path if not h.get("responsive", False)]
+    silent_failures = [h for h in unresponsive_hops if h.get("error_response", False) is False]
+
+    return {
+        "potential_blackhole": len(silent_failures) > 0,
+        "silent_failure_hops": len(silent_failures),
+        "responsive_hops": len([h for h in path if h.get("responsive", False)])
+    }
