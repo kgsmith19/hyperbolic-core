@@ -71,9 +71,21 @@ explicit authorization — blocked by Windows admin rights, which this session
 does not have. Script with before/after verification and a one-line rollback
 left at `C:\code\guards\runbox\netcheck-fix-wifi-mode.ps1` for Kyle to run.
 
-**Retire when:** the runbox script has been run and either errors recur (rules
-it out) or a clean stretch under `watch` supports it (doesn't prove it, but
-supports it).
+**Update 2026-08-05, later:** Kyle ran the script — driver property confirmed
+changed (`3. 802.11ac` → `4. 802.11ax`, verified by the script's own
+before/after read). But the **live** connection did not renegotiate: `netsh
+wlan show interfaces` still read `802.11ac` afterward. Attempted a WLAN
+profile disconnect/reconnect to force it — briefly took Kyle's Wi-Fi down for
+~15s from a string-parsing bug (empty SSID extracted, reconnect failed until
+manually retried with the known SSID). Restored immediately. Live radio still
+read `802.11ac` even after the reconnect, meaning a profile-level
+disconnect/reconnect is not enough — the driver needs a full adapter cycle.
+Left as `netcheck-reset-wifi-adapter.ps1` in the runbox (also admin-gated, and
+deliberately not attempted live again tonight after the incident above).
+
+**Retire when:** the adapter-reset script has been run, `Radio type` reads
+`802.11ax` live, and either errors recur (rules it out) or a clean stretch
+under `watch` supports it (doesn't prove it, but supports it).
 
 ---
 
