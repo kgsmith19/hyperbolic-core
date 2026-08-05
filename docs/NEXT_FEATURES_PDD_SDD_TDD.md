@@ -1,5 +1,20 @@
 # Next Diagnostic Features: PDD/SDD/TDD Framework
 
+> **Status (2026-08-05): Features 1-5 below are implemented.** This was the
+> original planning doc for canonical hypotheses #1-5 (latency/jitter,
+> packet loss, MTU/PMTUD, TCP state, dual-stack); Features 1-4 map to
+> `diagnostic_engine.classify_latency`/`classify_latency_under_load`,
+> `classify_packet_loss`/`detect_asymmetric_loss`, `find_path_mtu`/
+> `diagnose_pmtud`, and `build_state_machine` respectively (see `API.md`),
+> and Feature 5 to `analyze_dual_stack` and its siblings. They were actually
+> built once already (Phases 1-5 in git history) but lost to a phase-
+> overwrite bug and restored from this spec — see `OPEN-ISSUES.md` #12 for
+> the full story. The gaps listed below that this doc's five features don't
+> cover (DNSSEC validation, TLS/HTTP protocol negotiation, stateful firewall
+> patterns) remain open; nothing in this repo implements them yet. Left
+> below verbatim as the original spec/planning record, not because it's
+> still a to-do list for Features 1-5.
+
 ## Current State Assessment
 
 **What You Have:**
@@ -471,37 +486,57 @@ def test_dual_stack_happy_eyeballs_timeout():
 
 ## Implementation Roadmap (Phase 2)
 
+**Status, 2026-08-05:** checked off below where actually implemented (see
+the banner at the top of this doc). Unchecked items are genuinely still
+open — mostly "wire this into the live per-tick path," which every sibling
+analysis function in `diagnostic_engine.py` (dual-stack, routing, TLS,
+buffering) also doesn't do; these classifiers are consistent with that
+existing pattern, not a gap unique to them.
+
 ### Sprint 1: Latency & Jitter (Week 1-2)
-- [ ] Add latency metric collection to probe runner
-- [ ] Implement `classify_latency()` with 4 categories
-- [ ] Add buffer bloat detection under load
-- [ ] Create 5+ tests covering all scenarios
+- [ ] Add latency metric collection to probe runner — `probes.ping` already
+      gives round-trip latency per tick; no dedicated collection *pipeline*
+      feeding `classify_latency` was added on top of that
+- [x] Implement `classify_latency()` with categories (5, not 4 — added
+      `stable_high` for the "high latency, low jitter" case the original 4
+      didn't have a bucket for)
+- [x] Add buffer bloat detection under load (`classify_latency_under_load`)
+- [x] Create 5+ tests covering all scenarios (7, `LatencyJitterClassifierTest`)
 - [ ] Integrate into diagnostic rules
 
 ### Sprint 2: Packet Loss Patterns (Week 2-3)
-- [ ] Implement burst detection algorithm
-- [ ] Implement random/steady loss detection
-- [ ] Add asymmetric path detection
-- [ ] Create 5+ tests
+- [x] Implement burst detection algorithm (`classify_packet_loss`)
+- [x] Implement random/steady loss detection (`steady_degradation`)
+- [x] Add asymmetric path detection (`detect_asymmetric_loss`)
+- [x] Create 5+ tests (6, `PacketLossPatternTest`)
 - [ ] Update hypothesis ranking with loss patterns
 
 ### Sprint 3: MTU Discovery (Week 3-4)
-- [ ] Binary search MTU discovery
-- [ ] PMTUD status checking
+- [~] MTU discovery — `environ.mtu()` walks a fixed descending list of
+      standard sizes (a linear search over 6 known values), not a binary
+      search; genuinely live against the real path via the DF bit
+- [x] PMTUD status checking (`diagnose_pmtud`)
 - [ ] Fragmentation latency measurement
-- [ ] Create 5+ tests
+- [x] Create 5+ tests (5, `MtuPmtudTest`)
 
 ### Sprint 4: TCP State Tracking (Week 4-5)
-- [ ] Packet capture (tcpdump/Wireshark parsing)
-- [ ] State machine builder
-- [ ] RST/timeout pattern detection
-- [ ] Create 5+ tests
+- [ ] Packet capture (tcpdump/Wireshark parsing) — out of scope; see
+      `OPEN-ISSUES.md` #12. `build_state_machine` classifies a list of
+      already-timestamped events; nothing produces those events from a
+      real connection yet
+- [x] State machine builder (`build_state_machine`)
+- [x] RST/timeout pattern detection (rejected/reset states, `syn_backoff`)
+- [x] Create 5+ tests (5, `TcpStateMachineTest`)
 
 ### Sprint 5: Dual-Stack Isolation (Week 5-6)
-- [ ] Separate IPv4/IPv6 probes
-- [ ] Happy Eyeballs RFC 8305 implementation
-- [ ] Fallback detection
-- [ ] Create 5+ tests
+(Predates this restoration — built in the original Phase 5, unaffected by
+the overwrite bug that hit Sprints 1-4.)
+- [ ] Separate IPv4/IPv6 probes — `analyze_dual_stack` takes pre-gathered
+      `ipv4_result`/`ipv6_result` dicts rather than probing both live itself
+- [x] Happy Eyeballs RFC 8305 implementation (`detect_happy_eyeballs`)
+- [x] Fallback detection (`analyze_dual_stack`'s `affected_stack`,
+      `detect_dual_stack_preference`)
+- [x] Create 5+ tests (`DualStackIsolationTest`)
 
 ---
 

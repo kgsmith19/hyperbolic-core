@@ -93,7 +93,7 @@ netcheck/__main__.py  (CLI: probe, watch, scan, diagnose, serve, sync, full-chec
    |             \-- verification_engine.py  (did the fix work?)
    |                    \-- monitoring_engine.py  (did it come back?)
    |
-   \-- server.py -------- dashboard_payload() --> ui.html (Alpine.js, offline, no CDN)
+   \-- server.py -------- payload() --> ui.html (Alpine.js, offline, no CDN)
 ```
 
 Everything upstream of `diagnose.py`/`all_diagnostics.py` (probes, environ,
@@ -209,7 +209,7 @@ tests/
 ├── test_diagnose.py, test_diagnostic_engine.py, test_configuration_matrix.py
 ├── test_all_diagnostics.py, test_{wifi,modem,nat,cgnat,router,interference}_diagnostics.py
 ├── test_fix_application.py, test_verification_engine.py, test_monitoring_engine.py
-├── test_server.py, test_diagnostic_website.py
+├── test_server.py
 ├── test_e2e_faults.py            end-to-end acceptance (Phase 23)
 └── fixtures/                     captured real command output
 ```
@@ -224,7 +224,7 @@ Primary test runner is `unittest` (stdlib, matching the "no pip" constraint):
 python -m unittest discover -s tests -t .
 ```
 
-426 tests, hermetic — no live network calls, no sleeps beyond a probe's own
+400 tests, hermetic — no live network calls, no sleeps beyond a probe's own
 timing (`test_e2e_faults.py`'s live-fault-injection tests are the one
 exception; they need `tc`/`sudo` and skip gracefully without them). CI
 (`.github/workflows/tests.yml`) additionally installs `pytest` to run the

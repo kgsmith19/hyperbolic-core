@@ -162,29 +162,34 @@ without a real lookup.
 
 ---
 
-## 5. PowerShell command built by string interpolation (security, latent)
+## 5. ~~PowerShell command built by string interpolation~~ — RESOLVED 2026-08-05
 
 **Surfaced:** 2026-08-05, `/security-review-kgs`.
 
-`environ.driver(name)` and `environ.tailscale(target)` interpolate a
-caller-supplied string into a PowerShell command
-(`netcheck/environ.py:83`, `:164`). The value sits inside single quotes
-(`-Name '%s'`), so a value containing `'` escapes and appends arbitrary
-PowerShell.
+`environ.driver(name)` and `environ.tailscale(target)` interpolated a
+caller-supplied string into a PowerShell command. `driver`'s value sat
+inside single quotes (`-Name '%s'`), so a value containing `'` would escape
+and append arbitrary PowerShell; `tailscale`'s value wasn't quoted at all
+(`Resolve-DnsName %s`), so it needed no escaping — any PowerShell-meaningful
+character worked directly.
 
-**Not exploitable as written.** Both are called with no arguments from
-`scan()`, so the values are always the literal defaults, and `NETCHECK_TARGET`
-reaches only `probes.sample` / `idle_hold`, which use argv lists and sockets —
-never a shell string.
+**Not exploitable as written** — both were called with no arguments from
+`scan()`, so the values were always the literal defaults, and
+`NETCHECK_TARGET` reaches only `probes.sample`/`idle_hold`, which use argv
+lists and sockets, never a shell string. Logged because the parameters
+invited the bug: wiring `--target` through to `tailscale()` would have been
+a one-line change turning an environment variable into command execution.
 
-It is logged because the parameters invite the bug: wiring `--target` through
-to `tailscale()` is a one-line change that would turn an environment variable
-into command execution.
-
-**Fix:** pass values as PowerShell parameters (`-Command "param($n) ..."` with
-`-Args`) rather than interpolating, or validate against a strict charset.
-
-**Retire when:** the interpolation is replaced or the parameters are removed.
+**Fix applied:** `environ._ps()` now takes an `args` tuple, appended to the
+subprocess argv after `-Command` rather than interpolated into the script
+text. Both callers reference the value via PowerShell's own `$args[0]`
+instead of splicing it into the script string, so a value can no longer
+break out of it regardless of its content.
+`test_environ.py::PowerShellArgumentSafetyTest` verifies a value containing
+a quote and a destructive command never appears in the script text and does
+appear as its own argv element instead (reproduced the exploit against the
+old code first, by mocking `subprocess.run` and `WINDOWS=True` — the
+malicious string appeared verbatim in the constructed script, three times).
 
 ---
 
@@ -205,16 +210,22 @@ recorded so a stale open issue doesn't get mistaken for a live one.
 
 ---
 
-## 7. Raw router output stored and mirrored (security, low)
+## 7. ~~Raw router output stored and mirrored~~ — RESOLVED (found already fixed 2026-08-05)
 
 **Surfaced:** 2026-08-05, `/security-review-kgs`.
 
-`environ.router()` returns `body[:400]` verbatim into `env_scans.payload`,
-which syncs to Supabase. The current query (`nvram_get(productid)`) returns a
-product string, but the code stores whatever the device replies — including
-anything sensitive if the endpoint or firmware changes. Not rendered in the UI.
+`environ.router()` returned `body[:400]` verbatim into `env_scans.payload`,
+which synced to Supabase. The query at the time (`nvram_get(productid)`)
+returned a product string, but the code stored whatever the device replied —
+including anything sensitive if the endpoint or firmware changed.
 
-**Fix:** parse the specific fields wanted instead of keeping the raw body.
+**Found already fixed** while working through the rest of this list: issue
+#3b's rewrite of `router()` onto the real ASUS token-auth flow (querying
+`wrs_protect_enable` instead of `productid`) changed its return value as a
+side effect — it now parses out only the single `aiprotection_enabled`
+boolean and returns that, with no raw body field anywhere in the result.
+Verified by reading the current function directly. This entry was never
+retired when that landed, same as #6.
 
 ---
 
@@ -269,7 +280,7 @@ confirmed out of scope.
 
 ---
 
-## 10. `server.py` carries a second, disconnected dashboard-payload API that returns fabricated data
+## 10. ~~`server.py` carries a second, disconnected dashboard-payload API that returns fabricated data~~ — RESOLVED 2026-08-05
 
 **Surfaced:** 2026-08-05, Phase 27 dashboard review.
 
@@ -289,45 +300,48 @@ database. That is exactly the "silent fallback" pattern `AGENTS.md`
 prohibits (a missing measurement must read as `unavailable`, never as a
 faked `ok`-shaped value), just one layer further from a real probe.
 
-Left as-is for this phase rather than deleted: removing ~30 passing tests
-and a chunk of implementation is a bigger call than "add a dashboard
-feature," the task this entry was found under. Flagging it here instead so
-it's a decision, not an oversight.
+Left as a decision rather than deleted at the time it was found (a bigger
+call than "add a dashboard feature," the task it was found under) —
+revisited in a later pass explicitly aimed at closing out open issues.
 
-**Fix:** either wire `dashboard_payload()` up to real data (pulling from
-`store`/`diagnose` the way `payload()` does) and point `ui.html` at it if
-its richer shape (config snapshots, regressions, applied-fixes history) is
-still wanted, or delete it and `test_diagnostic_website.py` along with it if
-`payload()` already covers what the dashboard needs.
-
-**Retire when:** one of the above happens.
+**Fix applied:** deleted `dashboard_payload()`, `get_api_data()`,
+`get_api_configuration_snapshot()`, `get_api_diagnostic_history()`, and
+`test_diagnostic_website.py`'s ~30 tests along with them. `payload()`
+already covers everything `ui.html` actually renders; there was no real
+functionality to preserve, only the fabricated-data risk to remove. Chose
+delete over wire-up per this pass's "lean coding, high ROI" instruction —
+wiring up a richer payload shape nobody was consuming would have been new
+speculative work, not a fix.
 
 ---
 
-## 11. Two pre-existing, minor `ui.html` rough edges found during Playwright testing
+## 11. Two pre-existing, minor `ui.html` rough edges found during Playwright testing — 1 of 2 RESOLVED 2026-08-05
 
 **Surfaced:** 2026-08-05, Phase 27 (found while visually verifying the new
 dashboard features in a real browser — pre-dates this phase's changes,
 confirmed by testing against the version of `ui.html` from the initial
 commit).
 
-1. **Console errors on load/refresh.** Chromium logs `<rect> attribute x:
-   Unexpected end of attribute` (x2) and `ReferenceError: b is not defined`
-   (x2) plus an `importNode` TypeError, around the failure-band rectangles
-   in the latency chart (`x-for="b in chart.bands"`). Cosmetic — the chart
-   still renders correctly in every screenshot taken — but real console
-   noise, likely an Alpine/SVG namespaced-attribute morphing quirk.
-2. **"Recent samples" table needs horizontal scroll at narrow widths**, and
-   nothing hints that it scrolls: at the card's default ~283px width, only
-   `when` + part of `verdict` fit before the `.scroll` div's overflow-x
-   kicks in, so `gw`/`inet`/`dns`/`tls` are scrolled off with no visible
-   scrollbar affordance in a quick glance.
+1. **Console errors on load/refresh — still open.** Chromium logs `<rect>
+   attribute x: Unexpected end of attribute` (x2) and `ReferenceError: b is
+   not defined` (x2) plus an `importNode` TypeError, around the failure-band
+   rectangles in the latency chart (`x-for="b in chart.bands"`). Cosmetic —
+   the chart still renders correctly in every screenshot taken — but real
+   console noise, likely an Alpine/SVG namespaced-attribute morphing quirk.
+   Not attempted: root-causing this means either bisecting Alpine's SVG
+   handling or restructuring the bands away from `x-for` inside an `<svg>`,
+   and risks introducing a real regression in exchange for silencing a
+   dev-console-only warning — a worse trade than leaving it recorded.
+2. **~~"Recent samples" table needs horizontal scroll at narrow widths~~ —
+   RESOLVED.** `.scroll` now carries a two-edge fade (a CSS-only "scroll
+   shadow": four layered gradients, the inner two `background-attachment:
+   local` so they scroll with the content and vanish at the real start/end,
+   the outer two fixed so a hint is visible even mid-scroll). Verified in a
+   real Playwright session: the right-edge fade shows at rest and
+   disappears once scrolled to the last column, and the left-edge fade
+   appears in its place.
 
-Neither blocks reading the dashboard. Recorded rather than fixed here since
-both are pre-existing and outside a "add dashboard features" phase's scope.
-
-**Retire when:** the console errors are root-caused and fixed, and/or the
-table gets a scroll-hint (e.g. a fade edge or narrower default columns).
+**Retire when:** the console errors are root-caused and fixed.
 
 ---
 

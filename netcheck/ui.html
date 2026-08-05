@@ -87,7 +87,23 @@
   .network { --tone: var(--bad); } .server { --tone: var(--warn); }
   .client { --tone: var(--accent); } .unknown { --tone: var(--idle); }
 
-  .scroll { overflow-x: auto; max-height: 340px; overflow-y: auto; }
+  /* Scroll-shadow hint (OPEN-ISSUES.md #11): a table wider than its card
+     otherwise gives no visual sign there's more to the right. The two
+     gradients fade in only where content is actually scrolled past --
+     `local` ties them to the scrolling content so they vanish at the real
+     edges, not just the container's. */
+  .scroll {
+    overflow-x: auto; max-height: 340px; overflow-y: auto;
+    background:
+      linear-gradient(to right, var(--surface) 30%, transparent) local,
+      linear-gradient(to right, transparent, var(--surface) 70%) local,
+      linear-gradient(to right, color-mix(in oklab, var(--text) 20%, transparent), transparent),
+      linear-gradient(to right, transparent, color-mix(in oklab, var(--text) 20%, transparent)) 100% 0;
+    background-repeat: no-repeat;
+    background-color: var(--surface);
+    background-size: 24px 100%, 24px 100%, 8px 100%, 8px 100%;
+    background-position: 0 0, 100% 0, 0 0, 100% 0;
+  }
   .empty { color: var(--muted); font-size: .87rem; padding: .4rem 0; }
   .muted { color: var(--muted); }
 

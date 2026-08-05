@@ -29,7 +29,6 @@ pass, not full automation.
   (Phase 25).
 - `docs/API.md`, `docs/QUICKSTART.md`, `docs/TROUBLESHOOTING.md`,
   `docs/CONTRIBUTING.md`, rewritten `docs/ARCHITECTURE.md` (Phase 24).
-
 - Restored `classify_latency`, `classify_latency_under_load`,
   `classify_packet_loss`, `detect_asymmetric_loss`, `find_path_mtu`,
   `diagnose_pmtud`, and `build_state_machine` in `diagnostic_engine.py` —
@@ -56,6 +55,25 @@ pass, not full automation.
   available — a false positive that let three tests fail for real instead
   of skip. It now actually adds and removes a netem rule (`OPEN-ISSUES.md`
   #12).
+- `environ.driver()`/`environ.tailscale()` built a PowerShell command by
+  string-interpolating a caller-supplied value into the script text — a
+  value containing a quote could escape and append arbitrary PowerShell.
+  Not exploitable as wired (both call sites only ever pass their own
+  literal defaults), but the parameters invited the bug. Values are now
+  passed as trailing subprocess arguments and referenced via PowerShell's
+  own `$args[0]` instead (`OPEN-ISSUES.md` #5).
+- Dashboard: the "Recent samples" table gave no visual sign it had more
+  columns to scroll to at narrow widths. Added a CSS-only scroll-shadow
+  hint on both edges (`OPEN-ISSUES.md` #11).
+
+### Removed
+- `server.py`'s `dashboard_payload()`/`get_api_data()`/
+  `get_api_configuration_snapshot()`/`get_api_diagnostic_history()` and
+  `test_diagnostic_website.py`'s ~30 tests exercising them — a second,
+  entirely disconnected dashboard API that returned hardcoded fabricated
+  values (`wifi_mode: None`, `system_uptime: 0`, etc.) regardless of the
+  real database, never reachable from `Handler.do_GET` or `ui.html`
+  (`OPEN-ISSUES.md` #10).
 
 ## [1.0.0] — first tagged release
 

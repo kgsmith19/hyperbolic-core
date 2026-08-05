@@ -116,7 +116,7 @@ done.
 python -m unittest discover -s tests -t .
 ```
 
-426 tests, hermetic — no network, no real API calls. Parsers are tested against
+400 tests, hermetic — no network, no real API calls. Parsers are tested against
 real command output captured from a live machine, in `tests/fixtures/`.
 
 The adversarial cases in `test_llmlog.py` are the ones worth knowing about:

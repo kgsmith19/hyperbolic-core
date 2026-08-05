@@ -419,8 +419,3 @@ dispatch (works with no subcommand given).
   `/api/data` (calls `payload()`) and serves `ui.html`/vendored Alpine for
   everything else. Malformed `?limit=` returns 400, not a crash.
 - `serve(conn, port=8787) -> HTTPServer` — used by `netcheck serve`.
-- `dashboard_payload(db, limit=500)`, `get_api_data(db, limit=500)`,
-  `get_api_configuration_snapshot(db)`, `get_api_diagnostic_history(db, limit=10)`
-  — **not wired into `Handler`/`ui.html`; dead code that returns fabricated
-  data** (`wifi_mode: None`, `system_uptime: 0`, etc., regardless of the
-  actual database). See `OPEN-ISSUES.md` #10 before building on these.

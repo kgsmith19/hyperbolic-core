@@ -5,7 +5,7 @@ need credentials must go quiet, not loud, when they have none.
 """
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from netcheck import diagnose, environ
 
@@ -58,6 +58,46 @@ class WifiPlatformDispatchTest(unittest.TestCase):
             environ.wifi()
 
         self.assertEqual(mock_run.call_args[0][0][0], "netsh")
+
+
+class PowerShellArgumentSafetyTest(unittest.TestCase):
+    """A caller-supplied value must never be interpolated into the
+    PowerShell script text -- passed as a separate subprocess argument
+    instead, so a value containing a quote can't break out of the script
+    and inject additional commands (OPEN-ISSUES.md #5). Not exploitable
+    today (both callers only ever pass their own literal defaults), but the
+    parameters invite the bug, so this locks the safe shape in with a test
+    rather than relying on nobody ever wiring a caller-supplied value
+    through."""
+
+    def _run_with_mocked_powershell(self, fn, malicious):
+        with patch("netcheck.environ.WINDOWS", True), \
+             patch("netcheck.environ.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+            fn(malicious)
+        return mock_run.call_args[0][0]
+
+    def test_driver_passes_name_as_a_subprocess_argument_not_interpolated(self):
+        malicious = "Wi-Fi'; Remove-Item C:\\ -Recurse -Force #"
+        argv = self._run_with_mocked_powershell(environ.driver, malicious)
+
+        command_index = argv.index("-Command")
+        script = argv[command_index + 1]
+        self.assertNotIn(malicious, script,
+                        "value must not be interpolated into the script text")
+        self.assertIn(malicious, argv[command_index + 2:],
+                     "value must be passed as its own subprocess argument")
+
+    def test_tailscale_passes_target_as_a_subprocess_argument_not_interpolated(self):
+        malicious = "x'; Remove-Item C:\\ -Recurse -Force #"
+        argv = self._run_with_mocked_powershell(environ.tailscale, malicious)
+
+        command_index = argv.index("-Command")
+        script = argv[command_index + 1]
+        self.assertNotIn(malicious, script,
+                        "value must not be interpolated into the script text")
+        self.assertIn(malicious, argv[command_index + 2:],
+                     "value must be passed as its own subprocess argument")
 
 
 class DriverFindingsTest(unittest.TestCase):

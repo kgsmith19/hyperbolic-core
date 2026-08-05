@@ -24,19 +24,25 @@ _AIRPORT = ("/System/Library/PrivateFrameworks/Apple80211.framework/"
             "Versions/Current/Resources/airport")
 
 
-def _ps(script, timeout=25):
+def _ps(script, timeout=25, args=()):
     """Run PowerShell and parse its JSON, returning (data, reason).
 
     `reason` carries the actual failure — a script error, a timeout, a
     non-Windows host. Collapsing all of those into a bare None once made a
     broken query report itself as 'adapter not found', which sent the
     diagnosis looking in the wrong place entirely.
+
+    `args` are passed as trailing subprocess arguments, available inside
+    `script` via PowerShell's own `$args` array — never interpolated into
+    the script text itself, so a caller-supplied value containing a quote
+    can't break out of the script and inject additional commands
+    (OPEN-ISSUES.md #5).
     """
     if not WINDOWS:
         return None, "not Windows"
     try:
         p = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script, *args],
             capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return None, f"powershell timed out after {timeout}s"
@@ -82,18 +88,20 @@ def congestion(channel, own_bssid=None):
 def driver(name="Wi-Fi"):
     """Adapter identity plus the settings that actually cause intermittent drops."""
     data, reason = _ps(
-        "$a=Get-NetAdapter -Name '%s' -EA SilentlyContinue;"
+        "$n=$args[0];"
+        "$a=Get-NetAdapter -Name $n -EA SilentlyContinue;"
         "if(-not $a){ exit };"
-        "$p=@{}; Get-NetAdapterAdvancedProperty -Name '%s' -EA SilentlyContinue |"
+        "$p=@{}; Get-NetAdapterAdvancedProperty -Name $n -EA SilentlyContinue |"
         " ForEach-Object { $p[$_.DisplayName]=$_.DisplayValue };"
-        "$pm=Get-NetAdapterPowerManagement -Name '%s' -EA SilentlyContinue;"
+        "$pm=Get-NetAdapterPowerManagement -Name $n -EA SilentlyContinue;"
         # [string] rather than .ToString('fmt'): DriverDate has no single-arg
         # ToString overload and throws, taking the whole query down with it.
         "[pscustomobject]@{adapter=$a.InterfaceDescription;"
         " driver=$a.DriverVersion; driver_date=[string]$a.DriverDate;"
         " link=$a.LinkSpeed; props=$p;"
         " allow_power_off=[string]$pm.AllowComputerToTurnOffDevice}"
-        " | ConvertTo-Json -Depth 4 -Compress" % (name, name, name))
+        " | ConvertTo-Json -Depth 4 -Compress",
+        args=[name])
     if not data:
         return _unavailable(reason or f"adapter {name!r} not found")
 
@@ -168,13 +176,15 @@ def tailscale(target="api.anthropic.com"):
     data, reason = _ps(
         "$a=Get-NetAdapter -InterfaceDescription 'Tailscale*' -EA SilentlyContinue;"
         "if(-not $a){ '{\"installed\":false}'; exit };"
-        "$ip=(Resolve-DnsName %s -Type A -EA SilentlyContinue |"
+        "$t=$args[0];"
+        "$ip=(Resolve-DnsName $t -Type A -EA SilentlyContinue |"
         " Where-Object IPAddress | Select-Object -First 1).IPAddress;"
         "$r=if($ip){ (Find-NetRoute -RemoteIPAddress $ip -EA SilentlyContinue |"
         " Select-Object -First 1).InterfaceAlias };"
         "[pscustomobject]@{installed=$true; up=($a.Status -eq 'Up');"
         " egress=[string]$r; in_path=($r -like 'Tailscale*')}"
-        " | ConvertTo-Json -Compress" % target)
+        " | ConvertTo-Json -Compress",
+        args=[target])
     if data is None:
         return _unavailable(reason or "could not query adapters")
     return dict(data, state="ok")
