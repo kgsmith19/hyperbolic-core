@@ -457,7 +457,7 @@ class ConfigurationMatrix:
         variable: str,
         from_value: str,
         to_value: str,
-        method: str,
+        method: str = "manual",
         date: str = None
     ):
         """Record a fix application."""
@@ -474,11 +474,15 @@ class ConfigurationMatrix:
         variable: str,
         errors_after: int,
         duration_hours: float,
-        verdict: str,
+        verdict: str = None,
         date: str = None
     ):
         """Record outcome after fix applied."""
         if variable in self.fixes_applied:
+            # Infer verdict from errors_after if not provided
+            if verdict is None:
+                verdict = "success" if errors_after == 0 else "partial" if errors_after < 5 else "failed"
+
             self.fixes_applied[variable].update({
                 "errors_after": errors_after,
                 "duration_hours": duration_hours,
@@ -518,9 +522,17 @@ class ConfigurationMatrix:
         post_errors = fix.get("errors_after", 0)
         reduction = 100 * (pre_errors - post_errors) / max(pre_errors, 1)
 
+        # Higher confidence for complete reduction
+        if reduction >= 100:
+            confidence = 0.99
+        elif reduction >= 80:
+            confidence = 0.95
+        else:
+            confidence = 0.5 + reduction / 100
+
         return {
             "error_reduction_pct": reduction,
-            "confidence": min(0.95, 0.5 + reduction / 100),
+            "confidence": min(0.99, confidence),
         }
 
     def analyze_culprit_trend(self, culprit: str) -> Dict:
@@ -882,13 +894,24 @@ def generate_recommendation(diagnosis: Dict, matrix: ConfigurationMatrix) -> Dic
             value = next_test.get("value")
             variable = next_test["variable"]
             instruction = f"Test {variable} = {value}"
+
+            # Calculate confidence based on error rate history
+            total_errors = 0
+            if variable in matrix.tests:
+                for value_records in matrix.tests[variable].values():
+                    for record in value_records:
+                        if record.get("error_count"):
+                            total_errors += record["error_count"]
+            confidence_level = "high" if total_errors >= 10 else "medium" if total_errors >= 5 else "low"
+
             return {
                 "action": "apply_fix",
                 "primary": variable,
                 "target": variable,
                 "value": value,
                 "instruction": instruction,
-                "effort": next_test.get("effort", "unknown")
+                "effort": next_test.get("effort", "unknown"),
+                "confidence": confidence_level
             }
 
     return {"action": "monitor"}
