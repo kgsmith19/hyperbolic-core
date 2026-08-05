@@ -1200,102 +1200,115 @@ def rank_recommendations(candidates: List[Dict]) -> List[Dict]:
     return sorted(candidates, key=roi_score, reverse=True)
 
 
-def discover_path_mtu(probe_results: List[Dict]) -> Dict:
-    """Discover path MTU via binary search results analysis."""
-    if not probe_results:
-        return {"path_mtu": None, "is_standard_mtu": False, "mtu_type": "unknown"}
+def track_tcp_handshake(events: List[Dict]) -> Dict:
+    """Track TCP 3-way handshake progress."""
+    complete = False
+    timeout = False
+    final_state = "closed"
+    duration = 0
+    failed_at = None
 
-    # Find largest size that doesn't fragment
-    non_frag = [p for p in probe_results if not p.get("fragmented", False)]
-    path_mtu = max([p["size"] for p in non_frag]) if non_frag else None
+    start_time = events[0].get("timestamp", 0) if events else 0
 
-    if not path_mtu:
-        return {"path_mtu": None, "is_standard_mtu": False, "mtu_type": "unknown"}
+    for event in events:
+        evt_type = event.get("event")
+        ts = event.get("timestamp", 0)
 
-    mtu_type, is_standard = _classify_mtu_value(path_mtu)
+        if evt_type == "syn_sent":
+            start_time = ts
+        elif evt_type == "syn_ack_received":
+            final_state = "syn_received"
+        elif evt_type == "ack_sent":
+            complete = True
+            final_state = "established"
+            duration = ts - start_time
+        elif evt_type == "timeout":
+            timeout = True
+            failed_at = "syn_ack_wait"
+            duration = ts - start_time
 
     return {
-        "path_mtu": path_mtu,
-        "is_standard_mtu": is_standard,
-        "mtu_type": mtu_type,
-        "pmtud_working": _check_pmtud_status(probe_results),
-        "blackhole_detected": _detect_pmtud_blackhole(probe_results),
-        "fragmentation_occurring": any(p.get("fragmented") for p in probe_results),
-        "pmtud_status": _get_pmtud_status(probe_results)
+        "handshake_complete": complete,
+        "handshake_duration_ms": duration,
+        "handshake_timeout": timeout,
+        "final_state": final_state,
+        "failed_at_stage": failed_at
     }
 
 
-def _classify_mtu_value(mtu: int) -> Tuple[str, bool]:
-    """Classify MTU value as standard or non-standard."""
-    standards = {
-        1500: "ethernet_standard",
-        1492: "pppoe_dsl",
-        9000: "jumbo_frames",
+def track_tcp_connection(events: List[Dict]) -> Dict:
+    """Track TCP connection lifecycle."""
+    termination_reason = "active"
+    abnormal = False
+    duration = 0
+    start_time = events[0].get("timestamp", 0) if events else 0
+
+    for event in events:
+        evt_type = event.get("event")
+        ts = event.get("timestamp", 0)
+
+        if evt_type == "established":
+            start_time = ts
+        elif evt_type == "fin_sent" or evt_type == "fin_received":
+            termination_reason = "normal_close"
+            abnormal = False
+            duration = ts - start_time
+        elif evt_type == "rst_received":
+            termination_reason = "reset_by_peer"
+            abnormal = True
+            duration = ts - start_time
+        elif evt_type == "timeout":
+            termination_reason = "timeout"
+            abnormal = True
+            duration = ts - start_time
+
+    return {
+        "termination_reason": termination_reason,
+        "abnormal_termination": abnormal,
+        "connection_duration_ms": duration
     }
     mtu_type = standards.get(mtu, "non_standard")
     is_standard = mtu in standards
     return mtu_type, is_standard
 
 
-def _check_pmtud_status(probe_results: List[Dict]) -> bool:
-    """Check if PMTUD is working (DF bit respected, ICMP errors sent)."""
-    for result in probe_results:
-        if result.get("df_bit_set") and result.get("icmp_error"):
-            return True
-    return False
+def analyze_retransmission_pattern(events: List[Dict]) -> Dict:
+    """Analyze TCP retransmission patterns."""
+    retransmits = sum(1 for e in events if e.get("event") == "retransmit")
+    sends = sum(1 for e in events if e.get("event") in ("data_sent", "retransmit"))
 
-
-def _detect_pmtud_blackhole(probe_results: List[Dict]) -> bool:
-    """Detect PMTUD black hole (no response to oversized packets)."""
-    for result in probe_results:
-        if result.get("df_bit_set") and result.get("timeout"):
-            return True
-    return False
-
-
-def _get_pmtud_status(probe_results: List[Dict]) -> str:
-    """Get PMTUD status: working, broken_fragmentation, or blackhole."""
-    if _check_pmtud_status(probe_results):
-        return "working"
-    if _detect_pmtud_blackhole(probe_results):
-        return "blackhole"
-    if any(p.get("fragmented") for p in probe_results):
-        return "broken_fragmentation"
-    return "unknown"
-
-
-def analyze_fragmentation_impact(probe_results: List[Dict]) -> Dict:
-    """Analyze latency impact of fragmentation."""
-    frag = [p for p in probe_results if p.get("fragmented")]
-    non_frag = [p for p in probe_results if not p.get("fragmented")]
-
-    if not frag or not non_frag:
-        return {
-            "fragmentation_degrades_latency": False,
-            "latency_increase_pct": 0,
-            "fragmentation_is_problem": False
-        }
-
-    frag_rtt = sum(p.get("rtt_ms", 0) for p in frag) / len(frag)
-    non_frag_rtt = sum(p.get("rtt_ms", 0) for p in non_frag) / len(non_frag)
-
-    increase_pct = 100 * (frag_rtt - non_frag_rtt) / max(non_frag_rtt, 1)
-    degrades = increase_pct > 50
+    rate = 100 * retransmits / max(sends, 1) if sends > 0 else 0
+    excessive = retransmits >= 2
 
     return {
-        "fragmentation_degrades_latency": degrades,
-        "latency_increase_pct": round(increase_pct, 1),
-        "fragmentation_is_problem": degrades and increase_pct > 100
+        "retransmit_count": retransmits,
+        "retransmit_rate_pct": round(rate, 1),
+        "excessive_retransmits": excessive
     }
 
 
-def calculate_mss_from_mtu(mtu: int) -> Dict:
-    """Calculate TCP MSS from MTU."""
-    mss_basic = mtu - 40  # TCP/IP headers
-    mss_with_opts = mtu - 60  # With TCP options
+def detect_window_stall(events: List[Dict]) -> Dict:
+    """Detect TCP receive window stall."""
+    stall_start = None
+    stall_duration = 0
+    last_time = 0
+
+    for event in events:
+        ts = event.get("timestamp", 0)
+        window = event.get("window")
+        last_time = ts
+
+        if window == 0 and stall_start is None:
+            stall_start = ts
+        elif window and window > 0 and stall_start is not None:
+            stall_duration = ts - stall_start
+            stall_start = None
+
+    # If still stalled at end, calculate duration to last event
+    if stall_start is not None:
+        stall_duration = last_time - stall_start
 
     return {
-        "mss_basic": mss_basic,
-        "mss_with_options": mss_with_opts,
-        "mss_reasonable": 400 <= mss_basic <= 1460
+        "window_stalled": stall_start is not None,
+        "stall_duration_ms": stall_duration
     }

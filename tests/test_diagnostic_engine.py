@@ -601,122 +601,100 @@ class EdgeCaseCombinationsTest(unittest.TestCase):
                         "Unreachable is LAN problem, likely hardware")
 
 
-class MTUMSSDiscoveryTest(unittest.TestCase):
-    """Phase 3: MTU/MSS Discovery & Fragmentation Detection tests."""
+class TCPConnectionStateMachineTest(unittest.TestCase):
+    """Phase 4: TCP Connection State Machine Tracking tests."""
 
-    def test_mtu_discovery_standard_1500(self):
-        """Detect standard Ethernet MTU (1500 bytes).
-        Should find max size where packets don't fragment."""
-        # Simulated PMTUD probe results: sizes that don't fragment
-        probe_results = [
-            {"size": 1000, "fragmented": False},
-            {"size": 1500, "fragmented": False},
-            {"size": 1600, "fragmented": True},  # Fragments here
+    def test_tcp_handshake_complete_success(self):
+        """Track successful TCP 3-way handshake: SYN -> SYN-ACK -> ACK."""
+        events = [
+            {"event": "syn_sent", "timestamp": 0},
+            {"event": "syn_ack_received", "timestamp": 10},
+            {"event": "ack_sent", "timestamp": 11},
         ]
-        result = diagnose.discover_path_mtu(probe_results)
+        result = diagnose.track_tcp_handshake(events)
 
-        self.assertEqual(result["path_mtu"], 1500)
-        self.assertTrue(result["is_standard_mtu"])
-        self.assertEqual(result["mtu_type"], "ethernet_standard")
+        self.assertTrue(result["handshake_complete"])
+        self.assertEqual(result["handshake_duration_ms"], 11)
+        self.assertFalse(result["handshake_timeout"])
+        self.assertEqual(result["final_state"], "established")
 
-    def test_mtu_discovery_pppoe_1492(self):
-        """Detect PPPoE MTU (1492 bytes) - common for DSL."""
-        probe_results = [
-            {"size": 1000, "fragmented": False},
-            {"size": 1492, "fragmented": False},
-            {"size": 1500, "fragmented": True},  # Fragments at 1500
+    def test_tcp_handshake_timeout(self):
+        """Detect handshake timeout: SYN sent but no response."""
+        events = [
+            {"event": "syn_sent", "timestamp": 0},
+            {"event": "timeout", "timestamp": 5000},
         ]
-        result = diagnose.discover_path_mtu(probe_results)
+        result = diagnose.track_tcp_handshake(events)
 
-        self.assertEqual(result["path_mtu"], 1492)
-        self.assertTrue(result["is_standard_mtu"])
-        self.assertEqual(result["mtu_type"], "pppoe_dsl")
+        self.assertFalse(result["handshake_complete"])
+        self.assertTrue(result["handshake_timeout"])
+        self.assertEqual(result["failed_at_stage"], "syn_ack_wait")
 
-    def test_mtu_discovery_jumbo_9000(self):
-        """Detect jumbo frame MTU (9000 bytes)."""
-        probe_results = [
-            {"size": 8000, "fragmented": False},
-            {"size": 9000, "fragmented": False},
-            {"size": 9500, "fragmented": True},
+    def test_tcp_reset_detection(self):
+        """Detect TCP RST (connection reset by peer)."""
+        events = [
+            {"event": "syn_sent", "timestamp": 0},
+            {"event": "syn_ack_received", "timestamp": 10},
+            {"event": "ack_sent", "timestamp": 11},
+            {"event": "rst_received", "timestamp": 50},
         ]
-        result = diagnose.discover_path_mtu(probe_results)
+        result = diagnose.track_tcp_connection(events)
 
-        self.assertEqual(result["path_mtu"], 9000)
-        self.assertTrue(result["is_standard_mtu"])
-        self.assertEqual(result["mtu_type"], "jumbo_frames")
+        self.assertEqual(result["termination_reason"], "reset_by_peer")
+        self.assertTrue(result["abnormal_termination"])
+        self.assertEqual(result["connection_duration_ms"], 50)
 
-    def test_mtu_discovery_non_standard_1480(self):
-        """Detect non-standard MTU (1480 bytes)."""
-        probe_results = [
-            {"size": 1000, "fragmented": False},
-            {"size": 1480, "fragmented": False},
-            {"size": 1500, "fragmented": True},
+    def test_tcp_fin_handshake(self):
+        """Track normal connection close: FIN -> FIN-ACK -> ACK."""
+        events = [
+            {"event": "established", "timestamp": 100},
+            {"event": "fin_sent", "timestamp": 500},
+            {"event": "fin_ack_received", "timestamp": 510},
+            {"event": "ack_sent", "timestamp": 511},
         ]
-        result = diagnose.discover_path_mtu(probe_results)
+        result = diagnose.track_tcp_connection(events)
 
-        self.assertEqual(result["path_mtu"], 1480)
-        self.assertFalse(result["is_standard_mtu"])
-        self.assertEqual(result["mtu_type"], "non_standard")
+        self.assertEqual(result["termination_reason"], "normal_close")
+        self.assertFalse(result["abnormal_termination"])
 
-    def test_pmtud_working_status(self):
-        """Detect when PMTUD is functioning (DF bit respected)."""
-        # When PMTUD works: packets with DF bit get ICMP unreachable on oversized
-        probe_results = [
-            {"size": 1500, "fragmented": False, "df_bit_set": True},
-            {"size": 1501, "fragmented": False, "df_bit_set": True, "icmp_error": True},
+    def test_tcp_retransmission_pattern(self):
+        """Detect excessive retransmissions."""
+        events = [
+            {"event": "data_sent", "segment": 1, "timestamp": 0},
+            {"event": "timeout", "segment": 1, "timestamp": 100},
+            {"event": "retransmit", "segment": 1, "timestamp": 101},
+            {"event": "timeout", "segment": 1, "timestamp": 200},
+            {"event": "retransmit", "segment": 1, "timestamp": 201},
+            {"event": "ack_received", "segment": 1, "timestamp": 210},
         ]
-        result = diagnose.discover_path_mtu(probe_results)
+        result = diagnose.analyze_retransmission_pattern(events)
 
-        self.assertTrue(result["pmtud_working"])
-        self.assertFalse(result["blackhole_detected"])
+        self.assertEqual(result["retransmit_count"], 2)
+        self.assertGreater(result["retransmit_rate_pct"], 50)
+        self.assertTrue(result["excessive_retransmits"])
 
-    def test_pmtud_broken_fragmentation_occurs(self):
-        """Detect when PMTUD is broken (fragmentation occurs instead of ICMP)."""
-        # When PMTUD broken: packets fragment instead of returning ICMP error
-        probe_results = [
-            {"size": 1500, "fragmented": False},
-            {"size": 1501, "fragmented": True, "df_bit_set": True},  # Fragments despite DF
+    def test_tcp_window_stall_detection(self):
+        """Detect receive window stall (receiver not reading)."""
+        events = [
+            {"event": "data_sent", "timestamp": 0, "window": 65535},
+            {"event": "ack_received", "timestamp": 10, "window": 0},
+            {"event": "ack_received", "timestamp": 1000, "window": 0},
         ]
-        result = diagnose.discover_path_mtu(probe_results)
+        result = diagnose.detect_window_stall(events)
 
-        self.assertFalse(result["pmtud_working"])
-        self.assertTrue(result["fragmentation_occurring"])
-        self.assertEqual(result["pmtud_status"], "broken_fragmentation")
+        self.assertTrue(result["window_stalled"])
+        self.assertGreater(result["stall_duration_ms"], 900)
 
-    def test_pmtud_blackhole_detection(self):
-        """Detect PMTUD black hole (no response to oversized packets)."""
-        # Black hole: packets with DF bit disappear, no ICMP error, no response
-        probe_results = [
-            {"size": 1500, "fragmented": False, "timeout": False},
-            {"size": 1501, "fragmented": False, "timeout": True, "df_bit_set": True},
-        ]
-        result = diagnose.discover_path_mtu(probe_results)
+    def test_tcp_connection_integrates_into_results(self):
+        """TCP state tracking integrates into DiagnosisResult."""
+        results = diagnose.DiagnosisResult()
+        events = [{"event": "syn_sent", "timestamp": 0}]
 
-        self.assertFalse(result["pmtud_working"])
-        self.assertTrue(result["blackhole_detected"])
-        self.assertEqual(result["pmtud_status"], "blackhole")
+        tcp_result = diagnose.track_tcp_handshake(events)
+        results.add("tcp_handshake", tcp_result)
 
-    def test_fragmentation_latency_impact(self):
-        """Detect if fragmentation increases latency significantly."""
-        # Compare RTT: unfragmented vs fragmented packets
-        probe_results = [
-            {"size": 1500, "fragmented": False, "rtt_ms": 15.0},
-            {"size": 2000, "fragmented": True, "rtt_ms": 45.0},  # 3x latency
-        ]
-        result = diagnose.analyze_fragmentation_impact(probe_results)
-
-        self.assertTrue(result["fragmentation_degrades_latency"])
-        self.assertGreater(result["latency_increase_pct"], 100)
-        self.assertTrue(result["fragmentation_is_problem"])
-
-    def test_mtu_mss_alignment(self):
-        """Verify MSS is correctly derived from MTU."""
-        # MSS = MTU - 40 (TCP/IP headers) or MTU - 60 (with options)
-        mtu = 1500
-        result = diagnose.calculate_mss_from_mtu(mtu)
-
-        self.assertEqual(result["mss_basic"], 1460)  # 1500 - 40
-        self.assertTrue(result["mss_reasonable"])
+        stored = results.tests.get("tcp_handshake")
+        self.assertIsNotNone(stored)
 
 
 if __name__ == "__main__":
