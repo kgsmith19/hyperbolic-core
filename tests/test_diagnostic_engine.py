@@ -601,115 +601,122 @@ class EdgeCaseCombinationsTest(unittest.TestCase):
                         "Unreachable is LAN problem, likely hardware")
 
 
-class PacketLossPatternClassifierTest(unittest.TestCase):
-    """Phase 2: Packet Loss Pattern Classifier tests."""
+class MTUMSSDiscoveryTest(unittest.TestCase):
+    """Phase 3: MTU/MSS Discovery & Fragmentation Detection tests."""
 
-    def test_packet_loss_classifier_no_loss(self):
-        """Zero packet loss: healthy path.
-        Classification: healthy."""
-        loss_samples = [0.0, 0.0, 0.0, 0.0, 0.0]  # %
-        result = diagnose.classify_packet_loss_pattern(loss_samples)
+    def test_mtu_discovery_standard_1500(self):
+        """Detect standard Ethernet MTU (1500 bytes).
+        Should find max size where packets don't fragment."""
+        # Simulated PMTUD probe results: sizes that don't fragment
+        probe_results = [
+            {"size": 1000, "fragmented": False},
+            {"size": 1500, "fragmented": False},
+            {"size": 1600, "fragmented": True},  # Fragments here
+        ]
+        result = diagnose.discover_path_mtu(probe_results)
 
-        self.assertEqual(result["classification"], "healthy")
-        self.assertEqual(result["avg_loss_pct"], 0.0)
-        self.assertFalse(result["has_burst_loss"])
-        self.assertFalse(result["has_steady_degradation"])
+        self.assertEqual(result["path_mtu"], 1500)
+        self.assertTrue(result["is_standard_mtu"])
+        self.assertEqual(result["mtu_type"], "ethernet_standard")
 
-    def test_packet_loss_classifier_steady_low(self):
-        """Steady low packet loss: consistent degradation.
-        Classification: steady_low (0-5% consistently)."""
-        loss_samples = [2.0, 2.5, 2.0, 2.2, 2.1]  # % consistent
-        result = diagnose.classify_packet_loss_pattern(loss_samples)
+    def test_mtu_discovery_pppoe_1492(self):
+        """Detect PPPoE MTU (1492 bytes) - common for DSL."""
+        probe_results = [
+            {"size": 1000, "fragmented": False},
+            {"size": 1492, "fragmented": False},
+            {"size": 1500, "fragmented": True},  # Fragments at 1500
+        ]
+        result = diagnose.discover_path_mtu(probe_results)
 
-        self.assertEqual(result["classification"], "steady_low")
-        self.assertTrue(result["has_steady_degradation"])
-        self.assertFalse(result["has_burst_loss"])
-        self.assertAlmostEqual(result["avg_loss_pct"], 2.16, places=1)
+        self.assertEqual(result["path_mtu"], 1492)
+        self.assertTrue(result["is_standard_mtu"])
+        self.assertEqual(result["mtu_type"], "pppoe_dsl")
 
-    def test_packet_loss_classifier_burst_loss(self):
-        """Burst packet loss: sudden spikes then recovery.
-        Pattern: mostly zero, then spike to high, then back to zero.
-        Classification: burst_loss."""
-        loss_samples = [0.0, 0.0, 25.5, 28.0, 0.0, 0.0]  # Burst in middle
-        result = diagnose.classify_packet_loss_pattern(loss_samples)
+    def test_mtu_discovery_jumbo_9000(self):
+        """Detect jumbo frame MTU (9000 bytes)."""
+        probe_results = [
+            {"size": 8000, "fragmented": False},
+            {"size": 9000, "fragmented": False},
+            {"size": 9500, "fragmented": True},
+        ]
+        result = diagnose.discover_path_mtu(probe_results)
 
-        self.assertEqual(result["classification"], "burst_loss")
-        self.assertTrue(result["has_burst_loss"])
-        self.assertFalse(result["has_steady_degradation"])
-        self.assertGreater(result["max_loss_pct"], 20)
-        self.assertLess(result["min_loss_pct"], 1.0)
+        self.assertEqual(result["path_mtu"], 9000)
+        self.assertTrue(result["is_standard_mtu"])
+        self.assertEqual(result["mtu_type"], "jumbo_frames")
 
-    def test_packet_loss_classifier_intermittent_loss(self):
-        """Intermittent loss: random spikes with no clear pattern.
-        Classification: intermittent."""
-        loss_samples = [0.0, 10.0, 0.5, 15.0, 1.0, 5.0, 0.0]  # Random
-        result = diagnose.classify_packet_loss_pattern(loss_samples)
+    def test_mtu_discovery_non_standard_1480(self):
+        """Detect non-standard MTU (1480 bytes)."""
+        probe_results = [
+            {"size": 1000, "fragmented": False},
+            {"size": 1480, "fragmented": False},
+            {"size": 1500, "fragmented": True},
+        ]
+        result = diagnose.discover_path_mtu(probe_results)
 
-        self.assertEqual(result["classification"], "intermittent")
-        self.assertTrue(result["has_loss"])
-        self.assertFalse(result["has_steady_degradation"])
-        # Intermittent should have variable loss
-        self.assertGreater(result["loss_variance"], 20)
+        self.assertEqual(result["path_mtu"], 1480)
+        self.assertFalse(result["is_standard_mtu"])
+        self.assertEqual(result["mtu_type"], "non_standard")
 
-    def test_packet_loss_classifier_severe_loss(self):
-        """Severe packet loss: >15% avg or peak >50%.
-        Classification: severe."""
-        loss_samples = [45.0, 52.0, 48.0, 50.0, 46.0]  # Sustained high loss
-        result = diagnose.classify_packet_loss_pattern(loss_samples)
+    def test_pmtud_working_status(self):
+        """Detect when PMTUD is functioning (DF bit respected)."""
+        # When PMTUD works: packets with DF bit get ICMP unreachable on oversized
+        probe_results = [
+            {"size": 1500, "fragmented": False, "df_bit_set": True},
+            {"size": 1501, "fragmented": False, "df_bit_set": True, "icmp_error": True},
+        ]
+        result = diagnose.discover_path_mtu(probe_results)
 
-        self.assertEqual(result["classification"], "severe")
-        self.assertGreater(result["avg_loss_pct"], 15)
-        self.assertTrue(result["requires_immediate_attention"])
+        self.assertTrue(result["pmtud_working"])
+        self.assertFalse(result["blackhole_detected"])
 
-    def test_packet_loss_classifier_asymmetric_path(self):
-        """Asymmetric path detection: loss in one direction only.
-        Detected by: egress packets lost but responses received.
-        Note: This requires bidirectional measurement (simulated here)."""
-        # Simulating downstream (client->server) vs upstream (server->client)
-        downstream_loss = [15.0, 16.0, 14.5]  # High loss going out
-        upstream_loss = [0.0, 0.0, 0.0]  # No loss coming back
+    def test_pmtud_broken_fragmentation_occurs(self):
+        """Detect when PMTUD is broken (fragmentation occurs instead of ICMP)."""
+        # When PMTUD broken: packets fragment instead of returning ICMP error
+        probe_results = [
+            {"size": 1500, "fragmented": False},
+            {"size": 1501, "fragmented": True, "df_bit_set": True},  # Fragments despite DF
+        ]
+        result = diagnose.discover_path_mtu(probe_results)
 
-        result = diagnose.detect_asymmetric_loss(downstream_loss, upstream_loss)
+        self.assertFalse(result["pmtud_working"])
+        self.assertTrue(result["fragmentation_occurring"])
+        self.assertEqual(result["pmtud_status"], "broken_fragmentation")
 
-        self.assertTrue(result["is_asymmetric"])
-        self.assertEqual(result["affected_direction"], "downstream")
-        self.assertGreater(result["loss_differential_pct"], 10)
+    def test_pmtud_blackhole_detection(self):
+        """Detect PMTUD black hole (no response to oversized packets)."""
+        # Black hole: packets with DF bit disappear, no ICMP error, no response
+        probe_results = [
+            {"size": 1500, "fragmented": False, "timeout": False},
+            {"size": 1501, "fragmented": False, "timeout": True, "df_bit_set": True},
+        ]
+        result = diagnose.discover_path_mtu(probe_results)
 
-    def test_packet_loss_classifier_with_small_sample(self):
-        """Handle edge case: < 3 samples.
-        Should still classify but mark as uncertain."""
-        loss_samples = [5.0]
-        result = diagnose.classify_packet_loss_pattern(loss_samples)
+        self.assertFalse(result["pmtud_working"])
+        self.assertTrue(result["blackhole_detected"])
+        self.assertEqual(result["pmtud_status"], "blackhole")
 
-        self.assertIn("classification", result)
-        self.assertTrue(result.get("is_uncertain", False))
+    def test_fragmentation_latency_impact(self):
+        """Detect if fragmentation increases latency significantly."""
+        # Compare RTT: unfragmented vs fragmented packets
+        probe_results = [
+            {"size": 1500, "fragmented": False, "rtt_ms": 15.0},
+            {"size": 2000, "fragmented": True, "rtt_ms": 45.0},  # 3x latency
+        ]
+        result = diagnose.analyze_fragmentation_impact(probe_results)
 
-    def test_packet_loss_burst_detection_algorithm(self):
-        """Verify burst detection identifies sudden spikes correctly."""
-        # Pattern: baseline, spike, recovery
-        loss_samples = [0.0, 0.0, 0.5, 30.0, 32.0, 0.0, 0.0]
-        result = diagnose.classify_packet_loss_pattern(loss_samples)
+        self.assertTrue(result["fragmentation_degrades_latency"])
+        self.assertGreater(result["latency_increase_pct"], 100)
+        self.assertTrue(result["fragmentation_is_problem"])
 
-        # Should identify the burst window
-        self.assertTrue(result["has_burst_loss"])
-        self.assertIn("burst_windows", result)
-        # Burst window should be around indices 3-4
-        bursts = result["burst_windows"]
-        self.assertGreater(len(bursts), 0)
+    def test_mtu_mss_alignment(self):
+        """Verify MSS is correctly derived from MTU."""
+        # MSS = MTU - 40 (TCP/IP headers) or MTU - 60 (with options)
+        mtu = 1500
+        result = diagnose.calculate_mss_from_mtu(mtu)
 
-    def test_packet_loss_integrates_into_diagnostic_tree(self):
-        """Packet loss classification is collected as part of diagnostic results."""
-        results = diagnose.DiagnosisResult()
-        loss_samples = [0.5, 0.0, 0.5, 0.0, 0.0]
-
-        # Add packet loss classification to results
-        loss_result = diagnose.classify_packet_loss_pattern(loss_samples)
-        results.add("packet_loss_pattern", loss_result)
-
-        # Verify it can be retrieved
-        stored = results.tests.get("packet_loss_pattern")
-        self.assertIsNotNone(stored)
-        self.assertEqual(stored["classification"], "healthy")
+        self.assertEqual(result["mss_basic"], 1460)  # 1500 - 40
+        self.assertTrue(result["mss_reasonable"])
 
 
 if __name__ == "__main__":

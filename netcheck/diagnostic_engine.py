@@ -1200,190 +1200,102 @@ def rank_recommendations(candidates: List[Dict]) -> List[Dict]:
     return sorted(candidates, key=roi_score, reverse=True)
 
 
-def classify_packet_loss_pattern(loss_samples: List[float]) -> Dict:
-    """Classify packet loss pattern based on loss rate measurements."""
-    import statistics
+def discover_path_mtu(probe_results: List[Dict]) -> Dict:
+    """Discover path MTU via binary search results analysis."""
+    if not probe_results:
+        return {"path_mtu": None, "is_standard_mtu": False, "mtu_type": "unknown"}
 
-    if not loss_samples:
-        return _empty_loss_result()
+    # Find largest size that doesn't fragment
+    non_frag = [p for p in probe_results if not p.get("fragmented", False)]
+    path_mtu = max([p["size"] for p in non_frag]) if non_frag else None
 
-    avg_loss, min_loss, max_loss, variance = _calculate_loss_stats(loss_samples)
-    is_uncertain = len(loss_samples) < 3
-    has_loss = avg_loss > 1.0
-    burst_windows = _detect_burst_windows(loss_samples)
-    has_steady_degradation = _is_steady_degradation(avg_loss, loss_samples, variance)
+    if not path_mtu:
+        return {"path_mtu": None, "is_standard_mtu": False, "mtu_type": "unknown"}
 
-    classification, reason, attention = _classify_loss_pattern(
-        has_loss, max_loss, avg_loss, has_steady_degradation,
-        burst_windows, min_loss, variance
-    )
+    mtu_type, is_standard = _classify_mtu_value(path_mtu)
 
     return {
-        "classification": classification,
-        "avg_loss_pct": round(avg_loss, 2),
-        "min_loss_pct": round(min_loss, 2),
-        "max_loss_pct": round(max_loss, 2),
-        "loss_variance": round(variance, 2),
-        "has_loss": has_loss,
-        "has_burst_loss": len(burst_windows) > 0,
-        "has_steady_degradation": has_steady_degradation,
-        "requires_immediate_attention": attention,
-        "is_uncertain": is_uncertain,
-        "burst_windows": burst_windows,
-        "classification_reason": reason
+        "path_mtu": path_mtu,
+        "is_standard_mtu": is_standard,
+        "mtu_type": mtu_type,
+        "pmtud_working": _check_pmtud_status(probe_results),
+        "blackhole_detected": _detect_pmtud_blackhole(probe_results),
+        "fragmentation_occurring": any(p.get("fragmented") for p in probe_results),
+        "pmtud_status": _get_pmtud_status(probe_results)
     }
 
 
-def _empty_loss_result() -> Dict:
-    """Return empty result for no samples."""
-    return {
-        "classification": "unknown",
-        "avg_loss_pct": None,
-        "min_loss_pct": None,
-        "max_loss_pct": None,
-        "loss_variance": None,
-        "has_loss": False,
-        "has_burst_loss": False,
-        "has_steady_degradation": False,
-        "requires_immediate_attention": False,
-        "is_uncertain": True,
-        "burst_windows": [],
-        "classification_reason": "No measurements provided"
+def _classify_mtu_value(mtu: int) -> Tuple[str, bool]:
+    """Classify MTU value as standard or non-standard."""
+    standards = {
+        1500: "ethernet_standard",
+        1492: "pppoe_dsl",
+        9000: "jumbo_frames",
     }
+    mtu_type = standards.get(mtu, "non_standard")
+    is_standard = mtu in standards
+    return mtu_type, is_standard
 
 
-def _calculate_loss_stats(loss_samples: List[float]) -> Tuple[float, float, float, float]:
-    """Calculate loss statistics from samples."""
-    import statistics
-    avg = statistics.mean(loss_samples)
-    min_val = min(loss_samples)
-    max_val = max(loss_samples)
-    var = statistics.variance(loss_samples) if len(loss_samples) > 1 else 0.0
-    return avg, min_val, max_val, var
+def _check_pmtud_status(probe_results: List[Dict]) -> bool:
+    """Check if PMTUD is working (DF bit respected, ICMP errors sent)."""
+    for result in probe_results:
+        if result.get("df_bit_set") and result.get("icmp_error"):
+            return True
+    return False
 
 
-def _is_steady_degradation(avg_loss: float, loss_samples: List[float], variance: float) -> bool:
-    """Check if loss shows steady degradation pattern."""
-    threshold = 1.0
-    return (avg_loss >= threshold and
-            all(l >= threshold * 0.5 for l in loss_samples) and
-            variance < 25)
+def _detect_pmtud_blackhole(probe_results: List[Dict]) -> bool:
+    """Detect PMTUD black hole (no response to oversized packets)."""
+    for result in probe_results:
+        if result.get("df_bit_set") and result.get("timeout"):
+            return True
+    return False
 
 
-def _classify_loss_pattern(
-    has_loss: bool, max_loss: float, avg_loss: float,
-    has_steady: bool, bursts: List, min_loss: float, variance: float
-) -> Tuple[str, str, bool]:
-    """Classify loss pattern and return (classification, reason, attention)."""
-    if not has_loss:
-        return "healthy", f"No significant packet loss: avg={avg_loss:.2f}%", False
-
-    if max_loss > 50 or avg_loss > 15:
-        return "severe", f"Severe packet loss: avg={avg_loss:.2f}%, peak={max_loss:.2f}%", True
-
-    if has_steady:
-        if avg_loss < 5:
-            return "steady_low", f"Steady low loss: avg={avg_loss:.2f}%", False
-        else:
-            return "steady_high", f"Steady high loss: avg={avg_loss:.2f}%", True
-
-    if len(bursts) > 0:
-        is_clear = min_loss < 5 and max_loss > 20 and len(bursts) <= 2
-        if is_clear:
-            return "burst_loss", f"Burst: {len(bursts)} detected, peak={max_loss:.2f}%", max_loss > 30
-        else:
-            return "intermittent", f"Intermittent: {len(bursts)} bursts", avg_loss > 5
-
-    if variance > 20:
-        return "intermittent", f"Intermittent: avg={avg_loss:.2f}%, var={variance:.1f}", avg_loss > 5
-
-    return "healthy", f"No significant packet loss: avg={avg_loss:.2f}%", False
+def _get_pmtud_status(probe_results: List[Dict]) -> str:
+    """Get PMTUD status: working, broken_fragmentation, or blackhole."""
+    if _check_pmtud_status(probe_results):
+        return "working"
+    if _detect_pmtud_blackhole(probe_results):
+        return "blackhole"
+    if any(p.get("fragmented") for p in probe_results):
+        return "broken_fragmentation"
+    return "unknown"
 
 
-def _detect_burst_windows(loss_samples: List[float], threshold: float = 10.0) -> List[Tuple[int, int]]:
-    """Detect windows of burst loss (elevated loss followed by recovery).
+def analyze_fragmentation_impact(probe_results: List[Dict]) -> Dict:
+    """Analyze latency impact of fragmentation."""
+    frag = [p for p in probe_results if p.get("fragmented")]
+    non_frag = [p for p in probe_results if not p.get("fragmented")]
 
-    Args:
-        loss_samples: List of loss percentages
-        threshold: Loss threshold to consider as "burst" (default 10%)
-
-    Returns:
-        List of (start_idx, end_idx) tuples for burst windows
-    """
-    bursts = []
-    in_burst = False
-    burst_start = 0
-
-    for i, loss in enumerate(loss_samples):
-        if loss > threshold and not in_burst:
-            # Start of burst
-            in_burst = True
-            burst_start = i
-        elif loss <= threshold and in_burst:
-            # End of burst
-            in_burst = False
-            bursts.append((burst_start, i - 1))
-
-    # Handle burst at end of samples
-    if in_burst:
-        bursts.append((burst_start, len(loss_samples) - 1))
-
-    return bursts
-
-
-def detect_asymmetric_loss(downstream_loss: List[float], upstream_loss: List[float]) -> Dict:
-    """Detect if packet loss is asymmetric (one direction only).
-
-    Args:
-        downstream_loss: Loss percentages for outbound path (client->server)
-        upstream_loss: Loss percentages for inbound path (server->client)
-
-    Returns:
-        Dict with asymmetry analysis:
-        {
-            "is_asymmetric": bool,
-            "affected_direction": "downstream" | "upstream" | None,
-            "loss_differential_pct": float,
-            "downstream_avg": float,
-            "upstream_avg": float,
-            "diagnosis": str
-        }
-    """
-    import statistics
-
-    if not downstream_loss or not upstream_loss:
+    if not frag or not non_frag:
         return {
-            "is_asymmetric": False,
-            "affected_direction": None,
-            "loss_differential_pct": 0,
-            "downstream_avg": 0,
-            "upstream_avg": 0,
-            "diagnosis": "Insufficient data for asymmetry detection"
+            "fragmentation_degrades_latency": False,
+            "latency_increase_pct": 0,
+            "fragmentation_is_problem": False
         }
 
-    down_avg = statistics.mean(downstream_loss)
-    up_avg = statistics.mean(upstream_loss)
+    frag_rtt = sum(p.get("rtt_ms", 0) for p in frag) / len(frag)
+    non_frag_rtt = sum(p.get("rtt_ms", 0) for p in non_frag) / len(non_frag)
 
-    # Asymmetric if one direction has significant loss and other doesn't
-    differential = abs(down_avg - up_avg)
-    is_asymmetric = differential > 5  # >5% difference indicates asymmetry
-
-    if is_asymmetric:
-        if down_avg > up_avg:
-            affected = "downstream"
-            diagnosis = f"Outbound path impaired: {down_avg:.1f}% loss vs {up_avg:.1f}% return"
-        else:
-            affected = "upstream"
-            diagnosis = f"Inbound path impaired: {up_avg:.1f}% loss vs {down_avg:.1f}% outbound"
-    else:
-        affected = None
-        diagnosis = "No significant asymmetry detected"
+    increase_pct = 100 * (frag_rtt - non_frag_rtt) / max(non_frag_rtt, 1)
+    degrades = increase_pct > 50
 
     return {
-        "is_asymmetric": is_asymmetric,
-        "affected_direction": affected,
-        "loss_differential_pct": round(differential, 2),
-        "downstream_avg": round(down_avg, 2),
-        "upstream_avg": round(up_avg, 2),
-        "diagnosis": diagnosis
+        "fragmentation_degrades_latency": degrades,
+        "latency_increase_pct": round(increase_pct, 1),
+        "fragmentation_is_problem": degrades and increase_pct > 100
+    }
+
+
+def calculate_mss_from_mtu(mtu: int) -> Dict:
+    """Calculate TCP MSS from MTU."""
+    mss_basic = mtu - 40  # TCP/IP headers
+    mss_with_opts = mtu - 60  # With TCP options
+
+    return {
+        "mss_basic": mss_basic,
+        "mss_with_options": mss_with_opts,
+        "mss_reasonable": 400 <= mss_basic <= 1460
     }
