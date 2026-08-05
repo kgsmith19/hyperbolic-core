@@ -1,6 +1,7 @@
 """Modem/DOCSIS diagnostics: signal levels, stability, bridge mode verification.
 
-Covers hypothesis #2: DOCSIS/coax signal instability on cable modem.
+Phase 16 diagnostic module (additional to the canonical 15-hypothesis list in
+docs/TROUBLESHOOTING.md): DOCSIS/coax signal instability on cable modem.
 """
 import subprocess
 import re
@@ -97,7 +98,7 @@ def detect_wan_ip() -> Optional[str]:
 
 
 class ModemDiagnostics:
-    """Diagnose modem/DOCSIS issues (#2)."""
+    """Diagnose modem/DOCSIS issues (Phase 16 module)."""
 
     def __init__(self):
         self.id = "modem_docsis_instability"

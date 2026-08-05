@@ -1,6 +1,7 @@
 """Anthropic status diagnostics: check for service degradation.
 
-Covers hypothesis #8: Anthropic-side incident/degraded performance.
+Phase 19 diagnostic module (additional to the canonical 15-hypothesis list in
+docs/TROUBLESHOOTING.md): Anthropic-side incident or degraded performance.
 """
 import json
 from typing import Dict, Optional
@@ -50,7 +51,7 @@ def check_api_endpoint(endpoint: str = "https://api.anthropic.com/v1/models") ->
 
 
 class AnthropicDiagnostics:
-    """Diagnose Anthropic-side issues (#8)."""
+    """Diagnose Anthropic-side issues (Phase 19 module)."""
 
     def __init__(self):
         self.id = "anthropic_status"

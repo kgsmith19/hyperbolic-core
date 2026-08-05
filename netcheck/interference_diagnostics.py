@@ -1,12 +1,13 @@
 """Interference diagnostics: detect WiFi interference sources.
 
-Covers hypothesis #14: Persistent external WiFi interference.
+Phase 20 diagnostic module (additional to the canonical 15-hypothesis list in
+docs/TROUBLESHOOTING.md): persistent external WiFi interference.
 """
 from typing import Dict, List, Optional
 
 
 class InterferenceDiagnostics:
-    """Diagnose WiFi interference (#14)."""
+    """Diagnose WiFi interference (Phase 20 module)."""
 
     def __init__(self):
         self.id = "wifi_interference"

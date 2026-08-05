@@ -7,10 +7,13 @@ of a hunch.
 Pure Python 3 standard library. Nothing to install.
 
 ```bash
-python -m netcheck watch     # leave this running
-python -m netcheck serve     # dashboard at http://127.0.0.1:8787
-python -m netcheck diagnose  # ranked causes, in the terminal
+python -m netcheck watch      # leave this running
+python -m netcheck serve      # dashboard at http://127.0.0.1:8787
+python -m netcheck diagnose   # ranked causes, in the terminal
+python -m netcheck full-check # one-shot sweep across all 15 hypotheses
 ```
+
+New to this? See `docs/QUICKSTART.md`.
 
 ## Why it exists
 
@@ -113,7 +116,7 @@ done.
 python -m unittest discover -s tests -t .
 ```
 
-77 tests, hermetic — no network, no real API calls. Parsers are tested against
+380 tests, hermetic — no network, no real API calls. Parsers are tested against
 real command output captured from a live machine, in `tests/fixtures/`.
 
 The adversarial cases in `test_llmlog.py` are the ones worth knowing about:
@@ -121,3 +124,13 @@ grepping transcripts for `529` or `ECONNRESET` matches token counts, request
 ids, and conversations *about* errors. That approach overcounted this machine's
 real error total by roughly 200×. Detection keys on the `isApiErrorMessage`
 flag instead.
+
+## Documentation
+
+- `docs/QUICKSTART.md` — running `full-check`, `watch`, and `serve` for the first time
+- `docs/TROUBLESHOOTING.md` — symptom → hypothesis → fix, plus the full list of 15
+- `docs/API.md` — function-level reference for all 21 diagnostic modules
+- `docs/ARCHITECTURE.md` — module map, decision trees, module interactions
+- `docs/CONTRIBUTING.md` — adding a new diagnostic, PDD/SDD/TDD standards
+- `docs/DEVELOPMENT.md` — local dev setup, test commands, code-quality gates
+- `OPEN-ISSUES.md` — problems surfaced but not yet fixed

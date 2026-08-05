@@ -1,7 +1,8 @@
 """WiFi radio-layer diagnostics: band-steering, channel stability, interference.
 
-Covers hypothesis #1: WiFi radio-layer instability (band steering, DFS channel
-switches, WiFi 7 Multi-Link Operation quirks).
+Phase 15 diagnostic module, covering canonical hypothesis #15 ("WiFi/DFS" in
+docs/TROUBLESHOOTING.md): WiFi radio-layer instability (band steering, DFS
+channel switches, WiFi 7 Multi-Link Operation quirks).
 """
 import subprocess
 import re
@@ -257,7 +258,7 @@ def detect_signal_instability(history: List[Dict], threshold_dbm: int = 20, wind
 
 
 class WiFiDiagnostics:
-    """Diagnose WiFi radio-layer issues (#1)."""
+    """Diagnose WiFi radio-layer issues (canonical hypothesis #15, WiFi/DFS)."""
 
     def __init__(self):
         self.id = "wifi_radio_instability"

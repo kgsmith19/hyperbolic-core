@@ -1,6 +1,7 @@
 """CGNAT diagnostics: Carrier-Grade NAT detection.
 
-Covers hypothesis #10: CGNAT congestion on ISP side.
+Phase 18 diagnostic module (additional to the canonical 15-hypothesis list in
+docs/TROUBLESHOOTING.md): CGNAT congestion on the ISP side.
 """
 import json
 from typing import Optional, Dict
@@ -38,7 +39,7 @@ def is_cgnat_ip(ip: str) -> bool:
 
 
 class CGNATDiagnostics:
-    """Diagnose CGNAT-related issues (#10)."""
+    """Diagnose CGNAT-related issues (Phase 18 module)."""
 
     def __init__(self):
         self.id = "cgnat_congestion"

@@ -1,6 +1,7 @@
 """Router diagnostics: firmware, settings, security features.
 
-Covers hypothesis #15: Stale router default settings or outdated firmware.
+Phase 21 diagnostic module (additional to the canonical 15-hypothesis list in
+docs/TROUBLESHOOTING.md): stale router default settings or outdated firmware.
 """
 import subprocess
 from typing import Dict, Optional
@@ -24,7 +25,7 @@ def check_router_reachability() -> Dict:
 
 
 class RouterDiagnostics:
-    """Diagnose router-related issues (#15)."""
+    """Diagnose router-related issues (Phase 21 module)."""
 
     def __init__(self):
         self.id = "router_firmware_settings"

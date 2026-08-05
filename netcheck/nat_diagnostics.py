@@ -1,6 +1,7 @@
 """NAT diagnostics: double NAT detection, NAT traversal issues.
 
-Covers hypothesis #4: Modem reverting out of bridge mode (double NAT).
+Phase 17 diagnostic module (additional to the canonical 15-hypothesis list in
+docs/TROUBLESHOOTING.md): modem reverting out of bridge mode (double NAT).
 """
 import subprocess
 import re
@@ -86,7 +87,7 @@ def detect_double_nat() -> Dict:
 
 
 class NATDiagnostics:
-    """Diagnose NAT-related issues (#4 double NAT)."""
+    """Diagnose NAT-related issues (Phase 17 module: double NAT)."""
 
     def __init__(self):
         self.id = "double_nat"
