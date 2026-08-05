@@ -601,5 +601,99 @@ class EdgeCaseCombinationsTest(unittest.TestCase):
                         "Unreachable is LAN problem, likely hardware")
 
 
+class LatencyJitterClassifierTest(unittest.TestCase):
+    """Phase 1: Latency & Jitter Classifier tests."""
+
+    def test_latency_classifier_stable_low(self):
+        """Stable low latency: <20ms, jitter <2ms.
+        Classification: stable_low."""
+        measurements = [10.5, 11.2, 10.8, 11.5, 10.3]  # ms
+        result = diagnose.classify_latency(measurements)
+
+        self.assertEqual(result["classification"], "stable_low")
+        self.assertEqual(result["avg_latency_ms"], 10.86)
+        self.assertLess(result["jitter_ms"], 2.0)
+        self.assertTrue(result["is_stable"])
+
+    def test_latency_classifier_stable_medium(self):
+        """Stable medium latency: 20-50ms, jitter <5ms.
+        Classification: stable_medium."""
+        measurements = [35.1, 36.2, 35.8, 36.5, 35.3]  # ms
+        result = diagnose.classify_latency(measurements)
+
+        self.assertEqual(result["classification"], "stable_medium")
+        self.assertGreaterEqual(result["avg_latency_ms"], 20)
+        self.assertLess(result["avg_latency_ms"], 50)
+        self.assertLess(result["jitter_ms"], 5.0)
+        self.assertTrue(result["is_stable"])
+
+    def test_latency_classifier_variable(self):
+        """Variable latency: fluctuates but returns to baseline.
+        Classification: variable."""
+        measurements = [25.0, 30.5, 26.2, 32.1, 27.8, 31.0, 26.5]  # ms
+        result = diagnose.classify_latency(measurements)
+
+        self.assertEqual(result["classification"], "variable")
+        self.assertGreater(result["jitter_ms"], 2.0)
+        self.assertFalse(result["is_stable"])
+
+    def test_latency_classifier_high_variance_high_latency(self):
+        """High variance + high baseline: >100ms avg, jitter >20ms.
+        Classification: high_variance_high_latency."""
+        measurements = [150.0, 200.5, 120.2, 180.1, 210.0, 140.0]  # ms
+        result = diagnose.classify_latency(measurements)
+
+        self.assertEqual(result["classification"], "high_variance_high_latency")
+        self.assertGreater(result["avg_latency_ms"], 100)
+        self.assertGreater(result["jitter_ms"], 20.0)
+
+    def test_latency_classifier_buffer_bloat(self):
+        """Buffer bloat: latency spikes on data transfer.
+        Detected by: min latency <10ms, max latency >50ms (tail latency).
+        Classification: buffer_bloat."""
+        measurements = [8.0, 9.5, 8.2, 65.3, 9.1, 62.5, 8.8]  # Spikes to 65ms
+        result = diagnose.classify_latency(measurements)
+
+        self.assertEqual(result["classification"], "buffer_bloat")
+        self.assertTrue(result["has_buffer_bloat"])
+        # Tail latency (max) should be significantly higher than median
+        self.assertGreater(result["max_latency_ms"], 50)
+        self.assertLess(result["min_latency_ms"], 10)
+
+    def test_latency_classifier_with_insufficient_data(self):
+        """Handle edge case: < 3 samples.
+        Should still classify but mark as uncertain."""
+        measurements = [25.0]
+        result = diagnose.classify_latency(measurements)
+
+        self.assertIn("classification", result)
+        self.assertTrue(result.get("is_uncertain", False))
+
+    def test_latency_jitter_calculations(self):
+        """Verify jitter is calculated correctly: sample stddev of RTT."""
+        measurements = [10.0, 20.0, 30.0]  # Known stddev
+        result = diagnose.classify_latency(measurements)
+
+        # Sample stddev of [10, 20, 30] using (N-1) denominator:
+        # sqrt(((10-20)^2 + (20-20)^2 + (30-20)^2) / 2)
+        # = sqrt((100 + 0 + 100) / 2) = sqrt(100) = 10.0
+        expected_jitter = 10.0
+        self.assertAlmostEqual(result["jitter_ms"], expected_jitter, places=1)
+
+    def test_latency_classifier_integrates_into_diagnostic_tree(self):
+        """Latency classification is collected as part of diagnostic results."""
+        results = diagnose.DiagnosisResult()
+        measurements = [15.0, 15.5, 15.2, 15.8, 15.1]
+
+        # Add latency classification to results
+        latency_result = diagnose.classify_latency(measurements)
+        results.add("latency_jitter", latency_result)
+
+        # Verify it can be retrieved
+        stored = results.tests.get("latency_jitter")
+        self.assertIsNotNone(stored)
+        self.assertEqual(stored["classification"], "stable_low")
+
+
 if __name__ == "__main__":
     unittest.main()

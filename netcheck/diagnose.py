@@ -23,6 +23,7 @@ from .diagnostic_engine import (
     rank_hypotheses,
     correlate_with_history,
     calculate_confidence_from_history,
+    classify_latency,
 )
 
 WINDOW_S = 120
