@@ -37,6 +37,11 @@ from .diagnostic_engine import (
     calculate_confidence_score,
     detect_cascade_failures,
     generate_synthesis_report,
+    analyze_routing_path,
+    classify_hop_latency,
+    measure_hop_stability,
+    detect_route_flapping,
+    detect_blackhole_route,
 )
 
 WINDOW_S = 120
