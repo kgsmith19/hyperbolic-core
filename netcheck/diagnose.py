@@ -9,6 +9,21 @@ Two ideas carry the whole module:
      tell "my Wi-Fi dropped" from "the API had a bad minute".
 """
 from datetime import datetime
+from .diagnostic_engine import (
+    DiagnosticTree,
+    DiagnosisResult,
+    ConfigurationMatrix,
+    capture_baseline_snapshot,
+    compare_snapshots,
+    detect_regressions,
+    check_state_changes,
+    generate_recommendation,
+    rank_recommendations,
+    get_diagnosis,
+    rank_hypotheses,
+    correlate_with_history,
+    calculate_confidence_from_history,
+)
 
 WINDOW_S = 120
 
