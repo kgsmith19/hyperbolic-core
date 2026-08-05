@@ -101,11 +101,14 @@ never actually authenticating, on any run this session including the one in
   8.8.8.8/8.8.4.4, lease renewed ~3h before capture (matches the modem reboot
   cascading to a WAN renewal — expected, not a new anomaly).
 - `nvram_get(wrs_protect_enable)` → `"0"`, `TM_EULA` → `"0"`, but
-  `wrs_mals_enable` / `wrs_cc_enable` / `wrs_vp_enable` all → `"1"`. **Genuinely
-  ambiguous** — looks like the AiProtection master switch / EULA may be off
-  while sub-feature flags sit at stale/default `"1"`, but nvram alone can't
-  distinguish "actually filtering traffic" from "leftover flag with no
-  effect." Needs confirming in the actual ASUS GUI, not guessed from nvram.
+  `wrs_mals_enable` / `wrs_cc_enable` / `wrs_vp_enable` all → `"1"`. **Resolved
+  2026-08-05**: Kyle confirmed in the actual ASUS GUI that AiProtection is
+  off. The nvram read was correct — `wrs_protect_enable=0` gates the whole
+  feature, and the `"1"` sub-flags are stale/inactive underneath it. DPI is
+  **ruled out** as a currently-active cause. (Also tried `Main_LogStatus_Content.asp`
+  for the router syslog — loaded but was another JS-templated shell with no
+  log data in the raw fetch, same pattern as RouterStatus.htm. Real log hook
+  not found; not pursued further given session time.)
 
 **Fix:** rewrite `router()` on the real token/cookie flow above; detect the
 login-redirect stub as `fail`, never `ok`. Not done this session — logged
