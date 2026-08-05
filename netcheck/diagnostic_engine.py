@@ -61,7 +61,8 @@ class DiagnosticRule:
         # Find all results.get('key') patterns and replace with values
         for match in re.finditer(r"results\.get\('([^']+)'\)", condition):
             key = match.group(1)
-            value = results.get(key) if isinstance(results, dict) else getattr(results, key, None)
+            # Call the results.get() method (works for both dict and DiagnosisResult)
+            value = results.get(key)
             # Convert to safe comparison string
             if value is None:
                 safe_value = "None"
@@ -83,9 +84,7 @@ class DiagnosticRule:
         condition = condition.replace(" or ", " or ")    # Already correct
 
         try:
-            # No eval() - instead use ast.literal_eval for safety,
-            # then manually check comparisons
-            # For now, use a restricted globals dict
+            # No eval() - instead use safe condition evaluator
             return _safe_eval_condition(condition)
         except Exception:
             return False
