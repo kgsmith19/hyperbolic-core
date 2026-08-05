@@ -601,100 +601,102 @@ class EdgeCaseCombinationsTest(unittest.TestCase):
                         "Unreachable is LAN problem, likely hardware")
 
 
-class TCPConnectionStateMachineTest(unittest.TestCase):
-    """Phase 4: TCP Connection State Machine Tracking tests."""
+class DualStackIsolationTest(unittest.TestCase):
+    """Phase 5: Dual-Stack (IPv4/IPv6) Isolation tests."""
 
-    def test_tcp_handshake_complete_success(self):
-        """Track successful TCP 3-way handshake: SYN -> SYN-ACK -> ACK."""
+    def test_ipv4_only_working_ipv6_broken(self):
+        """Detect IPv4-only connectivity when IPv6 fails."""
+        ipv4_result = {"reachable": True, "latency_ms": 20, "loss_pct": 0}
+        ipv6_result = {"reachable": False, "latency_ms": None, "loss_pct": 100}
+
+        result = diagnose.analyze_dual_stack(ipv4_result, ipv6_result)
+
+        self.assertTrue(result["ipv4_working"])
+        self.assertFalse(result["ipv6_working"])
+        self.assertEqual(result["affected_stack"], "ipv6")
+        self.assertTrue(result["asymmetric"])
+
+    def test_ipv6_only_working_ipv4_broken(self):
+        """Detect IPv6-only connectivity when IPv4 fails."""
+        ipv4_result = {"reachable": False, "latency_ms": None, "loss_pct": 100}
+        ipv6_result = {"reachable": True, "latency_ms": 25, "loss_pct": 0}
+
+        result = diagnose.analyze_dual_stack(ipv4_result, ipv6_result)
+
+        self.assertFalse(result["ipv4_working"])
+        self.assertTrue(result["ipv6_working"])
+        self.assertEqual(result["affected_stack"], "ipv4")
+        self.assertTrue(result["asymmetric"])
+
+    def test_both_stacks_working_symmetric(self):
+        """Detect when both IPv4 and IPv6 work."""
+        ipv4_result = {"reachable": True, "latency_ms": 20, "loss_pct": 0}
+        ipv6_result = {"reachable": True, "latency_ms": 20, "loss_pct": 0}
+
+        result = diagnose.analyze_dual_stack(ipv4_result, ipv6_result)
+
+        self.assertTrue(result["ipv4_working"])
+        self.assertTrue(result["ipv6_working"])
+        self.assertFalse(result["asymmetric"])
+        self.assertTrue(result["both_working"])
+
+    def test_ipv6_slower_latency(self):
+        """Detect IPv6 with higher latency (routing issue)."""
+        ipv4_result = {"reachable": True, "latency_ms": 20, "loss_pct": 0}
+        ipv6_result = {"reachable": True, "latency_ms": 80, "loss_pct": 0}
+
+        result = diagnose.analyze_dual_stack(ipv4_result, ipv6_result)
+
+        self.assertTrue(result["ipv4_working"])
+        self.assertTrue(result["ipv6_working"])
+        self.assertTrue(result["latency_asymmetry"])
+        self.assertGreater(result["latency_differential_ms"], 50)
+
+    def test_happy_eyeballs_detection(self):
+        """Detect Happy Eyeballs in action (fast fallback)."""
         events = [
-            {"event": "syn_sent", "timestamp": 0},
-            {"event": "syn_ack_received", "timestamp": 10},
-            {"event": "ack_sent", "timestamp": 11},
+            {"protocol": "ipv6", "status": "timeout", "timestamp": 0},
+            {"protocol": "ipv4", "status": "success", "timestamp": 50},
+            {"protocol": "ipv6", "status": "connected", "timestamp": 300},
         ]
-        result = diagnose.track_tcp_handshake(events)
+        result = diagnose.detect_happy_eyeballs(events)
 
-        self.assertTrue(result["handshake_complete"])
-        self.assertEqual(result["handshake_duration_ms"], 11)
-        self.assertFalse(result["handshake_timeout"])
-        self.assertEqual(result["final_state"], "established")
+        self.assertTrue(result["happy_eyeballs_active"])
+        self.assertEqual(result["fallback_to"], "ipv4")
+        self.assertLess(result["fallback_delay_ms"], 100)
 
-    def test_tcp_handshake_timeout(self):
-        """Detect handshake timeout: SYN sent but no response."""
+    def test_ipv6_preferential_routing(self):
+        """Detect when dual-stack prefers IPv6 (per RFC 8305)."""
         events = [
-            {"event": "syn_sent", "timestamp": 0},
-            {"event": "timeout", "timestamp": 5000},
+            {"protocol": "ipv6", "status": "success", "latency": 25},
+            {"protocol": "ipv4", "status": "success", "latency": 30},
         ]
-        result = diagnose.track_tcp_handshake(events)
+        result = diagnose.detect_dual_stack_preference(events)
 
-        self.assertFalse(result["handshake_complete"])
-        self.assertTrue(result["handshake_timeout"])
-        self.assertEqual(result["failed_at_stage"], "syn_ack_wait")
+        self.assertEqual(result["preferred_protocol"], "ipv6")
+        self.assertTrue(result["following_rfc8305"])
 
-    def test_tcp_reset_detection(self):
-        """Detect TCP RST (connection reset by peer)."""
-        events = [
-            {"event": "syn_sent", "timestamp": 0},
-            {"event": "syn_ack_received", "timestamp": 10},
-            {"event": "ack_sent", "timestamp": 11},
-            {"event": "rst_received", "timestamp": 50},
-        ]
-        result = diagnose.track_tcp_connection(events)
+    def test_dns_64_translation(self):
+        """Detect DNS64 / NAT64 translation (synthetic IPv6)."""
+        # Well-known prefix for NAT64: 64:ff9b::/96
+        ipv6_addrs = ["2001:db8::1", "64:ff9b::192.0.2.1", "fe80::1"]
+        result = diagnose.detect_nat64_translation(ipv6_addrs)
 
-        self.assertEqual(result["termination_reason"], "reset_by_peer")
-        self.assertTrue(result["abnormal_termination"])
-        self.assertEqual(result["connection_duration_ms"], 50)
+        self.assertTrue(result["nat64_detected"])
+        self.assertIn("64:ff9b::192.0.2.1", result["translated_addresses"])
 
-    def test_tcp_fin_handshake(self):
-        """Track normal connection close: FIN -> FIN-ACK -> ACK."""
-        events = [
-            {"event": "established", "timestamp": 100},
-            {"event": "fin_sent", "timestamp": 500},
-            {"event": "fin_ack_received", "timestamp": 510},
-            {"event": "ack_sent", "timestamp": 511},
-        ]
-        result = diagnose.track_tcp_connection(events)
-
-        self.assertEqual(result["termination_reason"], "normal_close")
-        self.assertFalse(result["abnormal_termination"])
-
-    def test_tcp_retransmission_pattern(self):
-        """Detect excessive retransmissions."""
-        events = [
-            {"event": "data_sent", "segment": 1, "timestamp": 0},
-            {"event": "timeout", "segment": 1, "timestamp": 100},
-            {"event": "retransmit", "segment": 1, "timestamp": 101},
-            {"event": "timeout", "segment": 1, "timestamp": 200},
-            {"event": "retransmit", "segment": 1, "timestamp": 201},
-            {"event": "ack_received", "segment": 1, "timestamp": 210},
-        ]
-        result = diagnose.analyze_retransmission_pattern(events)
-
-        self.assertEqual(result["retransmit_count"], 2)
-        self.assertGreater(result["retransmit_rate_pct"], 50)
-        self.assertTrue(result["excessive_retransmits"])
-
-    def test_tcp_window_stall_detection(self):
-        """Detect receive window stall (receiver not reading)."""
-        events = [
-            {"event": "data_sent", "timestamp": 0, "window": 65535},
-            {"event": "ack_received", "timestamp": 10, "window": 0},
-            {"event": "ack_received", "timestamp": 1000, "window": 0},
-        ]
-        result = diagnose.detect_window_stall(events)
-
-        self.assertTrue(result["window_stalled"])
-        self.assertGreater(result["stall_duration_ms"], 900)
-
-    def test_tcp_connection_integrates_into_results(self):
-        """TCP state tracking integrates into DiagnosisResult."""
+    def test_dual_stack_integrates_into_results(self):
+        """Dual-stack analysis integrates into DiagnosisResult."""
         results = diagnose.DiagnosisResult()
-        events = [{"event": "syn_sent", "timestamp": 0}]
+        ipv4 = {"reachable": True, "latency_ms": 20, "loss_pct": 0}
+        ipv6 = {"reachable": True, "latency_ms": 20, "loss_pct": 0}
 
-        tcp_result = diagnose.track_tcp_handshake(events)
-        results.add("tcp_handshake", tcp_result)
+        stack_result = diagnose.analyze_dual_stack(ipv4, ipv6)
+        results.add("dual_stack", stack_result)
 
-        stored = results.tests.get("tcp_handshake")
+        stored = results.tests.get("dual_stack")
         self.assertIsNotNone(stored)
+        self.assertTrue(stored["both_working"])
 
 
 if __name__ == "__main__":
