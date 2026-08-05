@@ -1198,3 +1198,102 @@ def rank_recommendations(candidates: List[Dict]) -> List[Dict]:
         return impact * cost
 
     return sorted(candidates, key=roi_score, reverse=True)
+
+
+def classify_latency(measurements: List[float]) -> Dict:
+    """Classify latency pattern based on round-trip time measurements.
+
+    Args:
+        measurements: List of RTT measurements in milliseconds
+
+    Returns:
+        Dict with classification, statistics, and buffer bloat detection:
+        {
+            "classification": "stable_low" | "stable_medium" | "variable" |
+                             "high_variance_high_latency" | "buffer_bloat",
+            "avg_latency_ms": float,
+            "min_latency_ms": float,
+            "max_latency_ms": float,
+            "jitter_ms": float,  # standard deviation
+            "is_stable": bool,
+            "is_uncertain": bool,  # < 3 samples
+            "has_buffer_bloat": bool,
+            "classification_reason": str
+        }
+    """
+    import statistics
+
+    if not measurements:
+        return {
+            "classification": "unknown",
+            "avg_latency_ms": None,
+            "min_latency_ms": None,
+            "max_latency_ms": None,
+            "jitter_ms": None,
+            "is_stable": False,
+            "is_uncertain": True,
+            "has_buffer_bloat": False,
+            "classification_reason": "No measurements provided"
+        }
+
+    # Handle small sample sizes
+    is_uncertain = len(measurements) < 3
+    avg_latency = statistics.mean(measurements)
+    min_latency = min(measurements)
+    max_latency = max(measurements)
+
+    # Jitter is standard deviation of RTT
+    if len(measurements) > 1:
+        jitter = statistics.stdev(measurements)
+    else:
+        jitter = 0.0
+
+    # Detect buffer bloat: high tail latency (max - min spread) with low baseline
+    tail_latency_spread = max_latency - min_latency
+    has_buffer_bloat = (
+        min_latency < 10 and max_latency > 50 and
+        tail_latency_spread > 40  # Significant spike
+    )
+
+    # Classify based on latency characteristics
+    if has_buffer_bloat:
+        classification = "buffer_bloat"
+        reason = f"Buffer bloat detected: min={min_latency:.1f}ms, max={max_latency:.1f}ms (tail spike)"
+        is_stable = False
+
+    elif avg_latency > 100 and jitter > 20:
+        classification = "high_variance_high_latency"
+        reason = f"High baseline + high variance: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
+        is_stable = False
+
+    elif avg_latency < 20 and jitter < 2:
+        classification = "stable_low"
+        reason = f"Stable low latency: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
+        is_stable = True
+
+    elif avg_latency < 50 and jitter < 2:
+        classification = "stable_medium"
+        reason = f"Stable medium latency: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
+        is_stable = True
+
+    elif avg_latency >= 50 or jitter > 2:
+        classification = "variable"
+        reason = f"Variable latency: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
+        is_stable = False
+
+    else:
+        classification = "variable"
+        reason = f"Variable pattern: avg={avg_latency:.1f}ms, jitter={jitter:.1f}ms"
+        is_stable = False
+
+    return {
+        "classification": classification,
+        "avg_latency_ms": round(avg_latency, 2),
+        "min_latency_ms": round(min_latency, 2),
+        "max_latency_ms": round(max_latency, 2),
+        "jitter_ms": round(jitter, 2),
+        "is_stable": is_stable,
+        "is_uncertain": is_uncertain,
+        "has_buffer_bloat": has_buffer_bloat,
+        "classification_reason": reason
+    }
