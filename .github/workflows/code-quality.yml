@@ -18,20 +18,25 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Code Simplification Check (Report Only)
-        continue-on-error: true
+      - name: Code Simplification Check
+        continue-on-error: false
         run: |
-          echo "=== Code Simplification (High Intensity - Report Only) ==="
-          python tools/code_simplification.py netcheck -i high -f json > /tmp/simplification.json || true
-          python tools/code_simplification.py netcheck -i high || true
+          echo "=== Code Simplification (Low Intensity) ==="
+          echo "Threshold: Functions > 30 lines (allows necessary complexity)"
+          python tools/code_simplification.py netcheck -i low -f json > /tmp/simplification.json || true
+          python tools/code_simplification.py netcheck -i low
           echo ""
-          echo "Summary (not blocking):"
+          echo "Summary:"
           python -c "
           import json
           try:
               with open('/tmp/simplification.json') as f:
                   data = json.load(f)
-                  print(f'Found {len(data)} code complexity issues (see details above)')
+                  if data:
+                      print(f'⚠ Found {len(data)} functions over 30 lines')
+                      exit(1)
+                  else:
+                      print('✓ No excessively long functions')
           except:
               pass
           "
@@ -61,20 +66,31 @@ jobs:
               pass
           "
 
-      - name: Documentation Check (Report Only)
-        continue-on-error: true
+      - name: Documentation Check
+        continue-on-error: false
         run: |
-          echo "=== Documentation Check (High Intensity - Report Only) ==="
-          python tools/documentation_check.py . -i high -f json > /tmp/docs.json || true
-          python tools/documentation_check.py . -i high || true
+          echo "=== Documentation Check (Medium Intensity) ==="
+          echo "Requires: README exists, no template scaffolding, baseline docstrings"
+          python tools/documentation_check.py . -i medium -f json > /tmp/docs.json || true
+          python tools/documentation_check.py . -i medium
           echo ""
-          echo "Summary (not blocking):"
+          echo "Summary:"
           python -c "
           import json
           try:
               with open('/tmp/docs.json') as f:
                   data = json.load(f)
-                  print(f'Found {len(data)} documentation issues (see details above)')
+                  if data:
+                      print(f'⚠ Found {len(data)} documentation issues')
+                      # Only fail on MEDIUM and HIGH severity
+                      blocking = [x for x in data if x.get('severity') in ('medium', 'high')]
+                      if blocking:
+                          print(f'✗ {len(blocking)} blocking issues found')
+                          exit(1)
+                      else:
+                          print('✓ No blocking documentation issues')
+                  else:
+                      print('✓ Documentation standards met')
           except:
               pass
           "
