@@ -23,8 +23,9 @@ from .diagnostic_engine import (
     rank_hypotheses,
     correlate_with_history,
     calculate_confidence_from_history,
-    classify_packet_loss_pattern,
-    detect_asymmetric_loss,
+    discover_path_mtu,
+    analyze_fragmentation_impact,
+    calculate_mss_from_mtu,
 )
 
 WINDOW_S = 120
