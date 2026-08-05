@@ -243,31 +243,36 @@ class ConfigurationMatrix:
 
     def suggest_next_test(self) -> Dict:
         """Recommend highest-impact untested combination."""
-        candidates = []
-        for var, values in self.tests.items():
-            for val, records in values.items():
-                if records and records[-1]["tested"]:
-                    # Already tested, look for untested alternatives
-                    pass
+        high_impact_vars = {
+            "wifi_mode": {
+                "impact": 95,
+                "possible_values": ["802.11ac", "802.11ax", "802.11n", "802.11a"],
+                "effort": "easy"
+            },
+            "router_dns": {
+                "impact": 90,
+                "possible_values": ["enabled", "disabled"],
+                "effort": "easy"
+            },
+            "modem": {
+                "impact": 85,
+                "possible_values": ["restart", "no_restart"],
+                "effort": "medium"
+            },
+        }
 
-        # Simple: suggest first untested high-impact variable
-        high_impact = [
-            (v, 95) for v in ["wifi_mode", "router_dns", "modem"]
-        ]
-        for var, impact in high_impact:
+        for var, config in high_impact_vars.items():
             if var in self.tests:
-                # Check if all values tested
-                untested = [
-                    val for val, recs in self.tests[var].items()
-                    if not recs or not recs[-1]["tested"]
-                ]
+                tested_values = set(self.tests[var].keys())
+                untested = [v for v in config["possible_values"] if v not in tested_values]
                 if untested:
                     return {
                         "variable": var,
                         "value": untested[0],
-                        "expected_impact": impact,
-                        "effort": "easy",
+                        "expected_impact": config["impact"],
+                        "effort": config["effort"],
                     }
+
         return {"action": "monitor"}
 
     def record_fix_applied(
@@ -355,9 +360,26 @@ def get_diagnosis(results: DiagnosisResult) -> Diagnosis:
     """Convert results to diagnosis with culprit ranking."""
     diagnosis = Diagnosis()
 
-    # Simple rule-based mapping
-    if results.get("layer_1_gateway") == "fail":
+    if results.tests:
+        all_unavailable = all(
+            result_data.get("state") == "unavailable" if isinstance(result_data, dict) else result_data == "unavailable"
+            for result_data in results.tests.values()
+        )
+        if all_unavailable and len(results.tests) >= 5:
+            diagnosis.note = "inconclusive"
+            return diagnosis
+
+    gw_state = results.get("layer_1_gateway")
+    if gw_state == "fail":
         diagnosis.culprit = "lan"
+        diagnosis.is_definitive = True
+        diagnosis.should_continue_testing = False
+    elif gw_state == "timeout":
+        diagnosis.note = "lan_slow"
+        diagnosis.is_definitive = True
+        diagnosis.should_continue_testing = False
+    elif gw_state == "unreachable":
+        diagnosis.note = "lan_down"
         diagnosis.is_definitive = True
         diagnosis.should_continue_testing = False
 
@@ -368,6 +390,7 @@ def get_diagnosis(results: DiagnosisResult) -> Diagnosis:
     elif results.get("layer_3_dns") == "both_fail":
         diagnosis.culprit = "dns"
         diagnosis.is_definitive = True
+        diagnosis.should_continue_testing = False
 
     else:
         dns_test = results.tests.get("layer_3_dns", {})
