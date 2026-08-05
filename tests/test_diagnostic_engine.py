@@ -813,274 +813,250 @@ class DualStackIsolationTest(unittest.TestCase):
         self.assertFalse(stored["path_asymmetry"])
 
 
-class BufferSaturationDetectionTest(unittest.TestCase):
-    """PDD: Buffer saturation invariants hold across window sizes."""
+class SynthesisDiagnosisTest(unittest.TestCase):
+    """PDD: Synthesis produces exactly one primary culprit from layer results."""
 
-    def test_no_saturation_when_buffers_below_threshold(self):
-        """Healthy buffers (< 90%) are not flagged as saturated."""
-        events = [
-            {"send_buffer_percent": 50, "recv_buffer_percent": 60},
-            {"send_buffer_percent": 70, "recv_buffer_percent": 80},
-        ]
-        result = diagnose.detect_buffer_saturation(events)
+    def test_empty_layers_returns_no_culprit(self):
+        """No layer results produces no culprit."""
+        result = diagnose.synthesize_diagnosis({})
 
-        self.assertFalse(result["send_buffer_saturated"])
-        self.assertFalse(result["recv_buffer_saturated"])
-        self.assertEqual(result["saturation_events"], 0)
+        self.assertIsNone(result["primary_culprit"])
+        self.assertEqual(len(result["contributing_layers"]), 0)
+        self.assertEqual(result["synthesis_confidence"], 0.0)
 
-    def test_saturation_detected_when_above_threshold(self):
-        """Send buffers >= 90% are flagged as saturated."""
-        events = [
-            {"send_buffer_percent": 95, "recv_buffer_percent": 50},
-        ]
-        result = diagnose.detect_buffer_saturation(events)
-
-        self.assertTrue(result["send_buffer_saturated"])
-        self.assertFalse(result["recv_buffer_saturated"])
-        self.assertEqual(result["saturation_events"], 1)
-
-    def test_saturation_frequency_decreases_with_more_healthy_events(self):
-        """Saturation frequency is the ratio of saturated to total events."""
-        healthy = [{"send_buffer_percent": 50, "recv_buffer_percent": 50}] * 9
-        saturated = [{"send_buffer_percent": 95, "recv_buffer_percent": 95}] * 1
-        events = healthy + saturated
-
-        result = diagnose.detect_buffer_saturation(events)
-
-        self.assertTrue(result["send_buffer_saturated"])
-        self.assertEqual(result["saturation_frequency"], 0.1)  # 1 out of 10
-
-
-class QueueDepthAnalysisTest(unittest.TestCase):
-    """SDD: Queue depth measurement scenarios."""
-
-    def test_empty_packets_returns_zeros(self):
-        """Empty packet list returns zero depths and jitter."""
-        result = diagnose.measure_queue_depth([])
-
-        self.assertEqual(result["avg_depth"], 0)
-        self.assertEqual(result["max_depth"], 0)
-        self.assertEqual(result["queue_jitter"], 0)
-
-    def test_queue_depth_captures_max_and_average(self):
-        """Queue depth tracks max and average depth."""
-        packets = [
-            {"queue_depth": 10},
-            {"queue_depth": 20},
-            {"queue_depth": 30},
-        ]
-        result = diagnose.measure_queue_depth(packets)
-
-        self.assertEqual(result["avg_depth"], 20)
-        self.assertEqual(result["max_depth"], 30)
-
-    def test_queue_jitter_reflects_depth_variance(self):
-        """Queue jitter increases with variance in depth."""
-        stable = [{"queue_depth": 15}] * 5
-        result_stable = diagnose.measure_queue_depth(stable)
-
-        variable = [
-            {"queue_depth": 5},
-            {"queue_depth": 15},
-            {"queue_depth": 25},
-        ]
-        result_variable = diagnose.measure_queue_depth(variable)
-
-        self.assertGreater(result_variable["queue_jitter"], result_stable["queue_jitter"])
-
-
-class BackpressureDetectionTest(unittest.TestCase):
-    """SDD: Backpressure scenarios (zero window, delayed acks, retransmits)."""
-
-    def test_no_backpressure_in_healthy_flow(self):
-        """Healthy flow has no zero window, delayed acks, or retransmits."""
-        events = [
-            {"tcp_window": 32768, "ack_delay_ms": 5, "flags": "A"},
-            {"tcp_window": 32768, "ack_delay_ms": 10, "flags": "A"},
-        ]
-        result = diagnose.analyze_backpressure(events)
-
-        self.assertFalse(result["backpressure_detected"])
-        self.assertEqual(result["total_backpressure_events"], 0)
-
-    def test_zero_window_events_counted(self):
-        """Zero window TCP events are detected."""
-        events = [
-            {"tcp_window": 0, "ack_delay_ms": 5, "flags": "A"},
-            {"tcp_window": 1024, "ack_delay_ms": 5, "flags": "A"},
-        ]
-        result = diagnose.analyze_backpressure(events)
-
-        self.assertEqual(result["zero_window_events"], 1)
-        self.assertTrue(result["backpressure_detected"])
-
-    def test_delayed_ack_detection(self):
-        """ACK delays > 40ms indicate backpressure."""
-        events = [
-            {"tcp_window": 32768, "ack_delay_ms": 50, "flags": "A"},
-            {"tcp_window": 32768, "ack_delay_ms": 10, "flags": "A"},
-        ]
-        result = diagnose.analyze_backpressure(events)
-
-        self.assertEqual(result["delayed_ack_events"], 1)
-        self.assertTrue(result["backpressure_detected"])
-
-    def test_retransmit_events_detected(self):
-        """Retransmit flags (R in flags) are counted."""
-        events = [
-            {"tcp_window": 32768, "ack_delay_ms": 5, "flags": "R"},
-            {"tcp_window": 32768, "ack_delay_ms": 5, "flags": "A"},
-        ]
-        result = diagnose.analyze_backpressure(events)
-
-        self.assertEqual(result["retransmit_events"], 1)
-        self.assertTrue(result["backpressure_detected"])
-
-
-class CongestionClassificationTest(unittest.TestCase):
-    """SDD: Congestion scenarios classified by type."""
-
-    def test_buffer_exhaustion_classified(self):
-        """Buffer saturation is classified as buffer_exhaustion."""
-        metrics = {
-            "send_buffer_saturated": True,
-            "recv_buffer_saturated": False,
-            "backpressure_detected": False,
-            "queue_jitter": 2,
-            "max_depth": 10,
+    def test_single_layer_culprit_becomes_primary(self):
+        """Single culprit is made primary."""
+        layer_results = {
+            "gateway": {"culprit_found": True, "confidence": 0.9, "metric": "unreachable"}
         }
-        result = diagnose.classify_congestion_signal(metrics)
+        result = diagnose.synthesize_diagnosis(layer_results)
 
-        self.assertEqual(result, "buffer_exhaustion")
+        self.assertEqual(result["primary_culprit"], "gateway")
+        self.assertEqual(result["synthesis_confidence"], 0.9)
 
-    def test_flow_control_classified(self):
-        """Backpressure signals classified as flow_control."""
-        metrics = {
-            "send_buffer_saturated": False,
-            "recv_buffer_saturated": False,
-            "backpressure_detected": True,
-            "queue_jitter": 2,
-            "max_depth": 10,
+    def test_highest_confidence_culprit_ranked_first(self):
+        """Highest confidence culprit becomes primary, others contribute."""
+        layer_results = {
+            "gateway": {"culprit_found": True, "confidence": 0.7, "metric": "unreachable"},
+            "dns": {"culprit_found": True, "confidence": 0.95, "metric": "timeout"},
+            "isp": {"culprit_found": True, "confidence": 0.5, "metric": "high_latency"}
         }
-        result = diagnose.classify_congestion_signal(metrics)
+        result = diagnose.synthesize_diagnosis(layer_results)
 
-        self.assertEqual(result, "flow_control")
-
-    def test_queue_instability_classified(self):
-        """High jitter classified as queue_instability."""
-        metrics = {
-            "send_buffer_saturated": False,
-            "recv_buffer_saturated": False,
-            "backpressure_detected": False,
-            "queue_jitter": 15,
-            "max_depth": 10,
-        }
-        result = diagnose.classify_congestion_signal(metrics)
-
-        self.assertEqual(result, "queue_instability")
-
-    def test_deep_queue_classified(self):
-        """Deep queue buildup (> 100) is recognized."""
-        metrics = {
-            "send_buffer_saturated": False,
-            "recv_buffer_saturated": False,
-            "backpressure_detected": False,
-            "queue_jitter": 5,
-            "max_depth": 150,
-        }
-        result = diagnose.classify_congestion_signal(metrics)
-
-        self.assertEqual(result, "deep_queue_buildup")
-
-    def test_healthy_when_all_metrics_good(self):
-        """All-healthy metrics classify as healthy."""
-        metrics = {
-            "send_buffer_saturated": False,
-            "recv_buffer_saturated": False,
-            "backpressure_detected": False,
-            "queue_jitter": 2,
-            "max_depth": 10,
-        }
-        result = diagnose.classify_congestion_signal(metrics)
-
-        self.assertEqual(result, "healthy")
+        self.assertEqual(result["primary_culprit"], "dns")
+        self.assertEqual(result["synthesis_confidence"], 0.95)
+        self.assertEqual(result["contributing_layers"], ["gateway", "isp"])
 
 
-class BufferEfficiencyTest(unittest.TestCase):
-    """PDD: Buffer efficiency is bounded [0, 100]."""
+class RootCauseRankingTest(unittest.TestCase):
+    """SDD: Root causes ranked by score (confidence × frequency × impact)."""
 
-    def test_perfect_efficiency_with_no_retransmits(self):
-        """No retransmits means 100% efficiency."""
-        events = [
-            {"bytes_acknowledged": 1000, "retransmitted_bytes": 0},
+    def test_empty_findings_returns_empty_list(self):
+        """No findings returns empty ranking."""
+        result = diagnose.rank_root_causes([])
+
+        self.assertEqual(len(result), 0)
+
+    def test_single_finding_ranked(self):
+        """Single finding is ranked with its score."""
+        findings = [
+            {"cause": "gateway", "confidence": 0.9, "frequency": 0.2, "impact": 1.0, "evidence": ["packet loss"]}
         ]
-        result = diagnose.measure_buffer_efficiency(events)
+        result = diagnose.rank_root_causes(findings)
 
-        self.assertEqual(result["buffer_efficiency_percent"], 100.0)
-        self.assertEqual(result["useful_bytes_transmitted"], 1000)
-        self.assertEqual(result["wasted_bytes_retransmitted"], 0)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["cause"], "gateway")
+        self.assertGreater(result[0]["score"], 0)
 
-    def test_efficiency_decreases_with_retransmits(self):
-        """Efficiency drops as retransmit ratio increases."""
-        few_retransmits = [
-            {"bytes_acknowledged": 1000, "retransmitted_bytes": 100},
+    def test_higher_confidence_ranks_first(self):
+        """Higher confidence gets higher score."""
+        findings = [
+            {"cause": "dns", "confidence": 0.5, "frequency": 1.0, "impact": 1.0},
+            {"cause": "gateway", "confidence": 0.9, "frequency": 1.0, "impact": 1.0},
         ]
-        result_few = diagnose.measure_buffer_efficiency(few_retransmits)
+        result = diagnose.rank_root_causes(findings)
 
-        many_retransmits = [
-            {"bytes_acknowledged": 1000, "retransmitted_bytes": 500},
+        self.assertEqual(result[0]["cause"], "gateway")
+        self.assertGreater(result[0]["score"], result[1]["score"])
+
+    def test_frequency_and_impact_multiply_score(self):
+        """Frequency and impact multiply into score."""
+        high_freq = [
+            {"cause": "a", "confidence": 0.8, "frequency": 0.5, "impact": 1.0}
         ]
-        result_many = diagnose.measure_buffer_efficiency(many_retransmits)
+        result_high = diagnose.rank_root_causes(high_freq)
 
-        self.assertGreater(result_few["buffer_efficiency_percent"], result_many["buffer_efficiency_percent"])
-
-    def test_zero_bytes_returns_perfect_efficiency(self):
-        """No data transmitted defaults to 100% (healthy state)."""
-        events = [
-            {"bytes_acknowledged": 0, "retransmitted_bytes": 0},
+        low_freq = [
+            {"cause": "b", "confidence": 0.8, "frequency": 0.1, "impact": 1.0}
         ]
-        result = diagnose.measure_buffer_efficiency(events)
+        result_low = diagnose.rank_root_causes(low_freq)
 
-        self.assertEqual(result["buffer_efficiency_percent"], 100.0)
+        self.assertGreater(result_high[0]["score"], result_low[0]["score"])
 
 
-class BufferQueueIntegrationTest(unittest.TestCase):
-    """TDD: Buffer/queue analysis integrates into DiagnosisResult."""
+class ConfidenceScoreTest(unittest.TestCase):
+    """PDD: Confidence score bounded [0, 1] and increases with observations."""
 
-    def test_buffer_saturation_integrates(self):
-        """Buffer saturation results stored in DiagnosisResult."""
-        results = diagnose.DiagnosisResult()
-        events = [
-            {"send_buffer_percent": 95, "recv_buffer_percent": 85},
+    def test_empty_observations_returns_zero(self):
+        """No observations = zero confidence."""
+        score = diagnose.calculate_confidence_score([])
+
+        self.assertEqual(score, 0.0)
+
+    def test_confidence_bounded_between_zero_and_one(self):
+        """Confidence always between 0 and 1."""
+        observations_list = [
+            [],
+            [{"consistent": True}],
+            [{"consistent": True}] * 100,
+            [{"consistent": False}] * 100,
         ]
-        sat_result = diagnose.detect_buffer_saturation(events)
-        results.add("buffer_saturation", sat_result)
 
-        stored = results.tests.get("buffer_saturation")
-        self.assertIsNotNone(stored)
-        self.assertTrue(stored["send_buffer_saturated"])
+        for obs in observations_list:
+            score = diagnose.calculate_confidence_score(obs)
+            self.assertGreaterEqual(score, 0.0)
+            self.assertLessEqual(score, 1.0)
 
-    def test_congestion_classification_drives_recommendations(self):
-        """Congestion classification informs actionable fixes."""
-        metrics = {
-            "send_buffer_saturated": True,
-            "recv_buffer_saturated": False,
-            "backpressure_detected": False,
-            "queue_jitter": 2,
-            "max_depth": 10,
-        }
-        congestion_type = diagnose.classify_congestion_signal(metrics)
+    def test_all_consistent_observations_high_confidence(self):
+        """All consistent observations → high confidence."""
+        observations = [{"consistent": True}] * 10
+        score = diagnose.calculate_confidence_score(observations)
 
-        # Verify recommendation could be derived from type
-        recommendations = {
-            "buffer_exhaustion": "Increase TCP buffer size (SO_SNDBUF/SO_RCVBUF)",
-            "flow_control": "Check receiver's buffer status; retransmit may help",
-            "queue_instability": "Investigate application queue management",
-            "deep_queue_buildup": "Monitor application processing rate",
-            "healthy": "No action needed"
+        self.assertGreater(score, 0.5)
+
+    def test_mixed_observations_medium_confidence(self):
+        """Mixed consistent/inconsistent observations → medium confidence."""
+        observations = [{"consistent": True}, {"consistent": False}] * 5
+        score = diagnose.calculate_confidence_score(observations)
+
+        self.assertGreater(score, 0.0)
+        self.assertLess(score, 1.0)
+
+
+class CascadeFailureDetectionTest(unittest.TestCase):
+    """SDD: Cascade detection identifies layered failures."""
+
+    def test_no_failures_no_cascade(self):
+        """All layers healthy = no cascade."""
+        layer_states = {"gateway": "ok", "isp": "ok", "dns": "ok"}
+        result = diagnose.detect_cascade_failures(layer_states)
+
+        self.assertFalse(result["cascade_detected"])
+        self.assertIsNone(result["root_layer"])
+
+    def test_single_failure_not_cascade(self):
+        """One failure is not a cascade."""
+        layer_states = {"gateway": "fail", "isp": "ok", "dns": "ok"}
+        result = diagnose.detect_cascade_failures(layer_states)
+
+        self.assertFalse(result["cascade_detected"])
+
+    def test_gateway_failure_cascades_downstream(self):
+        """Gateway failure cascades to ISP and DNS."""
+        layer_states = {"gateway": "fail", "isp": "fail", "dns": "fail"}
+        result = diagnose.detect_cascade_failures(layer_states)
+
+        self.assertTrue(result["cascade_detected"])
+        self.assertEqual(result["root_layer"], "gateway")
+        self.assertIn("isp", result["cascade_chain"])
+        self.assertIn("dns", result["cascade_chain"])
+
+    def test_isp_failure_not_blamed_on_gateway_ok(self):
+        """ISP failure when gateway is ok is not cascading from gateway."""
+        layer_states = {"gateway": "ok", "isp": "fail", "dns": "fail"}
+        result = diagnose.detect_cascade_failures(layer_states)
+
+        self.assertTrue(result["cascade_detected"])
+        self.assertEqual(result["root_layer"], "isp")
+
+
+class SynthesisReportGenerationTest(unittest.TestCase):
+    """TDD: Reports synthesize findings into actionable recommendations."""
+
+    def test_no_culprit_returns_no_issue_summary(self):
+        """No primary culprit → 'no clear issue' report."""
+        synthesis = {"primary_culprit": None, "contributing_layers": [], "synthesis_confidence": 0.0}
+        root_causes = []
+        report = diagnose.generate_synthesis_report(synthesis, root_causes)
+
+        self.assertIn("no clear", report["summary"].lower())
+        self.assertIsNone(report["primary_issue"])
+
+    def test_gateway_culprit_has_wifi_recommendation(self):
+        """Gateway culprit → Wi-Fi recommendation."""
+        synthesis = {"primary_culprit": "gateway", "contributing_layers": [], "synthesis_confidence": 0.9}
+        root_causes = [{"impact": 1.0}]
+        report = diagnose.generate_synthesis_report(synthesis, root_causes)
+
+        self.assertEqual(report["primary_issue"], "gateway")
+        self.assertIn("Wi-Fi", report["recommendations"][0]["action"])
+
+    def test_dns_culprit_has_dns_recommendation(self):
+        """DNS culprit → DNS servers recommendation."""
+        synthesis = {"primary_culprit": "dns", "contributing_layers": [], "synthesis_confidence": 0.8}
+        root_causes = [{"impact": 1.0}]
+        report = diagnose.generate_synthesis_report(synthesis, root_causes)
+
+        self.assertEqual(report["primary_issue"], "dns")
+        self.assertIn("DNS", report["recommendations"][0]["action"])
+
+    def test_isp_culprit_has_contact_isp_recommendation(self):
+        """ISP culprit → Contact ISP recommendation."""
+        synthesis = {"primary_culprit": "isp", "contributing_layers": [], "synthesis_confidence": 0.85}
+        root_causes = [{"impact": 1.0}]
+        report = diagnose.generate_synthesis_report(synthesis, root_causes)
+
+        self.assertEqual(report["primary_issue"], "isp")
+        self.assertIn("ISP", report["recommendations"][0]["action"])
+
+    def test_report_includes_confidence_and_evidence(self):
+        """Report includes confidence score and evidence summary."""
+        synthesis = {"primary_culprit": "gateway", "contributing_layers": [], "synthesis_confidence": 0.92}
+        root_causes = [{"impact": 1.0, "frequency": 0.15}]
+        report = diagnose.generate_synthesis_report(synthesis, root_causes)
+
+        self.assertEqual(report["confidence"], 0.92)
+        self.assertIn("15%", report["evidence_summary"])
+
+
+class SynthesisIntegrationTest(unittest.TestCase):
+    """TDD: Full synthesis workflow from findings to recommendations."""
+
+    def test_full_synthesis_workflow(self):
+        """End-to-end: layer findings → synthesis → report."""
+        # Layer analysis produces findings
+        layer_results = {
+            "gateway": {"culprit_found": True, "confidence": 0.85, "metric": "packet_loss"},
+            "dns": {"culprit_found": True, "confidence": 0.6, "metric": "timeout"},
         }
 
-        self.assertIn(congestion_type, recommendations)
+        # Findings ranked by root cause analysis
+        findings = [
+            {"cause": "gateway", "confidence": 0.85, "frequency": 0.2, "impact": 1.0},
+            {"cause": "dns", "confidence": 0.6, "frequency": 0.1, "impact": 0.8},
+        ]
+
+        # Synthesis combines them
+        synthesis = diagnose.synthesize_diagnosis(layer_results)
+        ranked = diagnose.rank_root_causes(findings)
+
+        # Report is generated
+        report = diagnose.generate_synthesis_report(synthesis, ranked)
+
+        # Verify output
+        self.assertEqual(report["primary_issue"], "gateway")
+        self.assertGreater(report["confidence"], 0)
+        self.assertGreater(len(report["recommendations"]), 0)
+
+    def test_cascade_failure_synthesis_identifies_root(self):
+        """Cascade failures correctly identify root layer."""
+        layer_states = {"gateway": "fail", "isp": "fail", "dns": "fail", "application": "fail"}
+        cascade = diagnose.detect_cascade_failures(layer_states)
+
+        # Cascade analysis drives synthesis recommendation
+        self.assertTrue(cascade["cascade_detected"])
+        self.assertEqual(cascade["root_layer"], "gateway")
+        self.assertEqual(cascade["cascade_chain"][0], "gateway")
 
 
 if __name__ == "__main__":

@@ -32,6 +32,11 @@ from .diagnostic_engine import (
     analyze_backpressure,
     classify_congestion_signal,
     measure_buffer_efficiency,
+    synthesize_diagnosis,
+    rank_root_causes,
+    calculate_confidence_score,
+    detect_cascade_failures,
+    generate_synthesis_report,
 )
 
 WINDOW_S = 120
