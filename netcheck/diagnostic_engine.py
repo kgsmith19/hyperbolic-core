@@ -187,13 +187,15 @@ class ConfigurationMatrix:
         self.tests = {}  # {variable: {value: [results]}}
         self.fixes_applied = {}  # {variable: fix_record}
         self.baseline_state = None
+        self.untested_options = {}  # {variable: {value: {impact, cost, feasibility}}}
+        self.state_changes = []  # [{event, note, date}]
 
     def record_test(
         self,
         variable: str,
         value: str,
         outcome: str,
-        error_count: int = 0,
+        error_count: int = None,
         duration_hours: float = 0,
         date: str = None,
         notes: str = "",
@@ -205,16 +207,25 @@ class ConfigurationMatrix:
         if value not in self.tests[variable]:
             self.tests[variable][value] = []
 
+        # Handle missing error_count
+        if error_count is None:
+            error_count_val = None
+            impact = self._calculate_impact_score(0, outcome)
+        else:
+            error_count_val = error_count
+            impact = self._calculate_impact_score(error_count, outcome)
+
         record = {
             "variable": variable,
             "value": value,
             "outcome": outcome,
-            "error_count": error_count,
+            "error_count": error_count_val,
             "duration_hours": duration_hours,
             "date": date or datetime.utcnow().isoformat(),
             "tested": True,
             "notes": notes,
-            "impact_score": self._calculate_impact_score(error_count, outcome),
+            "impact_score": impact,
+            "data_complete": error_count is not None,
             **kwargs
         }
         self.tests[variable][value].append(record)
@@ -227,6 +238,15 @@ class ConfigurationMatrix:
             return min(80 + error_count / 2, 99.0)
         else:
             return 50.0
+
+    def _cost_to_effort(self, cost: float) -> str:
+        """Convert numeric cost to effort level."""
+        if cost <= 1:
+            return "easy"
+        elif cost <= 2:
+            return "medium"
+        else:
+            return "hard"
 
     def get_test_record(self, variable: str, value: str) -> Optional[Dict]:
         """Get latest test result for variable/value."""
@@ -241,8 +261,132 @@ class ConfigurationMatrix:
             return []
         return self.tests[variable][value]
 
+    def record_diagnosis_outcome(self, culprit: str, outcome: str = "fail", diagnosis: Dict = None, **kwargs) -> None:
+        """Record a diagnosed culprit as a test outcome."""
+        confidence = diagnosis.get("confidence", 0.0) if diagnosis else 0.0
+        # Use appropriate value for each culprit type
+        value_map = {
+            "router_dns": "enabled",
+            "gateway": "up",
+            "isp": "responding",
+            "dns": "enabled",
+            "wifi_mode": "tested",
+            "modem": "working"
+        }
+        value = value_map.get(culprit, "tested")
+
+        # Build notes including extra context like burst_num
+        notes_parts = [f"Diagnosed with confidence {confidence}"]
+        if "burst_num" in kwargs:
+            notes_parts.append(f"(burst {kwargs['burst_num']})")
+
+        self.record_test(
+            variable=culprit,
+            value=value,
+            outcome=outcome,
+            notes=", ".join(notes_parts),
+        )
+        if diagnosis and "confidence" in diagnosis:
+            self.tests.setdefault(culprit, {}).setdefault(value, [])[-1]["confidence"] = confidence
+
+    def track_untested_option(self, variable: str, value: str, impact: float, cost: float, feasibility: float = 1.0) -> None:
+        """Track an untested option with its expected impact and cost."""
+        if variable not in self.untested_options:
+            self.untested_options[variable] = {}
+        self.untested_options[variable][value] = {
+            "impact": impact,
+            "cost": cost,
+            "feasibility": feasibility
+        }
+
+    def note_state_change(self, event: str, note: str = "") -> None:
+        """Record when network state changes (e.g., modem restart)."""
+        self.state_changes.append({
+            "event": event,
+            "note": note,
+            "date": datetime.utcnow().isoformat()
+        })
+
+    def note_errors_during_test(self, variable: str, value: str, error_count: int) -> None:
+        """Record errors that occurred during a specific test."""
+        record = self.get_test_record(variable, value)
+        if record:
+            record["errors_during_test"] = error_count
+            # Flag contradiction if outcome was ok but errors occurred
+            if record.get("outcome") == "ok" and error_count > 0:
+                record["unexpected_outcome"] = True
+                record["note"] = "Inconclusive: outcome marked ok but errors still occurring"
+
+    def suggest_next_tests(self, limit: int = 3, context: str = None) -> List[Dict]:
+        """Return ranked list of suggested next tests (up to limit)."""
+        suggestions = []
+
+        # If matrix is empty, suggest baseline
+        if not self.tests and not self.untested_options:
+            return [{
+                "type": "baseline",
+                "variable": "all_layers",
+                "value": "baseline_diagnostic",
+                "effort": "medium",
+                "reason": "Run baseline diagnostic (all network layers)"
+            }]
+
+        # Build suggestions from untested options
+        for variable, values in self.untested_options.items():
+            for value, config in values.items():
+                roi = (config["impact"] * config["feasibility"]) / max(config["cost"], 1)
+                suggestions.append({
+                    "variable": variable,
+                    "value": value,
+                    "expected_impact": config["impact"],
+                    "effort": self._cost_to_effort(config["cost"]),
+                    "roi_score": roi,
+                    "expected_outcome_if_success": f"If fixes errors -> {variable} is causal",
+                    "expected_outcome_if_failure": f"If errors continue -> {variable} ruled out"
+                })
+
+        # Build suggestions from tested variables that had failures
+        for variable, values in self.tests.items():
+            for value, records in values.items():
+                latest = records[-1] if records else None
+                if latest and latest.get("outcome") == "fail":
+                    # Find untested values for this variable
+                    tested_values = set(self.tests.get(variable, {}).keys())
+                    high_impact_vars = {
+                        "wifi_mode": ["802.11ax", "802.11ac", "802.11n"],
+                        "router_dns": ["enabled", "disabled"],
+                        "modem": ["restart", "no_restart"],
+                    }
+                    if variable in high_impact_vars:
+                        for alt_value in high_impact_vars[variable]:
+                            if alt_value not in tested_values:
+                                roi = 85 / 1  # High impact, low cost
+                                suggestions.append({
+                                    "variable": variable,
+                                    "value": alt_value,
+                                    "expected_impact": 85,
+                                    "effort": "easy",
+                                    "roi_score": roi,
+                                    "expected_outcome_if_success": f"If fixes errors -> {variable}={alt_value} is causal",
+                                    "expected_outcome_if_failure": f"If errors continue -> {variable} ruled out"
+                                })
+
+        # Sort by ROI and return top N
+        ranked = sorted(suggestions, key=lambda s: -s.get("roi_score", 0))
+        return ranked[:limit]
+
     def suggest_next_test(self) -> Dict:
         """Recommend highest-impact untested combination."""
+        # If matrix is empty, suggest baseline
+        if not self.tests and not self.untested_options:
+            return {
+                "type": "baseline",
+                "variable": "all_layers",
+                "value": "baseline_diagnostic",
+                "effort": "medium",
+                "reason": "Run baseline diagnostic (all network layers)"
+            }
+
         high_impact_vars = {
             "wifi_mode": {
                 "impact": 95,
@@ -261,9 +405,20 @@ class ConfigurationMatrix:
             },
         }
 
+        # First pass: suggest retesting failed variables
         for var, config in high_impact_vars.items():
             if var in self.tests:
                 tested_values = set(self.tests[var].keys())
+
+                # Check if any value succeeded
+                any_succeeded = any(
+                    records[-1]["outcome"] == "success"
+                    for records in self.tests[var].values() if records
+                )
+
+                # Don't suggest retesting if any value succeeded (problem already fixed)
+                if any_succeeded:
+                    continue
 
                 any_failed = any(
                     records[-1]["outcome"] == "fail"
@@ -278,7 +433,22 @@ class ConfigurationMatrix:
                             "value": untested[0],
                             "expected_impact": config["impact"],
                             "effort": config["effort"],
+                            "expected_outcome_if_success": f"If fixes errors -> {var} is causal",
+                            "expected_outcome_if_failure": f"If errors continue -> {var} ruled out"
                         }
+
+        # Second pass: if no failures found, suggest untested high-impact variables
+        for var, config in high_impact_vars.items():
+            if var not in self.tests:
+                # Variable not tested yet, suggest testing it
+                return {
+                    "variable": var,
+                    "value": config["possible_values"][0],
+                    "expected_impact": config["impact"],
+                    "effort": config["effort"],
+                    "expected_outcome_if_success": f"If fixes errors -> {var} is causal",
+                    "expected_outcome_if_failure": f"If errors continue -> {var} ruled out"
+                }
 
         return {"action": "monitor"}
 
@@ -362,6 +532,29 @@ class ConfigurationMatrix:
             "pattern": "unknown"
         }
 
+    def calculate_confidence(self, culprit: str) -> float:
+        """Calculate confidence in a culprit based on historical frequency."""
+        if culprit not in self.tests:
+            return 0.0
+
+        # Count how many times this culprit was diagnosed
+        outcomes = self.tests[culprit]
+        fail_count = 0
+        total_count = 0
+
+        for value, records in outcomes.items():
+            for record in records:
+                total_count += 1
+                if record.get("outcome") == "fail":
+                    fail_count += 1
+
+        if total_count == 0:
+            return 0.0
+
+        frequency = fail_count / total_count
+        # Base confidence on how consistently this culprit failed
+        return min(0.99, frequency * 0.95)
+
 
 def get_diagnosis(results: DiagnosisResult) -> Diagnosis:
     """Convert results to diagnosis with culprit ranking."""
@@ -420,6 +613,14 @@ def get_diagnosis(results: DiagnosisResult) -> Diagnosis:
         diagnosis.culprit = "connection_reaping"
         diagnosis.is_definitive = True
 
+    # If local layers ok but far end fails, it's upstream
+    if (results.get("layer_1_gateway") == "ok" and
+        results.get("layer_2_isp") == "ok" and
+        results.get("layer_3_dns") == "ok" and
+        results.get("layer_4_tls") == "fail"):
+        diagnosis.culprit = "upstream"
+        diagnosis.is_definitive = True
+
     if (results.get("layer_1_gateway") == "ok" and
         results.get("layer_2_isp") == "ok" and
         results.get("layer_3_dns") == "ok" and
@@ -431,9 +632,98 @@ def get_diagnosis(results: DiagnosisResult) -> Diagnosis:
 
 
 def rank_hypotheses(results: DiagnosisResult) -> List[Dict]:
-    """Rank possible causes by evidence quality."""
-    # Placeholder implementation
-    return []
+    """Rank possible causes by evidence quality.
+
+    Ranking: specificity > frequency > reversibility > confidence
+    """
+    hypotheses = []
+
+    if results.get("layer_1_gateway") == "fail":
+        hypotheses.append({
+            "cause": "lan",
+            "confidence": "high",
+            "specificity": 10,
+            "evidence": "Gateway unreachable",
+        })
+
+    if results.get("layer_2_isp") == "fail":
+        hypotheses.append({
+            "cause": "isp",
+            "confidence": "high",
+            "specificity": 9,
+            "evidence": "ISP hop unreachable",
+        })
+
+    # Handle DNS test result - can be string like "router_fail_public_ok" or dict
+    dns_state = results.get("layer_3_dns")
+    if dns_state == "router_fail_public_ok":
+        hypotheses.append({
+            "cause": "router_dns",
+            "confidence": "high",
+            "specificity": 8,
+            "evidence": "Router DNS fails, public DNS works",
+        })
+    elif dns_state == "both_fail":
+        hypotheses.append({
+            "cause": "dns",
+            "confidence": "high",
+            "specificity": 7,
+            "evidence": "Both DNS resolvers fail",
+        })
+    elif dns_state == "router_unavailable_public_ok":
+        # Router unavailable means we can't measure it, never blame it
+        pass
+    else:
+        # Also handle dict format for DNS results
+        dns_test = results.tests.get("layer_3_dns", {})
+        if isinstance(dns_test, dict) and "state" not in dns_test:  # dict format with router/public keys
+            router_info = dns_test.get("router", {})
+            public_info = dns_test.get("public", {})
+            router_state = router_info.get("state") if isinstance(router_info, dict) else router_info
+            public_state = public_info.get("state") if isinstance(public_info, dict) else public_info
+
+            if router_state == "fail" and public_state == "ok":
+                hypotheses.append({
+                    "cause": "router_dns",
+                    "confidence": "high",
+                    "specificity": 8,
+                    "evidence": "Router DNS fails, public DNS works",
+                })
+
+    if results.get("drill_wifi_mode") == "fail":
+        hypotheses.append({
+            "cause": "wifi_mode",
+            "confidence": "medium",
+            "specificity": 8,
+            "evidence": "Wi-Fi adapter not on optimal mode",
+        })
+
+    if results.get("drill_interference") in ["high", "detected"]:
+        hypotheses.append({
+            "cause": "interference",
+            "confidence": "medium",
+            "specificity": 7,
+            "evidence": "Co-channel interference detected",
+        })
+
+    if results.get("layer_4_tls") == "fail":
+        hypotheses.append({
+            "cause": "tls_interception",
+            "confidence": "low",
+            "specificity": 5,
+            "evidence": "TLS handshake fails",
+        })
+
+    if results.get("layer_5_idle_hold") == "closed_by_peer":
+        hypotheses.append({
+            "cause": "connection_reaping",
+            "confidence": "high",
+            "specificity": 9,
+            "evidence": "Long-lived connections terminated",
+        })
+
+    confidence_order = {"high": 0, "medium": 1, "low": 2}
+    return sorted(hypotheses, key=lambda h: (-h.get("specificity", 0), confidence_order.get(h.get("confidence"), 2)))
 
 
 def calculate_confidence_from_history(history: List[Dict], culprit: str, fix_applied: bool = False) -> float:
@@ -581,17 +871,23 @@ def generate_recommendation(diagnosis: Dict, matrix: ConfigurationMatrix) -> Dic
     if diagnosis.get("culprit") == "router_dns":
         return {
             "action": "verify_router_dns",
+            "primary": "router_dns",
             "target": "router",
-            "instruction": "Check router DNS settings"
+            "instruction": "Check router DNS settings and ensure public DNS is configured"
         }
 
     if matrix:
         next_test = matrix.suggest_next_test()
         if next_test.get("variable"):
+            value = next_test.get("value")
+            variable = next_test["variable"]
+            instruction = f"Test {variable} = {value}"
             return {
                 "action": "apply_fix",
-                "target": next_test["variable"],
-                "value": next_test.get("value"),
+                "primary": variable,
+                "target": variable,
+                "value": value,
+                "instruction": instruction,
                 "effort": next_test.get("effort", "unknown")
             }
 
