@@ -601,6 +601,194 @@ class EdgeCaseCombinationsTest(unittest.TestCase):
                         "Unreachable is LAN problem, likely hardware")
 
 
+class LatencyJitterClassifierTest(unittest.TestCase):
+    """Canonical hypothesis #1/#2 (latency variance / jitter).
+
+    Restored: this classifier (and the packet-loss/MTU/TCP-state-machine
+    ones below it) existed under Phase 1-4 commits in git history but the
+    functions are not present in this file today -- each phase's commit
+    touched the same line range as the previous one and replaced its
+    functions instead of adding alongside them, so Phase 2 lost Phase 1's
+    work, Phase 3 lost Phase 2's, and Phase 4 lost Phase 3's (Phase 5
+    onward stopped colliding). See OPEN-ISSUES.md #12.
+    """
+
+    def test_stable_low_latency_is_healthy(self):
+        pings = [{"latency_ms": v} for v in (12, 15, 14, 13, 14, 12, 15, 13, 14, 12)]
+        result = diagnose.classify_latency(pings)
+        self.assertEqual(result["category"], "stable_low")
+        self.assertLess(result["jitter"], 10)
+        self.assertEqual(result["culprit"], "none")
+        self.assertEqual(result["confidence"], 100)
+
+    def test_high_variance_relative_to_median_is_variable(self):
+        pings = [{"latency_ms": v} for v in (8, 95, 12, 88, 15)]
+        result = diagnose.classify_latency(pings)
+        self.assertEqual(result["category"], "variable")
+        self.assertGreater(result["jitter"], result["median"] * 0.3)
+        self.assertTrue(any(h in result["hypotheses"]
+                           for h in ("buffer_bloat", "wifi_interference")))
+
+    def test_high_latency_high_jitter_is_flagged(self):
+        pings = [{"latency_ms": v} for v in (150, 110, 180, 105, 190)]
+        result = diagnose.classify_latency(pings)
+        self.assertEqual(result["category"], "high_variance_high_latency")
+        self.assertIn("congestion", result["hypotheses"])
+
+    def test_consistently_high_latency_low_jitter_is_stable_high(self):
+        """A long-haul or satellite path: slow but not jittery -- distinct
+        from buffer bloat or congestion, which are jittery."""
+        pings = [{"latency_ms": v} for v in (250, 252, 249, 251, 250)]
+        result = diagnose.classify_latency(pings)
+        self.assertEqual(result["category"], "stable_high")
+
+    def test_empty_input_is_unavailable_not_a_crash(self):
+        result = diagnose.classify_latency([])
+        self.assertEqual(result["category"], "unavailable")
+
+    def test_buffer_bloat_detected_from_idle_vs_loaded_differential(self):
+        idle = [{"latency_ms": 15} for _ in range(10)]
+        loaded = [{"latency_ms": 120} for _ in range(10)]
+        result = diagnose.classify_latency_under_load(idle, loaded)
+        self.assertEqual(result["category"], "buffer_bloat")
+        self.assertEqual(result["differential_ms"], 105)
+        self.assertIn("enable_sqm_qdisc", result["suggested_fixes"])
+
+    def test_small_differential_under_load_is_normal(self):
+        idle = [{"latency_ms": 15} for _ in range(10)]
+        loaded = [{"latency_ms": 25} for _ in range(10)]
+        result = diagnose.classify_latency_under_load(idle, loaded)
+        self.assertEqual(result["category"], "normal")
+
+
+class PacketLossPatternTest(unittest.TestCase):
+    """Canonical hypothesis #3 (packet loss). See OPEN-ISSUES.md #12."""
+
+    def test_no_loss_is_healthy(self):
+        result = diagnose.classify_packet_loss(["ok"] * 20)
+        self.assertEqual(result["pattern"], "healthy")
+        self.assertEqual(result["loss_rate"], 0.0)
+
+    def test_consecutive_failures_are_burst_loss(self):
+        results = ["ok"] * 25 + ["fail"] * 5 + ["ok"] * 70
+        result = diagnose.classify_packet_loss(results)
+        self.assertEqual(result["pattern"], "burst_loss")
+        self.assertGreaterEqual(result["burst_length"], 5)
+        self.assertIn("gateway_timeout", result["hypotheses"])
+
+    def test_evenly_spread_failures_are_steady_degradation(self):
+        results = ["fail" if i % 20 == 0 else "ok" for i in range(100)]
+        result = diagnose.classify_packet_loss(results)
+        self.assertEqual(result["pattern"], "steady_degradation")
+        self.assertEqual(result["burst_length"], 1)
+        self.assertIn("link_saturation", result["hypotheses"])
+
+    def test_empty_input_is_unavailable_not_a_crash(self):
+        result = diagnose.classify_packet_loss([])
+        self.assertEqual(result["pattern"], "unavailable")
+
+    def test_asymmetric_loss_flagged_past_five_point_differential(self):
+        result = diagnose.detect_asymmetric_loss(0.02, 0.08)
+        self.assertTrue(result["asymmetric"])
+        self.assertEqual(result["differential_pct"], 6.0)
+        self.assertIn("asymmetric_routing", result["hypotheses"])
+
+    def test_symmetric_loss_not_flagged(self):
+        result = diagnose.detect_asymmetric_loss(0.03, 0.035)
+        self.assertFalse(result["asymmetric"])
+
+
+class MtuPmtudTest(unittest.TestCase):
+    """Canonical hypothesis #4 (MTU constraints). See OPEN-ISSUES.md #12.
+
+    environ.mtu() already does real, live path-MTU discovery via the DF-bit
+    walk; these are the pure classification helpers the original spec called
+    for on top of a discovery result, so a result gathered from environ.mtu
+    (or anywhere else) can be turned into a PMTUD status/fragmentation
+    verdict without re-deriving that logic ad hoc.
+    """
+
+    def test_find_path_mtu_returns_largest_successful_size(self):
+        results = {1500: False, 1400: True, 1300: True, 1200: True}
+        self.assertEqual(diagnose.find_path_mtu(results), 1400)
+
+    def test_find_path_mtu_none_when_nothing_succeeds(self):
+        self.assertIsNone(diagnose.find_path_mtu({1500: False, 1200: False}))
+
+    def test_pmtud_working_when_max_size_delivered(self):
+        result = diagnose.diagnose_pmtud("delivered", icmp_fragmentation_needed_received=False)
+        self.assertEqual(result["pmtud_status"], "working")
+
+    def test_pmtud_broken_when_lost_with_no_icmp(self):
+        result = diagnose.diagnose_pmtud("lost", icmp_fragmentation_needed_received=False)
+        self.assertEqual(result["pmtud_status"], "broken")
+        self.assertIn("firewall_blocks_icmp", result["hypotheses"])
+
+    def test_pmtud_fragmenting_when_lost_but_icmp_received(self):
+        """ICMP fragmentation-needed came back -- PMTUD is doing its job,
+        just at a smaller size than the max, which is a functioning (if not
+        optimal) path rather than a broken one."""
+        result = diagnose.diagnose_pmtud("lost", icmp_fragmentation_needed_received=True)
+        self.assertEqual(result["pmtud_status"], "working_with_fragmentation")
+
+
+class TcpStateMachineTest(unittest.TestCase):
+    """Canonical hypothesis #5 (TCP retransmits / connection state).
+    See OPEN-ISSUES.md #12."""
+
+    def test_normal_handshake_reaches_established(self):
+        events = [
+            {"time": 0, "type": "SYN_sent", "port": 443},
+            {"time": 50, "type": "SYN_ACK_received"},
+            {"time": 51, "type": "ACK_sent"},
+        ]
+        result = diagnose.build_state_machine(events)
+        self.assertEqual(result["state"], "established")
+        self.assertEqual(result["handshake_rtt"], 50)
+
+    def test_rst_before_ack_is_rejected(self):
+        events = [
+            {"time": 0, "type": "SYN_sent"},
+            {"time": 10, "type": "RST_received"},
+        ]
+        result = diagnose.build_state_machine(events)
+        self.assertEqual(result["state"], "rejected")
+        self.assertEqual(result["reason"], "RST_before_ACK")
+
+    def test_syn_retransmits_follow_backoff_pattern(self):
+        events = [
+            {"time": 0, "type": "SYN_sent"},
+            {"time": 3000, "type": "SYN_retransmit"},
+            {"time": 9000, "type": "SYN_retransmit"},
+            {"time": 21000, "type": "timeout"},
+        ]
+        result = diagnose.build_state_machine(events)
+        self.assertEqual(result["timeouts"], [3000, 6000, 12000])
+        self.assertEqual(result["pattern"], "syn_backoff")
+
+    def test_fin_after_established_is_a_clean_close(self):
+        events = [
+            {"time": 0, "type": "SYN_sent"},
+            {"time": 20, "type": "SYN_ACK_received"},
+            {"time": 21, "type": "ACK_sent"},
+            {"time": 500, "type": "FIN_received"},
+        ]
+        result = diagnose.build_state_machine(events)
+        self.assertEqual(result["state"], "closed")
+        self.assertEqual(result["reason"], "FIN")
+
+    def test_rst_after_established_is_distinguished_from_rejection(self):
+        events = [
+            {"time": 0, "type": "SYN_sent"},
+            {"time": 20, "type": "SYN_ACK_received"},
+            {"time": 21, "type": "ACK_sent"},
+            {"time": 500, "type": "RST_received"},
+        ]
+        result = diagnose.build_state_machine(events)
+        self.assertEqual(result["state"], "reset")
+        self.assertEqual(result["reason"], "RST_after_established")
+
+
 class DualStackIsolationTest(unittest.TestCase):
     """Phase 5: Dual-Stack (IPv4/IPv6) Isolation tests."""
 

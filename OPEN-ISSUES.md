@@ -328,3 +328,71 @@ both are pre-existing and outside a "add dashboard features" phase's scope.
 
 **Retire when:** the console errors are root-caused and fixed, and/or the
 table gets a scroll-hint (e.g. a fade edge or narrower default columns).
+
+---
+
+## 12. ~~Canonical hypotheses #1-5 had no implementing code~~ — RESOLVED 2026-08-05
+
+**Surfaced:** 2026-08-05, while auditing `docs/NEXT_FEATURES_PDD_SDD_TDD.md`
+against the actual codebase for a "complete the remaining specs" pass.
+
+Git history shows Phase 1 (Latency & Jitter Classifier), Phase 2 (Packet
+Loss Pattern Classifier), Phase 3 (MTU/MSS Discovery & PMTUD), and Phase 4
+(TCP Connection State Machine) as separate commits, each claiming real
+functions and passing tests. None of those functions exist in
+`diagnostic_engine.py` today. Root cause: each phase's commit modified the
+*same* line range as the previous phase's and replaced its functions
+instead of adding alongside them — Phase 2 overwrote Phase 1's
+`classify_latency`, Phase 3 overwrote Phase 2's packet-loss functions,
+Phase 4 overwrote Phase 3's MTU/PMTUD functions, and would have overwritten
+Phase 4's own TCP state-machine functions too had Phase 5 (dual-stack)
+not started appending in a new region instead of colliding with the same
+slot. Confirmed by walking each commit's tree state directly
+(`git show <sha>:netcheck/diagnostic_engine.py`) rather than trusting
+commit messages.
+
+One concrete fingerprint of the damage survived even after the functions
+themselves were gone: `detect_happy_eyeballs()` ended with three orphaned,
+unreachable lines referencing undefined `mtu`/`standards` names — a
+fragment of the lost MTU classifier's `return` statement, spliced into the
+wrong function by whatever produced the overwrite. Removed.
+
+A second, related problem: `all_diagnostics.AllDiagnostics.hypotheses`
+lists "Latency (ms)", "Jitter (ms)", "Packet Loss (%)", "MTU Size (bytes)",
+and "TCP Retransmits" as hypotheses 1-5, and `tests/test_e2e_faults.py`'s
+acceptance tests for hypotheses #1, #3, and #7 injected a real `tc netem`
+fault and then asserted `assertTrue(True, "...")`, with the actual
+measurement assertion left in a comment ("# In a real test, we'd
+measure..."). So there was no code AND no real test that would have caught
+its absence.
+
+**Fixed:**
+- Restored `classify_latency`, `classify_latency_under_load`,
+  `classify_packet_loss`, `detect_asymmetric_loss`, `find_path_mtu`,
+  `diagnose_pmtud`, and `build_state_machine` in `diagnostic_engine.py`,
+  re-exported via `diagnose.py` matching the existing toolkit pattern
+  (`analyze_dual_stack` et al. — also unit-tested standalone, not wired
+  into `rank()`'s live per-tick path; these follow the same, already-
+  established convention rather than a new one).
+- Removed the orphaned dead code in `detect_happy_eyeballs`.
+- Rewrote `tests/test_e2e_faults.py`'s stub assertions into real ones:
+  inject a fault via `tc netem` on loopback, take a real measurement
+  through `probes.ping`/`probes.resolve`, assert the measurement reflects
+  the fault. Added a hand-rolled stub DNS responder (mirroring the
+  `_resolve_via` wire format) for the DNS-latency test, matching the
+  stand-in-server pattern `test_store.py`'s `MirrorTest` and
+  `test_probes.py`'s `IdleHoldTest` already use.
+- Fixed `_has_tc_capability` (now module-level `netem_available()`): it
+  checked `tc qdisc show`, which succeeds even when the `sch_netem` kernel
+  module isn't loaded (true of the sandbox this was found in — `tc` present,
+  `sch_netem` not) — a false positive that let three tests fail for real
+  instead of skip once `tc` happened to be installed. It now actually adds
+  and removes a netem rule.
+
+**Not attempted:** re-deriving TCP handshake/retransmit *events* from a live
+probe (raw packet capture) — `build_state_machine` classifies a list of
+already-timestamped events, matching the original spec's pure-function
+design and this project's "parsers are pure functions over data" convention,
+but nothing in this codebase captures real SYN/ACK/RST events to feed it.
+That would be a live packet-capture prober, a materially bigger addition
+than restoring what existed, and out of scope for a restoration.

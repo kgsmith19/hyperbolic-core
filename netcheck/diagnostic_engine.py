@@ -3,6 +3,7 @@
 Core principle: Systematic elimination. Every test reduces the search space.
 Never blame what we couldn't measure. Terminal conditions stop testing.
 """
+import statistics
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union
 from datetime import datetime, timedelta
@@ -1200,6 +1201,170 @@ def rank_recommendations(candidates: List[Dict]) -> List[Dict]:
     return sorted(candidates, key=roi_score, reverse=True)
 
 
+# --------------------------------------------------------------------------
+# Canonical hypotheses #1-5 (latency/jitter, packet loss, MTU/PMTUD, TCP
+# state). Restored: an earlier session built these, but each phase's commit
+# touched this same region and replaced the previous phase's functions
+# instead of adding alongside them, so they were gone from every subsequent
+# phase onward. See OPEN-ISSUES.md #12.
+# --------------------------------------------------------------------------
+
+def classify_latency(pings: List[Dict]) -> Dict:
+    """Classify a run of round-trip times into a stable/variable pattern.
+
+    Rules are checked in order, most-specific first, with "variable" as the
+    catch-all for anything that isn't clearly stable or clearly bad — every
+    input falls into exactly one category. Jitter here is max-min over the
+    window: there's no per-packet interarrival data available to compute a
+    true running RFC 3550 estimate from, only a list of round-trip times.
+    """
+    latencies = [p["latency_ms"] for p in pings]
+    if not latencies:
+        return {"category": "unavailable", "median": None, "jitter": None,
+                "culprit": "none", "hypotheses": [], "confidence": 0}
+
+    median = statistics.median(latencies)
+    jitter = max(latencies) - min(latencies)
+
+    if median < 50 and jitter < 10:
+        return {"category": "stable_low", "median": median, "jitter": jitter,
+                "culprit": "none", "hypotheses": [], "confidence": 100}
+    if 50 <= median <= 100 and jitter < 20:
+        return {"category": "stable_medium", "median": median, "jitter": jitter,
+                "culprit": "none", "hypotheses": [], "confidence": 90}
+    if median > 100 and jitter > 30:
+        return {"category": "high_variance_high_latency", "median": median,
+                "jitter": jitter, "culprit": None,
+                "hypotheses": ["congestion", "route_change", "wifi_interference"],
+                "confidence": 75}
+    if jitter > median * 0.3:
+        return {"category": "variable", "median": median, "jitter": jitter,
+                "culprit": None,
+                "hypotheses": ["buffer_bloat", "wifi_interference",
+                              "network_congestion", "gateway_queueing"],
+                "confidence": 80}
+    # High latency but low relative jitter: a consistently slow path (long
+    # haul, satellite) rather than congestion or interference, which are
+    # jittery by nature.
+    return {"category": "stable_high", "median": median, "jitter": jitter,
+            "culprit": None, "hypotheses": ["long_path"], "confidence": 85}
+
+
+def classify_latency_under_load(idle_pings: List[Dict], loaded_pings: List[Dict]) -> Dict:
+    """Buffer bloat: latency that only shows up once the link is busy."""
+    idle_ms = statistics.mean(p["latency_ms"] for p in idle_pings)
+    loaded_ms = statistics.mean(p["latency_ms"] for p in loaded_pings)
+    differential = loaded_ms - idle_ms
+
+    if differential > 100:
+        return {"category": "buffer_bloat", "differential_ms": differential,
+                "idle_ms": idle_ms, "loaded_ms": loaded_ms,
+                "suggested_fixes": ["enable_sqm_qdisc", "enable_cake_qdisc"],
+                "confidence": 85}
+    return {"category": "normal", "differential_ms": differential,
+            "idle_ms": idle_ms, "loaded_ms": loaded_ms,
+            "suggested_fixes": [], "confidence": 90}
+
+
+def classify_packet_loss(results: List[str]) -> Dict:
+    """Classify a sequence of 'ok'/'fail' probe outcomes by loss pattern.
+
+    Burst loss (several consecutive drops, otherwise clean) points at a
+    momentary total outage -- a gateway hiccup or a modem retransmit.
+    Steady degradation (drops spread evenly, none consecutive) points at
+    ongoing link saturation or rate limiting instead.
+    """
+    total = len(results)
+    if total == 0:
+        return {"pattern": "unavailable", "loss_rate": None, "burst_length": 0,
+                "hypotheses": []}
+
+    loss_count = sum(1 for r in results if r == "fail")
+    loss_rate = loss_count / total
+    if loss_count == 0:
+        return {"pattern": "healthy", "loss_rate": 0.0, "burst_length": 0,
+                "hypotheses": []}
+
+    max_run = run = 0
+    for r in results:
+        run = run + 1 if r == "fail" else 0
+        max_run = max(max_run, run)
+
+    if max_run >= 3:
+        return {"pattern": "burst_loss", "loss_rate": loss_rate, "burst_length": max_run,
+                "hypotheses": ["gateway_timeout", "modem_retransmit", "wifi_channel_congestion"],
+                "confidence": 90}
+    return {"pattern": "steady_degradation", "loss_rate": loss_rate, "burst_length": max_run,
+            "hypotheses": ["link_saturation", "qos_rate_limiting", "distance_from_ap"],
+            "confidence": 85}
+
+
+def detect_asymmetric_loss(outbound_loss: float, inbound_loss: float) -> Dict:
+    """outbound/inbound are loss ratios (0.0-1.0). A >5 percentage-point gap
+    points at an asymmetric path rather than uniform congestion."""
+    differential_pct = round(abs(outbound_loss - inbound_loss) * 100, 1)
+    asymmetric = differential_pct > 5.0
+    return {"asymmetric": asymmetric, "differential_pct": differential_pct,
+            "hypotheses": ["asymmetric_routing"] if asymmetric else []}
+
+
+def find_path_mtu(results: Dict[int, bool]) -> Optional[int]:
+    """The largest packet size that reached the destination unfragmented,
+    from a {size: succeeded} map such as environ.mtu()'s DF-bit walk."""
+    successful = [size for size, ok in results.items() if ok]
+    return max(successful) if successful else None
+
+
+def diagnose_pmtud(packet_1500_df_result: str,
+                   icmp_fragmentation_needed_received: bool) -> Dict:
+    """Whether Path MTU Discovery is working, from sending a DF-bit packet
+    at the standard 1500-byte MTU. If it's lost with no ICMP "fragmentation
+    needed" reply, something (a firewall, a filtering ISP, a carrier that
+    disables PMTUD) is dropping the ICMP that PMTUD depends on."""
+    if packet_1500_df_result == "delivered":
+        return {"pmtud_status": "working", "hypotheses": [], "confidence": 95}
+    if not icmp_fragmentation_needed_received:
+        return {"pmtud_status": "broken",
+                "hypotheses": ["firewall_blocks_icmp", "isp_filters_icmp",
+                              "carrier_pmtud_disabled"],
+                "confidence": 90}
+    return {"pmtud_status": "working_with_fragmentation", "hypotheses": [],
+            "confidence": 80}
+
+
+def build_state_machine(events: List[Dict]) -> Dict:
+    """Classify a TCP connection's outcome from its timestamped events
+    (SYN_sent, SYN_ACK_received, ACK_sent, SYN_retransmit, RST_received,
+    FIN_received/FIN_sent, timeout), and detect the exponential SYN-backoff
+    pattern (3s/6s/12s under Linux defaults) when a handshake never
+    completes.
+    """
+    events = sorted(events, key=lambda e: e["time"])
+    types = [e["type"] for e in events]
+
+    if "RST_received" in types:
+        rst_time = next(e["time"] for e in events if e["type"] == "RST_received")
+        ack_time = next((e["time"] for e in events if e["type"] == "ACK_sent"), None)
+        if ack_time is None or rst_time < ack_time:
+            return {"state": "rejected", "reason": "RST_before_ACK"}
+        return {"state": "reset", "reason": "RST_after_established"}
+
+    if "SYN_ACK_received" in types and "ACK_sent" in types:
+        syn_time = next(e["time"] for e in events if e["type"] == "SYN_sent")
+        synack_time = next(e["time"] for e in events if e["type"] == "SYN_ACK_received")
+        if "FIN_received" in types or "FIN_sent" in types:
+            return {"state": "closed", "reason": "FIN"}
+        return {"state": "established", "handshake_rtt": synack_time - syn_time}
+
+    backoff_types = ("SYN_sent", "SYN_retransmit", "timeout")
+    backoff_events = [e for e in events if e["type"] in backoff_types]
+    if "timeout" in types and "SYN_retransmit" in types and len(backoff_events) >= 2:
+        deltas = [b["time"] - a["time"] for a, b in zip(backoff_events, backoff_events[1:])]
+        return {"state": "timed_out", "timeouts": deltas, "pattern": "syn_backoff"}
+
+    return {"state": "unknown", "reason": "insufficient events"}
+
+
 def analyze_dual_stack(ipv4_result: Dict, ipv6_result: Dict) -> Dict:
     """Analyze IPv4/IPv6 dual-stack connectivity."""
     ipv4_ok = ipv4_result.get("reachable", False)
@@ -1254,9 +1419,6 @@ def detect_happy_eyeballs(events: List[Dict]) -> Dict:
         "fallback_delay_ms": fallback_delay,
         "ipv6_recovered": ipv6_recover is not None
     }
-    mtu_type = standards.get(mtu, "non_standard")
-    is_standard = mtu in standards
-    return mtu_type, is_standard
 
 
 def detect_dual_stack_preference(events: List[Dict]) -> Dict:

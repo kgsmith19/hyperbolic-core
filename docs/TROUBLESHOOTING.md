@@ -43,11 +43,11 @@ The table below is the canonical hypothesis list.
 
 | # | Hypothesis | Tested by | Symptom |
 |---|---|---|---|
-| 1 | Latency variance | `diagnostic_engine.classify_hop_latency`, `measure_hop_stability` | Requests are slow sometimes, fast other times, no clear pattern |
-| 2 | Jitter | `diagnostic_engine` latency helpers, `probes.ping` | Streaming responses stutter; latency swings widely tick to tick |
-| 3 | Packet loss | `probes.parse_ping` (`loss_pct`) | Occasional dropped requests with no error message — just silence |
-| 4 | MTU constraints | `environ.mtu` | Large requests/responses fail or hang; small ones work fine |
-| 5 | TCP retransmits | `diagnostic_engine` connection-state helpers | Connections stall mid-transfer, then recover |
+| 1 | Latency variance | `diagnostic_engine.classify_latency`, `probes.ping` | Requests are slow sometimes, fast other times, no clear pattern |
+| 2 | Jitter | `diagnostic_engine.classify_latency` (jitter = max-min over the window), `classify_latency_under_load` (buffer bloat) | Streaming responses stutter; latency swings widely tick to tick |
+| 3 | Packet loss | `diagnostic_engine.classify_packet_loss`, `detect_asymmetric_loss`, `probes.parse_ping` (`loss_pct`) | Occasional dropped requests with no error message — just silence |
+| 4 | MTU constraints | `environ.mtu` (live DF-bit discovery), `diagnostic_engine.find_path_mtu`/`diagnose_pmtud` (classify a discovery result) | Large requests/responses fail or hang; small ones work fine |
+| 5 | TCP retransmits | `diagnostic_engine.build_state_machine` (classifies a list of already-timestamped SYN/ACK/RST/retransmit events — nothing in this codebase captures those events live yet, see `OPEN-ISSUES.md` #12) | Connections stall mid-transfer, then recover |
 | 6 | Dual-stack IPv6 | `diagnostic_engine.analyze_dual_stack`, `detect_happy_eyeballs` | Failures only on networks with broken IPv6; works fine on IPv4-only networks |
 | 7 | DNS resolution delays | `probes.resolve`, `diagnose.culprit` (router DNS vs public DNS) | Slow to connect but fast once connected; `dns_router_ms` high while `dns_public_ms` is normal |
 | 8 | Routing asymmetry | `diagnostic_engine.analyze_routing_path`, `detect_route_flapping` | Works from one network/VPN but not another; latency differs by direction |

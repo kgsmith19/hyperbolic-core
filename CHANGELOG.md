@@ -30,6 +30,13 @@ pass, not full automation.
 - `docs/API.md`, `docs/QUICKSTART.md`, `docs/TROUBLESHOOTING.md`,
   `docs/CONTRIBUTING.md`, rewritten `docs/ARCHITECTURE.md` (Phase 24).
 
+- Restored `classify_latency`, `classify_latency_under_load`,
+  `classify_packet_loss`, `detect_asymmetric_loss`, `find_path_mtu`,
+  `diagnose_pmtud`, and `build_state_machine` in `diagnostic_engine.py` —
+  canonical hypotheses #1-5, present in git history under Phase 1-4 commits
+  but overwritten by later phases touching the same line range and lost
+  from the codebase entirely (`OPEN-ISSUES.md` #12).
+
 ### Fixed
 - `docs/DEVELOPMENT.md` told contributors to `pip install -e .` against a
   stdlib-only project with no `setup.py`/`pyproject.toml` (Phase 24).
@@ -37,6 +44,18 @@ pass, not full automation.
   match the canonical 15-hypothesis list (Phase 24).
 - `OPEN-ISSUES.md` #6 (malformed `?limit=` crashing the server) was already
   fixed in code but never marked retired (Phase 27).
+- `detect_happy_eyeballs()` ended with three unreachable lines referencing
+  undefined names — a fragment of the lost MTU classifier spliced into the
+  wrong function (`OPEN-ISSUES.md` #12).
+- `tests/test_e2e_faults.py`'s acceptance tests for hypotheses #1, #3, and
+  #7 injected a real fault via `tc netem` and then asserted `assertTrue(True,
+  "...")`, with the real measurement assertion left as a comment. Rewritten
+  to take a real measurement and assert against it (`OPEN-ISSUES.md` #12).
+- That same file's `tc` capability check only verified `tc qdisc show`
+  succeeded, which is true even when the `sch_netem` kernel module isn't
+  available — a false positive that let three tests fail for real instead
+  of skip. It now actually adds and removes a netem rule (`OPEN-ISSUES.md`
+  #12).
 
 ## [1.0.0] — first tagged release
 

@@ -210,6 +210,37 @@ functions); grouped here by what each cluster answers.
   `rank_recommendations(candidates) -> list[dict]` — "what to test/fix next,"
   ranked by ROI.
 
+**Latency/jitter (canonical hypothesis #1/#2)**
+- `classify_latency(pings) -> dict` — `{category, median, jitter, culprit,
+  hypotheses, confidence}`. Categories (checked in order, first match wins):
+  `stable_low`, `stable_medium`, `high_variance_high_latency`, `variable`,
+  `stable_high` — every input lands in exactly one.
+- `classify_latency_under_load(idle_pings, loaded_pings) -> dict` — buffer
+  bloat: `differential_ms` over 100 between idle and loaded latency.
+
+**Packet loss (canonical hypothesis #3)**
+- `classify_packet_loss(results) -> dict` — `results` is a list of `"ok"`/
+  `"fail"` strings; `{pattern, loss_rate, burst_length, hypotheses}`.
+  `burst_loss` (≥3 consecutive drops) vs `steady_degradation` (spread out).
+- `detect_asymmetric_loss(outbound_loss, inbound_loss) -> dict` — flags a
+  path as asymmetric past a 5-percentage-point gap.
+
+**MTU/PMTUD (canonical hypothesis #4)**
+- `find_path_mtu(results) -> int | None` — largest successful size from a
+  `{size: succeeded}` map, e.g. one gathered by `environ.mtu`'s live DF-bit
+  walk.
+- `diagnose_pmtud(packet_1500_df_result, icmp_fragmentation_needed_received) -> dict`
+  — `working` / `broken` / `working_with_fragmentation`.
+
+**TCP connection state (canonical hypothesis #5)**
+- `build_state_machine(events) -> dict` — classifies a timestamped event
+  list (`SYN_sent`, `SYN_ACK_received`, `ACK_sent`, `SYN_retransmit`,
+  `RST_received`, `FIN_sent`/`FIN_received`, `timeout`) into `established`
+  (with `handshake_rtt`), `rejected`/`reset`, `closed`, or `timed_out` (with
+  the `timeouts` deltas and `syn_backoff` pattern flag). Pure function over
+  already-captured events — nothing in this codebase captures real
+  SYN/ACK/RST events live yet to feed it; see `OPEN-ISSUES.md` #12.
+
 **Dual-stack (IPv4/IPv6)**
 - `analyze_dual_stack(ipv4_result, ipv6_result) -> dict`
 - `detect_happy_eyeballs(events) -> dict` (RFC 8305)
