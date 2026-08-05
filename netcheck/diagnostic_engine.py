@@ -375,8 +375,12 @@ class ConfigurationMatrix:
         ranked = sorted(suggestions, key=lambda s: -s.get("roi_score", 0))
         return ranked[:limit]
 
-    def suggest_next_test(self) -> Dict:
-        """Recommend highest-impact untested combination."""
+    def suggest_next_test(self, context: str = None) -> Dict:
+        """Recommend highest-impact untested combination.
+
+        Args:
+            context: Optional context like "modem_restarted" to allow retesting
+        """
         # If matrix is empty, suggest baseline
         if not self.tests and not self.untested_options:
             return {
@@ -417,7 +421,8 @@ class ConfigurationMatrix:
                 )
 
                 # Don't suggest retesting if any value succeeded (problem already fixed)
-                if any_succeeded:
+                # Unless network state changed significantly
+                if any_succeeded and context != "modem_restarted":
                     continue
 
                 any_failed = any(
@@ -436,6 +441,19 @@ class ConfigurationMatrix:
                             "expected_outcome_if_success": f"If fixes errors -> {var} is causal",
                             "expected_outcome_if_failure": f"If errors continue -> {var} ruled out"
                         }
+
+        # If network state changed (modem restart), suggest retesting key variables
+        if context == "modem_restarted":
+            # Retest router_dns after major network change
+            if "router_dns" in self.tests:
+                return {
+                    "variable": "router_dns",
+                    "value": "queried",
+                    "expected_impact": 90,
+                    "effort": "easy",
+                    "expected_outcome_if_success": "If works -> DNS recovered after restart",
+                    "expected_outcome_if_failure": "If fails -> DNS issue persists after restart"
+                }
 
         # Second pass: if no failures found, suggest untested high-impact variables
         for var, config in high_impact_vars.items():
