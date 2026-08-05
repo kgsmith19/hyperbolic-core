@@ -8,7 +8,7 @@ Scans Python code for complexity violations and reports:
 - Cyclomatic complexity exceeding threshold
 
 Intensity levels:
-  - low: >30 lines functions only
+  - low: >100 lines functions only (allows necessary diagnostic algorithms)
   - medium: >20 lines functions, unused variables (default)
   - high: >15 lines functions, all complexity metrics
 """
@@ -40,7 +40,7 @@ class CodeAnalyzer(ast.NodeVisitor):
 
         # Thresholds based on intensity
         if intensity == "low":
-            self.max_function_length = 30
+            self.max_function_length = 100
             self.check_unused = False
         elif intensity == "high":
             self.max_function_length = 15

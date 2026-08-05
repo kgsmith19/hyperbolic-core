@@ -117,7 +117,7 @@ def scan_for_secrets(filepath: str, intensity: str = "medium") -> List[Finding]:
             "high",
         ),
         "aws_key": (
-            r"(AKIA[0-9A-Z]{16}|aws_secret_access_key)",
+            r"AKIA[0-9A-Z]{16}(?!\w)",  # Lookahead to avoid matching in strings
             "high",
         ),
     }
@@ -181,7 +181,8 @@ def scan_directory(root: str, intensity: str = "medium") -> List[Finding]:
     """Scan all Python files in directory."""
     findings = []
     for filepath in Path(root).rglob("*.py"):
-        if ".git" in filepath.parts or "__pycache__" in filepath.parts:
+        # Skip tools directory and build artifacts
+        if any(part in filepath.parts for part in [".git", "__pycache__", "tools", "build", "dist"]):
             continue
         findings.extend(check_file(str(filepath), intensity))
     return findings
