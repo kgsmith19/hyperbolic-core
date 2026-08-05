@@ -3,7 +3,9 @@
 The load-bearing behaviour here is the unavailable/fail split. Sections that
 need credentials must go quiet, not loud, when they have none.
 """
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -98,6 +100,57 @@ class PowerShellArgumentSafetyTest(unittest.TestCase):
                         "value must not be interpolated into the script text")
         self.assertIn(malicious, argv[command_index + 2:],
                      "value must be passed as its own subprocess argument")
+
+
+class AsusSetTest(unittest.TestCase):
+    """_asus_set is the write counterpart to the already-proven _asus_get:
+    same cookie auth, POST to applyapp.cgi instead of GET to appGet.cgi.
+    Verified here against a stub server, not a real router -- see
+    OPEN-ISSUES.md for the caveat on the exact payload shape."""
+
+    def _stub(self):
+        received = []
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length).decode()
+                received.append((self.path, self.headers.get("Cookie"), body))
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        httpd = HTTPServer(("127.0.0.1", 0), H)
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return f"127.0.0.1:{httpd.server_address[1]}", received
+
+    def test_posts_to_applyapp_cgi_with_the_auth_cookie(self):
+        host, received = self._stub()
+        body, err = environ._asus_set(host, "tok123", {"wrs_protect_enable": "0"})
+
+        self.assertIsNone(err)
+        self.assertEqual(len(received), 1)
+        path, cookie, sent_body = received[0]
+        self.assertEqual(path, "/applyapp.cgi")
+        self.assertEqual(cookie, "asus_token=tok123")
+        self.assertIn("wrs_protect_enable%3D0", sent_body)
+
+    def test_multiple_pairs_are_semicolon_joined(self):
+        host, received = self._stub()
+        environ._asus_set(host, "tok", {"wl1_chanspec": "36", "wl1_bw": "80MHz"})
+
+        _, _, sent_body = received[0]
+        from urllib.parse import unquote
+        self.assertEqual(unquote(sent_body), "wl1_chanspec=36;wl1_bw=80MHz")
+
+    def test_unreachable_host_is_an_error_not_a_crash(self):
+        body, err = environ._asus_set("127.0.0.1:1", "tok", {"k": "v"}, timeout=1)
+        self.assertIsNone(body)
+        self.assertIsNotNone(err)
 
 
 class DriverFindingsTest(unittest.TestCase):

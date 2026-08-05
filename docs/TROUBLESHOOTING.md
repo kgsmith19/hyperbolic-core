@@ -138,10 +138,15 @@ The most common causes:
 1. `fix_engine.recommend_fixes_for_diagnosis(diagnosis)` — ranked, specific
    fixes for the diagnosed culprit (Wi-Fi ~35% weight, router ~20%, modem the
    rest, roughly — see `fix_engine.py` for the exact weighting).
-2. `fix_application.FixApplier` — applies a fix directly to the ASUS router
-   or CAX80 modem over their authenticated HTTP APIs, or
-   `tools/run_fixes.sh` for local OS-level fixes (DNS, adapter power, Wi-Fi
-   mode) — see `tools/README.md`.
+2. `fix_application.FixApplier` — writes a fix directly to the ASUS router
+   over its authenticated HTTP API. Defaults to `dry_run=True` (preview
+   only); pass `dry_run=False` to actually write. Only
+   `disable_aiprotection()` is confirmed by a read-back before reporting
+   `applied` — the rest report `attempted` (write sent, unconfirmed) since
+   no proven read-back exists yet for those settings, and the CAX80 modem
+   has no known automated write path at all. Or `tools/run_fixes.sh` for
+   local OS-level fixes (DNS, adapter power, Wi-Fi mode) — see
+   `tools/README.md`.
 3. `verification_engine.verify_fix_resolves_issue(before, fix, after)` —
    confirms the specific layer that was failing before is passing after.
 4. `monitoring_engine.detect_regression(baseline, current, sensitivity)` —

@@ -351,11 +351,32 @@ row.
 - `track_fix_application(fix, success)`
 
 ### `netcheck/fix_application.py` — actually apply fixes
-Class `FixApplier`: `apply_wifi_channel_fix(channel, bandwidth)`,
-`disable_aiprotection()`, `disable_qos()`, `restart_device()`,
-`get_device_status()`. All target the ASUS router or CAX80 modem over their
-authenticated HTTP APIs (`environ._asus_login`/`_asus_get`), never a local
-shell command.
+`FixApplier(device_type, host=None, user=None, password=None, dry_run=True)`
+— `host`/`user`/`password` fall back to `ROUTER_HOST`/`ROUTER_USER`/
+`ROUTER_PASS` or `MODEM_HOST`/`MODEM_USER`/`MODEM_PASS` in `.env`, matching
+`environ.router`/`environ.modem`. `dry_run` defaults to `True`: every method
+below returns what it *would* write without sending anything until called
+with `dry_run=False`.
+
+Methods: `apply_wifi_channel_fix(channel, bandwidth)`, `disable_aiprotection()`,
+`disable_qos()`, `restart_device()`, `get_device_status()`. All target the
+ASUS router over its authenticated HTTP API (`environ._asus_login`/
+`_asus_get`/`_asus_set`), never a local shell command. Every result's
+`status` is one of:
+- `unavailable` — no credentials, or the device type (CAX80 modem,
+  `local_config`) has no known automated write path.
+- `dry_run` — the default; nothing was sent.
+- `applied` (+ `verified_by_readback: true`) — `disable_aiprotection()`
+  only: the write is confirmed by re-reading `environ.router()` afterward
+  and checking the value actually changed.
+- `attempted` — the write's HTTP request succeeded, but no proven read-back
+  exists yet to confirm the specific setting took effect (Wi-Fi channel/
+  bandwidth, QoS), or `disable_aiprotection()`'s own read-back didn't
+  confirm the change.
+- `fail` — the login or write request itself failed.
+
+The write wire format (NVRAM key names, `applyapp.cgi`'s payload shape) is
+unverified against live hardware — see `OPEN-ISSUES.md` #13.
 - `apply_fix_sequence(fixes, device_handlers) -> list[dict]` — applies a
   sequence with dependency resolution (e.g., don't disable QoS before
   confirming DPI is the more likely culprit).

@@ -265,6 +265,47 @@ def _asus_get(host, hook, token, timeout=6):
         return None, f"{type(e).__name__}: {e}"
 
 
+def _asus_set(host, token, nvram, timeout=6):
+    """Write NVRAM key/value pairs to an ASUS router via the app-API's
+    applyapp.cgi, reusing the asus_token cookie _asus_login already
+    proved works for reads.
+
+    ASUS ships no public write-API spec; the POST /applyapp.cgi target,
+    the asus_token cookie, and the semicolon-joined `key=value` payload
+    (URL-quoted, mirroring how _asus_get's own GET-style hook query is
+    built) follow the shape used by community-reverse-engineered clients
+    (e.g. the AsusRouter and aioasuswrt Python libraries). UNVERIFIED
+    against a live device from this codebase -- see OPEN-ISSUES.md. A
+    200 response means only "the router accepted the request", never
+    "the value changed": callers must always confirm with a fresh read
+    via router()/modem() before reporting success.
+
+    Returns (body, error).
+    """
+    import urllib.error, urllib.request
+    from urllib.parse import quote
+
+    payload = ";".join(f"{k}={v}" for k, v in nvram.items())
+    url = f"http://{host}/applyapp.cgi"
+    req = urllib.request.Request(
+        url,
+        method="POST",
+        data=quote(payload).encode(),
+        headers={
+            "User-Agent": "asusrouter-Android-DUTUtil-1.0.0.201",
+            "Cookie": f"asus_token={token}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace"), None
+    except urllib.error.HTTPError as e:
+        return None, f"HTTP {e.code}"
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
 def _js_function_body(js, name):
     """Extract a JS function's body by brace-matching."""
     m = re.search(rf"function\s+{re.escape(name)}\s*\([^)]*\)\s*\{{", js)

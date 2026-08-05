@@ -410,3 +410,69 @@ design and this project's "parsers are pure functions over data" convention,
 but nothing in this codebase captures real SYN/ACK/RST events to feed it.
 That would be a live packet-capture prober, a materially bigger addition
 than restoring what existed, and out of scope for a restoration.
+
+---
+
+## 13. `fix_application.py`'s device-fix methods were entirely fabricated — RESOLVED 2026-08-05, write protocol still unverified against live hardware
+
+**Surfaced:** 2026-08-05, while auditing how reliably this project's automated
+*fixes* (as opposed to its diagnoses) can be trusted.
+
+Every method on `FixApplier` (`apply_wifi_channel_fix`, `disable_aiprotection`,
+`disable_qos`, `restart_device`, `get_device_status`) unconditionally returned
+`{"status": "applied", ...}` (or `"initiated"`/`"connected"`) with no I/O at
+all — no login, no request, no read-back. `docs/API.md` claimed these methods
+went "over their authenticated HTTP APIs (`environ._asus_login`/`_asus_get`)",
+which was simply false; every one of `test_fix_application.py`'s 281 lines
+tested that the fabricated shape stayed fabricated, not that anything real
+happened. Had this shipped as-is, running `disable_aiprotection()` against a
+real router would have reported success while changing nothing on the
+device — the exact "silent fallback" pattern `AGENTS.md` prohibits, just in
+the fix-application direction instead of the diagnosis direction.
+
+**Fix applied:** `FixApplier` now takes `host`/`user`/`password` (with
+`ROUTER_HOST`/`ROUTER_USER`/`ROUTER_PASS` or `MODEM_HOST`/`MODEM_USER`/
+`MODEM_PASS` env-var fallback, matching `environ.router`/`environ.modem`'s own
+convention) and a `dry_run` flag defaulting to `True` (matching
+`tools/fixer.py`'s existing safe-by-default pattern). A new
+`environ._asus_set()` reuses `_asus_login`'s proven auth to POST a real write
+to `applyapp.cgi`. Every apply method now follows one of five real states:
+
+- `unavailable` — no credentials, or the device type has no known write path
+  at all (the CAX80 modem and `local_config` never attempt anything —
+  inventing a write path for them would be fabrication in a different guise).
+- `dry_run` — the default; builds and returns the request it *would* send,
+  sends nothing.
+- `applied` + `verified_by_readback: true` — `disable_aiprotection()` only,
+  the flagship case: the write is confirmed by calling `environ.router()`
+  again afterward and checking `aiprotection_enabled` actually flipped,
+  rather than trusting the write's HTTP response.
+- `attempted` — the write's HTTP request succeeded, but no proven read-back
+  exists for that particular setting (Wi-Fi channel/bandwidth, QoS) to
+  confirm it took effect. Also what `disable_aiprotection()` itself falls
+  back to if the write succeeds but the read-back *doesn't* confirm the
+  change — see below.
+- `fail` — the login or write request itself failed.
+
+Tested against a real stub HTTP server speaking `login.cgi`/`appGet.cgi`/
+`applyapp.cgi` (same stand-in-server pattern as
+`test_store.py::MirrorTest._stub()`), including the specific case where the
+write "succeeds" at the HTTP layer but the read-back shows the value never
+actually changed — asserting the result is `attempted`, never `applied`, in
+that case. 34 tests in the rewritten `test_fix_application.py`.
+
+**Still open / unverified:** the exact write wire format — POST
+`/applyapp.cgi` with a semicolon-joined, URL-quoted `key=value` payload and
+the specific NVRAM key names (`wrs_protect_enable`, `wl1_chanspec`, `wl1_bw`,
+`qos_enable`) — follows the shape used by community-reverse-engineered
+clients (the `AsusRouter`/`aioasuswrt` Python libraries), since ASUS ships no
+public write-API spec. It has never been exercised against a real ASUS
+device from this codebase. Same caveat class as `probes.parse_airport_info`
+(#9): if the guessed shape is wrong, the design's own read-back check is the
+safety net — a wrong key still reports `attempted` rather than a false
+`applied`, but the fix genuinely won't have taken effect either way.
+
+**Retire when:** the write flow (any of `apply_wifi_channel_fix`,
+`disable_aiprotection`, `disable_qos`, `restart_device`) has been run with
+`dry_run=False` against a real ASUS router at least once and the read-back
+matches.

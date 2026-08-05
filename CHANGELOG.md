@@ -35,6 +35,18 @@ pass, not full automation.
   canonical hypotheses #1-5, present in git history under Phase 1-4 commits
   but overwritten by later phases touching the same line range and lost
   from the codebase entirely (`OPEN-ISSUES.md` #12).
+- `environ._asus_set()`: writes an NVRAM key/value pair to an ASUS router
+  via `applyapp.cgi`, reusing `_asus_login`'s proven token auth
+  (`OPEN-ISSUES.md` #13).
+- `fix_application.FixApplier` now performs real, opt-in device writes:
+  `host`/`user`/`password` (env-var fallback) and a `dry_run` flag
+  defaulting to `True`. `disable_aiprotection()` writes and confirms the
+  change via a fresh `environ.router()` read-back before ever reporting
+  `applied`; `apply_wifi_channel_fix()`/`disable_qos()` report `attempted`
+  (no proven read-back exists yet for those settings); `restart_device()`
+  reports `requested`; the CAX80 modem and `local_config` report
+  `unavailable` for every write (no known automated write path exists)
+  (`OPEN-ISSUES.md` #13).
 
 ### Fixed
 - `docs/DEVELOPMENT.md` told contributors to `pip install -e .` against a
@@ -65,6 +77,12 @@ pass, not full automation.
 - Dashboard: the "Recent samples" table gave no visual sign it had more
   columns to scroll to at narrow widths. Added a CSS-only scroll-shadow
   hint on both edges (`OPEN-ISSUES.md` #11).
+- `fix_application.FixApplier`'s device-fix methods (`apply_wifi_channel_fix`,
+  `disable_aiprotection`, `disable_qos`, `restart_device`,
+  `get_device_status`) did no I/O at all and unconditionally reported
+  `"applied"`/`"initiated"`/`"connected"` — running them against a real
+  router would have claimed success while changing nothing. Rewritten to
+  perform real, read-back-verified writes (`OPEN-ISSUES.md` #13).
 
 ### Removed
 - `server.py`'s `dashboard_payload()`/`get_api_data()`/

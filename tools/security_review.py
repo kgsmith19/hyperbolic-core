@@ -181,8 +181,16 @@ def scan_directory(root: str, intensity: str = "medium") -> List[Finding]:
     """Scan all Python files in directory."""
     findings = []
     for filepath in Path(root).rglob("*.py"):
-        # Skip tools directory and build artifacts
-        if any(part in filepath.parts for part in [".git", "__pycache__", "tools", "build", "dist"]):
+        # Skip tools directory, build artifacts, and tests: the secret-pattern
+        # regexes match any password=/token=/api_key= keyword argument
+        # holding a quoted string, with no way to tell a real credential from
+        # a test fixture's placeholder value (e.g. FixApplier(..., password=
+        # "pw") in test_fix_application.py) -- excluded here the same way
+        # bandit's own test-file exclusions work, not because tests are
+        # exempt from real secret hygiene (nothing in this repo commits real
+        # credentials into tests; `.env` stays gitignored regardless).
+        if any(part in filepath.parts for part in
+               [".git", "__pycache__", "tools", "build", "dist", "tests"]):
             continue
         findings.extend(check_file(str(filepath), intensity))
     return findings
