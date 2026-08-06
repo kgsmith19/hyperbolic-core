@@ -47,6 +47,19 @@ pass, not full automation.
   reports `requested`; the CAX80 modem and `local_config` report
   `unavailable` for every write (no known automated write path exists)
   (`OPEN-ISSUES.md` #13).
+- `schema.sql`: new `fix_outcomes` table (one row per verified fix
+  application, keyed by `fix_engine`'s `fix_id`), mirrored to Supabase in
+  `supabase/migrations/0001_init.sql`.
+- `store.record_fix_outcome()` / `store.fix_success_rate()`: real
+  persistence for fix outcomes. `verification_engine.track_fix_success()`
+  now accepts `conn`/`host` to persist an outcome after verifying a fix.
+  `fix_engine.recommend_fixes_for_diagnosis(diagnosis, conn=...)` replaces
+  each fix's hardcoded prior likelihood (`0.35`, `0.20`, etc.) with the real
+  measured success rate once at least `MIN_MEASURED_FIX_SAMPLES` (3)
+  outcomes exist for that `fix_id`; every `FixRecommendation` now carries
+  `likelihood_source` (`"prior"` or `"measured"`) and `likelihood_samples`
+  so a caller can tell which kind of number it's looking at
+  (`OPEN-ISSUES.md` #14).
 
 ### Fixed
 - `docs/DEVELOPMENT.md` told contributors to `pip install -e .` against a

@@ -201,6 +201,55 @@ class TrackFixSuccessTest(unittest.TestCase):
         self.assertIsNone(result["after_culprit"])
 
 
+class TrackFixSuccessPersistenceTest(unittest.TestCase):
+    """Passing conn/host persists the outcome via store.record_fix_outcome
+    -- this is what lets fix_engine's likelihoods eventually reflect real
+    fix history instead of only the documented prior."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from netcheck import store
+        self.dir = tempfile.TemporaryDirectory()
+        self.conn = store.open_db(Path(self.dir.name) / "t.db")
+        self.host = store.host_id(self.conn, "surface", "Windows")
+        self.store = store
+
+    def tearDown(self):
+        self.conn.close()
+        self.dir.cleanup()
+
+    def test_outcome_is_persisted_when_conn_and_host_given(self):
+        before = {"primary_culprit": "router", "synthesis_confidence": 0.8}
+        after = {"primary_culprit": None, "synthesis_confidence": 0.1}
+
+        verification_engine.track_fix_success("disable_aiprotection", before, after,
+                                              conn=self.conn, host=self.host)
+
+        got = self.store.fix_success_rate(self.conn, "disable_aiprotection")
+        self.assertEqual(got["n"], 1)
+        self.assertEqual(got["rate"], 1.0)
+
+    def test_failed_outcome_is_persisted_as_a_failure(self):
+        before = {"primary_culprit": "router", "synthesis_confidence": 0.8}
+        after = {"primary_culprit": "router", "synthesis_confidence": 0.8}
+
+        verification_engine.track_fix_success("disable_aiprotection", before, after,
+                                              conn=self.conn, host=self.host)
+
+        got = self.store.fix_success_rate(self.conn, "disable_aiprotection")
+        self.assertEqual(got["rate"], 0.0)
+
+    def test_without_conn_nothing_is_persisted_and_no_crash(self):
+        before = {"primary_culprit": "router", "synthesis_confidence": 0.8}
+        after = {"primary_culprit": None, "synthesis_confidence": 0.1}
+
+        result = verification_engine.track_fix_success("disable_aiprotection", before, after)
+
+        self.assertTrue(result["success"])
+        self.assertIsNone(self.store.fix_success_rate(self.conn, "disable_aiprotection"))
+
+
 class LayerComparisonTest(unittest.TestCase):
     """SDD: Comparing layer states identifies improvements."""
 

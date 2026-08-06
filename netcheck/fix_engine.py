@@ -16,7 +16,9 @@ class FixRecommendation:
         self.title = title
         self.category = category  # "wifi", "router", "modem", "network_config", "isp"
         self.effort = effort  # "low", "medium", "high"
-        self.likelihood = likelihood  # 0.0-1.0
+        self.likelihood = likelihood  # 0.0-1.0 -- documented prior until measured
+        self.likelihood_source = "prior"  # "prior" | "measured"
+        self.likelihood_samples = None  # outcome count backing a measured rate
         self.instructions = instructions
         self.applied = False
         self.applied_at = None
@@ -173,8 +175,17 @@ def _get_nat_fixes() -> List[FixRecommendation]:
     ]
 
 
-def recommend_fixes_for_diagnosis(diagnosis: Dict) -> List[FixRecommendation]:
-    """Generate ranked fix recommendations from diagnostic findings."""
+def recommend_fixes_for_diagnosis(diagnosis: Dict, conn=None) -> List[FixRecommendation]:
+    """Generate ranked fix recommendations from diagnostic findings.
+
+    `likelihood` starts as a documented prior (this module's own estimate of
+    how often each fix resolves its category of problem). Pass `conn` (an
+    open store.py connection) to have it switched to a real measured success
+    rate for any fix_id with enough recorded outcomes
+    (store.MIN_MEASURED_FIX_SAMPLES) -- see store.record_fix_outcome,
+    written by verification_engine.track_fix_success after a fix is applied
+    and verified.
+    """
     culprit = diagnosis.get("primary_culprit")
     confidence = diagnosis.get("synthesis_confidence", 0.5)
 
@@ -192,10 +203,29 @@ def recommend_fixes_for_diagnosis(diagnosis: Dict) -> List[FixRecommendation]:
     if not diagnosis.get("wan_ip_is_private"):
         fixes.extend(_get_nat_fixes())
 
+    if conn is not None:
+        _apply_measured_likelihoods(fixes, conn)
+
     effort_order = {"low": 0, "medium": 1, "high": 2}
     fixes.sort(key=lambda f: (effort_order[f.effort], -f.likelihood))
 
     return fixes
+
+
+def _apply_measured_likelihoods(fixes: List[FixRecommendation], conn) -> None:
+    """Replace each fix's prior with its measured rate once enough real
+    outcomes exist for that fix_id. A rate computed from one or two samples
+    isn't more trustworthy than the documented guess it would replace --
+    just quieter about being one -- so the prior stands below the
+    threshold."""
+    from . import store
+
+    for fix in fixes:
+        measured = store.fix_success_rate(conn, fix.id)
+        if measured and measured["n"] >= store.MIN_MEASURED_FIX_SAMPLES:
+            fix.likelihood = measured["rate"]
+            fix.likelihood_source = "measured"
+            fix.likelihood_samples = measured["n"]
 
 
 def get_ethernet_test_setup() -> Dict:

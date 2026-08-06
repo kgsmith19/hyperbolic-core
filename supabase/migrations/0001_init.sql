@@ -67,11 +67,28 @@ create table if not exists env_scans (
   unique (host, ts)
 );
 
+-- One row per verified fix outcome, keyed by fix_engine's fix_id. See
+-- netcheck/schema.sql's fix_outcomes for the local (source of truth) table
+-- this mirrors, and store.fix_success_rate for how it's read back.
+create table if not exists fix_outcomes (
+  id      bigserial primary key,
+  host    text        not null,
+  ts      timestamptz not null,
+  fix_id  text        not null,
+  success integer     not null,  -- 0 or 1, matching the local SQLite column
+                                 -- (no native boolean type there); kept as
+                                 -- integer here too rather than boolean so a
+                                 -- mirrored row inserts without a cast error
+  unique (host, ts, fix_id)
+);
+create index if not exists fix_outcomes_fix_id_idx on fix_outcomes (fix_id);
+
 -- RLS on with no permissive policy: only the service role reaches these tables,
 -- and the service key lives in .env on the machine doing the pushing. Adding a
 -- read policy later is a deliberate act rather than an accident of setup.
-alter table hosts      enable row level security;
-alter table samples    enable row level security;
-alter table events     enable row level security;
-alter table llm_errors enable row level security;
-alter table env_scans  enable row level security;
+alter table hosts        enable row level security;
+alter table samples      enable row level security;
+alter table events       enable row level security;
+alter table llm_errors   enable row level security;
+alter table env_scans    enable row level security;
+alter table fix_outcomes enable row level security;

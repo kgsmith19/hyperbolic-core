@@ -75,3 +75,19 @@ CREATE TABLE IF NOT EXISTS env_scans (
   synced  INTEGER NOT NULL DEFAULT 0,
   UNIQUE (host_id, ts)
 );
+
+-- One row per verified fix outcome, keyed by fix_engine's fix_id (e.g.
+-- "disable_aiprotection"). fix_engine's recommendation likelihoods start as
+-- documented priors and switch to this table's measured success rate once
+-- enough real outcomes exist for a given fix_id -- see
+-- fix_engine.recommend_fixes_for_diagnosis and store.fix_success_rate.
+CREATE TABLE IF NOT EXISTS fix_outcomes (
+  id      INTEGER PRIMARY KEY,
+  host_id INTEGER NOT NULL REFERENCES hosts(id),
+  ts      TEXT    NOT NULL,
+  fix_id  TEXT    NOT NULL,
+  success INTEGER NOT NULL,  -- 0 or 1
+  synced  INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (host_id, ts, fix_id)
+);
+CREATE INDEX IF NOT EXISTS fix_outcomes_fix_id ON fix_outcomes (fix_id);

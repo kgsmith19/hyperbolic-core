@@ -63,9 +63,17 @@ def verify_fix_resolves_issue(
 def track_fix_success(
     fix_id: str,
     before_diagnosis: Dict,
-    after_diagnosis: Dict
+    after_diagnosis: Dict,
+    conn=None,
+    host=None,
 ) -> Dict:
     """Track outcome of fix application and suggest next action.
+
+    Pass `conn` (an open store.py connection) and `host` (a store.host_id()
+    result) to persist this outcome via store.record_fix_outcome -- this is
+    what lets fix_engine.recommend_fixes_for_diagnosis eventually replace a
+    fix's documented prior with a real measured success rate. Omit either
+    and nothing is persisted; the return value is unaffected either way.
 
     Returns {
         "fix_id": str,
@@ -90,6 +98,10 @@ def track_fix_success(
     else:
         next_action = "Apply next recommended fix"
         success = False
+
+    if conn is not None and host is not None:
+        from . import store
+        store.record_fix_outcome(conn, host, fix_id, success)
 
     return {
         "fix_id": fix_id,

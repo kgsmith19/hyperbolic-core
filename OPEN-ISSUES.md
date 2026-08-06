@@ -476,3 +476,63 @@ safety net — a wrong key still reports `attempted` rather than a false
 `disable_aiprotection`, `disable_qos`, `restart_device`) has been run with
 `dry_run=False` against a real ASUS router at least once and the read-back
 matches.
+
+---
+
+## 14. `fix_engine.py`'s fix likelihoods were hardcoded authored guesses with no path to real data — RESOLVED (plumbing), still 0 real outcomes recorded
+
+**Surfaced:** 2026-08-05, during a reliability audit of how confidently this
+project's automated *fixes* (as opposed to its diagnoses) can be trusted —
+the same audit that also found `fix_application.py`'s device-fix methods
+were entirely fabricated (#13, above).
+
+`recommend_fixes_for_diagnosis()` ranked fixes partly by `likelihood` —
+`0.35` for the Wi-Fi channel fix, `0.20` for AiProtection, `0.07` for double
+NAT, etc. — hardcoded floats in `_get_wifi_fixes()`/`_get_router_fixes()`/
+etc. with no comment distinguishing "this is a documented estimate" from
+"this is measured". Nothing in the codebase recorded whether a fix actually
+worked anywhere durable: `diagnostic_engine.ConfigurationMatrix.
+record_fix_applied()`/`record_post_fix_outcome()` exist, but are in-memory
+only, keyed by `variable` name (e.g. `"wifi_mode"`) for the unrelated manual
+configuration-testing workflow — not by `fix_engine`'s `fix_id`, and never
+persisted to `store.py`'s SQLite database. `verification_engine.
+track_fix_success()` already computed a real success verdict after
+comparing before/after diagnoses, but threw that verdict away — it was
+never written anywhere a later `recommend_fixes_for_diagnosis()` call could
+read it back.
+
+**Fix applied:** a new `fix_outcomes` table in `schema.sql` (mirrored in
+`supabase/migrations/0001_init.sql`), `store.record_fix_outcome(conn, host,
+fix_id, success)` / `store.fix_success_rate(conn, fix_id) -> {n, rate} |
+None`, `verification_engine.track_fix_success(..., conn=None, host=None)`
+now persists its verdict when given a connection, and
+`fix_engine.recommend_fixes_for_diagnosis(diagnosis, conn=None)` replaces a
+fix's hardcoded `likelihood` with the real measured rate once at least
+`store.MIN_MEASURED_FIX_SAMPLES` (3) outcomes exist for that `fix_id` —
+below that threshold, or with no `conn` at all, the documented prior stands
+unchanged. Every `FixRecommendation` now carries `likelihood_source`
+(`"prior"` or `"measured"`) and `likelihood_samples`, so nothing downstream
+can mistake one for the other. 13 new tests
+(`test_fix_engine.py`, `test_store.py::FixOutcomeTest`,
+`test_verification_engine.py::TrackFixSuccessPersistenceTest`) cover: no
+conn keeps the prior, a conn with too little history keeps the prior, ≥3
+real outcomes switches to the measured rate, only the matching `fix_id` is
+affected, and the measured rate still sorts by effort-then-likelihood the
+same way a prior would.
+
+**Still open:** nothing in the live CLI (`netcheck full-check` / `watch` /
+`diagnose` / `serve`) calls `FixApplier`, `recommend_fixes_for_diagnosis`,
+or `track_fix_success` today — these three modules are a library with no
+command wired to them yet (see `fix_engine.py`'s own "recommend, don't act"
+framing). So in real usage right now, every recommendation is still a
+`"prior"`: the `fix_outcomes` table exists and is correctly read/written,
+but nothing populates it outside of tests until some future command
+actually applies a fix, verifies it, and calls `track_fix_success(...,
+conn=conn, host=host)` with the real database connection. Recorded so
+"measured likelihoods now exist" isn't mistaken for "this tool has learned
+anything about a real user's fixes yet" — it hasn't; the mechanism is real,
+the data isn't, yet.
+
+**Retire when:** a CLI command exists that applies a fix, verifies it, and
+records the outcome end to end against a real `~/.netcheck/netcheck.db`,
+and at least one fix has accumulated 3+ real recorded outcomes.

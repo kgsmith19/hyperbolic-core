@@ -131,10 +131,14 @@ gather that output. This is what runs every tick of `netcheck watch`.
   `docs/DEPLOYMENT.md`.
 - `host_id(conn, name, os_name) -> int` — upserts the host row, returns its id.
 - `add_sample(conn, host, row)`, `add_event(conn, host, row)`,
-  `add_error(conn, host, row)`, `add_scan(conn, host, payload)` — inserts,
+  `add_error(conn, host, row)`, `add_scan(conn, host, payload)`,
+  `record_fix_outcome(conn, host, fix_id, success, ts=None)` — inserts,
   each tagged with `host` and stamped for Supabase sync.
 - `samples(conn, limit=5000)`, `errors(conn, limit=5000)`,
-  `scans(conn, limit=20)` — reads, most recent first.
+  `scans(conn, limit=20)`, `fix_success_rate(conn, fix_id) -> dict | None` —
+  reads. `fix_success_rate` returns `{"n": int, "rate": float}` or `None` if
+  no outcomes are recorded yet for that `fix_id`; `fix_engine` falls back to
+  a documented prior below `MIN_MEASURED_FIX_SAMPLES` (3) real outcomes.
 - `offsets(conn) -> dict`, `save_offsets(conn, new)` — the file-offset
   bookkeeping `llmlog.scan_all` needs to avoid re-reading old transcripts.
 - `unsynced(conn, table, limit=500) -> list`, `mark_synced(conn, table, ids)`
@@ -344,8 +348,15 @@ row.
 
 ### `netcheck/fix_engine.py` — recommend, don't act
 - `FixRecommendation` — a single actionable fix: instructions + metadata, no
-  side effects.
-- `recommend_fixes_for_diagnosis(diagnosis) -> list[FixRecommendation]`
+  side effects. `likelihood` is a probability [0, 1]; `likelihood_source` is
+  `"prior"` (this module's documented estimate) or `"measured"` (a real
+  success rate from `store.fix_outcomes`); `likelihood_samples` is the
+  outcome count backing a measured rate, `None` for a prior.
+- `recommend_fixes_for_diagnosis(diagnosis, conn=None) -> list[FixRecommendation]`
+  — pass an open `store.py` connection to have each fix's `likelihood`
+  switched from its documented prior to a measured success rate once at
+  least `store.MIN_MEASURED_FIX_SAMPLES` real outcomes exist for that
+  `fix_id`. Without `conn` (or with too little history), the prior stands.
 - `get_ethernet_test_setup() -> dict` — instructions for the highest-ROI
   manual test (wire in over Ethernet to rule out Wi-Fi entirely).
 - `track_fix_application(fix, success)`
@@ -387,7 +398,11 @@ unverified against live hardware — see `OPEN-ISSUES.md` #13.
 
 ### `netcheck/verification_engine.py` — did the fix work?
 - `verify_fix_resolves_issue(before_diagnosis, fix, after_diagnosis) -> dict`
-- `track_fix_success(fix_id, before_diagnosis, after_diagnosis) -> dict`
+- `track_fix_success(fix_id, before_diagnosis, after_diagnosis, conn=None, host=None) -> dict`
+  — pass `conn`/`host` to persist the outcome via `store.record_fix_outcome`,
+  closing the loop back to `fix_engine.recommend_fixes_for_diagnosis`'s
+  measured likelihoods. Omitted, nothing is persisted; the returned dict is
+  unaffected either way.
 - `compare_diagnostic_layers(before, after) -> dict` — which layers improved.
 - `estimate_mttr(before, after) -> dict`
 
