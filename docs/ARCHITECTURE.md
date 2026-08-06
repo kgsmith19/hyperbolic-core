@@ -224,7 +224,7 @@ Primary test runner is `unittest` (stdlib, matching the "no pip" constraint):
 python -m unittest discover -s tests -t .
 ```
 
-425 tests, hermetic — no live network calls, no sleeps beyond a probe's own
+431 tests, hermetic — no live network calls, no sleeps beyond a probe's own
 timing (`test_e2e_faults.py`'s live-fault-injection tests are the one
 exception; they need `tc`/`sudo` and skip gracefully without them). CI
 (`.github/workflows/tests.yml`) additionally installs `pytest` to run the

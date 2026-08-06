@@ -254,10 +254,14 @@ def _resolve_via(host, server, timeout=4):
     return sorted(addrs)
 
 
-def tls_connect(host, port=443, timeout=8):
+def tls_connect(host, port=443, timeout=8, ctx=None):
+    """Real TLS handshake, timed. `ctx` defaults to a real verifying
+    SSLContext; overridable the same way idle_hold's own `ctx` parameter
+    is, so a test can hand in a context that trusts a local stub server's
+    self-signed certificate instead of a real CA-signed one."""
     t0 = time.monotonic()
     try:
-        ctx = ssl.create_default_context()
+        ctx = ctx or ssl.create_default_context()
         with socket.create_connection((host, port), timeout=timeout) as raw:
             t_tcp = time.monotonic()
             with ctx.wrap_socket(raw, server_hostname=host) as sock:

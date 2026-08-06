@@ -536,3 +536,61 @@ the data isn't, yet.
 **Retire when:** a CLI command exists that applies a fix, verifies it, and
 records the outcome end to end against a real `~/.netcheck/netcheck.db`,
 and at least one fix has accumulated 3+ real recorded outcomes.
+
+---
+
+## 15. Only 5 of 15 canonical hypotheses had real fault-injection e2e coverage — 2 more added, rest honestly still not attempted
+
+**Surfaced:** 2026-08-05, while extending `test_e2e_faults.py` beyond the 5
+hypotheses #12's restoration covered (latency, jitter, packet loss, DNS
+resolution, connection reaping).
+
+**Added, both verified working against a real injected fault before being
+written up here:**
+
+- **#4 (MTU/PMTUD).** `tc netem` has no MTU-clamping option, so this uses a
+  different real fault: `ip link set dev lo mtu 1000` genuinely shrinks
+  loopback's interface MTU (confirmed live in this sandbox — a DF-set
+  `ping -s 1200` fails with a real `local error: message too long,
+  mtu=1000`, one 872 bytes fits through at 928 total). Two tests: the
+  default candidate sizes (1200-1472) correctly report `unavailable`
+  rather than lying about some other size working, and a size list chosen
+  to bracket the real 1000-byte limit correctly finds it via
+  `environ.mtu()`'s actual descending walk.
+- **#9 (TLS handshake overhead).** A real `tc netem` delay against a real
+  local TLS server (self-signed certificate generated fresh via the
+  `openssl` CLI, skips gracefully if unavailable — no private key shipped
+  in the repo). `probes.tls_connect()` gained an optional `ctx` parameter,
+  the same pattern `idle_hold` already uses, so the test can hand in a
+  context that trusts that certificate instead of failing closed the way
+  a real unknown certificate must. `test_probes.py::TlsConnectCtxTest`
+  covers the parameter itself at the unit level (default is still a real
+  verifying `SSLContext` — fails closed against a plaintext peer).
+
+**Still not attempted, with the specific blocker for each:**
+
+- **#6 (dual-stack IPv6).** This sandbox has no IPv6 at all —
+  `socket.socket(AF_INET6, ...)` raises `OSError: Address family not
+  supported by protocol` outright, so there was no way to prototype or
+  confirm a real dual-stack test here before committing to it (unlike the
+  MTU and TLS additions above, both verified live in this environment
+  first). `diagnostic_engine.analyze_dual_stack()` is also a pure function
+  over an already-shaped `{"reachable", "latency_ms"}` dict per stack, and
+  nothing in this codebase currently produces that shape from a live
+  probe — a real test would need both a capability gate for the runner
+  and new glue code, not just a fault-injection harness.
+- **#5 (TCP retransmits) / #14 (monitoring regression).** Real retransmits
+  happen for free under `tc netem loss` (already exercised for hypothesis
+  #3), but nothing in this codebase counts them from a live connection
+  (e.g. parsing `ss -i`) — `build_state_machine` (see #12 above) consumes
+  already-timestamped events, it doesn't produce them.
+- **#8 (routing asymmetry) / #10 (socket buffer size).** Both would need
+  either multiple real network paths (asymmetry) or OS-level TCP-stack
+  introspection deeper than `environ.tcp_globals()`'s current `netsh`
+  parsing provides (buffers) — neither is a fault-injection problem the
+  existing `tc netem`/interface-MTU techniques extend to.
+
+**Retire when:** each remaining hypothesis either gets real e2e coverage
+using a technique verified live first (as both additions above were), or is
+confirmed genuinely out of reach for this environment and reclassified as
+permanently out of scope rather than merely unattempted.

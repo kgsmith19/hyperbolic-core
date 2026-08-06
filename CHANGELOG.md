@@ -60,6 +60,17 @@ pass, not full automation.
   `likelihood_source` (`"prior"` or `"measured"`) and `likelihood_samples`
   so a caller can tell which kind of number it's looking at
   (`OPEN-ISSUES.md` #14).
+- `tests/test_e2e_faults.py`: real fault-injection e2e coverage for two
+  more canonical hypotheses. #4 (MTU/PMTUD): shrinks loopback's actual
+  interface MTU (`ip link set dev lo mtu 1000`) and confirms
+  `environ.mtu()`'s descending DF-bit ping walk both correctly reports
+  `unavailable` when none of its default candidate sizes fit, and finds
+  the real limit when given sizes that bracket it. #9 (TLS handshake
+  overhead): injects a real `tc netem` delay and confirms it shows up in a
+  real TLS handshake against a local server, using a certificate generated
+  fresh via the `openssl` CLI. `probes.tls_connect()` gained an optional
+  `ctx` parameter (matching `idle_hold`'s existing one) so a test can
+  trust that self-signed certificate explicitly (`OPEN-ISSUES.md` #15).
 
 ### Fixed
 - `docs/DEVELOPMENT.md` told contributors to `pip install -e .` against a

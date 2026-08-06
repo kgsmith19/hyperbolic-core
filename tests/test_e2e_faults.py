@@ -15,15 +15,20 @@ aren't available, rather than failing -- this sandbox, for instance, has
 is not a reliable capability signal (it succeeds either way); the real
 check tries to add and remove a netem rule.
 """
+import re
+import shutil
 import socket
+import ssl
 import struct
 import subprocess
+import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from typing import List
 
-from netcheck import diagnose, probes
+from netcheck import diagnose, environ, probes
 
 
 def run_tc(args: List[str]) -> bool:
@@ -259,6 +264,139 @@ class E2EDNSResolutionTest(unittest.TestCase):
         self.assertEqual(result["state"], "ok")
         self.assertGreater(result["ms"], 60,
                           "80ms injected delay should be visible in a real DNS round trip")
+
+
+class E2ETlsHandshakeLatencyTest(unittest.TestCase):
+    """Hypothesis #9 (TLS handshake overhead): a real netem delay must show
+    up in a real TLS handshake's timing. Uses a real local TLS server with
+    a certificate generated fresh via the `openssl` CLI (skips gracefully
+    if unavailable) rather than shipping a private key in the repo;
+    probes.tls_connect's `ctx` parameter (added alongside idle_hold's
+    identical one, see test_probes.py::TlsConnectCtxTest) lets the client
+    trust that self-signed certificate explicitly instead of failing
+    closed the way it must against a real unknown certificate."""
+
+    def setUp(self):
+        cleanup_tc()
+        if not netem_available():
+            self.skipTest("netem not available (tc present, but sch_netem is not)")
+        if shutil.which("openssl") is None:
+            self.skipTest("openssl CLI not available to generate a test certificate")
+
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.key_path = Path(self.tmpdir.name) / "key.pem"
+        self.cert_path = Path(self.tmpdir.name) / "cert.pem"
+        result = subprocess.run([
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", str(self.key_path), "-out", str(self.cert_path),
+            "-days", "1", "-subj", "/CN=127.0.0.1",
+            "-addext", "subjectAltName=IP:127.0.0.1",
+        ], capture_output=True, timeout=20)
+        if result.returncode != 0:
+            self.skipTest(f"openssl cert generation failed: {result.stderr.decode()[:200]}")
+
+    def tearDown(self):
+        cleanup_tc()
+
+    def _serve_tls(self):
+        server_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server_ctx.load_cert_chain(str(self.cert_path), str(self.key_path))
+        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        raw.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        raw.bind(("127.0.0.1", 0))
+        raw.listen(1)
+        port = raw.getsockname()[1]
+
+        def accept_one():
+            try:
+                conn, _ = raw.accept()
+                with server_ctx.wrap_socket(conn, server_side=True) as tls_conn:
+                    tls_conn.recv(1)
+            except Exception:
+                pass  # client side already got what it needs from the handshake
+
+        thread = threading.Thread(target=accept_one, daemon=True)
+        thread.start()
+        self.addCleanup(raw.close)
+        self.addCleanup(lambda: thread.join(timeout=5))
+        return port
+
+    def test_injected_latency_is_measured_in_a_real_tls_handshake(self):
+        port = self._serve_tls()
+        self.assertTrue(run_tc(["qdisc", "add", "dev", "lo", "root", "netem", "delay", "60ms"]))
+
+        client_ctx = ssl.create_default_context(cafile=str(self.cert_path))
+        client_ctx.check_hostname = False
+
+        result = probes.tls_connect("127.0.0.1", port, timeout=10, ctx=client_ctx)
+
+        self.assertEqual(result["state"], "ok")
+        self.assertGreater(result["ms"], 40,
+                          "60ms injected delay should be visible in a real TLS handshake "
+                          "(TCP connect + TLS handshake both cross the delayed link)")
+
+
+def _lo_mtu():
+    try:
+        result = subprocess.run(["ip", "link", "show", "lo"], capture_output=True, text=True)
+    except FileNotFoundError:
+        return None
+    m = re.search(r"\bmtu (\d+)", result.stdout)
+    return int(m.group(1)) if m else None
+
+
+def _set_lo_mtu(mtu):
+    try:
+        result = subprocess.run(["sudo", "ip", "link", "set", "dev", "lo", "mtu", str(mtu)],
+                                capture_output=True)
+    except FileNotFoundError:
+        return False
+    return result.returncode == 0
+
+
+class E2EMtuPmtudTest(unittest.TestCase):
+    """Hypothesis #4 (MTU/PMTUD): environ.mtu()'s descending DF-bit ping
+    walk must actually find a real, reduced path MTU rather than only
+    being asserted about in the abstract. `tc netem` has no MTU-clamping
+    option, so this uses a different real fault: shrinking loopback's own
+    interface MTU (`ip link set dev lo mtu N`), which makes a DF-set ping
+    larger than N fail with a genuine "message too long" the same way a
+    real path with a smaller-MTU hop would."""
+
+    def setUp(self):
+        self.original_mtu = _lo_mtu()
+        if not _set_lo_mtu(1000):
+            self.skipTest("cannot set lo's MTU in this sandbox (needs CAP_NET_ADMIN)")
+
+    def tearDown(self):
+        if self.original_mtu is not None:
+            _set_lo_mtu(self.original_mtu)
+
+    def test_default_size_list_correctly_reports_unavailable_under_a_1000_byte_mtu(self):
+        """None of environ.mtu()'s default candidate sizes (1200-1472) fit
+        under a 1000-byte path -- it must say so, not report a false `ok`
+        for some other size that happens to work."""
+        result = environ.mtu("127.0.0.1")
+        self.assertEqual(result["state"], "unavailable")
+
+    def test_a_size_list_straddling_the_real_limit_finds_it(self):
+        """Sizes chosen to bracket the real 1000-byte MTU: 1172(+28=1200,
+        too big) then 872(+28=900, fits) -- environ.mtu() must pick 900,
+        not fail outright or pick the wrong candidate."""
+        result = environ.mtu("127.0.0.1", sizes=(1172, 872, 472))
+
+        self.assertEqual(result["state"], "ok")
+        self.assertEqual(result["mtu"], 900)
+
+    def test_a_size_that_no_longer_fits_is_skipped_for_the_next_one(self):
+        """Confirms the walk actually degrades: the too-large candidate
+        must fail for real (not just happen to be first in a lucky list)."""
+        too_big = probes.parse_ping(subprocess.run(
+            ["ping", "-c", "1", "-M", "do", "-s", "1172", "127.0.0.1"],
+            capture_output=True, text=True, timeout=8).stdout)
+        self.assertEqual(too_big["state"], "fail",
+                         "a DF-set ping bigger than the real 1000-byte MTU must fail")
 
 
 class AcceptanceTest(unittest.TestCase):

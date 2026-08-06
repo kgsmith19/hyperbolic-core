@@ -24,7 +24,7 @@ The primary, always-available test runner is `unittest`:
 python -m unittest discover -s tests -t .
 ```
 
-425 tests, hermetic — no live network calls, no sleeps beyond a probe's own
+431 tests, hermetic — no live network calls, no sleeps beyond a probe's own
 timing. This is the command in `AGENTS.md` and the one to run before every
 commit.
 
@@ -126,7 +126,7 @@ AST-based static checks — see `tools/README.md` for rules and intensity
 levels.
 
 ### `tests/`
-425 tests. Fixtures for real captured command output live in
+431 tests. Fixtures for real captured command output live in
 `tests/fixtures/`. `tests/test_llmlog.py` holds the adversarial cases
 worth reading first — the ones that catch substring-matching mistakes that
 previously overcounted real errors ~200x.

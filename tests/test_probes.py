@@ -320,5 +320,56 @@ class IdleHoldTest(unittest.TestCase):
         self.assertEqual(got["result"], "connect_error")
 
 
+class TlsConnectCtxTest(unittest.TestCase):
+    """tls_connect's ctx parameter (added alongside idle_hold's identical
+    one) lets a test hand in a stand-in context instead of a real verifying
+    SSLContext -- this is what makes a real e2e TLS-latency test against a
+    local self-signed stub server possible without shipping a private key
+    in the repo (test_e2e_faults.py's TLS test uses a real cert instead,
+    generated fresh via openssl; this one only checks the plumbing)."""
+
+    def _server(self):
+        import socket as s, threading
+        srv = s.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+
+        def serve():
+            conn, _ = srv.accept()
+            conn.close()
+        threading.Thread(target=serve, daemon=True).start()
+        self.addCleanup(srv.close)
+        return srv.getsockname()
+
+    def test_custom_ctx_is_used_instead_of_a_real_default_context(self):
+        """A ctx whose wrap_socket hands back an object with a fake
+        .cipher() (real SSL sockets have one; a bare passthrough like
+        _PlainCtx wouldn't, since regular sockets have no such method) --
+        proves tls_connect calls the given ctx rather than building its
+        own real one."""
+        from unittest.mock import MagicMock
+        host, port = self._server()
+        fake_wrapped = MagicMock()
+        fake_wrapped.cipher.return_value = ("FAKE-CIPHER", "TLSv1.3", 128)
+        fake_wrapped.__enter__.return_value = fake_wrapped
+        fake_ctx = MagicMock()
+        fake_ctx.wrap_socket.return_value = fake_wrapped
+
+        result = probes.tls_connect(host, port, timeout=2, ctx=fake_ctx)
+
+        self.assertEqual(result["state"], "ok")
+        self.assertEqual(result["cipher"], "FAKE-CIPHER")
+        fake_ctx.wrap_socket.assert_called_once()
+
+    def test_default_ctx_is_a_real_verifying_sslcontext(self):
+        """No ctx passed -- must fail closed against a plaintext peer,
+        proving the default is real TLS verification, not accidentally
+        bypassed."""
+        host, port = self._server()
+        result = probes.tls_connect(host, port, timeout=2)
+
+        self.assertEqual(result["state"], "fail")
+
+
 if __name__ == "__main__":
     unittest.main()
