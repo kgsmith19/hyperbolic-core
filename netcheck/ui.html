@@ -206,10 +206,7 @@
       <h2>Latency &amp; failures</h2>
       <template x-if="chart.points.gw">
         <svg class="chart" :viewBox="`0 0 ${chart.w} ${chart.h}`" preserveAspectRatio="none">
-          <template x-for="b in chart.bands" :key="b.x">
-            <rect :x="b.x" y="0" :width="b.w" :height="chart.h"
-                  fill="var(--bad)" opacity=".16"></rect>
-          </template>
+          <path :d="chart.bandsPath" fill="var(--bad)" opacity=".16"></path>
           <polyline :points="chart.points.gw"   fill="none" stroke="var(--ok)"     stroke-width="1.5"></polyline>
           <polyline :points="chart.points.inet" fill="none" stroke="var(--accent)" stroke-width="1.5"></polyline>
           <polyline :points="chart.points.tls"  fill="none" stroke="var(--warn)"   stroke-width="1.5"></polyline>
@@ -377,7 +374,7 @@ function netcheck() {
     // Hand-rolled SVG: a charting library would be a second dependency to draw
     // three polylines, and it could not be loaded offline anyway.
     get chart() {
-      const w = 900, h = 150, out = { w, h, points: {}, bands: [] };
+      const w = 900, h = 150, out = { w, h, points: {}, bandsPath: '' };
       const rows = (this.d.samples || []).slice(0, 180).reverse();
       if (rows.length < 2) return out;
 
@@ -391,7 +388,13 @@ function netcheck() {
                         .filter(Boolean).join(' ');
         out.points[k.replace('_ms', '')] = pts;
       }
-      rows.forEach((r, i) => { if (r.culprit) out.bands.push({ x: x(i) - 2, w: 4 }); });
+      // A single path of rectangle subpaths, not one <rect> per band via x-for:
+      // Alpine's morph clones SVG children outside the SVG namespace, which is
+      // what threw the console errors this replaced (OPEN-ISSUES.md #11).
+      const bandW = 4;
+      out.bandsPath = rows
+        .map((r, i) => r.culprit ? `M${(x(i) - bandW / 2).toFixed(1)},0h${bandW}v${h}h-${bandW}Z` : null)
+        .filter(Boolean).join(' ');
       return out;
     },
 

@@ -338,23 +338,32 @@ speculative work, not a fix.
 
 ---
 
-## 11. Two pre-existing, minor `ui.html` rough edges found during Playwright testing — 1 of 2 RESOLVED 2026-08-05
+## 11. Two pre-existing, minor `ui.html` rough edges found during Playwright testing — RESOLVED 2026-08-06 (both items)
 
 **Surfaced:** 2026-08-05, Phase 27 (found while visually verifying the new
 dashboard features in a real browser — pre-dates this phase's changes,
 confirmed by testing against the version of `ui.html` from the initial
 commit).
 
-1. **Console errors on load/refresh — still open.** Chromium logs `<rect>
-   attribute x: Unexpected end of attribute` (x2) and `ReferenceError: b is
-   not defined` (x2) plus an `importNode` TypeError, around the failure-band
-   rectangles in the latency chart (`x-for="b in chart.bands"`). Cosmetic —
-   the chart still renders correctly in every screenshot taken — but real
-   console noise, likely an Alpine/SVG namespaced-attribute morphing quirk.
-   Not attempted: root-causing this means either bisecting Alpine's SVG
-   handling or restructuring the bands away from `x-for` inside an `<svg>`,
-   and risks introducing a real regression in exchange for silencing a
-   dev-console-only warning — a worse trade than leaving it recorded.
+1. **~~Console errors on load/refresh~~ — RESOLVED 2026-08-06.** Chromium
+   logged `<rect> attribute x: Unexpected end of attribute` (x2) and
+   `ReferenceError: b is not defined` (x2) plus an `importNode` TypeError,
+   around the failure-band rectangles in the latency chart
+   (`x-for="b in chart.bands"`). Root cause confirmed live in a headless
+   Chromium session (Playwright, this sandbox): Alpine's `x-for` morph
+   clones `<rect>` elements without the SVG namespace when it re-diffs
+   children inside an `<svg>` — a documented Alpine limitation, not a bug
+   in this project's logic. Fixed by removing the `x-for`/`<rect>` pair
+   entirely: `chart.bands` (an array of `{x, w}`) is now `chart.bandsPath`,
+   one SVG path string built from per-band rectangle subpaths
+   (`M{x},0h{w}v{h}h-{w}Z`), bound to a single static `<path>` element via
+   `:d`. One element whose attribute changes, instead of N elements Alpine
+   has to create/destroy inside a foreign namespace — the class of bug
+   cannot recur here. Verified against a real seeded DB and a real headless
+   Chromium instance: zero Alpine/SVG console errors across initial load
+   and five manual `refresh` clicks (previously: 7 errors/warnings on load
+   alone), and the failure bands still render in the same position
+   (screenshot-verified against the `lan`-tagged sample rows).
 2. **~~"Recent samples" table needs horizontal scroll at narrow widths~~ —
    RESOLVED.** `.scroll` now carries a two-edge fade (a CSS-only "scroll
    shadow": four layered gradients, the inner two `background-attachment:
@@ -364,7 +373,7 @@ commit).
    disappears once scrolled to the last column, and the left-edge fade
    appears in its place.
 
-**Retire when:** the console errors are root-caused and fixed.
+**Retired:** both items fixed and verified live.
 
 ---
 

@@ -315,7 +315,6 @@ class NetworkFixer:
         fixes = [
             ("wifi_mode", self.fix_wifi_mode),
             ("dns", self.fix_dns),
-            ("gateway", self.detect_gateway_issue),
             ("adapter_power", self.fix_adapter_power_management),
         ]
 
@@ -334,6 +333,24 @@ class NetworkFixer:
                         error=str(e),
                     )
                 )
+
+        # Gateway has no automated fix -- an unreachable gateway is a
+        # hardware/ISP problem, not something this tool can write a
+        # config change for (see tools/README.md, "Gateway Unreachable:
+        # Validation only"). Wrap its (bool, dict) detection result in a
+        # FixResult so it fits the same list every other entry returns,
+        # instead of leaking a bare tuple into code that expects `.validated`.
+        try:
+            detected, state = self.detect_gateway_issue()
+            result = FixResult(issue="gateway", detected=detected, applied=False,
+                                validated=False, before_state=state)
+            results.append(result)
+            self.log(f"gateway: detected={result.detected}, applied={result.applied}, validated={result.validated}")
+        except Exception as e:
+            results.append(
+                FixResult(issue="gateway", detected=False, applied=False,
+                           validated=False, error=str(e))
+            )
 
         return results
 

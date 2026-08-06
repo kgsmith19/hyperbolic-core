@@ -84,24 +84,32 @@ data center.
 
 ## Releases
 
-Tagging `vX.Y.Z` and pushing the tag runs `.github/workflows/release.yml`:
-runs the full test suite, builds the Docker image, smoke-tests it
-(`--version` and a real `full-check`), and opens a **draft** GitHub Release
-with that version's `CHANGELOG.md` section and the image as a downloadable
-artifact (`docker load < netcheck-image.tar.gz`). No PyPI/Homebrew publish
-step, for the reason at the top of this doc.
+**As of 2026-08-06, `.github/workflows/release.yml` triggers on manual
+`workflow_dispatch` only** -- pushing a `vX.Y.Z` tag no longer runs
+anything by itself (see `.github/workflows/README.md` for why: the CI
+workflows were burning through the account's Actions minutes quota on
+every push). Building and smoke-testing the release image is now a local
+step (`tools/deploy.sh`); only dispatch the GitHub workflow when you
+specifically want the published GitHub Release + downloadable artifact.
 
 To cut a release:
 
 ```bash
 python tools/release.py bump patch   # or minor / major
 python tools/release.py changelog    # draft entries; paste into CHANGELOG.md under [Unreleased]
-# move the [Unreleased] section to a new ## [X.Y.Z] heading, commit, tag, push
+# move the [Unreleased] section to a new ## [X.Y.Z] heading, commit
 git tag vX.Y.Z
 git push origin vX.Y.Z
+bash tools/deploy.sh                 # local checks + build + smoke-test + save the image
 ```
 
-Review and publish the draft release once the workflow finishes.
+`tools/deploy.sh` runs `tools/check.sh` first, builds `netcheck:vX.Y.Z`,
+smoke-tests it (`--version` and a real `full-check`), and saves it as
+`netcheck-image-vX.Y.Z.tar.gz`. It prints the `git tag`/`gh release create`
+commands to publish from there if you want a GitHub Release; or dispatch
+the "Release" workflow manually from the Actions tab (picking the `vX.Y.Z`
+tag in "Use workflow from") to have CI build the image and open the draft
+release instead.
 
 ## Upgrade path for existing users
 

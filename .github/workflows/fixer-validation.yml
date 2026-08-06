@@ -1,10 +1,7 @@
 name: Fixer Validation
 
 on:
-  push:
-    branches: [main, 'claude/**']
-  pull_request:
-    branches: [main]
+  workflow_dispatch:  # manual only -- see tools/check.sh to run this locally instead
 
 jobs:
   fixer-tests:

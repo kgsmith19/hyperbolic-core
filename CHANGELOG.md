@@ -11,6 +11,11 @@ pass, not full automation.
 ## [Unreleased]
 
 ### Added
+- `tools/check.sh`: local stand-in for the CI workflows (tests, quality
+  tools, fixer validation), run before merging now that those workflows
+  no longer trigger automatically. `tools/deploy.sh`: local build +
+  smoke-test of the release Docker image, a stand-in for
+  `release.yml`'s build job.
 - `netcheck --version` (Phase 28).
 - Automatic SQLite schema migration: an existing user's database now picks
   up columns added to `schema.sql` after they first installed, instead of
@@ -73,6 +78,36 @@ pass, not full automation.
   trust that self-signed certificate explicitly (`OPEN-ISSUES.md` #15).
 
 ### Fixed
+- CI workflows (`tests.yml`, `code-quality.yml`, `fixer-validation.yml`,
+  `release.yml`) now trigger on manual `workflow_dispatch` only instead of
+  every push/PR — the automatic triggers were exhausting the account's
+  Actions minutes quota, which then failed every job instantly with an
+  empty log (`runner_id: 0`, no runner ever assigned), indistinguishable
+  from a real test failure without checking the job record directly. See
+  `tools/check.sh`/`tools/deploy.sh` above and `.github/workflows/README.md`
+  for the local-first replacement.
+- `tools/fixer.py`'s `apply_all_fixes()` put `detect_gateway_issue` (which
+  returns a bare `(bool, dict)` tuple) directly into the same list as the
+  `fix_*` methods (which return `FixResult` objects), so `netcheck fixer
+  --issue all --dry-run` crashed with `AttributeError: 'tuple' object has
+  no attribute 'validated'` as soon as `main()` tried to read that field.
+  The CI step that ran this had `|| true` on it, so the crash was silently
+  swallowed instead of failing the build. The gateway check has no
+  automated fix by design (an unreachable gateway is a hardware/ISP
+  problem, not a config change) — its detection result is now wrapped in
+  a `FixResult` like every other entry, and `tests/test_fixer.py` covers
+  the crash directly (calling `apply_all_fixes()` and reading `.validated`
+  off every result, reproducing `main()`'s summary line).
+- Dashboard: Alpine's `x-for="b in chart.bands"` created `<rect>` elements
+  inside an `<svg>` via Alpine's morph, which clones nodes outside the SVG
+  namespace — threw `<rect> attribute x: Unexpected end of attribute`,
+  `ReferenceError: b is not defined`, and an `importNode` TypeError on
+  every dashboard load/refresh. Replaced with a single `<path>` bound to
+  one precomputed path string (`chart.bandsPath`), so there's one static
+  element whose `d` attribute changes instead of N elements Alpine has to
+  create/destroy in a foreign namespace. Verified live: zero Alpine/SVG
+  console errors across load and five refreshes, previously 7
+  (`OPEN-ISSUES.md` #11).
 - `netcheck watch` resolved the gateway IP once at startup and never
   re-checked it, so a real network switch (home Wi-Fi to a phone hotspot,
   a DHCP renewal, etc.) left it pinging a now-unreachable stale gateway

@@ -8,8 +8,12 @@ name: Release
 # docs/DEPLOYMENT.md for the full release process, including why.
 
 on:
-  push:
-    tags: ['v*']
+  # Manual only -- pick the vX.Y.Z tag to run from in the Actions UI's "Run
+  # workflow" dropdown ("Use workflow from"). github.ref_name below still
+  # resolves to that tag. See tools/deploy.sh to build/smoke-test the image
+  # locally without spending Actions minutes at all; use this workflow only
+  # when you actually want the published GitHub Release.
+  workflow_dispatch:
 
 jobs:
   test:
