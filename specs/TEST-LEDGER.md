@@ -20,6 +20,14 @@ owner: Kyle
 
 | Test ID | Name / location | Level | Traces to | Failure mode caught | Why not cheaper | Why not duplicate | Mutation verified | Runtime (ms) | Deletion criterion | Added |
 |---|---|---|---|---|---|---|---|---|---|---|
+| T-I-001 | `tests/rls.test.mjs` | integration | AC-002 -> NFR-001 | An unauthenticated caller reads idea data | RLS is DB-level; nothing cheaper proves it over the real network | No other test hits the REST API unauthenticated | pending | | `idea.idea` gets a public-read use case (never expected) | SL-000 |
+| T-I-002 | `tests/rls.test.mjs` | integration | AC-006 -> NFR-001 | One user reads another user's `core.run` rows | Needs two real authenticated sessions | No other test uses two distinct identities | pending | | `core.run` ever becomes shared/team data | SL-000 |
+| T-I-003 | `tests/constraints.test.mjs` | integration | AC-003 -> FR-002 | A `core.run` row is created for an unregistered tool | FK is the cheap mechanism; this proves it is wired | No other test inserts an orphan `core.run` row | pending | | Never | SL-000 |
+| T-I-004 | `tests/constraints.test.mjs` | integration | AC-004 -> FR-003 | A metric is defined with no gaming risk | `NOT NULL` is the cheap mechanism; this proves it survives future migrations | No other test inserts into `core.metric_def` | pending | | Never | SL-000 |
+| T-I-005 | `tests/seed.test.mjs` | integration | AC-005, PROP-005 -> FR-001 | Seed data missing rows, duplicated, or drifted from the topology note | Needs a real query and value comparison | No other test reads the full 33-row set | pending | | Idea list gets a UI-driven edit path making seed bootstrap-only | SL-000 |
+| T-I-006 | `tests/seed.test.mjs` | integration | PROP-003 -> FR-001 | Re-running the seed migration duplicates rows | Requires actually running a migration twice | No other test re-runs a migration | pending | | Never | SL-000 |
+| T-A-001 | `tests/rls.test.mjs` (page load) | acceptance | AC-001 -> FR-001 | The list page fails to render a seeded row's fields | Only an end-to-end page load proves the browser contract | No other test loads the actual HTML page | pending | | Page replaced by a different tool's UI | SL-000 |
+| T-A-002 | `tests/rls.test.mjs` (down migration) | acceptance | AC-007 -> NFR-004 | The down migration for `idea` does not fully remove the schema | Only running the actual down migration proves rollback | No other test exercises a down migration | pending | | Never | SL-000 |
 
 **Column meanings:**
 
