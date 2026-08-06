@@ -324,16 +324,39 @@ def first_hop(host="1.1.1.1", gateway_ip=None, max_hops=5, timeout=40):
     return parse_traceroute(text, gateway_ip or gateway(), host)
 
 
+def parse_ipconfig_gateway(text):
+    """The IPv4 default gateway from Windows `ipconfig` output.
+
+    A dual-stack adapter prints its IPv6 default gateway on the labeled line
+    and its IPv4 one on an unlabeled continuation line right below it:
+
+        Default Gateway . . . . . . . . . : fe80::1234:5678:90ab:cdef%16
+                                            192.168.1.1
+
+    A regex anchored to `\\s*([\\d.]+)` right after the colon never reaches
+    that second line, since `\\s` cannot skip over the non-whitespace IPv6
+    text sitting in between -- it just fails to match, silently, on any
+    dual-stack adapter. There can also be more than one "Default Gateway"
+    label (a VPN/Tailscale-style adapter often prints one with no value at
+    all), so every occurrence is checked in order rather than only the
+    first.
+    """
+    for block in re.finditer(r"Default Gateway[ .]*:(.*(?:\n[ \t]+\S.*)*)", text):
+        m = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", block.group(1))
+        if m:
+            return m.group(1)
+    return None
+
+
 def gateway():
     if WINDOWS:
         text, _ = _run(["ipconfig"])
-        m = re.search(r"Default Gateway[ .]*:\s*([\d.]+)", text)
-    else:
-        text, _ = _run(["ip", "route"])
-        m = re.search(r"default via ([\d.]+)", text)
-        if not m:
-            text, _ = _run(["route", "-n", "get", "default"])
-            m = re.search(r"gateway:\s*([\d.]+)", text)
+        return parse_ipconfig_gateway(text)
+    text, _ = _run(["ip", "route"])
+    m = re.search(r"default via ([\d.]+)", text)
+    if not m:
+        text, _ = _run(["route", "-n", "get", "default"])
+        m = re.search(r"gateway:\s*([\d.]+)", text)
     return m.group(1) if m else None
 
 

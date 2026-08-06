@@ -74,6 +74,13 @@ def cmd_watch(args):
         while True:
             tick += 1
             t0 = time.monotonic()
+
+            current_gw = probes.gateway()
+            if current_gw != gw:
+                gw = current_gw
+                hop = probes.first_hop(gateway_ip=gw)
+                print(f"  gateway changed -> {gw} (isp hop {hop})")
+
             row = probes.sample(args.target, gw, hop, wifi=environ.wifi())
             row["culprit"] = diagnose.culprit(row)
             store.add_sample(conn, host, row)

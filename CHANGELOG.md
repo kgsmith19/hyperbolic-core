@@ -73,6 +73,19 @@ pass, not full automation.
   trust that self-signed certificate explicitly (`OPEN-ISSUES.md` #15).
 
 ### Fixed
+- `netcheck watch` resolved the gateway IP once at startup and never
+  re-checked it, so a real network switch (home Wi-Fi to a phone hotspot,
+  a DHCP renewal, etc.) left it pinging a now-unreachable stale gateway
+  for the rest of the run — reported as a false `lan`/100%-loss verdict
+  with high confidence, found live while re-enabling monitoring after
+  today's Wi-Fi mode fix. `probes.gateway()`'s `ipconfig` regex also only
+  matched a single-line gateway value, silently failing to match at all
+  on a dual-stack adapter whose real IPv4 gateway sits on an unlabeled
+  continuation line below the IPv6 one. `cmd_watch()` now re-resolves the
+  gateway every tick (cheap) and only re-runs the traceroute-based ISP
+  hop when it actually changes; `probes.gateway()` is now backed by a
+  pure `parse_ipconfig_gateway()` parser tested against a real captured
+  dual-stack fixture (`OPEN-ISSUES.md` #16).
 - `docs/DEVELOPMENT.md` told contributors to `pip install -e .` against a
   stdlib-only project with no `setup.py`/`pyproject.toml` (Phase 24).
 - Seven diagnostic-module docstrings cited a hypothesis number that didn't

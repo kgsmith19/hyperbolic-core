@@ -232,6 +232,41 @@ class ParseTracerouteTest(unittest.TestCase):
             probes.parse_traceroute(raw, "192.168.50.1", "1.1.1.1"), "172.16.1.1")
 
 
+class ParseIpconfigGatewayTest(unittest.TestCase):
+    """probes.gateway() reads this on every `netcheck watch` tick to know
+    which IP to ping as "the router" -- getting it wrong silently makes a
+    real network change (DHCP renewal, AP roam) look like a LAN outage for
+    the rest of the run."""
+
+    def test_dual_stack_adapter_picks_the_ipv4_continuation_line(self):
+        """The real bug: a dual-stack Wi-Fi adapter prints its IPv6 gateway
+        on the labeled line and the IPv4 one on an unlabeled line below it.
+        A regex anchored right after the colon never reaches that second
+        line -- it must search the whole gateway block, not just the first
+        line of it."""
+        text = fixture("ipconfig_dual_stack_gateway.txt")
+        self.assertEqual(probes.parse_ipconfig_gateway(text), "10.215.141.84")
+
+    def test_an_earlier_adapter_with_a_blank_gateway_is_skipped(self):
+        """The fixture's Tailscale adapter prints a "Default Gateway" label
+        with no value at all, before the real Wi-Fi one -- the first
+        occurrence must not shadow a real one that comes later."""
+        text = fixture("ipconfig_dual_stack_gateway.txt")
+        self.assertNotEqual(probes.parse_ipconfig_gateway(text), None)
+
+    def test_simple_single_line_gateway_still_works(self):
+        """Most machines have exactly one gateway line, IPv4 only -- the
+        common case must keep working unchanged."""
+        text = ("Wireless LAN adapter Wi-Fi:\n\n"
+                "   Default Gateway . . . . . . . . . : 192.168.1.1\n")
+        self.assertEqual(probes.parse_ipconfig_gateway(text), "192.168.1.1")
+
+    def test_no_gateway_anywhere_is_none(self):
+        text = ("Ethernet adapter Ethernet:\n\n"
+                "   Media State . . . . . . . . . . . : Media disconnected\n")
+        self.assertIsNone(probes.parse_ipconfig_gateway(text))
+
+
 class ResolveRetryTest(unittest.TestCase):
     """A single dropped UDP query to a resolver is common and is not itself
     evidence the resolver is broken -- resolve() retries once before giving

@@ -4,15 +4,24 @@ Problems surfaced but not fixed. Append; do not delete without a resolution.
 
 ---
 
-## Current Diagnosis Summary (2026-08-05)
+## Current Diagnosis Summary (2026-08-06)
 
-**Root cause of 14 API errors:** Unknown; no monitoring was running when they occurred.
+**Root cause of the original 14 (later 500+) API errors:** Still unknown;
+no monitoring was running when they occurred.
 
-**Most likely culprit:** Wi-Fi adapter pinned to 802.11ac (sub-optimal mode on 
-Wi-Fi 6 AX201 against AX-capable router). Driver property updated to 802.11ax,
-but needs full adapter reset (now available in `scripts/reset-wifi-adapter.ps1`)
-to take effect. Does not *prove* causation retroactively, but fits the symptom
-shape (intermittent drops under link margin).
+**Wi-Fi mode fix, status:** the adapter-reset script has been run and
+verified live — `netsh wlan show interfaces` now reads `Radio type:
+802.11ax` on the real home AP (was stuck reading `802.11ac` even after an
+earlier reconnect attempt). Does not *prove* causation retroactively for
+the original bursts, but the mode is now genuinely corrected either way.
+
+**New, separate bug found and fixed while re-enabling `watch`:** see #16
+below. `netcheck watch`'s own gateway caching produced a 15+ minute false
+`lan`/100%-loss reading after a real network switch (home Wi-Fi → phone
+hotspot) — confirmed to be the tool misreporting, not a real outage, and
+now fixed. This means any `lan` verdict recorded between roughly
+2026-08-06T04:01 and 04:33 UTC is not trustworthy evidence either way and
+should be disregarded when reading historical samples.
 
 **Ruled out (confirmed working):**
 - **Modem line:** 24 downstream QAM + 1 OFDM channel locked, SNR 40.6–42.0 dB,
@@ -24,11 +33,14 @@ shape (intermittent drops under link margin).
 - **Gateway/ISP:** WAN healthy, DNS correct, DHCP functioning.
 
 **Next steps:**
-1. Run `scripts/reset-wifi-adapter.ps1` to apply 802.11ax mode (requires admin)
-2. Run `python -m netcheck watch` for a few days
-3. If errors recur → Wi-Fi mode was not the cause (or not the only cause)
-4. If errors stop → captures the fix; doesn't prove causation (no A/B test 
-   of the original state), but supports it
+1. ~~Run `scripts/reset-wifi-adapter.ps1`~~ — done, verified live.
+2. Leave `python -m netcheck watch` running across normal use (now
+   resilient to network switches, see #16).
+3. If errors recur with a *measured* (non-`unmonitored`, non-false-`lan`)
+   sample alongside them → Wi-Fi mode was not the sole cause; read whatever
+   layer the sample actually shows as failing.
+4. If a long clean stretch accumulates → supports the mode fix; still not a
+   proven A/B, but corroborating.
 
 ---
 
@@ -115,9 +127,20 @@ deliberately not attempted live again tonight after the incident above).
 adapter to force WLAN AutoConfig to renegotiate at the new mode. Requires admin.
 Includes before/after verification of wireless mode.
 
-**Retire when:** the adapter-reset script has been run, `Radio type` reads
-`802.11ax` live, and either errors recur (rules it out) or a clean stretch
-under `watch` supports it (doesn't prove it, but supports it).
+**Update 2026-08-06:** `netcheck-reset-wifi-adapter.ps1` was run from the Guards
+GUI (confirmed by its presence in `guards/runbox/.trash`, timestamped
+2026-08-05 11:38, alongside the mode-fix script — this happened in a session
+that was later archived, so it went unrecorded here until now). Verified live
+against the real home AP after reconnecting to `Smith Family_5G`: `netsh wlan
+show interfaces` now reads `Radio type: 802.11ax` (was stuck reading `802.11ac`
+live even after the earlier reconnect attempt). Two of three retirement
+conditions are now met. `netcheck watch`/`serve` restarted to observe whether
+errors recur under the corrected mode.
+
+**Retire when:** the adapter-reset script has been run (done), `Radio type`
+reads `802.11ax` live (done), and either errors recur (rules it out) or a
+clean stretch under `watch` supports it (doesn't prove it, but supports it) —
+still pending.
 
 ---
 
@@ -594,3 +617,74 @@ written up here:**
 using a technique verified live first (as both additions above were), or is
 confirmed genuinely out of reach for this environment and reclassified as
 permanently out of scope rather than merely unattempted.
+
+---
+
+## 16. `netcheck watch` cached the gateway IP once at startup — RESOLVED 2026-08-06, found live during real monitoring
+
+**Surfaced:** 2026-08-06, while `watch` was actively running to observe
+whether the Wi-Fi mode fix (#3) held. It caught a real network switch —
+the exact kind of event this ongoing diagnosis needs to observe — and
+turned it into a false alarm instead.
+
+`cmd_watch()` called `probes.gateway()` and `probes.first_hop()` exactly
+once before entering its loop, then reused those values for the entire
+run. When the machine switched from the home AP (gateway `192.168.50.1`)
+to a phone hotspot (gateway `10.215.141.84`, a different subnet
+entirely), `watch` kept pinging the now-unreachable `192.168.50.1` for
+every subsequent tick. The result: 30+ consecutive samples read
+`gw_state: fail`, `gw_loss: 100.0`, `culprit: lan` — the dashboard showed
+"lan, high confidence, 100% of samples" for a 15+ minute stretch — while
+a direct `Test-Connection` to the real current gateway from the same
+machine, at the same time, succeeded in 5-9ms. `inet_state`/
+`dns_public_state`/`tls_state` stayed `ok` throughout (they hit public
+targets, unaffected by the stale gateway), which is what made the false
+positive identifiable rather than indistinguishable from a real one.
+
+A second, related bug in the same function: `probes.gateway()`'s regex
+(`Default Gateway[ .]*:\s*([\d.]+)`) only ever matched a *single-line*
+gateway value. A dual-stack Windows adapter prints its IPv6 gateway on
+the labeled line and the IPv4 one on an unlabeled continuation line right
+below it:
+
+```
+   Default Gateway . . . . . . . . . : fe80::xxxx:xxxx:xxxx:xxxx%16
+                                       10.215.141.84
+```
+
+`\s*` cannot skip over the non-whitespace IPv6 text to reach the second
+line, so the regex silently failed to match at all on any dual-stack
+adapter — confirmed directly against this machine's real `ipconfig`
+output (`re.search(...)` returned `None`). This means simply re-resolving
+the gateway every tick, without also fixing the regex, would have made
+things *worse* — trading a stale-but-present IP for `None`.
+
+**Fix applied:**
+- `probes.py`: extracted `parse_ipconfig_gateway(text)` as a pure
+  function (matching this module's own "parsers are pure functions over
+  text" convention, which `gateway()` had been the one exception to).
+  It captures the whole "Default Gateway" block — the labeled line plus
+  any indented continuation lines — and searches within that block for
+  an IPv4-shaped token, and it checks every `Default Gateway` occurrence
+  in order (a VPN/Tailscale-style adapter often prints the label with no
+  value at all, before the real one).
+- `__main__.py`'s `cmd_watch()`: re-resolves the gateway every tick
+  (cheap — one `ipconfig`/`ip route` call) and only re-runs the more
+  expensive `first_hop()` traceroute when the gateway has actually
+  changed, printing a note when it does.
+- New fixture `tests/fixtures/ipconfig_dual_stack_gateway.txt`, captured
+  from this real machine (link-local/global IPv6 values replaced with
+  placeholders, matching this repo's fixture convention for anything
+  that could geolocate a house). 4 new tests in
+  `test_probes.py::ParseIpconfigGatewayTest`: the dual-stack case, a
+  blank-gateway adapter appearing before the real one, the plain
+  single-line case (must keep working unchanged), and no gateway
+  anywhere.
+
+**Verified live:** restarted `watch`/`serve` with the fix; the next two
+ticks (samples 180, 181) both read `gw_state: ok` on the current network,
+versus the `fail`/`lan` streak (samples ~122-179) immediately before the
+restart.
+
+**Retire when:** done — fixed, tested against a real captured fixture,
+and confirmed live against the actual bug it was found from.
