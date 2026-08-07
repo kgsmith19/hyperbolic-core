@@ -5,7 +5,7 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-traces: [FR-001, FR-002, FR-004, FR-005, FR-006, NFR-001, DR-001, DR-002, DR-003, DR-004, DR-005]
+traces: [FR-001, FR-002, FR-004, FR-005, FR-006, FR-007, NFR-001, DR-001, DR-002, DR-003, DR-004, DR-005]
 ---
 
 # Data Flow Diagram
@@ -51,13 +51,13 @@ The only trust boundary is the browser-to-Supabase hop. There is no application 
 | F-2 | Token issued | GoTrue | HTTPS response | Browser memory | Access token (JWT), `sub` = user id | — |
 | F-3 | Read idea list | Browser | HTTPS `GET /rest/v1/idea` + `Accept-Profile: idea` | PostgREST → `idea.idea` | Bearer token | RLS: role must be `authenticated` |
 | F-4 | Register a tool | A tool's operator | HTTPS `POST /rest/v1/app` + `Content-Profile: core` | `core.app` | Tool id, name, schema name | RLS: role must be `authenticated` |
-| F-5 | Log a run | A tool | HTTPS `POST /rest/v1/run` | `core.run` | `app_id`, kind, ref; `user_id` defaults to `auth.uid()` | RLS: `user_id = auth.uid()` |
-| F-6 | Log run detail | A tool | HTTPS `POST` to `event`/`cost`/`outcome` | `core.*` | Run id and payload | RLS: role must be `authenticated` |
+| F-5 | Log a run | A tool | HTTPS `POST /rest/v1/rpc/log_run` (`Content-Profile: core`) | `core.log_run` → `core.run` + `core.cost` | `app_id`, `kind`, `wall_clock_ms`; `user_id` defaults to `auth.uid()` inside the function | RLS: `user_id = auth.uid()`, enforced the same as a direct insert; the RPC is `security definer` so it works even if `core.*`'s grants are ever tightened (SPEC-0003 RISK-008) |
+| F-6 | Log run detail | A tool | HTTPS `POST` to `event`/`outcome` | `core.*` | Run id and payload | RLS: role must be `authenticated` |
 | F-7 | Read idea scores | Browser | HTTPS `GET /rest/v1/score` + `Accept-Profile: idea` | PostgREST → `idea.score` | Bearer token | RLS: role must be `authenticated` |
 | F-8 | Read metric names | Browser | HTTPS `GET /rest/v1/metric_def` + `Accept-Profile: core` | PostgREST → `core.metric_def` | Bearer token | RLS: role must be `authenticated` |
 | F-9 | Read idea dependencies | Browser | HTTPS `GET /rest/v1/dependency` + `Accept-Profile: idea` | PostgREST → `idea.dependency` | Bearer token | RLS: role must be `authenticated` |
 
-F-4 through F-6 are the shape SL-003 will use. No tool writes to them yet (PRD OOS-003). F-7 through F-9 are read by the same page load as F-3, in parallel (SPEC-0001, SPEC-0002).
+F-5 is SL-003 (SPEC-0003), shipped 2026-08-07: `prompt-organizer` is the first real caller. F-4 and F-6 remain the shape a tool uses to register itself and to log event/outcome detail directly; no tool writes those yet (PRD OOS-003). F-7 through F-9 are read by the same page load as F-3, in parallel (SPEC-0001, SPEC-0002).
 
 ## 3. Data at rest
 

@@ -5,7 +5,7 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, NFR-001, NFR-002, NFR-003, NFR-004]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, NFR-001, NFR-002, NFR-003, NFR-004]
 ---
 
 # System Requirements
@@ -32,6 +32,14 @@ What the system must be, as opposed to what it must do. What it does lives in `d
 | SR-027 | `GET /rest/v1/dependency` with header `Accept-Profile: idea` | Supabase PostgREST | Reading each idea's dependencies | Non-200 leaves the section hidden, same as SR-024 |
 
 All four are provided by the same Supabase project as the database. None is a third-party integration (PRD section 11).
+
+## 2a. Interfaces the system provides to other tools
+
+| ID | Interface | Consumer | Used for | Failure behavior |
+|---|---|---|---|---|
+| SR-028 | `POST /rest/v1/rpc/log_run` (`core.log_run`, `security definer`) | Any authenticated tool in the portfolio (first caller: `prompt-organizer`) | Recording one `core.run` row and one `core.cost` row without the caller ever writing directly into `core.*` | A bad `app_id` returns `409`/`23503`, the caller's own responsibility to surface; any other failure is the same class of error a direct `POST /rest/v1/run` would return |
+
+This is the mechanism `prompt-organizer`'s own `CLAUDE.md` names as the boundary: "cross-schema writes belong to the owning repo." `core.run`/`core.cost` are owned here; no other repo's client code should ever contain a schema-qualified write against either.
 
 ## 3. Security requirements
 
