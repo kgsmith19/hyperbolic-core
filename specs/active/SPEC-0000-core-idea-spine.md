@@ -36,7 +36,7 @@ The `toolbelt` Supabase project exists with the `core` and `idea` Postgres schem
 - A new Supabase project named `toolbelt`
 - Schema `core`: tables `app`, `run`, `event`, `cost`, `outcome`, `run_outcome`, `metric_def`, `metric_value`, `assumption`, `intervention`
 - Schema `idea`: tables `idea`, `dependency`, `score`
-- RLS enabled and forced on all 11 tables above
+- RLS enabled and forced on all 13 tables above (10 in `core`, 3 in `idea`)
 - Seed data: 33 rows in `idea.idea`
 - One static page listing every row in `idea.idea`
 
@@ -88,14 +88,14 @@ AC-002, AC-003, AC-004, and AC-006 are the failure cases.
 | Test LOC | ~180 | 200 | within | |
 | New modules/classes | 0 | 2 | within | |
 | Source files touched | 13 (8 migration files, 1 HTML page, 3 test files, 1 `.env.example`) | 3 | EXCEEDS — exception | |
-| New tables | 11 | 1 | EXCEEDS — exception | |
+| New tables | 13 | 1 | EXCEEDS — exception | |
 | New columns | ~70 | 6 | EXCEEDS — exception | |
 | New endpoints | 0 (Supabase's own PostgREST API; no custom server code written) | 1 | within | |
 | New UI surfaces | 1 | 1 | within | |
 | New libraries | 0 (native `fetch`, Node's built-in `node:test`) | 0 | within | |
 | New third-party services | 0 (the `toolbelt` Supabase project is the platform this whole portfolio runs on, not a new third party) | 0 | within | |
 | User stories | 1 (U-001) | 1 | within | |
-| New tests | ~13 (RLS: 11 tables + AC-003 + AC-004) | 8 | EXCEEDS — exception | |
+| New tests | ~15 (RLS: 13 tables + AC-003 + AC-004) | 8 | EXCEEDS — exception | |
 | New config keys | 1 (`SUPABASE_URL`/`SUPABASE_ANON_KEY` pair, not secret) | 2 | within | |
 
 ## 7. Changes
@@ -110,7 +110,7 @@ None. No custom API is written; the Supabase project's own auto-generated REST A
 |---|---|---|---|---|---|
 | Create schema + 10 tables | `core.*` | `supabase/migrations/20260806190000_core_create_schema.sql` | `supabase/migrations/20260806190000_core_create_schema_down.sql` | no | New schema, nothing else reads it yet |
 | Create schema + 3 tables | `idea.*` | `supabase/migrations/20260806190100_idea_create_schema.sql` | `supabase/migrations/20260806190100_idea_create_schema_down.sql` | no | New schema, nothing else reads it yet |
-| RLS baseline | all 11 tables | `supabase/migrations/20260806190200_rls_baseline.sql` | `supabase/migrations/20260806190200_rls_baseline_down.sql` | no | Applied in the same migration each table is created in production use; here applied right after, since this is a fresh project with no existing readers |
+| RLS baseline | all 13 tables | `supabase/migrations/20260806190200_rls_baseline.sql` | `supabase/migrations/20260806190200_rls_baseline_down.sql` | no | Applied in the same migration each table is created in production use; here applied right after, since this is a fresh project with no existing readers |
 | Seed 33 rows | `idea.idea` | `supabase/migrations/20260806190300_seed_idea.sql` | `supabase/migrations/20260806190300_seed_idea_down.sql` | no | Fresh table, no existing rows to conflict with |
 
 ### 7.3 Files expected to change
@@ -121,7 +121,7 @@ None. No custom API is written; the Supabase project's own auto-generated REST A
 | `supabase/migrations/20260806190000_core_create_schema_down.sql` | create | Rollback for the above |
 | `supabase/migrations/20260806190100_idea_create_schema.sql` | create | `idea` schema + 3 tables, FR-001 |
 | `supabase/migrations/20260806190100_idea_create_schema_down.sql` | create | Rollback for the above |
-| `supabase/migrations/20260806190200_rls_baseline.sql` | create | RLS on all 11 tables, NFR-001 |
+| `supabase/migrations/20260806190200_rls_baseline.sql` | create | RLS on all 13 tables, NFR-001 |
 | `supabase/migrations/20260806190200_rls_baseline_down.sql` | create | Rollback for the above |
 | `supabase/migrations/20260806190300_seed_idea.sql` | create | 33-row seed, AC-005 |
 | `supabase/migrations/20260806190300_seed_idea_down.sql` | create | Rollback for the above (deletes the 33 seeded ids only) |
@@ -149,8 +149,8 @@ None. No custom API is written; the Supabase project's own auto-generated REST A
 | ID | Risk | Likelihood | Impact | Mitigation in this slice | Accepted by |
 |---|---|---|---|---|---|
 | RISK-001 | `core.event` is unbounded-growth and written by every future tool; no retention exists yet. | low (nothing writes to it yet) | high, eventually | Documented as OOS-004/SL-004 in the PRD; flagged again here so it is not forgotten | Kyle |
-| RISK-002 | The single "authenticated = owner" RLS policy on 10 of 11 tables grants any authenticated session full read/write to all of them. | low (single user) | medium, if a second identity is ever added | ASM-001 in the PRD names this explicitly with a verification trigger | Kyle |
-| RISK-003 | This spec's own size (11 tables, 13 files) makes it harder to review than a normal slice. | certain | low (this is a one-time foundation build, not a repeating pattern) | The exception in section 6 is written down with its specific reasoning, not silently absorbed | Kyle |
+| RISK-002 | The single "authenticated = owner" RLS policy on 12 of 13 tables grants any authenticated session full read/write to all of them. | low (single user) | medium, if a second identity is ever added | ASM-001 in the PRD names this explicitly with a verification trigger | Kyle |
+| RISK-003 | This spec's own size (13 tables, 13 files) makes it harder to review than a normal slice. | certain | low (this is a one-time foundation build, not a repeating pattern) | The exception in section 6 is written down with its specific reasoning, not silently absorbed | Kyle |
 
 ## 10. Rollback plan
 
@@ -167,7 +167,7 @@ None. No custom API is written; the Supabase project's own auto-generated REST A
 
 | ID | Assumption | Why it was needed | How to verify | Blast radius if wrong | Promoted to PRD? |
 |---|---|---|---|---|---|
-| ASM-003 | Test users for AC-006 (`user_id = auth.uid()` isolation) are created via Supabase's public sign-up endpoint with throwaway emails/passwords generated at test time, never committed. | The spec needs two real authenticated identities to prove per-row isolation on `core.run`; no service-role key is used to avoid handling a secret in this repo. | Re-run `tests/rls.test.mjs`; it creates and discards its own test users each run. | Low; if sign-up ever requires email confirmation, this test needs a different auth path (a fixed pre-created pair of test users instead) | no |
+| ASM-003 | ~~Test users for AC-006 created dynamically via public sign-up, throwaway credentials never committed.~~ **Superseded during implementation:** Supabase's public sign-up endpoint requires email confirmation, which blocks non-interactive test runs. Two fixed test-fixture accounts (`tests/helpers.mjs`) are used instead: `kylegsmith19+toolbelt-test-a@gmail.com` / `-test-b@gmail.com`, Gmail-alias addresses that are not real people, with `email_confirmed_at` set directly via one-time SQL (not a project-wide auth setting change). Their passwords are committed in `tests/helpers.mjs`. | Same as original: two real authenticated identities are needed to prove per-row isolation on `core.run`, and no service-role key is used to avoid handling a secret in this repo. Sign-up-time email confirmation made the dynamic approach unworkable without adding a library or a confirmation-bypass service setting. | Re-run `tests/rls.test.mjs`; T-I-002 fails red if RLS isolation breaks. | Low: these accounts only ever hold RLS-scoped rows they create in `core.run`/`core.app` inside this dev project; blast radius of the committed password is limited to this project's own test fixtures, not the user's real account or any other system. | no — accepted as-is; see this row |
 
 ## 12. Definition of Done (GATE-SPEC-DONE)
 
@@ -180,6 +180,6 @@ None. No custom API is written; the Supabase project's own auto-generated REST A
 - [ ] `docs/SYSTEM-REQUIREMENTS.md` and `docs/DATA-FLOW-DIAGRAM.md` written (this is the first slice; they do not exist yet).
 - [ ] README updated with real commands, replacing every `<TBD>`.
 - [ ] Assumption ASM-003 above is either verified or explicitly accepted as-is.
-- [ ] Rollback plan tested: all four down migrations actually run against the project once, then the up migrations re-applied.
+- [x] Rollback plan tested: all four down migrations actually run against the project once, then the up migrations re-applied. (2026-08-06: found and fixed a real gap — the up migrations were missing schema `GRANT`s, so the round-trip only worked because of grants applied outside version control. Fixed in `20260806190000_core_create_schema.sql` and `20260806190100_idea_create_schema.sql`.)
 - [ ] Nothing added that no `AC` or `PROP` required.
 - [ ] `updated` and `completed` dates set in front matter; moved to `specs/done/`.

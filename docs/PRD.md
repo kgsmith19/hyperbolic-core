@@ -141,7 +141,7 @@ None. Every tool that reads or writes this schema lives in its own repo and conn
 
 | Slice | Name | What becomes true | Requirements delivered | Est. net LOC | Depends on |
 |---|---|---|---|---|---|
-| SL-000 | Core + idea spine | The `core` and `idea` Postgres schemas exist with all 11 tables, RLS forced on every one, `idea.idea` seeded with 33 rows, and a page lists every idea. | FR-001, FR-002, FR-003 | ~450 SQL + ~60 UI (exceeds `MAX_NET_LOC` and `MAX_NEW_TABLES`; exception recorded in `SPEC-0000` section 6) | - |
+| SL-000 | Core + idea spine | The `core` and `idea` Postgres schemas exist with all 13 tables, RLS forced on every one, `idea.idea` seeded with 33 rows, and a page lists every idea. | FR-001, FR-002, FR-003 | ~450 SQL + ~60 UI (exceeds `MAX_NET_LOC` and `MAX_NEW_TABLES`; exception recorded in `SPEC-0000` section 6) | - |
 | SL-001 | Idea scoring | `idea.score` rows are visible next to each idea on the list page. | none yet | 150 | SL-000 |
 | SL-002 | Idea dependencies | `idea.dependency` edges are visible as a simple list under each idea. | none yet | 150 | SL-000 |
 | SL-003 | First tool writes a run | A thin client library lets a tool insert a `core.run`/`core.event` row, proven by Prompt Organizer's first real write. | none yet | 200 | SL-000, Prompt Organizer repo exists |
