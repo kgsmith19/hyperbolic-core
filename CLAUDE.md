@@ -84,13 +84,16 @@ Full set and calibration: `rules/01-BUDGETS.md`. SPEC-0000 in this repo carries 
 ## Commands
 
 ```bash
-<TBD>             # run the suite
-<TBD>             # lint
-<TBD>             # typecheck
-<TBD>             # build
-<TBD>             # run locally
-<TBD>             # apply migrations
+node --test "tests/*.test.mjs"    # run the suite
+none                              # lint      (no linter; no package.json by choice)
+none                              # typecheck (vanilla JS, no type layer)
+none                              # build     (no build step by choice)
+python3 -m http.server 8811       # run locally, then open /web/index.html
+none                              # apply migrations (Supabase API, not a local command)
 ```
+
+`none` means deliberately absent, not unknown. GATE-GREEN G3, G4, and G5 are
+not applicable in this repo; G1, G2, and G8 run off the suite command above.
 
 ## Project variables
 
