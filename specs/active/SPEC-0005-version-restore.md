@@ -52,16 +52,16 @@ AC-003 is the boundary/failure-adjacent case: it proves the feature composes cor
 
 ## 6. Budget declaration (standard ceilings)
 
-| Metric | Declared | Ceiling | Status |
-|---|---|---|---|
-| Net source LOC | ~40 (`web/index.html` delta only — no new module, no new endpoint) | 300 | within |
-| Test LOC | ~90 | 200 | within |
-| New modules | 0 | 2 | within |
-| Source files touched | 1 (`web/index.html`) | 3 | within |
-| Test files touched | 1 (`tests/restore.test.mjs`) | 3 | within |
-| New tables/columns/endpoints/libraries/third-party | 0 (reuses SL-004's table, grant, and trigger entirely) | — | within |
-| User stories | 1 (U-001, UC-004) | 1 | within |
-| New tests | 5 | 8 | within |
+| Metric | Declared | Ceiling | Status | Actual |
+|---|---|---|---|---|
+| Net source LOC | ~40 (`web/index.html` delta only — no new module, no new endpoint) | 300 | within | 38 (`index.html` +33/−3 = 30; `restore.mjs` +8 new = 8) |
+| Test LOC | ~90 | 200 | within | 195 (`tests/restore.test.mjs`, new file) |
+| New modules | 0 | 2 | within | 1 (`web/restore.mjs` — see section 11: `isCurrentVersion` needed a real export for `tests/restore.test.mjs` to import; inlining into `index.html` was not an option once a test needed to call it directly) |
+| Source files touched | 1 (`web/index.html`) | 3 | within | 2 (`web/index.html` edited; `web/restore.mjs` created) |
+| Test files touched | 1 (`tests/restore.test.mjs`) | 3 | within | 1 |
+| New tables/columns/endpoints/libraries/third-party | 0 (reuses SL-004's table, grant, and trigger entirely) | — | within | 0 (confirmed: no migration written or applied) |
+| User stories | 1 (U-001, UC-004) | 1 | within | 1 |
+| New tests | 5 | 8 | within | 5 (T-I-012, T-A-004, T-I-013, T-U-015, T-I-015, all executable). Largest new function 26 LOC (`buildHistoryPanel`) ≤ 40; touched file 250 LOC (`index.html`, at the ceiling exactly) ≤ 250; suite runtime 3.62s ≤ 120s |
 
 ## 7. Changes
 
@@ -94,12 +94,24 @@ Revert the slice's commits; no schema to roll back.
 
 ## 11. Assumptions made during implementation
 
-(Implementer fills.)
+**`isCurrentVersion` placement (ASM-004).** `tests/restore.test.mjs` needs to import the decision function directly (T-U-015), so inlining it as a closure inside `web/index.html`'s module script was not an option — nothing in that script is importable from a test file. The two remaining choices were folding it into an existing module (`search.mjs` or `render.mjs`) or a new one-function module. Folding it into `search.mjs` or `render.mjs` would have coupled an unrelated concern (which version is "current") into a module whose exports are about searching or rendering respectively — worse cohesion than a new file, and no cheaper by any budget line (LOC is identical either way; only the "new modules" count changes). Created `web/restore.mjs`, one exported pure function, matching the repo's existing per-feature-module convention (`render.mjs` for SPEC-0003, `search.mjs` for SPEC-0001/0004). Budget: "New modules" actual is 1 against a ceiling of 2 (declared 0; the declared value undercounted this need — recorded here, not silently, per this repo's own precedent for correcting a spec's estimate against reality mid-slice).
+
+**T-I-013's Given-construction (ASM-005).** AC-003's literal Given — "a prompt at version 2, where version 2's body already equals version 1's body" — cannot arise between two *adjacent* version numbers: SL-004's distinct-body guard (proven by T-I-007) only ever writes a new version when the incoming body differs from the row's *current* stored value, so version `n+1` can never repeat version `n`'s body (if it did, the guard would have made that update a no-op and version `n+1` would not exist at all). The Given's own parenthetical resolves this: "(a prior restore)". Realized as: insert bodyA (v1), patch to bodyB (v2, a genuine edit), patch back to bodyA (v3 — this *is* a restore of v1, so the current body now equals an old version's body again, exactly as AC-003 describes, just three versions deep rather than two). "Version 1 is restored again" is then a same-value `PATCH` against the already-bodyA current row, which the existing guard makes a no-op: no new version, and the version count (captured before/after, not hardcoded to a literal "2") is asserted unchanged. This is the faithful realization of the AC's actual invariant (PROP-004, idempotence), not a literal match on the version-number "2" in the prose.
+
+**T-I-015's PATCH-with-no-matching-row assertion (ASM-006).** Verified live rather than assumed: a `PATCH` from a non-owning session, whose `WHERE` clause matches zero rows under RLS's `owner_all` policy, returns HTTP `200` with `Prefer: return=representation` producing an empty JSON array (`[]`) — not a `403`/`404`/error shape. This is the same behavior any `UPDATE` matching zero rows produces in Postgres/PostgREST; RLS filtering the row out of the session's visible set is indistinguishable, from the client's perspective, from the row simply not existing. `tests/restore.test.mjs` asserts on this literal shape (status `200`, `json` deep-equal `[]`) rather than an assumed error status, and the assertion was mutation-verified against a deliberately wrong expectation (`[{ id }]`) to confirm it is real and discriminating, not vacuous.
+
+**Mutation verification for the four API-only tests (ASM-007).** T-I-012, T-A-004, T-I-013, and T-I-015 each exercise real database/API behavior (SL-004's trigger and grant; SL-000/SL-004's RLS) through a new call sequence, but none traverses a line of *new* application code this slice wrote — the restore control in `web/index.html` issues the identical `PATCH` any caller could send, and correctly contains no client-side ownership or guard logic to mutate (ownership belongs in RLS, not the client). Per `rules/06-TESTS.md` ("the mutation step is about finding real coverage holes in code YOU wrote, not manufacturing mutations for code that's just reused") and this repo's own T-A-001 precedent ("oracle mutation: expected body changed"), each of these four was mutation-verified by temporarily flipping the test's own discriminating assertion to a wrong expected value, confirming red, then reverting and confirming green — not by mutating reused SL-004/SL-000 database objects (the spec's HARD RULE also forbids touching schema this slice). T-U-015 is the one test with real new application code (`web/restore.mjs`'s `isCurrentVersion`) and was mutation-verified by inverting its comparison operator.
+
+**Lazy-loaded history panel.** The version-history `<details>` fetches `prompt_version` rows only on first expand (`toggle` listener with `{ once: true }`), not on every `renderList()` call — `renderList()` re-runs on every search keystroke and tag-filter click, so eager fetching per prompt per render would multiply network calls needlessly. This is a design choice, not something any AC mandates directly, but it is the cheapest way to satisfy AC-001 ("the page loads that prompt" shows the history) without a performance regression no requirement asks for either.
+
+**`web/index.html` is exactly 250 lines** — at, not under, the ceiling. The diff was tightened (comment length, one `{ once: true }` listener instead of a manual `loaded` flag, `item.append(templateString)` instead of a separate label element) to land inside the budget; no functionality was cut to get there.
+
+**Browser drill not performed.** Per the task assignment, no browser is available in this environment. AC-001/AC-002/AC-004's live-page confirmation (section 12's Definition of Done) is left for the integrator, same posture as SL-002/SL-006's browser drills.
 
 ## 12. Definition of Done
 
-- [ ] T-I-012, T-A-004, T-I-013, T-U-015, T-I-015 green; red output recorded first.
-- [ ] Ledger rows predate tests; mutation-verified dates recorded.
-- [ ] Browser drill: AC-001 (history shown), AC-002 (restore creates new version, visible), AC-004 (no self-restore control) on the real page.
+- [x] T-I-012, T-A-004, T-I-013, T-U-015, T-I-015 green; red output recorded first. (T-U-015 red on a stub before `isCurrentVersion` was implemented; T-I-012/T-A-004/T-I-013/T-I-015 exercise SL-004/SL-000's already-working trigger/grant/RLS through a correctly-constructed Given and passed on their first real run — no collection/import error at any point, per GATE-RED R2. Full suite 33/33 green.)
+- [x] Ledger rows predate tests; mutation-verified dates recorded. (All five rows added to `specs/TEST-LEDGER.md` before `tests/restore.test.mjs` was written; all five mutation-verified 2026-08-07, dates and technique recorded per row.)
+- [ ] Browser drill: AC-001 (history shown), AC-002 (restore creates new version, visible), AC-004 (no self-restore control) on the real page. **Not performed — no browser available in this environment.** Left for the integrator, same posture as SL-002/SL-006.
 - [ ] PRD FR-009 → `done`; change-log entry — integrator applies.
 - [ ] Spec moved to `done/`, dates set.
