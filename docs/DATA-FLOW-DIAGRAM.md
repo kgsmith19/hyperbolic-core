@@ -5,12 +5,12 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-012, NFR-003, NFR-005, NFR-011, DR-001, DR-002, DR-006]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-009, FR-012, NFR-003, NFR-005, NFR-011, DR-001, DR-002, DR-006]
 ---
 
 # Data Flow Diagram
 
-Where data comes from, goes, and rests. As of SL-006; later slices extend this file in the same commit that changes the flows.
+Where data comes from, goes, and rests. As of SL-008; later slices extend this file in the same commit that changes the flows.
 
 ## 1. Trust boundaries
 
@@ -60,9 +60,9 @@ One trust boundary: browser to Supabase. No third position exists, which is why 
 | F-2 | Token issued | GoTrue | HTTPS response | Browser memory | JWT | — |
 | F-3 | Save a prompt | Browser form | `POST /rest/v1/prompt` | `prompt.prompt` | Title, body (confidential) | RLS `with check (user_id = auth.uid())`; rejected `409` if the title already exists, case-insensitively (FR-002) |
 | F-4 | List / search prompts | Browser | `GET /rest/v1/prompt?select=...,tag(tag)` | Browser DOM | Own rows only, with each row's tags embedded via the FK relationship in one round trip | RLS `using (user_id = auth.uid())` on both `prompt` and, through the embed, `tag`. Search (FR-006, tags included since SL-006) and tag filtering (FR-012) both run client-side over the already-fetched list; neither is a separate network flow. |
-| F-5 | Edit a prompt's body | Browser (not yet wired to a UI control; API-level, FR-003) | `PATCH /rest/v1/prompt` | `prompt.prompt` | New body (confidential) | RLS scopes the update to the owner; grant is column-scoped to `title, body` only |
+| F-5 | Edit a prompt's body — including a restore (SL-008: the new body sent is a prior version's own stored body) | Browser, from the version-history panel's Restore control | `PATCH /rest/v1/prompt` | `prompt.prompt` | New body (confidential) | RLS scopes the update to the owner (T-I-015 proves a cross-user attempt affects 0 rows); grant is column-scoped to `title, body` only |
 | F-6 | Version recorded | Trigger on `prompt.prompt`, fired by F-3 or F-5 | In-database, no network hop | `prompt.prompt_version` | A full copy of the new body | `auth.uid()` carried through from the row being written, checked by the insert policy |
-| F-7 | Read version history | Browser (not yet wired to a UI control; API-level, FR-009 pending) | `GET /rest/v1/prompt_version` | Browser | Own version rows only | RLS `using (user_id = auth.uid())` |
+| F-7 | Read version history | Browser, on expanding a prompt's "Version history" panel | `GET /rest/v1/prompt_version` | Browser | Own version rows only | RLS `using (user_id = auth.uid())` |
 | F-8 | Render and copy | Browser (variable inputs) | In-browser only, no network hop | `navigator.clipboard` | Rendered body text (confidential — the same body already in the DOM, substituted) | None needed; the data never leaves the browser it was already fetched into |
 | F-9 | Add tags to a prompt | Browser form (save flow) | `POST /rest/v1/tag` | `prompt.tag` | Tag strings, trimmed/lowercased/deduplicated client-side (internal — bare category words, not confidential) | `with check` via `EXISTS (... prompt.prompt.user_id = auth.uid())`, since `tag` has no `user_id` of its own |
 
