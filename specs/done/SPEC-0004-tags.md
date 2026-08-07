@@ -2,11 +2,11 @@
 title: Tags on prompts, filter and search
 spec_id: SPEC-0004-tags
 slice: SL-006
-status: active
+status: done
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-completed:
+completed: 2026-08-07
 traces: [FR-012, FR-006]
 ---
 
@@ -118,11 +118,11 @@ Down migration drops `prompt.tag`; revert the `search.mjs`/`index.html` commits.
 
 ## 12. Definition of Done
 
-- [ ] T-I-008..010, T-I-014, T-U-013..014 green; red output recorded first.
-- [ ] T-I-011 (cascade) run as an integrator drill, evidence recorded.
-- [ ] Ledger rows predate tests; mutation-verified dates recorded.
-- [ ] Existing T-U-001..005 (SL-001) still pass unmodified — no existing assertion changed, only new cases added.
-- [ ] Browser drill: AC-001 (tag entry), AC-002/AC-005 (filter/clear), AC-003/AC-004 (tag search + ranking) on the real page.
-- [ ] PRD FR-012 → `done`; FR-006 → `done` (title+body+tags, full); change-log entry — integrator applies.
-- [ ] DFD/SYSTEM-REQUIREMENTS updated: new table, new grant/policy shape (ownership via parent row).
-- [ ] Spec moved to `done/`, dates set.
+- [x] T-I-008..010, T-I-014, T-U-013..014 green; red output recorded first (worker's red phase: T-I-008/009/014 correctly `PGRST205` pre-migration; T-U-013/014/T-I-010 real assertion failures against pre-extension code).
+- [x] T-I-011 (cascade) run as an integrator drill, 2026-08-07: rehearsed on `lifeos-test` (insert prompt + tag, delete prompt, 0 orphans), then identically on the real project.
+- [x] Ledger rows predate tests; mutation-verified dates recorded. Integrator DDL mutations 2026-08-07: dropped `owner_select` entirely → T-I-008/T-I-009 both red; dropped `tag_tag_check` → T-I-014 red. All reverted, re-proven green.
+- [x] Existing T-U-001..005 (SL-001) still pass unmodified — verified: 28/28 green includes all five with zero assertion changes.
+- [x] Browser drill, 2026-08-07 (Chromium against the live project via the Node-relay technique, page logic unmodified): AC-001 — saving with tags `sdd, Review, sdd` produced exactly two chips, `["sdd","review"]`; AC-002/AC-005 — clicking the `sdd` chip filtered 140 rows to 5 (fixture stayed visible), clicking again restored all 140; AC-003/AC-004 — a prompt findable only by tag (title/body deliberately non-matching) returned as the sole search result for that query. The worker's flagged-unverified PostgREST embed syntax (`tag(tag)`) confirmed working live — the page loaded all prompts with tags embedded, no API errors.
+- [x] PRD FR-012 → `done`; FR-006 → `done` (title+body+tags, full); change-log entry — same commit as this file's move to `done/`.
+- [x] DFD/SYSTEM-REQUIREMENTS updated: new table, new grant/policy shape (ownership via parent row).
+- [x] Spec moved to `done/`, dates set.
