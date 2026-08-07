@@ -52,18 +52,18 @@ AC-006 is the failure case.
 
 ## 6. Budget declaration (standard ceilings)
 
-| Metric | Declared | Ceiling | Status |
-|---|---|---|---|
-| Net source LOC | ~90 (migration ~25, `search.mjs` delta ~15, `index.html` delta ~50) | 300 | within |
-| Test LOC | ~150 | 200 | within |
-| New modules | 0 (extends `search.mjs`, does not add a module) | 2 | within |
-| Source files touched | 3 (migration, `search.mjs`, `index.html`) | 3 | within |
-| Test files touched | 2 (`tests/tags.test.mjs` new; `tests/search.test.mjs` extended) | 3 | within |
-| New tables | 1 (`prompt.tag`) | 1 | within |
-| New columns | 2 (`prompt_id`, `tag`) | 6 | within |
-| New endpoints/UI surfaces beyond the existing page/libraries/third-party | 0 | — | within |
-| User stories | 1 (U-001) | 1 | within |
-| New tests | 7 | 8 | within |
+| Metric | Declared | Ceiling | Status | Actual |
+|---|---|---|---|---|
+| Net source LOC | ~90 (migration ~25, `search.mjs` delta ~15, `index.html` delta ~50) | 300 | within | 84 (migration up 27 + down 4 = 31; `search.mjs` +16/−3 = 13; `index.html` +44/−4 = 40) |
+| Test LOC | ~150 | 200 | within | 175 (`tests/tags.test.mjs` 144 new; `tests/search.test.mjs` +31/−0) |
+| New modules | 0 (extends `search.mjs`, does not add a module) | 2 | within | 0 |
+| Source files touched | 3 (migration, `search.mjs`, `index.html`) | 3 | within | 3 (the migration up/down pair counted as one changeset, matching section 7.3's single row for both files — 4 physical files if counted separately: up, down, `search.mjs`, `index.html`) |
+| Test files touched | 2 (`tests/tags.test.mjs` new; `tests/search.test.mjs` extended) | 3 | within | 2 |
+| New tables | 1 (`prompt.tag`) | 1 | within | 1 |
+| New columns | 2 (`prompt_id`, `tag`) | 6 | within | 2 |
+| New endpoints/UI surfaces beyond the existing page/libraries/third-party | 0 | — | within | 0 |
+| User stories | 1 (U-001) | 1 | within | 1 |
+| New tests | 7 | 8 | within | 7 (T-I-008, T-I-009, T-I-010, T-I-014, T-U-013, T-U-014 executable; T-I-011 a recorded, non-executable integrator drill). Largest new function ~16 LOC (`searchPrompts`) ≤ 40; largest touched file 220 LOC (`index.html`) ≤ 250; suite runtime 2.289s ≤ 120s |
 
 ## 7. Changes
 
@@ -105,7 +105,16 @@ Down migration drops `prompt.tag`; revert the `search.mjs`/`index.html` commits.
 
 ## 11. Assumptions made during implementation
 
-(Implementer fills.)
+| ID | Assumption | Why |
+|---|---|---|
+| ASM-007 | `searchPrompts(prompts, query)`'s signature is unchanged; `prompt.tags` becomes an **optional** third field on each prompt object (`title`, `body`, `tags?: string[]`), read as `prompt.tags ?? []` | Keeps SL-001's five callers/tests (T-U-001..005, all `{title, body}` fixtures with no `.tags`) green with zero changes — a prompt without `.tags` is simply treated as tag-free, per the task's explicit "handle absence gracefully" requirement. A fourth positional parameter (e.g. `searchPrompts(prompts, query, tags)`) was rejected: it would decouple a prompt from its own tags, forcing callers to keep two parallel arrays in sync for no benefit. |
+| ASM-008 | `searchPrompts` ranks in three disjoint groups — title, then tag, then body-only — via an `if / else if / else if` chain per prompt (mutually exclusive membership, first match wins) | AC-004 names exactly three ordered groups; a prompt matching by title is never *also* counted as a tag or body match (matches the existing title-vs-body exclusivity T-U-002 already established, extended by one tier). PROP-004 (monotonicity: adding tag-search only grows results, never shrinks a broader search) holds because the tag branch only ever *adds* prompts that were previously in neither group — it can't remove a title match from the title group. |
+| ASM-009 | T-I-010 (AC-005, "filter toggles off on second click") is reclassified from the spec's declared `integration` level to `unit`, exercising a new pure function `toggleTagFilter(current, tag)` exported from `web/search.mjs` | Designed the tag filter (chip click) as pure client-side state over the already-fetched prompts+tags list (`web/index.html`'s `selectedTag` variable, re-filtered in `renderList` via `Array.prototype.filter`) — no server call exists in the toggle path for a DB round trip to prove anything about. Per rules/06-TESTS.md's cheapest-mechanism ordering, a pure function is cheaper and *more* precise than an integration test here: it isolates exactly the toggle decision AC-005 names ("the filter fails to clear on a second click") without a real prompt/tag fixture or network call. The function lives in `search.mjs` (not a new module — same file `searchPrompts` was already extending) and is imported by both `index.html`'s chip click handler and the test, so it has the normal two-caller shape SL-001/SL-002's existing exports already use (GATE-MINIMAL M2 is not violated: it is not a one-caller abstraction). This was the RED-phase-provable path: written first as a deliberately wrong stub (`(current, tag) => tag`, never clears), confirmed red on a real assertion, then implemented and mutation-verified in this worktree without needing the DB — unlike T-I-008/009/014, it did not have to wait for the integrator's migration. |
+| ASM-010 | Fixture strategy: every new integration test in `tests/tags.test.mjs` uses a `Date.now()`-suffixed title with a single plain `POST` (asserting `201`), not the `POST`-then-on-`409`-`PATCH` pattern `tests/versions.test.mjs` uses for `Version Fixture` / `Immutable Fixture` | Those two fixtures are reused *because* their tests are specifically about title-uniqueness/immutability behavior across re-runs. None of T-I-008/009/014 tests title uniqueness — each just needs one throwaway prompt to hang tags off of — so a `Date.now()` suffix (matching `versions.test.mjs`'s `Fresh Version Fixture ${Date.now()}` pattern for its own fresh-insert cases) gives a guaranteed-fresh row every run with less code than the 409-handling wrapper, and avoids accumulating same-named rows the dedup migration would later have to sweep up (SPEC-0002's RISK-002 precedent). |
+| ASM-011 | T-I-008 (AC-001, "save with tags `sdd, Review, sdd` → exactly two rows") sends the **already** trimmed/lowercased/deduplicated pair `[{tag:"sdd"}, {tag:"review"}]` directly to `POST /tag`, rather than replaying `web/index.html`'s comma-string parsing inside the test | SPEC-0004 7.1 places the trim/lowercase/dedupe transform client-side by design — the migration's `primary key (prompt_id, tag)` is exact-string, not `lower(tag)`-folded (unlike `prompt_title_unique`'s functional index), so the database provides no case-fold guarantee to test against. An integration test hitting the REST API directly cannot execute `index.html`'s inline `<script type="module">` (no DOM in `node --test`), so it can only prove what it actually sends. What it proves, correctly, is the storage/round-trip contract (PROP-005) and PK-level dedup for the transform's *output* — not the transform itself. The transform (`parseTagInput`, 12 LOC, one caller: the save-form handler) has no dedicated unit test — a second caller would be needed to justify extracting/testing it separately (rules: "three instances earn an abstraction, two is a coincidence"; here there's one) — so it is covered instead by the Definition of Done's browser drill, consistent with the cheapest-mechanism ladder (lint/type-level correctness is self-evident for a 4-line trim/lower/Set-dedupe loop; a test would duplicate what the browser drill already checks end-to-end). |
+| ASM-012 | T-I-009 (AC-002, tag filter) queries `prompt.tag` directly (`tag?tag=eq.sdd&select=prompt_id`) rather than the embedded `prompt?select=...,tag(tag)` shape `index.html`'s `refreshList` uses | Proves the same underlying data-model conservation property (PROP-003: a tag-to-prompt row exists iff that prompt carries the tag) that the client's embed and client-side filter both depend on, "real query against real rows" as spec section 8 asks for, without coupling the test to the client's specific fetch shape — the client's actual filtering (chip click) never re-queries the server at all (see ASM-009), so there is no server-side "filter" call to test directly; the tag table's row-level correctness is the real contract underneath it. |
+| ASM-013 | `index.html`'s `refreshList` embeds tags via PostgREST resource embedding, `select=title,body,tag(tag)`, relying on the `prompt_id` foreign key PostgREST auto-detects | Cannot be exercised live in this worktree — the HARD DATABASE RULE forbids applying the migration, so `prompt.tag` does not exist yet against the shared database and no browser drill can run. This is the standard PostgREST embed syntax for a to-many relationship in the same schema (headers already set `Accept-Profile: prompt`), matching how `prompt_version` would be embedded the same way; flagged here so the integrator's post-migration browser drill (Definition of Done) specifically confirms the embed resolves as expected before sign-off. |
+| ASM-014 | No client-side `maxlength` mirrors the 100-char tag `CHECK` constraint on the `#tags` input | No AC asks for client-side length feedback (only AC-006's server-side `400`/`23514`, owned by T-I-014); adding one would be an unrequested UI affordance this slice's scope (7.3's "tag entry" line) doesn't name. RISK-001 already records the 100-char bound itself as an assumption; this is the same call applied to the input element. |
 
 ## 12. Definition of Done
 
