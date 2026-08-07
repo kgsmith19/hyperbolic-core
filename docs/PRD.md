@@ -4,7 +4,7 @@ status: draft
 created: 2026-08-06
 updated: 2026-08-07
 owner: Kyle
-version: 0.1.6
+version: 0.1.7
 ---
 
 # Prompt Organizer PRD
@@ -137,7 +137,7 @@ This is a place to keep the instructions you write for AI tools, so you can find
 | ID | Category | Requirement | Threshold | How it is measured | Status |
 |---|---|---|---|---|---|
 | NFR-001 | Performance | Search must return results within 300 ms at p95 with 1,000 prompts stored. | 300 ms | Timed query against a seeded database | not-started |
-| NFR-002 | Performance | Render must complete within 100 ms at p95 for a 100,000-character body. | 100 ms | Timed unit benchmark | not-started |
+| NFR-002 | Performance | Render must complete within 100 ms at p95 for a 100,000-character body — **any** such body, including one that is pathological rather than typical. | 100 ms | Timed unit benchmark (`tests/performance.test.mjs`, T-U-024..026): a realistic body and a worst-case body against the absolute threshold, plus a machine-independent growth-ratio check, since an absolute threshold alone passes on fast hardware even when the algorithm is quadratic. | done |
 | NFR-003 | Security | Every read and write must be rejected unless the caller is the authenticated owner of the row. | 100% of cross-user attempts rejected | RLS policy test as a second user | done |
 | NFR-004 | Security | No API key or service-role credential may appear in client-delivered code. | 0 occurrences | Grep of the built bundle in CI | not-started |
 | NFR-005 | Durability | A saved prompt version must never be modified or deleted by the application. | 0 update or delete statements against the version table | Code inspection plus a revoked `UPDATE`/`DELETE` grant on the table | done |
@@ -178,7 +178,7 @@ DR-002 and DR-003 are classified confidential, so NFR-003, NFR-004, and NFR-011 
 |---|---|---|---|---|
 | ASM-001 | Search plus tags is sufficient organization up to roughly 300 prompts. | Count prompts monthly; log searches returning nothing useful | Adding hierarchy later is a two-slice change, not a rewrite | unverified |
 | ASM-002 | Copy-to-clipboard is the whole integration need; no extension or API is required at first. | Track how often the flow ends in a paste versus a wish for direct invocation | FR-013 moves from Could to Must; one slice | unverified |
-| ASM-003 | Prompt bodies stay under 100,000 characters. | Track the maximum stored | Storage and render approach both still work; the performance threshold in NFR-002 would need revisiting | unverified |
+| ASM-003 | Prompt bodies stay under 100,000 characters. | Track the maximum stored | Storage still works. Render no longer degrades: SL-010 replaced the quadratic section parser with a linear one, so this assumption is no longer load-bearing for NFR-002 (measured 2026-08-07: worst case at the ceiling fell from 164.8 ms to 0.98 ms, and growth is now linear rather than quadratic). | unverified, but no longer NFR-002's guard |
 | ASM-004 | Nested optional sections are not needed. | Watch whether any real prompt wants them | Parser complexity roughly doubles; a full slice | unverified |
 | ASM-005 | Variables are plain string substitution; no defaults, conditionals, or loops are needed. | Watch for the first prompt that wants one | A template engine is a dependency decision, which is a halt | unverified |
 
@@ -253,6 +253,7 @@ None. The tool reads and writes its own schema and nothing else. Adding one requ
 | 2026-08-07 | 0.1.4 | SL-006 shipped (serialized after SL-002, same `web/index.html`-overlap reasoning as 0.1.3). FR-012 → `done`; FR-006 → `done` in full (title, body, and tags). | Tag entry, chips, filter/clear, and tag-inclusive search all verified live in a browser against the real project. | FR-006, FR-012, SL-006 |
 | 2026-08-07 | 0.1.5 | SL-008 shipped (serialized, same reasoning). FR-009 → `done`. SPEC-0005's own AC-003 corrected: its Given described a state impossible under SL-004's distinct-body guard (found implementing the test, not by inspection alone). | Version history, restore, and the guard's exact no-op boundary all verified live. `web/index.html` is now at its 250-line ceiling exactly — flagged for the next slice that needs to extend it. | FR-009, SL-008 |
 | 2026-08-07 | 0.1.6 | SL-003 shipped. FR-005 → `done`, and its wording clarified to state the pairing rule (matching ids, non-empty id charset) that was previously implicit. `web/index.html`'s 250/250 ceiling — flagged in 0.1.5 — resolved by extracting `buildRenderPanel` to a new `web/panel.mjs`; the file is now 207 lines. | The clarification is not a scope change: a lone `<!--OPTIONAL:x-->` with no closer had to stay literal text regardless, because SL-002's PROP-005 (and T-U-011, whose deletion criterion reads "Never") guarantees fence-shaped text passes through byte-for-byte. Writing the rule down makes the parser's backreference a stated requirement rather than an implementation detail. Section inclusion, exclusion, fence stripping, and the FR-005 × FR-010 interaction (a variable inside an excluded section is never demanded) all verified live in a browser. SL-005's dependency on SL-003 is now unblocked. | FR-005, NFR-009, SL-003 |
+| 2026-08-07 | 0.1.7 | SL-010 shipped (unplanned defect slice, SPEC-0007). NFR-002 → `done`, its wording tightened to say **any** 100,000-character body, and its measurement column now names the three tests. ASM-003 downgraded from NFR-002's guard. | Measuring NFR-002 before writing its test — the honest order — found it **failing**, not passing. SL-003's section pattern `<!--OPTIONAL:(id)-->([\s\S]*?)<!--/OPTIONAL:\1-->` re-scanned to end-of-string once per opening fence, so a body of unterminated fences cost O(n^2): 99,994 characters (inside FR-001's own CHECK bound) took 164.8 ms against a 100 ms budget, and each doubling quadrupled the time. Replaced with a single-pass fence scanner: 0.98 ms, linear. Behavior preservation verified against all 40 pre-existing tests. Two measurement lessons are recorded in SPEC-0007 rather than buried: an earlier single-shot 34.7 ms reading was retracted as unreproducible, and V8's regex tiering swings this body 5.5x depending on execution order, which made the first version of the benchmark order-dependent. | NFR-002, ASM-003, ASM-004, FR-005 |
 | 2026-08-07 | 0.1.3 | SL-002 shipped (serialized, not parallel — `rules/07-SKILLS.md`'s ~2000 LOC threshold, all three of this round's slices touch `web/index.html`). FR-004, FR-007, FR-010 → `done`. | The PRD's own "first useful day is the end of SL-002" claim (section 13) is now true: variables render and copy to the clipboard, verified live in a browser with clipboard permissions, exact text confirmed. | FR-004, FR-007, FR-010, SL-002 |
 
 ---

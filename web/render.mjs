@@ -1,48 +1,91 @@
 // SPEC-0003: extractVariables, render. Pure functions, CON-004 syntax.
 const TOKEN_RE = /\{\{([A-Z_][A-Z0-9_]*)\}\}/g;
-// SPEC-0006: a section is a well-formed PAIR. The closing id is a
-// backreference, so `<!--OPTIONAL:x-->...<!--/OPTIONAL:y-->` is not a section;
-// the id charset requires at least one character, so `<!--OPTIONAL:-->` is
-// not either. Both stay literal text (AC-004), which is what preserves
-// SL-002's PROP-005 byte-for-byte guarantee for a lone opening fence.
-// Content is non-greedy so sibling sections never merge; nesting is
-// undefined behavior by PRD ASM-004.
-const SECTION_RE = /<!--OPTIONAL:([A-Za-z0-9_-]+)-->([\s\S]*?)<!--\/OPTIONAL:\1-->/g;
+// SPEC-0007: matches EITHER fence, opening or closing. Deliberately not a
+// pair-matching pattern -- SL-003's `<!--OPTIONAL:(id)-->([\s\S]*?)<!--/
+// OPTIONAL:\1-->` re-scanned to end-of-string once per opening fence, so a
+// body of unterminated fences cost O(n^2) and blew NFR-002's 100ms budget at
+// 99,994 chars, a size FR-001's CHECK allows. This one has no nested
+// quantifier and cannot backtrack; pairing happens in one linear pass below.
+const FENCE_RE = /<!--(\/?)OPTIONAL:([A-Za-z0-9_-]+)-->/g;
 
-// Capture group 1 of every match, first-occurrence order, deduplicated. The
-// two extractors below were byte-identical but for the pattern (lean pass,
-// 2026-08-07). Two callers, so this is dedup, not a one-caller abstraction.
-function firstOccurrenceIds(body, pattern) {
-  const seen = new Set();
-  const ids = [];
-  for (const match of body.matchAll(pattern)) {
-    if (!seen.has(match[1])) {
-      seen.add(match[1]);
-      ids.push(match[1]);
+// Complete section pairs, left-to-right and non-overlapping -- the same set
+// the old non-greedy pair-regex produced, at O(n). "First open wins" (an id
+// already open is not reopened) reproduces its pairing; a closing fence with
+// no matching open is ignored, which is what keeps mismatched ids, stray
+// closers, and lone opening fences as literal text (SPEC-0006 AC-004, and
+// SL-002's PROP-005 byte-for-byte guarantee). Overlapping pairs are dropped
+// left-to-right, so interleaved sections degrade to the old behavior rather
+// than to corrupt output (SPEC-0007 AC-005; nesting stays undefined per
+// PRD ASM-004).
+function sectionSpans(body) {
+  const open = new Map();
+  const pairs = [];
+  for (const match of body.matchAll(FENCE_RE)) {
+    const [text, closing, id] = match;
+    if (!closing) {
+      if (!open.has(id)) open.set(id, { start: match.index, contentStart: match.index + text.length });
+    } else if (open.has(id)) {
+      const started = open.get(id);
+      open.delete(id);
+      pairs.push({ id, ...started, contentEnd: match.index, end: match.index + text.length });
     }
   }
-  return ids;
+  pairs.sort((a, b) => a.start - b.start);
+  const spans = [];
+  let cursor = 0;
+  for (const pair of pairs) {
+    if (pair.start >= cursor) {
+      spans.push(pair);
+      cursor = pair.end;
+    }
+  }
+  return spans;
 }
 
 // Ordered, deduplicated list of {{NAME}} token names in `body` (AC-004,
 // PROP-002). Malformed spans (`{{}}`, unterminated `{{`) never match the
 // regex, so they are simply not tokens (RISK-001).
 export function extractVariables(body) {
-  return firstOccurrenceIds(body, TOKEN_RE);
+  const seen = new Set();
+  const names = [];
+  for (const match of body.matchAll(TOKEN_RE)) {
+    if (!seen.has(match[1])) {
+      seen.add(match[1]);
+      names.push(match[1]);
+    }
+  }
+  return names;
 }
 
 // Ordered, deduplicated list of well-formed section ids (AC-003, PROP-002).
+// Reads the same span list applySections does, so the two cannot disagree
+// about what counts as a section.
 export function extractSections(body) {
-  return firstOccurrenceIds(body, SECTION_RE);
+  const seen = new Set();
+  const ids = [];
+  for (const { id } of sectionSpans(body)) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
 }
 
 // Keeps a listed section's content and drops an unlisted section entirely,
 // removing the fence comments either way (FR-005, AC-001/AC-002). Membership
 // is a set test, so the order of `includes` cannot matter (PROP-006).
 function applySections(body, includes) {
-  return body.replace(SECTION_RE, (_match, id, content) =>
-    includes.includes(id) ? content : "",
-  );
+  const spans = sectionSpans(body);
+  if (spans.length === 0) return body;
+  let out = "";
+  let cursor = 0;
+  for (const span of spans) {
+    out += body.slice(cursor, span.start);
+    if (includes.includes(span.id)) out += body.slice(span.contentStart, span.contentEnd);
+    cursor = span.end;
+  }
+  return out + body.slice(cursor);
 }
 
 // Substitutes every {{NAME}} occurrence with values[NAME]. A name is
