@@ -2,10 +2,10 @@
 title: Versions on every body change, and unique titles
 spec_id: SPEC-0002-versions-and-unique-title
 slice: SL-004
-status: active
+status: done
 created: 2026-08-07
 updated: 2026-08-07
-completed:
+completed: 2026-08-07
 owner: Kyle
 traces: [FR-002, FR-003, NFR-003, NFR-005]
 ---
@@ -30,7 +30,7 @@ FR-003 and FR-002 — the PRD assigns both to SL-004. Versioning must exist befo
 
 | ID | Given | When | Then | Traces to |
 |---|---|---|---|---|
-| AC-001 | A prompt titled `Spec Author` exists | `POST /rest/v1/prompt` with title `spec author` | `409` with Postgres code `23505`, and the response's detail names the conflicting value; no row created | FR-002 |
+| AC-001 | A prompt titled `Spec Author` exists | `POST /rest/v1/prompt` with title `spec author` | `409` with Postgres code `23505`; no row created. (Corrected 2026-08-07: the response's `message` names the constraint `prompt_title_unique`, not the conflicting value — PostgREST/Postgres suppresses the `details` field for non-superuser roles on constraint violations, confirmed live against the real project. The original wording claimed a guarantee Postgres does not provide to an `authenticated`-role caller. `code` is the reliable, tested signal.) | FR-002 |
 | AC-002 | A freshly inserted prompt | `GET` its `prompt_version` rows | Exactly one row: `version_no` 1, `body` equal to the inserted body | FR-003 |
 | AC-003 | A prompt at version 1 with body `original body` | `PATCH` its body to `edited body` | `prompt_version` has version 1 = `original body` (unchanged) and version 2 = `edited body`; `max(version_no)` = 2 | FR-003 |
 | AC-004 | Any `prompt_version` row | `PATCH` it; separately `DELETE` it | Each request is rejected — `42501` (no grant) — and the row is unchanged | NFR-005 |
@@ -52,16 +52,16 @@ AC-001 and AC-004 are the failure cases.
 
 | Metric | Declared | Ceiling | Status | Actual |
 |---|---|---|---|---|
-| Net source LOC | ~55 (up ~40, down ~12) | 300 | within | |
-| Test LOC | ~110 (new file + the declared skeleton amendment) | 200 | within | |
-| New modules | 0 | 2 | within | |
-| Source files touched | 2 (migration up, migration down) | 3 | within | |
-| Test files touched | 2 (`tests/versions.test.mjs` new; `tests/skeleton.test.mjs` amended, declared) | 3 | within | |
-| New tables | 1 (`prompt.prompt_version`) | 1 | within | |
-| New columns | 5 (`prompt_id`, `version_no`, `body`, `user_id`, `created_at`; PK is composite — no id column) | 6 | within | |
-| New endpoints / UI / libraries / third-party | 0 | — | within | |
-| User stories | 1 (U-001, UC-004) | 1 | within | |
-| New tests | 4 | 8 | within | |
+| Net source LOC | ~55 (up ~40, down ~12) | 300 | within | 82 raw / 51 executable (up 72/46, down 10/5; comments are spec-demanded reasoning) |
+| Test LOC | ~110 (new file + the declared skeleton amendment) | 200 | within | 154 net (`versions.test.mjs` 131 new; skeleton +27/−4) |
+| New modules | 0 | 2 | within | 0 |
+| Source files touched | 2 (migration up, migration down) | 3 | within | 2 |
+| Test files touched | 2 (`tests/versions.test.mjs` new; `tests/skeleton.test.mjs` amended, declared) | 3 | within | 2 |
+| New tables | 1 (`prompt.prompt_version`) | 1 | within | 1 |
+| New columns | 5 (`prompt_id`, `version_no`, `body`, `user_id`, `created_at`; PK is composite — no id column) | 6 | within | 5 |
+| New endpoints / UI / libraries / third-party | 0 | — | within | 0 |
+| User stories | 1 (U-001, UC-004) | 1 | within | 1 |
+| New tests | 4 | 8 | within | 5 (T-I-004, T-I-005, T-A-003, T-I-006, plus T-I-007 added during review — a real coverage hole the mutation drill surfaced, not scope creep). Function LOC 20 ≤ 40; complexity 3 ≤ 8; largest file 143 ≤ 250 |
 
 ## 7. Changes
 
@@ -98,6 +98,7 @@ Down: drop trigger, function, table, index; revoke the update grant. Rehearsal o
 | T-I-005 | integration | AC-002, PROP-004 | An insert records no version, so history starts at the first edit and the original is unrecoverable | Trigger behavior needs the real database | Only insert-version test | FR-003 changes |
 | T-A-003 | acceptance | AC-003, PROP-002, PROP-003 | An edit overwrites history (version 1 lost or altered) — UC-004's exact loss | End-to-end through the API is the AC as written | Only update-version test | FR-003 changes |
 | T-I-006 | integration | AC-004, PROP-002 | A stored version is changed or deleted after the fact | Grant/policy absence is the mechanism; this proves both probes are rejected | Only immutability test | NFR-005 changes |
+| T-I-007 | integration | PROP-003 | A no-op body update (same value) appends a spurious version | Added during review: the trigger's distinct-body guard had no test, and its removal left the full suite green — a real hole, not a hypothetical | No other test issues a same-value update | Never; this is the invariant the guard exists to hold |
 
 Plus the amended skeleton tests staying green (their own ledger rows carry an amendment note; no new IDs).
 
@@ -115,15 +116,22 @@ Run the down migration (AC-005, drilled); revert the commits. Dedup'd fixture ro
 
 ## 11. Assumptions made during implementation
 
-(Implementer fills.)
+| ID | Assumption | Why |
+|---|---|---|
+| ASM-001 | T-I-005 and T-A-003 fixtures carry a `Date.now()` title suffix (`Fresh Version Fixture <ms>`, `Version Trail Fixture <ms>`) | Their Givens demand a genuinely fresh insert; with append-only history and no DELETE grant, a fixed title can never return to "at version 1" on a re-run. The clock names fixtures only — no assertion depends on time (J8 holds). One unique-titled row accumulates per run; the dedup does not remove them — same stance as RISK-002's fixture accumulation. |
+| ASM-002 | The distinct-body guard lives inside `prompt.record_version()`, not a trigger `WHEN` clause | Postgres rejects `OLD` references in the `WHEN` condition of a trigger that also fires on insert; the spec's single-trigger phrasing ("the update branch fires only when …") is preserved with the guard as the function's first statement. |
+| ASM-003 | AC-004's `42501` arrives as HTTP `403` with `code: "42501"` in the error body (PostgREST's insufficient_privilege mapping); T-I-006 asserts both | Confirmed live in the red run: the pre-grant PATCH in T-A-003 returned exactly this shape (`403`, body code `42501`). |
+| ASM-004 | T-I-006's on-409 fixture PATCH writes a timestamp-distinct body | Red-phase runs insert `Immutable Fixture` before the trigger exists and the migration declares no backfill; a distinct-body update is what guarantees at least one version row exists to probe post-migration. |
+| ASM-005 | Gap, flagged for the integrator's mutation drill: deleting the distinct-body guard turns no test red | The mutation only adds spurious version rows on same-body PATCHes, which none of the four declared tests observes. Recorded here instead of adding a fifth test beyond the declared plan (no scope widening mid-slice). |
+| ASM-006 | Cross-user reads of `prompt_version` rest on the `owner_select` policy alone; no multi-user test probes it | The declared four-test plan is single-identity; NFR-003's executable probe remains T-I-003 on `prompt.prompt`. Flagged for the every-5-slices security review. |
 
 ## 12. Definition of Done
 
-- [ ] AC-001..AC-004 tests green through the real API; red output recorded first.
-- [ ] AC-005 round-trip drilled against the real project (integrator), evidence recorded.
-- [ ] Amended skeleton tests green; their ledger rows carry the amendment note and date.
-- [ ] Ledger rows predate tests; mutation verification recorded (integrator DDL mutations: drop the unique index → T-I-004 red; drop the trigger → T-I-005 red; grant update on `prompt_version` + policy → T-I-006 red; each reverted and re-proven green).
-- [ ] Budget actuals filled; every line within ceiling.
-- [ ] PRD: FR-002, FR-003 → `done`; change-log entry; NFR-005 → `done` for the version table (integrator applies).
-- [ ] DFD and SYSTEM-REQUIREMENTS updated in the same integration commit (new table, new flow F-5 edit, immutability mechanism).
-- [ ] Spec moved to `done/`, dates set.
+- [x] AC-001..AC-004 tests green through the real API; red output recorded first (worker's red phase, section 8 predictions all matched actual: dup 201-not-409, 404 PGRST205 on the version table, 403/42501 on the pre-grant PATCH).
+- [x] AC-005 round-trip drilled against the real project (integrator) 2026-08-07: down removed trigger/function/table/index and revoked the grant, confirmed absent by query (table count 0, index count 0, grant count 0); up re-applied verbatim; suite green after.
+- [x] Amended skeleton tests green; their ledger rows (T-A-001, T-I-003) carry the amendment note and date.
+- [x] Ledger rows predate tests; mutation verification recorded (integrator DDL mutations, 2026-08-07: drop the unique index → T-I-004 red; drop the trigger → T-I-005 and T-A-003 red; grant update + policy on `prompt_version` → T-I-006 red; each reverted and re-proven green). One additional finding during review: removing the trigger's distinct-body guard turned **no** test red — a real GATE-TEST-JUSTIFIED J6 hole. Closed with a new test, **T-I-007** (`no_op_body_update_creates_no_spurious_version`, traces PROP-003), added to section 8 and the ledger; red confirmed on the same guard-removed mutation, then green on restore. AC-001 corrected: PostgREST/Postgres suppresses the `details` field for a non-superuser role on a `23505` violation (confirmed live) — the original wording claimed a guarantee that role does not get. `code` is the tested signal; `message` names the constraint. Test and AC both updated, spec-first.
+- [x] Budget actuals filled; every line within ceiling. New tests actual is 5 (T-I-004..007 + T-A-003), not 4 as declared — the one addition is T-I-007, a review-phase finding, not scope creep (still 5 of 8).
+- [x] PRD: FR-002, FR-003 → `done`; change-log entry; NFR-005 → `done` for the version table (integrator applies, same commit as this file's move to `done/`).
+- [x] DFD and SYSTEM-REQUIREMENTS updated in the same integration commit (new table, new flow F-5 edit, immutability mechanism, corrected constraint-violation behavior).
+- [x] Spec moved to `done/`, dates set.

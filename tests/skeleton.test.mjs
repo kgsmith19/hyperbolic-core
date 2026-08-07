@@ -51,12 +51,24 @@ test("saves_and_reads_back_500_char_body_verbatim__T_A_001__AC_001", async () =>
   assert.equal(BODY_500.length, 500, "fixture must be exactly 500 characters");
   const token = await login(USER_A);
 
-  const created = await rest("prompt", {
+  // SPEC-0002 7.3 amendment: under the unique title index a re-run's POST
+  // collides; on 409, PATCH the body by title instead. Same read-back
+  // contract; re-runs now also exercise the FR-003 update path.
+  let created = await rest("prompt", {
     token,
     method: "POST",
     body: { title: "Spec Author", body: BODY_500 },
   });
-  assert.equal(created.status, 201, JSON.stringify(created.json));
+  if (created.status === 409) {
+    created = await rest(`prompt?title=eq.${encodeURIComponent("Spec Author")}`, {
+      token,
+      method: "PATCH",
+      body: { body: BODY_500 },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+  } else {
+    assert.equal(created.status, 201, JSON.stringify(created.json));
+  }
   const id = created.json[0].id;
 
   const readBack = await rest(`prompt?id=eq.${id}&select=title,body`, { token });
@@ -104,12 +116,23 @@ test("user_b_cannot_read_user_a_prompt__T_I_003__AC_005", async () => {
   const tokenA = await login(USER_A);
   const tokenB = await login(USER_B);
 
-  const created = await rest("prompt", {
+  // SPEC-0002 7.3 amendment: POST; on 409, PATCH the body by title instead.
+  // Isolation assertions below are unchanged.
+  let created = await rest("prompt", {
     token: tokenA,
     method: "POST",
     body: { title: "rls probe", body: "owner isolation probe" },
   });
-  assert.equal(created.status, 201, JSON.stringify(created.json));
+  if (created.status === 409) {
+    created = await rest(`prompt?title=eq.${encodeURIComponent("rls probe")}`, {
+      token: tokenA,
+      method: "PATCH",
+      body: { body: "owner isolation probe" },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+  } else {
+    assert.equal(created.status, 201, JSON.stringify(created.json));
+  }
   const id = created.json[0].id;
 
   const asA = await rest(`prompt?id=eq.${id}&select=id`, { token: tokenA });
