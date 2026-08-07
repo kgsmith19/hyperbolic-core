@@ -53,8 +53,13 @@ def _max_nesting(node, depth=0):
 
 
 def _param_count(node):
+    """Real, callable-facing params -- excludes the implicit self/cls every
+    method carries, which the 4-param ceiling was never meant to count."""
     a = node.args
-    return len(a.posonlyargs) + len(a.args) + len(a.kwonlyargs) \
+    positional = [p.arg for p in a.posonlyargs + a.args]
+    if positional and positional[0] in ("self", "cls"):
+        positional = positional[1:]
+    return len(positional) + len(a.kwonlyargs) \
         + (1 if a.vararg else 0) + (1 if a.kwarg else 0)
 
 

@@ -10,7 +10,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 
-from . import docsis, probes
+from . import docsis, probes, wlan_probes
 
 WINDOWS = probes.WINDOWS
 MACOS = probes.MACOS
@@ -73,11 +73,11 @@ def wifi():
         text, state = probes._run([_AIRPORT, "-I"])
         if state != "ok":
             return _unavailable("airport unavailable")
-        return probes.parse_airport_info(text)
+        return wlan_probes.parse_airport_info(text)
     text, state = probes._run(["netsh", "wlan", "show", "interfaces"])
     if state != "ok":
         return _unavailable("netsh unavailable")
-    return probes.parse_wlan_interfaces(text)
+    return wlan_probes.parse_wlan_interfaces(text)
 
 
 def congestion(channel, own_bssid=None):
@@ -87,7 +87,7 @@ def congestion(channel, own_bssid=None):
     text, state = probes._run(["netsh", "wlan", "show", "networks", "mode=bssid"], 30)
     if state != "ok":
         return _unavailable("netsh unavailable")
-    return probes.parse_wlan_networks(text, channel, own_bssid)
+    return wlan_probes.parse_wlan_networks(text, channel, own_bssid)
 
 
 def driver(name="Wi-Fi"):

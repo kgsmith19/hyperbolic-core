@@ -114,46 +114,44 @@ class NetworkFixer:
         )
         return issue, state
 
-    def fix_wifi_mode(self) -> FixResult:
-        """Fix WiFi mode to 802.11ax if available."""
-        result = FixResult(issue="wifi_mode_pinned", detected=False, applied=False, validated=False)
+    def _run_fix(self, issue: str, detect_fn, apply_fn, already_ok_msg: str) -> FixResult:
+        """Shared detect -> apply -> validate shape every fix_* follows.
+        apply_fn runs the platform-specific change and returns (applied, error)."""
+        result = FixResult(issue=issue, detected=False, applied=False, validated=False)
 
-        # Detect
-        detected, before_state = self.detect_wifi_mode_issue()
+        detected, before_state = detect_fn()
         result.detected = detected
         result.before_state = before_state
-
         if not detected:
-            result.error = "WiFi is already optimal or not detectable"
+            result.error = already_ok_msg
             return result
 
-        self.log(f"WiFi mode issue detected: {before_state}")
-
-        # Apply fix
-        if self.platform == "Linux":
-            # Set to 802.11ax
-            rc, _, err = self.run_command(
-                "iw phy phy0 set netns $(ip netns identify)",
-                sudo=True,
-            )
-            if rc == 0:
-                result.applied = True
-                self.rollback_stack.append(("wifi_mode", before_state))
-
-        elif self.platform == "Darwin":
-            # macOS: requires System Preferences or networksetup
-            self.log("macOS WiFi mode changes require manual System Preferences adjustment")
-            result.error = "macOS WiFi mode requires GUI intervention"
-
-        # Validate
+        self.log(f"{issue} issue detected: {before_state}")
+        result.applied, result.error = apply_fn()
         if result.applied:
-            detected_after, after_state = self.detect_wifi_mode_issue()
+            self.rollback_stack.append((issue, before_state))
+            detected_after, after_state = detect_fn()
             result.validated = not detected_after
             result.after_state = after_state
             if result.validated:
-                self.log("WiFi mode fix validated successfully")
+                self.log(f"{issue} fix validated successfully")
 
         return result
+
+    def _apply_wifi_mode_fix(self) -> Tuple[bool, Optional[str]]:
+        if self.platform == "Linux":
+            rc, _, err = self.run_command("iw phy phy0 set netns $(ip netns identify)", sudo=True)
+            return rc == 0, None
+        if self.platform == "Darwin":
+            self.log("macOS WiFi mode changes require manual System Preferences adjustment")
+            return False, "macOS WiFi mode requires GUI intervention"
+        return False, None
+
+    def fix_wifi_mode(self) -> FixResult:
+        """Fix WiFi mode to 802.11ax if available."""
+        return self._run_fix("wifi_mode_pinned", self.detect_wifi_mode_issue,
+                             self._apply_wifi_mode_fix,
+                             "WiFi is already optimal or not detectable")
 
     def detect_dns_issue(self) -> Tuple[bool, Dict]:
         """Detect if DNS resolution is failing.
@@ -178,53 +176,25 @@ class NetworkFixer:
         issue = not state["resolution_test"] and len(state["resolvers"]) > 0
         return issue, state
 
-    def fix_dns(self, resolver_ips: List[str] = None) -> FixResult:
-        """Fix DNS by setting public resolvers (Cloudflare, Google)."""
-        if resolver_ips is None:
-            resolver_ips = ["1.1.1.1", "8.8.8.8"]
-
-        result = FixResult(issue="dns_failure", detected=False, applied=False, validated=False)
-
-        # Detect
-        detected, before_state = self.detect_dns_issue()
-        result.detected = detected
-        result.before_state = before_state
-
-        if not detected:
-            result.error = "DNS is already working"
-            return result
-
-        self.log(f"DNS issue detected: {before_state}")
-
-        # Apply fix - update resolv.conf
+    def _apply_dns_fix(self, resolver_ips: List[str]) -> Tuple[bool, Optional[str]]:
         if self.platform in ("Linux", "Darwin"):
             resolv_content = "\n".join(f"nameserver {ip}" for ip in resolver_ips)
-            rc, _, err = self.run_command(
-                f"echo '{resolv_content}' > /etc/resolv.conf",
-                sudo=True,
-            )
+            rc, _, _ = self.run_command(f"echo '{resolv_content}' > /etc/resolv.conf", sudo=True)
             if rc == 0:
-                result.applied = True
-                self.rollback_stack.append(("dns", before_state))
                 self.log(f"DNS set to {resolver_ips}")
-
-        elif self.platform == "Windows":
+            return rc == 0, None
+        if self.platform == "Windows":
             for ip in resolver_ips:
-                self.run_command(
-                    f'netsh interface ip add dns name="Ethernet" {ip}',
-                    sudo=True,
-                )
-            result.applied = True
+                self.run_command(f'netsh interface ip add dns name="Ethernet" {ip}', sudo=True)
+            return True, None
+        return False, None
 
-        # Validate
-        if result.applied:
-            detected_after, after_state = self.detect_dns_issue()
-            result.validated = not detected_after
-            result.after_state = after_state
-            if result.validated:
-                self.log("DNS fix validated successfully")
-
-        return result
+    def fix_dns(self, resolver_ips: List[str] = None) -> FixResult:
+        """Fix DNS by setting public resolvers (Cloudflare, Google)."""
+        resolver_ips = resolver_ips or ["1.1.1.1", "8.8.8.8"]
+        return self._run_fix("dns_failure", self.detect_dns_issue,
+                             lambda: self._apply_dns_fix(resolver_ips),
+                             "DNS is already working")
 
     def detect_gateway_issue(self) -> Tuple[bool, Dict]:
         """Detect if gateway is unreachable."""
@@ -266,40 +236,17 @@ class NetworkFixer:
         # Issue is if power management is too aggressive (True = aggressive, issue)
         return state["power_save_mode"] == True, state
 
+    def _apply_adapter_power_fix(self) -> Tuple[bool, Optional[str]]:
+        if self.platform == "Linux":
+            rc, _, _ = self.run_command("ethtool -s eth0 wol g", sudo=True)
+            return rc == 0, None
+        return False, None
+
     def fix_adapter_power_management(self) -> FixResult:
         """Disable aggressive power management on network adapter."""
-        result = FixResult(
-            issue="adapter_power_management",
-            detected=False,
-            applied=False,
-            validated=False,
-        )
-
-        # Detect
-        detected, before_state = self.detect_adapter_power_management()
-        result.detected = detected
-        result.before_state = before_state
-
-        if not detected:
-            result.error = "Power management is already optimal"
-            return result
-
-        self.log(f"Power management issue detected: {before_state}")
-
-        # Apply fix
-        if self.platform == "Linux":
-            rc, _, err = self.run_command("ethtool -s eth0 wol g", sudo=True)
-            if rc == 0:
-                result.applied = True
-                self.rollback_stack.append(("adapter_power", before_state))
-
-        # Validate
-        if result.applied:
-            detected_after, after_state = self.detect_adapter_power_management()
-            result.validated = not detected_after
-            result.after_state = after_state
-
-        return result
+        return self._run_fix("adapter_power_management", self.detect_adapter_power_management,
+                             self._apply_adapter_power_fix,
+                             "Power management is already optimal")
 
     def rollback_all(self):
         """Rollback all applied fixes in reverse order."""
