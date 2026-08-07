@@ -11,6 +11,7 @@ import base64
 import ipaddress
 import json
 import os
+import socket
 import urllib.error
 import urllib.request
 
@@ -80,6 +81,36 @@ def _asus_get(host, hook, token, timeout=6):
         headers={"User-Agent": _ASUS_UA, "Cookie": f"asus_token={token}"}), timeout)
 
 
+def _on_lan(host):
+    """True only if every address `host` resolves to is off the public
+    internet.
+
+    Credentials reach these devices as HTTP Basic and as a plaintext login
+    header over `http://`, because that is all a modem or consumer router
+    speaks. Accepted on a LAN; never acceptable off one, and a single wrong
+    digit in `.env` is enough to make the difference.
+
+    `ipaddress.is_private` is the right predicate *here* -- the question is
+    "could this leave my network", and it covers loopback and link-local too.
+    classify_wan() above deliberately avoids it for the opposite reason: there
+    the question is "is something NATing me", and counting loopback would
+    answer it wrongly.
+    """
+    name = host.rsplit(":", 1)[0].strip("[]") if host else ""
+    try:
+        infos = socket.getaddrinfo(name, None)
+    except OSError:
+        return False
+    return bool(infos) and all(
+        ipaddress.ip_address(i[4][0]).is_private for i in infos)
+
+
+def _off_lan(host, which):
+    return _unavailable(
+        f"{which} host {host!r} is not on a local network, so no credentials "
+        f"were sent; check {which.upper()}_HOST in .env")
+
+
 def modem(host=None, user=None, password=None):
     """DOCSIS line quality. Uncorrectable codewords are the single best
     indicator that the physical cable plant is the problem."""
@@ -88,6 +119,8 @@ def modem(host=None, user=None, password=None):
     password = password if password is not None else os.environ.get("MODEM_PASS")
     if not user:
         return _unavailable("no credentials: set MODEM_USER / MODEM_PASS in .env")
+    if not _on_lan(host):
+        return _off_lan(host, "modem")
 
     body, err = _http_get(f"http://{host}/DocsisStatusAdv.htm", user, password)
     if err:
@@ -103,6 +136,8 @@ def router(host=None, user=None, password=None):
     password = password if password is not None else os.environ.get("ROUTER_PASS")
     if not user:
         return _unavailable("no credentials: set ROUTER_USER / ROUTER_PASS in .env")
+    if not _on_lan(host):
+        return _off_lan(host, "router")
 
     token, err = _asus_login(host, user, password)
     if err:
@@ -111,16 +146,20 @@ def router(host=None, user=None, password=None):
     body, err = _asus_get(host, "nvram_get(wrs_protect_enable)", token)
     if err:
         return {"state": "fail", "reason": err}
+    return {"state": "ok",
+            "aiprotection_enabled": _nvram(body, "wrs_protect_enable") == "1"}
 
-    # Parse nvram response: "nvram_get(key)=value" format, sometimes with multiple lines
-    aiprotection_enabled = False
+
+def _nvram(body, key):
+    """The value of one key in an appGet.cgi reply, or None.
+
+    The reply is `nvram_get(key)=value`, sometimes several lines of it, so the
+    key is matched rather than the first line taken.
+    """
     for line in body.split("\n"):
-        if "wrs_protect_enable" in line and "=" in line:
-            value = line.split("=", 1)[1].strip()
-            aiprotection_enabled = value == "1"
-            break
-
-    return {"state": "ok", "aiprotection_enabled": aiprotection_enabled}
+        if key in line and "=" in line:
+            return line.split("=", 1)[1].strip()
+    return None
 
 
 def classify_wan(ip):

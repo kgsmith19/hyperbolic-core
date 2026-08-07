@@ -105,6 +105,12 @@ absent ones make the feature report `unavailable`, not fail:
 - **Modem** DOCSIS SNR, power levels, uncorrectable codewords
 - **Router** uptime, clients, and whether AiProtection / Trend Micro DPI is on
 
+Modem and router credentials travel as HTTP Basic over plain `http://`,
+because that is all these devices speak on a LAN. netcheck therefore refuses
+to send them anywhere that is not a LAN: the host is resolved first, and if
+any address it answers with is publicly routable, nothing is sent and the
+section reads `unavailable`.
+
 All device hosts (`MODEM_HOST`, `ROUTER_HOST`) and the diagnosis target
 (`NETCHECK_TARGET`) are read from the environment everywhere they're used —
 nothing in `netcheck/` hardcodes a device address with no override.

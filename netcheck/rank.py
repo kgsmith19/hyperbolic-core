@@ -72,6 +72,37 @@ _FIXES = {
 }
 
 
+# Causes this repo ships a script for, and the invocation that applies each.
+# Generated into the fix text rather than written into the prose, so a script
+# that is renamed or deleted cannot leave a fix quietly recommending it --
+# test_rank.py checks both directions against the filesystem.
+#
+# Only run_fixes.sh takes --dry-run; the individual fix_*.sh do not, and its
+# dry-run prints what it would run without executing anything, which is why
+# that is the invocation offered first.
+_SCRIPTS = {
+    "wifi_mode_pinned": "tools/run_fixes.sh --wifi-only",
+    "router_dns": "tools/run_fixes.sh --dns-only",
+    "dns": "tools/run_fixes.sh --dns-only",
+    "radio_drops": "tools/run_fixes.sh --adapter-only",
+}
+
+
+def _fix(cause):
+    """The remedy for `cause`, naming the script that applies it if one exists.
+
+    These are Linux shell scripts. On Windows -- this project's primary
+    target -- the fix text names the PowerShell equivalent inline where there
+    is one, and is a manual instruction where there is not.
+    """
+    text = _FIXES.get(cause, "")
+    invocation = _SCRIPTS.get(cause)
+    if invocation:
+        text += (f" On Linux, `sudo bash {invocation} --dry-run` shows what a "
+                 f"scripted fix would change; drop --dry-run to apply it.")
+    return text
+
+
 def _one_family_broken(section, broken, working):
     """True only when one address family measured a failure and the other
     measured success. Happy Eyeballs makes that the interesting case: the
@@ -151,7 +182,7 @@ def _sample_causes(samples):
         "confidence": "high" if n / total >= 0.10 else
                       "medium" if n / total >= 0.02 else "low",
         "evidence": f"{n} of {total} samples ({n / total:.0%}) showed this pattern",
-        "fix": _FIXES.get(cause, ""),
+        "fix": _fix(cause),
     } for cause, n in sorted(counts.items(), key=lambda kv: -kv[1])]
 
 
@@ -185,7 +216,7 @@ def _scan_causes(scan):
         found = evidence(data)
         if found:
             out.append({"cause": cause, "confidence": confidence,
-                        "evidence": found, "fix": _FIXES[cause]})
+                        "evidence": found, "fix": _fix(cause)})
     return out
 
 

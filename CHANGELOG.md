@@ -10,6 +10,32 @@ pass, not full automation.
 
 ## [Unreleased]
 
+### Security
+- Device credentials are no longer sent off the local network (#30, FR-014).
+  Modem and router logins travel as HTTP Basic and as a plaintext login
+  header over `http://`, which is all these devices speak and an accepted
+  risk on a LAN. It was never an accepted risk off one, and a single wrong
+  digit in `MODEM_HOST` was enough to post the modem password to a stranger,
+  in the clear, on every scan. The host is now resolved first and **every**
+  address it answers with must be private -- a name answering with both a
+  LAN and a public address, which is the shape of DNS rebinding, is refused.
+  A refused host reads `unavailable` naming the variable to fix, never
+  `fail`: nothing about the device was measured.
+
+### Added
+- Ranked causes now name the script that fixes them, where one exists (#31).
+  `tools/fix_dns.sh` and its siblings have been in the repo the whole time,
+  fixing three of the causes `diagnose` already names, and nothing connected
+  the two -- the user read "set the adapter's DNS to 1.1.1.1" and did it by
+  hand. The invocation is generated from a table checked against the
+  filesystem in both directions, so a renamed or deleted script cannot leave
+  a fix quietly recommending it. `run_fixes.sh --dry-run` is offered first;
+  the individual `fix_*.sh` do not take that flag, which is why the wrapper
+  is what gets named.
+- `scripts/delete-merged-branches.ps1` -- deletes the remote branches whose
+  work is already in `main`, verifying each against `ls-remote` before and
+  after so a partial run is safe to repeat. Supports `-WhatIf`.
+
 ### Added
 - IPv4-vs-IPv6 isolation (`netcheck/dualstack.py`, FR-013). Happy Eyeballs
   races the two families and returns whichever answers first, so a wholly
@@ -157,6 +183,32 @@ pass, not full automation.
   prompts with `https://<project-ref>.supabase.co` as the shape.
 
 ## [Unreleased]
+
+### Security
+- Device credentials are no longer sent off the local network (#30, FR-014).
+  Modem and router logins travel as HTTP Basic and as a plaintext login
+  header over `http://`, which is all these devices speak and an accepted
+  risk on a LAN. It was never an accepted risk off one, and a single wrong
+  digit in `MODEM_HOST` was enough to post the modem password to a stranger,
+  in the clear, on every scan. The host is now resolved first and **every**
+  address it answers with must be private -- a name answering with both a
+  LAN and a public address, which is the shape of DNS rebinding, is refused.
+  A refused host reads `unavailable` naming the variable to fix, never
+  `fail`: nothing about the device was measured.
+
+### Added
+- Ranked causes now name the script that fixes them, where one exists (#31).
+  `tools/fix_dns.sh` and its siblings have been in the repo the whole time,
+  fixing three of the causes `diagnose` already names, and nothing connected
+  the two -- the user read "set the adapter's DNS to 1.1.1.1" and did it by
+  hand. The invocation is generated from a table checked against the
+  filesystem in both directions, so a renamed or deleted script cannot leave
+  a fix quietly recommending it. `run_fixes.sh --dry-run` is offered first;
+  the individual `fix_*.sh` do not take that flag, which is why the wrapper
+  is what gets named.
+- `scripts/delete-merged-branches.ps1` -- deletes the remote branches whose
+  work is already in `main`, verifying each against `ls-remote` before and
+  after so a partial run is safe to repeat. Supports `-WhatIf`.
 
 ### Added
 - IPv4-vs-IPv6 isolation (`netcheck/dualstack.py`, FR-013). Happy Eyeballs
