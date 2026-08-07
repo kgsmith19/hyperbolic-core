@@ -155,24 +155,34 @@ def mirror(conn, url=None, key=None, host_name=None):
         pending = unsynced(conn, table)
         if not pending:
             continue
-        body = json.dumps([_for_remote(r, host_name) for r in pending]).encode()
-        req = urllib.request.Request(
-            f"{url.rstrip('/')}/rest/v1/{table}", data=body, method="POST",
-            headers={"apikey": key, "Authorization": f"Bearer {key}",
-                     "Content-Type": "application/json",
-                     "Prefer": "resolution=ignore-duplicates,return=minimal"})
-        try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                if r.status >= 300:
-                    return {**report, "state": "fail", "reason": f"HTTP {r.status}"}
-        except (urllib.error.URLError, OSError) as e:
-            # Expected whenever the link is down. Rows stay unsynced and go on
-            # the next attempt; this is a retry, not a failure to record.
+        err = _push((url, key), table, pending, host_name)
+        if err:
             # `report` spreads first so it cannot overwrite the failure state.
-            return {**report, "state": "fail", "reason": str(e)}
+            return {**report, "state": "fail", "reason": err}
         mark_synced(conn, table, [r["id"] for r in pending])
         report["pushed"][table] = len(pending)
     return report
+
+
+def _push(supabase, table, rows, host_name):
+    """POST one table's pending rows. Returns an error string, or None.
+
+    A link that is down is expected, not exceptional: the caller leaves the
+    rows unsynced so the next attempt retries them, which is why this returns
+    an error rather than raising.
+    """
+    url, key = supabase
+    body = json.dumps([_for_remote(r, host_name) for r in rows]).encode()
+    req = urllib.request.Request(
+        f"{url.rstrip('/')}/rest/v1/{table}", data=body, method="POST",
+        headers={"apikey": key, "Authorization": f"Bearer {key}",
+                 "Content-Type": "application/json",
+                 "Prefer": "resolution=ignore-duplicates,return=minimal"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return f"HTTP {r.status}" if r.status >= 300 else None
+    except (urllib.error.URLError, OSError) as e:
+        return str(e)
 
 
 def _for_remote(row, host_name):

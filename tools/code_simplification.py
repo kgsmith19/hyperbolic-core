@@ -2,15 +2,19 @@
 """Code simplification scanner: enforce lean code practices.
 
 Scans Python code for complexity violations and reports:
+- Files longer than threshold
 - Functions longer than threshold
 - Functions with more than 4 parameters
 - Cyclomatic complexity exceeding threshold
 - Nesting depth exceeding threshold
 
-Intensity levels:
-  - low: >100 line functions only (allows necessary diagnostic algorithms)
-  - medium: >40 lines, >4 params, complexity >8, nesting >3 (default)
-  - high: >15 lines, all complexity metrics at a stricter bar
+Intensity levels, and the ceiling each enforces:
+  - low:    600-line files, 100-line functions, 8 params, complexity 15, nesting 5
+  - medium: 250-line files,  40-line functions, 4 params, complexity  8, nesting 3
+  - high:   150-line files,  15-line functions, 3 params, complexity  6, nesting 2
+
+`medium` is exactly rules/01-BUDGETS.md's MAX_FILE_LOC / MAX_FUNCTION_LOC /
+MAX_CYCLOMATIC ceilings, and is what tools/check.sh runs.
 """
 import ast
 import sys
@@ -104,12 +108,21 @@ class CodeAnalyzer(ast.NodeVisitor):
         self.violations.append(Violation(self.filename, node.lineno, "medium", rule, message))
 
 
+MAX_FILE_LOC = {"low": 600, "medium": 250, "high": 150}
+
+
 def check_file(filepath: str, intensity: str = "medium") -> List[Violation]:
     """Analyze a single Python file."""
     violations = []
     try:
         with open(filepath) as f:
             source = f.read()
+        lines = source.count("\n") + 1
+        ceiling = MAX_FILE_LOC[intensity]
+        if lines > ceiling:
+            violations.append(Violation(
+                filepath, 1, "medium", "file_too_long",
+                f"File is {lines} lines (max {ceiling})"))
         tree = ast.parse(source, filename=filepath)
         analyzer = CodeAnalyzer(filepath, source, intensity)
         analyzer.visit(tree)

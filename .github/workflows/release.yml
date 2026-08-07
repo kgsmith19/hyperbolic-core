@@ -5,7 +5,7 @@ name: Release
 # No PyPI/Homebrew publish step: this project is stdlib-only with no
 # setup.py/pyproject.toml by design (see AGENTS.md), so there is nothing to
 # build for pip and no wheel for a Homebrew formula to fetch. See
-# netcheck/docs/DEPLOYMENT.md for the full release process, including why.
+# docs/notes/2026-08-07-deploying-and-releasing-netcheck.md for the full release process, including why.
 
 on:
   # Manual only -- pick the vX.Y.Z tag to run from in the Actions UI's "Run
@@ -31,7 +31,7 @@ jobs:
       - name: Smoke test the image
         run: |
           docker run --rm netcheck:${{ github.ref_name }} --version
-          docker run --rm netcheck:${{ github.ref_name }} full-check --format quick
+          docker run --rm netcheck:${{ github.ref_name }} scan
 
       - name: Save image as a release artifact
         run: docker save netcheck:${{ github.ref_name }} | gzip > netcheck-image.tar.gz

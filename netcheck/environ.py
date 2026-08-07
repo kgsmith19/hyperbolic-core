@@ -6,11 +6,10 @@ modem password is not a broken modem, and the diagnosis engine relies on being
 able to tell the difference.
 """
 import json
-import os
 import subprocess
 from datetime import datetime, timezone
 
-from . import docsis, probes, wlan_probes
+from . import probes, remote, wlan_probes
 
 WINDOWS = probes.WINDOWS
 MACOS = probes.MACOS
@@ -22,12 +21,6 @@ MACOS = probes.MACOS
 _AIRPORT = ("/System/Library/PrivateFrameworks/Apple80211.framework/"
             "Versions/Current/Resources/airport")
 
-# Single source of truth for both this module and the *_diagnostics.py
-# modules that talk to the same two devices -- a second, independently
-# hardcoded copy of either address is exactly the kind of drift that made
-# router_diagnostics.py silently ping the wrong router (see .env.example).
-MODEM_HOST_DEFAULT = "192.168.100.1"
-ROUTER_HOST_DEFAULT = "192.168.50.1"
 
 
 def _ps(script, timeout=25, args=()):
@@ -195,163 +188,7 @@ def tailscale(target="api.anthropic.com"):
     return dict(data, state="ok")
 
 
-def _http_get(url, user=None, password=None, timeout=6):
-    import base64, urllib.error, urllib.request
-    req = urllib.request.Request(url, headers={"User-Agent": "netcheck"})
-    if user:
-        token = base64.b64encode(f"{user}:{password or ''}".encode()).decode()
-        req.add_header("Authorization", f"Basic {token}")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.read().decode("utf-8", "replace"), None
-    except urllib.error.HTTPError as e:
-        return None, f"HTTP {e.code}"
-    except Exception as e:
-        return None, f"{type(e).__name__}: {e}"
-
-
-def _asus_login(host, user, password, timeout=6):
-    """Authenticate to ASUS router via POST /login.cgi token flow.
-
-    Returns (token, error). On success, token is a string; on failure, error
-    explains why and token is None.
-    """
-    import base64, json, urllib.error, urllib.request
-
-    login_auth = base64.b64encode(f"{user}:{password or ''}".encode()).decode()
-    url = f"http://{host}/login.cgi"
-    req = urllib.request.Request(
-        url,
-        method="POST",
-        data=b"",
-        headers={
-            "User-Agent": "asusrouter-Android-DUTUtil-1.0.0.201",
-            "login_authorization": login_auth,
-        }
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            body = r.read().decode("utf-8", "replace")
-            try:
-                data = json.loads(body)
-                token = data.get("asus_token")
-                if not token:
-                    return None, f"no asus_token in response"
-                return token, None
-            except ValueError:
-                return None, f"invalid JSON response: {body[:100]}"
-    except urllib.error.HTTPError as e:
-        return None, f"HTTP {e.code}"
-    except Exception as e:
-        return None, f"{type(e).__name__}: {e}"
-
-
-def _asus_get(host, hook, token, timeout=6):
-    """Query ASUS router API with an authenticated token.
-
-    Returns (body, error).
-    """
-    import urllib.error, urllib.request
-
-    url = f"http://{host}/appGet.cgi?hook={hook}"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "asusrouter-Android-DUTUtil-1.0.0.201",
-            "Cookie": f"asus_token={token}",
-        }
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.read().decode("utf-8", "replace"), None
-    except urllib.error.HTTPError as e:
-        return None, f"HTTP {e.code}"
-    except Exception as e:
-        return None, f"{type(e).__name__}: {e}"
-
-
-def _asus_set(host, token, nvram, timeout=6):
-    """Write NVRAM key/value pairs to an ASUS router via the app-API's
-    applyapp.cgi, reusing the asus_token cookie _asus_login already
-    proved works for reads.
-
-    ASUS ships no public write-API spec; the POST /applyapp.cgi target,
-    the asus_token cookie, and the semicolon-joined `key=value` payload
-    (URL-quoted, mirroring how _asus_get's own GET-style hook query is
-    built) follow the shape used by community-reverse-engineered clients
-    (e.g. the AsusRouter and aioasuswrt Python libraries). UNVERIFIED
-    against a live device from this codebase. A
-    200 response means only "the router accepted the request", never
-    "the value changed": callers must always confirm with a fresh read
-    via router()/modem() before reporting success.
-
-    Returns (body, error).
-    """
-    import urllib.error, urllib.request
-    from urllib.parse import quote
-
-    payload = ";".join(f"{k}={v}" for k, v in nvram.items())
-    url = f"http://{host}/applyapp.cgi"
-    req = urllib.request.Request(
-        url,
-        method="POST",
-        data=quote(payload).encode(),
-        headers={
-            "User-Agent": "asusrouter-Android-DUTUtil-1.0.0.201",
-            "Cookie": f"asus_token={token}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.read().decode("utf-8", "replace"), None
-    except urllib.error.HTTPError as e:
-        return None, f"HTTP {e.code}"
-    except Exception as e:
-        return None, f"{type(e).__name__}: {e}"
-
-
-def modem(host=None, user=None, password=None):
-    """DOCSIS line quality. Uncorrectable codewords are the single best
-    indicator that the physical cable plant is the problem."""
-    host = host or os.environ.get("MODEM_HOST", MODEM_HOST_DEFAULT)
-    user = user if user is not None else os.environ.get("MODEM_USER")
-    password = password if password is not None else os.environ.get("MODEM_PASS")
-    if not user:
-        return _unavailable("no credentials: set MODEM_USER / MODEM_PASS in .env")
-
-    body, err = _http_get(f"http://{host}/DocsisStatusAdv.htm", user, password)
-    if err:
-        return {"state": "fail", "reason": err}
-    return docsis.parse_docsis_status(body)
-
-
-def router(host=None, user=None, password=None):
-    """ASUS routers ship DPI (AiProtection / Trend Micro) that is well known
-    for reaping long-lived TLS streams — exactly this symptom."""
-    host = host or os.environ.get("ROUTER_HOST", ROUTER_HOST_DEFAULT)
-    user = user if user is not None else os.environ.get("ROUTER_USER")
-    password = password if password is not None else os.environ.get("ROUTER_PASS")
-    if not user:
-        return _unavailable("no credentials: set ROUTER_USER / ROUTER_PASS in .env")
-
-    token, err = _asus_login(host, user, password)
-    if err:
-        return {"state": "fail", "reason": err}
-
-    body, err = _asus_get(host, "nvram_get(wrs_protect_enable)", token)
-    if err:
-        return {"state": "fail", "reason": err}
-
-    # Parse nvram response: "nvram_get(key)=value" format, sometimes with multiple lines
-    aiprotection_enabled = False
-    for line in body.split("\n"):
-        if "wrs_protect_enable" in line and "=" in line:
-            value = line.split("=", 1)[1].strip()
-            aiprotection_enabled = value == "1"
-            break
-
-    return {"state": "ok", "aiprotection_enabled": aiprotection_enabled}
+_ASUS_UA = "asusrouter-Android-DUTUtil-1.0.0.201"
 
 
 def scan():
@@ -366,7 +203,9 @@ def scan():
         "tcp": tcp_globals(),
         "mtu": mtu(),
         "tailscale": tailscale(),
-        "modem": modem(),
-        "router": router(),
+        "modem": remote.modem(),
+        "router": remote.router(),
+        "wan": remote.wan(),
+        "anthropic": remote.anthropic(),
     }
     return out

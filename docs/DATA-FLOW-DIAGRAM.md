@@ -60,7 +60,7 @@ graph TB
 
     D1[("D1: SQLite (netcheck.db)")]
 
-    E1 -->|"F1: probe/watch/scan/full-check"| P1
+    E1 -->|"F1: probe/watch/scan"| P1
     P1 -->|"F3: reachability probes"| E2
     E2 -->|"F4: probe responses"| P1
     P1 -->|"F9: sample/scan row"| P3
@@ -80,7 +80,7 @@ graph TB
     E1 -->|"F1: serve"| P6
     P6 -->|"F15: JSON + dashboard page"| E1
 
-    E1 -->|"F1: full-check"| P1
+    E1 -->|"F1: scan"| P1
     P1 -->|"F7: status query"| E5
     E5 -->|"F8: status response"| P1
 ```

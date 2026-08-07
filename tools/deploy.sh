@@ -24,8 +24,8 @@ docker build -t "$IMAGE" .
 echo "=== Smoke test: --version ==="
 docker run --rm "$IMAGE" --version
 
-echo "=== Smoke test: full-check --format quick ==="
-docker run --rm "$IMAGE" full-check --format quick
+echo "=== Smoke test: scan ==="
+docker run --rm "$IMAGE" scan
 
 ARTIFACT="netcheck-image-${VERSION}.tar.gz"
 echo "=== Saving image to $ARTIFACT ==="

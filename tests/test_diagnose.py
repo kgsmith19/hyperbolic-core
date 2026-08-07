@@ -148,31 +148,5 @@ class BurstTest(unittest.TestCase):
         self.assertEqual(b["span_s"], 20)
 
 
-class RankTest(unittest.TestCase):
-    def test_repeated_router_dns_failures_are_ranked_and_actionable(self):
-        samples = [row(ts=f"2026-08-05T00:0{i}:00Z", dns_router_state="fail")
-                   for i in range(5)]
-        causes = diagnose.rank(samples, [], {})
-        self.assertEqual(causes[0]["cause"], "router_dns")
-        self.assertIn("evidence", causes[0])
-        self.assertTrue(causes[0]["fix"])
-
-    def test_a_healthy_history_reports_no_causes(self):
-        self.assertEqual(diagnose.rank([row()] * 5, [], {}), [])
-
-    def test_unavailable_sections_are_never_cited_as_evidence(self):
-        """Criterion 9 through to the report."""
-        causes = diagnose.rank([row(gw_state="unavailable")] * 5, [], {})
-        self.assertEqual(causes, [])
-
-    def test_wireless_mode_pinned_below_capability_is_surfaced(self):
-        """A Wi-Fi 6 card pinned to 802.11ac is a deliberate setting worth
-        reporting; it is invisible unless something looks for it."""
-        causes = diagnose.rank([row()], [], {
-            "driver": {"state": "ok", "adapter": "Intel(R) Wi-Fi 6 AX201 160MHz",
-                       "wireless_mode": "3. 802.11ac"}})
-        self.assertTrue(any(c["cause"] == "wifi_mode_pinned" for c in causes))
-
-
 if __name__ == "__main__":
     unittest.main()

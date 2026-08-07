@@ -10,6 +10,107 @@ pass, not full automation.
 
 ## [Unreleased]
 
+### Changed
+- `netcheck diagnose` now ranks the standing conditions an environment scan
+  measures alongside the faults measured over time, in one list. New causes:
+  `anthropic_incident`, `double_nat`, `cgnat`, `modem_signal`, `router_dpi`,
+  `radio_drops`, `wifi_congestion`, `dfs_channel`, `tailscale_in_path`,
+  `low_mtu`. Each carries evidence and a fix, and appears on the dashboard
+  without any UI change. Adding another is a row in `diagnose._SCAN_RULES`.
+- `environ.scan()` gained two sections: `wan` (the address the internet sees
+  us as, classified for double NAT and RFC 6598 carrier NAT) and `anthropic`
+  (the provider's declared status). Both degrade to a state, never raise.
+
+### Removed
+- The `netcheck full-check` command and the eight modules behind it
+  (`all_diagnostics`, `wifi_`/`modem_`/`nat_`/`cgnat_`/`anthropic_`/
+  `interference_`/`router_diagnostics`, `cache`). They were a second
+  measurement path reachable from one undocumented command, never surfaced
+  in `diagnose` or the dashboard, and much of it measured nothing:
+  `router_diagnostics` returned hardcoded advice from five of its six
+  methods, `modem_diagnostics.detect_modem_reachable()` ignored `ping`'s exit
+  code (reporting an unreachable modem as reachable) and re-implemented the
+  DOCSIS parsing `docsis.py` already does properly with credentials,
+  `detect_wan_ip()` had no callers, and every class set `self.id`/`self.name`
+  that nothing read. The measurements that were real are now scan sections
+  and ranked causes.
+- `tools/profile_diagnostics.py`, which profiled only the removed runner.
+- `tests/test_e2e_faults.py`. Eleven of its twelve tests skipped on any
+  machine without `CAP_NET_ADMIN` and the `sch_netem` module — which is every
+  container and every CI runner this project uses — and one of them called
+  `diagnose.classify_latency()`, a function that has never existed, so it
+  could not have passed even where it ran. `environ.mtu()`'s descending walk
+  was the only behaviour it uniquely covered; that now has a hermetic test
+  in `test_environ.py::MtuWalkTest`, mutation-verified against two ways of
+  breaking the walk. The suite now reports zero skips.
+- `tools/fixer.py`, `tests/test_fixer.py`, and
+  `.github/workflows/fixer-validation.yml`. `fixer.py` was a second, broken
+  implementation of the three fixes `tools/fix_*.sh` already perform: every
+  command in it was a shell string (`"cat /etc/resolv.conf"`, `"ip route |
+  grep default"`) passed to `subprocess.run(shell=False)`, so any real
+  invocation died with `FileNotFoundError` before doing anything. Both gates
+  that "validated" it only ran it under `--dry-run`, which returns before
+  executing, so both passed against code that could not work. It also
+  shipped a `rollback_all()` that logged "Restoring ..." and restored
+  nothing, and a Linux Wi-Fi "fix" that ran `iw phy phy0 set netns ...` --
+  moving the adapter into another network namespace, which is not a mode
+  change and would break networking if it had ever run. FR-012 is delivered
+  by the shell scripts, which work and have a real `--dry-run`.
+- `netcheck/docs/` (seven files, 1,075 lines). A second documentation tree
+  restating README, AGENTS.md, and `docs/`, which `rules/04-DOCS.md` forbids
+  ("a fact lives in exactly one document; duplicated facts diverge, always").
+  They had already diverged: `API.md` documented `wifi_diagnostics.
+  get_wifi_interface()` and `scan_available_networks()`, which never existed
+  in this codebase, and gave `diagnose.correlate()` the verdicts
+  `your_side`/`far_side`, which it has never returned. The deployment and
+  release content was real and unique, and is now
+  `docs/notes/2026-08-07-deploying-and-releasing-netcheck.md`; "adding a
+  diagnostic" and the gate command moved to `AGENTS.md`. There is
+  deliberately no hand-written API reference now — the docstrings are it.
+- `docs/notes/2026-08-04-netcheck-implementation-plan.md`: a build checklist
+  with all 44 boxes still unticked for a tool that shipped days earlier,
+  naming modules (`net_diag.py`, `OPEN-ISSUES.md`) that no longer exist.
+- `.github/workflows/status-checks.yml`, which echoed "Check Actions tab"
+  three times and always passed.
+- 297 lines of `tools/README.md` (387 -> 90). It carried two Quick Start
+  sections and two CI Integration sections for the same scripts, a "Future
+  Enhancements" list (`rules/04-DOCS.md`: docs describe what is true now), a
+  JSON output example no shell script emits, and a "Backup & Rollback -
+  original state saved, all changes reversible" claim true only of
+  `fix_dns.sh`. The rewrite says rollback is DNS-only, which is what the
+  scripts do.
+- `environ._asus_set()` and its tests. A write path to router NVRAM that no
+  command reached, whose own docstring said "UNVERIFIED against a live device
+  from this codebase". PRD OOS-001 puts automated device writes out of scope
+  precisely because "a wrong automated write to networking hardware can take a
+  household offline with no easy recovery" — this was the last piece of that
+  capability still in the tree.
+
+### Added
+- `tools/code_simplification.py` now checks file length. `MAX_FILE_LOC: 250`
+  was declared in `rules/01-BUDGETS.md` and enforced by nothing, so five files
+  had drifted over it unnoticed. All are now under.
+
+### Fixed
+- `test_rank.py`'s two guard tests — the ones asserting that `unavailable`
+  and `fail` sections are never cited as causes, which is the most
+  load-bearing rule in the codebase — passed for the wrong reason. Their
+  input sections carried only `state` and `reason`, so the rule predicates
+  read the fault fields as `None` and declined regardless. Mutation-verified:
+  deleting the state gate entirely left both green. They now pass sections
+  that carry the fault fields *and* a non-`ok` state, so only the gate can
+  suppress them, and removing it turns both red.
+- README told users to `cp .env.example`, a file that does not exist and
+  never will: `docs/SYSTEM-REQUIREMENTS.md` records the deliberate decision
+  not to ship one, and `.gitignore` ignores it. The README now lists the keys
+  directly and says why there is no template.
+- A specific Supabase project reference was hardcoded as the default in
+  `scripts/configure.ps1` (and in its comment, and in the design note), so
+  the interactive setup offered one person's project to every user. It now
+  prompts with `https://<project-ref>.supabase.co` as the shape.
+
+## [Unreleased]
+
 ### Removed
 - `netcheck/diagnostic_engine.py`, `fix_engine.py`, `fix_application.py`,
   `monitoring_engine.py`, `verification_engine.py`, and their test files

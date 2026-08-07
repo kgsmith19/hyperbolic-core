@@ -13,11 +13,11 @@ Intensity levels:
   - medium: Check structure, lean principle, basic examples (default)
   - high: Full validation of all docstrings and examples
 """
-import os
+import ast
 import re
 import sys
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import List
 
 
@@ -28,6 +28,17 @@ class Issue:
     severity: str  # low, medium, high
     rule: str
     message: str
+
+
+def _undocumented(tree, path):
+    """Public functions in `tree` that carry no docstring. A leading
+    underscore means the author already said it is internal."""
+    return [Issue(file=str(path), line=n.lineno, severity="low",
+                  rule="missing_docstring",
+                  message=f"Function '{n.name}' missing docstring")
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and not n.name.startswith("_") and not ast.get_docstring(n)]
 
 
 class DocChecker:
@@ -68,52 +79,25 @@ class DocChecker:
                 )
 
     def check_docstrings(self):
-        """Check for missing or incomplete docstrings."""
-        if self.intensity == "low":
+        """Public functions with no docstring.
+
+        Reads the AST rather than guessing line by line: a decorator, a
+        multi-line signature, or an `async def` all defeat a regex for
+        "a def followed by a docstring", and the previous version of this
+        check walked every file at `medium` only to report nothing.
+        """
+        if self.intensity != "high":
             return
 
-        py_files = self.root.rglob("*.py")
-        for pyfile in py_files:
+        for pyfile in self.root.rglob("*.py"):
             if ".git" in pyfile.parts or "__pycache__" in pyfile.parts:
                 continue
-
             try:
-                with open(pyfile) as f:
-                    content = f.read()
-
-                # Find public functions without docstrings
-                lines = content.split("\n")
-                for i, line in enumerate(lines, 1):
-                    # Simple heuristic: function def followed by no docstring
-                    if re.match(r"^\s*def\s+(\w+)\s*\(", line) and not line.strip(
-                        ).startswith("def _"
-                    ):
-                        # Check if next non-empty line is a docstring
-                        next_line_idx = i
-                        while next_line_idx < len(lines):
-                            next_line = lines[next_line_idx].strip()
-                            if next_line:
-                                if not (
-                                    next_line.startswith('"""')
-                                    or next_line.startswith("'''")
-                                ):
-                                    if self.intensity == "high":
-                                        func_match = re.search(r"def\s+(\w+)", line)
-                                        func_name = func_match.group(1) if func_match else "unknown"
-                                        self.issues.append(
-                                            Issue(
-                                                file=str(pyfile),
-                                                line=i,
-                                                severity="low",
-                                                rule="missing_docstring",
-                                                message=f"Function '{func_name}' missing docstring",
-                                            )
-                                        )
-                                break
-                            next_line_idx += 1
-
-            except Exception as e:
+                tree = ast.parse(pyfile.read_text())
+            except (OSError, SyntaxError) as e:
                 print(f"Error checking {pyfile}: {e}", file=sys.stderr)
+                continue
+            self.issues.extend(_undocumented(tree, pyfile))
 
     def check_for_scaffolding(self):
         """Find leftover scaffold/template files."""
@@ -168,49 +152,22 @@ class DocChecker:
 
 def main():
     import argparse
+    import json
 
     parser = argparse.ArgumentParser(description="Documentation check")
     parser.add_argument("path", nargs="?", default=".", help="Directory to check")
-    parser.add_argument(
-        "-i",
-        "--intensity",
-        choices=["low", "medium", "high"],
-        default="medium",
-        help="Validation intensity",
-    )
-    parser.add_argument(
-        "-f",
-        "--format",
-        choices=["text", "json"],
-        default="text",
-        help="Output format",
-    )
+    parser.add_argument("-i", "--intensity", choices=["low", "medium", "high"],
+                        default="medium", help="Validation intensity")
+    parser.add_argument("-f", "--format", choices=["text", "json"], default="text")
 
     args = parser.parse_args()
-
-    checker = DocChecker(args.path, args.intensity)
-    issues = checker.run()
+    issues = DocChecker(args.path, args.intensity).run()
 
     if args.format == "json":
-        import json
-
-        print(
-            json.dumps(
-                [
-                    {
-                        "file": i.file,
-                        "line": i.line,
-                        "severity": i.severity,
-                        "rule": i.rule,
-                        "message": i.message,
-                    }
-                    for i in issues
-                ]
-            )
-        )
+        print(json.dumps([asdict(i) for i in issues]))
     else:
-        for issue in sorted(issues, key=lambda x: (x.file, x.line)):
-            print(f"{issue.file}:{issue.line}: [{issue.severity}] {issue.rule}: {issue.message}")
+        for i in sorted(issues, key=lambda x: (x.file, x.line)):
+            print(f"{i.file}:{i.line}: [{i.severity}] {i.rule}: {i.message}")
 
     return 1 if issues else 0
 

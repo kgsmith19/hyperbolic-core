@@ -77,9 +77,8 @@ graph TB
 | ID | Container | Technology | Responsibility (one sentence) | Runs where | Traces to |
 |---|---|---|---|---|---|
 | C-001 | CLI dispatch (`__main__.py`) | Python 3, `argparse` | Parses `sys.argv` and dispatches to one command | User's machine | FR-001 through FR-007 |
-| C-002 | Probing + environment (`probes.py`, `environ.py`) | Python 3 stdlib (`subprocess`, `socket`, `ssl`, `urllib`) | Measures every network layer and gathers device/OS state | User's machine | FR-001, FR-004, FR-005 |
-| C-003 | Correlation + ranking (`diagnose.py`, `llmlog.py`) | Pure Python 3 | Classifies errors, joins them to samples, ranks causes | User's machine | FR-002, FR-003, FR-009, FR-010 |
-| C-004 | Hypothesis-specific diagnostics (`wifi_diagnostics.py` and six siblings) + runner (`all_diagnostics.py`) | Python 3 stdlib | One-shot concurrent environment sweep | User's machine | FR-006 |
+| C-002 | Probing + environment (`probes.py`, `environ.py`, `wlan_probes.py`, `docsis.py`) | Python 3 stdlib (`subprocess`, `socket`, `ssl`, `urllib`) | Measures every network layer and gathers device, OS, WAN, and provider state | User's machine | FR-001, FR-004, FR-005, FR-006 |
+| C-003 | Correlation + ranking (`diagnose.py`, `llmlog.py`) | Pure Python 3 | Classifies errors, joins them to samples, ranks causes from both the sample history and the environment scan | User's machine | FR-002, FR-003, FR-006, FR-009, FR-010 |
 | C-005 | Store (`store.py`, `schema.sql`) | `sqlite3` stdlib, PostgREST over `urllib` | Local source of truth; optional Supabase mirror | User's machine (SQLite); Supabase cloud (mirror) | FR-011, NFR-003 |
 | C-006 | Dashboard server (`server.py`, `ui.html`) | `http.server` stdlib, Alpine.js (vendored, no CDN) | Serves JSON + the dashboard page | User's machine | FR-007 |
 
@@ -102,11 +101,11 @@ graph TB
 | SR-002 | C-003 must classify a transcript line as an error using the `isApiErrorMessage` flag and `type: system` objects, never a substring match on raw text. | FR-002 | Test | `test_llmlog.py` (adversarial cases) | done |
 | SR-003 | C-003 must join an error to the sample with the smallest absolute time difference, and only accept it if that difference is ≤120 seconds. | FR-003 | Test | `test_diagnose.py::CorrelateTest` | done |
 | SR-004 | C-002 must re-resolve the default gateway on every `watch` tick, and only re-run the more expensive first-hop traceroute when the gateway actually changed. | FR-004 | Test | `test_main.py`, `test_probes.py::ParseIpconfigGatewayTest` | done |
-| SR-005 | C-004's seven checks must run concurrently via a bounded thread pool, so wall time is bounded by the slowest single check. | FR-006 | Test | `test_all_diagnostics.py` | done |
+| SR-005 | C-003 must derive a cause from a scan section only when that section's state is `ok`, so neither an unmeasured section nor a failed query can produce a fault. | FR-006, FR-008 | Test | `test_diagnose.py::ScanCauseTest` | done |
 | SR-006 | C-006 must build its `/api/data` response from a live query against C-005, never from a hardcoded or fabricated payload. | FR-007 | Inspection | `netcheck/server.py::payload()` read directly; `test_server.py` | done |
 | SR-007 | C-005's `mirror()` must mark a row synced only after a successful push, and must never block local writes on the mirror's availability. | FR-011, NFR-003 | Test | `test_store.py::MirrorTest` | done |
 | SR-008 | No subprocess/PowerShell call in C-002 may interpolate a caller-supplied value into the command text. | NFR-005 | Test | `test_environ.py::PowerShellArgumentSafetyTest` | done |
-| SR-009 | The full test suite must run with zero live network calls and zero sleeps beyond a probe's own timing, except fault-injection tests that explicitly skip when their OS-level capability (`tc`, `sudo`) is unavailable. | NFR-006 | Test | `python -m unittest discover -s tests -t .` (CI) | done |
+| SR-009 | The full test suite must run with zero live network calls, zero sleeps beyond a probe's own timing, and zero skips — a test that does not run on the machine running the suite is not coverage. | NFR-006 | Test | `python -m unittest discover -s tests -t .` reports `OK` with no `skipped` count | done |
 | SR-010 | No module in `netcheck/` may import a package outside the Python 3 standard library. | NFR-001 | Inspection | `code-quality.yml` import scan | done |
 
 **Verification methods (pick exactly one per row):**
@@ -192,7 +191,7 @@ Summary only. `netcheck/schema.sql` is authoritative for exact types.
 | Monitoring | The tool itself doesn't monitor its own health beyond CI on every push; there is no production instance to page on. |
 | Alerting | None — the user runs `watch` in the foreground or a terminal multiplexer and reads its own output. |
 | Logging | `watch`/`diagnose`/etc. print human-readable status to stdout; no structured log file beyond the SQLite database itself, which is the durable record. |
-| Runbook | `netcheck/docs/TROUBLESHOOTING.md` — symptom to cause to fix. |
+| Runbook | `netcheck diagnose` itself: every ranked cause carries its evidence and its fix. |
 
 ## 9. Technology decisions
 
@@ -202,7 +201,7 @@ Summary only. `netcheck/schema.sql` is authoritative for exact types.
 | Local storage | SQLite | Flat JSON/CSV files, an embedded key-value store | A cloud database cannot record an outage while it's happening; SQLite gives real queries and a durable file with zero setup | Medium (schema migration) | None — stdlib `sqlite3` |
 | Remote mirror | Supabase (Postgres + PostgREST) | Self-hosted Postgres, a custom API | Free tier, RLS built in, PostgREST means no server code to write for simple reads | Low (mirror is optional and additive) | Low — plain Postgres underneath |
 | Dashboard UI | Single HTML file + vendored Alpine.js | A full frontend framework + build step | Consistent with the no-build-step constraint (CON-001); Alpine is small enough to vendor directly, no CDN dependency | Low | None — vendored copy, not a live dependency |
-| Test runner | `unittest` (stdlib) | `pytest` as the primary runner | Matches the "no pip required for local dev" constraint; `pytest` still runs in CI as a coverage-reporting convenience only | Low | None |
+| Test runner | `unittest` (stdlib) | `pytest` | Matches the no-dependency constraint. CI runs the same stdlib command, so there is no environment where a package is required. | Low | None |
 
 **Required for each row:** maturity, migration cost, and lock-in risk are stated in the table above; none of these choices carry meaningful lock-in given the standard-library-first constraint.
 

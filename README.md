@@ -11,7 +11,8 @@ Pure Python 3 standard library — nothing to install, no `pip`, no build step.
 ```bash
 git clone https://github.com/kgsmith19/network-checker
 cd network-checker
-python -m netcheck full-check --format quick    # one-shot check, right now
+python -m netcheck scan        # one-shot snapshot of every environment section
+python -m netcheck probe       # one measured tick across every network layer
 ```
 
 That alone gives you a snapshot. For a problem that comes and goes, leave a
@@ -26,8 +27,8 @@ python -m netcheck serve      # dashboard at http://127.0.0.1:8787
 `watch` also reads Claude Code's own error logs and tells you which of your
 past API errors were actually your network, and which weren't.
 
-New to this? `netcheck/docs/QUICKSTART.md` walks through every command with real
-sample output. Running in a container? See `netcheck/docs/DEPLOYMENT.md`.
+Running in a container, or cutting a release? See
+`docs/notes/2026-08-07-deploying-and-releasing-netcheck.md`.
 
 ## Why it exists
 
@@ -89,11 +90,14 @@ Always, no configuration:
   something reaps it — the one probe that reproduces a streaming response
   dying mid-flight
 
-With credentials in a local `.env` (gitignored, never committed) — copy
-`.env.example`, fill in what you have, or run `scripts/configure.ps1` for an
-interactive prompt that writes it for you (nothing typed is echoed, kept in
-shell history, or passed as an argument). Every value is optional; absent
-ones make the feature report `unavailable`, not fail:
+With credentials in a local `.env` (gitignored, never committed). Run
+`scripts/configure.ps1` for an interactive prompt that writes it for you —
+nothing typed is echoed, kept in shell history, or passed as an argument. Or
+write the keys yourself: `MODEM_HOST`, `MODEM_USER`, `MODEM_PASS`,
+`ROUTER_HOST`, `ROUTER_USER`, `ROUTER_PASS`, and optionally `SUPABASE_URL`
+and `SUPABASE_KEY`. No `.env.example` ships on purpose: a committed template
+is one careless edit away from holding a live key. Every value is optional;
+absent ones make the feature report `unavailable`, not fail:
 
 - **Modem** DOCSIS SNR, power levels, uncorrectable codewords
 - **Router** uptime, clients, and whether AiProtection / Trend Micro DPI is on
@@ -133,14 +137,13 @@ flag instead.
 - `docs/PRD.md` — the living source of truth: requirements, status, scope
 - `docs/SYSTEM-REQUIREMENTS.md` — functional/non-functional requirements, traced
 - `docs/DATA-FLOW-DIAGRAM.md` — how a tick moves from probe to stored row to verdict
-- `netcheck/docs/QUICKSTART.md` — running `full-check`, `watch`, and `serve` for the first time
-- `netcheck/docs/TROUBLESHOOTING.md` — symptom → cause → fix
-- `netcheck/docs/API.md` — function-level reference for every module
-- `netcheck/docs/ARCHITECTURE.md` — module map, decision trees, module interactions
-- `netcheck/docs/CONTRIBUTING.md` — adding a new diagnostic, PDD/SDD/TDD standards
-- `netcheck/docs/DEVELOPMENT.md` — local dev setup, test commands, code-quality gates
-- `netcheck/docs/DEPLOYMENT.md` — local, container, and cloud deployment; releases; upgrade path
+- `AGENTS.md` — how to work in this repo: layout, standards, gates, adding a diagnostic
+- `docs/notes/` — runbooks and design notes, including deployment and releases
 - `CHANGELOG.md` — what changed, by version
+
+There is deliberately no hand-written API reference. One existed and drifted:
+it documented functions that had never been written, and gave `correlate()`
+verdicts it has never returned. The docstrings are the reference.
 
 Known issues and accepted risks are tracked as
 [GitHub issues](https://github.com/kgsmith19/network-checker/issues), not in

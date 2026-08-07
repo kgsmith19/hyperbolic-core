@@ -1,3 +1,13 @@
+---
+title: netcheck design
+status: active
+scope: repo
+created: 2026-08-04
+updated: 2026-08-04
+owner: Kyle Smith
+traces: [FR-001, FR-002, FR-003]
+---
+
 # netcheck — design
 
 Date: 2026-08-04
@@ -191,7 +201,8 @@ Single `ui.html`, dark, no remote assets:
 
 ### Supabase
 
-Project `netcheck` (`crqhkqmrkhmfnrhtczlf`, us-east-1), $10/mo, confirmed.
+Project `netcheck` (us-east-1), $10/mo, confirmed. The project ref lives
+in `SUPABASE_URL` in the local `.env`, not here.
 
 Two DDL files — `schema.sql` (SQLite) and `supabase/migrations/0001_init.sql`
 (Postgres) — carrying the same logical schema. A single DDL serving both was in

@@ -18,8 +18,8 @@ import ast
 import re
 import sys
 from pathlib import Path
-from dataclasses import dataclass
-from typing import List, Tuple
+from dataclasses import asdict, dataclass
+from typing import List
 
 
 @dataclass
@@ -32,6 +32,34 @@ class Finding:
     code_snippet: str = ""
 
 
+def _eval_or_exec(name, _module, _node):
+    if name in ("eval", "exec"):
+        return f"Use of {name}() is unsafe"
+
+
+def _unsafe_deserialize(name, module, _node):
+    if (name in ("load", "loads") and isinstance(module, ast.Name)
+            and module.id in ("pickle", "yaml")):
+        return f"Unsafe use of {module.id}.{name}()"
+
+
+def _shell_true(name, _module, node):
+    if name in ("run", "call") and any(
+            k.arg == "shell" and isinstance(k.value, ast.Constant)
+            and k.value.value is True for k in node.keywords):
+        return "subprocess with shell=True is vulnerable to injection"
+
+
+# (pattern name, predicate). Each predicate gets the called name, the
+# attribute's module if there is one, and the node; it returns the finding's
+# message, or None. Adding a check is a row here.
+CALL_RULES = (
+    ("dangerous_eval", _eval_or_exec),
+    ("insecure_deserialization", _unsafe_deserialize),
+    ("shell_injection", _shell_true),
+)
+
+
 class SecurityScanner(ast.NodeVisitor):
     def __init__(self, filename: str, source: str, intensity: str = "medium"):
         self.filename = filename
@@ -40,118 +68,57 @@ class SecurityScanner(ast.NodeVisitor):
         self.intensity = intensity
         self.findings: List[Finding] = []
 
+    def _flag(self, node, pattern, message, severity="high"):
+        line = node.lineno
+        snippet = self.lines[line - 1] if line <= len(self.lines) else ""
+        self.findings.append(Finding(file=self.filename, line=line,
+                                     severity=severity, pattern=pattern,
+                                     message=message, code_snippet=snippet.strip()))
+
     def visit_Call(self, node):
-        # Check for dangerous functions
-        func_name = ""
-        if isinstance(node.func, ast.Name):
-            func_name = node.func.id
-        elif isinstance(node.func, ast.Attribute):
-            func_name = node.func.attr
-
-        # Dangerous builtin functions
-        if func_name in ("eval", "exec"):
-            line = node.lineno
-            snippet = self.lines[line - 1] if line <= len(self.lines) else ""
-            self.findings.append(
-                Finding(
-                    file=self.filename,
-                    line=line,
-                    severity="high",
-                    pattern="dangerous_eval",
-                    message=f"Use of {func_name}() is unsafe",
-                    code_snippet=snippet.strip(),
-                )
-            )
-
-        # Insecure deserialization
-        if func_name in ("load", "loads"):
-            if hasattr(node, "func") and isinstance(node.func, ast.Attribute):
-                module = node.func.value
-                if isinstance(module, ast.Name) and module.id in ("pickle", "yaml"):
-                    line = node.lineno
-                    snippet = self.lines[line - 1] if line <= len(self.lines) else ""
-                    self.findings.append(
-                        Finding(
-                            file=self.filename,
-                            line=line,
-                            severity="high",
-                            pattern="insecure_deserialization",
-                            message=f"Unsafe use of {module.id}.{func_name}()",
-                            code_snippet=snippet.strip(),
-                        )
-                    )
-
-        # subprocess with shell=True
-        if func_name == "run" or func_name == "call":
-            for keyword in node.keywords:
-                if keyword.arg == "shell" and isinstance(keyword.value, ast.Constant):
-                    if keyword.value.value is True:
-                        line = node.lineno
-                        snippet = self.lines[line - 1] if line <= len(self.lines) else ""
-                        self.findings.append(
-                            Finding(
-                                file=self.filename,
-                                line=line,
-                                severity="high",
-                                pattern="shell_injection",
-                                message="subprocess with shell=True is vulnerable to injection",
-                                code_snippet=snippet.strip(),
-                            )
-                        )
-
+        func = node.func
+        name = (func.id if isinstance(func, ast.Name)
+                else func.attr if isinstance(func, ast.Attribute) else "")
+        module = func.value if isinstance(func, ast.Attribute) else None
+        for pattern, matches in CALL_RULES:
+            message = matches(name, module, node)
+            if message:
+                self._flag(node, pattern, message)
         self.generic_visit(node)
+
+
+SECRET_PATTERNS = {
+    "api_key": (r"(api[_-]?key|apikey)\s*[=:]\s*['\"]([^'\"]{16,})['\"]", "high"),
+    "password": (r"(password|passwd)\s*[=:]\s*['\"]([^'\"]+)['\"]", "high"),
+    "token": (r"(token|secret)\s*[=:]\s*['\"]([^'\"]{20,})['\"]", "high"),
+    # Lookahead so a longer identifier that merely starts with AKIA is not a hit.
+    "aws_key": (r"AKIA[0-9A-Z]{16}(?!\w)", "high"),
+}
+
+AGGRESSIVE_PATTERNS = {
+    "generic_secret": (r"secret\s*[=:]\s*['\"]([^'\"]+)['\"]", "medium"),
+    "url_credentials": (r"(http|https)://[^:]+:[^@]+@", "high"),
+}
 
 
 def scan_for_secrets(filepath: str, intensity: str = "medium") -> List[Finding]:
     """Regex-based scanning for hardcoded secrets."""
-    findings = []
-
-    secret_patterns = {
-        "api_key": (
-            r"(api[_-]?key|apikey)\s*[=:]\s*['\"]([^'\"]{16,})['\"]",
-            "high",
-        ),
-        "password": (r"(password|passwd)\s*[=:]\s*['\"]([^'\"]+)['\"]", "high"),
-        "token": (
-            r"(token|secret)\s*[=:]\s*['\"]([^'\"]{20,})['\"]",
-            "high",
-        ),
-        "aws_key": (
-            r"AKIA[0-9A-Z]{16}(?!\w)",  # Lookahead to avoid matching in strings
-            "high",
-        ),
-    }
-
+    patterns = dict(SECRET_PATTERNS)
     if intensity == "high":
-        secret_patterns.update({
-            "generic_secret": (r"secret\s*[=:]\s*['\"]([^'\"]+)['\"]", "medium"),
-            "url_credentials": (
-                r"(http|https)://[^:]+:[^@]+@",
-                "high",
-            ),
-        })
+        patterns.update(AGGRESSIVE_PATTERNS)
 
     try:
         with open(filepath) as f:
             lines = f.readlines()
-    except:
-        return findings
+    except OSError:
+        return []
 
-    for line_no, line in enumerate(lines, 1):
-        for pattern_name, (pattern, severity) in secret_patterns.items():
-            if re.search(pattern, line, re.IGNORECASE):
-                findings.append(
-                    Finding(
-                        file=filepath,
-                        line=line_no,
-                        severity=severity,
-                        pattern=pattern_name,
-                        message=f"Potential {pattern_name} found",
-                        code_snippet=line.strip(),
-                    )
-                )
-
-    return findings
+    return [Finding(file=filepath, line=line_no, severity=severity,
+                    pattern=name, message=f"Potential {name} found",
+                    code_snippet=line.strip())
+            for line_no, line in enumerate(lines, 1)
+            for name, (pattern, severity) in patterns.items()
+            if re.search(pattern, line, re.IGNORECASE)]
 
 
 def check_file(filepath: str, intensity: str = "medium") -> List[Finding]:
@@ -197,50 +164,21 @@ def scan_directory(root: str, intensity: str = "medium") -> List[Finding]:
 
 def main():
     import argparse
+    import json
 
     parser = argparse.ArgumentParser(description="Security review scanner")
     parser.add_argument("path", nargs="?", default=".", help="File or directory to scan")
-    parser.add_argument(
-        "-i",
-        "--intensity",
-        choices=["low", "medium", "high"],
-        default="medium",
-        help="Violation detection intensity",
-    )
-    parser.add_argument(
-        "-f",
-        "--format",
-        choices=["text", "json"],
-        default="text",
-        help="Output format",
-    )
+    parser.add_argument("-i", "--intensity", choices=["low", "medium", "high"],
+                        default="medium", help="Detection intensity")
+    parser.add_argument("-f", "--format", choices=["text", "json"], default="text")
 
     args = parser.parse_args()
     path = Path(args.path)
-
-    if path.is_file():
-        findings = check_file(str(path), args.intensity)
-    else:
-        findings = scan_directory(str(path), args.intensity)
+    findings = (check_file(str(path), args.intensity) if path.is_file()
+                else scan_directory(str(path), args.intensity))
 
     if args.format == "json":
-        import json
-
-        print(
-            json.dumps(
-                [
-                    {
-                        "file": f.file,
-                        "line": f.line,
-                        "severity": f.severity,
-                        "pattern": f.pattern,
-                        "message": f.message,
-                        "snippet": f.code_snippet,
-                    }
-                    for f in findings
-                ]
-            )
-        )
+        print(json.dumps([asdict(f) for f in findings]))
     else:
         for f in sorted(findings, key=lambda x: (x.file, x.line)):
             print(f"{f.file}:{f.line}: [{f.severity}] {f.pattern}: {f.message}")

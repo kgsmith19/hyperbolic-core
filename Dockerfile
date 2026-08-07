@@ -1,7 +1,7 @@
 # Stdlib only, per AGENTS.md -- there is nothing to `pip install`, so there
 # is no build stage. This just packages the interpreter and the source tree.
 #
-# Caveat (see docs/DEPLOYMENT.md): environ.py's Wi-Fi/driver/event-log/MTU
+# Caveat (see docs/notes/2026-08-07-deploying-and-releasing-netcheck.md): environ.py's Wi-Fi/driver/event-log/MTU
 # checks shell out to Windows-only tools (netsh, PowerShell) or, since Phase
 # 26, macOS's airport -- none of which exist in this Linux image. Inside a
 # container, `full-check`/`diagnose`/`serve` still work for the checks that

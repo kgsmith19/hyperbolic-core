@@ -12,7 +12,7 @@
 # The Supabase value must be the SERVICE ROLE key, not the publishable one:
 # every table has RLS enabled with no policies, so anon deliberately cannot
 # write. Find it at:
-#   https://supabase.com/dashboard/project/crqhkqmrkhmfnrhtczlf/settings/api
+#   https://supabase.com/dashboard/project/<project-ref>/settings/api
 
 $ErrorActionPreference = 'Stop'
 
@@ -61,7 +61,7 @@ function Cur([string]$k) { if ($vals.ContainsKey($k)) { return $vals[$k] } else 
 # ----------------------------------------------------------------- prompt ---
 
 Write-Host '--- Supabase mirror (optional; SQLite is always the source of truth) ---'
-$vals['SUPABASE_URL'] = Read-Plain  'SUPABASE_URL ' (& { $c = Cur 'SUPABASE_URL'; if ($c) { $c } else { 'https://crqhkqmrkhmfnrhtczlf.supabase.co' } })
+$vals['SUPABASE_URL'] = Read-Plain  'SUPABASE_URL (https://<project-ref>.supabase.co)' (Cur 'SUPABASE_URL')
 $vals['SUPABASE_KEY'] = Read-Secret 'SUPABASE_KEY (service role, hidden)' (Cur 'SUPABASE_KEY')
 
 Write-Host "`n--- Cable modem: DOCSIS SNR, power, uncorrectable codewords ---"

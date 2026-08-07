@@ -94,10 +94,14 @@ def _block(channel):
     return (channel - 36) // 16
 
 
-def parse_wlan_networks(text, channel, own_bssid=None):
-    """Count competing radios near our channel, excluding our own AP."""
-    seen = []
-    current = None
+def _bssid_channels(text):
+    """Every (bssid, channel) pair in `netsh wlan show networks mode=bssid`.
+
+    A BSSID line opens a record and the next Channel line closes it; a BSSID
+    with no channel after it is dropped rather than paired with the following
+    network's channel.
+    """
+    seen, current = [], None
     for line in text.splitlines():
         bssid = re.search(r"BSSID\s+\d+\s*:\s*([0-9a-fA-F:]{17})", line)
         if bssid:
@@ -107,18 +111,29 @@ def parse_wlan_networks(text, channel, own_bssid=None):
         if ch and current:
             seen.append((current, int(ch.group(1))))
             current = None
+    return seen
 
+
+def _overlaps(theirs, ours):
+    """True when a neighbour contends for our airtime without sitting exactly
+    on us. 2.4 GHz channels are 5 apart but 20 MHz wide, so anything within 5
+    overlaps; 5 GHz contends across the whole 80 MHz block."""
+    if theirs == ours:
+        return False
+    if ours <= 14:
+        return abs(theirs - ours) < 5
+    return theirs > 14 and _block(theirs) == _block(ours)
+
+
+def parse_wlan_networks(text, channel, own_bssid=None):
+    """Count competing radios near our channel, excluding our own AP."""
+    seen = _bssid_channels(text)
     if not seen:
         return {"state": "unavailable", "reason": "scan returned no BSSIDs",
                 "total_bssids": 0, "cochannel": 0, "same_block": 0}
 
     own = (own_bssid or "").lower()
-    others = [(b, c) for b, c in seen if b != own]
-    cochannel = sum(1 for _, c in others if c == channel)
-    if channel <= 14:                       # 2.4 GHz: 20 MHz channels overlap
-        block = sum(1 for _, c in others if c != channel and abs(c - channel) < 5)
-    else:
-        block = sum(1 for _, c in others
-                    if c != channel and c > 14 and _block(c) == _block(channel))
+    others = [c for b, c in seen if b != own]
     return {"state": "ok", "total_bssids": len(seen),
-            "cochannel": cochannel, "same_block": block}
+            "cochannel": sum(1 for c in others if c == channel),
+            "same_block": sum(1 for c in others if _overlaps(c, channel))}

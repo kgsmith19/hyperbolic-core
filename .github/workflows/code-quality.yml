@@ -10,98 +10,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
-      - name: Code Simplification Check
-        continue-on-error: false
-        run: |
-          echo "=== Code Simplification (Low Intensity) ==="
-          echo "Threshold: Functions > 100 lines (allows necessary diagnostic algorithms)"
-          python tools/code_simplification.py netcheck -i low -f json > /tmp/simplification.json || true
-          python tools/code_simplification.py netcheck -i low
-          echo ""
-          echo "Summary:"
-          python -c "
-          import json
-          try:
-              with open('/tmp/simplification.json') as f:
-                  data = json.load(f)
-                  if data:
-                      print(f'⚠ Found {len(data)} functions over 100 lines')
-                      exit(1)
-                  else:
-                      print('✓ No excessively long functions')
-          except:
-              pass
-          "
-
-      - name: Security Review
-        continue-on-error: false
-        run: |
-          echo "=== Security Review (High Intensity) ==="
-          python tools/security_review.py . -i high -f json > /tmp/security.json || true
-          python tools/security_review.py . -i high
-          echo ""
-          echo "Checking for HIGH severity issues..."
-          python -c "
-          import json
-          try:
-              with open('/tmp/security.json') as f:
-                  data = json.load(f)
-                  high_severity = [x for x in data if x.get('severity') == 'high']
-                  if high_severity:
-                      print(f'ERROR: Found {len(high_severity)} HIGH severity security issues!')
-                      for issue in high_severity:
-                          print(f'  - {issue.get(\"pattern\")}: {issue.get(\"message\")}')
-                      exit(1)
-                  else:
-                      print('✓ No HIGH severity security issues found')
-          except:
-              pass
-          "
-
-      - name: Documentation Check
-        continue-on-error: false
-        run: |
-          echo "=== Documentation Check (Medium Intensity) ==="
-          echo "Requires: README exists, no template scaffolding, baseline docstrings"
-          python tools/documentation_check.py . -i medium -f json > /tmp/docs.json || true
-          python tools/documentation_check.py . -i medium
-          echo ""
-          echo "Summary:"
-          python -c "
-          import json
-          try:
-              with open('/tmp/docs.json') as f:
-                  data = json.load(f)
-                  if data:
-                      print(f'⚠ Found {len(data)} documentation issues')
-                      # Only fail on MEDIUM and HIGH severity
-                      blocking = [x for x in data if x.get('severity') in ('medium', 'high')]
-                      if blocking:
-                          print(f'✗ {len(blocking)} blocking issues found')
-                          exit(1)
-                      else:
-                          print('✓ No blocking documentation issues')
-                  else:
-                      print('✓ Documentation standards met')
-          except:
-              pass
-          "
-
-      - name: Quality Report
-        if: always()
-        run: |
-          echo "## Code Quality Report"
-          echo ""
-          echo "### Simplification"
-          [ -f /tmp/simplification.json ] && python -c "import json; data=json.load(open('/tmp/simplification.json')); print(f'- Issues: {len(data)}')" || echo "- No report"
-          echo ""
-          echo "### Security"
-          [ -f /tmp/security.json ] && python -c "import json; data=json.load(open('/tmp/security.json')); print(f'- Issues: {len(data)}'); high=[x for x in data if x.get('severity')=='high']; print(f'- HIGH severity: {len(high)}')" || echo "- No report"
-          echo ""
-          echo "### Documentation"
-          [ -f /tmp/docs.json ] && python -c "import json; data=json.load(open('/tmp/docs.json')); print(f'- Issues: {len(data)}')" || echo "- No report"
+      # tools/check.sh is the gate: it runs the suite, all three quality tools
+      # at the intensities rules/01-BUDGETS.md declares, and the shell syntax
+      # checks, printing PASS/FAIL per step and exiting non-zero if any failed.
+      # Running it here rather than restating its steps means local and CI
+      # cannot drift, and there is one place to add a check.
+      - name: Run the gate
+        run: bash tools/check.sh

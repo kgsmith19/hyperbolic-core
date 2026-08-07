@@ -2,40 +2,21 @@ name: Tests
 
 on:
   workflow_dispatch:  # manual only -- see tools/check.sh to run this locally instead
-  workflow_call:  # so release.yml can still run the same suite when manually dispatched
+  workflow_call:      # so release.yml can run the same suite when dispatched
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.9', '3.10', '3.11']
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.12'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-cov
-
-      - name: Run tests
-        run: |
-          pytest tests/ -v --tb=short --cov=netcheck --cov-report=xml
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        if: matrix.python-version == '3.11'
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
-
-      - name: Test results
-        if: always()
-        run: |
-          echo "Tests completed with status: ${{ job.status }}"
+      # No pip install: netcheck is standard library only (AGENTS.md), and its
+      # tests are stdlib unittest. A CI step that installs packages is the one
+      # place that constraint would rot without anyone noticing.
+      - name: Run the suite
+        run: python -m unittest discover -s tests -t . -v

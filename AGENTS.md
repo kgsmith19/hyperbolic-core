@@ -43,8 +43,13 @@ python -m netcheck sync                        # push to Supabase
 
 | File | Responsibility |
 |---|---|
-| `netcheck/probes.py` | Per-tick measurement; pure parsers over command output |
-| `netcheck/environ.py` | Wi-Fi, driver, event log, MTU, Tailscale, modem, router |
+| `netcheck/probes.py` | Per-tick measurement: ping, TLS, HTTP, idle-hold |
+| `netcheck/resolver.py` | Name resolution, incl. a minimal DNS/UDP client |
+| `netcheck/route.py` | Default gateway and the ISP's first hop |
+| `netcheck/wlan_probes.py` | `netsh`/`airport` Wi-Fi parsers |
+| `netcheck/docsis.py` | DOCSIS status-page parser |
+| `netcheck/environ.py` | This host: Wi-Fi, driver, event log, TCP, MTU, Tailscale; composes `scan()` |
+| `netcheck/remote.py` | Reached over the network: modem, router, WAN address, provider status |
 | `netcheck/llmlog.py` | Transcript scraping, error classification, offsets |
 | `netcheck/store.py` | SQLite schema and writes; Supabase mirror |
 | `netcheck/diagnose.py` | Culprit rules, correlation, ranked causes |
@@ -74,5 +79,34 @@ before `llmlog.py` existed. `test_llmlog.py` holds the adversarial cases.
 during the outage. Supabase is a mirror; a failed push must leave rows
 unsynced for retry, never mark them done.
 
-**Tests are hermetic.** No network, no sleeps beyond a probe's own timing, no
-shared state. Add the test before the code and watch it fail first.
+**Tests are hermetic, and none of them skip.** No network, no sleeps beyond a
+probe's own timing, no shared state. A test that does not run on the machine
+running the suite is not coverage, so anything needing `sudo`, `tc`, or
+`CAP_NET_ADMIN` does not belong here. Add the test before the code and watch
+it fail first.
+
+## Adding a diagnostic
+
+A new standing condition is a **row in `diagnose._SCAN_RULES`**, not a new
+module. The row names the `environ.scan()` section it reads, a confidence,
+and a callback returning either an evidence string or `None`.
+
+1. Write the test first, in `tests/test_diagnose.py::ScanCauseTest`: one that
+   the cause fires on a realistic section, one that it does *not* fire on the
+   healthy version of the same section. Watch both fail.
+2. If it needs a new scan section, that section is a pure function over text
+   or a thin I/O wrapper around one, with a captured fixture in
+   `tests/fixtures/`.
+3. Give the cause a `_FIXES` entry saying what to actually do. A cause with
+   no fix is a complaint, and
+   `test_every_scan_cause_carries_an_actionable_fix` enforces it.
+
+`_scan_causes()` skips any section whose state is not `ok`, so neither an
+unmeasured section nor a broken query can invent a fault.
+
+## Gates
+
+`bash tools/check.sh` is the gate, and CI runs the same script. It runs the
+suite, `code_simplification` at the ceilings in `rules/01-BUDGETS.md`
+(40 lines, 4 params, cyclomatic 8, nesting 3), the security and documentation
+scanners, and shell syntax checks. It must exit 0 before a merge.

@@ -69,6 +69,36 @@ def _hz(text):
     return int(m.group()) if m else None
 
 
+# Per table: the Init*TagValue function, its field count, and the name of
+# each field in order. `int`/`_num`/`_hz` convert; None keeps the raw string.
+_TABLES = (
+    ("InitDsTableTagValue", 9,
+     (("channel", None), ("lock_status", None), ("modulation", None),
+      ("channel_id", None), ("frequency_hz", _hz), ("power_dbmv", _num),
+      ("snr_db", _num), ("correctables", int), ("uncorrectables", int))),
+    ("InitUsTableTagValue", 7,
+     (("channel", None), ("lock_status", None), ("channel_type", None),
+      ("channel_id", None), ("symbol_rate", None), ("frequency_hz", _hz),
+      ("power_dbmv", _num))),
+    ("InitDsOfdmTableTagValue", 11,
+     (("channel", None), ("lock_status", None), ("profile_id", None),
+      ("channel_id", None), ("frequency_hz", _hz), ("power_dbmv", _num),
+      ("snr_db", _num), ("subcarrier_range", None), ("unerrored", int),
+      ("correctable", int), ("uncorrectable", int))),
+    ("InitUsOfdmaTableTagValue", 6,
+     (("channel", None), ("lock_status", None), ("profile_id", None),
+      ("channel_id", None), ("frequency_hz", _hz), ("power_dbmv", _num))),
+)
+
+
+def _channel_tables(js):
+    """The four channel tables, each a list of dicts, in _TABLES order."""
+    return [[{name: convert(value) if convert else value
+              for (name, convert), value in zip(fields, row)}
+             for row in _docsis_rows(js, fn, width)]
+            for fn, width, fields in _TABLES]
+
+
 def parse_docsis_status(js):
     """Parse a NETGEAR combo gateway's DocsisStatusAdv.htm.
 
@@ -79,25 +109,7 @@ def parse_docsis_status(js):
     m = re.search(r"var\s+tagValueList\s*=\s*(\{.*?\});", body, re.DOTALL)
     summary = json.loads(m.group(1)) if m else {}
 
-    ds = [{"channel": r[0], "lock_status": r[1], "modulation": r[2],
-           "channel_id": r[3], "frequency_hz": _hz(r[4]), "power_dbmv": _num(r[5]),
-           "snr_db": _num(r[6]), "correctables": int(r[7]), "uncorrectables": int(r[8])}
-          for r in _docsis_rows(js, "InitDsTableTagValue", 9)]
-
-    us = [{"channel": r[0], "lock_status": r[1], "channel_type": r[2],
-           "channel_id": r[3], "symbol_rate": r[4], "frequency_hz": _hz(r[5]),
-           "power_dbmv": _num(r[6])}
-          for r in _docsis_rows(js, "InitUsTableTagValue", 7)]
-
-    ds_ofdm = [{"channel": r[0], "lock_status": r[1], "profile_id": r[2],
-                "channel_id": r[3], "frequency_hz": _hz(r[4]), "power_dbmv": _num(r[5]),
-                "snr_db": _num(r[6]), "subcarrier_range": r[7],
-                "unerrored": int(r[8]), "correctable": int(r[9]), "uncorrectable": int(r[10])}
-               for r in _docsis_rows(js, "InitDsOfdmTableTagValue", 11)]
-
-    us_ofdma = [{"channel": r[0], "lock_status": r[1], "profile_id": r[2],
-                 "channel_id": r[3], "frequency_hz": _hz(r[4]), "power_dbmv": _num(r[5])}
-                for r in _docsis_rows(js, "InitUsOfdmaTableTagValue", 6)]
+    ds, us, ds_ofdm, us_ofdma = _channel_tables(js)
 
     def locked(rows):
         return [r for r in rows if r["lock_status"] == "Locked"]

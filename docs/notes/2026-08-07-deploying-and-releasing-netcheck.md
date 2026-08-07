@@ -1,4 +1,14 @@
-# Deployment Guide
+---
+title: Deploying and releasing netcheck
+status: active
+scope: repo
+created: 2026-08-07
+updated: 2026-08-07
+owner: Kyle Smith
+traces: [NFR-001, FR-011]
+---
+
+# Deploying and releasing netcheck
 
 ## Why there's no `pip install netcheck`
 
@@ -11,10 +21,10 @@ Packaging here means: clone it, run it.
 ```bash
 git clone https://github.com/kgsmith19/network-checker
 cd network-checker
-python -m netcheck full-check --format quick
+python -m netcheck scan
 ```
 
-That's the entire "install." See `netcheck/docs/QUICKSTART.md` for day-to-day usage.
+That's the entire "install." See `README.md` for day-to-day usage.
 
 ## Local deployment
 
@@ -35,7 +45,7 @@ docstring).
 
 ```bash
 docker build -t netcheck .
-docker run --rm -v netcheck-data:/data netcheck full-check --format quick
+docker run --rm -v netcheck-data:/data netcheck scan
 docker run --rm -v netcheck-data:/data -p 8787:8787 netcheck serve --no-open
 ```
 
@@ -47,7 +57,7 @@ container those sections report `unavailable`, same as they would on any
 Linux host missing those binaries — not a fabricated `ok`, per the
 three-state model in `AGENTS.md`. What does work fully in a container:
 
-- `netcheck full-check`'s NAT/CGNAT/Anthropic-status/router checks (pure
+- `netcheck scan`'s WAN/provider-status/modem/router sections (pure
   HTTP/socket work)
 - `netcheck probe`/`diagnose`'s gateway/ISP-hop/internet/DNS/TLS/HTTP layers
 - `netcheck serve` reading an existing `netcheck.db` (mount it read-only to
@@ -104,7 +114,7 @@ bash tools/deploy.sh                 # local checks + build + smoke-test + save 
 ```
 
 `tools/deploy.sh` runs `tools/check.sh` first, builds `netcheck:vX.Y.Z`,
-smoke-tests it (`--version` and a real `full-check`), and saves it as
+smoke-tests it (`--version` and a real `scan`), and saves it as
 `netcheck-image-vX.Y.Z.tar.gz`. It prints the `git tag`/`gh release create`
 commands to publish from there if you want a GitHub Release; or dispatch
 the "Release" workflow manually from the Actions tab (picking the `vX.Y.Z`

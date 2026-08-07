@@ -16,12 +16,11 @@ GitHub-hosted run (e.g. to double-check something before an admin merges).
 ## Workflows
 
 ### 1. Tests (`tests.yml`)
-Runs comprehensive test suite across Python 3.9, 3.10, 3.11.
+Runs the stdlib unittest suite on Python 3.12, the declared target.
 
 **Triggers:** Manual (`workflow_dispatch`), or `workflow_call` from `release.yml`
 
 **Steps:**
-- Install dependencies (pytest, pytest-cov)
 - Run all tests in `tests/` directory
 - Generate coverage reports
 - Upload to codecov
@@ -51,27 +50,7 @@ Runs automation tools to enforce code standards.
 
 ---
 
-### 3. Fixer Validation (`fixer-validation.yml`)
-Validates network fixer system functionality.
-
-**Triggers:** Manual (`workflow_dispatch`)
-
-**Tests:**
-- Fixer module imports correctly
-- All detection methods work
-- Dry-run mode executes
-- JSON output is valid
-- Shell scripts have valid syntax
-
----
-
-### 4. Status Checks (`status-checks.yml`)
-Aggregates workflow results (triggered by the three above completing, so it
-only fires now if one of them is manually run).
-
----
-
-### 5. Release (`release.yml`)
+### 3. Release (`release.yml`)
 Builds and smoke-tests the Docker image, then opens a draft GitHub Release.
 
 **Triggers:** Manual (`workflow_dispatch`) -- pick the `vX.Y.Z` tag to run
@@ -85,8 +64,8 @@ when you actually want the published GitHub Release + artifact.
 ## Branch protection note
 
 If **Settings -> Branches -> main** has "Require status checks to pass
-before merging" configured for `test (3.9)` / `test (3.10)` / `test (3.11)`
-/ `quality` / `fixer-tests`, a PR will now sit unmergeable forever --
+before merging" configured for `test`
+/ `quality`, a PR will now sit unmergeable forever --
 those checks no longer report anything automatically, and GitHub can't
 tell "not required" from "required but never ran." Either remove those as
 required checks (rely on `tools/check.sh` run before merge instead), or
@@ -105,8 +84,8 @@ bash tools/check.sh
 
 This runs, in order: the full test suite (`python -m unittest discover -s
 tests -v`), all three quality tools at the same intensities `code-quality.yml`
-used, the fixer import/dry-run/JSON-output checks, and shell syntax checks on
-`tools/fix_*.sh` -- printing PASS/FAIL per step and exiting non-zero if
+used, and shell syntax checks on `tools/fix_*.sh` and `tools/run_fixes.sh`
+-- printing PASS/FAIL per step and exiting non-zero if
 anything failed. Individual commands, if you want to run just one:
 
 ```bash
@@ -118,8 +97,8 @@ python tools/code_simplification.py netcheck -i low
 python tools/security_review.py . -i high
 python tools/documentation_check.py . -i medium
 
-# Fixer
-python tools/fixer.py --issue all --dry-run -v
+# Fix scripts
+bash -n tools/fix_*.sh tools/run_fixes.sh
 ```
 
 To cut a release without spending Actions minutes:
@@ -176,8 +155,8 @@ python tools/security_review.py . -i high -v
 python tools/documentation_check.py . -i medium -v
 ```
 
-### Fixer Issues
+### Fix script issues
 ```bash
-python tools/fixer.py --issue all --dry-run -v
-bash -n tools/fix_*.sh
+bash -n tools/fix_*.sh tools/run_fixes.sh
+bash tools/run_fixes.sh --dry-run
 ```

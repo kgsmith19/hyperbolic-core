@@ -7,16 +7,10 @@ BSSID, MAC and GUID replaced by placeholders. A BSSID is enough to locate a
 house through Wi-Fi geolocation databases, so it does not belong in a repo.
 """
 import unittest
-from pathlib import Path
 
 from netcheck import wlan_probes
 
-FIXTURES = Path(__file__).parent / "fixtures"
-
-
-def fixture(name):
-    # utf-8-sig: the captured files carry a BOM that live command output does not.
-    return (FIXTURES / name).read_text(encoding="utf-8-sig")
+from tests import fixture
 
 
 class ParseWlanInterfacesTest(unittest.TestCase):

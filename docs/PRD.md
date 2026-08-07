@@ -43,7 +43,7 @@ This is a program that runs on your computer and tells you which part of your in
 - Reading Claude Code's own transcript files to find real API errors and classify each as network, server, or client
 - Correlating each API error against the network state recorded near the same moment, and naming which layer broke — or that nothing was watching
 - Ranking the most likely culprit layer across all recorded samples, with the evidence and a plain-language fix suggestion
-- A one-shot, point-in-time environment sweep across seven device/service-specific checks (Wi-Fi, modem, NAT, CGNAT, router, interference, Anthropic service status)
+- A one-shot environment snapshot (Wi-Fi link, channel congestion, adapter driver, event log, TCP globals, path MTU, Tailscale, modem DOCSIS, router DPI, WAN address and NAT type, provider status), read by the same ranking engine so its findings appear beside the ones measured over time
 - A local web dashboard for reading recorded history without the command line
 - An optional, best-effort mirror of recorded data to a Supabase project, for reading history from more than one machine
 - Local, dry-run-capable OS-level fix scripts for the specific problems this tool can already diagnose (Wi-Fi mode, DNS, adapter power management)
@@ -92,10 +92,10 @@ This is a program that runs on your computer and tells you which part of your in
 |---|---|
 | Actor | U-001 |
 | Precondition | None |
-| Trigger | User runs `netcheck full-check` |
-| Main path | 1. Tool runs seven independent hypothesis-specific checks concurrently. 2. Tool prints either a full JSON result or a short human summary. |
-| Success outcome | User sees a point-in-time snapshot of Wi-Fi, modem, NAT/CGNAT, router, interference, and far-side status |
-| Failure paths | A check has no credentials/binary -> `unavailable` for that check only, others unaffected |
+| Trigger | User runs `netcheck scan`, then `netcheck diagnose` |
+| Main path | 1. Tool records every environment section, including the WAN address and the provider's declared status. 2. Tool ranks the standing faults those sections reveal beside the ones measured over time. |
+| Success outcome | User sees Wi-Fi, modem, NAT/CGNAT, router, interference, and far-side status as ranked causes with evidence and a fix — in the same list, and on the same dashboard, as everything else |
+| Failure paths | A section has no credentials/binary -> `unavailable` for that section only, and it is never cited as a cause |
 | Frequency | Occasional, when starting a fresh diagnosis |
 | Traces to | FR-006 |
 
@@ -121,7 +121,7 @@ This is a program that runs on your computer and tells you which part of your in
 | FR-003 | The system must join each classified error to the nearest sample within a 120-second window and report a verdict, or `unmonitored` if none exists. | Must | Given an error at time T with a sample at T+90s and none closer, when correlated, then the verdict is derived from that sample; given no sample within 120s, then the verdict is `unmonitored`. | UC-001 | done |
 | FR-004 | The system must re-resolve the default gateway every tick during `watch`, not just at startup. | Must | Given the gateway changes mid-run (e.g. Wi-Fi to hotspot), when the next tick runs, then the new gateway is pinged, not the stale one. | UC-002 | done |
 | FR-005 | The system must periodically hold a real TLS connection open and report whether it was closed by the peer, dropped, or survived, to catch connection reaping that a ping-based check cannot see. | Must | Given `watch` runs with `--idle-every N`, then every Nth tick performs an idle-hold check and records its result as an event. | UC-002 | done |
-| FR-006 | The system must run modem, NAT, CGNAT, Anthropic-status, interference, router, and Wi-Fi checks concurrently and return a combined result. | Must | Given `netcheck full-check`, when run, then wall time is bounded by the slowest single check, not the sum of all seven. | UC-003 | done |
+| FR-006 | The system must turn the standing conditions an environment scan measures — provider incident, double NAT, carrier NAT, DOCSIS codeword errors, router DPI, radio power-cycling, channel congestion, DFS channel, tunnelled API route, reduced MTU, pinned Wi-Fi mode — into ranked causes carrying evidence and a fix. | Must | Given a scan whose `anthropic` section reports a declared outage, when ranked, then `anthropic_incident` appears as a `high`-confidence cause naming the indicator; given the same section is `unavailable`, then no such cause appears. | UC-003 | done |
 | FR-007 | The system must serve a local dashboard over HTTP showing recent samples, culprits, and LLM error correlation. | Must | Given `netcheck serve`, when a browser requests `/api/data`, then it receives JSON built from the live SQLite database, never fabricated placeholder values. | UC-004 | done |
 | FR-008 | Every measurement must report one of exactly three states: `ok`, `fail`, or `unavailable`, and `unavailable` must never be treated as evidence of a fault. | Must | Given a probe has no credentials configured, when run, then it returns `unavailable`, and the ranking engine does not cite it as a cause. | UC-001, UC-002, UC-003 | done |
 | FR-009 | The system must rank probable causes across all recorded samples by how large a share of samples showed that pattern, most confident first. | Must | Given 100 samples where 12 show a `lan` culprit and 3 show `isp`, when ranked, then `lan` appears before `isp` with its share stated. | UC-001 | done |
@@ -166,7 +166,7 @@ Rules:
 | ID | Constraint | Type | Source | Consequence |
 |---|---|---|---|---|
 | CON-001 | No `pip install`, no `npm install`, no build step. | technical | Project decision (`AGENTS.md`) | Every dependency choice is either "already in the stdlib" or "don't." |
-| CON-002 | Tests use `unittest`, not a third-party test framework, as the primary runner. | technical | Project decision, matches CON-001 | CI's `pytest` run is a coverage-reporting convenience only, never required locally. |
+| CON-002 | Tests use `unittest`, not a third-party test framework. | technical | Project decision, matches CON-001 | CI runs the same `python -m unittest` command and installs nothing. |
 | CON-003 | Windows is the primary, most complete platform; macOS is partial; Linux has only cross-platform probe-level support. | technical | The tool was built against the maintainer's own Windows machine first | Some `environ.py` functions report `unavailable` on non-Windows platforms until ported. |
 | CON-004 | ASUS routers and NETGEAR CAX80-style modems have no public write/read API; parsers are built against reverse-engineered or community-documented formats. | technical | Device vendor decision, outside this project's control | Some parsers (e.g. `parse_airport_info`, the ASUS write path) carry an unverified-against-live-hardware caveat until confirmed. |
 

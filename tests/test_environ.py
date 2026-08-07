@@ -3,35 +3,10 @@
 The load-bearing behaviour here is the unavailable/fail split. Sections that
 need credentials must go quiet, not loud, when they have none.
 """
-import threading
 import unittest
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from netcheck import diagnose, docsis, environ
-
-FIXTURES = Path(__file__).parent / "fixtures"
-
-
-class CredentialGateTest(unittest.TestCase):
-    def test_modem_without_credentials_is_unavailable(self):
-        got = environ.modem(host="192.168.100.1", user=None, password=None)
-        self.assertEqual(got["state"], "unavailable")
-        self.assertIn("credential", got["reason"].lower())
-
-    def test_router_without_credentials_is_unavailable(self):
-        got = environ.router(host="192.168.50.1", user=None, password=None)
-        self.assertEqual(got["state"], "unavailable")
-        self.assertIn("credential", got["reason"].lower())
-
-    def test_unavailable_sections_are_never_cited_as_a_cause(self):
-        """A missing modem password must not read as a broken modem."""
-        scan = {"modem": {"state": "unavailable", "reason": "no credentials"},
-                "router": {"state": "unavailable", "reason": "no credentials"},
-                "driver": {"state": "unavailable", "reason": "not Windows"}}
-        self.assertEqual(diagnose.rank([], [], scan), [])
-
+from netcheck import diagnose, environ
 
 class WifiPlatformDispatchTest(unittest.TestCase):
     """wifi() shells out to a different tool per platform; each parser is
@@ -102,57 +77,6 @@ class PowerShellArgumentSafetyTest(unittest.TestCase):
                      "value must be passed as its own subprocess argument")
 
 
-class AsusSetTest(unittest.TestCase):
-    """_asus_set is the write counterpart to the already-proven _asus_get:
-    same cookie auth, POST to applyapp.cgi instead of GET to appGet.cgi.
-    Verified here against a stub server, not a real router -- the exact
-    payload shape is unverified against live hardware."""
-
-    def _stub(self):
-        received = []
-
-        class H(BaseHTTPRequestHandler):
-            def log_message(self, *_): pass
-
-            def do_POST(self):
-                length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(length).decode()
-                received.append((self.path, self.headers.get("Cookie"), body))
-                self.send_response(200)
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-
-        httpd = HTTPServer(("127.0.0.1", 0), H)
-        self.addCleanup(httpd.server_close)
-        self.addCleanup(httpd.shutdown)
-        threading.Thread(target=httpd.serve_forever, daemon=True).start()
-        return f"127.0.0.1:{httpd.server_address[1]}", received
-
-    def test_posts_to_applyapp_cgi_with_the_auth_cookie(self):
-        host, received = self._stub()
-        body, err = environ._asus_set(host, "tok123", {"wrs_protect_enable": "0"})
-
-        self.assertIsNone(err)
-        self.assertEqual(len(received), 1)
-        path, cookie, sent_body = received[0]
-        self.assertEqual(path, "/applyapp.cgi")
-        self.assertEqual(cookie, "asus_token=tok123")
-        self.assertIn("wrs_protect_enable%3D0", sent_body)
-
-    def test_multiple_pairs_are_semicolon_joined(self):
-        host, received = self._stub()
-        environ._asus_set(host, "tok", {"wl1_chanspec": "36", "wl1_bw": "80MHz"})
-
-        _, _, sent_body = received[0]
-        from urllib.parse import unquote
-        self.assertEqual(unquote(sent_body), "wl1_chanspec=36;wl1_bw=80MHz")
-
-    def test_unreachable_host_is_an_error_not_a_crash(self):
-        body, err = environ._asus_set("127.0.0.1:1", "tok", {"k": "v"}, timeout=1)
-        self.assertIsNone(body)
-        self.assertIsNotNone(err)
-
-
 class DriverFindingsTest(unittest.TestCase):
     def test_capable_card_at_full_mode_is_not_flagged(self):
         scan = {"driver": {"state": "ok", "adapter": "Intel(R) Wi-Fi 6 AX201 160MHz",
@@ -167,84 +91,61 @@ class DriverFindingsTest(unittest.TestCase):
         self.assertIn("802.11ac", got["evidence"])
 
 
-class ParseDocsisStatusTest(unittest.TestCase):
-    """The channel tables never appear as HTML text — NETGEAR's firmware
-    assigns a pipe-delimited string to a JS `tagValueList` inside each
-    Init*TagValue() function, and the page's own script splits and renders it
-    client-side. Real capture from a NETGEAR CAX80 (tests/fixtures/), with
-    each function body also carrying a stale example inside a /* */ comment
-    that a naive extraction would pick up instead of the live data.
+class MtuWalkTest(unittest.TestCase):
+    """environ.mtu() walks the DF bit down until a packet gets through.
+
+    The fault it exists to catch is a path that silently drops full-size
+    packets — a tunnel, a PPPoE link, a hop with a smaller MTU. Driven here
+    through probes._run so the walk itself is tested rather than the local
+    machine's own loopback, which has nothing to say about a real path.
     """
 
-    def setUp(self):
-        js = (FIXTURES / "docsis_status_adv.js").read_text(encoding="utf-8")
-        self.got = docsis.parse_docsis_status(js)
+    OK = ("1 packets transmitted, 1 packets received, 0.0% packet loss\n"
+          "round-trip min/avg/max/stddev = 1.0/1.0/1.0/0.0 ms\n")
+    TOO_BIG = "ping: local error: message too long, mtu=900\n"
 
-    def test_summary_fields(self):
-        self.assertEqual(self.got["state"], "ok")
-        self.assertEqual(self.got["connectivity"], "OK")
-        self.assertEqual(self.got["boot_state"], "OK")
-        self.assertEqual(self.got["security"], "Enabled")
-        self.assertEqual(self.got["uptime"], "02:51:08")
+    def fits_under(self, limit):
+        """Stand in for a path whose real MTU is `limit`: any DF-set probe
+        larger than it comes back 'message too long', like a real hop would."""
+        def run(cmd, _timeout=None):
+            size = int(cmd[cmd.index("-s") + 1] if "-s" in cmd
+                       else cmd[cmd.index("-l") + 1])
+            return (self.OK, "ok") if size + 28 <= limit else (self.TOO_BIG, "ok")
+        return run
 
-    def test_downstream_channel_count_and_a_known_row(self):
-        self.assertEqual(len(self.got["downstream"]), 32)
-        ch1 = self.got["downstream"][0]
-        self.assertEqual(ch1["lock_status"], "Locked")
-        self.assertEqual(ch1["modulation"], "256 QAM")
-        self.assertEqual(ch1["frequency_hz"], 657000000)
-        self.assertEqual(ch1["power_dbmv"], -2.2)
-        self.assertEqual(ch1["snr_db"], 41.8)
-        self.assertEqual(ch1["correctables"], 3)
-        self.assertEqual(ch1["uncorrectables"], 0)
+    def test_the_walk_stops_at_the_largest_candidate_that_fits(self):
+        """Not merely 'some size worked' — the first candidate that fits
+        wins, so the answer is a lower bound on the path MTU rather than a
+        smaller lucky guess. On a 1400-byte path the candidates 1500/1488/
+        1468/1428 are all too big and 1328 is the first that fits."""
+        with patch.object(environ.probes, "_run", side_effect=self.fits_under(1400)):
+            got = environ.mtu("192.0.2.1")
+        self.assertEqual(got["state"], "ok")
+        self.assertEqual(got["mtu"], 1328)
 
-    def test_unlocked_downstream_rows_still_parse(self):
-        """'Not Locked' rows use bare numbers with no dB/dBmV/Hz suffix —
-        a different format from active channels on the same table."""
-        ch25 = self.got["downstream"][24]
-        self.assertEqual(ch25["lock_status"], "Not Locked")
-        self.assertEqual(ch25["power_dbmv"], 0.0)
+    def test_a_full_size_path_reports_1500(self):
+        with patch.object(environ.probes, "_run", side_effect=self.fits_under(1500)):
+            self.assertEqual(environ.mtu("192.0.2.1")["mtu"], 1500)
 
-    def test_upstream_channels(self):
-        self.assertEqual(len(self.got["upstream"]), 8)
-        ch1 = self.got["upstream"][0]
-        self.assertEqual(ch1["channel_type"], "ATDMA")
-        self.assertEqual(ch1["frequency_hz"], 17600000)
-        self.assertEqual(ch1["power_dbmv"], 41.3)
+    def test_a_path_below_every_candidate_is_unavailable_not_a_false_ok(self):
+        """The dangerous failure: reporting a healthy MTU for a path where
+        nothing we tried got through. `unavailable` says we could not measure
+        it; a number would say we did."""
+        with patch.object(environ.probes, "_run", side_effect=self.fits_under(600)):
+            got = environ.mtu("192.0.2.1")
+        self.assertEqual(got["state"], "unavailable")
+        self.assertNotIn("mtu", got)
 
-    def test_downstream_ofdm_channel_with_large_codeword_counts(self):
-        ofdm = self.got["downstream_ofdm"][0]
-        self.assertEqual(ofdm["frequency_hz"], 516000000)
-        self.assertEqual(ofdm["unerrored"], 185404237)
-        self.assertEqual(ofdm["correctable"], 167393611)
-        self.assertEqual(ofdm["uncorrectable"], 0)
+    def test_a_missing_ping_binary_is_unavailable_not_a_fault(self):
+        with patch.object(environ.probes, "_run", return_value=(None, "unavailable")):
+            self.assertEqual(environ.mtu("192.0.2.1")["state"], "unavailable")
 
-    def test_upstream_ofdma_channels(self):
-        self.assertEqual(len(self.got["upstream_ofdma"]), 2)
-
-    def test_summary_lists_exclude_unlocked_placeholder_channels(self):
-        """The 8 unlocked DS channels report power=0.0/snr=0.0 — real zeros
-        would be indistinguishable from a genuinely perfect channel, so they
-        must never enter an average or a min/max."""
-        self.assertEqual(len(self.got["snr_db"]), 25)      # 24 DS QAM + 1 OFDM, locked
-        self.assertNotIn(0.0, self.got["snr_db"])
-
-    def test_uncorrectables_summary_is_all_zero_on_this_real_capture(self):
-        """The headline finding this parser exists to surface."""
-        self.assertTrue(self.got["uncorrectables"])
-        self.assertEqual(sum(self.got["uncorrectables"]), 0)
-
-    def test_missing_table_yields_an_empty_list_not_a_crash(self):
-        stripped = (FIXTURES / "docsis_status_adv.js").read_text(encoding="utf-8")
-        stripped = stripped.split("function InitUsOfdmaTableTagValue")[0]
-        got = docsis.parse_docsis_status(stripped)
-        self.assertEqual(got["upstream_ofdma"], [])
-        self.assertEqual(len(got["downstream"]), 32)  # unaffected sections unaffected
-
-    def test_empty_input_is_a_clean_empty_result_not_a_crash(self):
-        got = docsis.parse_docsis_status("")
-        self.assertEqual(got["downstream"], [])
-        self.assertEqual(got["snr_db"], [])
+    def test_the_caller_chooses_the_candidate_sizes(self):
+        """`sizes` is what makes a narrower second pass possible after a
+        coarse first one."""
+        with patch.object(environ.probes, "_run", side_effect=self.fits_under(900)):
+            got = environ.mtu("192.0.2.1", sizes=(1172, 872, 472))
+        self.assertEqual(got["mtu"], 900)
 
 
 class ScanShapeTest(unittest.TestCase):

@@ -74,45 +74,47 @@ def parse_line(line, source):
             "detail": detail[:500]}
 
 
-def scan(root, offsets, source="claude-code"):
-    """Read only what is new since `offsets`, returning (errors, new_offsets).
+def _tail(path, start):
+    """The complete lines added to `path` since byte `start`, plus the offset
+    after them — or None when there is nothing usable to read.
 
-    Advances each offset to the last complete line, so a transcript being
-    appended to right now never yields a half-parsed record.
+    Stops at the last newline, so a transcript being appended to right now
+    never yields a half-parsed record. A file shorter than our offset was
+    rotated or truncated, which makes the offset meaningless, so we re-read
+    it whole rather than seeking past its end.
     """
+    try:
+        size = path.stat().st_size
+        if size < start:
+            start = 0
+        if size == start:
+            return None
+        with path.open("rb") as f:
+            f.seek(start)
+            raw = f.read()
+    except OSError:
+        return None
+
+    cut = raw.rfind(b"\n") + 1              # ignore any partial trailing line
+    if not cut:
+        return None
+    return raw[:cut].decode("utf-8", "replace"), start + cut
+
+
+def scan(root, offsets, source="claude-code"):
+    """Read only what is new since `offsets`, returning (errors, new_offsets)."""
     root = Path(root)
     if not root.exists():
         return [], dict(offsets)
 
     errors, new = [], dict(offsets)
     for path in sorted(root.rglob("*.jsonl")):
-        key = str(path)
-        try:
-            size = path.stat().st_size
-        except OSError:
+        tail = _tail(path, offsets.get(str(path), 0))
+        if tail is None:
             continue
-        start = offsets.get(key, 0)
-        if size < start:        # rotated or truncated; our offset is meaningless
-            start = 0
-        if size == start:
-            continue
-
-        try:
-            with path.open("rb") as f:
-                f.seek(start)
-                raw = f.read()
-        except OSError:
-            continue
-
-        cut = raw.rfind(b"\n") + 1          # ignore any partial trailing line
-        if not cut:
-            continue
-        new[key] = start + cut
-
-        for line in raw[:cut].decode("utf-8", "replace").splitlines():
-            if not line.strip():
-                continue
-            err = parse_line(line, source)
+        text, new[str(path)] = tail
+        for line in text.splitlines():
+            err = parse_line(line, source) if line.strip() else None
             if err and err["ts"]:
                 errors.append(err)
     return errors, new

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run all network fixes with detection, application, and validation
-# Coordinates Python fixer module and shell scripts
+# Runs each fix script in order, with --dry-run support
 
 set -e
 

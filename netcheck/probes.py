@@ -17,8 +17,15 @@ import ssl
 import subprocess
 import time
 
+from . import resolver
+
 WINDOWS = __import__("platform").system() == "Windows"
 MACOS = __import__("platform").system() == "Darwin"
+
+# The resolver every tick compares the router against. Fixed on purpose: the
+# whole point of the pair is that one side is known-good and unchanging, so a
+# difference between them is the router's fault and not a config difference.
+PUBLIC_DNS = "1.1.1.1"
 
 
 # --------------------------------------------------------------------------
@@ -80,68 +87,6 @@ def ping(host, count=2):
     return dict(parse_ping(text), host=host)
 
 
-def resolve(host, server=None, attempts=2, backoff_s=0.3):
-    """Resolve `host`, optionally against a specific DNS server.
-
-    The server-specific path is what separates 'the router's DNS is broken'
-    from 'DNS is broken', which is the single most useful split on this network
-    because the router is the configured resolver.
-
-    Retries once on failure before reporting it: a single dropped UDP query
-    is common and is not, by itself, evidence the resolver is broken.
-    """
-    result = None
-    for attempt in range(attempts):
-        result = _resolve_once(host, server)
-        if result["state"] == "ok":
-            return result
-        if attempt + 1 < attempts:
-            time.sleep(backoff_s)
-    return result
-
-
-def _resolve_once(host, server):
-    t0 = time.monotonic()
-    try:
-        if server:
-            addrs = _resolve_via(host, server)
-        else:
-            addrs = sorted({i[4][0] for i in socket.getaddrinfo(host, 443)})
-        if not addrs:
-            return {"state": "fail", "ms": None, "reason": "no answer"}
-        return {"state": "ok", "ms": round((time.monotonic() - t0) * 1000, 1),
-                "addrs": addrs}
-    except Exception as e:
-        return {"state": "fail", "ms": None, "reason": f"{type(e).__name__}: {e}"}
-
-
-def _resolve_via(host, server, timeout=4):
-    """Minimal DNS/UDP A-record query. Avoids a dnspython dependency."""
-    qname = b"".join(bytes([len(p)]) + p.encode() for p in host.split(".")) + b"\0"
-    query = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + qname + b"\x00\x01\x00\x01"
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.settimeout(timeout)
-        s.sendto(query, (server, 53))
-        data, _ = s.recvfrom(2048)
-
-    count = int.from_bytes(data[6:8], "big")          # ANCOUNT
-    addrs, i = [], len(query)                          # answers follow the question
-    for _ in range(count):
-        if data[i] & 0xC0 == 0xC0:                     # compressed name pointer
-            i += 2
-        else:
-            while data[i]:
-                i += data[i] + 1
-            i += 1
-        rtype = int.from_bytes(data[i:i + 2], "big")
-        length = int.from_bytes(data[i + 8:i + 10], "big")
-        body = data[i + 10:i + 10 + length]
-        if rtype == 1 and length == 4:
-            addrs.append(".".join(str(b) for b in body))
-        i += 10 + length
-    return sorted(addrs)
-
-
 def tls_connect(host, port=443, timeout=8, ctx=None):
     """Real TLS handshake, timed. `ctx` defaults to a real verifying
     SSLContext; overridable the same way idle_hold's own `ctx` parameter
@@ -182,70 +127,22 @@ def http_check(host, path="/v1/models", timeout=10):
             "code": code}
 
 
-def parse_traceroute(text, gateway_ip=None, target=None):
-    """First responding hop past the gateway.
+def _peer_ended(sock, t0):
+    """One look at a held connection: how it ended, or None if it is still up.
 
-    Deliberately *not* "first public address": ISPs commonly number their edge
-    out of RFC1918 space, so filtering private addresses throws away the exact
-    hop that distinguishes 'my ISP' from 'the internet'. The gateway is the only
-    address we actually need to skip.
+    A readable socket returning b"" is a clean close by the peer; an OSError
+    is the connection being dropped underneath us. SSLWantReadError means TLS
+    wants more bytes before it can say anything, which is not an ending.
     """
-    for line in text.splitlines():
-        if re.search(r"timed out|\*\s+\*\s+\*", line):
-            continue
-        found = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", line)
-        if not found:
-            continue
-        ip = found.group(1)
-        if ip != gateway_ip and ip != target:
-            return ip
-    return None
-
-
-def first_hop(host="1.1.1.1", gateway_ip=None, max_hops=5, timeout=40):
-    """The first responding hop past the gateway: your ISP's edge."""
-    cmd = (["tracert", "-d", "-h", str(max_hops), "-w", "1000", host] if WINDOWS
-           else ["traceroute", "-n", "-m", str(max_hops), "-w", "1", host])
-    text, state = _run(cmd, timeout=timeout)
-    if state != "ok":
+    import select
+    if not select.select([sock], [], [], 0)[0]:
         return None
-    return parse_traceroute(text, gateway_ip or gateway(), host)
-
-
-def parse_ipconfig_gateway(text):
-    """The IPv4 default gateway from Windows `ipconfig` output.
-
-    A dual-stack adapter prints its IPv6 default gateway on the labeled line
-    and its IPv4 one on an unlabeled continuation line right below it:
-
-        Default Gateway . . . . . . . . . : fe80::1234:5678:90ab:cdef%16
-                                            192.168.1.1
-
-    A regex anchored to `\\s*([\\d.]+)` right after the colon never reaches
-    that second line, since `\\s` cannot skip over the non-whitespace IPv6
-    text sitting in between -- it just fails to match, silently, on any
-    dual-stack adapter. There can also be more than one "Default Gateway"
-    label (a VPN/Tailscale-style adapter often prints one with no value at
-    all), so every occurrence is checked in order rather than only the
-    first.
-    """
-    for block in re.finditer(r"Default Gateway[ .]*:(.*(?:\n[ \t]+\S.*)*)", text):
-        m = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", block.group(1))
-        if m:
-            return m.group(1)
-    return None
-
-
-def gateway():
-    if WINDOWS:
-        text, _ = _run(["ipconfig"])
-        return parse_ipconfig_gateway(text)
-    text, _ = _run(["ip", "route"])
-    m = re.search(r"default via ([\d.]+)", text)
-    if not m:
-        text, _ = _run(["route", "-n", "get", "default"])
-        m = re.search(r"gateway:\s*([\d.]+)", text)
-    return m.group(1) if m else None
+    try:
+        return _held("closed_by_peer", t0) if sock.recv(1) == b"" else None
+    except ssl.SSLWantReadError:
+        return None
+    except OSError as e:
+        return dict(_held("dropped", t0), reason=str(e))
 
 
 def idle_hold(host, port=443, seconds=90, ctx=None):
@@ -255,7 +152,6 @@ def idle_hold(host, port=443, seconds=90, ctx=None):
     response dying mid-flight. No ping-based check can observe it, because the
     path is fine — something is reaping the *connection*.
     """
-    import select
     t0 = time.monotonic()
     sock = None
     try:
@@ -265,14 +161,9 @@ def idle_hold(host, port=443, seconds=90, ctx=None):
         sock.setblocking(False)
         while time.monotonic() - t0 < seconds:
             time.sleep(min(2, seconds - (time.monotonic() - t0)))
-            if select.select([sock], [], [], 0)[0]:
-                try:
-                    if sock.recv(1) == b"":
-                        return _held("closed_by_peer", t0)
-                except ssl.SSLWantReadError:
-                    pass
-                except OSError as e:
-                    return dict(_held("dropped", t0), reason=str(e))
+            ended = _peer_ended(sock, t0)
+            if ended:
+                return ended
         return _held("still_alive", t0)
     except Exception as e:
         return dict(_held("connect_error", t0), reason=f"{type(e).__name__}: {e}")
@@ -289,8 +180,7 @@ def _held(result, t0):
             "result": result, "held_s": round(time.monotonic() - t0, 1)}
 
 
-def sample(target="api.anthropic.com", gw=None, hop=None, public_dns="1.1.1.1",
-           wifi=None):
+def sample(target="api.anthropic.com", gw=None, hop=None, wifi=None):
     """One tick: every layer measured close together, flattened into one row.
 
     They must share a row because the diagnosis reads across them — a gateway
@@ -307,13 +197,13 @@ def sample(target="api.anthropic.com", gw=None, hop=None, public_dns="1.1.1.1",
     h = ping(hop, count=2) if hop else {"state": "unavailable"}
     row.update(hop_state=h["state"], hop_ms=h.get("rtt_avg_ms"), hop_loss=h.get("loss_pct"))
 
-    i = ping(public_dns, count=2)
+    i = ping(PUBLIC_DNS, count=2)
     row.update(inet_state=i["state"], inet_ms=i.get("rtt_avg_ms"), inet_loss=i.get("loss_pct"))
 
     # The pair that isolates the router as a resolver from DNS in general.
-    dr = resolve(target, server=gw) if gw else {"state": "unavailable"}
+    dr = resolver.resolve(target, server=gw) if gw else {"state": "unavailable"}
     row.update(dns_router_state=dr["state"], dns_router_ms=dr.get("ms"))
-    dp = resolve(target, server=public_dns)
+    dp = resolver.resolve(target, server=PUBLIC_DNS)
     row.update(dns_public_state=dp["state"], dns_public_ms=dp.get("ms"))
 
     t = tls_connect(target)
