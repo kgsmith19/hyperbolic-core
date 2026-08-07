@@ -1,7 +1,7 @@
 """Router diagnostics: firmware, settings, security features.
 
 Phase 21 diagnostic module (additional to the canonical 15-hypothesis list in
-docs/TROUBLESHOOTING.md): stale router default settings or outdated firmware.
+netcheck/docs/TROUBLESHOOTING.md): stale router default settings or outdated firmware.
 """
 import os
 import subprocess

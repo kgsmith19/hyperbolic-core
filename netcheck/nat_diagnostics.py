@@ -1,10 +1,9 @@
 """NAT diagnostics: double NAT detection, NAT traversal issues.
 
 Phase 17 diagnostic module (additional to the canonical 15-hypothesis list in
-docs/TROUBLESHOOTING.md): modem reverting out of bridge mode (double NAT).
+netcheck/docs/TROUBLESHOOTING.md): modem reverting out of bridge mode (double NAT).
 """
-import subprocess
-import re
+import ipaddress
 import socket
 from typing import Optional, Dict
 from urllib.request import urlopen
@@ -41,28 +40,20 @@ def get_wan_ip() -> Optional[str]:
         return None
 
 
-def is_private_ip(ip: str) -> bool:
-    """Check if IP is in private range (RFC 1918)."""
-    if not ip:
-        return False
-    parts = ip.split('.')
-    if len(parts) != 4:
-        return False
+_RFC1918 = tuple(ipaddress.ip_network(n)
+                 for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
 
+
+def is_private_ip(ip: str) -> bool:
+    """Check if IP is in an RFC 1918 private range. Deliberately NOT
+    ipaddress's own .is_private, which also counts loopback, link-local,
+    and (pre-3.11) the CGNAT block -- a CGNAT WAN address reading as
+    'private' would misreport carrier NAT as double NAT."""
     try:
-        octets = [int(p) for p in parts]
-        # 10.0.0.0 – 10.255.255.255
-        if octets[0] == 10:
-            return True
-        # 172.16.0.0 – 172.31.255.255
-        if octets[0] == 172 and 16 <= octets[1] <= 31:
-            return True
-        # 192.168.0.0 – 192.168.255.255
-        if octets[0] == 192 and octets[1] == 168:
-            return True
+        addr = ipaddress.ip_address(ip)
+    except (TypeError, ValueError):
         return False
-    except ValueError:
-        return False
+    return any(addr in net for net in _RFC1918)
 
 
 def detect_double_nat() -> Dict:

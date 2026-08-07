@@ -169,7 +169,7 @@ netcheck/
 
 supabase/migrations/            Postgres DDL mirroring schema.sql
 
-Dockerfile, .dockerignore       container packaging (docs/DEPLOYMENT.md)
+Dockerfile, .dockerignore       container packaging (netcheck/docs/DEPLOYMENT.md)
 CHANGELOG.md                    Keep a Changelog-format release history
 
 tools/

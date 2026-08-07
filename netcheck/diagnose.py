@@ -35,8 +35,10 @@ _FIXES = {
            "interception, router DPI (ASUS AiProtection / Trend Micro), or the "
            "far side.",
     "wifi_mode_pinned": "The adapter is pinned below its capability. Set "
-                        "'802.11n/ac/ax Wireless Mode' back to its default so "
-                        "the card can negotiate 802.11ax.",
+                        "'802.11n/ac/ax Wireless Mode' back to its default -- "
+                        "then cycle the adapter (scripts/reset-wifi-adapter.ps1), "
+                        "since a driver property change alone does not force "
+                        "the live link to renegotiate.",
 }
 
 

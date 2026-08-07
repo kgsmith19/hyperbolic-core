@@ -1,292 +1,158 @@
-"""WiFi diagnostics: band-steering, channel stability, interference detection.
-
-PDD: WiFi state sampling and detection have consistent structure.
-SDD: Band-steering, DFS, signal instability, and interference are detected correctly.
-TDD: WiFi diagnostics integrate with OS-specific commands.
-"""
+"""WiFi diagnostics: band-steering, DFS, signal instability, interference.
+Link state and congestion are mocked at the environ boundary -- hermetic."""
 import unittest
-from datetime import datetime, timedelta
+from unittest.mock import patch
 from netcheck import wifi_diagnostics
 
 
-class WiFiStateSamplingTest(unittest.TestCase):
-    """PDD: WiFi state samples have required fields."""
-
-    def test_sample_has_required_fields(self):
-        """State sample includes timestamp, SSID, BSSID, channel, signal."""
-        diag = wifi_diagnostics.WiFiDiagnostics()
-        # Manual sample construction (real sampling may fail in test env)
-        sample = {
-            'timestamp': datetime.now(),
-            'ssid': 'TestNetwork',
-            'bssid': '00:11:22:33:44:55',
-            'channel': 36,
-            'signal_dbm': -50,
-        }
-        diag.history.append(sample)
-
-        self.assertIn('timestamp', sample)
-        self.assertIn('ssid', sample)
-        self.assertIn('bssid', sample)
-        self.assertIn('channel', sample)
-        self.assertIn('signal_dbm', sample)
-
-    def test_history_accumulates_samples(self):
-        """Multiple samples accumulate in history."""
-        diag = wifi_diagnostics.WiFiDiagnostics()
-        for i in range(3):
-            sample = {
-                'timestamp': datetime.now() + timedelta(seconds=i),
-                'ssid': 'TestNetwork',
-                'bssid': f'00:11:22:33:44:{i:02x}',
-                'channel': 36 + i,
-                'signal_dbm': -50 - i,
-            }
-            diag.history.append(sample)
-
-        self.assertEqual(len(diag.history), 3)
+def _link(state="ok", ssid="TestNet", bssid="00:11:22:33:44:55", channel=36, rssi=-50):
+    if state != "ok":
+        return {"state": state, "reason": "no wireless interface"}
+    return {"state": "ok", "ssid": ssid, "bssid": bssid,
+            "channel": channel, "rssi_dbm": rssi}
 
 
 class DFSChannelDetectionTest(unittest.TestCase):
-    """SDD: DFS channel detection works correctly."""
+    """is_dfs_channel covers the full 5 GHz DFS range (52-144), where radar
+    detection forces the AP to jump channels and kills every connection."""
 
-    def test_dfs_channels_120_to_144_detected(self):
-        """Channels 120-144 are flagged as DFS-affected."""
-        for channel in [120, 128, 144]:
+    def test_dfs_range_detected_including_boundaries(self):
+        for channel in [52, 64, 100, 120, 128, 144]:
             self.assertTrue(wifi_diagnostics.is_dfs_channel(channel),
                           f"Channel {channel} should be DFS")
 
     def test_non_dfs_5ghz_channels_not_detected(self):
-        """Channels outside 120-144 on 5GHz are not DFS."""
         for channel in [36, 40, 44, 48, 149, 153, 157, 165]:
             self.assertFalse(wifi_diagnostics.is_dfs_channel(channel),
                            f"Channel {channel} should not be DFS")
 
     def test_2_4_ghz_channels_not_dfs(self):
-        """2.4GHz channels are never DFS."""
         for channel in [1, 6, 11]:
             self.assertFalse(wifi_diagnostics.is_dfs_channel(channel))
 
 
 class BandSteeringDetectionTest(unittest.TestCase):
-    """SDD: Band-steering is detected when BSSID changes."""
-
     def test_single_bssid_no_steering(self):
-        """No band-steering when BSSID remains constant."""
-        history = [
-            {'bssid': '00:11:22:33:44:55'},
-            {'bssid': '00:11:22:33:44:55'},
-            {'bssid': '00:11:22:33:44:55'},
-        ]
+        history = [{'bssid': '00:11:22:33:44:55'}] * 3
         self.assertFalse(wifi_diagnostics.detect_band_steering(history))
 
     def test_multiple_bssids_detected(self):
-        """Band-steering detected when BSSID changes."""
         history = [
             {'bssid': '00:11:22:33:44:55'},
-            {'bssid': '00:11:22:33:44:66'},  # Changed BSSID
             {'bssid': '00:11:22:33:44:66'},
         ]
         self.assertTrue(wifi_diagnostics.detect_band_steering(history))
 
-    def test_steering_detection_result(self):
-        """Band-steering detection returns proper diagnostic result."""
-        diag = wifi_diagnostics.WiFiDiagnostics()
-        diag.history = [
-            {'bssid': '00:11:22:33:44:55', 'timestamp': datetime.now()},
-            {'bssid': '00:11:22:33:44:66', 'timestamp': datetime.now()},
-        ]
-        result = diag.detect_band_steering()
+    def test_single_sample_is_never_steering(self):
+        self.assertFalse(wifi_diagnostics.detect_band_steering([{'bssid': 'x'}]))
 
-        self.assertTrue(result.get('detected') or not result.get('detected'))  # Has key
-        self.assertIn('reason', result)
+    def test_class_method_reports_bssid_change_across_real_samples(self):
+        """Two sample_current_state() calls that see different BSSIDs (the AP
+        moved us between bands) must come back detected=True."""
+        diag = wifi_diagnostics.WiFiDiagnostics()
+        with patch("netcheck.wifi_diagnostics.environ.wifi",
+                   side_effect=[_link(bssid="00:11:22:33:44:55"),
+                                _link(bssid="00:11:22:33:44:66")]):
+            diag.sample_current_state()
+            result = diag.detect_band_steering()
+        self.assertTrue(result['detected'])
+        self.assertEqual(result['count'], 2)
+
+    def test_class_method_reports_not_connected(self):
+        diag = wifi_diagnostics.WiFiDiagnostics()
+        with patch("netcheck.wifi_diagnostics.environ.wifi",
+                   return_value=_link(state="unavailable")):
+            result = diag.detect_band_steering()
+        self.assertFalse(result['detected'])
+        self.assertEqual(result['reason'], 'Not connected to WiFi')
 
 
 class SignalInstabilityDetectionTest(unittest.TestCase):
-    """SDD: Signal strength variation triggers instability warning."""
-
     def test_stable_signal_no_warning(self):
-        """Signal within threshold doesn't trigger warning."""
-        history = [
-            {'signal_dbm': -50},
-            {'signal_dbm': -52},
-            {'signal_dbm': -51},
-            {'signal_dbm': -50},
-        ]
-        # Variation is 2 dBm, threshold is 20
+        history = [{'signal_dbm': s} for s in (-50, -52, -51, -50)]
         self.assertFalse(wifi_diagnostics.detect_signal_instability(history, threshold_dbm=20))
 
     def test_large_signal_variation_detected(self):
-        """Large signal swings trigger warning."""
-        history = [
-            {'signal_dbm': -30},
-            {'signal_dbm': -80},  # 50 dBm variation
-            {'signal_dbm': -35},
-        ]
+        history = [{'signal_dbm': s} for s in (-30, -80, -35)]
         self.assertTrue(wifi_diagnostics.detect_signal_instability(history, threshold_dbm=20))
 
-    def test_instability_result_includes_details(self):
-        """Instability result includes min/max/variation."""
+    def test_class_method_reports_variation_details(self):
         diag = wifi_diagnostics.WiFiDiagnostics()
-        diag.history = [
-            {'signal_dbm': -30},
-            {'signal_dbm': -80},
-        ]
+        diag.history = [{'signal_dbm': -30}, {'signal_dbm': -80}]
         result = diag.detect_signal_instability()
-
-        if result.get('unstable'):
-            self.assertIn('variation_dbm', result)
-            self.assertIn('min', result)
-            self.assertIn('max', result)
-
-
-class InterferenceCongestionTest(unittest.TestCase):
-    """SDD: Channel congestion indicates interference risk."""
-
-    def test_many_networks_same_channel(self):
-        """Congestion detected when >3 networks on same channel."""
-        diag = wifi_diagnostics.WiFiDiagnostics()
-        diag.history = [
-            {'channel': 6, 'timestamp': datetime.now()},
-        ]
-        # Simulate scan result with 5 networks on channel 6
-        networks = [
-            {'channel': 6, 'ssid': f'Network{i}'} for i in range(5)
-        ]
-        # Mock the check_interference to return expected result
-        result = diag.check_interference()
-        # Result depends on actual network scan, so just check structure
-        self.assertIn('congestion', result)
-
-    def test_clear_channel_no_congestion(self):
-        """No congestion when few networks on same channel."""
-        diag = wifi_diagnostics.WiFiDiagnostics()
-        # With fewer than 4 networks, should be low congestion
-        result = diag.check_interference()
-        self.assertIn('congestion', result)
-
-
-class WiFiDiagnosticsIntegrationTest(unittest.TestCase):
-    """TDD: WiFi diagnostics methods integrate properly."""
-
-    def test_diagnostics_object_has_required_methods(self):
-        """WiFiDiagnostics has all required detection methods."""
-        diag = wifi_diagnostics.WiFiDiagnostics()
-
-        self.assertTrue(callable(diag.detect_band_steering))
-        self.assertTrue(callable(diag.detect_dfs_channel_warning))
-        self.assertTrue(callable(diag.detect_signal_instability))
-        self.assertTrue(callable(diag.check_interference))
-
-    def test_diagnostics_object_has_id_and_name(self):
-        """WiFiDiagnostics object has proper identification."""
-        diag = wifi_diagnostics.WiFiDiagnostics()
-
-        self.assertEqual(diag.id, 'wifi_radio_instability')
-        self.assertIsNotNone(diag.name)
-        self.assertTrue(len(diag.name) > 0)
-
-    def test_all_detections_return_dicts(self):
-        """All detection methods return dictionaries."""
-        diag = wifi_diagnostics.WiFiDiagnostics()
-        # Add sample history to avoid 'not connected' returns
-        diag.history = [
-            {
-                'timestamp': datetime.now(),
-                'ssid': 'TestSSID',
-                'bssid': '00:11:22:33:44:55',
-                'channel': 36,
-                'signal_dbm': -50,
-            }
-        ]
-
-        results = [
-            diag.detect_band_steering(),
-            diag.detect_dfs_channel_warning(),
-            diag.detect_signal_instability(),
-            diag.check_interference(),
-        ]
-
-        for result in results:
-            self.assertIsInstance(result, dict)
+        self.assertTrue(result['unstable'])
+        self.assertEqual(result['variation_dbm'], 50)
+        self.assertEqual(result['min'], -80)
+        self.assertEqual(result['max'], -30)
 
 
 class DFSChannelWarningTest(unittest.TestCase):
-    """SDD: DFS channel warning clearly indicates risk."""
-
-    def test_dfs_channel_warning_includes_reason(self):
-        """DFS warning explains radar-triggered handoff risk."""
+    def test_dfs_channel_triggers_warning_with_radar_reason(self):
         diag = wifi_diagnostics.WiFiDiagnostics()
-        diag.history = [
-            {
-                'timestamp': datetime.now(),
-                'ssid': 'TestSSID',
-                'bssid': '00:11:22:33:44:55',
-                'channel': 128,  # DFS channel
-                'signal_dbm': -50,
-            }
-        ]
-        result = diag.detect_dfs_channel_warning()
-
-        if result.get('warning'):
-            self.assertEqual(result['channel'], 128)
-            self.assertIn('radar', result.get('reason', '').lower())
+        with patch("netcheck.wifi_diagnostics.environ.wifi",
+                   return_value=_link(channel=128)):
+            result = diag.detect_dfs_channel_warning()
+        self.assertTrue(result['warning'])
+        self.assertEqual(result['channel'], 128)
+        self.assertIn('radar', result['reason'].lower())
 
     def test_non_dfs_channel_no_warning(self):
-        """Non-DFS channels don't trigger warning."""
         diag = wifi_diagnostics.WiFiDiagnostics()
-        diag.history = [
-            {
-                'timestamp': datetime.now(),
-                'ssid': 'TestSSID',
-                'bssid': '00:11:22:33:44:55',
-                'channel': 36,  # Non-DFS 5GHz channel
-                'signal_dbm': -50,
-            }
-        ]
-        result = diag.detect_dfs_channel_warning()
-
-        self.assertFalse(result.get('warning', False))
+        with patch("netcheck.wifi_diagnostics.environ.wifi",
+                   return_value=_link(channel=36)):
+            result = diag.detect_dfs_channel_warning()
+        self.assertFalse(result['warning'])
+        self.assertEqual(result['channel'], 36)
 
 
-class WiFiDiagnosticsHistoryTest(unittest.TestCase):
-    """TDD: History tracking enables time-series analysis."""
-
-    def test_history_preserves_timestamps(self):
-        """Samples are timestamped for trend analysis."""
+class InterferenceCongestionTest(unittest.TestCase):
+    def test_congestion_true_when_more_than_three_cochannel(self):
         diag = wifi_diagnostics.WiFiDiagnostics()
-        base_time = datetime.now()
+        with patch("netcheck.wifi_diagnostics.environ.wifi", return_value=_link(channel=6)), \
+             patch("netcheck.wifi_diagnostics.environ.congestion",
+                   return_value={"state": "ok", "total_bssids": 6, "cochannel": 5, "same_block": 0}):
+            result = diag.check_interference()
+        self.assertTrue(result['congestion'])
+        self.assertEqual(result['same_channel'], 5)
 
-        for i in range(3):
-            sample = {
-                'timestamp': base_time + timedelta(seconds=i),
-                'ssid': 'TestNetwork',
-                'bssid': '00:11:22:33:44:55',
-                'channel': 36,
-                'signal_dbm': -50 - i,
-            }
-            diag.history.append(sample)
-
-        # Verify timestamps are in order
-        for i in range(len(diag.history) - 1):
-            self.assertLess(
-                diag.history[i]['timestamp'],
-                diag.history[i + 1]['timestamp']
-            )
-
-    def test_history_enables_trend_detection(self):
-        """History allows detection of trends over time."""
+    def test_clear_channel_no_congestion(self):
         diag = wifi_diagnostics.WiFiDiagnostics()
-        # Degrading signal trend
-        for i in range(5):
-            diag.history.append({
-                'signal_dbm': -40 - (i * 10),  # Gets worse
-                'timestamp': datetime.now() + timedelta(seconds=i),
-            })
+        with patch("netcheck.wifi_diagnostics.environ.wifi", return_value=_link(channel=36)), \
+             patch("netcheck.wifi_diagnostics.environ.congestion",
+                   return_value={"state": "ok", "total_bssids": 2, "cochannel": 1, "same_block": 0}):
+            result = diag.check_interference()
+        self.assertFalse(result['congestion'])
 
-        # Strongest to weakest: -40 to -80
-        signals = [h['signal_dbm'] for h in diag.history]
-        self.assertGreater(signals[0], signals[-1])
+    def test_scan_failure_reports_unknown_not_a_verdict(self):
+        """A failed scan must never read as 'no congestion' -- same
+        unavailable-is-not-fail rule every probe follows."""
+        diag = wifi_diagnostics.WiFiDiagnostics()
+        with patch("netcheck.wifi_diagnostics.environ.wifi", return_value=_link(channel=6)), \
+             patch("netcheck.wifi_diagnostics.environ.congestion",
+                   return_value={"state": "unavailable", "reason": "netsh unavailable"}):
+            result = diag.check_interference()
+        self.assertEqual(result['congestion'], 'unknown')
+
+
+class SampleCurrentStateTest(unittest.TestCase):
+    def test_sample_maps_environ_wifi_fields_and_appends_history(self):
+        diag = wifi_diagnostics.WiFiDiagnostics()
+        with patch("netcheck.wifi_diagnostics.environ.wifi",
+                   return_value=_link(ssid="Home", bssid="aa:bb:cc:dd:ee:ff",
+                                     channel=44, rssi=-61)):
+            sample = diag.sample_current_state()
+        self.assertEqual(sample['ssid'], "Home")
+        self.assertEqual(sample['bssid'], "aa:bb:cc:dd:ee:ff")
+        self.assertEqual(sample['channel'], 44)
+        self.assertEqual(sample['signal_dbm'], -61)
+        self.assertEqual(diag.history, [sample])
+
+    def test_not_connected_returns_none_and_keeps_history_clean(self):
+        diag = wifi_diagnostics.WiFiDiagnostics()
+        with patch("netcheck.wifi_diagnostics.environ.wifi",
+                   return_value=_link(state="fail")):
+            self.assertIsNone(diag.sample_current_state())
+        self.assertEqual(diag.history, [])
 
 
 if __name__ == "__main__":

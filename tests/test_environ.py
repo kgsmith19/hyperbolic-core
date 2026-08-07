@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from netcheck import diagnose, environ
+from netcheck import diagnose, docsis, environ
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -178,7 +178,7 @@ class ParseDocsisStatusTest(unittest.TestCase):
 
     def setUp(self):
         js = (FIXTURES / "docsis_status_adv.js").read_text(encoding="utf-8")
-        self.got = environ.parse_docsis_status(js)
+        self.got = docsis.parse_docsis_status(js)
 
     def test_summary_fields(self):
         self.assertEqual(self.got["state"], "ok")
@@ -237,12 +237,12 @@ class ParseDocsisStatusTest(unittest.TestCase):
     def test_missing_table_yields_an_empty_list_not_a_crash(self):
         stripped = (FIXTURES / "docsis_status_adv.js").read_text(encoding="utf-8")
         stripped = stripped.split("function InitUsOfdmaTableTagValue")[0]
-        got = environ.parse_docsis_status(stripped)
+        got = docsis.parse_docsis_status(stripped)
         self.assertEqual(got["upstream_ofdma"], [])
         self.assertEqual(len(got["downstream"]), 32)  # unaffected sections unaffected
 
     def test_empty_input_is_a_clean_empty_result_not_a_crash(self):
-        got = environ.parse_docsis_status("")
+        got = docsis.parse_docsis_status("")
         self.assertEqual(got["downstream"], [])
         self.assertEqual(got["snr_db"], [])
 

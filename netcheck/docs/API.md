@@ -125,7 +125,7 @@ gather that output. This is what runs every tick of `netcheck watch`.
   `ALTER TABLE ... ADD COLUMN`, diffed against a throwaway in-memory build
   of the current schema rather than a hand-rolled SQL parser). Added columns
   are always nullable, regardless of `schema.sql`'s `NOT NULL` — see
-  `docs/DEPLOYMENT.md`.
+  `netcheck/docs/DEPLOYMENT.md`.
 - `host_id(conn, name, os_name) -> int` — upserts the host row, returns its id.
 - `add_sample(conn, host, row)`, `add_event(conn, host, row)`,
   `add_error(conn, host, row)`, `add_scan(conn, host, payload)` — inserts,

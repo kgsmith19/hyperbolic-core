@@ -1,7 +1,7 @@
 """Modem/DOCSIS diagnostics: signal levels, stability, bridge mode verification.
 
 Phase 16 diagnostic module (additional to the canonical 15-hypothesis list in
-docs/TROUBLESHOOTING.md): DOCSIS/coax signal instability on cable modem.
+netcheck/docs/TROUBLESHOOTING.md): DOCSIS/coax signal instability on cable modem.
 """
 import os
 import subprocess

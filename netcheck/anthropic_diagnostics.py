@@ -1,7 +1,7 @@
 """Anthropic status diagnostics: check for service degradation.
 
 Phase 19 diagnostic module (additional to the canonical 15-hypothesis list in
-docs/TROUBLESHOOTING.md): Anthropic-side incident or degraded performance.
+netcheck/docs/TROUBLESHOOTING.md): Anthropic-side incident or degraded performance.
 """
 import json
 from typing import Dict, Optional

@@ -14,7 +14,7 @@ cd network-checker
 python -m netcheck full-check --format quick
 ```
 
-That's the entire "install." See `docs/QUICKSTART.md` for day-to-day usage.
+That's the entire "install." See `netcheck/docs/QUICKSTART.md` for day-to-day usage.
 
 ## Local deployment
 
@@ -132,6 +132,6 @@ rather than editing `0001` in place.
 
 **No breaking config format changes to date.** `.env` keys, the CLI's
 subcommands, and `NETCHECK_DB`/`NETCHECK_TARGET` have been additive-only
-since the original design (`docs/superpowers/specs/2026-08-04-netcheck-design.md`).
+since the original design (`docs/notes/2026-08-04-netcheck-design.md`).
 If that ever changes, it belongs in `CHANGELOG.md` under a `### Changed`
 heading with an explicit migration note, not silently.
