@@ -1,7 +1,7 @@
 """NAT diagnostics: double NAT detection, NAT traversal issues.
 
 Phase 17 diagnostic module (additional to the canonical 15-hypothesis list in
-docs/TROUBLESHOOTING.md): modem reverting out of bridge mode (double NAT).
+netcheck/docs/TROUBLESHOOTING.md): modem reverting out of bridge mode (double NAT).
 """
 import ipaddress
 import socket

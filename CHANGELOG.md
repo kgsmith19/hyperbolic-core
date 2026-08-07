@@ -3,7 +3,7 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [SemVer](https://semver.org/): `MAJOR.MINOR.PATCH`, bumped
 with `python tools/release.py bump {major,minor,patch}` (see
-`docs/DEPLOYMENT.md` for the full release process). Draft entries for a new
+`netcheck/docs/DEPLOYMENT.md` for the full release process). Draft entries for a new
 release with `python tools/release.py changelog`, which lists commit
 subjects since the last tag — the entry itself still gets a human editorial
 pass, not full automation.
@@ -56,8 +56,8 @@ pass, not full automation.
   concurrently (Phase 25).
 - `tools/profile_diagnostics.py`: per-phase runtime/memory profiling
   (Phase 25).
-- `docs/API.md`, `docs/QUICKSTART.md`, `docs/TROUBLESHOOTING.md`,
-  `docs/CONTRIBUTING.md`, rewritten `docs/ARCHITECTURE.md` (Phase 24).
+- `netcheck/docs/API.md`, `netcheck/docs/QUICKSTART.md`, `netcheck/docs/TROUBLESHOOTING.md`,
+  `netcheck/docs/CONTRIBUTING.md`, rewritten `netcheck/docs/ARCHITECTURE.md` (Phase 24).
 - Restored `classify_latency`, `classify_latency_under_load`,
   `classify_packet_loss`, `detect_asymmetric_loss`, `find_path_mtu`,
   `diagnose_pmtud`, and `build_state_machine` in `diagnostic_engine.py` —
@@ -145,7 +145,7 @@ pass, not full automation.
   hop when it actually changes; `probes.gateway()` is now backed by a
   pure `parse_ipconfig_gateway()` parser tested against a real captured
   dual-stack fixture (`OPEN-ISSUES.md` #16).
-- `docs/DEVELOPMENT.md` told contributors to `pip install -e .` against a
+- `netcheck/docs/DEVELOPMENT.md` told contributors to `pip install -e .` against a
   stdlib-only project with no `setup.py`/`pyproject.toml` (Phase 24).
 - Seven diagnostic-module docstrings cited a hypothesis number that didn't
   match the canonical 15-hypothesis list (Phase 24).
@@ -195,5 +195,5 @@ Consolidates Phases 1–23: the core probe/correlation engine, all 15
 canonical failure hypotheses, the six Phase 16–21 additional diagnostic
 modules (modem, NAT, CGNAT, Anthropic status, interference, router), the
 unified `full-check` runner, and end-to-end fault-injection tests. See
-`docs/ARCHITECTURE.md` for the full module map and `git log` for the
+`netcheck/docs/ARCHITECTURE.md` for the full module map and `git log` for the
 phase-by-phase history predating this file.

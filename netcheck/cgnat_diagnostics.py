@@ -1,7 +1,7 @@
 """CGNAT diagnostics: Carrier-Grade NAT detection.
 
 Phase 18 diagnostic module (additional to the canonical 15-hypothesis list in
-docs/TROUBLESHOOTING.md): CGNAT congestion on the ISP side.
+netcheck/docs/TROUBLESHOOTING.md): CGNAT congestion on the ISP side.
 """
 import ipaddress
 from typing import Optional, Dict

@@ -26,8 +26,8 @@ python -m netcheck serve      # dashboard at http://127.0.0.1:8787
 `watch` also reads Claude Code's own error logs and tells you which of your
 past API errors were actually your network, and which weren't.
 
-New to this? `docs/QUICKSTART.md` walks through every command with real
-sample output. Running in a container? See `docs/DEPLOYMENT.md`.
+New to this? `netcheck/docs/QUICKSTART.md` walks through every command with real
+sample output. Running in a container? See `netcheck/docs/DEPLOYMENT.md`.
 
 ## Why it exists
 
@@ -131,13 +131,13 @@ flag instead.
 - `docs/PRD.md` — the living source of truth: requirements, status, scope
 - `docs/SYSTEM-REQUIREMENTS.md` — functional/non-functional requirements, traced
 - `docs/DATA-FLOW-DIAGRAM.md` — how a tick moves from probe to stored row to verdict
-- `docs/QUICKSTART.md` — running `full-check`, `watch`, and `serve` for the first time
-- `docs/TROUBLESHOOTING.md` — symptom → cause → fix
-- `docs/API.md` — function-level reference for every module
-- `docs/ARCHITECTURE.md` — module map, decision trees, module interactions
-- `docs/CONTRIBUTING.md` — adding a new diagnostic, PDD/SDD/TDD standards
-- `docs/DEVELOPMENT.md` — local dev setup, test commands, code-quality gates
-- `docs/DEPLOYMENT.md` — local, container, and cloud deployment; releases; upgrade path
+- `netcheck/docs/QUICKSTART.md` — running `full-check`, `watch`, and `serve` for the first time
+- `netcheck/docs/TROUBLESHOOTING.md` — symptom → cause → fix
+- `netcheck/docs/API.md` — function-level reference for every module
+- `netcheck/docs/ARCHITECTURE.md` — module map, decision trees, module interactions
+- `netcheck/docs/CONTRIBUTING.md` — adding a new diagnostic, PDD/SDD/TDD standards
+- `netcheck/docs/DEVELOPMENT.md` — local dev setup, test commands, code-quality gates
+- `netcheck/docs/DEPLOYMENT.md` — local, container, and cloud deployment; releases; upgrade path
 - `CHANGELOG.md` — what changed, by version
 
 Known issues and accepted risks are tracked as

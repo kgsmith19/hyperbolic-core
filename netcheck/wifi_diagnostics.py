@@ -1,7 +1,7 @@
 """WiFi radio-layer diagnostics: band-steering, channel stability, interference.
 
 Phase 15 diagnostic module, covering canonical hypothesis #15 ("WiFi/DFS" in
-docs/TROUBLESHOOTING.md): WiFi radio-layer instability (band steering, DFS
+netcheck/docs/TROUBLESHOOTING.md): WiFi radio-layer instability (band steering, DFS
 channel switches, WiFi 7 Multi-Link Operation quirks).
 
 Current link state comes from environ.wifi() and neighbour congestion from

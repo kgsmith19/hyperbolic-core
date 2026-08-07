@@ -1,7 +1,7 @@
 """Interference diagnostics: detect WiFi interference sources.
 
 Phase 20 diagnostic module (additional to the canonical 15-hypothesis list in
-docs/TROUBLESHOOTING.md): persistent external WiFi interference. Reuses
+netcheck/docs/TROUBLESHOOTING.md): persistent external WiFi interference. Reuses
 environ.wifi()/environ.congestion() -- the same real co-channel/same-block
 scan `netcheck diagnose` already relies on -- rather than a second,
 disconnected measurement.

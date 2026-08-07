@@ -158,7 +158,7 @@ All checks must pass before merging to main.
 
 Tag pushes matching `v*` additionally run **Release** (`release.yml`): the
 full suite, a Docker image build, a smoke test of that image, and a draft
-GitHub Release. See `docs/DEPLOYMENT.md` for the release process and
+GitHub Release. See `netcheck/docs/DEPLOYMENT.md` for the release process and
 `tools/release.py` for the version-bump/changelog-draft helper.
 
 ## Making Changes
@@ -166,7 +166,7 @@ GitHub Release. See `docs/DEPLOYMENT.md` for the release process and
 ### Adding a New Diagnostic Rule
 1. Add a test case in `tests/test_diagnose.py`.
 2. Implement the rule in `diagnose.py`.
-3. Update `docs/TROUBLESHOOTING.md` if it changes the symptom-to-hypothesis
+3. Update `netcheck/docs/TROUBLESHOOTING.md` if it changes the symptom-to-hypothesis
    mapping.
 4. Run the full test suite to verify.
 

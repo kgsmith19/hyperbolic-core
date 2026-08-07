@@ -192,7 +192,7 @@ Summary only. `netcheck/schema.sql` is authoritative for exact types.
 | Monitoring | The tool itself doesn't monitor its own health beyond CI on every push; there is no production instance to page on. |
 | Alerting | None — the user runs `watch` in the foreground or a terminal multiplexer and reads its own output. |
 | Logging | `watch`/`diagnose`/etc. print human-readable status to stdout; no structured log file beyond the SQLite database itself, which is the durable record. |
-| Runbook | `docs/TROUBLESHOOTING.md` — symptom to cause to fix. |
+| Runbook | `netcheck/docs/TROUBLESHOOTING.md` — symptom to cause to fix. |
 
 ## 9. Technology decisions
 

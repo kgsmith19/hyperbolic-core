@@ -1,6 +1,6 @@
 """Phase 22: Unified diagnostics runner for the 7 extra hypothesis modules
 (Phases 15-21, additional to the canonical 15-hypothesis list in
-docs/TROUBLESHOOTING.md).
+netcheck/docs/TROUBLESHOOTING.md).
 
 Every phase is the same shape: instantiate a *Diagnostics class, call a few
 of its methods, wrap the results in a dict with a human-readable hypothesis
