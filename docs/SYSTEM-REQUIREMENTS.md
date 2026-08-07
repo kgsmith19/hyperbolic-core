@@ -5,7 +5,7 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-traces: [FR-001, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, CON-001]
+traces: [FR-001, FR-002, FR-003, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, CON-001]
 ---
 
 # System Requirements
@@ -26,9 +26,12 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 | ID | Requirement | Mechanism | Verified by |
 |---|---|---|---|
 | SR-05 | RLS enabled **and forced** on every `prompt.*` table; rows are owner-scoped. | `force row level security` + `owner_all` policy on `user_id = auth.uid()` | T-I-002, T-I-003; `pg_class` |
-| SR-06 | The grant surface is the narrowest that satisfies the shipped slices: today `SELECT` (anon, authenticated) and `INSERT` (authenticated). No `UPDATE` or `DELETE` grant exists at all. | Postgres grants | `information_schema.role_table_grants` |
+| SR-06 | The grant surface is the narrowest that satisfies the shipped slices: `prompt.prompt` has `SELECT` (anon, authenticated), `INSERT` (authenticated), and, since SL-004, a column-scoped `UPDATE` on `title, body` only (`id`, `user_id`, `created_at` stay unwritable) — never `DELETE`. `prompt.prompt_version` has only `SELECT` and `INSERT`; no `UPDATE` or `DELETE` grant exists on it at all, ever (SR-19). | Postgres grants | `information_schema.role_table_grants` |
 | SR-07 | Only the anon key appears in this repo; it is public by design and RLS is the boundary. The service-role key never appears anywhere. | Key choice + grep | GATE-SHIP SH6 |
 | SR-08 | Prompt bodies (confidential, DR-002) reach only the Supabase project; no other host. | The page's two `fetch` targets | Code inspection of `web/index.html` |
+| SR-18 | Two prompts can never share a title, case-insensitively. | `unique index (lower(title))` on `prompt.prompt` | T-I-004 |
+| SR-19 | A stored version row is never modified or deleted, by any caller, ever. | The absence of any `UPDATE`/`DELETE` grant or policy on `prompt.prompt_version` — an absence is the mechanism, not a rule enforced in application code | T-I-006 |
+| SR-20 | A duplicate-title rejection (`23505`) does not reveal the conflicting prompt's title or body in its response. | Postgres suppresses the constraint-violation `details` field for a non-superuser role; `message` names only the constraint | Confirmed live 2026-08-07 (SPEC-0002 AC-001); `code` is the tested signal |
 
 ## 3. Data integrity
 
@@ -37,6 +40,8 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 | SR-09 | Title length 1–200 and body length 1–100,000 are enforced in the database, not only the UI. | `CHECK` constraints | T-I-001 |
 | SR-10 | Every row carries its owner; ownership defaults to the authenticated caller and cannot be null. | `user_id uuid not null default auth.uid()` | Column definition |
 | SR-11 | A stored body is returned byte-identical: template tokens, fences, newlines, non-ASCII untouched. | Postgres `text` + PostgREST JSON, proven end to end | T-A-001 |
+| SR-21 | Every insert and every distinct-value body update writes exactly one `prompt.prompt_version` row; a same-value update (title-only, or body set to its current value) writes none. | An `after insert or update of body` trigger with an in-function distinct-body guard — the guard cannot live in a trigger `WHEN` clause, since Postgres rejects `OLD` references there on a trigger that also fires on `INSERT` | T-I-005, T-A-003, T-I-007 |
+| SR-22 | `version_no` increases by exactly 1 per recorded change, starting at 1, no gaps, no reuse. | `coalesce(max(version_no), 0) + 1` computed inside the trigger | T-I-005, T-A-003 |
 
 ## 4. Operations
 

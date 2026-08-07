@@ -5,12 +5,12 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-traces: [FR-001, NFR-003, NFR-011, DR-001, DR-002, DR-006]
+traces: [FR-001, FR-002, FR-003, NFR-003, NFR-005, NFR-011, DR-001, DR-002, DR-006]
 ---
 
 # Data Flow Diagram
 
-Where data comes from, goes, and rests. As of SL-000; later slices extend this file in the same commit that changes the flows.
+Where data comes from, goes, and rests. As of SL-004; later slices extend this file in the same commit that changes the flows.
 
 ## 1. Trust boundaries
 
@@ -20,19 +20,28 @@ Where data comes from, goes, and rests. As of SL-000; later slices extend this f
 │  access token held in a JS variable, never stored    │
 └──────────────┬───────────────────────────────────────┘
                │ HTTPS
-               │ (1) POST /auth/v1/token    email + password
-               │ (2) GET/POST /rest/v1/prompt   Bearer token,
+               │ (1) POST /auth/v1/token       email + password
+               │ (2) GET/POST/PATCH /rest/v1/prompt   Bearer token,
                │     profile header "prompt"
+               │ (3) GET /rest/v1/prompt_version       read-only
                ▼
 ┌─ Supabase project `toolbelt` ────────────────────────┐
 │  GoTrue ──issues──▶ JWT, sub = auth.uid()            │
 │  PostgREST ──enforces──▶ RLS (forced, owner-scoped)  │
-│   └─ Postgres schema `prompt`: table `prompt`        │
-│      (this repo's only writable surface)             │
+│   └─ Postgres schema `prompt`:                       │
+│      table `prompt`          (title, body writable;  │
+│                                title unique per-user  │
+│                                is global, case-fold)  │
+│      table `prompt_version`  (insert-only from the    │
+│                                client's point of view; │
+│                                every row actually      │
+│                                written by a trigger,   │
+│                                never by direct client   │
+│                                INSERT in practice)      │
 └──────────────────────────────────────────────────────┘
                ▲ same endpoints, same anon key
 ┌──────────────┴───────────────────────────────────────┐
-│  tests/skeleton.test.mjs (Node, no DB credentials)   │
+│  tests/*.test.mjs (Node, no DB credentials)          │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -44,19 +53,23 @@ One trust boundary: browser to Supabase. No third position exists, which is why 
 |---|---|---|---|---|---|---|
 | F-1 | Sign in | Browser form | `POST /auth/v1/token?grant_type=password` | GoTrue | Email, password | Anon key names the project |
 | F-2 | Token issued | GoTrue | HTTPS response | Browser memory | JWT | — |
-| F-3 | Save a prompt | Browser form | `POST /rest/v1/prompt` | `prompt.prompt` | Title, body (confidential) | RLS `with check (user_id = auth.uid())` |
-| F-4 | List prompts | Browser | `GET /rest/v1/prompt` | Browser DOM | Own rows only | RLS `using (user_id = auth.uid())` |
+| F-3 | Save a prompt | Browser form | `POST /rest/v1/prompt` | `prompt.prompt` | Title, body (confidential) | RLS `with check (user_id = auth.uid())`; rejected `409` if the title already exists, case-insensitively (FR-002) |
+| F-4 | List / search prompts | Browser | `GET /rest/v1/prompt` | Browser DOM | Own rows only | RLS `using (user_id = auth.uid())`. Search (FR-006) filters the already-fetched list client-side; no separate network flow. |
+| F-5 | Edit a prompt's body | Browser (not yet wired to a UI control; API-level, FR-003) | `PATCH /rest/v1/prompt` | `prompt.prompt` | New body (confidential) | RLS scopes the update to the owner; grant is column-scoped to `title, body` only |
+| F-6 | Version recorded | Trigger on `prompt.prompt`, fired by F-3 or F-5 | In-database, no network hop | `prompt.prompt_version` | A full copy of the new body | `auth.uid()` carried through from the row being written, checked by the insert policy |
+| F-7 | Read version history | Browser (not yet wired to a UI control; API-level, FR-009 pending) | `GET /rest/v1/prompt_version` | Browser | Own version rows only | RLS `using (user_id = auth.uid())` |
 
-Render, copy, and `core.run` instrumentation flows arrive with SL-002/SL-007 and get rows here then.
+Render, copy, and `core.run` instrumentation flows arrive with SL-002/SL-007.
 
 ## 3. Data at rest
 
 | Store | Contents | Classification | Retention | Encryption |
 |---|---|---|---|---|
-| `prompt.prompt` | Titles (DR-001, internal), bodies (DR-002, **confidential**), owner ids (DR-006) | per column | Forever until the user deletes — though no `DELETE` grant exists yet, so today rows are effectively append-only | At rest by Supabase |
+| `prompt.prompt` | Titles (DR-001, internal, globally unique case-insensitively), bodies (DR-002, **confidential**), owner ids (DR-006) | per column | Forever until the user deletes — no `DELETE` grant exists at all, so today rows are effectively permanent | At rest by Supabase |
+| `prompt.prompt_version` | One immutable copy of `body` per insert and per distinct-value body edit (DR-002, **confidential**), owner id (DR-006) | per column | Forever — no `UPDATE` or `DELETE` grant or policy exists on this table at all, ever (NFR-005's mechanism) | At rest by Supabase |
 | `auth.users` | Kyle's account + two project-level test fixtures | internal | Until fixtures retire | Managed by Supabase |
 
-Test fixture rows accumulate in `prompt.prompt` across suite runs (SPEC-0000 RISK-002, accepted).
+Test fixture rows accumulate in `prompt.prompt` and `prompt.prompt_version` across suite runs (SPEC-0000 RISK-002, extended by SPEC-0002 RISK-002; accepted, cleaned by the migration's one-time dedup only, not routinely).
 
 ## 4. Secrets
 

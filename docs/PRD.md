@@ -4,7 +4,7 @@ status: draft
 created: 2026-08-06
 updated: 2026-08-07
 owner: Kyle
-version: 0.1.1
+version: 0.1.2
 ---
 
 # Prompt Organizer PRD
@@ -119,11 +119,11 @@ This is a place to keep the instructions you write for AI tools, so you can find
 | ID | Requirement | Priority | Acceptance criterion (objective) | Traces to | Status |
 |---|---|---|---|---|---|
 | FR-001 | The system must save a prompt with a title of 1 to 200 characters and a body of 1 to 100,000 characters. | Must | Given an empty library, when a prompt titled `Spec Author` with a 500-character body is saved, then it appears in the list and its body is returned unchanged, character for character. | UC-002 | done |
-| FR-002 | The system must reject a prompt whose title duplicates an existing prompt's title, case-insensitively. | Must | Given a prompt titled `Spec Author` exists, when saving another titled `spec author`, then the save is rejected with `409` and the message names the existing prompt. | UC-002 | not-started |
-| FR-003 | The system must create a new version on every body change and must never modify a stored version. | Must | Given a prompt at version 1, when the body is changed and saved, then version 2 holds the new body, version 1 holds the original unchanged, and the prompt reports current version 2. | UC-004 | not-started |
+| FR-002 | The system must reject a prompt whose title duplicates an existing prompt's title, case-insensitively. | Must | Given a prompt titled `Spec Author` exists, when saving another titled `spec author`, then the save is rejected with `409` and Postgres code `23505`. (Corrected 2026-08-07, SL-004: PostgREST/Postgres suppresses the constraint-violation `details` field for a non-superuser role, confirmed live — a message naming the specific existing prompt is not a guarantee this system can make to an `authenticated` caller. `code` is the reliable signal; see SPEC-0002 AC-001.) | UC-002 | done |
+| FR-003 | The system must create a new version on every body change and must never modify a stored version. | Must | Given a prompt at version 1, when the body is changed and saved, then version 2 holds the new body, version 1 holds the original unchanged, and the prompt reports current version 2. | UC-004 | done |
 | FR-004 | The system must substitute every `{{VARIABLE}}` token in the body with the value supplied for that name. | Must | Given a body `Repo is {{REPO}}.` and the value `REPO=toolbelt`, when rendered, then the output is exactly `Repo is toolbelt.` | UC-001 | not-started |
 | FR-005 | The system must remove any block fenced by `<!--OPTIONAL:id-->` and `<!--/OPTIONAL:id-->` whose `id` is not in the requested include list, and must keep blocks whose `id` is in the list, with the fence comments removed in both cases. | Must | Given a body with sections `a` and `b`, when rendered including only `a`, then the output contains section `a`'s content, does not contain section `b`'s content, and contains no `<!--OPTIONAL` text. | UC-003 | not-started |
-| FR-006 | The system must return prompts matching a search string against title, tags, and body, ranked title matches first. | Must | Given three prompts, when searching `spec`, then only prompts containing `spec` in title, a tag, or body are returned, and a title match sorts above a body-only match. | UC-001, UC-002 | not-started |
+| FR-006 | The system must return prompts matching a search string against title, tags, and body, ranked title matches first. | Must | Given three prompts, when searching `spec`, then only prompts containing `spec` in title, a tag, or body are returned, and a title match sorts above a body-only match. | UC-001, UC-002 | in-slice-006 (title+body done in SL-001; tag matching is SL-006) |
 | FR-007 | The system must render a prompt to plain text and place it on the clipboard in one user action. | Must | Given a prompt with all variables filled, when the copy control is activated, then the clipboard contains the fully rendered text and the interface confirms the copy within 1 second. | UC-001 | not-started |
 | FR-008 | The system must save a named configuration consisting of variable values and a list of included section ids, and must apply it on selection. | Must | Given a configuration `lean` with `REPO=toolbelt` and sections `[a]`, when `lean` is selected, then the variable field for `REPO` reads `toolbelt` and only section `a` is included. | UC-003 | not-started |
 | FR-009 | The system must display every prior version of a prompt with its creation timestamp, and must allow restoring one as a new current version. | Should | Given a prompt at version 3, when version 1 is restored, then version 4 is created holding version 1's body and version 1 remains unchanged. | UC-004 | not-started |
@@ -140,7 +140,7 @@ This is a place to keep the instructions you write for AI tools, so you can find
 | NFR-002 | Performance | Render must complete within 100 ms at p95 for a 100,000-character body. | 100 ms | Timed unit benchmark | not-started |
 | NFR-003 | Security | Every read and write must be rejected unless the caller is the authenticated owner of the row. | 100% of cross-user attempts rejected | RLS policy test as a second user | done |
 | NFR-004 | Security | No API key or service-role credential may appear in client-delivered code. | 0 occurrences | Grep of the built bundle in CI | not-started |
-| NFR-005 | Durability | A saved prompt version must never be modified or deleted by the application. | 0 update or delete statements against the version table | Code inspection plus a revoked `UPDATE`/`DELETE` grant on the table | not-started |
+| NFR-005 | Durability | A saved prompt version must never be modified or deleted by the application. | 0 update or delete statements against the version table | Code inspection plus a revoked `UPDATE`/`DELETE` grant on the table | done |
 | NFR-006 | Availability | The tool must be usable whenever the database is reachable. No additional service may be required to render. | Rendering has zero external dependencies | Inspection: render is a pure function | not-started |
 | NFR-007 | Cost | Infrastructure cost must be $0 above the existing `toolbelt` project. | $0 marginal | Billing report | done |
 | NFR-008 | Accessibility | Every control must be reachable and operable by keyboard alone, and search must be focusable by a single keystroke from anywhere in the app. | 0 keyboard traps | Manual keyboard pass plus an automated scan | not-started |
@@ -249,6 +249,7 @@ None. The tool reads and writes its own schema and nothing else. Adding one requ
 |---|---|---|---|---|
 | 2026-08-06 | 0.1.0 | Initial draft. | First application of the PRD template. | - |
 | 2026-08-07 | 0.1.1 | SL-000 slice row now delivers FR-001 (was "none"); FR-001, NFR-003, NFR-007, NFR-009 set to `done`; NFR-009's measurement corrected from "lint rule" to line count. | The skeleton as built satisfies FR-001's acceptance criterion in full, and hiding that behind "none" would make the status columns dishonest once GATE-GREEN passed — the same recorded deviation the toolbelt PRD made for its Phase 0. NFR-003/NFR-007/NFR-009 hold for everything that exists after SL-000. No linter can exist under `MAX_NEW_LIBRARIES: 0`, so the measurement column now says what is actually done. | FR-001, NFR-003, NFR-007, NFR-009, SL-000 |
+| 2026-08-07 | 0.1.2 | SL-001 and SL-004 shipped (worktree-parallel, `rules/07-SKILLS.md`). FR-006 → `in-slice-006` (title+body done, tags remain); FR-002, FR-003, NFR-005 → `done`. FR-002's AC corrected: the response's `message` names the violated constraint, not the conflicting prompt's value — Postgres suppresses the `details` field for a non-superuser role on a constraint violation, confirmed live against the real project. | The original FR-002 AC claimed a guarantee this system cannot make to an `authenticated` caller; SPEC-0002's own AC-001 carried the identical error and both were fixed together, spec-first, so the PRD and the spec never disagree on what is actually true. | FR-002, FR-003, FR-006, NFR-005, SL-001, SL-004 |
 
 ---
 

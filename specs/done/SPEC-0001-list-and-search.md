@@ -2,10 +2,10 @@
 title: Search the prompt list by title and body
 spec_id: SPEC-0001-list-and-search
 slice: SL-001
-status: active
+status: done
 created: 2026-08-07
 updated: 2026-08-07
-completed:
+completed: 2026-08-07
 owner: Kyle
 traces: [FR-006, NFR-009]
 ---
@@ -110,6 +110,6 @@ Revert the slice's commits; no data or schema to roll back.
 - [x] T-U-001..005 green; red output recorded first; one cycle logged if more were needed. Red 2026-08-07: 5/5 `ERR_ASSERTION` against the R2 stub (no import errors), each showing expected vs actual; green in one red-green cycle; full suite 9/9, exit 0, 1.7 s. Red/green evidence in the slice commit message.
 - [x] Ledger rows predate tests; mutation-verified dates recorded (break the function per `rules/06-TESTS.md`: invert the case-fold, drop the rank sort, mutate the input — each must turn its test red). All five mutations run 2026-08-07, each turned exactly its claimed test red (case-fold → T-U-001, rank sort → T-U-002, ignored query → T-U-003, in-place splice → T-U-004 also re-proven in isolation, RegExp query → T-U-005); details per ledger row; suite re-run green after every revert.
 - [x] GATE-MINIMAL: no line undemanded by an AC/PROP; function ≤40 lines; `search.mjs` ≤250. `searchPrompts` 10 lines, complexity 4; `search.mjs` 12 lines, `index.html` 134, both ≤250; four lines deleted (the prepend/direct-render path).
-- [ ] Browser drill at integration: AC-001 and AC-003 exercised on the real page against live data, evidence recorded here.
-- [ ] PRD FR-006 → `in-slice-001` at start, `done (partial: title+body; tags SL-006)` note at close — integrator applies with the change-log entry.
-- [ ] Spec moved to `done/` with dates set.
+- [x] Browser drill at integration, 2026-08-07 (Chromium against the live project via the same Node-relay technique as SL-000's ASM-005, since this sandbox resets the browser's own TLS egress; page logic ran unmodified): AC-001/AC-002 — searching `spec author` returned 2 matches, both containing the query case-insensitively; AC-003 — searching a no-match string showed 0 rows, `#empty-state` read exactly `No prompts match "zzz-nonexistent-query-drill"`, and `#title` was prefilled with the same string; AC-004 — clearing the search restored the full 31-row list and hid the empty state.
+- [x] PRD FR-006 → `done (partial: title+body; tags SL-006)` — integrator applies with the change-log entry, same commit as this file's move to `done/`.
+- [x] Spec moved to `done/` with dates set.

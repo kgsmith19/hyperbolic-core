@@ -41,7 +41,7 @@ owner: Kyle
 | Integration (`T-I-`) | 7 | ~20% | ~3s | T-I-001..003 (SL-000), T-I-004..007 (SL-004) |
 | Acceptance (`T-A-`) | 3 | 1 per AC | ~1.2s + drill | T-A-001, T-A-003 executable; T-A-002 a recorded drill |
 | E2E / Regression | 0 | | 0 | No defects yet; browser pass is a recorded drill, not a dependency |
-| **Total (SL-000+SL-001+SL-004)** | 14 executable | | measured at the merge-commit full-suite run below | Phase 0 cap (4) applied to SL-000 only; SL-001 and SL-004 declare standard ceilings; well under 120 s |
+| **Total (SL-000+SL-001+SL-004)** | 14 executable | | 2.49s measured (`node --test "tests/*.test.mjs"` on integrated `main`, commit 750b4ab) | Phase 0 cap (4) applied to SL-000 only; SL-001 and SL-004 declare standard ceilings; well under 120 s |
 
 ## 3. Regression register
 
@@ -65,5 +65,5 @@ Quarantine is capped at 14 days.
 - [x] Every test file has a matching row; every row's test exists. Three files (`skeleton.test.mjs`, `search.test.mjs`, `versions.test.mjs`), fourteen executable rows, plus the T-A-002 drill labelled as not executable.
 - [x] Every `Traces to` resolves through an `AC`/`PROP` to an `FR`/`NFR`/`CON`.
 - [x] Every row has a mutation-verified date and a deletion criterion. All SL-004 rows verified 2026-08-07 by the integrator (DDL mutations, since the worker's task deliberately excluded schema access). None `pending`.
-- [x] Total suite runtime measured at the merge-commit full-suite run, under 120 s.
+- [x] Total suite runtime 2.49s measured on integrated `main`, under 120 s.
 - [x] Quarantine empty.
