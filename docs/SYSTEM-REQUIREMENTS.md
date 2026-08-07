@@ -5,7 +5,7 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, FR-004, FR-005, NFR-001, NFR-002, NFR-003, NFR-004]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, NFR-001, NFR-002, NFR-003, NFR-004]
 ---
 
 # System Requirements
@@ -29,8 +29,9 @@ What the system must be, as opposed to what it must do. What it does lives in `d
 | SR-006 | `GET /rest/v1/idea` with header `Accept-Profile: idea` | Supabase PostgREST | Reading the idea list | Non-200 leaves the table empty and the section hidden |
 | SR-024 | `GET /rest/v1/score` with header `Accept-Profile: idea` | Supabase PostgREST | Reading each idea's scores | Non-200 leaves the section hidden (thrown before render, same as SR-006) |
 | SR-025 | `GET /rest/v1/metric_def` with header `Accept-Profile: core` | Supabase PostgREST | Reading metric names to label scores | Non-200 leaves the section hidden, same as SR-024 |
+| SR-027 | `GET /rest/v1/dependency` with header `Accept-Profile: idea` | Supabase PostgREST | Reading each idea's dependencies | Non-200 leaves the section hidden, same as SR-024 |
 
-All three are provided by the same Supabase project as the database. None is a third-party integration (PRD section 11).
+All four are provided by the same Supabase project as the database. None is a third-party integration (PRD section 11).
 
 ## 3. Security requirements
 
