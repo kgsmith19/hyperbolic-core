@@ -23,6 +23,13 @@ MACOS = probes.MACOS
 _AIRPORT = ("/System/Library/PrivateFrameworks/Apple80211.framework/"
             "Versions/Current/Resources/airport")
 
+# Single source of truth for both this module and the *_diagnostics.py
+# modules that talk to the same two devices -- a second, independently
+# hardcoded copy of either address is exactly the kind of drift that made
+# router_diagnostics.py silently ping the wrong router (see .env.example).
+MODEM_HOST_DEFAULT = "192.168.100.1"
+ROUTER_HOST_DEFAULT = "192.168.50.1"
+
 
 def _ps(script, timeout=25, args=()):
     """Run PowerShell and parse its JSON, returning (data, reason).
@@ -424,7 +431,7 @@ def parse_docsis_status(js):
 def modem(host=None, user=None, password=None):
     """DOCSIS line quality. Uncorrectable codewords are the single best
     indicator that the physical cable plant is the problem."""
-    host = host or os.environ.get("MODEM_HOST", "192.168.100.1")
+    host = host or os.environ.get("MODEM_HOST", MODEM_HOST_DEFAULT)
     user = user if user is not None else os.environ.get("MODEM_USER")
     password = password if password is not None else os.environ.get("MODEM_PASS")
     if not user:
@@ -439,7 +446,7 @@ def modem(host=None, user=None, password=None):
 def router(host=None, user=None, password=None):
     """ASUS routers ship DPI (AiProtection / Trend Micro) that is well known
     for reaping long-lived TLS streams — exactly this symptom."""
-    host = host or os.environ.get("ROUTER_HOST", "192.168.50.1")
+    host = host or os.environ.get("ROUTER_HOST", ROUTER_HOST_DEFAULT)
     user = user if user is not None else os.environ.get("ROUTER_USER")
     password = password if password is not None else os.environ.get("ROUTER_PASS")
     if not user:

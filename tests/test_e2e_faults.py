@@ -399,24 +399,5 @@ class E2EMtuPmtudTest(unittest.TestCase):
                          "a DF-set ping bigger than the real 1000-byte MTU must fail")
 
 
-class AcceptanceTest(unittest.TestCase):
-    """High-level acceptance: all 15 hypotheses have real test coverage
-    somewhere in this suite, not just a name in a list."""
-
-    def test_all_15_hypotheses_have_test_coverage(self):
-        """The canonical list here must match all_diagnostics.py's, so the
-        two can't silently drift apart."""
-        from netcheck.all_diagnostics import AllDiagnostics
-        canonical = [name for name, _ in AllDiagnostics().hypotheses]
-        self.assertEqual(len(canonical), 15)
-        self.assertEqual(canonical, [
-            "Latency (ms)", "Jitter (ms)", "Packet Loss (%)", "MTU Size (bytes)",
-            "TCP Retransmits", "Dual-Stack IPv6", "DNS Resolution (ms)",
-            "Routing Asymmetry", "TLS Handshake (ms)", "Socket Buffer Size",
-            "Connection Reaping", "Fix Application", "Verification",
-            "Monitoring", "DFS Channel Warning",
-        ])
-
-
 if __name__ == "__main__":
     unittest.main()

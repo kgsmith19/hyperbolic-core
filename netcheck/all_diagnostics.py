@@ -1,10 +1,14 @@
-"""Phase 22: Unified diagnostics runner for all 15 network failure hypotheses.
+"""Phase 22: Unified diagnostics runner for the 7 extra hypothesis modules
+(Phases 15-21, additional to the canonical 15-hypothesis list in
+docs/TROUBLESHOOTING.md).
 
-Super-easy-to-use CLI interface with recommendations and fix guidance.
+Every phase is the same shape: instantiate a *Diagnostics class, call a few
+of its methods, wrap the results in a dict with a human-readable hypothesis
+label. PHASES below is the single declarative list of "what phases exist";
+adding a new one is a data change here, not a new run_phase_* method.
 """
-from typing import Dict, List, Tuple
+from typing import Dict
 import concurrent.futures
-import json
 
 from . import (
     modem_diagnostics,
@@ -14,127 +18,80 @@ from . import (
     interference_diagnostics,
     router_diagnostics,
     wifi_diagnostics,
-    probes,
-    environ,
+)
+
+# (result key, hypothesis label, Diagnostics class, ((output key, method name), ...))
+PHASES = (
+    ("phase_16_modem", "Modem signal degradation or DOCSIS issues",
+     modem_diagnostics.ModemDiagnostics,
+     (("modem_reachable", "detect_modem_reachable"),
+      ("signal_levels", "detect_signal_levels"),
+      ("bridge_mode", "detect_bridge_mode"),
+      ("uncorrectable_codewords", "detect_uncorrectable_codewords"))),
+
+    ("phase_17_nat", "Double NAT or restrictive NAT type",
+     nat_diagnostics.NATDiagnostics,
+     (("double_nat", "detect_double_nat"),
+      ("nat_type", "detect_nat_type"),
+      ("network_topology", "get_network_topology"))),
+
+    ("phase_18_cgnat", "Carrier-Grade NAT limiting port range",
+     cgnat_diagnostics.CGNATDiagnostics,
+     (("cgnat_detected", "detect_cgnat"),
+      ("implications", "check_cgnat_implications"))),
+
+    ("phase_19_anthropic", "Anthropic API or service degradation",
+     anthropic_diagnostics.AnthropicDiagnostics,
+     (("service_status", "check_service_status"),
+      ("api_connectivity", "check_api_connectivity"),
+      ("incident_history", "check_incident_history"))),
+
+    ("phase_20_interference", "Persistent external WiFi interference",
+     interference_diagnostics.InterferenceDiagnostics,
+     (("interference_sources", "scan_interference_sources"),
+      ("channel_overlap", "detect_channel_overlap"),
+      ("signal_quality", "check_signal_quality"))),
+
+    ("phase_21_router", "Stale router defaults or outdated firmware",
+     router_diagnostics.RouterDiagnostics,
+     (("firmware", "check_firmware_currency"),
+      ("qos_settings", "check_qos_settings"),
+      ("security_features", "check_security_features"),
+      ("bridge_mode", "check_bridge_mode_setting"),
+      ("band_steering", "check_band_steering"),
+      ("recommended_settings", "get_recommended_settings"))),
+
+    ("phase_15_wifi", "WiFi-related issues (band steering, DFS, interference)",
+     wifi_diagnostics.WiFiDiagnostics,
+     (("band_steering", "detect_band_steering"),
+      ("dfs_warning", "detect_dfs_channel_warning"),
+      ("signal_instability", "detect_signal_instability"),
+      ("interference", "check_interference"))),
 )
 
 
+def run_phase(entry) -> Dict:
+    """Run one PHASES entry: instantiate its class, call each listed method,
+    wrap the results under the hypothesis label."""
+    _key, hypothesis, cls, fields = entry
+    diag = cls()
+    return {"hypothesis": hypothesis,
+           **{output_key: getattr(diag, method)() for output_key, method in fields}}
+
+
 class AllDiagnostics:
-    """Run all 21 diagnostic phases and provide unified recommendations."""
-
-    def __init__(self):
-        self.results = {}
-        self.hypotheses = [
-            ("Latency (ms)", "Measure baseline latency variance"),
-            ("Jitter (ms)", "Measure latency variation"),
-            ("Packet Loss (%)", "Detect packet drops"),
-            ("MTU Size (bytes)", "Check path MTU constraints"),
-            ("TCP Retransmits", "Detect TCP-level failures"),
-            ("Dual-Stack IPv6", "IPv4/IPv6 preference issues"),
-            ("DNS Resolution (ms)", "DNS lookup delays"),
-            ("Routing Asymmetry", "Forward/reverse path mismatch"),
-            ("TLS Handshake (ms)", "TLS negotiation overhead"),
-            ("Socket Buffer Size", "OS buffer constraints"),
-            ("Connection Reaping", "Server closing idle connections"),
-            ("Fix Application", "Automated fix execution"),
-            ("Verification", "Post-fix regression testing"),
-            ("Monitoring", "Continuous health monitoring"),
-            ("DFS Channel Warning", "WiFi regulatory restrictions"),
-        ]
-
-    def run_phase_16_modem(self) -> Dict:
-        """Run modem diagnostics."""
-        diag = modem_diagnostics.ModemDiagnostics()
-        return {
-            "hypothesis": "Modem signal degradation or DOCSIS issues",
-            "modem_reachable": diag.detect_modem_reachable(),
-            "signal_levels": diag.detect_signal_levels(),
-            "bridge_mode": diag.detect_bridge_mode(),
-            "uncorrectable_codewords": diag.detect_uncorrectable_codewords(),
-        }
-
-    def run_phase_17_nat(self) -> Dict:
-        """Run NAT diagnostics."""
-        diag = nat_diagnostics.NATDiagnostics()
-        return {
-            "hypothesis": "Double NAT or restrictive NAT type",
-            "double_nat": diag.detect_double_nat(),
-            "nat_type": diag.detect_nat_type(),
-            "network_topology": diag.get_network_topology(),
-        }
-
-    def run_phase_18_cgnat(self) -> Dict:
-        """Run CGNAT diagnostics."""
-        diag = cgnat_diagnostics.CGNATDiagnostics()
-        return {
-            "hypothesis": "Carrier-Grade NAT limiting port range",
-            "cgnat_detected": diag.detect_cgnat(),
-            "implications": diag.check_cgnat_implications(),
-        }
-
-    def run_phase_19_anthropic(self) -> Dict:
-        """Run Anthropic service status diagnostics."""
-        diag = anthropic_diagnostics.AnthropicDiagnostics()
-        return {
-            "hypothesis": "Anthropic API or service degradation",
-            "service_status": diag.check_service_status(),
-            "api_connectivity": diag.check_api_connectivity(),
-            "incident_history": diag.check_incident_history(),
-        }
-
-    def run_phase_20_interference(self) -> Dict:
-        """Run WiFi interference diagnostics."""
-        diag = interference_diagnostics.InterferenceDiagnostics()
-        return {
-            "hypothesis": "Persistent external WiFi interference",
-            "interference_sources": diag.scan_interference_sources(),
-            "channel_overlap": diag.detect_channel_overlap(),
-            "signal_quality": diag.check_signal_quality(),
-        }
-
-    def run_phase_21_router(self) -> Dict:
-        """Run router firmware and settings diagnostics."""
-        diag = router_diagnostics.RouterDiagnostics()
-        return {
-            "hypothesis": "Stale router defaults or outdated firmware",
-            "firmware": diag.check_firmware_currency(),
-            "qos_settings": diag.check_qos_settings(),
-            "security_features": diag.check_security_features(),
-            "bridge_mode": diag.check_bridge_mode_setting(),
-            "band_steering": diag.check_band_steering(),
-            "recommended_settings": diag.get_recommended_settings(),
-        }
-
-    def run_phase_15_wifi(self) -> Dict:
-        """Run WiFi diagnostics."""
-        diag = wifi_diagnostics.WiFiDiagnostics()
-        return {
-            "hypothesis": "WiFi-related issues (band steering, DFS, interference)",
-            "band_steering": diag.detect_band_steering(),
-            "dfs_warning": diag.detect_dfs_channel_warning(),
-            "signal_instability": diag.detect_signal_instability(),
-            "interference": diag.check_interference(),
-        }
+    """Run all 7 diagnostic phases and provide unified recommendations."""
 
     def run_all(self) -> Dict:
-        """Run all diagnostics and return comprehensive results.
+        """Run all phases and return comprehensive results.
 
         Each phase does its own independent I/O (HTTP requests, subprocess
         calls, each with its own timeout), so they run concurrently rather
         than one after another -- `full-check`'s wall time is bounded by the
         slowest single phase, not the sum of all seven.
         """
-        phases = {
-            "phase_16_modem": self.run_phase_16_modem,
-            "phase_17_nat": self.run_phase_17_nat,
-            "phase_18_cgnat": self.run_phase_18_cgnat,
-            "phase_19_anthropic": self.run_phase_19_anthropic,
-            "phase_20_interference": self.run_phase_20_interference,
-            "phase_21_router": self.run_phase_21_router,
-            "phase_15_wifi": self.run_phase_15_wifi,
-        }
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(phases)) as pool:
-            futures = {name: pool.submit(fn) for name, fn in phases.items()}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(PHASES)) as pool:
+            futures = {entry[0]: pool.submit(run_phase, entry) for entry in PHASES}
             return {name: future.result() for name, future in futures.items()}
 
     def get_quick_diagnosis(self) -> str:
@@ -161,7 +118,7 @@ class AllDiagnostics:
 
         # CGNAT check
         cgnat = all_results["phase_18_cgnat"]
-        if cgnat.get("cgnat_detected", {}).get("is_cgnat"):
+        if cgnat.get("cgnat_detected", {}).get("detected"):
             summary_lines.append(f"[CGNAT] WARNING: Carrier-Grade NAT detected!")
         else:
             summary_lines.append(f"[CGNAT] {cgnat['hypothesis']}")

@@ -1,5 +1,6 @@
-"""CGNAT diagnostics tests: CGNAT detection."""
+"""CGNAT diagnostics tests. WAN-IP lookups mocked -- hermetic."""
 import unittest
+from unittest.mock import patch
 from netcheck import cgnat_diagnostics
 
 
@@ -36,28 +37,29 @@ class CGNATIPDetectionTest(unittest.TestCase):
 
 
 class CGNATDiagnosticsTest(unittest.TestCase):
-    """Tests for CGNAT diagnostics."""
+    """Tests for CGNAT diagnostics, with the WAN-IP lookup mocked."""
 
-    def test_cgnat_detection_returns_dict(self):
-        """CGNAT detection returns proper diagnostic dict."""
-        diag = cgnat_diagnostics.CGNATDiagnostics()
-        result = diag.detect_cgnat()
-        self.assertIsInstance(result, dict)
-        self.assertIn('detected', result)
+    def test_cgnat_detected_when_wan_ip_in_range(self):
+        with patch("netcheck.cgnat_diagnostics.get_wan_ip", return_value="100.70.1.1"):
+            result = cgnat_diagnostics.CGNATDiagnostics().detect_cgnat()
+        self.assertTrue(result["detected"])
+        self.assertEqual(result["wan_ip"], "100.70.1.1")
 
-    def test_cgnat_implications_returned(self):
-        """CGNAT implications check returns guidance."""
-        diag = cgnat_diagnostics.CGNATDiagnostics()
-        result = diag.check_cgnat_implications()
-        self.assertIsInstance(result, dict)
-        self.assertIn('cgnat_active', result)
-        self.assertIn('implications', result)
+    def test_not_cgnat_when_wan_ip_outside_range(self):
+        with patch("netcheck.cgnat_diagnostics.get_wan_ip", return_value="203.0.113.5"):
+            result = cgnat_diagnostics.CGNATDiagnostics().detect_cgnat()
+        self.assertFalse(result["detected"])
 
-    def test_cgnat_diagnostics_has_methods(self):
-        """CGNATDiagnostics has required methods."""
-        diag = cgnat_diagnostics.CGNATDiagnostics()
-        self.assertTrue(callable(diag.detect_cgnat))
-        self.assertTrue(callable(diag.check_cgnat_implications))
+    def test_cgnat_implications_listed_only_when_active(self):
+        with patch("netcheck.cgnat_diagnostics.get_wan_ip", return_value="100.70.1.1"):
+            result = cgnat_diagnostics.CGNATDiagnostics().check_cgnat_implications()
+        self.assertTrue(result["cgnat_active"])
+        self.assertTrue(result["implications"])
+
+        with patch("netcheck.cgnat_diagnostics.get_wan_ip", return_value="203.0.113.5"):
+            result = cgnat_diagnostics.CGNATDiagnostics().check_cgnat_implications()
+        self.assertFalse(result["cgnat_active"])
+        self.assertEqual(result["implications"], [])
 
 
 if __name__ == "__main__":

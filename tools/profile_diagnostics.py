@@ -23,16 +23,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from netcheck import all_diagnostics  # noqa: E402
 
-PHASES = (
-    "run_phase_16_modem",
-    "run_phase_17_nat",
-    "run_phase_18_cgnat",
-    "run_phase_19_anthropic",
-    "run_phase_20_interference",
-    "run_phase_21_router",
-    "run_phase_15_wifi",
-)
-
 
 def _timed(fn):
     tracemalloc.start()
@@ -49,8 +39,9 @@ def profile_phases():
     run_all(), so the report shows the actual speedup on this machine."""
     runner = all_diagnostics.AllDiagnostics()
     per_phase = {}
-    for name in PHASES:
-        elapsed, peak = _timed(getattr(runner, name))
+    for entry in all_diagnostics.PHASES:
+        name = entry[0]
+        elapsed, peak = _timed(lambda entry=entry: all_diagnostics.run_phase(entry))
         per_phase[name] = {"seconds": round(elapsed, 3), "peak_kb": round(peak / 1024, 1)}
 
     sequential_total = sum(p["seconds"] for p in per_phase.values())

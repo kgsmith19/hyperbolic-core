@@ -3,20 +3,28 @@
 Phase 21 diagnostic module (additional to the canonical 15-hypothesis list in
 docs/TROUBLESHOOTING.md): stale router default settings or outdated firmware.
 """
+import os
 import subprocess
 from typing import Dict, Optional
+
+from .environ import ROUTER_HOST_DEFAULT
+
+
+def get_router_host() -> str:
+    """Router LAN IP: ROUTER_HOST from .env, same default environ.router() uses."""
+    return os.environ.get("ROUTER_HOST", ROUTER_HOST_DEFAULT)
 
 
 def get_router_admin_url() -> str:
     """Get router admin interface URL."""
-    return "http://192.168.1.1"
+    return f"http://{get_router_host()}"
 
 
 def check_router_reachability() -> Dict:
     """Check if router admin interface is accessible."""
     try:
         result = subprocess.run(
-            ["ping", "-c", "1", "192.168.1.1"],
+            ["ping", "-c", "1", get_router_host()],
             capture_output=True, timeout=3
         )
         return {'reachable': result.returncode == 0}

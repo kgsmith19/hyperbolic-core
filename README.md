@@ -89,29 +89,16 @@ Always, no configuration:
   something reaps it — the one probe that reproduces a streaming response
   dying mid-flight
 
-With credentials in a local `.env` (gitignored, never committed):
+With credentials in a local `.env` (gitignored, never committed) — copy
+`.env.example`, fill in what you have. Every value is optional; absent ones
+make the feature report `unavailable`, not fail:
 
 - **Modem** DOCSIS SNR, power levels, uncorrectable codewords
 - **Router** uptime, clients, and whether AiProtection / Trend Micro DPI is on
 
-```ini
-# All optional. Absent values make the feature report `unavailable`, not fail.
-SUPABASE_URL=https://<project>.supabase.co
-SUPABASE_KEY=            # service role key: RLS is on with no policies,
-                         # so the publishable key deliberately cannot write
-MODEM_HOST=192.168.100.1
-MODEM_USER=
-MODEM_PASS=
-ROUTER_HOST=192.168.50.1
-ROUTER_USER=
-ROUTER_PASS=
-# NETCHECK_TARGET=api.anthropic.com
-# NETCHECK_DB=~/.netcheck/netcheck.db
-```
-
-No `.env.example` ships with this repo on purpose: the filename matches a
-secret pattern, and a template one careless edit away from holding a live
-service-role key is not worth the convenience.
+All device hosts (`MODEM_HOST`, `ROUTER_HOST`) and the diagnosis target
+(`NETCHECK_TARGET`) are read from the environment everywhere they're used —
+nothing in `netcheck/` hardcodes a device address with no override.
 
 ## Storage
 

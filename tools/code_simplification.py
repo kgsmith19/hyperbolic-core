@@ -2,21 +2,25 @@
 """Code simplification scanner: enforce lean code practices.
 
 Scans Python code for complexity violations and reports:
-- Functions longer than threshold (default 20 lines)
-- Unused imports and variables
-- Redundant logic patterns
+- Functions longer than threshold
+- Functions with more than 4 parameters
 - Cyclomatic complexity exceeding threshold
+- Nesting depth exceeding threshold
 
 Intensity levels:
-  - low: >100 lines functions only (allows necessary diagnostic algorithms)
-  - medium: >20 lines functions, unused variables (default)
-  - high: >15 lines functions, all complexity metrics
+  - low: >100 line functions only (allows necessary diagnostic algorithms)
+  - medium: >40 lines, >4 params, complexity >8, nesting >3 (default)
+  - high: >15 lines, all complexity metrics at a stricter bar
 """
 import ast
 import sys
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
+
+DECISION_NODES = (ast.If, ast.For, ast.While, ast.ExceptHandler, ast.With,
+                   ast.Assert, ast.comprehension)
+NESTING_NODES = (ast.If, ast.For, ast.While, ast.With, ast.Try)
 
 
 @dataclass
@@ -28,58 +32,71 @@ class Violation:
     message: str
 
 
+def _complexity(node):
+    """Cyclomatic complexity: 1 + one per decision point and boolop operand."""
+    count = 1
+    for child in ast.walk(node):
+        if isinstance(child, DECISION_NODES):
+            count += 1
+        elif isinstance(child, ast.BoolOp):
+            count += len(child.values) - 1
+    return count
+
+
+def _max_nesting(node, depth=0):
+    """Deepest chain of nested if/for/while/with/try inside a function body."""
+    best = depth
+    for child in ast.iter_child_nodes(node):
+        child_depth = depth + 1 if isinstance(child, NESTING_NODES) else depth
+        best = max(best, _max_nesting(child, child_depth))
+    return best
+
+
+def _param_count(node):
+    a = node.args
+    return len(a.posonlyargs) + len(a.args) + len(a.kwonlyargs) \
+        + (1 if a.vararg else 0) + (1 if a.kwarg else 0)
+
+
 class CodeAnalyzer(ast.NodeVisitor):
     def __init__(self, filename: str, source: str, intensity: str = "medium"):
         self.filename = filename
-        self.source = source
-        self.lines = source.split("\n")
-        self.intensity = intensity
         self.violations: List[Violation] = []
-        self.imports = set()
-        self.used_names = set()
 
-        # Thresholds based on intensity
         if intensity == "low":
-            self.max_function_length = 100
-            self.check_unused = False
+            self.max_length, self.max_params, self.max_complexity, self.max_nesting = 100, 8, 15, 5
         elif intensity == "high":
-            self.max_function_length = 15
-            self.check_unused = True
-            self.max_complexity = 5
+            self.max_length, self.max_params, self.max_complexity, self.max_nesting = 15, 3, 6, 2
         else:  # medium
-            self.max_function_length = 20
-            self.check_unused = True
-            self.max_complexity = 8
+            self.max_length, self.max_params, self.max_complexity, self.max_nesting = 40, 4, 8, 3
 
     def visit_FunctionDef(self, node):
-        # Check function length
+        self._check(node)
+        self.generic_visit(node)
+
+    def _check(self, node):
         func_lines = node.end_lineno - node.lineno + 1
-        if func_lines > self.max_function_length:
-            self.violations.append(
-                Violation(
-                    file=self.filename,
-                    line=node.lineno,
-                    severity="medium",
-                    rule="function_too_long",
-                    message=f"Function '{node.name}' is {func_lines} lines (max {self.max_function_length})",
-                )
-            )
-        self.generic_visit(node)
+        if func_lines > self.max_length:
+            self._violation(node, "function_too_long",
+                            f"Function '{node.name}' is {func_lines} lines (max {self.max_length})")
 
-    def visit_Import(self, node):
-        for alias in node.names:
-            self.imports.add(alias.name)
-        self.generic_visit(node)
+        params = _param_count(node)
+        if params > self.max_params:
+            self._violation(node, "too_many_params",
+                            f"Function '{node.name}' has {params} params (max {self.max_params})")
 
-    def visit_ImportFrom(self, node):
-        for alias in node.names:
-            self.imports.add(alias.name)
-        self.generic_visit(node)
+        complexity = _complexity(node)
+        if complexity > self.max_complexity:
+            self._violation(node, "too_complex",
+                            f"Function '{node.name}' has cyclomatic complexity {complexity} (max {self.max_complexity})")
 
-    def visit_Name(self, node):
-        if isinstance(node.ctx, ast.Load):
-            self.used_names.add(node.id)
-        self.generic_visit(node)
+        nesting = _max_nesting(node)
+        if nesting > self.max_nesting:
+            self._violation(node, "nested_too_deep",
+                            f"Function '{node.name}' nests {nesting} levels deep (max {self.max_nesting})")
+
+    def _violation(self, node, rule, message):
+        self.violations.append(Violation(self.filename, node.lineno, "medium", rule, message))
 
 
 def check_file(filepath: str, intensity: str = "medium") -> List[Violation]:
@@ -93,17 +110,7 @@ def check_file(filepath: str, intensity: str = "medium") -> List[Violation]:
         analyzer.visit(tree)
         violations.extend(analyzer.violations)
     except SyntaxError as e:
-        violations.append(
-            Violation(
-                file=filepath,
-                line=e.lineno or 0,
-                severity="high",
-                rule="syntax_error",
-                message=str(e),
-            )
-        )
-    except Exception as e:
-        print(f"Error analyzing {filepath}: {e}", file=sys.stderr)
+        violations.append(Violation(filepath, e.lineno or 0, "high", "syntax_error", str(e)))
     return violations
 
 
@@ -122,46 +129,18 @@ def main():
 
     parser = argparse.ArgumentParser(description="Code simplification scanner")
     parser.add_argument("path", nargs="?", default=".", help="File or directory to scan")
-    parser.add_argument(
-        "-i",
-        "--intensity",
-        choices=["low", "medium", "high"],
-        default="medium",
-        help="Violation detection intensity",
-    )
-    parser.add_argument(
-        "-f",
-        "--format",
-        choices=["text", "json"],
-        default="text",
-        help="Output format",
-    )
+    parser.add_argument("-i", "--intensity", choices=["low", "medium", "high"], default="medium")
+    parser.add_argument("-f", "--format", choices=["text", "json"], default="text")
 
     args = parser.parse_args()
     path = Path(args.path)
 
-    if path.is_file():
-        violations = check_file(str(path), args.intensity)
-    else:
-        violations = scan_directory(str(path), args.intensity)
+    violations = check_file(str(path), args.intensity) if path.is_file() \
+        else scan_directory(str(path), args.intensity)
 
     if args.format == "json":
         import json
-
-        print(
-            json.dumps(
-                [
-                    {
-                        "file": v.file,
-                        "line": v.line,
-                        "severity": v.severity,
-                        "rule": v.rule,
-                        "message": v.message,
-                    }
-                    for v in violations
-                ]
-            )
-        )
+        print(json.dumps([vars(v) for v in violations]))
     else:
         for v in sorted(violations, key=lambda x: (x.file, x.line)):
             print(f"{v.file}:{v.line}: [{v.severity}] {v.rule}: {v.message}")

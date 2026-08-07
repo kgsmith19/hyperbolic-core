@@ -3,6 +3,7 @@
 Phase 16 diagnostic module (additional to the canonical 15-hypothesis list in
 docs/TROUBLESHOOTING.md): DOCSIS/coax signal instability on cable modem.
 """
+import os
 import subprocess
 import re
 import socket
@@ -11,9 +12,17 @@ from urllib.request import urlopen
 from urllib.error import URLError
 import json
 
+from .environ import MODEM_HOST_DEFAULT
 
-def get_modem_status_page(ip: str = "192.168.100.1", timeout: int = 5) -> Optional[Dict]:
+
+def get_modem_host() -> str:
+    """Modem LAN IP: MODEM_HOST from .env, same default environ.modem() uses."""
+    return os.environ.get("MODEM_HOST", MODEM_HOST_DEFAULT)
+
+
+def get_modem_status_page(ip: str = None, timeout: int = 5) -> Optional[Dict]:
     """Fetch modem status page (NETGEAR CAX80, other DOCSIS modems)."""
+    ip = ip or get_modem_host()
     urls = [
         f"http://{ip}/api/devices",
         f"http://{ip}/RgConnect.asp",
@@ -59,9 +68,9 @@ def check_bridge_mode(timeout: int = 5) -> Dict:
         'evidence': '',
     }
 
-    # Method 1: Check if modem responds on default IP
+    # Method 1: Check if modem responds on its configured IP
     try:
-        response = urlopen("http://192.168.100.1/", timeout=timeout)
+        response = urlopen(f"http://{get_modem_host()}/", timeout=timeout)
         statuses['modem_admin_reachable'] = True
         statuses['method'] = 'admin_page'
     except (URLError, socket.timeout):
@@ -103,7 +112,7 @@ class ModemDiagnostics:
     def __init__(self):
         self.id = "modem_docsis_instability"
         self.name = "Modem/DOCSIS Signal Stability"
-        self.modem_ip = "192.168.100.1"
+        self.modem_ip = get_modem_host()
 
     def detect_modem_reachable(self) -> Dict:
         """Check if modem status page is accessible."""

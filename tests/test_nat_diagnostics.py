@@ -39,36 +39,37 @@ class PrivateIPDetectionTest(unittest.TestCase):
 
 
 class DoubleNATDetectionTest(unittest.TestCase):
-    """Tests for double NAT detection."""
+    """Tests for double NAT detection, with local/WAN IP lookups mocked."""
 
-    def test_double_nat_detection_returns_dict(self):
-        """Double NAT detection returns proper diagnostic dict."""
-        result = nat_diagnostics.detect_double_nat()
-        self.assertIsInstance(result, dict)
-        self.assertIn('detected', result)
-        self.assertIn('local_ip', result)
-        self.assertIn('wan_ip', result)
+    def test_double_nat_detected_when_wan_ip_is_private(self):
+        with patch("netcheck.nat_diagnostics.get_local_ip", return_value="192.168.1.5"), \
+             patch("netcheck.nat_diagnostics.get_wan_ip", return_value="10.0.0.1"):
+            result = nat_diagnostics.detect_double_nat()
+        self.assertTrue(result["detected"])
+        self.assertEqual(result["local_ip"], "192.168.1.5")
+        self.assertEqual(result["wan_ip"], "10.0.0.1")
 
-    def test_nat_diagnostics_has_required_methods(self):
-        """NATDiagnostics has all detection methods."""
-        diag = nat_diagnostics.NATDiagnostics()
-        self.assertTrue(callable(diag.detect_double_nat))
-        self.assertTrue(callable(diag.detect_nat_type))
-        self.assertTrue(callable(diag.get_network_topology))
+    def test_single_nat_when_wan_ip_is_public(self):
+        with patch("netcheck.nat_diagnostics.get_local_ip", return_value="192.168.1.5"), \
+             patch("netcheck.nat_diagnostics.get_wan_ip", return_value="203.0.113.5"):
+            result = nat_diagnostics.detect_double_nat()
+        self.assertFalse(result["detected"])
 
-    def test_nat_type_detection_returns_type(self):
-        """NAT type detection returns classification."""
-        diag = nat_diagnostics.NATDiagnostics()
-        result = diag.detect_nat_type()
-        self.assertIsInstance(result, dict)
-        self.assertIn('nat_type', result)
+    def test_nat_type_is_double_nat_when_wan_ip_private(self):
+        with patch("netcheck.nat_diagnostics.get_wan_ip", return_value="10.0.0.1"):
+            result = nat_diagnostics.NATDiagnostics().detect_nat_type()
+        self.assertEqual(result["nat_type"], "double_nat")
 
-    def test_network_topology_detection(self):
-        """Network topology detection returns topology string."""
-        diag = nat_diagnostics.NATDiagnostics()
-        result = diag.get_network_topology()
-        self.assertIsInstance(result, dict)
-        self.assertIn('topology', result)
+    def test_nat_type_is_standard_when_wan_ip_public(self):
+        with patch("netcheck.nat_diagnostics.get_wan_ip", return_value="203.0.113.5"):
+            result = nat_diagnostics.NATDiagnostics().detect_nat_type()
+        self.assertEqual(result["nat_type"], "standard_nat")
+
+    def test_network_topology_double_nat(self):
+        with patch("netcheck.nat_diagnostics.get_local_ip", return_value="192.168.1.5"), \
+             patch("netcheck.nat_diagnostics.get_wan_ip", return_value="10.0.0.1"):
+            result = nat_diagnostics.NATDiagnostics().get_network_topology()
+        self.assertEqual(result["topology"], "double_nat")
 
 
 class WanIpCachingTest(unittest.TestCase):
