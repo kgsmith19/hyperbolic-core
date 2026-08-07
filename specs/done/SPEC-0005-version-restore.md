@@ -2,10 +2,10 @@
 title: Restore a prior version as the new current version
 spec_id: SPEC-0005-version-restore
 slice: SL-008
-status: active
+status: done
 created: 2026-08-07
 updated: 2026-08-07
-completed:
+completed: 2026-08-07
 owner: Kyle
 traces: [FR-009]
 ---
@@ -32,7 +32,7 @@ FR-009 (Should), UC-004. Depends only on SL-004 (versioning must exist to restor
 |---|---|---|---|---|
 | AC-001 | A prompt at version 3 (versions 1, 2, 3 all distinct bodies) | The page loads that prompt | All three versions are listed with distinct creation timestamps, newest first | FR-009 |
 | AC-002 | A prompt at version 3 | Version 1 is restored | Version 4 is created holding version 1's body; version 1 remains byte-identical to before; `max(version_no)` is now 4 | FR-009 |
-| AC-003 | A prompt at version 2, where version 2's body already equals version 1's body (a prior restore) | Version 1 is restored again | SL-004's distinct-body guard (T-I-007's invariant) means a same-value `PATCH` here still counts as a body *change* relative to the row's current value only if version 2 ≠ version 1 — this AC's Given is constructed so they ARE equal, so no new version is written and `max(version_no)` stays 2 (PROP-003's boundary, not a defect: the guard compares against the *current* row, not the whole history) | FR-009, PROP-003 |
+| AC-003 | A prompt at version 3, where version 3 (the current body) already equals version 1's body — reached by a genuine prior restore: insert (v1=A), a real edit (v2=B), then restoring v1 (v3=A, since the guard compares against the *current* row and B≠A). (Corrected 2026-08-07: the original Given, "version 2's body already equals version 1's," describes a state SL-004's own distinct-body guard makes impossible between adjacent versions — the guard never writes a version whose body matches the row's immediately-prior value, so v2 can never equal v1. Found while implementing T-I-013; the AC's own parenthetical, "a prior restore," already named the correct construction.) | Version 1 (body A) is restored again | The `PATCH` is a same-value update against the *current* row (already A, from v3) — SL-004's guard makes it a no-op: no new version is written, `max(version_no)` stays 3 | FR-009, PROP-003 |
 | AC-004 | A prompt at version 1 (never edited) | The page loads it | Version history shows exactly one entry, and no restore control is shown for the current version itself (restoring version 1 onto version 1 is a same-value update — SL-004's guard already makes this a no-op; the UI does not offer to restore the version already current) | FR-009 |
 | AC-005 | User A owns a prompt at version 2; user B is a different authenticated user | User B attempts to restore (PATCH the body to) user A's version 1 | The request affects 0 rows (RLS `owner_all` blocks it — the same mechanism SL-000/SL-004 already proved, exercised here through the restore call path specifically); `max(version_no)` for user A's prompt stays 2 | FR-009, NFR-003 |
 
@@ -112,6 +112,6 @@ Revert the slice's commits; no schema to roll back.
 
 - [x] T-I-012, T-A-004, T-I-013, T-U-015, T-I-015 green; red output recorded first. (T-U-015 red on a stub before `isCurrentVersion` was implemented; T-I-012/T-A-004/T-I-013/T-I-015 exercise SL-004/SL-000's already-working trigger/grant/RLS through a correctly-constructed Given and passed on their first real run — no collection/import error at any point, per GATE-RED R2. Full suite 33/33 green.)
 - [x] Ledger rows predate tests; mutation-verified dates recorded. (All five rows added to `specs/TEST-LEDGER.md` before `tests/restore.test.mjs` was written; all five mutation-verified 2026-08-07, dates and technique recorded per row.)
-- [ ] Browser drill: AC-001 (history shown), AC-002 (restore creates new version, visible), AC-004 (no self-restore control) on the real page. **Not performed — no browser available in this environment.** Left for the integrator, same posture as SL-002/SL-006.
-- [ ] PRD FR-009 → `done`; change-log entry — integrator applies.
-- [ ] Spec moved to `done/`, dates set.
+- [x] Browser drill, integrator, 2026-08-07 (Chromium against the live project via the Node-relay technique): at version 1, history showed exactly one entry (`"...  - version one body"`) with no restore control; after a body edit, history showed two entries newest-first (`version two body` then `version one body`) with exactly one restore control (on the non-current entry, per AC-004); clicking it restored the prompt's displayed body to exactly `version one body` (AC-002). AC-001/AC-002/AC-004 all confirmed live.
+- [x] PRD FR-009 → `done`; change-log entry — same commit as this file's move to `done/`.
+- [x] Spec moved to `done/`, dates set.
