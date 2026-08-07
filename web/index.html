@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Prompt Organizer</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+    label { display: block; margin: 0.5rem 0; }
+    input, textarea { width: 100%; }
+    pre { white-space: pre-wrap; }
+    .error { color: #b00020; }
+    #app, #sign-in-error, #save-error { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Prompt Organizer</h1>
+
+  <form id="sign-in-form">
+    <label>Email <input type="email" id="email" required autocomplete="username" /></label>
+    <label>Password <input type="password" id="password" required autocomplete="current-password" /></label>
+    <button type="submit">Sign in</button>
+    <p id="sign-in-error" class="error"></p>
+  </form>
+
+  <section id="app">
+    <form id="save-form">
+      <label>Title <input type="text" id="title" required maxlength="200" /></label>
+      <label>Body <textarea id="body" required></textarea></label>
+      <button type="submit">Save</button>
+      <p id="save-error" class="error"></p>
+    </form>
+    <h2>Saved prompts</h2>
+    <ul id="prompt-list"></ul>
+  </section>
+
+  <script type="module">
+    const SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
+    const ANON_KEY =
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
+    let accessToken = null;
+
+    async function api(path, { method = "GET", body } = {}) {
+      const headers = { apikey: ANON_KEY, Authorization: `Bearer ${accessToken}`, "Accept-Profile": "prompt", "Content-Profile": "prompt" };
+      if (body !== undefined) headers["Content-Type"] = "application/json";
+      if (method !== "GET") headers.Prefer = "return=representation";
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+        method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.message || `request failed: ${res.status}`);
+      return json;
+    }
+
+    function showPrompt(listEl, prompt) {
+      const item = document.createElement("li");
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = prompt.title;
+      const pre = document.createElement("pre");
+      pre.textContent = prompt.body;
+      details.append(summary, pre);
+      item.append(details);
+      listEl.prepend(item);
+    }
+
+    async function refreshList() {
+      const list = document.getElementById("prompt-list");
+      list.replaceChildren();
+      const prompts = await api("prompt?select=title,body&order=created_at.asc");
+      for (const p of prompts) showPrompt(list, p);
+    }
+
+    document.getElementById("sign-in-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById("sign-in-error");
+      errEl.style.display = "none";
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        method: "POST",
+        headers: { apikey: ANON_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ email: document.getElementById("email").value, password: document.getElementById("password").value }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        errEl.textContent = body.error_description || body.msg || `sign-in failed: ${res.status}`;
+        errEl.style.display = "block";
+        return;
+      }
+      accessToken = body.access_token;
+      document.getElementById("app").style.display = "block";
+      await refreshList();
+    });
+
+    document.getElementById("save-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById("save-error");
+      errEl.style.display = "none";
+      try {
+        const [saved] = await api("prompt", {
+          method: "POST",
+          body: { title: document.getElementById("title").value, body: document.getElementById("body").value },
+        });
+        showPrompt(document.getElementById("prompt-list"), saved);
+        document.getElementById("save-form").reset();
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = "block";
+      }
+    });
+  </script>
+</body>
+</html>
