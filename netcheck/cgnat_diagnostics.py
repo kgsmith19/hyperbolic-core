@@ -3,28 +3,19 @@
 Phase 18 diagnostic module (additional to the canonical 15-hypothesis list in
 docs/TROUBLESHOOTING.md): CGNAT congestion on the ISP side.
 """
+import ipaddress
 from typing import Optional, Dict
 
 from .nat_diagnostics import get_wan_ip
 
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")  # RFC 6598 shared address space
+
 
 def is_cgnat_ip(ip: str) -> bool:
-    """Check if IP is in CGNAT range (100.64.0.0 to 100.127.255.255)."""
-    if not ip:
-        return False
-    parts = ip.split('.')
-    if len(parts) != 4:
-        return False
-
+    """Check if IP is in the CGNAT range (100.64.0.0/10)."""
     try:
-        first_octet = int(parts[0])
-        second_octet = int(parts[1])
-
-        # CGNAT range: 100.64.0.0 to 100.127.255.255
-        if first_octet == 100 and 64 <= second_octet <= 127:
-            return True
-        return False
-    except ValueError:
+        return ipaddress.ip_address(ip) in _CGNAT
+    except (TypeError, ValueError):
         return False
 
 
