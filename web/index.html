@@ -26,7 +26,7 @@
     <p id="empty-note">No ideas are recorded.</p>
     <table id="idea-table">
       <thead>
-        <tr><th>Name</th><th>Category</th><th>One-liner</th><th>Status</th><th>Score</th></tr>
+        <tr><th>Name</th><th>Category</th><th>One-liner</th><th>Status</th><th>Score</th><th>Depends on</th></tr>
       </thead>
       <tbody id="idea-rows"></tbody>
     </table>
@@ -97,7 +97,29 @@
       return byIdea;
     }
 
-    function renderIdeas(ideas, scoresByIdea) {
+    // FR-006: each dependency edge names the idea it depends on by id;
+    // resolve to a display name using the already-fetched idea list, no
+    // extra fetch (ASM-008: same-schema PostgREST embedding would work too,
+    // but this stays consistent with latestScoresByIdea's proven pattern).
+    async function fetchDependencies(token) {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/dependency?select=idea_id,depends_on,reason`, {
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, "Accept-Profile": "idea" },
+      });
+      if (!res.ok) throw new Error(`dependency list failed: ${res.status}`);
+      return res.json();
+    }
+
+    function dependenciesByIdea(dependencies, ideas) {
+      const nameById = new Map(ideas.map((i) => [i.id, i.name]));
+      const byIdea = new Map();
+      for (const d of dependencies) {
+        const label = `${nameById.get(d.depends_on)}: ${d.reason}`;
+        byIdea.set(d.idea_id, [...(byIdea.get(d.idea_id) || []), label]);
+      }
+      return byIdea;
+    }
+
+    function renderIdeas(ideas, scoresByIdea, dependenciesByIdeaMap) {
       document.getElementById("idea-section").style.display = "block";
       if (ideas.length === 0) {
         document.getElementById("empty-note").style.display = "block";
@@ -110,6 +132,7 @@
           row.insertCell().textContent = idea[field];
         }
         row.insertCell().textContent = (scoresByIdea.get(idea.id) || []).join(", ");
+        row.insertCell().textContent = (dependenciesByIdeaMap.get(idea.id) || []).join("; ");
       }
     }
 
@@ -121,12 +144,13 @@
       const password = document.getElementById("password").value;
       try {
         const token = await signIn(email, password);
-        const [ideas, scores, metricNames] = await Promise.all([
+        const [ideas, scores, metricNames, dependencies] = await Promise.all([
           fetchIdeas(token),
           fetchScores(token),
           fetchMetricNames(token),
+          fetchDependencies(token),
         ]);
-        renderIdeas(ideas, latestScoresByIdea(scores, metricNames));
+        renderIdeas(ideas, latestScoresByIdea(scores, metricNames), dependenciesByIdea(dependencies, ideas));
       } catch (err) {
         errorEl.textContent = err.message;
         errorEl.style.display = "block";

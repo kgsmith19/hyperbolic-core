@@ -32,6 +32,7 @@ owner: Kyle
 | T-A-004 | `tests/scores.test.mjs` | acceptance | AC-008 -> FR-004 | A scored idea's value or metric name is missing or wrong on read | Only a real read against `idea.score` and `core.metric_def` proves the join the page performs | No other test reads `idea.score` joined to `core.metric_def` | 2026-08-07 (mutated: `UPDATE core.metric_def SET name = 'wrong-name'`; test went red asserting `[{name: 'wrong-name'}]` !== `[{name: 'Idea effectiveness'}]`, reverted) | 1235 | If the page stops displaying scores | SL-001 |
 | T-I-007 | `tests/scores.test.mjs` | integration | AC-010 -> FR-005 | A score above a metric's declared maximum is accepted | A `CHECK` cannot look up `core.metric_def`; this proves the bounds trigger is wired | No other test inserts an out-of-range score | 2026-08-07 (mutated: `ALTER TABLE idea.score DISABLE TRIGGER score_bounds_check`; test went red, 201 instead of 400; re-enabled, leaked rows deleted) | 219 | Never; this is the range guarantee itself | SL-001 |
 | T-I-008 | `tests/scores.test.mjs` | integration | AC-011 -> FR-005 | A score below a metric's declared minimum is accepted | Same as T-I-007, the symmetric boundary | T-I-007 covers the upper bound only | 2026-08-07 (same mutation as T-I-007, disabling one trigger red-tests both boundaries at once; re-enabled, leaked rows deleted) | 226 | Never | SL-001 |
+| T-A-005 | `tests/dependencies.test.mjs` | acceptance | AC-012 -> FR-006 | The seeded dependency's target idea or reason is missing or wrong on read | Only a real read against `idea.dependency` proves the seed migration wrote what the topology note's section 3 says | No other test reads `idea.dependency` | 2026-08-07 (mutated: `UPDATE idea.dependency SET reason = 'wrong-reason'`; test went red asserting the wrong reason, reverted. Idempotence (PROP-022) also drilled: re-ran the seed migration against the live project, row count stayed 1) | 334 | If `constraint-finder`'s real dependency on `optimize-metrics` is ever removed or superseded | SL-002 |
 
 **Column meanings:**
 
@@ -53,10 +54,10 @@ Updated at every Test Review. A shape that inverts (many E2E, few unit) is a def
 | Unit (`T-U-`) | 0 | ~70% | 0 | Still none. SPEC-0001 added one pure function (`latestScoresByIdea` in `web/index.html`) but left it inline rather than extracting a separately importable module for one caller (GATE-MINIMAL M2); its behavior is covered by the AC-009 browser drill instead. A real second caller would justify extracting and unit-testing it. |
 | Property (counted within unit) | 1 | 1-3 per slice | 1.4s | PROP-005 as an oracle comparison inside T-I-005 |
 | Integration (`T-I-`) | 7 | ~20% | 3.9s | T-I-001 through T-I-005, T-I-007, T-I-008; T-I-006 is a recorded manual drill, not executable |
-| Acceptance (`T-A-`) | 3 | 1 per AC | 1.6s | T-A-001, T-A-004 executable; T-A-002 a recorded manual drill |
+| Acceptance (`T-A-`) | 4 | 1 per AC | 1.6s | T-A-001, T-A-004, T-A-005 executable; T-A-002 a recorded manual drill |
 | E2E (`T-E-`) | 0 | ~5%, critical paths only | 0 | The browser drill covers this path without adding a dependency |
 | Regression (`T-R-`) | 0 | 1 per real defect | 0 | D-001 is covered by tightening T-A-001, not by a new test |
-| **Total** | 10 executable | | 1.4s | Under `{{MAX_SUITE_SECONDS}}` |
+| **Total** | 11 executable | | 1.6s | Under `{{MAX_SUITE_SECONDS}}` |
 
 ## 3. Regression register
 
@@ -88,12 +89,12 @@ Tests that are flaky, slow, or unproven live here with an expiry date. A quarant
 
 ## 6. Ledger self-check (GATE-LEDGER)
 
-- [x] Every test file in the repo has a matching row in section 1. Four files: `rls.test.mjs` (T-I-001, T-I-002, T-A-001), `constraints.test.mjs` (T-I-003, T-I-004), `seed.test.mjs` (T-I-005), `scores.test.mjs` (T-A-004, T-I-007, T-I-008).
+- [x] Every test file in the repo has a matching row in section 1. Five files: `rls.test.mjs` (T-I-001, T-I-002, T-A-001), `constraints.test.mjs` (T-I-003, T-I-004), `seed.test.mjs` (T-I-005), `scores.test.mjs` (T-A-004, T-I-007, T-I-008), `dependencies.test.mjs` (T-A-005).
 - [x] Every row in section 1 corresponds to a test that exists. T-I-006, T-A-002, and T-A-003 are labelled as manual drills rather than executable tests, so the count is not overstated.
 - [x] Every row's `Traces to` resolves to a real `PROP-`/`AC-` and a real `FR-`/`NFR-`.
 - [x] Every row has a mutation-verified date. None left `pending`.
 - [x] Every row has a deletion criterion.
 - [x] No row's failure mode is phrased in implementation terms rather than observable terms.
-- [x] Total suite runtime is under `{{MAX_SUITE_SECONDS}}` (120): 1.4s measured, 10 tests.
+- [x] Total suite runtime is under `{{MAX_SUITE_SECONDS}}` (120): 1.6s measured, 11 tests.
 - [x] Quarantine has no expired entries. It is empty.
 - [x] Every regression row names the gate that missed the defect. D-001 names GATE-RED R4, with GATE-GREEN G7 as the backstop that also missed it.
