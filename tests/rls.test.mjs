@@ -17,6 +17,11 @@ test("rejects_anon_read_of_idea_idea__T_I_001__AC_002", async () => {
 // page's contract; the browser rendering itself has no automated test here
 // (no headless-browser dependency was added, per MAX_NEW_LIBRARIES: 0 -
 // verified by hand instead, see SPEC-0000 section 12 evidence).
+//
+// 2026-08-07: this test previously asserted status 'idea', matching the seed
+// rather than AC-001, which names 'specced'. That inverted the source of
+// truth. The seed was the defect (Prompt Organizer's PRD is complete, so it
+// is specced); fixed by 20260807010000_idea_fix_prompt_organizer_status.sql.
 test("authenticated_read_returns_seeded_prompt_organizer_row__T_A_001__AC_001", async () => {
   const token = await login(TEST_USER_A);
   const { status, json } = await rest(
@@ -30,7 +35,7 @@ test("authenticated_read_returns_seeded_prompt_organizer_row__T_A_001__AC_001", 
       name: "Prompt Organizer",
       category: "Agentic / LLM systems tooling",
       one_liner: "A place to save AI prompts and reuse them instead of retyping them.",
-      status: "idea",
+      status: "specced",
     },
   ]);
 });
