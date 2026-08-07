@@ -9,7 +9,7 @@ insert into idea.idea (id, name, category, one_liner, status, project, schema_na
 ('step-back', 'Step Back', 'Meta layer', 'Reads outcomes and the idea backlog to prompt reconsidering direction.', 'idea', 'toolbelt', 'stepback'),
 ('assumption-ledger', 'Assumption Ledger', 'Meta layer', 'Records assumptions made by every agentic run so they can be verified later.', 'idea', 'toolbelt', 'core'),
 ('autonomy-trust-calibrator', 'Autonomy Trust Calibrator', 'Meta layer', 'Reads runs and interventions to calibrate how much autonomy an agent has earned.', 'idea', 'toolbelt', 'autonomy'),
-('prompt-organizer', 'Prompt Organizer', 'Agentic / LLM systems tooling', 'A place to save AI prompts and reuse them instead of retyping them.', 'idea', 'toolbelt', 'prompt'),
+('prompt-organizer', 'Prompt Organizer', 'Agentic / LLM systems tooling', 'A place to save AI prompts and reuse them instead of retyping them.', 'specced', 'toolbelt', 'prompt'),
 ('instruction-optimizer', 'Instruction Optimizer', 'Agentic / LLM systems tooling', 'Reads Prompt Organizer''s data to suggest improvements to saved prompts.', 'idea', 'toolbelt', 'prompt'),
 ('prompt-agent-regression-tracker', 'Prompt/Agent Regression Tracker', 'Agentic / LLM systems tooling', 'Owns evaluation cases and runs to catch when a prompt or agent regresses.', 'idea', 'toolbelt', 'prompt'),
 ('llm-to-rules-based-transition', 'LLM-to-Rules-Based Transition', 'Agentic / LLM systems tooling', 'Reads run and render data to find where an LLM call can become deterministic logic.', 'idea', 'toolbelt', 'agentic'),

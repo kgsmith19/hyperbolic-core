@@ -2,9 +2,9 @@
 title: toolbelt Product Requirements Document
 status: draft
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-08-07
 owner: Kyle
-version: 0.1.0
+version: 0.1.2
 ---
 
 # toolbelt PRD
@@ -43,6 +43,7 @@ This is one shared place in the database where every small tool Kyle builds writ
 - A `core` Postgres schema with the tables every tool writes to: `app`, `run`, `event`, `cost`, `outcome`, `run_outcome`, `metric_def`, `metric_value`, `assumption`, `intervention`
 - An `idea` Postgres schema holding the tool backlog: `idea`, `dependency`, `score`
 - A page listing every row in `idea.idea` with its name, category, one-liner, and status
+- A sign-in form on that page, the minimum needed for it to hold an authenticated session (NFR-001 requires one; nothing reads `idea.idea` unauthenticated)
 - Row-level security, enabled and forced, on every table above
 
 ### 4.2 Out of scope (non-goals)
@@ -52,7 +53,7 @@ This is one shared place in the database where every small tool Kyle builds writ
 | OOS-001 | Editing ideas from the UI | Nothing needs to write to `idea.idea` yet except the seed data | A tool needs to change idea status from its own UI |
 | OOS-002 | An idea dependency graph or scoring UI | `idea.dependency` and `idea.score` have no reader yet | A tool (Golden Goose, Constraint Finder) is specced against them |
 | OOS-003 | A client library wrapping `core.run`/`core.event` writes | No tool has been instrumented yet; a wrapper's shape should follow real usage, not precede it | The first tool (Prompt Organizer) actually needs to write a `core.run` row |
-| OOS-004 | Authentication UI (sign-up, sign-in) | Kyle is the only user across every tool in the portfolio and already has one Supabase auth identity | A second person needs access |
+| OOS-004 | Sign-up, password reset, and multi-user account management | Kyle is the only user across every tool in the portfolio and already has one Supabase auth identity | A second person needs access |
 | OOS-005 | A retention job for `core.event` | No tool has written an event yet, so there is nothing to retain | `core.event` has real rows and the 90-day risk in the topology note becomes concrete |
 
 ## 5. Use cases
@@ -87,18 +88,18 @@ This is one shared place in the database where every small tool Kyle builds writ
 
 | ID | Requirement | Priority | Acceptance criterion (objective) | Traces to | Status |
 |---|---|---|---|---|---|
-| FR-001 | The system must display every row in `idea.idea` with its `name`, `category`, `one_liner`, and `status`. | Must | Given `idea.idea` contains a row with `id` `prompt-organizer`, `name` `Prompt Organizer`, `category` `Agentic / LLM systems tooling`, `one_liner` `A place to save AI prompts and reuse them instead of retyping them.`, and `status` `specced`, when the idea list page loads, then all four of those values appear on the page for that row. | UC-001 | not-started |
-| FR-002 | The system must reject an insert into `core.run` whose `app_id` has no matching row in `core.app`. | Must | Given `core.app` has no row with `id` `test-app`, when inserting into `core.run` with `app_id` `test-app` and `kind` `job`, then the insert fails with a foreign key violation and no row is created. | UC-002 | not-started |
-| FR-003 | The system must provide the `core.app`, `core.run`, `core.event`, `core.cost`, `core.outcome`, `core.run_outcome`, `core.metric_def`, `core.metric_value`, `core.assumption`, and `core.intervention` tables, matching the column definitions in `docs/notes/2026-08-06-supabase-project-topology.md` section 2. | Must | Given the `core` schema migration has been applied, when a row is inserted into `core.metric_def` with `id` `cost_per_requirement`, `name` `Cost per requirement`, `formula` `total cost / total requirements shipped`, `unit` `USD`, and `gaming_risk` omitted, then the insert fails a `NOT NULL` constraint on `gaming_risk`. | UC-002 | not-started |
+| FR-001 | The system must display every row in `idea.idea` with its `name`, `category`, `one_liner`, and `status`. | Must | Given `idea.idea` contains a row with `id` `prompt-organizer`, `name` `Prompt Organizer`, `category` `Agentic / LLM systems tooling`, `one_liner` `A place to save AI prompts and reuse them instead of retyping them.`, and `status` `specced`, when the idea list page loads, then all four of those values appear on the page for that row. | UC-001 | done |
+| FR-002 | The system must reject an insert into `core.run` whose `app_id` has no matching row in `core.app`. | Must | Given `core.app` has no row with `id` `test-app`, when inserting into `core.run` with `app_id` `test-app` and `kind` `job`, then the insert fails with a foreign key violation and no row is created. | UC-002 | done |
+| FR-003 | The system must provide the `core.app`, `core.run`, `core.event`, `core.cost`, `core.outcome`, `core.run_outcome`, `core.metric_def`, `core.metric_value`, `core.assumption`, and `core.intervention` tables, matching the column definitions in `docs/notes/2026-08-06-supabase-project-topology.md` section 2. | Must | Given the `core` schema migration has been applied, when a row is inserted into `core.metric_def` with `id` `cost_per_requirement`, `name` `Cost per requirement`, `formula` `total cost / total requirements shipped`, `unit` `USD`, and `gaming_risk` omitted, then the insert fails a `NOT NULL` constraint on `gaming_risk`. | UC-002 | done |
 
 ## 7. Non-functional requirements
 
 | ID | Category | Requirement | Threshold | How it is measured | Status |
 |---|---|---|---|---|---|
-| NFR-001 | Security | Every read and write to a `core.*` or `idea.*` table must be rejected unless the caller is authenticated. | 100% of unauthenticated attempts rejected | RLS policy test as an unauthenticated caller, one per table | not-started |
-| NFR-002 | Cost | Infrastructure cost must be $0 beyond the one new Supabase project this repo creates. | $0 marginal | Billing report | not-started |
-| NFR-003 | Maintainability | No source file over 250 lines; no function over 40 lines. | 250 / 40 | Manual line count (no build step yet to lint) | not-started |
-| NFR-004 | Durability | Every migration must have a tested down migration. | 100% of migrations | Down migration run against the project and confirmed to remove exactly what the up migration added | not-started |
+| NFR-001 | Security | Every read and write to a `core.*` or `idea.*` table must be rejected unless the caller is authenticated. | 100% of unauthenticated attempts rejected | RLS policy test as an unauthenticated caller, one per table | done |
+| NFR-002 | Cost | Infrastructure cost must be $0 beyond the one new Supabase project this repo creates. | $0 marginal | Billing report | done |
+| NFR-003 | Maintainability | No source file over 250 lines; no function over 40 lines. | 250 / 40 | Manual line count (no build step yet to lint) | done |
+| NFR-004 | Durability | Every migration must have a tested down migration. | 100% of migrations | Down migration run against the project and confirmed to remove exactly what the up migration added | done |
 
 Categories considered and not applicable: performance (no real traffic yet), scalability (single user), availability (inherits Supabase's own SLA, not controlled by this repo), compliance (no regulated data), internationalization (single user, English), portability (Postgres only, by choice).
 
@@ -174,6 +175,8 @@ Rules:
 | Date | Version | Change | Reason | Affected IDs |
 |---|---|---|---|---|
 | 2026-08-06 | 0.1.0 | Initial draft. | First PRD for the toolbelt spine, written ahead of `SPEC-0000`. | - |
+| 2026-08-07 | 0.1.1 | Narrowed OOS-004 to sign-up, password reset, and multi-user account management; added a sign-in form to section 4.1. | FR-001 requires the page to display idea rows and NFR-001 requires every read to be authenticated. With sign-in entirely out of scope the two contradicted each other and the page could not exist. The form is the smallest thing that resolves it: email, password, no sign-up, no reset, no session persistence. | FR-001, NFR-001, OOS-004 |
+| 2026-08-07 | 0.1.2 | Set FR-001, FR-002, FR-003 and NFR-001 through NFR-004 to `done`. | SL-000 shipped and every acceptance criterion has a passing test. | FR-001, FR-002, FR-003, NFR-001, NFR-002, NFR-003, NFR-004 |
 
 ---
 

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>toolbelt — idea list</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #ddd; }
+    #sign-in-error, #idea-error { color: #b00020; }
+    #idea-section, #sign-in-error, #idea-error, #empty-note { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Idea backlog</h1>
+
+  <form id="sign-in-form">
+    <label>Email <input type="email" id="email" required autocomplete="username" /></label>
+    <label>Password <input type="password" id="password" required autocomplete="current-password" /></label>
+    <button type="submit">Sign in</button>
+    <p id="sign-in-error"></p>
+  </form>
+
+  <section id="idea-section">
+    <p id="idea-error"></p>
+    <p id="empty-note">No ideas are recorded.</p>
+    <table id="idea-table">
+      <thead>
+        <tr><th>Name</th><th>Category</th><th>One-liner</th><th>Status</th></tr>
+      </thead>
+      <tbody id="idea-rows"></tbody>
+    </table>
+  </section>
+
+  <script type="module">
+    import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.mjs";
+
+    async function signIn(email, password) {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        method: "POST",
+        headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error_description || body.msg || `sign-in failed: ${res.status}`);
+      return body.access_token;
+    }
+
+    async function fetchIdeas(token) {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/idea?select=name,category,one_liner,status`, {
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${token}`,
+          "Accept-Profile": "idea",
+        },
+      });
+      if (!res.ok) throw new Error(`idea list failed: ${res.status}`);
+      return res.json();
+    }
+
+    function renderIdeas(ideas) {
+      document.getElementById("idea-section").style.display = "block";
+      if (ideas.length === 0) {
+        document.getElementById("empty-note").style.display = "block";
+        return;
+      }
+      const tbody = document.getElementById("idea-rows");
+      for (const idea of ideas) {
+        const row = tbody.insertRow();
+        for (const field of ["name", "category", "one_liner", "status"]) {
+          row.insertCell().textContent = idea[field];
+        }
+      }
+    }
+
+    document.getElementById("sign-in-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const errorEl = document.getElementById("sign-in-error");
+      errorEl.style.display = "none";
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      try {
+        const token = await signIn(email, password);
+        const ideas = await fetchIdeas(token);
+        renderIdeas(ideas);
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.style.display = "block";
+      }
+    });
+  </script>
+</body>
+</html>

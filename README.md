@@ -6,15 +6,37 @@ The shared spine every small tool in Kyle's tool portfolio plugs into: one Postg
 
 ## Prerequisites
 
-<TBD>
+| Tool | Version | Why |
+|---|---|---|
+| Node | 22 or newer | Runs the tests with the built-in `node:test` runner and native `fetch`. Nothing is installed; there is no `package.json`. |
+| Python | 3 (any) | Only to serve the page locally. Any static file server works. |
+
+There is no build step, no framework, and no dependency to install.
 
 ## Run it
 
-<TBD>
+```bash
+python3 -m http.server 8811     # from the repo root
+```
+
+Open `http://localhost:8811/web/index.html`, sign in with a Supabase account
+on the `toolbelt` project, and the idea list loads.
 
 ## Test it
 
-<TBD>
+```bash
+node --test "tests/*.test.mjs"
+```
+
+The suite runs against the live `toolbelt` project using only the public anon
+key in `config.mjs`. No database credentials and no service-role key are
+needed, or accepted.
+
+## Apply migrations
+
+Migrations in `supabase/migrations/` are applied to the `toolbelt` project
+through the Supabase API. Each `<name>.sql` has a matching `<name>_down.sql`
+that removes exactly what it added.
 
 ## Where things are
 

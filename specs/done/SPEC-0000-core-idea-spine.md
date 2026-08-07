@@ -2,10 +2,10 @@
 title: Core spine and idea registry
 spec_id: SPEC-0000-core-idea-spine
 slice: SL-000
-status: draft
+status: done
 created: 2026-08-06
-updated: 2026-08-06
-completed:
+updated: 2026-08-07
+completed: 2026-08-07
 owner: Kyle
 traces: [FR-001, FR-002, FR-003, NFR-001, NFR-002, NFR-003, NFR-004]
 ---
@@ -84,19 +84,19 @@ AC-002, AC-003, AC-004, and AC-006 are the failure cases.
 
 | Metric | Declared | Ceiling | Status | Actual (fill at completion) |
 |---|---|---|---|---|
-| Net source LOC | ~510 (SQL + one HTML page) | 300 | EXCEEDS — exception | |
-| Test LOC | ~180 | 200 | within | |
-| New modules/classes | 0 | 2 | within | |
-| Source files touched | 13 (8 migration files, 1 HTML page, 3 test files, 1 `.env.example`) | 3 | EXCEEDS — exception | |
-| New tables | 13 | 1 | EXCEEDS — exception | |
-| New columns | ~70 | 6 | EXCEEDS — exception | |
-| New endpoints | 0 (Supabase's own PostgREST API; no custom server code written) | 1 | within | |
-| New UI surfaces | 1 | 1 | within | |
-| New libraries | 0 (native `fetch`, Node's built-in `node:test`) | 0 | within | |
-| New third-party services | 0 (the `toolbelt` Supabase project is the platform this whole portfolio runs on, not a new third party) | 0 | within | |
-| User stories | 1 (U-001) | 1 | within | |
-| New tests | ~15 (RLS: 13 tables + AC-003 + AC-004) | 8 | EXCEEDS — exception | |
-| New config keys | 1 (`SUPABASE_URL`/`SUPABASE_ANON_KEY` pair, not secret) | 2 | within | |
+| Net source LOC | ~510 (SQL + one HTML page) | 300 | EXCEEDS — exception | 432 (`web/index.html` 93, `config.mjs` 6, migrations 333) |
+| Test LOC | ~180 | 200 | within | 200 (`tests/*.mjs`) |
+| New modules/classes | 0 | 2 | within | 0 |
+| Source files touched | 13 (8 migration files, 1 HTML page, 3 test files, 1 `.env.example`) | 3 | EXCEEDS — exception | 15 (10 migration files, 1 HTML page, 3 test files, `config.mjs`). Two more than declared: a corrective migration and its down file for defect D-001. No `.env.example` was written; `config.mjs` holds the same two non-secret values and is what the page and tests actually import. |
+| New tables | 13 | 1 | EXCEEDS — exception | 13 |
+| New columns | ~70 | 6 | EXCEEDS — exception | 78 |
+| New endpoints | 0 (Supabase's own PostgREST API; no custom server code written) | 1 | within | 0 |
+| New UI surfaces | 1 | 1 | within | 1 (`web/index.html`) |
+| New libraries | 0 (native `fetch`, Node's built-in `node:test`) | 0 | within | 0. No `package.json` exists. The browser drill used the environment's pre-installed Playwright, run from outside the repo; nothing was added to it. |
+| New third-party services | 0 (the `toolbelt` Supabase project is the platform this whole portfolio runs on, not a new third party) | 0 | within | 0 |
+| User stories | 1 (U-001) | 1 | within | 1 |
+| New tests | ~15 (RLS: 13 tables + AC-003 + AC-004) | 8 | EXCEEDS — exception | 7 executable, under both the declaration and the ceiling. The per-table RLS sweep was replaced by one `pg_class` query proving `relrowsecurity` and `relforcerowsecurity` on all 13 tables, which is the cheaper mechanism (`rules/00-CORE.md` principle 1). |
+| New config keys | 1 (`SUPABASE_URL`/`SUPABASE_ANON_KEY` pair, not secret) | 2 | within | 1 |
 
 ## 7. Changes
 
@@ -168,18 +168,29 @@ None. No custom API is written; the Supabase project's own auto-generated REST A
 | ID | Assumption | Why it was needed | How to verify | Blast radius if wrong | Promoted to PRD? |
 |---|---|---|---|---|---|
 | ASM-003 | ~~Test users for AC-006 created dynamically via public sign-up, throwaway credentials never committed.~~ **Superseded during implementation:** Supabase's public sign-up endpoint requires email confirmation, which blocks non-interactive test runs. Two fixed test-fixture accounts (`tests/helpers.mjs`) are used instead: `kylegsmith19+toolbelt-test-a@gmail.com` / `-test-b@gmail.com`, Gmail-alias addresses that are not real people, with `email_confirmed_at` set directly via one-time SQL (not a project-wide auth setting change). Their passwords are committed in `tests/helpers.mjs`. | Same as original: two real authenticated identities are needed to prove per-row isolation on `core.run`, and no service-role key is used to avoid handling a secret in this repo. Sign-up-time email confirmation made the dynamic approach unworkable without adding a library or a confirmation-bypass service setting. | Re-run `tests/rls.test.mjs`; T-I-002 fails red if RLS isolation breaks. | Low: these accounts only ever hold RLS-scoped rows they create in `core.run`/`core.app` inside this dev project; blast radius of the committed password is limited to this project's own test fixtures, not the user's real account or any other system. | no — accepted as-is; see this row |
+| ASM-004 | The `prompt-organizer` idea's true status is `specced`, so the seed data was the defect rather than FR-001/AC-001. | The database said `idea` and the PRD said `specced`; one had to be named wrong to resolve defect D-001. | Prompt Organizer's own PRD exists and is complete, which is what `specced` means in the `idea.idea` status set. If Kyle considers it not yet specced, revert `20260807010000_idea_fix_prompt_organizer_status.sql` and change FR-001 instead. | Low. One row's status column in a 33-row backlog, with a written down migration. | no — `rules/00-CORE.md` already ranks the PRD above code, so this is applying the existing rule, not a new one |
+| ASM-005 | Relaying the page's two fetches through Node during the browser drill is acceptable evidence for AC-001. | The sandbox resets the browser's own TLS egress to `supabase.co`, so an unmodified browser cannot reach the project from this environment. | Load `web/index.html` on a machine with normal network access and sign in; the page should behave identically, since only the transport hop was substituted. | Low. The page's own sign-in and render logic ran unmodified in a real browser against real data from the live project. What is unproven is only that this sandbox can open a socket, which is not a property of the page. | no — an environment limitation, not a product requirement |
 
 ## 12. Definition of Done (GATE-SPEC-DONE)
 
-- [ ] Every `AC` has a passing acceptance/integration test, with the test ID recorded.
-- [ ] Every `PROP` has a passing property test or a recorded reason it does not apply.
-- [ ] GATE-GREEN passes in full, with command output shown.
-- [ ] Every declared budget line has an Actual value; every exceedance matches the exception in section 6, nothing new.
-- [ ] Every test in section 8 passed GATE-TEST-JUSTIFIED.
-- [ ] PRD status column updated for FR-001, FR-002, FR-003 (`in-slice-000` -> `done`).
-- [ ] `docs/SYSTEM-REQUIREMENTS.md` and `docs/DATA-FLOW-DIAGRAM.md` written (this is the first slice; they do not exist yet).
-- [ ] README updated with real commands, replacing every `<TBD>`.
-- [ ] Assumption ASM-003 above is either verified or explicitly accepted as-is.
-- [x] Rollback plan tested: all four down migrations actually run against the project once, then the up migrations re-applied. (2026-08-06: found and fixed a real gap — the up migrations were missing schema `GRANT`s, so the round-trip only worked because of grants applied outside version control. Fixed in `20260806190000_core_create_schema.sql` and `20260806190100_idea_create_schema.sql`.)
-- [ ] Nothing added that no `AC` or `PROP` required.
-- [ ] `updated` and `completed` dates set in front matter; moved to `specs/done/`.
+- [x] Every `AC` has a passing acceptance/integration test, with the test ID recorded. AC-001 T-A-001, AC-002 T-I-001, AC-003 T-I-003, AC-004 T-I-004, AC-005 T-I-005, AC-006 T-I-002, AC-007 T-A-002 (manual drill, recorded below).
+- [x] Every `PROP` has a passing property test or a recorded reason it does not apply, stated at the strength the evidence actually supports:
+  - **PROP-001 (error totality): spot-checked, not exhaustive.** T-I-003 and T-I-004 each assert a named Postgres error code (`23503`, `23502`) rather than a crash or a partial write. That covers the two constraint classes the acceptance criteria name, on two of thirteen tables. It is not a generated sweep over every column combination, and this slice added no property-testing library to make one (`MAX_NEW_LIBRARIES: 0`). Recorded as the honest limit of the evidence.
+  - **PROP-002, PROP-005 (round-trip, oracle): covered** by T-I-005, mutation-verified 2026-08-07.
+  - **PROP-003 (idempotence): covered** by the T-I-006 drill, run against the live project 2026-08-06.
+  - **PROP-007 (conservation): not separately tested, by design.** `SELECT` cannot change a row count; Postgres read semantics are the mechanism, which is cheaper than a test (`rules/00-CORE.md` principle 1). A test here would assert a property of Postgres, not of this system.
+  - **PROP-009 (invariant): covered** by the `CHECK` constraint on `idea.idea.status`, the cheapest sufficient mechanism.
+  - PROP-004, PROP-006, PROP-008 are recorded in section 5 as not applicable, with reasons.
+- [x] GATE-GREEN passes in full, with command output shown. `node --test "tests/*.test.mjs"` exits 0, 7/7 pass in 2.1s. G3/G4/G5 (lint, typecheck, build) have no command: there is no linter, no type system, and no build step in this repo, and adding one would breach `MAX_NEW_LIBRARIES: 0`. NFR-003's file and function limits were checked by `wc -l` instead: largest file 115 lines against a 250 ceiling.
+- [x] Every declared budget line has an Actual value; every exceedance matches the exception in section 6, nothing new. Two lines moved: source files touched went 13 -> 15 (a corrective migration plus its down file, for defect D-001), and new tests came in at 7, under both the declaration and the ceiling.
+- [x] Every test in section 8 passed GATE-TEST-JUSTIFIED. Every row in `specs/TEST-LEDGER.md` section 1 now carries a mutation-verified date; none was left `pending`.
+- [x] PRD status column updated for FR-001, FR-002, FR-003, and NFR-001 through NFR-004 (all `not-started` -> `done`).
+- [x] `docs/SYSTEM-REQUIREMENTS.md` and `docs/DATA-FLOW-DIAGRAM.md` written. `docs/` root holds exactly three `.md` files (GATE-DOC D7).
+- [~] GATE-DOC D3 (zero broken internal links) **does not fully pass, and this slice did not cause it.** `CLAUDE.md` and three rule cards reference `prompts/*.md` and `templates/SPEC.md`, which exist only in the SDD pack on Kyle's machine, not in this repo. That breaks the self-containment rule in `rules/04-DOCS.md`. Recorded in `docs/notes/2026-08-07-repo-references-prompts-and-templates-it-does-not-contain.md` with three options and left for its own slice, per `rules/00-CORE.md` ("discoveries become spec entries, not more code"). Every reference this slice added does resolve. D1, D2, D4, D5, D6, and D7 pass.
+- [x] README updated with real commands, replacing every `<TBD>`.
+- [x] Assumption ASM-003 above is explicitly accepted as-is; see its row.
+- [x] AC-001 verified in a real browser, not only over REST. Chromium loaded `web/index.html`, signed in as the fixture user, and rendered 33 rows; the `prompt-organizer` row's four cells read exactly `Prompt Organizer`, `Agentic / LLM systems tooling`, `A place to save AI prompts and reuse them instead of retyping them.`, `specced`. A wrong password showed `Invalid login credentials` and left the idea section hidden. The sandbox resets the browser's own TLS egress, so the page's two fetches were relayed through Node against the same live project; every line of the page's sign-in and render logic ran in the browser against real data, and only the browser-to-internet TCP hop was substituted.
+- [x] Defect D-001 found and fixed during this slice: the `prompt-organizer` row's `status` was `idea` while FR-001 and AC-001 both name `specced`, and T-A-001 had been written to assert the observed value rather than the specified one. Recorded in `specs/TEST-LEDGER.md` section 3 with the gate that missed it.
+- [x] Rollback plan tested: all four down migrations actually run against the project once, then the up migrations re-applied. The fifth migration added by this slice (`20260807010000_idea_fix_prompt_organizer_status`) had its own round-trip run on 2026-08-07: the down reverted the row to `idea` (confirmed by query), the up restored `specced`, and the suite returned 7/7 green. NFR-004 therefore holds for 5 of 5 migrations, not 4. (2026-08-06: found and fixed a real gap — the up migrations were missing schema `GRANT`s, so the round-trip only worked because of grants applied outside version control. Fixed in `20260806190000_core_create_schema.sql` and `20260806190100_idea_create_schema.sql`.)
+- [x] Nothing added that no `AC` or `PROP` required. The one addition beyond the original spec is the sign-in form on `web/index.html`. It is required, not extra: AC-001 needs the page to display rows and AC-002/NFR-001 forbid reading them unauthenticated, so with no way to hold a session the page could not satisfy AC-001 at all. PRD OOS-004 was narrowed in the same change (v0.1.1) and now excludes sign-up, password reset, and multi-user account management, all of which remain unbuilt.
+- [x] `updated` and `completed` dates set in front matter; moved to `specs/done/`.
