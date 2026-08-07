@@ -2,10 +2,10 @@
 title: Variables and render
 spec_id: SPEC-0003-variables-and-render
 slice: SL-002
-status: active
+status: done
 created: 2026-08-07
 updated: 2026-08-07
-completed:
+completed: 2026-08-07
 owner: Kyle
 traces: [FR-004, FR-007, FR-010]
 ---
@@ -124,7 +124,7 @@ Revert the slice's commits; no schema change exists to roll back.
 - [x] T-U-006..012 green; red output recorded first. (Also T-U-016, added mid-slice to close a coverage hole — section 11.)
 - [x] Ledger rows predate tests; mutation-verified dates recorded.
 - [x] GATE-MINIMAL: function ≤40 lines each, file ≤250.
-- [ ] Browser drill: AC-002 (missing-variable block) and AC-003 (copy + clipboard content) exercised on the real page, evidence recorded. **Not performed this slice — no browser tooling in this environment; deferred to integrator (section 11).**
-- [ ] PRD FR-004, FR-007, FR-010 → `done`; change-log entry — integrator applies.
-- [ ] DFD updated: render is a client-side-only transform, no new flow to the database. — integrator applies.
-- [ ] Spec moved to `done/`, dates set. — integrator applies.
+- [x] Browser drill, integrator, 2026-08-07 (Chromium, clipboard permissions granted, against the live project via the same Node-relay technique as prior drills): a two-variable prompt showed labels `NAME`, `REPO`; copying with both blank showed `Missing: NAME, REPO`; filling only `NAME` and copying showed `Missing: REPO`; filling both and copying showed `Copied!` and `navigator.clipboard.readText()` returned exactly `Hello Kyle, repo is toolbelt.` — AC-002 and AC-003 both confirmed live.
+- [x] PRD FR-004, FR-007, FR-010 → `done`; change-log entry — same commit as this file's move to `done/`.
+- [x] DFD updated: render is a client-side-only transform, no new flow to the database.
+- [x] Spec moved to `done/`, dates set.
