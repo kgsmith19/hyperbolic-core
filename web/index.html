@@ -40,7 +40,7 @@
 
   <script type="module">
     import { searchPrompts, toggleTagFilter } from "./search.mjs";
-    import { extractVariables, render } from "./render.mjs";
+    import { buildRenderPanel } from "./panel.mjs";
     import { isCurrentVersion } from "./restore.mjs";
 
     const SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
@@ -58,49 +58,6 @@
       const json = await res.json().catch(() => null);
       if (!res.ok) throw new Error(json?.message || `request failed: ${res.status}`);
       return json;
-    }
-
-    // SPEC-0003: one input per detected variable; an empty input is treated
-    // as an absent key so render()'s missing-variable block (AC-002) fires
-    // for it, matching scope 3's "blocks ... if any are empty".
-    function buildRenderPanel(prompt) {
-      const names = extractVariables(prompt.body);
-      if (names.length === 0) return null;
-
-      const panel = document.createElement("div");
-      const inputs = {};
-      for (const name of names) {
-        const label = document.createElement("label");
-        label.textContent = name;
-        const input = document.createElement("input");
-        input.type = "text";
-        label.append(input);
-        panel.append(label);
-        inputs[name] = input;
-      }
-
-      const copyBtn = document.createElement("button");
-      copyBtn.type = "button";
-      copyBtn.textContent = "Copy rendered text";
-      const status = document.createElement("p");
-      panel.append(copyBtn, status);
-
-      copyBtn.addEventListener("click", async () => {
-        const values = {};
-        for (const name of names) {
-          const value = inputs[name].value;
-          if (value !== "") values[name] = value;
-        }
-        const result = render(prompt.body, values);
-        if (!result.ok) {
-          status.textContent = `Missing: ${result.missing.join(", ")}`;
-          return;
-        }
-        await navigator.clipboard.writeText(result.text);
-        status.textContent = "Copied!";
-      });
-
-      return panel;
     }
 
     // SPEC-0004: comma-separated tag input, trimmed, lowercased, deduplicated
