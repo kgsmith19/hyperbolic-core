@@ -39,7 +39,7 @@ function addSectionBoxes(panel, ids) {
 // An empty input is omitted from `values` entirely, so render() sees an
 // absent key and its missing-variable block (AC-002 of SPEC-0003) fires --
 // this is the one place "empty input" maps to "absent key".
-export function buildRenderPanel(prompt) {
+export function buildRenderPanel(prompt, api) {
   const names = extractVariables(prompt.body);
   const ids = extractSections(prompt.body);
   if (names.length === 0 && ids.length === 0) return null;
@@ -67,6 +67,9 @@ export function buildRenderPanel(prompt) {
     }
     await navigator.clipboard.writeText(result.text);
     status.textContent = "Copied!";
+    // SPEC-0008 (FR-011): after the confirmation, not before -- a slow or
+    // failed write must never delay or block the copy FR-007 promises.
+    await api("usage", { method: "POST", body: { prompt_id: prompt.id, version_no: prompt.currentVersion } });
   });
 
   return panel;

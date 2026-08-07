@@ -111,7 +111,7 @@
       const pre = document.createElement("pre");
       pre.textContent = prompt.body;
       details.append(summary, pre);
-      const panel = buildRenderPanel(prompt);
+      const panel = buildRenderPanel(prompt, api);
       if (panel) details.append(panel);
       details.append(buildHistoryPanel(prompt));
       item.append(details);
@@ -151,8 +151,21 @@
     }
 
     async function refreshList() {
-      const rows = await api("prompt?select=id,title,body,tag(tag)&order=created_at.desc");
-      allPrompts = rows.map((row) => ({ id: row.id, title: row.title, body: row.body, tags: (row.tag || []).map((t) => t.tag) }));
+      // SPEC-0008: prompt_version embed scoped to its latest row only
+      // (every prompt has at least one the instant it is saved -- SL-004's
+      // trigger fires on insert, not only update), so currentVersion is
+      // always populated, one round trip, no extra query.
+      const rows = await api(
+        "prompt?select=id,title,body,tag(tag),prompt_version(version_no)" +
+          "&order=created_at.desc&prompt_version.order=version_no.desc&prompt_version.limit=1"
+      );
+      allPrompts = rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        body: row.body,
+        tags: (row.tag || []).map((t) => t.tag),
+        currentVersion: row.prompt_version[0].version_no,
+      }));
       renderList();
     }
 
@@ -194,7 +207,7 @@
             body: tags.map((tag) => ({ prompt_id: saved.id, tag })),
           });
         }
-        allPrompts.unshift({ id: saved.id, title: saved.title, body: saved.body, tags });
+        allPrompts.unshift({ id: saved.id, title: saved.title, body: saved.body, tags, currentVersion: 1 });
         document.getElementById("save-form").reset();
         renderList();
       } catch (err) {

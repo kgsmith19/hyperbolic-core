@@ -5,7 +5,7 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-012, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, CON-001]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-011, FR-012, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, CON-001]
 ---
 
 # System Requirements
@@ -19,7 +19,7 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 | SR-01 | Lives in the `toolbelt` Supabase project, schema `prompt` only. No project of its own. | project ref `woltgcggxaehtuypkxqk` | CON-001; `information_schema` |
 | SR-02 | No application server. The page and tests call Supabase's own PostgREST and GoTrue directly. | 0 custom services | No server code exists in this repo |
 | SR-03 | The web surface is one static HTML file; no framework, no build step, zero dependencies. | 1 file, 0 libraries | No `package.json` exists |
-| SR-04 | This repo writes only to schema `prompt`. Reads of `core` begin in SL-007. | 1 schema | Code inspection; grants |
+| SR-04 | This repo writes only to schema `prompt`, without exception. | 1 schema | Code inspection; grants; PRD NFR-010 is `blocked` on exactly this constraint, not silently worked around |
 
 ## 2. Security
 
@@ -34,6 +34,8 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 | SR-20 | A duplicate-title rejection (`23505`) does not reveal the conflicting prompt's title or body in its response. | Postgres suppresses the constraint-violation `details` field for a non-superuser role; `message` names only the constraint | Confirmed live 2026-08-07 (SPEC-0002 AC-001); `code` is the tested signal |
 | SR-23 | `prompt.tag` carries no `user_id` column of its own; ownership is checked through the parent `prompt.prompt` row on every read and write. | `EXISTS (select 1 from prompt.prompt p where p.id = prompt_id and p.user_id = auth.uid())` in both the select and insert policies | T-I-008, T-I-009 |
 | SR-24 | A prompt's tags are deleted when the prompt is, with no separate mechanism required. | `prompt_id ... references prompt.prompt(id) on delete cascade` | T-I-011 (integrator drill) |
+| SR-25 | A `prompt.usage` row can never name a `(prompt_id, version_no)` pair that was never actually created. | Composite foreign key `(prompt_id, version_no) references prompt.prompt_version(prompt_id, version_no)` — a plain `CHECK` cannot express a cross-table reference | T-I-016 |
+| SR-26 | `prompt.usage` is append-only: no caller, ever, can modify or delete a usage row. | No `UPDATE` or `DELETE` grant or policy exists on it, same absence-is-the-mechanism pattern as `prompt.prompt_version` (SR-19) | Code inspection; `information_schema.role_table_grants` |
 
 ## 3. Data integrity
 
