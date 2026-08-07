@@ -86,6 +86,9 @@ Always, no configuration:
   power management, roaming aggressiveness, 802.11 mode
 - Windows event log: radio off/on, DHCP, DNS-client timeouts
 - Path MTU, TCP autotuning, whether Tailscale is in the route
+- IPv4 and IPv6 reachability to the target, measured **separately** — Happy
+  Eyeballs hides a dead family behind the working one, so a broken stack
+  shows up only as occasional stalls unless something tests each on its own
 - An **idle-hold test** that keeps a real TLS connection open to see whether
   something reaps it — the one probe that reproduces a streaming response
   dying mid-flight

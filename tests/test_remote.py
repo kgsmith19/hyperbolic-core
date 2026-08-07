@@ -8,7 +8,7 @@ be cited as a fault by the ranking engine.
 import unittest
 from unittest.mock import patch
 
-from netcheck import diagnose, docsis, remote
+from netcheck import docsis, rank, remote
 
 from tests import fixture
 
@@ -29,7 +29,7 @@ class CredentialGateTest(unittest.TestCase):
         scan = {"modem": {"state": "unavailable", "reason": "no credentials"},
                 "router": {"state": "unavailable", "reason": "no credentials"},
                 "driver": {"state": "unavailable", "reason": "not Windows"}}
-        self.assertEqual(diagnose.rank([], [], scan), [])
+        self.assertEqual(rank.rank([], [], scan), [])
 
 
 class ParseDocsisStatusTest(unittest.TestCase):

@@ -45,6 +45,7 @@ python -m netcheck sync                        # push to Supabase
 |---|---|
 | `netcheck/probes.py` | Per-tick measurement: ping, TLS, HTTP, idle-hold |
 | `netcheck/resolver.py` | Name resolution, incl. a minimal DNS/UDP client |
+| `netcheck/dualstack.py` | IPv4-vs-IPv6 reachability, measured per family |
 | `netcheck/route.py` | Default gateway and the ISP's first hop |
 | `netcheck/wlan_probes.py` | `netsh`/`airport` Wi-Fi parsers |
 | `netcheck/docsis.py` | DOCSIS status-page parser |
@@ -52,7 +53,8 @@ python -m netcheck sync                        # push to Supabase
 | `netcheck/remote.py` | Reached over the network: modem, router, WAN address, provider status |
 | `netcheck/llmlog.py` | Transcript scraping, error classification, offsets |
 | `netcheck/store.py` | SQLite schema and writes; Supabase mirror |
-| `netcheck/diagnose.py` | Culprit rules, correlation, ranked causes |
+| `netcheck/diagnose.py` | Culprit rules for one row, error correlation, bursts |
+| `netcheck/rank.py` | `_SCAN_RULES`, `_FIXES`, and the ranked report |
 | `netcheck/server.py` | stdlib HTTP + JSON API |
 | `netcheck/ui.html` | Single-file Alpine dashboard |
 
@@ -87,7 +89,7 @@ it fail first.
 
 ## Adding a diagnostic
 
-A new standing condition is a **row in `diagnose._SCAN_RULES`**, not a new
+A new standing condition is a **row in `rank._SCAN_RULES`**, not a new
 module. The row names the `environ.scan()` section it reads, a confidence,
 and a callback returning either an evidence string or `None`.
 
@@ -101,7 +103,7 @@ and a callback returning either an evidence string or `None`.
    no fix is a complaint, and
    `test_every_scan_cause_carries_an_actionable_fix` enforces it.
 
-`_scan_causes()` skips any section whose state is not `ok`, so neither an
+`rank._scan_causes()` skips any section whose state is not `ok`, so neither an
 unmeasured section nor a broken query can invent a fault.
 
 ## Gates

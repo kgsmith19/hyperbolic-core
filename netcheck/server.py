@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import diagnose, store
+from . import diagnose, rank, store
 
 UI = Path(__file__).with_name("ui.html")
 VENDOR = Path(__file__).parent / "vendor"
@@ -26,7 +26,7 @@ def payload(conn, limit=500):
         "samples": samples,
         "errors": errors,
         "bursts": diagnose.bursts(raw) if raw else [],
-        "causes": diagnose.rank(samples, errors, latest),
+        "causes": rank.rank(samples, errors, latest),
         "scan": latest,
         "live": dict(samples[0], culprit=diagnose.culprit(samples[0])) if samples else None,
     }

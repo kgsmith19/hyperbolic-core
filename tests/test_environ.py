@@ -6,7 +6,8 @@ need credentials must go quiet, not loud, when they have none.
 import unittest
 from unittest.mock import patch, MagicMock
 
-from netcheck import diagnose, environ
+from netcheck import environ, rank
+
 
 class WifiPlatformDispatchTest(unittest.TestCase):
     """wifi() shells out to a different tool per platform; each parser is
@@ -81,12 +82,12 @@ class DriverFindingsTest(unittest.TestCase):
     def test_capable_card_at_full_mode_is_not_flagged(self):
         scan = {"driver": {"state": "ok", "adapter": "Intel(R) Wi-Fi 6 AX201 160MHz",
                            "wireless_mode": "5. 802.11ax"}}
-        self.assertEqual(diagnose.rank([], [], scan), [])
+        self.assertEqual(rank.rank([], [], scan), [])
 
     def test_pinned_card_is_flagged_with_the_actual_setting_quoted(self):
         scan = {"driver": {"state": "ok", "adapter": "Intel(R) Wi-Fi 6 AX201 160MHz",
                            "wireless_mode": "3. 802.11ac"}}
-        got = diagnose.rank([], [], scan)[0]
+        got = rank.rank([], [], scan)[0]
         self.assertEqual(got["cause"], "wifi_mode_pinned")
         self.assertIn("802.11ac", got["evidence"])
 

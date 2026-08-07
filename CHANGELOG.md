@@ -10,6 +10,53 @@ pass, not full automation.
 
 ## [Unreleased]
 
+### Added
+- IPv4-vs-IPv6 isolation (`netcheck/dualstack.py`, FR-013). Happy Eyeballs
+  races the two families and returns whichever answers first, so a wholly
+  broken family shows up only as occasional extra latency on a connection
+  that still succeeds -- indistinguishable from "the network is slow today"
+  unless something measures each family on its own. `scan()` gains a
+  `dual_stack` section and `rank()` gains `broken_ipv6` / `broken_ipv4`,
+  which fire only when the *other* family succeeded.
+
+  Three states, not two, and both "could not measure" cases are real: the
+  target having no AAAA record is its DNS, not our stack; and this host
+  having no IPv6 stack at all is IPv6 switched off, which is not IPv6
+  broken. Neither is ever cited as a cause.
+
+  Deliberately not `socket.create_connection`: it re-resolves the hostname
+  and can return the other family, quietly measuring the thing the probe
+  exists to isolate. The socket is opened on the requested family and the
+  `sockaddr` passed through whole -- IPv6's is a 4-tuple carrying flowinfo
+  and a scope id, and truncating it to `(host, port)` raised `ValueError`
+  against a real target.
+
+### Fixed
+- `dns_router_ms` reading exactly `0.0` on every tick (#28). The cause was the
+  clock, not the resolver: before Python 3.11, `time.monotonic()` on Windows
+  was `GetTickCount64` with ~15.6 ms resolution, so a real 1-3 ms query
+  started and finished inside a single tick. Every short-duration measurement
+  (`resolve`, `tls_connect`, `http_check`, the new dual-stack connect) now
+  uses `time.perf_counter()`, which is the documented clock for exactly this
+  and uses the high-resolution counter on every version. `idle_hold`'s
+  90-second loop and `watch`'s interval keep `monotonic()`, which is the right
+  tool for "has enough wall time passed".
+
+- `_resolve_via` accepted any UDP packet arriving on its ephemeral port as
+  the answer: the query id was the constant `0x1234` and the reply's id was
+  never checked, nor was the QR bit. `watch` asks the same server the same
+  question every tick, so a late reply to the previous tick satisfied the
+  current one -- reporting the router's resolver as healthy on the strength
+  of a stale packet, which is the opposite of what this tool is for. Each
+  query now carries a fresh random id and the reply must match it and be a
+  response.
+
+### Changed
+- `diagnose.py` split into `diagnose.py` (culprit for one row, correlation,
+  bursts) and `rank.py` (`_SCAN_RULES`, `_FIXES`, the ranked report),
+  matching the seam the tests already had. `probes.py` split again to give
+  `dualstack.py` its own module, alongside `resolver.py` and `route.py`.
+
 ### Changed
 - `netcheck diagnose` now ranks the standing conditions an environment scan
   measures alongside the faults measured over time, in one list. New causes:
@@ -110,6 +157,53 @@ pass, not full automation.
   prompts with `https://<project-ref>.supabase.co` as the shape.
 
 ## [Unreleased]
+
+### Added
+- IPv4-vs-IPv6 isolation (`netcheck/dualstack.py`, FR-013). Happy Eyeballs
+  races the two families and returns whichever answers first, so a wholly
+  broken family shows up only as occasional extra latency on a connection
+  that still succeeds -- indistinguishable from "the network is slow today"
+  unless something measures each family on its own. `scan()` gains a
+  `dual_stack` section and `rank()` gains `broken_ipv6` / `broken_ipv4`,
+  which fire only when the *other* family succeeded.
+
+  Three states, not two, and both "could not measure" cases are real: the
+  target having no AAAA record is its DNS, not our stack; and this host
+  having no IPv6 stack at all is IPv6 switched off, which is not IPv6
+  broken. Neither is ever cited as a cause.
+
+  Deliberately not `socket.create_connection`: it re-resolves the hostname
+  and can return the other family, quietly measuring the thing the probe
+  exists to isolate. The socket is opened on the requested family and the
+  `sockaddr` passed through whole -- IPv6's is a 4-tuple carrying flowinfo
+  and a scope id, and truncating it to `(host, port)` raised `ValueError`
+  against a real target.
+
+### Fixed
+- `dns_router_ms` reading exactly `0.0` on every tick (#28). The cause was the
+  clock, not the resolver: before Python 3.11, `time.monotonic()` on Windows
+  was `GetTickCount64` with ~15.6 ms resolution, so a real 1-3 ms query
+  started and finished inside a single tick. Every short-duration measurement
+  (`resolve`, `tls_connect`, `http_check`, the new dual-stack connect) now
+  uses `time.perf_counter()`, which is the documented clock for exactly this
+  and uses the high-resolution counter on every version. `idle_hold`'s
+  90-second loop and `watch`'s interval keep `monotonic()`, which is the right
+  tool for "has enough wall time passed".
+
+- `_resolve_via` accepted any UDP packet arriving on its ephemeral port as
+  the answer: the query id was the constant `0x1234` and the reply's id was
+  never checked, nor was the QR bit. `watch` asks the same server the same
+  question every tick, so a late reply to the previous tick satisfied the
+  current one -- reporting the router's resolver as healthy on the strength
+  of a stale packet, which is the opposite of what this tool is for. Each
+  query now carries a fresh random id and the reply must match it and be a
+  response.
+
+### Changed
+- `diagnose.py` split into `diagnose.py` (culprit for one row, correlation,
+  bursts) and `rank.py` (`_SCAN_RULES`, `_FIXES`, the ranked report),
+  matching the seam the tests already had. `probes.py` split again to give
+  `dualstack.py` its own module, alongside `resolver.py` and `route.py`.
 
 ### Removed
 - `netcheck/diagnostic_engine.py`, `fix_engine.py`, `fix_application.py`,

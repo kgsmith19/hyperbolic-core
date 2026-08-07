@@ -77,8 +77,8 @@ graph TB
 | ID | Container | Technology | Responsibility (one sentence) | Runs where | Traces to |
 |---|---|---|---|---|---|
 | C-001 | CLI dispatch (`__main__.py`) | Python 3, `argparse` | Parses `sys.argv` and dispatches to one command | User's machine | FR-001 through FR-007 |
-| C-002 | Probing + environment (`probes.py`, `environ.py`, `wlan_probes.py`, `docsis.py`) | Python 3 stdlib (`subprocess`, `socket`, `ssl`, `urllib`) | Measures every network layer and gathers device, OS, WAN, and provider state | User's machine | FR-001, FR-004, FR-005, FR-006 |
-| C-003 | Correlation + ranking (`diagnose.py`, `llmlog.py`) | Pure Python 3 | Classifies errors, joins them to samples, ranks causes from both the sample history and the environment scan | User's machine | FR-002, FR-003, FR-006, FR-009, FR-010 |
+| C-002 | Probing + environment (`probes.py`, `resolver.py`, `route.py`, `dualstack.py`, `environ.py`, `remote.py`, `wlan_probes.py`, `docsis.py`) | Python 3 stdlib (`subprocess`, `socket`, `ssl`, `urllib`) | Measures every network layer and gathers device, OS, WAN, and provider state | User's machine | FR-001, FR-004, FR-005, FR-006 |
+| C-003 | Correlation + ranking (`diagnose.py`, `rank.py`, `llmlog.py`) | Pure Python 3 | Classifies errors, joins them to samples, ranks causes from both the sample history and the environment scan | User's machine | FR-002, FR-003, FR-006, FR-009, FR-010 |
 | C-005 | Store (`store.py`, `schema.sql`) | `sqlite3` stdlib, PostgREST over `urllib` | Local source of truth; optional Supabase mirror | User's machine (SQLite); Supabase cloud (mirror) | FR-011, NFR-003 |
 | C-006 | Dashboard server (`server.py`, `ui.html`) | `http.server` stdlib, Alpine.js (vendored, no CDN) | Serves JSON + the dashboard page | User's machine | FR-007 |
 
@@ -101,12 +101,13 @@ graph TB
 | SR-002 | C-003 must classify a transcript line as an error using the `isApiErrorMessage` flag and `type: system` objects, never a substring match on raw text. | FR-002 | Test | `test_llmlog.py` (adversarial cases) | done |
 | SR-003 | C-003 must join an error to the sample with the smallest absolute time difference, and only accept it if that difference is ≤120 seconds. | FR-003 | Test | `test_diagnose.py::CorrelateTest` | done |
 | SR-004 | C-002 must re-resolve the default gateway on every `watch` tick, and only re-run the more expensive first-hop traceroute when the gateway actually changed. | FR-004 | Test | `test_main.py`, `test_probes.py::ParseIpconfigGatewayTest` | done |
-| SR-005 | C-003 must derive a cause from a scan section only when that section's state is `ok`, so neither an unmeasured section nor a failed query can produce a fault. | FR-006, FR-008 | Test | `test_diagnose.py::ScanCauseTest` | done |
+| SR-005 | C-003 must derive a cause from a scan section only when that section's state is `ok`, so neither an unmeasured section nor a failed query can produce a fault. | FR-006, FR-008 | Test | `test_rank.py::ScanCauseTest` | done |
 | SR-006 | C-006 must build its `/api/data` response from a live query against C-005, never from a hardcoded or fabricated payload. | FR-007 | Inspection | `netcheck/server.py::payload()` read directly; `test_server.py` | done |
 | SR-007 | C-005's `mirror()` must mark a row synced only after a successful push, and must never block local writes on the mirror's availability. | FR-011, NFR-003 | Test | `test_store.py::MirrorTest` | done |
 | SR-008 | No subprocess/PowerShell call in C-002 may interpolate a caller-supplied value into the command text. | NFR-005 | Test | `test_environ.py::PowerShellArgumentSafetyTest` | done |
 | SR-009 | The full test suite must run with zero live network calls, zero sleeps beyond a probe's own timing, and zero skips — a test that does not run on the machine running the suite is not coverage. | NFR-006 | Test | `python -m unittest discover -s tests -t .` reports `OK` with no `skipped` count | done |
 | SR-010 | No module in `netcheck/` may import a package outside the Python 3 standard library. | NFR-001 | Inspection | `code-quality.yml` import scan | done |
+| SR-011 | C-002 must open its own socket on the requested address family rather than calling `socket.create_connection`, which re-resolves the hostname and may return the other family. | FR-013 | Test | `test_dualstack.py::test_each_family_is_connected_on_a_socket_of_that_family` | done |
 
 **Verification methods (pick exactly one per row):**
 

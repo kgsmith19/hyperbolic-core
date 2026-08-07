@@ -6,10 +6,11 @@ modem password is not a broken modem, and the diagnosis engine relies on being
 able to tell the difference.
 """
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 
-from . import probes, remote, wlan_probes
+from . import dualstack, probes, remote, wlan_probes
 
 WINDOWS = probes.WINDOWS
 MACOS = probes.MACOS
@@ -21,6 +22,9 @@ MACOS = probes.MACOS
 _AIRPORT = ("/System/Library/PrivateFrameworks/Apple80211.framework/"
             "Versions/Current/Resources/airport")
 
+# The endpoint the target-dependent sections measure against. Read from the
+# environment so `scan` and `probe` never disagree about what they diagnosed.
+TARGET = os.environ.get("NETCHECK_TARGET", "api.anthropic.com")
 
 
 def _ps(script, timeout=25, args=()):
@@ -203,6 +207,7 @@ def scan():
         "tcp": tcp_globals(),
         "mtu": mtu(),
         "tailscale": tailscale(),
+        "dual_stack": dualstack.dual_stack(TARGET),
         "modem": remote.modem(),
         "router": remote.router(),
         "wan": remote.wan(),

@@ -17,7 +17,8 @@ import time
 import webbrowser
 from pathlib import Path
 
-from . import diagnose, environ, llmlog, probes, route as route_mod, server, store
+from . import (diagnose, environ, llmlog, probes, rank,
+               route as route_mod, server, store)
 from . import __version__
 
 DB = Path(os.environ.get("NETCHECK_DB", Path.home() / ".netcheck" / "netcheck.db"))
@@ -143,7 +144,7 @@ def cmd_diagnose(args):
     scans = store.scans(conn, 1)
     latest = json.loads(scans[0]["payload"]) if scans else {}
     errors = diagnose.correlate(raw, samples)
-    causes = diagnose.rank(samples, errors, latest)
+    causes = rank.rank(samples, errors, latest)
 
     # ASCII only: the Windows console codepage mangles anything else.
     print(f"\nnetcheck - {len(samples)} samples, {len(raw)} LLM errors\n")

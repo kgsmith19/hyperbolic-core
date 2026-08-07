@@ -8,7 +8,7 @@ something the user can act on.
 """
 import unittest
 
-from netcheck import diagnose
+from netcheck import rank
 
 from tests.test_diagnose import row
 
@@ -17,23 +17,23 @@ class RankTest(unittest.TestCase):
     def test_repeated_router_dns_failures_are_ranked_and_actionable(self):
         samples = [row(ts=f"2026-08-05T00:0{i}:00Z", dns_router_state="fail")
                    for i in range(5)]
-        causes = diagnose.rank(samples, [], {})
+        causes = rank.rank(samples, [], {})
         self.assertEqual(causes[0]["cause"], "router_dns")
         self.assertIn("evidence", causes[0])
         self.assertTrue(causes[0]["fix"])
 
     def test_a_healthy_history_reports_no_causes(self):
-        self.assertEqual(diagnose.rank([row()] * 5, [], {}), [])
+        self.assertEqual(rank.rank([row()] * 5, [], {}), [])
 
     def test_unavailable_sections_are_never_cited_as_evidence(self):
         """Criterion 9 through to the report."""
-        causes = diagnose.rank([row(gw_state="unavailable")] * 5, [], {})
+        causes = rank.rank([row(gw_state="unavailable")] * 5, [], {})
         self.assertEqual(causes, [])
 
     def test_wireless_mode_pinned_below_capability_is_surfaced(self):
         """A Wi-Fi 6 card pinned to 802.11ac is a deliberate setting worth
         reporting; it is invisible unless something looks for it."""
-        causes = diagnose.rank([row()], [], {
+        causes = rank.rank([row()], [], {
             "driver": {"state": "ok", "adapter": "Intel(R) Wi-Fi 6 AX201 160MHz",
                        "wireless_mode": "3. 802.11ac"}})
         self.assertTrue(any(c["cause"] == "wifi_mode_pinned" for c in causes))
@@ -48,7 +48,7 @@ class ScanCauseTest(unittest.TestCase):
     """
 
     def causes(self, **sections):
-        return {c["cause"]: c for c in diagnose.rank([row()], [], sections)}
+        return {c["cause"]: c for c in rank.rank([row()], [], sections)}
 
     def test_provider_incident_outranks_every_local_cause(self):
         """The finding that stops you rebuilding a working network: when
@@ -143,6 +143,44 @@ class ScanCauseTest(unittest.TestCase):
     def test_a_full_mtu_is_not_a_cause(self):
         self.assertEqual(self.causes(mtu={"state": "ok", "mtu": 1500}), {})
 
+    def test_one_broken_address_family_is_surfaced(self):
+        """The fault Happy Eyeballs hides: v6 dead, v4 fine, connections
+        still succeed but stall while the race times out."""
+        got = self.causes(dual_stack={"state": "ok",
+                                      "ipv4": {"state": "ok", "ms": 12.0},
+                                      "ipv6": {"state": "fail", "ms": None,
+                                               "reason": "TimeoutError: timed out"}})
+        self.assertIn("broken_ipv6", got)
+        self.assertIn("IPv4 reached it", got["broken_ipv6"]["evidence"])
+
+    def test_a_broken_v4_with_working_v6_is_surfaced_too(self):
+        got = self.causes(dual_stack={"state": "ok",
+                                      "ipv4": {"state": "fail", "ms": None,
+                                               "reason": "OSError: unreachable"},
+                                      "ipv6": {"state": "ok", "ms": 9.0}})
+        self.assertIn("broken_ipv4", got)
+
+    def test_both_families_working_is_not_a_cause(self):
+        self.assertEqual(self.causes(dual_stack={
+            "state": "ok", "ipv4": {"state": "ok", "ms": 12.0},
+            "ipv6": {"state": "ok", "ms": 14.0}}), {})
+
+    def test_a_target_with_no_ipv6_at_all_is_not_a_cause(self):
+        """`unavailable` on one family means the target has no address there.
+        Reporting that as a broken stack would send the user to fix IPv6 on a
+        machine whose IPv6 was never in the path."""
+        self.assertEqual(self.causes(dual_stack={
+            "state": "ok", "ipv4": {"state": "ok", "ms": 12.0},
+            "ipv6": {"state": "unavailable", "ms": None,
+                     "reason": "example.test has no IPv6 address"}}), {})
+
+    def test_both_families_down_is_left_to_the_layer_rules(self):
+        """Everything being unreachable is not a dual-stack finding; the
+        per-layer culprit rules already name that, and better."""
+        self.assertEqual(self.causes(dual_stack={
+            "state": "ok", "ipv4": {"state": "fail", "ms": None, "reason": "x"},
+            "ipv6": {"state": "fail", "ms": None, "reason": "x"}}), {})
+
     def test_unavailable_sections_are_never_cited(self):
         """The rule that makes every section above safe: "we could not
         measure" must never read as "we measured a fault".
@@ -187,7 +225,7 @@ class ScanCauseTest(unittest.TestCase):
 
     def test_every_scan_cause_carries_an_actionable_fix(self):
         """A cause with no fix is a complaint."""
-        for c in diagnose.rank([row()], [], {
+        for c in rank.rank([row()], [], {
                 "anthropic": {"state": "ok", "degraded": True, "indicator": "major_outage"},
                 "wan": {"state": "ok", "ip": "100.90.1.2", "double_nat": False, "cgnat": True},
                 "wifi": {"state": "ok", "channel": 52},

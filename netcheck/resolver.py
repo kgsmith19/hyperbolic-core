@@ -7,6 +7,7 @@ to know the inside of. The wire-format client exists because querying a
 against a public one -- is not something socket.getaddrinfo can do, and
 dnspython is not an option under this project's no-dependency constraint.
 """
+import os
 import socket
 import time
 
@@ -32,7 +33,11 @@ def resolve(host, server=None, attempts=2, backoff_s=0.3):
 
 
 def _resolve_once(host, server):
-    t0 = time.monotonic()
+    # perf_counter, not monotonic: this measures a single query that often
+    # completes in 1-3 ms. Before Python 3.11, monotonic() on Windows was
+    # GetTickCount64 with ~15.6 ms resolution, so both reads landed in the
+    # same tick and every router-DNS timing came back as exactly 0.0 ms.
+    t0 = time.perf_counter()
     try:
         if server:
             addrs = _resolve_via(host, server)
@@ -40,7 +45,7 @@ def _resolve_once(host, server):
             addrs = sorted({i[4][0] for i in socket.getaddrinfo(host, 443)})
         if not addrs:
             return {"state": "fail", "ms": None, "reason": "no answer"}
-        return {"state": "ok", "ms": round((time.monotonic() - t0) * 1000, 1),
+        return {"state": "ok", "ms": round((time.perf_counter() - t0) * 1000, 1),
                 "addrs": addrs}
     except Exception as e:
         return {"state": "fail", "ms": None, "reason": f"{type(e).__name__}: {e}"}
@@ -59,20 +64,37 @@ def _skip_name(data, i):
 def _resolve_via(host, server, timeout=4):
     """Minimal DNS/UDP A-record query. Avoids a dnspython dependency."""
     qname = b"".join(bytes([len(p)]) + p.encode() for p in host.split(".")) + b"\0"
-    query = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + qname + b"\x00\x01\x00\x01"
+    # A fresh id per query, checked on the way back. `watch` asks the same
+    # server the same question every tick, so with a fixed id a late reply to
+    # the previous tick would satisfy this one -- clearing the very resolver
+    # this tool exists to indict.
+    txid = os.urandom(2)
+    query = txid + b"\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + qname + b"\x00\x01\x00\x01"
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.settimeout(timeout)
         s.sendto(query, (server, 53))
         data, _ = s.recvfrom(2048)
 
-    count = int.from_bytes(data[6:8], "big")          # ANCOUNT
-    addrs, i = [], len(query)                          # answers follow the question
-    for _ in range(count):
+    if data[:2] != txid:
+        raise ValueError("reply id does not match the query")
+    if not data[2] & 0x80:                            # QR bit: 1 = response
+        raise ValueError("packet is not a DNS response")
+
+    return _a_records(data, start=len(query))          # answers follow the question
+
+
+def _a_records(data, start):
+    """Every A record in the answer section, as dotted-quad strings.
+
+    Records of other types are skipped by their own length rather than
+    guessed at, so a CNAME ahead of the A record does not derail the walk.
+    """
+    addrs, i = [], start
+    for _ in range(int.from_bytes(data[6:8], "big")):  # ANCOUNT
         i = _skip_name(data, i)
         rtype = int.from_bytes(data[i:i + 2], "big")
         length = int.from_bytes(data[i + 8:i + 10], "big")
-        body = data[i + 10:i + 10 + length]
         if rtype == 1 and length == 4:
-            addrs.append(".".join(str(b) for b in body))
+            addrs.append(".".join(str(b) for b in data[i + 10:i + 14]))
         i += 10 + length
     return sorted(addrs)

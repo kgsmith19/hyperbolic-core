@@ -92,16 +92,16 @@ def tls_connect(host, port=443, timeout=8, ctx=None):
     SSLContext; overridable the same way idle_hold's own `ctx` parameter
     is, so a test can hand in a context that trusts a local stub server's
     self-signed certificate instead of a real CA-signed one."""
-    t0 = time.monotonic()
+    t0 = time.perf_counter()
     try:
         ctx = ctx or ssl.create_default_context()
         with socket.create_connection((host, port), timeout=timeout) as raw:
-            t_tcp = time.monotonic()
+            t_tcp = time.perf_counter()
             with ctx.wrap_socket(raw, server_hostname=host) as sock:
                 cipher = sock.cipher()
         return {"state": "ok",
                 "tcp_ms": round((t_tcp - t0) * 1000, 1),
-                "ms": round((time.monotonic() - t0) * 1000, 1),
+                "ms": round((time.perf_counter() - t0) * 1000, 1),
                 "cipher": cipher[0] if cipher else None}
     except Exception as e:
         return {"state": "fail", "ms": None,
@@ -112,7 +112,7 @@ def http_check(host, path="/v1/models", timeout=10):
     """One real HTTPS request. A 401 proves the whole path works end to end —
     we are testing reachability, not credentials."""
     import urllib.error, urllib.request
-    t0 = time.monotonic()
+    t0 = time.perf_counter()
     req = urllib.request.Request(f"https://{host}{path}", method="GET",
                                  headers={"User-Agent": "netcheck"})
     try:
@@ -123,7 +123,7 @@ def http_check(host, path="/v1/models", timeout=10):
     except Exception as e:
         return {"state": "fail", "ms": None, "code": None,
                 "reason": f"{type(e).__name__}: {e}"}
-    return {"state": "ok", "ms": round((time.monotonic() - t0) * 1000, 1),
+    return {"state": "ok", "ms": round((time.perf_counter() - t0) * 1000, 1),
             "code": code}
 
 
