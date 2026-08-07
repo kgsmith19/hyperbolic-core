@@ -77,3 +77,34 @@ test("treats_metacharacter_and_non_ascii_queries_as_literal_text__T_U_005__PROP_
   assert.deepEqual(titles(accent), ["Café Menu"]);
   assert.deepEqual(titles(space), ["Regex (.*) Guide", "Café Menu", "Plain"]);
 });
+
+// SPEC-0004 (SL-006): tags. `prompt.tags` is optional -- absent on every
+// fixture above, exercising the backward-compatible path (T-U-001..005 stay
+// untouched, zero prompts with tags).
+
+// T-U-013 -> AC-003, PROP-001 -> FR-006. A tag-only match (title and body
+// contain neither the query nor a variant of it) must still be found.
+test("finds_tag_only_match_absent_from_title_and_body__T_U_013__AC_003", () => {
+  const prompts = [
+    { title: "Daily Journal", body: "morning pages", tags: ["sdd"] },
+    { title: "Bug Fixer", body: "fix a spec defect", tags: [] },
+  ];
+
+  const result = searchPrompts(prompts, "sdd");
+
+  assert.deepEqual(titles(result), ["Daily Journal"]);
+});
+
+// T-U-014 -> AC-004, PROP-004 -> FR-006. Three disjoint match groups: title
+// ranks first, tag second, body-only last.
+test("ranks_title_above_tag_above_body_only_match__T_U_014__AC_004", () => {
+  const prompts = [
+    { title: "Body Only", body: "contains sdd in the body", tags: [] },
+    { title: "Tag Only", body: "no match here", tags: ["sdd"] },
+    { title: "sdd in Title", body: "irrelevant", tags: [] },
+  ];
+
+  const result = searchPrompts(prompts, "sdd");
+
+  assert.deepEqual(titles(result), ["sdd in Title", "Tag Only", "Body Only"]);
+});
