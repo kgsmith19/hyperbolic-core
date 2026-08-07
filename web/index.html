@@ -26,7 +26,7 @@
     <p id="empty-note">No ideas are recorded.</p>
     <table id="idea-table">
       <thead>
-        <tr><th>Name</th><th>Category</th><th>One-liner</th><th>Status</th></tr>
+        <tr><th>Name</th><th>Category</th><th>One-liner</th><th>Status</th><th>Score</th></tr>
       </thead>
       <tbody id="idea-rows"></tbody>
     </table>
@@ -47,7 +47,7 @@
     }
 
     async function fetchIdeas(token) {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/idea?select=name,category,one_liner,status`, {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/idea?select=id,name,category,one_liner,status`, {
         headers: {
           apikey: SUPABASE_ANON_KEY,
           Authorization: `Bearer ${token}`,
@@ -58,7 +58,46 @@
       return res.json();
     }
 
-    function renderIdeas(ideas) {
+    // FR-004: idea.score is (idea, metric) -> value, appended to over time
+    // (PRD DR-004), never overwritten. Two flat reads plus a client-side
+    // join, rather than a cross-schema PostgREST embed (idea.score and
+    // core.metric_def are different exposed schemas).
+    async function fetchScores(token) {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/score?select=idea_id,metric_id,value,scored_at`, {
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, "Accept-Profile": "idea" },
+      });
+      if (!res.ok) throw new Error(`score list failed: ${res.status}`);
+      return res.json();
+    }
+
+    async function fetchMetricNames(token) {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/metric_def?select=id,name`, {
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, "Accept-Profile": "core" },
+      });
+      if (!res.ok) throw new Error(`metric list failed: ${res.status}`);
+      return res.json();
+    }
+
+    // FR-004: the most recent score per (idea, metric) wins, since a
+    // superseded row must not also render. Ideas with no score row get no
+    // map entry at all -- rendered as blank, never 0 (AC-009).
+    function latestScoresByIdea(scores, metricNames) {
+      const nameById = new Map(metricNames.map((m) => [m.id, m.name]));
+      const latest = new Map();
+      for (const s of scores) {
+        const key = `${s.idea_id}:${s.metric_id}`;
+        const prev = latest.get(key);
+        if (!prev || s.scored_at > prev.scored_at) latest.set(key, s);
+      }
+      const byIdea = new Map();
+      for (const s of latest.values()) {
+        const label = `${nameById.get(s.metric_id)}: ${s.value}`;
+        byIdea.set(s.idea_id, [...(byIdea.get(s.idea_id) || []), label]);
+      }
+      return byIdea;
+    }
+
+    function renderIdeas(ideas, scoresByIdea) {
       document.getElementById("idea-section").style.display = "block";
       if (ideas.length === 0) {
         document.getElementById("empty-note").style.display = "block";
@@ -70,6 +109,7 @@
         for (const field of ["name", "category", "one_liner", "status"]) {
           row.insertCell().textContent = idea[field];
         }
+        row.insertCell().textContent = (scoresByIdea.get(idea.id) || []).join(", ");
       }
     }
 
@@ -81,8 +121,12 @@
       const password = document.getElementById("password").value;
       try {
         const token = await signIn(email, password);
-        const ideas = await fetchIdeas(token);
-        renderIdeas(ideas);
+        const [ideas, scores, metricNames] = await Promise.all([
+          fetchIdeas(token),
+          fetchScores(token),
+          fetchMetricNames(token),
+        ]);
+        renderIdeas(ideas, latestScoresByIdea(scores, metricNames));
       } catch (err) {
         errorEl.textContent = err.message;
         errorEl.style.display = "block";

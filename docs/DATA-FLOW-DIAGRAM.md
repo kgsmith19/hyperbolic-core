@@ -5,7 +5,7 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-traces: [FR-001, FR-002, NFR-001, DR-001, DR-002, DR-003]
+traces: [FR-001, FR-002, FR-004, FR-005, NFR-001, DR-001, DR-002, DR-003, DR-004]
 ---
 
 # Data Flow Diagram
@@ -53,16 +53,20 @@ The only trust boundary is the browser-to-Supabase hop. There is no application 
 | F-4 | Register a tool | A tool's operator | HTTPS `POST /rest/v1/app` + `Content-Profile: core` | `core.app` | Tool id, name, schema name | RLS: role must be `authenticated` |
 | F-5 | Log a run | A tool | HTTPS `POST /rest/v1/run` | `core.run` | `app_id`, kind, ref; `user_id` defaults to `auth.uid()` | RLS: `user_id = auth.uid()` |
 | F-6 | Log run detail | A tool | HTTPS `POST` to `event`/`cost`/`outcome` | `core.*` | Run id and payload | RLS: role must be `authenticated` |
+| F-7 | Read idea scores | Browser | HTTPS `GET /rest/v1/score` + `Accept-Profile: idea` | PostgREST → `idea.score` | Bearer token | RLS: role must be `authenticated` |
+| F-8 | Read metric names | Browser | HTTPS `GET /rest/v1/metric_def` + `Accept-Profile: core` | PostgREST → `core.metric_def` | Bearer token | RLS: role must be `authenticated` |
 
-F-4 through F-6 are the shape SL-003 will use. No tool writes to them yet (PRD OOS-003).
+F-4 through F-6 are the shape SL-003 will use. No tool writes to them yet (PRD OOS-003). F-7 and F-8 are read by the same page load as F-3, in parallel (SPEC-0001).
 
 ## 3. Data at rest
 
 | Store | Contents | Classification | Retention | Encryption |
 |---|---|---|---|---|
 | `idea.idea` (33 rows) | Tool names, categories, one-liners, status | internal | Forever, until Kyle deletes a row | At rest by Supabase |
-| `idea.dependency`, `idea.score` | Empty | internal | n/a until SL-001/SL-002 | At rest by Supabase |
-| `core.app`, `core.run`, `core.cost`, `core.outcome`, `core.run_outcome`, `core.metric_def`, `core.metric_value`, `core.assumption`, `core.intervention` | Empty except test fixtures | internal | Not yet decided (PRD Q-002) | At rest by Supabase |
+| `idea.dependency` | Empty | internal | n/a until SL-002 | At rest by Supabase |
+| `idea.score` | Empty in production; no real judgment has been entered for any idea (PRD DR-004) | internal | Forever, once a row exists | At rest by Supabase |
+| `core.metric_def` | One real row (`idea_effectiveness`, 0-10, proxy) plus test fixtures | internal | Forever | At rest by Supabase |
+| `core.app`, `core.run`, `core.cost`, `core.outcome`, `core.run_outcome`, `core.metric_value`, `core.assumption`, `core.intervention` | Empty except test fixtures | internal | `core.run` and related tables: forever (PRD DR-002) | At rest by Supabase |
 | `core.event` | Empty | internal | 90 days hot, then a monthly aggregate (PRD DR-003, default not yet implemented) | At rest by Supabase |
 | `auth.users` | Two test-fixture accounts | internal | Until the fixtures are retired | Managed by Supabase |
 

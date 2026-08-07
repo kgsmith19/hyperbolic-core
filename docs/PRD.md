@@ -43,6 +43,7 @@ This is one shared place in the database where every small tool Kyle builds writ
 - A `core` Postgres schema with the tables every tool writes to: `app`, `run`, `event`, `cost`, `outcome`, `run_outcome`, `metric_def`, `metric_value`, `assumption`, `intervention`
 - An `idea` Postgres schema holding the tool backlog: `idea`, `dependency`, `score`
 - A page listing every row in `idea.idea` with its name, category, one-liner, and status
+- That page also showing each idea's effectiveness score, where one has been recorded
 - A sign-in form on that page, the minimum needed for it to hold an authenticated session (NFR-001 requires one; nothing reads `idea.idea` unauthenticated)
 - Row-level security, enabled and forced, on every table above
 
@@ -51,7 +52,7 @@ This is one shared place in the database where every small tool Kyle builds writ
 | ID | Not doing | Why not | Revisit when |
 |---|---|---|---|
 | OOS-001 | Editing ideas from the UI | Nothing needs to write to `idea.idea` yet except the seed data | A tool needs to change idea status from its own UI |
-| OOS-002 | An idea dependency graph or scoring UI | `idea.dependency` and `idea.score` have no reader yet | A tool (Golden Goose, Constraint Finder) is specced against them |
+| OOS-002 | An idea dependency graph, and any UI for *entering* or *editing* scores | `idea.dependency` has no reader yet, and scores are written by migration until a tool needs to write them | SL-002 for the graph; a tool (Golden Goose, Constraint Finder) is specced against `idea.score` for the write path |
 | OOS-003 | A client library wrapping `core.run`/`core.event` writes | No tool has been instrumented yet; a wrapper's shape should follow real usage, not precede it | The first tool (Prompt Organizer) actually needs to write a `core.run` row |
 | OOS-004 | Sign-up, password reset, and multi-user account management | Kyle is the only user across every tool in the portfolio and already has one Supabase auth identity | A second person needs access |
 | OOS-005 | A retention job for `core.event` | No tool has written an event yet, so there is nothing to retain | `core.event` has real rows and the 90-day risk in the topology note becomes concrete |
@@ -65,11 +66,11 @@ This is one shared place in the database where every small tool Kyle builds writ
 | Actor | U-001 |
 | Precondition | `idea.idea` has at least one row |
 | Trigger | Kyle wants to decide what to build next |
-| Main path | 1. Opens the idea list page. 2. Reads name, category, one-liner, and status for every idea. |
-| Success outcome | Every row in `idea.idea` is visible on the page |
-| Failure paths | `idea.idea` is empty -> the page states that no ideas are recorded |
+| Main path | 1. Opens the idea list page. 2. Reads name, category, one-liner, and status for every idea. 3. Reads the effectiveness score next to each idea that has one, and uses it to rank what to build next. |
+| Success outcome | Every row in `idea.idea` is visible on the page, each with its score where one has been recorded |
+| Failure paths | `idea.idea` is empty -> the page states that no ideas are recorded. An idea has no score row -> the page shows the idea with no score, never a zero (unscored and scored-zero are different facts) |
 | Frequency | Weekly |
-| Traces to | FR-001 |
+| Traces to | FR-001, FR-004 |
 
 ### UC-002: A tool registers itself and starts logging
 
@@ -91,6 +92,8 @@ This is one shared place in the database where every small tool Kyle builds writ
 | FR-001 | The system must display every row in `idea.idea` with its `name`, `category`, `one_liner`, and `status`. | Must | Given `idea.idea` contains a row with `id` `prompt-organizer`, `name` `Prompt Organizer`, `category` `Agentic / LLM systems tooling`, `one_liner` `A place to save AI prompts and reuse them instead of retyping them.`, and `status` `building`, when the idea list page loads, then all four of those values appear on the page for that row. | UC-001 | done |
 | FR-002 | The system must reject an insert into `core.run` whose `app_id` has no matching row in `core.app`. | Must | Given `core.app` has no row with `id` `test-app`, when inserting into `core.run` with `app_id` `test-app` and `kind` `job`, then the insert fails with a foreign key violation and no row is created. | UC-002 | done |
 | FR-003 | The system must provide the `core.app`, `core.run`, `core.event`, `core.cost`, `core.outcome`, `core.run_outcome`, `core.metric_def`, `core.metric_value`, `core.assumption`, and `core.intervention` tables, matching the column definitions in `docs/notes/2026-08-06-supabase-project-topology.md` section 2. | Must | Given the `core` schema migration has been applied, when a row is inserted into `core.metric_def` with `id` `cost_per_requirement`, `name` `Cost per requirement`, `formula` `total cost / total requirements shipped`, `unit` `USD`, and `gaming_risk` omitted, then the insert fails a `NOT NULL` constraint on `gaming_risk`. | UC-002 | done |
+| FR-004 | The system must display, next to each idea that has a score, that score's value and the name of the metric it was scored against. An idea with no score row must show no score value. | Must | Given `core.metric_def` contains a row with `id` `idea_effectiveness`, `name` `Idea effectiveness`, and `unit` `points (0-10)`, and `idea.score` contains a row with `idea_id` `prompt-organizer`, `metric_id` `idea_effectiveness`, and `value` `8`, when the idea list page loads, then `8` and `Idea effectiveness` both appear on the page for the `prompt-organizer` row, and an idea with no matching `idea.score` row shows neither a number nor a zero in its score position. | UC-001 | done |
+| FR-005 | The system must reject an insert into `idea.score` whose `value` falls outside the `min_value`/`max_value` declared on its metric. | Must | Given `core.metric_def` contains `idea_effectiveness` with `min_value` `0` and `max_value` `10`, when inserting into `idea.score` with `idea_id` `prompt-organizer`, `metric_id` `idea_effectiveness`, and `value` `11`, then the insert fails and no row is created. | UC-001 | done |
 
 ## 7. Non-functional requirements
 
@@ -109,6 +112,7 @@ Categories considered and not applicable: performance (no real traffic yet), sca
 |---|---|---|---|---|---|---|
 | DR-001 | Idea record | One row per tool idea: its name, category, one-liner, and build status | Transcribed once from the topology note's planning table | internal | Forever, until Kyle deletes an idea | FR-001 |
 | DR-002 | Run record | One row per execution of anything worth measuring, across every tool | Written by each tool | internal | Forever. SL-004's job drops `core.event` rows only, and `core.cost`/`core.outcome`/`core.run_outcome` reference runs. | FR-002, FR-003 |
+| DR-004 | Idea score | One human judgment of an idea against one metric, at a point in time: `(idea, metric) -> value` | Entered by Kyle via migration until a tool needs a write path | internal | Forever. Scores are the history of how judgment changed, so superseded rows are kept, not overwritten. | FR-004, FR-005 |
 | DR-003 | Event record | An append-only log entry belonging to a run | Written by each tool | internal | 90 days hot, then a monthly aggregate kept forever (ratified via Q-002) | FR-003 |
 
 ## 9. Constraints
@@ -143,7 +147,7 @@ None. Every tool that reads or writes this schema lives in its own repo and conn
 | Slice | Name | What becomes true | Requirements delivered | Est. net LOC | Depends on |
 |---|---|---|---|---|---|
 | SL-000 | Core + idea spine | The `core` and `idea` Postgres schemas exist with all 13 tables, RLS forced on every one, `idea.idea` seeded with 33 rows, and a page lists every idea. | FR-001, FR-002, FR-003 | ~450 SQL + ~60 UI (exceeds `MAX_NET_LOC` and `MAX_NEW_TABLES`; exception recorded in `SPEC-0000` section 6) | - |
-| SL-001 | Idea scoring | `idea.score` rows are visible next to each idea on the list page. | none yet | 150 | SL-000 |
+| SL-001 | Idea scoring | `idea.score` rows are visible next to each idea on the list page, and a score outside its metric's declared range is rejected. | FR-004, FR-005 | 150 (shipped 2026-08-07, SPEC-0001, 113 actual net source LOC) | SL-000 |
 | SL-002 | Idea dependencies | `idea.dependency` edges are visible as a simple list under each idea. | none yet | 150 | SL-000 |
 | SL-003 | First tool writes a run | A thin client library lets a tool insert a `core.run`/`core.event` row, proven by Prompt Organizer's first real write. | none yet | 200 | SL-000, Prompt Organizer repo exists |
 | SL-004 | `core.event` retention | A scheduled job drops `core.event` rows older than 90 days, keeping a monthly aggregate. | none yet | 200 | SL-003 |
@@ -180,6 +184,8 @@ Both questions are settled. Neither creates a requirement: SL-003 and SL-004 sti
 | 2026-08-07 | 0.1.1 | Narrowed OOS-004 to sign-up, password reset, and multi-user account management; added a sign-in form to section 4.1. | FR-001 requires the page to display idea rows and NFR-001 requires every read to be authenticated. With sign-in entirely out of scope the two contradicted each other and the page could not exist. The form is the smallest thing that resolves it: email, password, no sign-up, no reset, no session persistence. | FR-001, NFR-001, OOS-004 |
 | 2026-08-07 | 0.1.2 | Set FR-001, FR-002, FR-003 and NFR-001 through NFR-004 to `done`. | SL-000 shipped and every acceptance criterion has a passing test. | FR-001, FR-002, FR-003, NFR-001, NFR-002, NFR-003, NFR-004 |
 | 2026-08-07 | 0.1.3 | FR-001's acceptance criterion literal for the `prompt-organizer` row's `status` updated `specced` -> `building`. | The row is alive by design: Prompt Organizer's walking skeleton started implementation, so its status legitimately moved (migration `20260807030000`). The AC's literal is a snapshot of the fixture row and tracks its real lifecycle; it will change again at most twice (`live`, or `parked`/`killed`). This is a PRD-first amendment with the test updated to match, not a test edited to pass: the defect D-001 rule (assert the specified value) still holds — the specified value itself moved. | FR-001 |
+| 2026-08-07 | 0.1.5 | Added FR-004 (scores visible on the list page) and FR-005 (a score outside its metric's declared range is rejected). Added DR-004. Extended UC-001 and section 4.1. Narrowed OOS-002. Set SL-001's requirements from `none yet` to FR-004, FR-005. | SL-001 delivered no requirement, so STOP condition 4 blocked it. Writing FR-004 required resolving a contradiction first: OOS-002 put a scoring UI out of scope because "`idea.score` has no reader yet", which is precisely what SL-001 builds. Narrowed rather than deleted — entering and editing scores stay out of scope, and the dependency graph stays out until SL-002, so the non-goal keeps its teeth. Same amendment shape as 0.1.1. Bounds live on `core.metric_def` as `min_value`/`max_value` rather than a fixed `CHECK` on `idea.score.value`, so a later metric with a different range does not require a schema change. | FR-004, FR-005, DR-004, UC-001, OOS-002, SL-001 |
+| 2026-08-07 | 0.1.6 | Set FR-004 and FR-005 to `done`. SL-001 marked shipped. | SPEC-0001 delivered both: `core.metric_def` gained `min_value`/`max_value` and one seeded metric (`idea_effectiveness`, 0-10, proxy); a trigger on `idea.score` rejects out-of-range values (T-I-007, T-I-008); the list page shows each idea's latest score per metric (T-A-004, browser-verified). No real score exists for any idea yet — that is Kyle's judgment to enter, not this slice's to invent (SPEC-0001 section 3.2). | FR-004, FR-005 |
 | 2026-08-07 | 0.1.4 | Ratified Q-001 and Q-002 at their recorded defaults. Corrected DR-002's retention from "Not yet decided; see Q-002" to "Forever", and restated DR-003's as ratified rather than a topology-note default. | Both questions had carried a recorded default since 0.1.0 and neither had been contested; leaving them open blocked SL-003 and SL-004 for no reason. Ratifying exposed that DR-002 pointed at Q-002 for its answer, but Q-002 only ever asked about `core.event`. SL-004's slice plan entry already says the job drops `core.event` rows only, so runs being retained was implied by the plan and merely unstated here. No requirement is created: SL-003 and SL-004 still deliver no `FR-`/`NFR-`. | Q-001, Q-002, DR-002, DR-003 |
 
 ---
