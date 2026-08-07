@@ -102,9 +102,18 @@ PROJECT_NAME:  toolbelt
 LANGUAGE:      SQL (Postgres/Supabase) + vanilla JS (no framework, no build step)
 FRAMEWORK:     none
 DATABASE:      Supabase Postgres, project "toolbelt"
-PROPERTY_LIB:  fast-check
+PROPERTY_LIB:  none
 MAIN_BRANCH:   main
 ```
+
+`PROPERTY_LIB: none` is a consequence of `MAX_NEW_LIBRARIES: 0` and no
+`package.json`, not an oversight. No generated-case property runner exists here,
+so GATE-PROPERTY PR2-PR5 cannot be exercised. Properties are still mandatory as
+spec-level reasoning: `rules/06-TESTS.md` requires walking all nine kinds, and
+each `PROP-` is discharged by the cheapest sufficient mechanism -- a `CHECK`
+constraint, an integration test, or a written not-applicable reason. SPEC-0000
+section 8 is the worked example. Adding a runner needs written approval, because
+it breaches `MAX_NEW_LIBRARIES: 0`.
 
 ## Review cadence
 

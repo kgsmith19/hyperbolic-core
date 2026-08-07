@@ -14,12 +14,21 @@ traces: []
 
 ## The blocker
 
-`git push origin --delete` was denied by the Claude Code auto-mode permission classifier. It is the only deletion mechanism available here:
+`git push origin --delete` is the only deletion mechanism available in this environment, and it does not work:
 
-- `gh` CLI is not installed in this environment, so the `gh repo delete-branch` path in the cleanup prompt cannot run.
+- `gh` CLI is not installed, so the `gh repo delete-branch` path in the cleanup prompt cannot run.
 - The GitHub MCP server exposes `create_branch` and `list_branches` but **no delete-branch tool**.
 
-This is a local permission decision, not a proxy or GitHub 403. Deletion succeeds from the GitHub UI, or from a session with a `Bash(git push:*)` permission rule. One probe was attempted on the disposable `tmp-probe-delete` branch and not retried.
+Two probes were run against the disposable `tmp-probe-delete` branch, and they failed for two different reasons:
+
+| Probe | Result |
+|---|---|
+| First, before approval | Denied by the Claude Code auto-mode permission classifier. Never reached the network. |
+| Second, after approval | Reached the network and failed: `RPC failed; HTTP 403`, `send-pack: unexpected disconnect while reading sideband packet`. |
+
+The second result is the real blocker: **the session's git proxy refuses the delete, and no local permission grant changes that.** `BRANCH_CLEANUP_PROMPT.md` predicted exactly this. Not retried further, per its own rule that a 403 is infrastructure rather than transience.
+
+Deletion has to happen from the GitHub UI, or from an environment whose proxy permits `git push --delete`.
 
 ## What git says vs. what is true
 
@@ -77,6 +86,6 @@ Ground truth is git history plus PR merge state, not the GitHub API's `merged` f
 
 ## Next
 
-1. Delete the 24 safe branches, via the GitHub UI or a session permitted to run `git push origin --delete`.
+1. Delete the 24 safe branches from the GitHub UI. Both tables above are the worklist; a session in this environment cannot do it.
 2. Decide the 3 held branches. `claude/network-diagnostics-ui-5ortgo` is the only one holding substantial unmerged work.
 3. Delete this note once the branch list is clean. It describes a state, and states expire.
