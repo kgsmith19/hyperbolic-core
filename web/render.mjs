@@ -9,39 +9,31 @@ const TOKEN_RE = /\{\{([A-Z_][A-Z0-9_]*)\}\}/g;
 // undefined behavior by PRD ASM-004.
 const SECTION_RE = /<!--OPTIONAL:([A-Za-z0-9_-]+)-->([\s\S]*?)<!--\/OPTIONAL:\1-->/g;
 
-// Ordered, deduplicated list of {{NAME}} token names in `body` (AC-004,
-// PROP-002). Malformed spans (`{{}}`, unterminated `{{`) never match the
-// regex, so they are simply not tokens (RISK-001).
-export function extractVariables(body) {
-  const seen = new Set();
-  const names = [];
-  for (const match of body.matchAll(TOKEN_RE)) {
-    if (!seen.has(match[1])) {
-      seen.add(match[1]);
-      names.push(match[1]);
-    }
-  }
-  return names;
-}
-
-// Substitutes every {{NAME}} occurrence with values[NAME]. A name is
-// "missing" only when its key is absent or its value is undefined -- an
-// empty string is a supplied value (AC-002's Given, PROP-001). On success
-// returns { ok: true, text }; on any missing variable, never substitutes
-// partially -- returns { ok: false, missing } naming every missing name in
-// extraction order (PROP-001, PROP-006: order of `values`' keys is
-// irrelevant since lookup is by name, not iteration).
-// Ordered, deduplicated list of well-formed section ids (AC-003, PROP-002).
-export function extractSections(body) {
+// Capture group 1 of every match, first-occurrence order, deduplicated. The
+// two extractors below were byte-identical but for the pattern (lean pass,
+// 2026-08-07). Two callers, so this is dedup, not a one-caller abstraction.
+function firstOccurrenceIds(body, pattern) {
   const seen = new Set();
   const ids = [];
-  for (const match of body.matchAll(SECTION_RE)) {
+  for (const match of body.matchAll(pattern)) {
     if (!seen.has(match[1])) {
       seen.add(match[1]);
       ids.push(match[1]);
     }
   }
   return ids;
+}
+
+// Ordered, deduplicated list of {{NAME}} token names in `body` (AC-004,
+// PROP-002). Malformed spans (`{{}}`, unterminated `{{`) never match the
+// regex, so they are simply not tokens (RISK-001).
+export function extractVariables(body) {
+  return firstOccurrenceIds(body, TOKEN_RE);
+}
+
+// Ordered, deduplicated list of well-formed section ids (AC-003, PROP-002).
+export function extractSections(body) {
+  return firstOccurrenceIds(body, SECTION_RE);
 }
 
 // Keeps a listed section's content and drops an unlisted section entirely,
@@ -53,6 +45,14 @@ function applySections(body, includes) {
   );
 }
 
+// Substitutes every {{NAME}} occurrence with values[NAME]. A name is
+// "missing" only when its key is absent or its value is undefined -- an
+// empty string is a supplied value (AC-002's Given, PROP-001). On success
+// returns { ok: true, text }; on any missing variable, never substitutes
+// partially -- returns { ok: false, missing } naming every missing name in
+// extraction order (PROP-001, PROP-006: order of `values`' keys is
+// irrelevant since lookup is by name, not iteration).
+//
 // Sections resolve BEFORE variables substitute: a variable living only in an
 // excluded block is not in the text being rendered, so FR-010 must not demand
 // a value for text that is about to be deleted (AC-005). `includes` defaults
