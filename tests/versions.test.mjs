@@ -57,9 +57,13 @@ test("rejects_case_folded_duplicate_title_with_23505__T_I_004__AC_001", async ()
     token, method: "POST", body: { title: "version fixture", body: "case-folded duplicate" },
   });
 
+  // SPEC-0002 AC-001 corrected 2026-08-07: `details` is null for a
+  // non-superuser role (a Postgres/PostgREST security behavior, confirmed
+  // live), so `code` plus the constraint name in `message` are what's
+  // actually available -- not the conflicting value itself.
   assert.equal(dup.status, 409, JSON.stringify(dup.json));
   assert.equal(dup.json.code, "23505");
-  assert.match(String(dup.json.details), /version fixture/, "detail must name the conflicting value");
+  assert.match(String(dup.json.message), /prompt_title_unique/, "message must name the violated constraint");
   const ghost = await rest(`prompt?title=eq.${encodeURIComponent("version fixture")}&select=id`, { token });
   assert.deepEqual(ghost.json, [], "the rejected duplicate must not create a row");
 });
@@ -98,6 +102,29 @@ test("edit_appends_version_2_and_preserves_version_1__T_A_003__AC_003", async ()
     [{ version_no: 1, body: "original body" }, { version_no: 2, body: "edited body" }],
     "version 1 unchanged, version 2 is the edit, max(version_no) = 2",
   );
+});
+
+// T-I-007 -> PROP-003 -> FR-003. Integration-drill finding, added by the
+// integrator: a no-op body update (PATCH setting body to its current value)
+// still fires the column-list trigger `after update of body`, since Postgres
+// fires on the column being in the SET list, not on the value changing. The
+// function's distinct-body guard exists for exactly this; no other test in
+// this file exercises a same-value update, so a removed guard survived the
+// full suite green (mutation-verified below).
+test("no_op_body_update_creates_no_spurious_version__T_I_007__PROP_003", async () => {
+  const token = await login(USER_A);
+  const created = await rest("prompt", {
+    token, method: "POST", body: { title: `No-Op Update Fixture ${Date.now()}`, body: "steady body" },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.json));
+  const id = created.json[0].id;
+
+  const patched = await rest(`prompt?id=eq.${id}`, { token, method: "PATCH", body: { body: "steady body" } });
+  assert.equal(patched.status, 200, JSON.stringify(patched.json));
+
+  const versions = await rest(`prompt_version?prompt_id=eq.${id}&select=version_no`, { token });
+  assert.equal(versions.status, 200, JSON.stringify(versions.json));
+  assert.deepEqual(versions.json, [{ version_no: 1 }], "a same-value update must not append version 2");
 });
 
 // T-I-006 -> AC-004, PROP-002 -> NFR-005
