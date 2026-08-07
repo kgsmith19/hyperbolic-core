@@ -9,7 +9,7 @@
     input, textarea { width: 100%; }
     pre { white-space: pre-wrap; }
     .error { color: #b00020; }
-    #app, #sign-in-error, #save-error { display: none; }
+    #app, #sign-in-error, #save-error, #empty-state { display: none; }
   </style>
 </head>
 <body>
@@ -30,10 +30,14 @@
       <p id="save-error" class="error"></p>
     </form>
     <h2>Saved prompts</h2>
+    <label>Search <input type="search" id="search" /></label>
+    <p id="empty-state"></p>
     <ul id="prompt-list"></ul>
   </section>
 
   <script type="module">
+    import { searchPrompts } from "./search.mjs";
+
     const SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
     const ANON_KEY =
       "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
@@ -60,15 +64,33 @@
       pre.textContent = prompt.body;
       details.append(summary, pre);
       item.append(details);
-      listEl.prepend(item);
+      listEl.append(item);
+    }
+
+    let allPrompts = [];
+
+    function renderList() {
+      const query = document.getElementById("search").value;
+      const shown = searchPrompts(allPrompts, query);
+      const list = document.getElementById("prompt-list");
+      list.replaceChildren();
+      for (const p of shown) showPrompt(list, p);
+      const emptyEl = document.getElementById("empty-state");
+      if (shown.length === 0 && query !== "") {
+        emptyEl.textContent = `No prompts match "${query}"`;
+        emptyEl.style.display = "block";
+        document.getElementById("title").value = query;
+      } else {
+        emptyEl.style.display = "none";
+      }
     }
 
     async function refreshList() {
-      const list = document.getElementById("prompt-list");
-      list.replaceChildren();
-      const prompts = await api("prompt?select=title,body&order=created_at.asc");
-      for (const p of prompts) showPrompt(list, p);
+      allPrompts = await api("prompt?select=title,body&order=created_at.desc");
+      renderList();
     }
+
+    document.getElementById("search").addEventListener("input", renderList);
 
     document.getElementById("sign-in-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -99,8 +121,9 @@
           method: "POST",
           body: { title: document.getElementById("title").value, body: document.getElementById("body").value },
         });
-        showPrompt(document.getElementById("prompt-list"), saved);
+        allPrompts.unshift(saved);
         document.getElementById("save-form").reset();
+        renderList();
       } catch (err) {
         errEl.textContent = err.message;
         errEl.style.display = "block";

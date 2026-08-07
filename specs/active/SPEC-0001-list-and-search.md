@@ -53,14 +53,14 @@ Regex metacharacters in PROP-001 are the trap: the filter must treat the query a
 
 | Metric | Declared | Ceiling | Status | Actual |
 |---|---|---|---|---|
-| Net source LOC | ~55 (`web/search.mjs` ~20, `web/index.html` delta ~35) | 300 | within | |
-| Test LOC | ~80 | 200 | within | |
-| New modules | 1 (`web/search.mjs`, shared by page and unit tests — the repo's first pure-logic module) | 2 | within | |
-| Source files touched | 2 | 3 | within | |
-| Test files touched | 1 (`tests/search.test.mjs`) | 3 | within | |
-| New tables/columns/endpoints/UI surfaces/libraries/third-party | 0 (the search input extends the existing surface) | — | within | |
-| User stories | 1 (U-001) | 1 | within | |
-| New tests | 5 | 8 | within | |
+| Net source LOC | ~55 (`web/search.mjs` ~20, `web/index.html` delta ~35) | 300 | within | 35 (`web/search.mjs` 12 by `wc -l`; `web/index.html` +29/−6 by `git diff --numstat`) |
+| Test LOC | ~80 | 200 | within | 79 (`wc -l tests/search.test.mjs`) |
+| New modules | 1 (`web/search.mjs`, shared by page and unit tests — the repo's first pure-logic module) | 2 | within | 1 |
+| Source files touched | 2 | 3 | within | 2 |
+| Test files touched | 1 (`tests/search.test.mjs`) | 3 | within | 1 |
+| New tables/columns/endpoints/UI surfaces/libraries/third-party | 0 (the search input extends the existing surface) | — | within | 0 |
+| User stories | 1 (U-001) | 1 | within | 1 |
+| New tests | 5 | 8 | within | 5 |
 
 ## 7. Changes
 
@@ -96,13 +96,20 @@ Revert the slice's commits; no data or schema to roll back.
 
 ## 11. Assumptions made during implementation
 
-(Implementer fills.)
+| ID | Assumption | Why it was needed | How to verify | Blast radius | Promoted to PRD? |
+|---|---|---|---|---|---|
+| ASM-001 | "Original order" in AC-004 means the pre-search display order (newest first). The page previously fetched ascending and prepended each row; it now fetches `order=created_at.desc` and appends, so `allPrompts` holds display order and the ranked result renders top-down. Display is unchanged. | AC-001 demands the ranked array render in array order; prepend would reverse it | Browser drill: pre-search list order matches the pre-slice page | Low — display plumbing, no data change | no |
+| ASM-002 | The empty state shows only when the query is non-empty; an empty library with an empty search box never reads `No prompts match ""`. | AC-003's state names a search; with no search there is nothing to name | Browser drill AC-003/AC-004 | Low | no |
+| ASM-003 | Prefill writes the query into the title field on every no-match render, overwriting whatever was there; AC-003 does not constrain interleaving with a half-typed title. | AC-003 requires the title field to hold the query whenever the empty state shows | Browser drill; revisit if a typed title is ever lost | Low — a convenience field, nothing stored | no |
+| ASM-004 | T-U-004 asserts its Given (`filtered.length === 2`, message-labelled `given:`) because the R2 pass-through stub trivially satisfies AC-004's Then; without the guard the test could not be red as section 8 requires. Not a duplicate of T-U-001: it guards a precondition, it does not assert membership. | Section 8 demands all five tests red on assertions | The red run shows `3 !== 2` on exactly this assertion | None | no |
+| ASM-005 | PROP-001/PROP-002's adversarial domain instantiated as the literal fixture `Regex (.*) Guide` / `Café Menu` / `Plain`, probed with `.*`, `(`, `"`, `é`, and a one-char whitespace query; the empty-query case lives in T-U-004. | The spec names the domains but not the fixture literals | Fixture is in `tests/search.test.mjs` | None | no |
+| ASM-006 | PROP-001's "empty query returns the whole input unchanged" read as content-and-order equality of a fresh array (same objects), not same-array identity. `"x".includes("")` is always true, so every prompt is a title match and no dedicated empty-query branch exists — a branch no test reaches would break GATE-MINIMAL M5. | The property does not pin array identity | T-U-004's `cleared` assertion | None | no |
 
 ## 12. Definition of Done
 
-- [ ] T-U-001..005 green; red output recorded first; one cycle logged if more were needed.
-- [ ] Ledger rows predate tests; mutation-verified dates recorded (break the function per `rules/06-TESTS.md`: invert the case-fold, drop the rank sort, mutate the input — each must turn its test red).
-- [ ] GATE-MINIMAL: no line undemanded by an AC/PROP; function ≤40 lines; `search.mjs` ≤250.
+- [x] T-U-001..005 green; red output recorded first; one cycle logged if more were needed. Red 2026-08-07: 5/5 `ERR_ASSERTION` against the R2 stub (no import errors), each showing expected vs actual; green in one red-green cycle; full suite 9/9, exit 0, 1.7 s. Red/green evidence in the slice commit message.
+- [x] Ledger rows predate tests; mutation-verified dates recorded (break the function per `rules/06-TESTS.md`: invert the case-fold, drop the rank sort, mutate the input — each must turn its test red). All five mutations run 2026-08-07, each turned exactly its claimed test red (case-fold → T-U-001, rank sort → T-U-002, ignored query → T-U-003, in-place splice → T-U-004 also re-proven in isolation, RegExp query → T-U-005); details per ledger row; suite re-run green after every revert.
+- [x] GATE-MINIMAL: no line undemanded by an AC/PROP; function ≤40 lines; `search.mjs` ≤250. `searchPrompts` 10 lines, complexity 4; `search.mjs` 12 lines, `index.html` 134, both ≤250; four lines deleted (the prepend/direct-render path).
 - [ ] Browser drill at integration: AC-001 and AC-003 exercised on the real page against live data, evidence recorded here.
 - [ ] PRD FR-006 → `in-slice-001` at start, `done (partial: title+body; tags SL-006)` note at close — integrator applies with the change-log entry.
 - [ ] Spec moved to `done/` with dates set.
