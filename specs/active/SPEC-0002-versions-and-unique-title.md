@@ -52,16 +52,16 @@ AC-001 and AC-004 are the failure cases.
 
 | Metric | Declared | Ceiling | Status | Actual |
 |---|---|---|---|---|
-| Net source LOC | ~55 (up ~40, down ~12) | 300 | within | |
-| Test LOC | ~110 (new file + the declared skeleton amendment) | 200 | within | |
-| New modules | 0 | 2 | within | |
-| Source files touched | 2 (migration up, migration down) | 3 | within | |
-| Test files touched | 2 (`tests/versions.test.mjs` new; `tests/skeleton.test.mjs` amended, declared) | 3 | within | |
-| New tables | 1 (`prompt.prompt_version`) | 1 | within | |
-| New columns | 5 (`prompt_id`, `version_no`, `body`, `user_id`, `created_at`; PK is composite — no id column) | 6 | within | |
-| New endpoints / UI / libraries / third-party | 0 | — | within | |
-| User stories | 1 (U-001, UC-004) | 1 | within | |
-| New tests | 4 | 8 | within | |
+| Net source LOC | ~55 (up ~40, down ~12) | 300 | within | 82 raw / 51 executable (up 72/46, down 10/5; comments are spec-demanded reasoning) |
+| Test LOC | ~110 (new file + the declared skeleton amendment) | 200 | within | 154 net (`versions.test.mjs` 131 new; skeleton +27/−4) |
+| New modules | 0 | 2 | within | 0 |
+| Source files touched | 2 (migration up, migration down) | 3 | within | 2 |
+| Test files touched | 2 (`tests/versions.test.mjs` new; `tests/skeleton.test.mjs` amended, declared) | 3 | within | 2 |
+| New tables | 1 (`prompt.prompt_version`) | 1 | within | 1 |
+| New columns | 5 (`prompt_id`, `version_no`, `body`, `user_id`, `created_at`; PK is composite — no id column) | 6 | within | 5 |
+| New endpoints / UI / libraries / third-party | 0 | — | within | 0 |
+| User stories | 1 (U-001, UC-004) | 1 | within | 1 |
+| New tests | 4 | 8 | within | 4 (function LOC 20 ≤ 40; complexity 3 ≤ 8; largest file 143 ≤ 250) |
 
 ## 7. Changes
 
@@ -115,7 +115,14 @@ Run the down migration (AC-005, drilled); revert the commits. Dedup'd fixture ro
 
 ## 11. Assumptions made during implementation
 
-(Implementer fills.)
+| ID | Assumption | Why |
+|---|---|---|
+| ASM-001 | T-I-005 and T-A-003 fixtures carry a `Date.now()` title suffix (`Fresh Version Fixture <ms>`, `Version Trail Fixture <ms>`) | Their Givens demand a genuinely fresh insert; with append-only history and no DELETE grant, a fixed title can never return to "at version 1" on a re-run. The clock names fixtures only — no assertion depends on time (J8 holds). One unique-titled row accumulates per run; the dedup does not remove them — same stance as RISK-002's fixture accumulation. |
+| ASM-002 | The distinct-body guard lives inside `prompt.record_version()`, not a trigger `WHEN` clause | Postgres rejects `OLD` references in the `WHEN` condition of a trigger that also fires on insert; the spec's single-trigger phrasing ("the update branch fires only when …") is preserved with the guard as the function's first statement. |
+| ASM-003 | AC-004's `42501` arrives as HTTP `403` with `code: "42501"` in the error body (PostgREST's insufficient_privilege mapping); T-I-006 asserts both | Confirmed live in the red run: the pre-grant PATCH in T-A-003 returned exactly this shape (`403`, body code `42501`). |
+| ASM-004 | T-I-006's on-409 fixture PATCH writes a timestamp-distinct body | Red-phase runs insert `Immutable Fixture` before the trigger exists and the migration declares no backfill; a distinct-body update is what guarantees at least one version row exists to probe post-migration. |
+| ASM-005 | Gap, flagged for the integrator's mutation drill: deleting the distinct-body guard turns no test red | The mutation only adds spurious version rows on same-body PATCHes, which none of the four declared tests observes. Recorded here instead of adding a fifth test beyond the declared plan (no scope widening mid-slice). |
+| ASM-006 | Cross-user reads of `prompt_version` rest on the `owner_select` policy alone; no multi-user test probes it | The declared four-test plan is single-identity; NFR-003's executable probe remains T-I-003 on `prompt.prompt`. Flagged for the every-5-slices security review. |
 
 ## 12. Definition of Done
 
