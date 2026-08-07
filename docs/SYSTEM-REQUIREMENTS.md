@@ -5,7 +5,7 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, CON-001]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-012, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, CON-001]
 ---
 
 # System Requirements
@@ -32,6 +32,8 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 | SR-18 | Two prompts can never share a title, case-insensitively. | `unique index (lower(title))` on `prompt.prompt` | T-I-004 |
 | SR-19 | A stored version row is never modified or deleted, by any caller, ever. | The absence of any `UPDATE`/`DELETE` grant or policy on `prompt.prompt_version` — an absence is the mechanism, not a rule enforced in application code | T-I-006 |
 | SR-20 | A duplicate-title rejection (`23505`) does not reveal the conflicting prompt's title or body in its response. | Postgres suppresses the constraint-violation `details` field for a non-superuser role; `message` names only the constraint | Confirmed live 2026-08-07 (SPEC-0002 AC-001); `code` is the tested signal |
+| SR-23 | `prompt.tag` carries no `user_id` column of its own; ownership is checked through the parent `prompt.prompt` row on every read and write. | `EXISTS (select 1 from prompt.prompt p where p.id = prompt_id and p.user_id = auth.uid())` in both the select and insert policies | T-I-008, T-I-009 |
+| SR-24 | A prompt's tags are deleted when the prompt is, with no separate mechanism required. | `prompt_id ... references prompt.prompt(id) on delete cascade` | T-I-011 (integrator drill) |
 
 ## 3. Data integrity
 
@@ -47,7 +49,7 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 
 | ID | Requirement | Value | Verified by |
 |---|---|---|---|
-| SR-12 | Every migration has a down migration that removes exactly what the up added, tested against the live project. | 1 of 1 | T-A-002 drill, 2026-08-07 |
+| SR-12 | Every migration has a down migration that removes exactly what the up added, tested against the live project. | 3 of 3 | T-A-002 (SL-000), the SL-004 round-trip, and the SL-006 round-trip, all drilled 2026-08-07 |
 | SR-13 | Migrations rehearse on `lifeos-test` before touching the real project (DDL portion; the PostgREST exposure line cannot run there and is exercised by the red→green transition itself). | topology convention | Rehearsal record in SPEC-0000 |
 | SR-14 | The suite runs with the public anon key only; no secret is required or accepted. | 0 secrets | `node --test "tests/*.test.mjs"` |
 | SR-15 | Marginal infrastructure cost is $0. | $0 | NFR-007; no new project or service |
