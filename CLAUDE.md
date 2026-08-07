@@ -84,13 +84,16 @@ Full set and calibration: `rules/01-BUDGETS.md`. SPEC-0000 in this repo carries 
 ## Commands
 
 ```bash
-<TBD>             # run the suite
-<TBD>             # lint
-<TBD>             # typecheck
-<TBD>             # build
-<TBD>             # run locally
-<TBD>             # apply migrations
+node --test "tests/*.test.mjs"    # run the suite
+none                              # lint      (no linter; no package.json by choice)
+none                              # typecheck (vanilla JS, no type layer)
+none                              # build     (no build step by choice)
+python3 -m http.server 8811       # run locally, then open /web/index.html
+none                              # apply migrations (Supabase API, not a local command)
 ```
+
+`none` means deliberately absent, not unknown. GATE-GREEN G3, G4, and G5 are
+not applicable in this repo; G1, G2, and G8 run off the suite command above.
 
 ## Project variables
 
@@ -99,9 +102,18 @@ PROJECT_NAME:  toolbelt
 LANGUAGE:      SQL (Postgres/Supabase) + vanilla JS (no framework, no build step)
 FRAMEWORK:     none
 DATABASE:      Supabase Postgres, project "toolbelt"
-PROPERTY_LIB:  fast-check
+PROPERTY_LIB:  none
 MAIN_BRANCH:   main
 ```
+
+`PROPERTY_LIB: none` is a consequence of `MAX_NEW_LIBRARIES: 0` and no
+`package.json`, not an oversight. No generated-case property runner exists here,
+so GATE-PROPERTY PR2-PR5 cannot be exercised. Properties are still mandatory as
+spec-level reasoning: `rules/06-TESTS.md` requires walking all nine kinds, and
+each `PROP-` is discharged by the cheapest sufficient mechanism -- a `CHECK`
+constraint, an integration test, or a written not-applicable reason. SPEC-0000
+section 8 is the worked example. Adding a runner needs written approval, because
+it breaches `MAX_NEW_LIBRARIES: 0`.
 
 ## Review cadence
 
