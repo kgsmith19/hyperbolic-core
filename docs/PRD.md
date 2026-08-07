@@ -108,8 +108,8 @@ Categories considered and not applicable: performance (no real traffic yet), sca
 | ID | Data item | Meaning in plain language | Source | Classification | Retention | Traces to |
 |---|---|---|---|---|---|---|
 | DR-001 | Idea record | One row per tool idea: its name, category, one-liner, and build status | Transcribed once from the topology note's planning table | internal | Forever, until Kyle deletes an idea | FR-001 |
-| DR-002 | Run record | One row per execution of anything worth measuring, across every tool | Written by each tool | internal | Not yet decided; see Q-002 | FR-002, FR-003 |
-| DR-003 | Event record | An append-only log entry belonging to a run | Written by each tool | internal | 90 days hot, then a monthly aggregate kept forever (default from the topology note) | FR-003 |
+| DR-002 | Run record | One row per execution of anything worth measuring, across every tool | Written by each tool | internal | Forever. SL-004's job drops `core.event` rows only, and `core.cost`/`core.outcome`/`core.run_outcome` reference runs. | FR-002, FR-003 |
+| DR-003 | Event record | An append-only log entry belonging to a run | Written by each tool | internal | 90 days hot, then a monthly aggregate kept forever (ratified via Q-002) | FR-003 |
 
 ## 9. Constraints
 
@@ -167,8 +167,10 @@ Rules:
 
 | ID | Question | Blocks | Owner | Needed by | Answer |
 |---|---|---|---|---|---|
-| Q-001 | Where do tool runs actually get instrumented: a shared client library, a hook, or manual writes per tool? | SL-003 | Kyle | before SL-003 | Default: a thin wrapper library, one function, written when the first tool needs it |
-| Q-002 | What is `core.event`'s retention: 90 days, or longer for provenance? | SL-004 | Kyle | before `core.event` has real rows | Default: 90 days hot, monthly aggregate kept forever |
+| Q-001 | Where do tool runs actually get instrumented: a shared client library, a hook, or manual writes per tool? | SL-003 | Kyle | before SL-003 | **Ratified 2026-08-07:** a thin wrapper library, one function, written when the first tool needs it. Not written speculatively; SL-003 builds it against Prompt Organizer's first real write. |
+| Q-002 | What is `core.event`'s retention: 90 days, or longer for provenance? | SL-004 | Kyle | before `core.event` has real rows | **Ratified 2026-08-07:** 90 days hot, monthly aggregate kept forever. Applies to `core.event` only; `core.run` is retained indefinitely (DR-002). |
+
+Both questions are settled. Neither creates a requirement: SL-003 and SL-004 still deliver no `FR-`/`NFR-`, so neither can be built until section 6 or 7 names what it must do.
 
 ## 16. Change log
 
@@ -178,6 +180,7 @@ Rules:
 | 2026-08-07 | 0.1.1 | Narrowed OOS-004 to sign-up, password reset, and multi-user account management; added a sign-in form to section 4.1. | FR-001 requires the page to display idea rows and NFR-001 requires every read to be authenticated. With sign-in entirely out of scope the two contradicted each other and the page could not exist. The form is the smallest thing that resolves it: email, password, no sign-up, no reset, no session persistence. | FR-001, NFR-001, OOS-004 |
 | 2026-08-07 | 0.1.2 | Set FR-001, FR-002, FR-003 and NFR-001 through NFR-004 to `done`. | SL-000 shipped and every acceptance criterion has a passing test. | FR-001, FR-002, FR-003, NFR-001, NFR-002, NFR-003, NFR-004 |
 | 2026-08-07 | 0.1.3 | FR-001's acceptance criterion literal for the `prompt-organizer` row's `status` updated `specced` -> `building`. | The row is alive by design: Prompt Organizer's walking skeleton started implementation, so its status legitimately moved (migration `20260807030000`). The AC's literal is a snapshot of the fixture row and tracks its real lifecycle; it will change again at most twice (`live`, or `parked`/`killed`). This is a PRD-first amendment with the test updated to match, not a test edited to pass: the defect D-001 rule (assert the specified value) still holds — the specified value itself moved. | FR-001 |
+| 2026-08-07 | 0.1.4 | Ratified Q-001 and Q-002 at their recorded defaults. Corrected DR-002's retention from "Not yet decided; see Q-002" to "Forever", and restated DR-003's as ratified rather than a topology-note default. | Both questions had carried a recorded default since 0.1.0 and neither had been contested; leaving them open blocked SL-003 and SL-004 for no reason. Ratifying exposed that DR-002 pointed at Q-002 for its answer, but Q-002 only ever asked about `core.event`. SL-004's slice plan entry already says the job drops `core.event` rows only, so runs being retained was implied by the plan and merely unstated here. No requirement is created: SL-003 and SL-004 still deliver no `FR-`/`NFR-`. | Q-001, Q-002, DR-002, DR-003 |
 
 ---
 
