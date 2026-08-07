@@ -29,6 +29,9 @@ owner: Kyle
 | T-A-001 | `tests/rls.test.mjs` (data contract) | acceptance | AC-001 -> FR-001 | The list page fails to render a seeded row's four fields | Only an end-to-end page load proves the browser contract; this test covers the data half, the browser half is verified by the drill below | No other test asserts all four AC-001 fields for one row | 2026-08-07 (caught a real defect rather than a synthetic one: asserting AC-001's `specced` went red against the seeded `idea`, and green after `20260807010000_idea_fix_prompt_organizer_status.sql`. See section 3, D-001) | 400 | Page replaced by a different tool's UI | SL-000 |
 | T-A-002 | `tests/rls.test.mjs` (down migration) | acceptance | AC-007 -> NFR-004 | The down migration for `idea` does not fully remove the schema | Only running the actual down migration proves rollback | No other test exercises a down migration | 2026-08-06 (ran all four down migrations against the live project, confirmed `core`/`idea` schemas absent, then re-ran all four up migrations; also found and fixed a real gap: the up migrations were missing `GRANT`s, so the round-trip silently relied on grants applied outside version control) | 0 (manual drill) | Never | SL-000 |
 | T-A-003 | migration round-trip drill (not executable) | acceptance | AC-007 -> NFR-004 | The corrective status migration cannot be rolled back | Only running the actual down migration proves rollback | T-A-002 covers the four schema migrations; this covers the fifth, a data migration | 2026-08-07 (applied the down against the live project: the row reverted to `idea`, confirmed by query; re-applied the up, row returned to `specced`, suite 7/7 green) | 0 (manual drill) | Never | SL-000 |
+| T-A-004 | `tests/scores.test.mjs` | acceptance | AC-008 -> FR-004 | A scored idea's value or metric name is missing or wrong on read | Only a real read against `idea.score` and `core.metric_def` proves the join the page performs | No other test reads `idea.score` joined to `core.metric_def` | 2026-08-07 (mutated: `UPDATE core.metric_def SET name = 'wrong-name'`; test went red asserting `[{name: 'wrong-name'}]` !== `[{name: 'Idea effectiveness'}]`, reverted) | 1235 | If the page stops displaying scores | SL-001 |
+| T-I-007 | `tests/scores.test.mjs` | integration | AC-010 -> FR-005 | A score above a metric's declared maximum is accepted | A `CHECK` cannot look up `core.metric_def`; this proves the bounds trigger is wired | No other test inserts an out-of-range score | 2026-08-07 (mutated: `ALTER TABLE idea.score DISABLE TRIGGER score_bounds_check`; test went red, 201 instead of 400; re-enabled, leaked rows deleted) | 219 | Never; this is the range guarantee itself | SL-001 |
+| T-I-008 | `tests/scores.test.mjs` | integration | AC-011 -> FR-005 | A score below a metric's declared minimum is accepted | Same as T-I-007, the symmetric boundary | T-I-007 covers the upper bound only | 2026-08-07 (same mutation as T-I-007, disabling one trigger red-tests both boundaries at once; re-enabled, leaked rows deleted) | 226 | Never | SL-001 |
 
 **Column meanings:**
 
@@ -47,13 +50,13 @@ Updated at every Test Review. A shape that inverts (many E2E, few unit) is a def
 
 | Level | Count | Target share | Total runtime | Notes |
 |---|---|---|---|---|
-| Unit (`T-U-`) | 0 | ~70% | 0 | No pure logic exists yet to unit-test: this slice is schema plus one page whose only logic is a fetch and a render |
+| Unit (`T-U-`) | 0 | ~70% | 0 | Still none. SPEC-0001 added one pure function (`latestScoresByIdea` in `web/index.html`) but left it inline rather than extracting a separately importable module for one caller (GATE-MINIMAL M2); its behavior is covered by the AC-009 browser drill instead. A real second caller would justify extracting and unit-testing it. |
 | Property (counted within unit) | 1 | 1-3 per slice | 1.4s | PROP-005 as an oracle comparison inside T-I-005 |
-| Integration (`T-I-`) | 5 | ~20% | 2.0s | T-I-001 through T-I-005; T-I-006 is a recorded manual drill, not executable |
-| Acceptance (`T-A-`) | 2 | 1 per AC | 0.4s | T-A-001 executable; T-A-002 a recorded manual drill |
+| Integration (`T-I-`) | 7 | ~20% | 3.9s | T-I-001 through T-I-005, T-I-007, T-I-008; T-I-006 is a recorded manual drill, not executable |
+| Acceptance (`T-A-`) | 3 | 1 per AC | 1.6s | T-A-001, T-A-004 executable; T-A-002 a recorded manual drill |
 | E2E (`T-E-`) | 0 | ~5%, critical paths only | 0 | The browser drill covers this path without adding a dependency |
 | Regression (`T-R-`) | 0 | 1 per real defect | 0 | D-001 is covered by tightening T-A-001, not by a new test |
-| **Total** | 7 executable | | 2.1s | Under `{{MAX_SUITE_SECONDS}}` |
+| **Total** | 10 executable | | 1.4s | Under `{{MAX_SUITE_SECONDS}}` |
 
 ## 3. Regression register
 
@@ -85,12 +88,12 @@ Tests that are flaky, slow, or unproven live here with an expiry date. A quarant
 
 ## 6. Ledger self-check (GATE-LEDGER)
 
-- [x] Every test file in the repo has a matching row in section 1. Three files: `rls.test.mjs` (T-I-001, T-I-002, T-A-001), `constraints.test.mjs` (T-I-003, T-I-004), `seed.test.mjs` (T-I-005).
+- [x] Every test file in the repo has a matching row in section 1. Four files: `rls.test.mjs` (T-I-001, T-I-002, T-A-001), `constraints.test.mjs` (T-I-003, T-I-004), `seed.test.mjs` (T-I-005), `scores.test.mjs` (T-A-004, T-I-007, T-I-008).
 - [x] Every row in section 1 corresponds to a test that exists. T-I-006, T-A-002, and T-A-003 are labelled as manual drills rather than executable tests, so the count is not overstated.
 - [x] Every row's `Traces to` resolves to a real `PROP-`/`AC-` and a real `FR-`/`NFR-`.
 - [x] Every row has a mutation-verified date. None left `pending`.
 - [x] Every row has a deletion criterion.
 - [x] No row's failure mode is phrased in implementation terms rather than observable terms.
-- [x] Total suite runtime is under `{{MAX_SUITE_SECONDS}}` (120): 2.1s measured.
+- [x] Total suite runtime is under `{{MAX_SUITE_SECONDS}}` (120): 1.4s measured, 10 tests.
 - [x] Quarantine has no expired entries. It is empty.
 - [x] Every regression row names the gate that missed the defect. D-001 names GATE-RED R4, with GATE-GREEN G7 as the backstop that also missed it.

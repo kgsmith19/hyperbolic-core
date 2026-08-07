@@ -5,7 +5,7 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, NFR-001, NFR-002, NFR-003, NFR-004]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-005, NFR-001, NFR-002, NFR-003, NFR-004]
 ---
 
 # System Requirements
@@ -27,8 +27,10 @@ What the system must be, as opposed to what it must do. What it does lives in `d
 |---|---|---|---|---|
 | SR-005 | `POST /auth/v1/token?grant_type=password` | Supabase GoTrue | Exchanging email and password for an access token | Non-200 surfaces the returned message on the page; no idea data is shown |
 | SR-006 | `GET /rest/v1/idea` with header `Accept-Profile: idea` | Supabase PostgREST | Reading the idea list | Non-200 leaves the table empty and the section hidden |
+| SR-024 | `GET /rest/v1/score` with header `Accept-Profile: idea` | Supabase PostgREST | Reading each idea's scores | Non-200 leaves the section hidden (thrown before render, same as SR-006) |
+| SR-025 | `GET /rest/v1/metric_def` with header `Accept-Profile: core` | Supabase PostgREST | Reading metric names to label scores | Non-200 leaves the section hidden, same as SR-024 |
 
-Both are provided by the same Supabase project as the database. Neither is a third-party integration (PRD section 11).
+All three are provided by the same Supabase project as the database. None is a third-party integration (PRD section 11).
 
 ## 3. Security requirements
 
@@ -49,6 +51,7 @@ Both are provided by the same Supabase project as the database. Neither is a thi
 | SR-014 | Enum-like columns are `text` with a `CHECK`, never a Postgres `enum` type. | `CHECK (status in (...))` on `app`, `run`, `idea`, `assumption` | `pg_constraint` |
 | SR-015 | Every timestamp column is `timestamptz`. | Column types | `information_schema.columns` |
 | SR-016 | Money is `numeric`, never a float type. | `core.cost.usd numeric(12,6)` | `information_schema.columns` |
+| SR-026 | An `idea.score` row cannot hold a value outside its metric's declared `min_value`/`max_value`. | A trigger, not a `CHECK`: a `CHECK` constraint cannot look up another table, so `idea.enforce_score_bounds()` reads `core.metric_def` on every insert/update | T-I-007, T-I-008 |
 
 ## 5. Operational requirements
 
