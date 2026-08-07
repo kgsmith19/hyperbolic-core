@@ -41,6 +41,7 @@
   <script type="module">
     import { searchPrompts, toggleTagFilter } from "./search.mjs";
     import { extractVariables, render } from "./render.mjs";
+    import { isCurrentVersion } from "./restore.mjs";
 
     const SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
     const ANON_KEY =
@@ -117,6 +118,34 @@
       return tags;
     }
 
+    // SPEC-0005 (SL-008): version history; append(string) is a safe text node (not innerHTML); restore PATCHes body via SL-004's grant.
+    function buildHistoryPanel(prompt) {
+      const panel = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "Version history";
+      const list = document.createElement("ul");
+      panel.append(summary, list);
+      panel.addEventListener("toggle", async () => {
+        const versions = await api(`prompt_version?prompt_id=eq.${prompt.id}&select=version_no,body,created_at&order=version_no.desc`);
+        for (const v of versions) {
+          const item = document.createElement("li");
+          item.append(`${new Date(v.created_at).toLocaleString()} - ${v.body.slice(0, 60)}`);
+          if (!isCurrentVersion(v.body, prompt.body)) {
+            const restoreBtn = document.createElement("button");
+            restoreBtn.type = "button";
+            restoreBtn.textContent = "Restore";
+            restoreBtn.addEventListener("click", async () => {
+              await api(`prompt?id=eq.${prompt.id}`, { method: "PATCH", body: { body: v.body } });
+              await refreshList();
+            });
+            item.append(restoreBtn);
+          }
+          list.append(item);
+        }
+      }, { once: true });
+      return panel;
+    }
+
     function showPrompt(listEl, prompt) {
       const item = document.createElement("li");
       const details = document.createElement("details");
@@ -127,6 +156,7 @@
       details.append(summary, pre);
       const panel = buildRenderPanel(prompt);
       if (panel) details.append(panel);
+      details.append(buildHistoryPanel(prompt));
       item.append(details);
       for (const tag of prompt.tags) {
         const chip = document.createElement("button");
@@ -164,8 +194,8 @@
     }
 
     async function refreshList() {
-      const rows = await api("prompt?select=title,body,tag(tag)&order=created_at.desc");
-      allPrompts = rows.map((row) => ({ title: row.title, body: row.body, tags: (row.tag || []).map((t) => t.tag) }));
+      const rows = await api("prompt?select=id,title,body,tag(tag)&order=created_at.desc");
+      allPrompts = rows.map((row) => ({ id: row.id, title: row.title, body: row.body, tags: (row.tag || []).map((t) => t.tag) }));
       renderList();
     }
 
@@ -207,7 +237,7 @@
             body: tags.map((tag) => ({ prompt_id: saved.id, tag })),
           });
         }
-        allPrompts.unshift({ title: saved.title, body: saved.body, tags });
+        allPrompts.unshift({ id: saved.id, title: saved.title, body: saved.body, tags });
         document.getElementById("save-form").reset();
         renderList();
       } catch (err) {
