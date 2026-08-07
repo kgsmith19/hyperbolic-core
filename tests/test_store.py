@@ -75,47 +75,6 @@ class StoreTest(unittest.TestCase):
                              {"ts": "z", "gw_typo_ms": 1.0})
 
 
-class FixOutcomeTest(unittest.TestCase):
-    """fix_engine's recommendation likelihoods start as documented priors and
-    switch to a measured success rate once real outcomes exist -- this is
-    the persistence layer that makes "measured" real rather than another
-    guess with a different label."""
-
-    def setUp(self):
-        self.dir = tempfile.TemporaryDirectory()
-        self.conn = store.open_db(Path(self.dir.name) / "t.db")
-        self.host = store.host_id(self.conn, "surface", "Windows")
-
-    def tearDown(self):
-        self.conn.close()
-        self.dir.cleanup()
-
-    def test_no_history_returns_none(self):
-        self.assertIsNone(store.fix_success_rate(self.conn, "disable_aiprotection"))
-
-    def test_rate_reflects_recorded_outcomes(self):
-        store.record_fix_outcome(self.conn, self.host, "disable_aiprotection", True, ts="t1")
-        store.record_fix_outcome(self.conn, self.host, "disable_aiprotection", True, ts="t2")
-        store.record_fix_outcome(self.conn, self.host, "disable_aiprotection", False, ts="t3")
-
-        got = store.fix_success_rate(self.conn, "disable_aiprotection")
-
-        self.assertEqual(got["n"], 3)
-        self.assertAlmostEqual(got["rate"], 2 / 3)
-
-    def test_different_fix_ids_are_tracked_independently(self):
-        store.record_fix_outcome(self.conn, self.host, "disable_qos", True, ts="t1")
-
-        self.assertIsNone(store.fix_success_rate(self.conn, "disable_aiprotection"))
-        self.assertEqual(store.fix_success_rate(self.conn, "disable_qos")["n"], 1)
-
-    def test_replaying_the_same_outcome_does_not_duplicate(self):
-        store.record_fix_outcome(self.conn, self.host, "disable_qos", True, ts="t1")
-        store.record_fix_outcome(self.conn, self.host, "disable_qos", True, ts="t1")
-
-        self.assertEqual(store.fix_success_rate(self.conn, "disable_qos")["n"], 1)
-
-
 class SchemaMigrationTest(unittest.TestCase):
     """An existing user's on-disk database predates whatever columns get
     added to schema.sql after they first installed. executescript's

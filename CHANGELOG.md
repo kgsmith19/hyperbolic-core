@@ -10,7 +10,31 @@ pass, not full automation.
 
 ## [Unreleased]
 
+### Removed
+- `netcheck/diagnostic_engine.py`, `fix_engine.py`, `fix_application.py`,
+  `monitoring_engine.py`, `verification_engine.py`, and their test files
+  (~2,850 lines of source, ~2,750 lines of tests) — fully unreachable from
+  any CLI command. Every one of the ~40 names `diagnose.py` imported from
+  `diagnostic_engine` was unused beyond the import line; `fix_engine`/
+  `fix_application`/`verification_engine`/`monitoring_engine` had no caller
+  anywhere outside their own tests. Deleting them changes no observable
+  behavior. The removed fix-recommendation capability is tracked as a
+  GitHub issue for a future, actually-wired-to-a-command rebuild.
+- `store.record_fix_outcome`/`fix_success_rate`, the `fix_outcomes` SQLite
+  table, and its test — dead once the modules above that were its only
+  callers were removed. The Supabase migration recording this table is left
+  untouched as historical record.
+- `OPEN-ISSUES.md` — retired in favor of GitHub issues. The four still-open
+  items were filed there before deletion.
+- `docs/NEXT_FEATURES_PDD_SDD_TDD.md` — its still-relevant content is now
+  reflected in `docs/PRD.md`; the rest documented functions that no longer
+  exist after the `diagnostic_engine.py` removal above.
+
 ### Added
+- `docs/PRD.md`, `docs/SYSTEM-REQUIREMENTS.md`, `docs/DATA-FLOW-DIAGRAM.md`:
+  the project's source-of-truth documentation, and `rules/`: the SDD
+  development-process rules this project draws on. `AGENTS.md` now states
+  the sources-of-truth order.
 - `tools/check.sh`: local stand-in for the CI workflows (tests, quality
   tools, fixer validation), run before merging now that those workflows
   no longer trigger automatically. `tools/deploy.sh`: local build +

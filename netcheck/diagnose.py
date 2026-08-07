@@ -9,47 +9,6 @@ Two ideas carry the whole module:
      tell "my Wi-Fi dropped" from "the API had a bad minute".
 """
 from datetime import datetime
-from .diagnostic_engine import (
-    DiagnosticTree,
-    DiagnosisResult,
-    ConfigurationMatrix,
-    capture_baseline_snapshot,
-    compare_snapshots,
-    detect_regressions,
-    check_state_changes,
-    generate_recommendation,
-    rank_recommendations,
-    get_diagnosis,
-    rank_hypotheses,
-    correlate_with_history,
-    calculate_confidence_from_history,
-    classify_latency,
-    classify_latency_under_load,
-    classify_packet_loss,
-    detect_asymmetric_loss,
-    find_path_mtu,
-    diagnose_pmtud,
-    build_state_machine,
-    analyze_dual_stack,
-    detect_happy_eyeballs,
-    detect_dual_stack_preference,
-    detect_nat64_translation,
-    detect_buffer_saturation,
-    measure_queue_depth,
-    analyze_backpressure,
-    classify_congestion_signal,
-    measure_buffer_efficiency,
-    synthesize_diagnosis,
-    rank_root_causes,
-    calculate_confidence_score,
-    detect_cascade_failures,
-    generate_synthesis_report,
-    analyze_routing_path,
-    classify_hop_latency,
-    measure_hop_stability,
-    detect_route_flapping,
-    detect_blackhole_route,
-)
 
 WINDOW_S = 120
 

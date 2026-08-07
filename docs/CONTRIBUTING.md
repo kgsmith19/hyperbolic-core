@@ -43,14 +43,12 @@ full list):
    refuses to cite `unavailable` as evidence of a fault.
 4. **Any command-output parsing takes a string, returns a dict, and ships a
    captured fixture in `tests/fixtures/`.** Never shell out inside a test.
-   This is what makes a new platform backend (see `OPEN-ISSUES.md` #9,
-   macOS) additive instead of a rewrite.
+   This is what makes a new platform backend additive instead of a rewrite.
 5. **Any subprocess/PowerShell call with a caller-supplied value must not
-   build the command by string interpolation.** See `OPEN-ISSUES.md` #5 for
-   a live example of why: a value containing a quote character escapes out
-   of the string and appends arbitrary commands. Pass values as command
-   arguments (an argv list, or `-Args`), never interpolate into a shell
-   string.
+   build the command by string interpolation** — a value containing a quote
+   character can escape the string and append arbitrary commands. Pass
+   values as command arguments (an argv list, or `-Args`), never interpolate
+   into a shell string.
 6. **Wire it into `all_diagnostics.py`** — add a `run_phase_NN_<name>`
    method following the existing pattern, add it to `run_all()`, and update
    `get_quick_diagnosis()` if it deserves a one-line summary.
@@ -60,14 +58,13 @@ full list):
 
 ## Adding a fix
 
-Fixes recommend (`fix_engine.py`), apply (`fix_application.py`), verify
-(`verification_engine.py`), and get monitored for regression
-(`monitoring_engine.py`) as four separate concerns — keep new fixes in that
-shape rather than folding apply-and-verify into one step. A fix that touches
-the router or modem goes through the authenticated HTTP flow in
-`environ._asus_login`/`_asus_get` — never a hardcoded raw request, and never
-Basic Auth against ASUS gear (`OPEN-ISSUES.md` #3b explains why that
-silently "succeeds" without proving anything).
+Local OS-level fixes live in `tools/fix_*.sh`, orchestrated by
+`tools/run_fixes.sh` — each supports `--dry-run` and prints what it would
+change before touching anything. A fix that touches the router or modem
+goes through the authenticated HTTP flow in `environ._asus_login`/
+`_asus_get` — never a hardcoded raw request, and never Basic Auth against
+ASUS gear (it silently "succeeds" without proving anything actually
+changed).
 
 ## Documentation
 

@@ -11,8 +11,7 @@ import urllib.request
 from pathlib import Path
 
 SCHEMA = Path(__file__).with_name("schema.sql")
-SYNCED_TABLES = ("samples", "events", "llm_errors", "env_scans", "fix_outcomes")
-MIN_MEASURED_FIX_SAMPLES = 3
+SYNCED_TABLES = ("samples", "events", "llm_errors", "env_scans")
 
 
 def open_db(path):
@@ -102,34 +101,6 @@ def add_error(conn, host, row):
 
 def add_scan(conn, host, payload):
     _insert(conn, "env_scans", host, payload)
-
-
-def record_fix_outcome(conn, host, fix_id, success, ts=None):
-    """Persist one verified fix outcome. `success` is whatever
-    verification_engine.track_fix_success already decided -- this only
-    stores it, so a fix's measured success rate reflects real applications,
-    never a self-reported claim from the fix itself."""
-    import datetime as _datetime
-    _insert(conn, "fix_outcomes", host, {
-        "ts": ts or _datetime.datetime.now(_datetime.timezone.utc).isoformat(timespec="seconds"),
-        "fix_id": fix_id,
-        "success": 1 if success else 0,
-    })
-
-
-def fix_success_rate(conn, fix_id):
-    """Measured (rate, n) for a fix_id, or None if there's no history yet.
-
-    Callers (fix_engine) fall back to a documented prior when this returns
-    None or n is too small to trust -- a rate computed from one outcome is
-    not more trustworthy than a guess, just quieter about being one.
-    """
-    row = conn.execute(
-        "SELECT COUNT(*) AS n, SUM(success) AS successes"
-        " FROM fix_outcomes WHERE fix_id=?", (fix_id,)).fetchone()
-    if not row or not row["n"]:
-        return None
-    return {"n": row["n"], "rate": row["successes"] / row["n"]}
 
 
 def _rows(cur):

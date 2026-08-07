@@ -157,7 +157,7 @@ class ParseWlanNetworksTest(unittest.TestCase):
 class ParseAirportInfoTest(unittest.TestCase):
     """macOS `airport -I` parser. Unlike the other fixtures here, this one is
     hand-built from Apple's documented output format rather than captured
-    from a live Mac -- see OPEN-ISSUES.md #9. Treat this parser as needing
+    from a live Mac. Treat this parser as needing
     real-machine verification before being trusted the way the Windows
     parsers are."""
 

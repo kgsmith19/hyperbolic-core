@@ -24,9 +24,8 @@ The primary, always-available test runner is `unittest`:
 python -m unittest discover -s tests -t .
 ```
 
-431 tests, hermetic — no live network calls, no sleeps beyond a probe's own
-timing. This is the command in `AGENTS.md` and the one to run before every
-commit.
+Hermetic — no live network calls, no sleeps beyond a probe's own timing.
+This is the command in `AGENTS.md` and the one to run before every commit.
 
 ### With pytest (optional, what CI uses for coverage)
 
@@ -102,15 +101,9 @@ See `ARCHITECTURE.md` for the full module map and `API.md` for the
 function-level reference. The files worth reading first:
 
 ### `netcheck/diagnose.py`
-The lightweight, always-on ranker (`culprit`, `bursts`, `correlate`, `rank`)
-behind `netcheck diagnose` and `netcheck watch`. Small and dependency-light
-by design — the heavier historical/per-layer analysis lives in
-`diagnostic_engine.py`, which `diagnose.py` re-exports.
-
-### `netcheck/diagnostic_engine.py`
-The full decision-tree engine: `DiagnosticTree`, hypothesis ranking,
-`ConfigurationMatrix` (historical confidence), and per-layer analysis
-helpers for dual-stack, routing, TLS, and buffering.
+The always-on ranker (`culprit`, `bursts`, `correlate`, `rank`) behind
+`netcheck diagnose` and `netcheck watch`. Small and dependency-light by
+design: pattern matching over one sample row at a time, no historical model.
 
 ### `netcheck/probes.py`
 Per-tick network measurement: pure parsers over command output (`parse_ping`,
@@ -126,8 +119,7 @@ AST-based static checks — see `tools/README.md` for rules and intensity
 levels.
 
 ### `tests/`
-431 tests. Fixtures for real captured command output live in
-`tests/fixtures/`. `tests/test_llmlog.py` holds the adversarial cases
+Fixtures for real captured command output live in `tests/fixtures/`. `tests/test_llmlog.py` holds the adversarial cases
 worth reading first — the ones that catch substring-matching mistakes that
 previously overcounted real errors ~200x.
 
@@ -146,7 +138,7 @@ python tools/fixer.py --issue wifi_mode --dry-run -v
 
 ### Inspect test output verbosely
 ```bash
-python -m unittest tests.test_diagnostic_engine -v
+python -m unittest tests.test_diagnose -v
 ```
 
 ## CI/CD Pipeline
@@ -172,9 +164,8 @@ GitHub Release. See `docs/DEPLOYMENT.md` for the release process and
 ## Making Changes
 
 ### Adding a New Diagnostic Rule
-1. Add a test case in `tests/test_diagnose.py` or `tests/test_diagnostic_engine.py`.
-2. Implement the rule in `diagnose.py` (row-level pattern) or
-   `diagnostic_engine.py` (historical/per-layer analysis).
+1. Add a test case in `tests/test_diagnose.py`.
+2. Implement the rule in `diagnose.py`.
 3. Update `docs/TROUBLESHOOTING.md` if it changes the symptom-to-hypothesis
    mapping.
 4. Run the full test suite to verify.
@@ -206,8 +197,6 @@ See `CONTRIBUTING.md` — it walks through the full shape (pure functions,
   network-bound lookups shared across modules (e.g. `nat_diagnostics` and
   `cgnat_diagnostics` both need the WAN IP; they now share one cached
   lookup instead of two independent `api.ipify.org` round trips).
-- `diagnostic_engine.ConfigurationMatrix` bounds burst history so repeated
-  analysis stays cheap as the dataset grows.
 - `store.py` writes are append-only with a unique `(host, ts)` index, so
   replay/retry is idempotent rather than requiring dedup logic elsewhere.
 - All network I/O in `probes.py`/`environ.py` is timeout-protected; nothing
@@ -235,19 +224,17 @@ latency.
 
 - No hardcoded secrets or API keys; credentials live in a gitignored `.env`
   (see `README.md` for why no `.env.example` ships).
-- No `eval()` — `diagnostic_engine._safe_eval_condition` is a
-  recursive-descent parser instead.
-- See `OPEN-ISSUES.md` for the current accepted-risk and latent-fix items
-  found by `/security-review-kgs` (PowerShell string interpolation, raw
-  router output storage, plaintext HTTP to LAN devices).
+- Basic auth to the modem/router goes over plaintext HTTP on the local
+  segment only — an accepted risk, not an oversight (neither device offers
+  HTTPS).
+- Known issues and accepted risks are tracked as GitHub issues, not in-repo.
 - Regular scanning via `tools/security_review.py` in CI.
 
 ## Documentation Standards
 
 - Public functions get a one-line docstring stating what they return.
-- Non-obvious algorithms (brace-matching in `environ.parse_docsis_status`,
-  the recursive-descent condition parser in `diagnostic_engine.py`) get a
-  short comment explaining the *why*, not the *what*.
+- Non-obvious algorithms (brace-matching in `environ.parse_docsis_status`)
+  get a short comment explaining the *why*, not the *what*.
 - `README.md` covers what the tool measures and how to read its output.
 - `docs/` holds architectural guides — `ARCHITECTURE.md` (module map,
   decision trees), `API.md` (function reference), `QUICKSTART.md`,

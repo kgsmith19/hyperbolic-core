@@ -101,8 +101,7 @@ def parse_airport_info(text):
     type string, so those come back `None` rather than a guess. Built
     against Apple's long-documented output format -- see
     tests/fixtures/airport_info.txt for the caveat that this is not yet
-    verified against a live capture the way the Windows parser is
-    (OPEN-ISSUES.md #9).
+    verified against a live capture the way the Windows parser is.
     """
     if "AirPort: Off" in text or not text.strip():
         return {"state": "unavailable", "reason": "Wi-Fi off or no interface"}

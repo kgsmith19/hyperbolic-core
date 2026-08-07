@@ -38,8 +38,8 @@ class OfflineAssetTest(unittest.TestCase):
             self.assertIn(needle, html, f"missing dashboard control: {needle}")
 
     def test_scroll_containers_have_a_shadow_hint(self):
-        """OPEN-ISSUES.md #11: a table wider than its card gave no visual
-        sign there was more to scroll to. Verified in a real browser
+        """A table wider than its card gave no visual sign there was more
+        to scroll to. Verified in a real browser
         (Playwright) that the shadow appears/disappears at the correct
         scroll position; this is the lightweight regression check that it
         stays wired into the CSS."""

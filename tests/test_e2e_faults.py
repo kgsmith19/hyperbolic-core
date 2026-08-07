@@ -7,7 +7,7 @@ through this project's own probe functions, and assert the measurement
 reflects the injected fault. Earlier versions of this file injected the
 fault and then asserted `assertTrue(True, "...")` with the real assertion
 left as a comment ("# In a real test, we'd measure...") -- decorative,
-not verifying anything. See OPEN-ISSUES.md #12.
+not verifying anything.
 
 Every test degrades gracefully (skipTest) when `tc`/`sudo`/`sch_netem`
 aren't available, rather than failing -- this sandbox, for instance, has

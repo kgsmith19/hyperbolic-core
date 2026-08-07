@@ -4,6 +4,20 @@ Local-first network diagnostic. Names *which layer* breaks LLM API connections
 by correlating multi-layer probes against errors already recorded in Claude
 Code transcripts.
 
+## Sources of truth, in order
+
+| Rank | Artifact | Governs |
+|---|---|---|
+| 1 | `docs/PRD.md` | What the product does and why. Living document — if code and PRD disagree, one is a defect. |
+| 2 | `docs/SYSTEM-REQUIREMENTS.md` | What the system must be |
+| 3 | `docs/DATA-FLOW-DIAGRAM.md` | Where data comes from, goes, rests |
+| 4 | This file | How to work in this repo |
+
+`rules/` holds the fuller development-process rules (budgets, gates, writing
+standard, spec/test discipline) this project draws on; not all of it applies
+at this project's current scale, but nothing here contradicts it. Known
+issues and accepted risks are tracked as GitHub issues, not in this repo.
+
 ## Stack
 
 Python 3.12, **standard library only**. No pip, no npm, no build step — this is

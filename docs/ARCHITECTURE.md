@@ -10,15 +10,10 @@ dependencies, ever (`AGENTS.md`).
 
 Two diagnosis paths exist side by side, at different weights:
 
-- **`diagnose.py`** — the lightweight, always-on ranker behind `netcheck
-  diagnose`. Pattern-matches one sample row at a time against an ordered
-  rule table. This is what runs continuously via `netcheck watch`.
-- **`diagnostic_engine.py`** — the heavier decision-tree engine with
-  historical confidence, regression tracking, and per-layer analysis
-  (dual-stack, routing, TLS, buffering) for the 15 canonical hypotheses.
-  `diagnose.py` imports and re-exports its top-level functions; `diagnose.py`
-  itself stays deliberately small and dependency-light.
-- **`all_diagnostics.py`** — a third, independent path: a one-shot sweep
+- **`diagnose.py`** — the ranker behind `netcheck diagnose`. Pattern-matches
+  one sample row at a time against an ordered rule table, plus burst-grouped
+  LLM-error correlation. This is what runs continuously via `netcheck watch`.
+- **`all_diagnostics.py`** — a second, independent path: a one-shot sweep
   (`netcheck full-check`) across seven hypothesis-specific modules (Wi-Fi,
   modem, NAT, CGNAT, router, interference, Anthropic status). It does not
   read history or correlate with LLM errors; it answers "what does this
@@ -76,8 +71,6 @@ netcheck/__main__.py  (CLI: probe, watch, scan, diagnose, serve, sync, full-chec
    |-- store.py --------- add_sample/add_error/add_scan, mirror() to Supabase
    |
    |-- diagnose.py ------ culprit(row), correlate(errors, samples), rank(...)
-   |      \-- diagnostic_engine.py  (historical confidence, per-layer analysis,
-   |           dual-stack/routing/TLS/buffer helpers, ConfigurationMatrix)
    |
    |-- all_diagnostics.py  (netcheck full-check)
    |      |-- wifi_diagnostics.py        (hypothesis #15, WiFi/DFS)
@@ -87,11 +80,6 @@ netcheck/__main__.py  (CLI: probe, watch, scan, diagnose, serve, sync, full-chec
    |      |-- anthropic_diagnostics.py   (Phase 19 addition)
    |      |-- interference_diagnostics.py (Phase 20 addition)
    |      \-- router_diagnostics.py      (Phase 21 addition)
-   |
-   |-- fix_engine.py ---- recommend_fixes_for_diagnosis(diagnosis)
-   |      \-- fix_application.py  (FixApplier: applies to ASUS router / CAX80 modem)
-   |             \-- verification_engine.py  (did the fix work?)
-   |                    \-- monitoring_engine.py  (did it come back?)
    |
    \-- server.py -------- payload() --> ui.html (Alpine.js, offline, no CDN)
 ```
@@ -113,8 +101,7 @@ modem password is not a broken modem. Enforced by `test_environ.py` and
 ### Parsers are pure functions over text
 Anything that parses command output takes a string and returns a dict, so
 tests use captured fixtures in `tests/fixtures/` and never shell out. This is
-also what makes a new platform backend (see `OPEN-ISSUES.md` #9, macOS)
-additive rather than a rewrite.
+also what made the macOS backend additive rather than a rewrite.
 
 ### Never substring-match transcripts
 Error detection in `llmlog.py` keys on the `isApiErrorMessage` flag and
@@ -122,11 +109,6 @@ Error detection in `llmlog.py` keys on the `isApiErrorMessage` flag and
 matches token counts and request IDs — it overcounted this project's real
 error total by roughly 200x before `llmlog.py` existed. `test_llmlog.py`
 holds the adversarial cases.
-
-### Safe condition evaluation, not `eval()`
-`diagnostic_engine.DiagnosticRule.should_run()` evaluates rule conditions
-through a small recursive-descent parser (`_safe_eval_condition`), never
-Python's `eval()`.
 
 ### Bounded retries for genuinely transient failures
 A single dropped UDP packet isn't evidence a resolver is broken —
@@ -172,8 +154,7 @@ netcheck/
 ├── store.py                    SQLite schema, writes, Supabase mirror
 ├── schema.sql                  SQLite DDL
 ├── cache.py                    shared TTL cache for repeated network-bound checks
-├── diagnose.py                 lightweight always-on ranker
-├── diagnostic_engine.py        decision-tree engine, historical confidence
+├── diagnose.py                 always-on ranker
 ├── all_diagnostics.py          unified full-check runner (Phase 22)
 ├── wifi_diagnostics.py         hypothesis #15: WiFi/DFS (Phase 15)
 ├── modem_diagnostics.py        modem/DOCSIS (Phase 16)
@@ -182,10 +163,6 @@ netcheck/
 ├── anthropic_diagnostics.py    far-side status (Phase 19)
 ├── interference_diagnostics.py Wi-Fi interference (Phase 20)
 ├── router_diagnostics.py       router firmware/settings (Phase 21)
-├── fix_engine.py                recommend fixes for a diagnosis
-├── fix_application.py           apply fixes to router/modem
-├── verification_engine.py       confirm a fix worked
-├── monitoring_engine.py         watch for regression after a fix
 ├── server.py                    stdlib HTTP + JSON API
 ├── ui.html                       single-file Alpine dashboard
 └── vendor/                       vendored Alpine.js (no CDN)
@@ -206,9 +183,8 @@ tools/
 
 tests/
 ├── test_probes.py, test_environ.py, test_llmlog.py, test_store.py
-├── test_diagnose.py, test_diagnostic_engine.py, test_configuration_matrix.py
+├── test_diagnose.py
 ├── test_all_diagnostics.py, test_{wifi,modem,nat,cgnat,router,interference}_diagnostics.py
-├── test_fix_application.py, test_verification_engine.py, test_monitoring_engine.py
 ├── test_server.py
 ├── test_e2e_faults.py            end-to-end acceptance (Phase 23)
 └── fixtures/                     captured real command output
@@ -224,7 +200,7 @@ Primary test runner is `unittest` (stdlib, matching the "no pip" constraint):
 python -m unittest discover -s tests -t .
 ```
 
-431 tests, hermetic — no live network calls, no sleeps beyond a probe's own
+Hermetic — no live network calls, no sleeps beyond a probe's own
 timing (`test_e2e_faults.py`'s live-fault-injection tests are the one
 exception; they need `tc`/`sudo` and skip gracefully without them). CI
 (`.github/workflows/tests.yml`) additionally installs `pytest` to run the

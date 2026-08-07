@@ -35,8 +35,7 @@ def _ps(script, timeout=25, args=()):
     `args` are passed as trailing subprocess arguments, available inside
     `script` via PowerShell's own `$args` array — never interpolated into
     the script text itself, so a caller-supplied value containing a quote
-    can't break out of the script and inject additional commands
-    (OPEN-ISSUES.md #5).
+    can't break out of the script and inject additional commands.
     """
     if not WINDOWS:
         return None, "not Windows"
@@ -275,7 +274,7 @@ def _asus_set(host, token, nvram, timeout=6):
     (URL-quoted, mirroring how _asus_get's own GET-style hook query is
     built) follow the shape used by community-reverse-engineered clients
     (e.g. the AsusRouter and aioasuswrt Python libraries). UNVERIFIED
-    against a live device from this codebase -- see OPEN-ISSUES.md. A
+    against a live device from this codebase. A
     200 response means only "the router accepted the request", never
     "the value changed": callers must always confirm with a fresh read
     via router()/modem() before reporting success.

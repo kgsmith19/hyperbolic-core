@@ -13,16 +13,14 @@ This is a reference, not a tutorial. For "how do I run this," see
 
 ## Module map
 
-21 diagnostic modules split into six groups by what they do, plus one small
-shared utility (`cache`):
+15 modules split into four groups by what they do, plus one small shared
+utility (`cache`):
 
 | Group | Modules |
 |---|---|
 | Core probing & storage | `probes`, `environ`, `llmlog`, `store` |
-| Correlation & ranking | `diagnose`, `diagnostic_engine` |
+| Correlation & ranking | `diagnose` |
 | Hypothesis-specific diagnostics | `wifi_diagnostics`, `modem_diagnostics`, `nat_diagnostics`, `cgnat_diagnostics`, `interference_diagnostics`, `router_diagnostics`, `anthropic_diagnostics` |
-| Fixes | `fix_engine`, `fix_application` |
-| Verification & monitoring | `verification_engine`, `monitoring_engine` |
 | Runner, CLI, transport | `all_diagnostics`, `__main__`, `server` |
 | Shared utility | `cache` |
 
@@ -42,8 +40,7 @@ gather that output. This is what runs every tick of `netcheck watch`.
 - `parse_airport_info(text) -> dict` — link state from macOS's `airport -I`.
   Partial field mapping compared to the Windows parser (no signal
   percentage, no separate rx/tx rate, no radio-type string — those come back
-  `None`). Built against Apple's documented format, not a live capture; see
-  `OPEN-ISSUES.md` #9.
+  `None`). Built against Apple's documented format, not a live capture.
 - `parse_wlan_networks(text, channel, own_bssid=None) -> dict` — counts
   competing radios near our channel, excluding our own AP.
 - `ping(host, count=2) -> dict` — shells out and parses with `parse_ping`.
@@ -78,7 +75,7 @@ gather that output. This is what runs every tick of `netcheck watch`.
   contend for our airtime on the same or an overlapping channel. Windows
   only for now (`netsh wlan show networks`) — no macOS path yet, since
   `airport -s` requires disassociating on modern macOS, a poor fit for a
-  passive scan (`OPEN-ISSUES.md` #9).
+  passive scan.
 - `driver(name="Wi-Fi") -> dict` — adapter identity plus the settings that
   actually cause intermittent drops (power management, roaming
   aggressiveness, 802.11 mode).
@@ -92,14 +89,14 @@ gather that output. This is what runs every tick of `netcheck watch`.
   captures the API route, or the DNS for it.
 - `parse_docsis_status(js) -> dict` — parses a NETGEAR combo gateway's
   `DocsisStatusAdv.htm` JS payload (brace-matched function bodies, pipe-
-  delimited rows; see `OPEN-ISSUES.md` #2 for why this is non-trivial).
+  delimited rows — the firmware never emits these as plain HTML text).
 - `modem(host=None, user=None, password=None) -> dict` — DOCSIS line quality:
   SNR, power levels, uncorrectable codewords. `unavailable` without
   `MODEM_HOST`/`MODEM_USER`/`MODEM_PASS`.
 - `router(host=None, user=None, password=None) -> dict` — whether ASUS
   AiProtection/Trend Micro DPI is enabled, via the real token-auth flow
   (`_asus_login` + `_asus_get`; Basic Auth silently succeeds on ASUS gear
-  without proving anything — see `OPEN-ISSUES.md` #3b). `unavailable`
+  without proving anything). `unavailable`
   without `ROUTER_HOST`/`ROUTER_USER`/`ROUTER_PASS`.
 - `scan() -> dict` — one full environment snapshot: everything above, in one
   call. This is what `netcheck scan` prints and `netcheck watch` stores once
@@ -131,14 +128,10 @@ gather that output. This is what runs every tick of `netcheck watch`.
   `docs/DEPLOYMENT.md`.
 - `host_id(conn, name, os_name) -> int` — upserts the host row, returns its id.
 - `add_sample(conn, host, row)`, `add_event(conn, host, row)`,
-  `add_error(conn, host, row)`, `add_scan(conn, host, payload)`,
-  `record_fix_outcome(conn, host, fix_id, success, ts=None)` — inserts,
+  `add_error(conn, host, row)`, `add_scan(conn, host, payload)` — inserts,
   each tagged with `host` and stamped for Supabase sync.
 - `samples(conn, limit=5000)`, `errors(conn, limit=5000)`,
-  `scans(conn, limit=20)`, `fix_success_rate(conn, fix_id) -> dict | None` —
-  reads. `fix_success_rate` returns `{"n": int, "rate": float}` or `None` if
-  no outcomes are recorded yet for that `fix_id`; `fix_engine` falls back to
-  a documented prior below `MIN_MEASURED_FIX_SAMPLES` (3) real outcomes.
+  `scans(conn, limit=20)` — reads.
 - `offsets(conn) -> dict`, `save_offsets(conn, new)` — the file-offset
   bookkeeping `llmlog.scan_all` needs to avoid re-reading old transcripts.
 - `unsynced(conn, table, limit=500) -> list`, `mark_synced(conn, table, ids)`
@@ -161,11 +154,12 @@ gather that output. This is what runs every tick of `netcheck watch`.
 
 ## Correlation & ranking
 
-### `netcheck/diagnose.py` — the lightweight, always-on ranker
+### `netcheck/diagnose.py` — the ranker
 
-This is what `netcheck diagnose` calls. It is deliberately small: pattern
-matching over one row at a time, no historical confidence model. That model
-lives in `diagnostic_engine.py`.
+This is what `netcheck diagnose` calls. Pattern matching over one sample row
+at a time against an ordered rule table, plus burst-grouped LLM-error
+correlation. No historical confidence model, no cross-session state — every
+call is a fresh read of `store.py`.
 
 - `culprit(row) -> str | None` — names the layer that broke in a single
   sample row, or `None` if the row is healthy.
@@ -177,108 +171,6 @@ lives in `diagnostic_engine.py`.
   network state within `window_s` seconds either side.
 - `rank(samples, errors, scan) -> list[dict]` — ranked causes, most
   confident first, each with `cause`, `confidence`, `evidence`, `fix`.
-
-### `netcheck/diagnostic_engine.py` — the full decision-tree engine
-
-The heavyweight sibling: an ordered rule tree with historical confidence,
-regression detection, and per-layer analysis helpers for the deeper
-hypotheses (dual-stack, routing, TLS, buffering). Large module (60+
-functions); grouped here by what each cluster answers.
-
-**Core types**
-- `TestState` (enum): `OK | FAIL | TIMEOUT | UNAVAILABLE`.
-- `Culprit` (enum): `GATEWAY_FAILURE | ISP_FAILURE | DNS_ROUTER | DNS_GENERAL |
-  INTERNET_UPSTREAM | TLS_INTERCEPTION | CONNECTION_REAPING | WIFI_MODE |
-  WIFI_INTERFERENCE | ROUTER_DPI | MODEM_ISSUE | NONE`.
-- `DiagnosticRule` — one rule (`id`, `priority`, `condition`);
-  `should_run(results)` evaluates its condition through a recursive-descent
-  parser, never `eval()` (`_safe_eval_condition`).
-- `DiagnosticTree` — the ordered rule set. `get_rules_in_order()`,
-  `get_rule(rule_id)`, `get_remaining_rules(results)`.
-- `DiagnosisResult` — accumulates test outcomes: `add`, `get`, `clear`.
-- `ConfigurationMatrix` — tracks every tested config, fix, and outcome across
-  runs so confidence can be historical rather than single-sample. Notable
-  methods: `record_test`, `suggest_next_tests`, `record_fix_applied`,
-  `record_post_fix_outcome`, `detect_regression_in_field`,
-  `calculate_improvement`, `calculate_confidence`, `detect_cascading_failure`.
-
-**Top-level diagnosis**
-- `get_diagnosis(results) -> Diagnosis`, `rank_hypotheses(results) -> list[dict]`
-  — convert accumulated test results into a ranked hypothesis list.
-- `calculate_confidence_from_history(history, culprit, fix_applied=False) -> float`
-- `correlate_with_history(errors, samples) -> list[dict]`
-- `capture_baseline_snapshot() -> dict`, `compare_snapshots(a, b) -> dict`,
-  `detect_regressions(baseline, current, known_fixed_configs) -> list`,
-  `check_state_changes(baseline, current) -> str`
-- `generate_recommendation(diagnosis, matrix) -> dict`,
-  `rank_recommendations(candidates) -> list[dict]` — "what to test/fix next,"
-  ranked by ROI.
-
-**Latency/jitter (canonical hypothesis #1/#2)**
-- `classify_latency(pings) -> dict` — `{category, median, jitter, culprit,
-  hypotheses, confidence}`. Categories (checked in order, first match wins):
-  `stable_low`, `stable_medium`, `high_variance_high_latency`, `variable`,
-  `stable_high` — every input lands in exactly one.
-- `classify_latency_under_load(idle_pings, loaded_pings) -> dict` — buffer
-  bloat: `differential_ms` over 100 between idle and loaded latency.
-
-**Packet loss (canonical hypothesis #3)**
-- `classify_packet_loss(results) -> dict` — `results` is a list of `"ok"`/
-  `"fail"` strings; `{pattern, loss_rate, burst_length, hypotheses}`.
-  `burst_loss` (≥3 consecutive drops) vs `steady_degradation` (spread out).
-- `detect_asymmetric_loss(outbound_loss, inbound_loss) -> dict` — flags a
-  path as asymmetric past a 5-percentage-point gap.
-
-**MTU/PMTUD (canonical hypothesis #4)**
-- `find_path_mtu(results) -> int | None` — largest successful size from a
-  `{size: succeeded}` map, e.g. one gathered by `environ.mtu`'s live DF-bit
-  walk.
-- `diagnose_pmtud(packet_1500_df_result, icmp_fragmentation_needed_received) -> dict`
-  — `working` / `broken` / `working_with_fragmentation`.
-
-**TCP connection state (canonical hypothesis #5)**
-- `build_state_machine(events) -> dict` — classifies a timestamped event
-  list (`SYN_sent`, `SYN_ACK_received`, `ACK_sent`, `SYN_retransmit`,
-  `RST_received`, `FIN_sent`/`FIN_received`, `timeout`) into `established`
-  (with `handshake_rtt`), `rejected`/`reset`, `closed`, or `timed_out` (with
-  the `timeouts` deltas and `syn_backoff` pattern flag). Pure function over
-  already-captured events — nothing in this codebase captures real
-  SYN/ACK/RST events live yet to feed it; see `OPEN-ISSUES.md` #12.
-
-**Dual-stack (IPv4/IPv6)**
-- `analyze_dual_stack(ipv4_result, ipv6_result) -> dict`
-- `detect_happy_eyeballs(events) -> dict` (RFC 8305)
-- `detect_dual_stack_preference(events) -> dict`
-- `detect_nat64_translation(ipv6_addrs) -> dict`
-
-**Routing**
-- `analyze_routing_path(ipv4_path, ipv6_path) -> dict` — asymmetry between
-  IPv4/IPv6 paths.
-- `detect_route_flapping(events) -> dict`
-- `classify_hop_latency(latencies) -> str`, `measure_hop_stability(hop_samples) -> dict`
-- `detect_blackhole_route(path) -> dict` — no response, no error, no ICMP.
-
-**TLS / application protocol**
-- `measure_tls_handshake(events) -> dict`
-- `detect_tls_version(handshake) -> str`, `detect_cipher_strength(cipher) -> str`
-- `analyze_http_protocol(responses) -> dict`,
-  `detect_connection_multiplexing(streams) -> dict`
-
-**Buffer/queue**
-- `detect_buffer_saturation(window_events) -> dict`
-- `measure_queue_depth(packets) -> dict`
-- `analyze_backpressure(events) -> dict`
-- `classify_congestion_signal(metrics) -> str`
-- `measure_buffer_efficiency(buffer_events) -> dict`
-
-**Root-cause synthesis** (combines all layers into one verdict)
-- `synthesize_diagnosis(layer_results) -> dict`
-- `rank_root_causes(findings) -> list[dict]`
-- `calculate_confidence_score(observations) -> float`
-- `detect_cascade_failures(layer_states) -> dict` — one layer's failure
-  explaining a downstream layer's failure, so the downstream one isn't
-  double-counted as a separate cause.
-- `generate_synthesis_report(synthesis, root_causes) -> dict`
 
 ---
 
@@ -341,77 +233,6 @@ Class `AnthropicDiagnostics`: `check_service_status()`,
 `check_api_connectivity()`, `check_incident_history()`. This is the module
 that answers "is it even my network" — see the README's "Not your network"
 row.
-
----
-
-## Fixes
-
-### `netcheck/fix_engine.py` — recommend, don't act
-- `FixRecommendation` — a single actionable fix: instructions + metadata, no
-  side effects. `likelihood` is a probability [0, 1]; `likelihood_source` is
-  `"prior"` (this module's documented estimate) or `"measured"` (a real
-  success rate from `store.fix_outcomes`); `likelihood_samples` is the
-  outcome count backing a measured rate, `None` for a prior.
-- `recommend_fixes_for_diagnosis(diagnosis, conn=None) -> list[FixRecommendation]`
-  — pass an open `store.py` connection to have each fix's `likelihood`
-  switched from its documented prior to a measured success rate once at
-  least `store.MIN_MEASURED_FIX_SAMPLES` real outcomes exist for that
-  `fix_id`. Without `conn` (or with too little history), the prior stands.
-- `get_ethernet_test_setup() -> dict` — instructions for the highest-ROI
-  manual test (wire in over Ethernet to rule out Wi-Fi entirely).
-- `track_fix_application(fix, success)`
-
-### `netcheck/fix_application.py` — actually apply fixes
-`FixApplier(device_type, host=None, user=None, password=None, dry_run=True)`
-— `host`/`user`/`password` fall back to `ROUTER_HOST`/`ROUTER_USER`/
-`ROUTER_PASS` or `MODEM_HOST`/`MODEM_USER`/`MODEM_PASS` in `.env`, matching
-`environ.router`/`environ.modem`. `dry_run` defaults to `True`: every method
-below returns what it *would* write without sending anything until called
-with `dry_run=False`.
-
-Methods: `apply_wifi_channel_fix(channel, bandwidth)`, `disable_aiprotection()`,
-`disable_qos()`, `restart_device()`, `get_device_status()`. All target the
-ASUS router over its authenticated HTTP API (`environ._asus_login`/
-`_asus_get`/`_asus_set`), never a local shell command. Every result's
-`status` is one of:
-- `unavailable` — no credentials, or the device type (CAX80 modem,
-  `local_config`) has no known automated write path.
-- `dry_run` — the default; nothing was sent.
-- `applied` (+ `verified_by_readback: true`) — `disable_aiprotection()`
-  only: the write is confirmed by re-reading `environ.router()` afterward
-  and checking the value actually changed.
-- `attempted` — the write's HTTP request succeeded, but no proven read-back
-  exists yet to confirm the specific setting took effect (Wi-Fi channel/
-  bandwidth, QoS), or `disable_aiprotection()`'s own read-back didn't
-  confirm the change.
-- `fail` — the login or write request itself failed.
-
-The write wire format (NVRAM key names, `applyapp.cgi`'s payload shape) is
-unverified against live hardware — see `OPEN-ISSUES.md` #13.
-- `apply_fix_sequence(fixes, device_handlers) -> list[dict]` — applies a
-  sequence with dependency resolution (e.g., don't disable QoS before
-  confirming DPI is the more likely culprit).
-
----
-
-## Verification & monitoring
-
-### `netcheck/verification_engine.py` — did the fix work?
-- `verify_fix_resolves_issue(before_diagnosis, fix, after_diagnosis) -> dict`
-- `track_fix_success(fix_id, before_diagnosis, after_diagnosis, conn=None, host=None) -> dict`
-  — pass `conn`/`host` to persist the outcome via `store.record_fix_outcome`,
-  closing the loop back to `fix_engine.recommend_fixes_for_diagnosis`'s
-  measured likelihoods. Omitted, nothing is persisted; the returned dict is
-  unaffected either way.
-- `compare_diagnostic_layers(before, after) -> dict` — which layers improved.
-- `estimate_mttr(before, after) -> dict`
-
-### `netcheck/monitoring_engine.py` — did it come back?
-- `schedule_periodic_monitoring(interval_hours) -> dict`
-- `detect_regression(baseline_diagnosis, current_diagnosis, sensitivity) -> dict`
-- `track_diagnosis_history(diagnosis_snapshots, window_hours) -> dict`
-- `predict_next_regression(diagnosis_history, fixed_culprit, recurrence_window_hours) -> dict`
-- `generate_monitoring_report(baseline, current, history) -> dict`
 
 ---
 

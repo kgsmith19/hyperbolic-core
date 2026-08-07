@@ -66,7 +66,7 @@ class PowerShellArgumentSafetyTest(unittest.TestCase):
     """A caller-supplied value must never be interpolated into the
     PowerShell script text -- passed as a separate subprocess argument
     instead, so a value containing a quote can't break out of the script
-    and inject additional commands (OPEN-ISSUES.md #5). Not exploitable
+    and inject additional commands. Not exploitable
     today (both callers only ever pass their own literal defaults), but the
     parameters invite the bug, so this locks the safe shape in with a test
     rather than relying on nobody ever wiring a caller-supplied value
@@ -105,8 +105,8 @@ class PowerShellArgumentSafetyTest(unittest.TestCase):
 class AsusSetTest(unittest.TestCase):
     """_asus_set is the write counterpart to the already-proven _asus_get:
     same cookie auth, POST to applyapp.cgi instead of GET to appGet.cgi.
-    Verified here against a stub server, not a real router -- see
-    OPEN-ISSUES.md for the caveat on the exact payload shape."""
+    Verified here against a stub server, not a real router -- the exact
+    payload shape is unverified against live hardware."""
 
     def _stub(self):
         received = []

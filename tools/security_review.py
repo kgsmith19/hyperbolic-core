@@ -184,8 +184,7 @@ def scan_directory(root: str, intensity: str = "medium") -> List[Finding]:
         # Skip tools directory, build artifacts, and tests: the secret-pattern
         # regexes match any password=/token=/api_key= keyword argument
         # holding a quoted string, with no way to tell a real credential from
-        # a test fixture's placeholder value (e.g. FixApplier(..., password=
-        # "pw") in test_fix_application.py) -- excluded here the same way
+        # a test fixture's placeholder value -- excluded here the same way
         # bandit's own test-file exclusions work, not because tests are
         # exempt from real secret hygiene (nothing in this repo commits real
         # credentials into tests; `.env` stays gitignored regardless).

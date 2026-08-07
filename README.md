@@ -130,7 +130,7 @@ done.
 python -m unittest discover -s tests -t .
 ```
 
-431 tests, hermetic — no network, no real API calls. Parsers are tested against
+Hermetic — no network, no real API calls. Parsers are tested against
 real command output captured from a live machine, in `tests/fixtures/`.
 
 The adversarial cases in `test_llmlog.py` are the ones worth knowing about:
@@ -141,12 +141,18 @@ flag instead.
 
 ## Documentation
 
+- `docs/PRD.md` — the living source of truth: requirements, status, scope
+- `docs/SYSTEM-REQUIREMENTS.md` — functional/non-functional requirements, traced
+- `docs/DATA-FLOW-DIAGRAM.md` — how a tick moves from probe to stored row to verdict
 - `docs/QUICKSTART.md` — running `full-check`, `watch`, and `serve` for the first time
-- `docs/TROUBLESHOOTING.md` — symptom → hypothesis → fix, plus the full list of 15
-- `docs/API.md` — function-level reference for all 21 diagnostic modules
+- `docs/TROUBLESHOOTING.md` — symptom → cause → fix
+- `docs/API.md` — function-level reference for every module
 - `docs/ARCHITECTURE.md` — module map, decision trees, module interactions
 - `docs/CONTRIBUTING.md` — adding a new diagnostic, PDD/SDD/TDD standards
 - `docs/DEVELOPMENT.md` — local dev setup, test commands, code-quality gates
 - `docs/DEPLOYMENT.md` — local, container, and cloud deployment; releases; upgrade path
 - `CHANGELOG.md` — what changed, by version
-- `OPEN-ISSUES.md` — problems surfaced but not yet fixed
+
+Known issues and accepted risks are tracked as
+[GitHub issues](https://github.com/kgsmith19/network-checker/issues), not in
+this repo.
