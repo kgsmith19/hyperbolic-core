@@ -5,12 +5,12 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, NFR-003, NFR-005, NFR-011, DR-001, DR-002, DR-006]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-007, NFR-003, NFR-005, NFR-011, DR-001, DR-002, DR-006]
 ---
 
 # Data Flow Diagram
 
-Where data comes from, goes, and rests. As of SL-004; later slices extend this file in the same commit that changes the flows.
+Where data comes from, goes, and rests. As of SL-002; later slices extend this file in the same commit that changes the flows.
 
 ## 1. Trust boundaries
 
@@ -58,8 +58,9 @@ One trust boundary: browser to Supabase. No third position exists, which is why 
 | F-5 | Edit a prompt's body | Browser (not yet wired to a UI control; API-level, FR-003) | `PATCH /rest/v1/prompt` | `prompt.prompt` | New body (confidential) | RLS scopes the update to the owner; grant is column-scoped to `title, body` only |
 | F-6 | Version recorded | Trigger on `prompt.prompt`, fired by F-3 or F-5 | In-database, no network hop | `prompt.prompt_version` | A full copy of the new body | `auth.uid()` carried through from the row being written, checked by the insert policy |
 | F-7 | Read version history | Browser (not yet wired to a UI control; API-level, FR-009 pending) | `GET /rest/v1/prompt_version` | Browser | Own version rows only | RLS `using (user_id = auth.uid())` |
+| F-8 | Render and copy | Browser (variable inputs) | In-browser only, no network hop | `navigator.clipboard` | Rendered body text (confidential — the same body already in the DOM, substituted) | None needed; the data never leaves the browser it was already fetched into |
 
-Render, copy, and `core.run` instrumentation flows arrive with SL-002/SL-007.
+Render (FR-004/007/010, SL-002) is a pure client-side transform over data F-4 already fetched — it opens no new flow to the database and carries no new authorization concern. `core.run` instrumentation arrives with SL-007.
 
 ## 3. Data at rest
 
