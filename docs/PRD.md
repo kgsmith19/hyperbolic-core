@@ -4,7 +4,7 @@ status: draft
 created: 2026-08-06
 updated: 2026-08-07
 owner: Kyle
-version: 0.1.2
+version: 0.1.3
 ---
 
 # toolbelt PRD
@@ -88,7 +88,7 @@ This is one shared place in the database where every small tool Kyle builds writ
 
 | ID | Requirement | Priority | Acceptance criterion (objective) | Traces to | Status |
 |---|---|---|---|---|---|
-| FR-001 | The system must display every row in `idea.idea` with its `name`, `category`, `one_liner`, and `status`. | Must | Given `idea.idea` contains a row with `id` `prompt-organizer`, `name` `Prompt Organizer`, `category` `Agentic / LLM systems tooling`, `one_liner` `A place to save AI prompts and reuse them instead of retyping them.`, and `status` `specced`, when the idea list page loads, then all four of those values appear on the page for that row. | UC-001 | done |
+| FR-001 | The system must display every row in `idea.idea` with its `name`, `category`, `one_liner`, and `status`. | Must | Given `idea.idea` contains a row with `id` `prompt-organizer`, `name` `Prompt Organizer`, `category` `Agentic / LLM systems tooling`, `one_liner` `A place to save AI prompts and reuse them instead of retyping them.`, and `status` `building`, when the idea list page loads, then all four of those values appear on the page for that row. | UC-001 | done |
 | FR-002 | The system must reject an insert into `core.run` whose `app_id` has no matching row in `core.app`. | Must | Given `core.app` has no row with `id` `test-app`, when inserting into `core.run` with `app_id` `test-app` and `kind` `job`, then the insert fails with a foreign key violation and no row is created. | UC-002 | done |
 | FR-003 | The system must provide the `core.app`, `core.run`, `core.event`, `core.cost`, `core.outcome`, `core.run_outcome`, `core.metric_def`, `core.metric_value`, `core.assumption`, and `core.intervention` tables, matching the column definitions in `docs/notes/2026-08-06-supabase-project-topology.md` section 2. | Must | Given the `core` schema migration has been applied, when a row is inserted into `core.metric_def` with `id` `cost_per_requirement`, `name` `Cost per requirement`, `formula` `total cost / total requirements shipped`, `unit` `USD`, and `gaming_risk` omitted, then the insert fails a `NOT NULL` constraint on `gaming_risk`. | UC-002 | done |
 
@@ -177,6 +177,7 @@ Rules:
 | 2026-08-06 | 0.1.0 | Initial draft. | First PRD for the toolbelt spine, written ahead of `SPEC-0000`. | - |
 | 2026-08-07 | 0.1.1 | Narrowed OOS-004 to sign-up, password reset, and multi-user account management; added a sign-in form to section 4.1. | FR-001 requires the page to display idea rows and NFR-001 requires every read to be authenticated. With sign-in entirely out of scope the two contradicted each other and the page could not exist. The form is the smallest thing that resolves it: email, password, no sign-up, no reset, no session persistence. | FR-001, NFR-001, OOS-004 |
 | 2026-08-07 | 0.1.2 | Set FR-001, FR-002, FR-003 and NFR-001 through NFR-004 to `done`. | SL-000 shipped and every acceptance criterion has a passing test. | FR-001, FR-002, FR-003, NFR-001, NFR-002, NFR-003, NFR-004 |
+| 2026-08-07 | 0.1.3 | FR-001's acceptance criterion literal for the `prompt-organizer` row's `status` updated `specced` -> `building`. | The row is alive by design: Prompt Organizer's walking skeleton started implementation, so its status legitimately moved (migration `20260807030000`). The AC's literal is a snapshot of the fixture row and tracks its real lifecycle; it will change again at most twice (`live`, or `parked`/`killed`). This is a PRD-first amendment with the test updated to match, not a test edited to pass: the defect D-001 rule (assert the specified value) still holds — the specified value itself moved. | FR-001 |
 
 ---
 
