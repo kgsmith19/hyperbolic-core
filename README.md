@@ -90,8 +90,10 @@ Always, no configuration:
   dying mid-flight
 
 With credentials in a local `.env` (gitignored, never committed) — copy
-`.env.example`, fill in what you have. Every value is optional; absent ones
-make the feature report `unavailable`, not fail:
+`.env.example`, fill in what you have, or run `scripts/configure.ps1` for an
+interactive prompt that writes it for you (nothing typed is echoed, kept in
+shell history, or passed as an argument). Every value is optional; absent
+ones make the feature report `unavailable`, not fail:
 
 - **Modem** DOCSIS SNR, power levels, uncorrectable codewords
 - **Router** uptime, clients, and whether AiProtection / Trend Micro DPI is on
