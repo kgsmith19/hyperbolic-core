@@ -23,3 +23,10 @@ export function searchPrompts(prompts, query) {
 export function toggleTagFilter(current, tag) {
   return current === tag ? null : tag;
 }
+
+// SPEC-0010 AC-001: archived prompts are hidden unless explicitly requested.
+// `prompt.isActive` is optional -- absent (undefined) is treated as active,
+// so callers that predate archiving are unaffected.
+export function filterByActive(prompts, showArchived) {
+  return showArchived ? prompts : prompts.filter((p) => p.isActive !== false);
+}

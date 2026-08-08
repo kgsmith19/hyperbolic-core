@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { searchPrompts } from "../web/search.mjs";
+import { searchPrompts, filterByActive } from "../web/search.mjs";
 
 // AC-001 fixture (SPEC-0001 section 4), literal.
 const PROMPTS = [
@@ -107,4 +107,28 @@ test("ranks_title_above_tag_above_body_only_match__T_U_014__AC_004", () => {
   const result = searchPrompts(prompts, "sdd");
 
   assert.deepEqual(titles(result), ["sdd in Title", "Tag Only", "Body Only"]);
+});
+
+// SPEC-0010 (SL-011): archive/restore. is_active absent on every fixture
+// above (all treated as active by searchPrompts, unaffected by this filter).
+
+// T-U-027 -> AC-001 -> FR-014. Default view hides archived prompts; the
+// show-archived case returns every prompt, order and input both preserved.
+test("hides_archived_prompts_by_default_and_shows_them_when_requested__T_U_027__AC_001", () => {
+  const input = [
+    { title: "Active One", isActive: true },
+    { title: "Archived One", isActive: false },
+    { title: "Active Two", isActive: true },
+  ];
+
+  const defaultView = filterByActive(input, false);
+  const showArchived = filterByActive(input, true);
+
+  assert.deepEqual(titles(defaultView), ["Active One", "Active Two"]);
+  assert.deepEqual(titles(showArchived), ["Active One", "Archived One", "Active Two"]);
+  assert.deepEqual(input, [
+    { title: "Active One", isActive: true },
+    { title: "Archived One", isActive: false },
+    { title: "Active Two", isActive: true },
+  ], "must not mutate its input");
 });

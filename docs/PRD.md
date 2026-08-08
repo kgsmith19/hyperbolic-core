@@ -2,9 +2,9 @@
 title: Prompt Organizer Product Requirements Document
 status: draft
 created: 2026-08-06
-updated: 2026-08-07
+updated: 2026-08-08
 owner: Kyle
-version: 0.1.7
+version: 0.1.10
 ---
 
 # Prompt Organizer PRD
@@ -114,6 +114,19 @@ This is a place to keep the instructions you write for AI tools, so you can find
 | Frequency | 1 to 10 per day |
 | Traces to | FR-003, FR-009 |
 
+### UC-005: Retire a prompt without losing it
+
+| Field | Content |
+|---|---|
+| Actor | U-001 |
+| Precondition | An active prompt exists |
+| Trigger | The prompt is no longer useful but Kyle doesn't want to risk losing it for good |
+| Main path | 1. Opens the prompt. 2. Presses Archive. 3. It disappears from the default list. |
+| Success outcome | The prompt and every version stay in the database, readable via "Show archived," and can be restored to active at any time |
+| Failure paths | None expected — archiving is reversible and never touches stored data |
+| Frequency | Rare |
+| Traces to | FR-014 |
+
 ## 6. Functional requirements
 
 | ID | Requirement | Priority | Acceptance criterion (objective) | Traces to | Status |
@@ -131,6 +144,7 @@ This is a place to keep the instructions you write for AI tools, so you can find
 | FR-011 | The system must record a usage row each time a prompt is rendered and copied, with the prompt id, version, configuration used, and timestamp. | Should | Given a prompt is copied twice, when its usage count is read, then it is 2 and two rows exist with distinct timestamps. | UC-001 | done |
 | FR-012 | The system must assign zero or more tags to a prompt and must filter the list by a selected tag. | Should | Given prompts tagged `sdd` and `review`, when filtering by `sdd`, then only prompts carrying that tag are returned. | UC-001 | done |
 | FR-013 | The system must serve a rendered prompt over an authenticated HTTP endpoint given a prompt name and a configuration name. | Could | Given `GET /v1/render?name=spec-author&config=lean` with a valid key, then the response body is the rendered text with content type `text/plain` and status `200`. | U-002 | not-started |
+| FR-014 | The system must let an active prompt be archived (`is_active` set false) and an archived prompt reactivated, without deleting the row or any version, and the default list and search must exclude archived prompts. | Must | Given an active prompt, when it is archived, then it no longer appears in the default (active-only) view, its row and every version are unchanged when read directly, and reactivating it makes it appear in the default view again. | UC-005 | done |
 
 ## 7. Non-functional requirements
 
@@ -160,6 +174,7 @@ Categories considered and not applicable: internationalization (single user, Eng
 | DR-004 | Section id | The name of an optional block | Parsed from the body | internal | Derived, not stored independently | FR-005 |
 | DR-005 | Usage record | When a prompt was copied and which configuration was used | Generated | internal | 365 days, then aggregated to a monthly count | FR-011 |
 | DR-006 | Owner id | Which account owns the row | Auth | internal | Life of the row | NFR-003 |
+| DR-007 | Active flag | Whether a prompt is archived or in active use | User action | internal | Life of the row | FR-014 |
 
 DR-002 and DR-003 are classified confidential, so NFR-003, NFR-004, and NFR-011 exist to protect them.
 
@@ -218,6 +233,7 @@ None. The tool reads and writes its own schema and nothing else. Adding one requ
 | SL-007 | Usage tracking | Every copy writes a usage row; counts are visible; a run is logged to `toolbelt`'s shared spine. | FR-011, NFR-010 | 180 (shipped 2026-08-07, SPEC-0008 + SPEC-0009, both delivered) | SL-002 |
 | SL-008 | Version restore | A prior version can be restored as a new current version. | FR-009 | 150 | SL-004 |
 | SL-009 | Render endpoint | An authenticated HTTP endpoint returns rendered text by name and configuration. | FR-013 | 200 | SL-005 |
+| SL-011 | Archive prompt | A prompt can be archived (hidden, never deleted) and reactivated; this is the delete half of CRUD. | FR-014 | 60 (shipped 2026-08-08, SPEC-0010) | SL-000 |
 
 **The first useful day is the end of SL-002.** At that point the tool already beats retyping, and the pack's own ten prompts can be loaded into it. Everything after SL-002 is improvement on a thing already earning its keep, which is exactly the shape a slice plan should have.
 
@@ -248,6 +264,7 @@ None. The tool reads and writes its own schema and nothing else. Adding one requ
 | Date | Version | Change | Reason | Affected IDs |
 |---|---|---|---|---|
 | 2026-08-06 | 0.1.0 | Initial draft. | First application of the PRD template. | - |
+| 2026-08-08 | 0.1.10 | SL-011 shipped (SPEC-0010, renumbered from SPEC-0009 to resolve a spec-id collision with the independently shipped SPEC-0009 log-run-call): a single `is_active` boolean is the delete half of CRUD — archiving hides a prompt from the default list without ever running `DELETE` or touching version history. FR-014 (new) → `done`; UC-005, DR-007 added; slice plan gained SL-011. | Asked directly for CRUD delete; a real `DELETE` would cascade through `prompt_version` and contradict DR-002 ("every version kept forever") and NFR-005, so soft delete via a flag was the only option consistent with this PRD's own durability requirements — confirmed with Kyle before touching the live schema. | FR-014, UC-005, DR-007, SL-011 |
 | 2026-08-07 | 0.1.8 | SL-007 shipped (SPEC-0008). FR-011 → `done`. NFR-010 reclassified from `not-started` to `blocked`: as worded it requires writing into `toolbelt`'s `core` schema, which this repo's own `CLAUDE.md` forbids. Not a new decision — a standing contradiction this slice's scoping exposed, not resolved. `docs/SYSTEM-REQUIREMENTS.md` SR-04 corrected (it claimed "reads of `core` begin in SL-007"; this slice reads nothing from `core` either). | Kyle's PRD self-check line 12 ("no two requirements contradict") no longer holds for NFR-010 against `CLAUDE.md`'s explicit "Never" rule, so it needed a status that says so rather than `not-started`, which reads as merely unscheduled. FR-011 is real and independently valuable: a `prompt.usage` row per copy, composite-FK'd to `prompt_version` so it can never name a version that never existed. Building it surfaced a second, unrelated defect: 21 pre-SL-004 fixture prompts had zero `prompt_version` rows (the versioning trigger didn't exist when they were created), which would have crashed the client's new version-lookup query and made those specific prompts un-loggable. Backfilled in the same migration, same "make the invariant actually true" precedent SPEC-0002's duplicate-title dedup already set. | FR-011, NFR-010, SL-007 |
 | 2026-08-07 | 0.1.9 | NFR-010 → `done` (SPEC-0009). SL-007's row updated: "a run is logged to `toolbelt`'s shared spine" added to what becomes true; both specs named. | Kyle decided the blocked mechanism directly (2026-08-07): `toolbelt` now exposes `core.log_run`, a `security definer` RPC any authenticated tool calls to record one `core.run` row and one `core.cost` row, without this repo ever writing a schema-qualified statement against `core.*`. `CLAUDE.md`'s "Never write to any schema except `prompt`" rule holds by construction, not merely by convention. | NFR-010, SL-007 |
 | 2026-08-07 | 0.1.1 | SL-000 slice row now delivers FR-001 (was "none"); FR-001, NFR-003, NFR-007, NFR-009 set to `done`; NFR-009's measurement corrected from "lint rule" to line count. | The skeleton as built satisfies FR-001's acceptance criterion in full, and hiding that behind "none" would make the status columns dishonest once GATE-GREEN passed — the same recorded deviation the toolbelt PRD made for its Phase 0. NFR-003/NFR-007/NFR-009 hold for everything that exists after SL-000. No linter can exist under `MAX_NEW_LIBRARIES: 0`, so the measurement column now says what is actually done. | FR-001, NFR-003, NFR-007, NFR-009, SL-000 |

@@ -3,9 +3,9 @@ title: Prompt Organizer Data Flow Diagram
 status: active
 scope: repo
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-08-08
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-009, FR-011, FR-012, NFR-003, NFR-005, NFR-010, NFR-011, DR-001, DR-002, DR-005, DR-006]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-009, FR-011, FR-012, FR-014, NFR-003, NFR-005, NFR-010, NFR-011, DR-001, DR-002, DR-005, DR-006, DR-007]
 ---
 
 # Data Flow Diagram
@@ -67,14 +67,15 @@ One trust boundary: browser to Supabase. No third position exists, which is why 
 | F-9 | Add tags to a prompt | Browser form (save flow) | `POST /rest/v1/tag` | `prompt.tag` | Tag strings, trimmed/lowercased/deduplicated client-side (internal — bare category words, not confidential) | `with check` via `EXISTS (... prompt.prompt.user_id = auth.uid())`, since `tag` has no `user_id` of its own |
 | F-10 | Log usage | Browser, immediately after F-8's copy succeeds | `POST /rest/v1/usage` | `prompt.usage` | Prompt id, version number (internal — no body text, no confidential data) | `with check (user_id = auth.uid())`; the composite FK (SR-25) rejects a `version_no` that was never actually created |
 | F-11 | Log a run to `toolbelt`'s shared spine | Browser, immediately after F-10 | `POST /rest/v1/rpc/log_run` (`Content-Profile: core`) | `toolbelt`'s `core.log_run` → `core.run` + `core.cost`, owned entirely by `toolbelt`'s own migration | App id, kind (`render`), measured wall-clock time — internal, no body text, no confidential data | `toolbelt`'s `core.log_run` is `security definer`, `user_id` still resolves to this caller's real `auth.uid()`; a call naming a bad `app_id` fails on the FK the same way a direct insert would (`toolbelt` T-I-003's guarantee, extended) |
+| F-12 | Archive / restore a prompt | Browser, the Archive/Restore control | `PATCH /rest/v1/prompt` | `prompt.prompt` | `is_active` boolean (internal, DR-007) | Same `owner_all` RLS as F-5; grant is column-scoped to `is_active` only (SR-06). Display filter, not a security boundary (SR-28) |
 
-Render itself (FR-004/007/010, SL-002; optional sections FR-005, SL-003) stays a pure client-side transform over data F-4 already fetched — it opens no flow to the database and carries no confidential data anywhere. F-10 and F-11 (SL-007) are new and separate: both fire after a copy, not during render, and neither carries body text. Section ids are derived from the body at read time and never stored (DR-004), so SL-003 adds no column, no table, and no flow; SL-005 will be the first slice to persist a chosen include list. Tags (FR-012, SL-006) ride the same trust boundary as everything else: ownership checked through the parent row, cascade-deleted with it (SR-24). `core.run`/`core.cost` instrumentation (NFR-010) is done as of `SPEC-0009` (2026-08-07): F-11 is a function call, never a direct write against `core.*` — `SR-04`/`SR-27` are the mechanism that keeps this repo's own `CLAUDE.md` boundary real rather than conventional.
+Render itself (FR-004/007/010, SL-002; optional sections FR-005, SL-003) stays a pure client-side transform over data F-4 already fetched — it opens no flow to the database and carries no confidential data anywhere. F-10 and F-11 (SL-007) are new and separate: both fire after a copy, not during render, and neither carries body text. Section ids are derived from the body at read time and never stored (DR-004), so SL-003 adds no column, no table, and no flow; SL-005 will be the first slice to persist a chosen include list. Tags (FR-012, SL-006) ride the same trust boundary as everything else: ownership checked through the parent row, cascade-deleted with it (SR-24). `core.run`/`core.cost` instrumentation (NFR-010) is done as of `SPEC-0009` (2026-08-07): F-11 is a function call, never a direct write against `core.*` — `SR-04`/`SR-27` are the mechanism that keeps this repo's own `CLAUDE.md` boundary real rather than conventional. F-12 (SL-011, SPEC-0010) is a display-only flag flip, carrying no confidential data and touching no other row.
 
 ## 3. Data at rest
 
 | Store | Contents | Classification | Retention | Encryption |
 |---|---|---|---|---|
-| `prompt.prompt` | Titles (DR-001, internal, globally unique case-insensitively), bodies (DR-002, **confidential**), owner ids (DR-006) | per column | Forever until the user deletes — no `DELETE` grant exists at all, so today rows are effectively permanent | At rest by Supabase |
+| `prompt.prompt` | Titles (DR-001, internal, globally unique case-insensitively), bodies (DR-002, **confidential**), owner ids (DR-006), active flag (DR-007, internal, SL-011) | per column | Forever — no `DELETE` grant exists at all; "deleting" a prompt sets `is_active` false and every row stays in place | At rest by Supabase |
 | `prompt.prompt_version` | One immutable copy of `body` per insert and per distinct-value body edit (DR-002, **confidential**), owner id (DR-006) | per column | Forever — no `UPDATE` or `DELETE` grant or policy exists on this table at all, ever (NFR-005's mechanism) | At rest by Supabase |
 | `prompt.tag` | Bare tag strings, no owner id of its own (DR-001-like, internal) | internal | Forever until the owning prompt is deleted (cascade) — no `DELETE` grant exists to remove a tag on its own | At rest by Supabase |
 | `prompt.usage` | One row per copy: prompt id, version number, `config_name` (`null` until FR-008 ships), owner id (DR-005, internal) | internal | 365 days per DR-005, then aggregated to a monthly count — the aggregation job does not exist yet, same gap `toolbelt`'s own `core.event` retention has (its OOS-005) | At rest by Supabase |
