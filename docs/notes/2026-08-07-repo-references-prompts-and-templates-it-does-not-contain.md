@@ -1,6 +1,6 @@
 ---
 title: The repo references prompts/ and templates/ that are not in it
-status: resolved
+status: done
 scope: repo
 created: 2026-08-07
 updated: 2026-08-08
