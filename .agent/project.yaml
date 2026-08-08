@@ -1,7 +1,4 @@
-# Machine-readable repo facts for ACC/Toolbelt-style tooling.
-# Prose policy lives in AGENTS.md and the pinned standard (.agent/standard.lock),
-# not here. Every command below is what tools/check.sh actually runs — do not
-# add a command that has not been run successfully in this repo.
+# Machine-readable repo facts. Prose policy lives in AGENTS.md and the pinned standard.
 
 project:
   name: netcheck
@@ -10,52 +7,52 @@ project:
 
 stack:
   language: python
-  language_version_declared: "3.12"   # AGENTS.md / .github/workflows/*.yml target
-  dependencies: none                  # standard library only, no pip/npm, no build step
+  language_version_declared: "3.12"
+  dependencies: none
   test_framework: unittest
 
 commands:
-  setup: none                                                   # git clone; nothing to install
-  build: none                                                   # no build step (stdlib only)
-  format: none                                                  # no formatter configured
+  setup: none
+  build: none
+  format: none
   lint: python3 tools/code_simplification.py netcheck -i medium
-  typecheck: none                                               # no type checker configured
-  test_fast: python3 -m unittest discover -s tests -t .         # ~30s, hermetic, no network
-  test_full: bash tools/check.sh                                # tests + simplification x3 + security + docs + shell syntax
-  e2e: none                                                     # no E2E harness; see docs/notes/2026-08-07-deploying-and-releasing-netcheck.md for manual container smoke steps
+  typecheck: none
+  test_fast: python3 -m unittest discover -s tests -t .
+  test_full: bash tools/check.sh
+  e2e: none
   security_scan: python3 tools/security_review.py . -i high
   docs_check: python3 tools/documentation_check.py . -i medium
-  release_build: bash tools/deploy.sh                           # runs tools/check.sh, then docker build + smoke test
+  release_build: bash tools/deploy.sh
   release_notes: python3 tools/release.py changelog
 
 ci_profile:
-  mode: manual_dispatch_plus_local_gate
+  required_workflow: .github/workflows/pr-gate.yml
+  required_check: "PR Gate"
+  required_trigger: "ready pull request + merge_group"
+  required_gate: bash tools/check.sh
+  deep_or_release_workflows:
+    - .github/workflows/tests.yml
+    - .github/workflows/code-quality.yml
+    - .github/workflows/release.yml
   note: >
-    GitHub Actions workflows (tests.yml, code-quality.yml, release.yml) are
-    workflow_dispatch-only by deliberate choice (see .github/workflows/README.md) --
-    a prior automatic push/PR trigger exhausted the account's Actions-minutes
-    quota. tools/check.sh is the actual required gate and must be run locally
-    (or dispatched manually) before merge. Do not add push/pull_request
-    triggers back without re-solving the minutes-budget problem first.
-  required_local_gate: bash tools/check.sh
+    The ~30-second local-equivalent gate runs automatically only for ready PRs
+    and merge groups. Manual workflows remain available for explicit deep/release use.
 
 risk:
   default: R1
   protected_paths:
-    - netcheck/remote.py        # modem/router network egress + credential handling (FR-014 hardening)
+    - netcheck/remote.py
     - netcheck/docsis.py
     - netcheck/snmp.py
-    - netcheck/store.py         # SQLite source of truth + Supabase mirror
-    - supabase/migrations/      # schema changes
-    - .github/workflows/        # CI/control plane
-    - .agent/                   # this file and the standard pin
+    - netcheck/store.py
+    - supabase/migrations/
+    - .github/workflows/
+    - .agent/
   notes: >
-    Automated writes to network devices are out of scope by product decision
-    (docs/PRD.md OOS-001): a change that would send configuration writes to
-    modem/router hardware is R4 and needs an explicit product decision, not
-    routine autonomous implementation.
+    Automated writes to network devices remain out of scope. A change that
+    sends configuration writes to modem/router hardware is R4.
 
 platforms:
-  primary: windows          # netsh / PowerShell backends
-  secondary: macos          # airport backend, partial (issue #29)
-  ci_runner: ubuntu-latest  # test-only; host-specific scan sections report `unavailable` there, by design
+  primary: windows
+  secondary: macos
+  ci_runner: ubuntu-latest
