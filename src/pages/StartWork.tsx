@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Circle, FileText, MessageSquarePlus, Play, Rocket } from "lucide-react";
 import { api, type Directive } from "@/api";
+import { ApiError } from "@/components/api-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -92,8 +93,11 @@ export default function StartWork() {
     onError: (e) => setNote(String(e instanceof Error ? e.message : e)),
   });
 
+  const anyError = directives.error ?? proc.error ?? lane.error;
+
   return (
     <div className="space-y-6">
+      <ApiError error={anyError} />
       <Card>
         <CardHeader><CardTitle>Start work</CardTitle></CardHeader>
         <CardContent className="space-y-3">

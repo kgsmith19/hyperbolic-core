@@ -35,6 +35,7 @@ async function req<T>(url: string, body?: unknown): Promise<T> {
     headers: { "content-type": "application/json", "X-ACC": "1" },
     body: JSON.stringify(body),
   });
+  if (!r.ok) throw new Error(`ACC API ${r.status}`);
   return r.json() as Promise<T>;
 }
 

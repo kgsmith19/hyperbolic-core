@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Shield, ShieldOff } from "lucide-react";
 import { api } from "@/api";
+import { ApiError } from "@/components/api-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -51,20 +52,24 @@ export default function Guards() {
   const engine = useMutation({
     mutationFn: (a: { verb: string; arg?: string; extra?: object }) => api.engine(a.verb, a.arg, a.extra),
     onSuccess: (r) => { setMsg(r.error || r.out || ""); refresh(); },
+    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
   });
   const importVault = useMutation({
     mutationFn: api.vaultImport,
     onSuccess: (r) => { setVault(""); setMsg(r.error || (r.stored ? `stored: ${r.stored.join(", ")}` : r.out || "")); refresh(); },
+    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
   });
   const rmVaultKey = useMutation({
     mutationFn: api.vaultRm,
     onSuccess: (r) => { setVaultKey(""); setMsg(r.error || r.out || ""); refresh(); },
+    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
   });
   const s = status.data;
   const enabled = !!s?.enabled;
 
   return (
     <div className="space-y-6">
+      <ApiError error={status.error ?? list.error} />
       <Card>
         <CardHeader className="flex-row items-center gap-3">
           <CardTitle className="flex items-center gap-2">

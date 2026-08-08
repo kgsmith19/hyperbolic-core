@@ -111,3 +111,13 @@ test("Kernel: policy renders and a save lands on disk", async ({ page }) => {
   await expect(page.getByTestId("kernelMsg")).toContainText("Saved");
   expect(JSON.parse(fs.readFileSync(policyFile, "utf8")).kernel.budget.toolCalls).toBe(150);
 });
+
+test("API unreachable: every page shows the error banner instead of blank UI", async ({ page }) => {
+  // Intercept all /api/* requests and simulate network failure.
+  await page.route("/api/**", (r) => r.abort("failed"));
+
+  for (const route of ["/", "/guards", "/spending", "/kernel"]) {
+    await page.goto(route);
+    await expect(page.getByTestId("api-error")).toBeVisible();
+  }
+});

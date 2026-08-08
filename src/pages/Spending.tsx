@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleDollarSign, OctagonX, Play, Users } from "lucide-react";
 import { api, type Dials } from "@/api";
+import { ApiError } from "@/components/api-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -41,10 +42,12 @@ export default function Spending() {
       allow: (form.allow ?? "").split(",").map((x) => x.trim()).filter(Boolean),
     } as Dials),
     onSuccess: (r) => { setMsg(r.error || "Saved — hooks pick this up on the next fire."); qc.invalidateQueries({ queryKey: ["process"] }); },
+    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
   });
   const control = useMutation({
     mutationFn: api.control,
     onSuccess: (r) => { setMsg(r.error || r.out || "done"); qc.invalidateQueries({ queryKey: ["process"] }); },
+    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
   });
 
   const tier = s?.tier?.tier;
@@ -53,6 +56,7 @@ export default function Spending() {
 
   return (
     <div className="space-y-6">
+      <ApiError error={status.error} />
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><CircleDollarSign className="size-5" /> Spending &amp; limits</CardTitle></CardHeader>
         <CardContent className="space-y-4">

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cpu } from "lucide-react";
 import { api, type KernelPolicy } from "@/api";
+import { ApiError } from "@/components/api-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LabeledInput } from "@/components/labeled-input";
@@ -37,11 +38,14 @@ export default function Kernel() {
       extraDenyWriteRoots: f.extraDenyWriteRoots.split(",").map((s) => s.trim()).filter(Boolean),
     } as KernelPolicy),
     onSuccess: (r) => { setMsg(r.error || "Saved — applies on the next guardhook fire."); qc.invalidateQueries({ queryKey: ["kernel"] }); },
+    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
   });
 
   const set = (k: string) => (v: string) => setF({ ...f, [k]: v });
   return (
-    <Card>
+    <div className="space-y-6">
+      <ApiError error={policy.error} />
+      <Card>
       <CardHeader><CardTitle className="flex items-center gap-2"><Cpu className="size-5" /> Kernel policy</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <LabeledInput id="harness" label="Harness" value={f.harness ?? ""} onChange={set("harness")} wide />
@@ -66,5 +70,6 @@ export default function Kernel() {
         </div>
       </CardContent>
     </Card>
+    </div>
   );
 }
