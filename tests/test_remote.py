@@ -190,5 +190,29 @@ class CredentialDestinationTest(unittest.TestCase):
         self.assertTrue(calls, "a port suffix must not defeat the check")
 
 
+class ModemSnmpTest(unittest.TestCase):
+    """modem_snmp() is best-effort: most ISP-provisioned modems disable
+    LAN-side SNMP, so no reply is the common case, not a fault -- and the
+    same off-LAN guard as the credentialed sections applies here too."""
+
+    def test_a_reply_reports_descr_and_uptime(self):
+        with patch.object(remote.snmp, "get", side_effect=["ASUS RT-AX88U", 123456]):
+            got = remote.modem_snmp(host="192.168.100.1")
+        self.assertEqual(got["state"], "ok")
+        self.assertEqual(got["sys_descr"], "ASUS RT-AX88U")
+        self.assertEqual(got["sys_uptime_ticks"], 123456)
+
+    def test_no_reply_is_unavailable_not_fail(self):
+        with patch.object(remote.snmp, "get", return_value=None):
+            got = remote.modem_snmp(host="192.168.100.1")
+        self.assertEqual(got["state"], "unavailable")
+
+    def test_an_off_lan_host_sends_no_query(self):
+        with patch.object(remote.snmp, "get") as mock_get:
+            got = remote.modem_snmp(host="1.1.1.1")
+        mock_get.assert_not_called()
+        self.assertEqual(got["state"], "unavailable")
+
+
 if __name__ == "__main__":
     unittest.main()

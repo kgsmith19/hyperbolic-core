@@ -15,7 +15,7 @@ import socket
 import urllib.error
 import urllib.request
 
-from . import docsis
+from . import docsis, snmp
 
 MODEM_HOST_DEFAULT = "192.168.100.1"
 ROUTER_HOST_DEFAULT = "192.168.50.1"
@@ -126,6 +126,24 @@ def modem(host=None, user=None, password=None):
     if err:
         return {"state": "fail", "reason": err}
     return docsis.parse_docsis_status(body)
+
+
+def modem_snmp(host=None, timeout=2):
+    """Best-effort SNMPv2c read of generic MIB-II scalars from the modem.
+
+    A supplement to modem() above, never a replacement: most ISP-provisioned
+    DOCSIS modems disable LAN-side SNMP by default, so `unavailable` here is
+    the common case, not a sign of trouble.
+    """
+    host = host or os.environ.get("MODEM_HOST", MODEM_HOST_DEFAULT)
+    if not _on_lan(host):
+        return _unavailable(f"modem host {host!r} is not on a local network")
+
+    descr = snmp.get(snmp.SYS_DESCR, host, timeout)
+    if descr is None:
+        return _unavailable(f"no SNMP response from {host} within {timeout}s")
+    return {"state": "ok", "sys_descr": descr,
+            "sys_uptime_ticks": snmp.get(snmp.SYS_UPTIME, host, timeout)}
 
 
 def router(host=None, user=None, password=None):

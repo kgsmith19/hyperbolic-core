@@ -209,6 +209,7 @@ def scan():
         "tailscale": tailscale(),
         "dual_stack": dualstack.dual_stack(TARGET),
         "modem": remote.modem(),
+        "modem_snmp": remote.modem_snmp(),
         "router": remote.router(),
         "wan": remote.wan(),
         "anthropic": remote.anthropic(),

@@ -2,9 +2,9 @@
 title: netcheck Product Requirements Document
 status: living
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-08-08
 owner: Kyle Smith
-version: 1.0.0
+version: 1.2.0
 ---
 
 # netcheck PRD
@@ -56,7 +56,7 @@ This is a program that runs on your computer and tells you which part of your in
 | OOS-002 | Monitoring more than one machine from a single running instance | Each machine's Wi-Fi/router/ISP path is independent; the Supabase mirror already covers "read history from elsewhere" without needing a controller process | A user asks for fleet monitoring |
 | OOS-003 | Any dependency requiring `pip install` or a build step | Python standard library only is a deliberate hard constraint (see `AGENTS.md`); it keeps the tool runnable on a machine mid-outage with no working package registry | Never |
 | OOS-004 | Diagnosing problems inside the AI provider's own infrastructure beyond "is their status page reporting an incident" | This tool has no visibility past its own network path; anything past the far side's edge is the provider's responsibility | Never |
-| OOS-005 | A general-purpose network monitor for arbitrary hosts/services | The entire design — the LLM-transcript correlation, the fix suggestions — is built around one target: an LLM API endpoint used by a coding CLI | A second, clearly distinct target use case is requested |
+| OOS-005 | A general-purpose network monitor for arbitrary hosts/services chosen by the user at runtime | The entire design — the LLM-transcript correlation, the fix suggestions — is built around one target: an LLM API endpoint used by a coding CLI. Read-only identification of the user's own LAN gateway (FR-015, FR-016) is in scope because it improves diagnosis of that one fixed target's path — it does not let the tool monitor a host the user names at runtime | A second, clearly distinct target use case, or user-configurable arbitrary-host monitoring, is requested |
 
 ## 5. Use cases
 
@@ -97,7 +97,7 @@ This is a program that runs on your computer and tells you which part of your in
 | Success outcome | User sees Wi-Fi, modem, NAT/CGNAT, router, interference, and far-side status as ranked causes with evidence and a fix — in the same list, and on the same dashboard, as everything else |
 | Failure paths | A section has no credentials/binary -> `unavailable` for that section only, and it is never cited as a cause |
 | Frequency | Occasional, when starting a fresh diagnosis |
-| Traces to | FR-006 |
+| Traces to | FR-006, FR-015, FR-016 |
 
 ### UC-004: Read history from a dashboard
 
@@ -130,6 +130,8 @@ This is a program that runs on your computer and tells you which part of your in
 | FR-014 | The system must not send device credentials to any address outside a private network, and must say so instead of sending them. | Must | Given `MODEM_HOST` resolves to a public address, when the modem section runs, then no request is made and the section reads `unavailable` naming the misconfigured variable. | UC-003 | done |
 | FR-013 | The system must reach the target over IPv4 and over IPv6 independently, and report a family as broken only when the other family succeeded. | Should | Given IPv6 connects and IPv4 is refused, when ranked, then `broken_ipv4` appears; given the target has no AAAA record, or this host has no IPv6 stack, then the IPv6 section reads `unavailable` and no cause appears. | UC-003 | done |
 | FR-012 | The system must provide local, dry-run-capable OS-level fix scripts for Wi-Fi mode, DNS, and adapter power management, runnable independently of diagnosis. | Should | Given `tools/run_fixes.sh --dry-run`, when run, then it prints what each fix would change without applying it. | - | done |
+| FR-015 | The system must attempt to identify the LAN gateway's manufacturer and model via SSDP (UPnP) discovery, and must report `unavailable`, never `fail`, when no device responds or the discovered device-description URL does not resolve to a private address. | Should | Given a captured SSDP M-SEARCH response and device-description XML fixture, when parsed, then manufacturer and model are extracted; given no SSDP response arrives within the timeout, then the section reads `unavailable`; given the LOCATION header names a host that resolves off-LAN, then no request is made for it and the section reads `unavailable`. | UC-003 | not-started |
+| FR-016 | The system must attempt a best-effort SNMPv2c GET of the standard MIB-II scalar OIDs `sysDescr` and `sysUpTime` against the modem host, and must report `unavailable`, never `fail`, when the agent does not respond within the timeout. | Could | Given a captured SNMP GET-response fixture for `sysDescr`, when parsed, then the value is extracted and the section reads `ok`; given the modem host does not respond within the timeout, then the section reads `unavailable`, not `fail`. DOCSIS-indexed table OIDs requiring SNMP WALK are explicitly out of scope for this requirement. | UC-003 | done |
 
 **Priority values:** `Must` (product does not exist without it), `Should` (product is materially worse without it), `Could` (nice, cut it first), `Won't` (recorded so it is not re-litigated).
 
@@ -154,7 +156,7 @@ This is a program that runs on your computer and tells you which part of your in
 |---|---|---|---|---|---|---|
 | DR-001 | Sample row | One tick's measurement of every network layer | `probes.sample()` | internal | Unbounded locally; user-controlled deletion of `~/.netcheck/netcheck.db` | FR-001 |
 | DR-002 | LLM error | A classified real API error scraped from a CLI transcript | Claude Code's `~/.claude/projects/**/*.jsonl` | internal (may reflect the user's own prompt/response timing, not content) | Unbounded locally | FR-002 |
-| DR-003 | Environment scan | A full snapshot of Wi-Fi, driver, modem, and router state | `environ.scan()` | confidential (may include SSID, BSSID, adapter identity) | Unbounded locally | FR-006 |
+| DR-003 | Environment scan | A full snapshot of Wi-Fi, driver, modem, and router state, including best-effort gateway manufacturer/model and SNMP scalars | `environ.scan()` | confidential (may include SSID, BSSID, adapter identity, gateway manufacturer/model) | Unbounded locally | FR-006, FR-015, FR-016 |
 | DR-004 | Modem/router credentials | Login for optional device queries | User's `.env` file, gitignored | secret | Until the user removes them from `.env`; never written to the database | NFR-004 |
 | DR-005 | Supabase mirror rows | A copy of samples/events/errors/scans on a remote Postgres project | `store.mirror()` | internal | Governed by the user's own Supabase project retention | FR-011 |
 
@@ -170,7 +172,7 @@ Rules:
 | CON-001 | No `pip install`, no `npm install`, no build step. | technical | Project decision (`AGENTS.md`) | Every dependency choice is either "already in the stdlib" or "don't." |
 | CON-002 | Tests use `unittest`, not a third-party test framework. | technical | Project decision, matches CON-001 | CI runs the same `python -m unittest` command and installs nothing. |
 | CON-003 | Windows is the primary, most complete platform; macOS is partial; Linux has only cross-platform probe-level support. | technical | The tool was built against the maintainer's own Windows machine first | Some `environ.py` functions report `unavailable` on non-Windows platforms until ported. |
-| CON-004 | ASUS routers and NETGEAR CAX80-style modems have no public write/read API; parsers are built against reverse-engineered or community-documented formats. | technical | Device vendor decision, outside this project's control | Some parsers (e.g. `parse_airport_info`, the ASUS write path) carry an unverified-against-live-hardware caveat until confirmed. |
+| CON-004 | ASUS routers and NETGEAR CAX80-style modems have no public write/read API; parsers are built against reverse-engineered or community-documented formats. | technical | Device vendor decision, outside this project's control | Some parsers (e.g. `parse_airport_info`, the ASUS write path) carry an unverified-against-live-hardware caveat until confirmed. SSDP discovery and generic SNMP scalars (FR-015, FR-016) add a best-effort, vendor-agnostic identification fallback for gateways that do not match the ASUS/NETGEAR-specific parsers, but do not replace those parsers for detailed DOCSIS/DPI diagnostics. |
 
 ## 10. Assumptions
 
@@ -207,8 +209,10 @@ netcheck is an already-built, shipped tool (Phases 1-28 in git history predate t
 | Slice | Name | What becomes true | Requirements delivered | Est. net LOC | Depends on |
 |---|---|---|---|---|---|
 | SL-000 | SDD scaffold + lean-code pass | `docs/PRD.md`, `docs/SYSTEM-REQUIREMENTS.md`, `docs/DATA-FLOW-DIAGRAM.md`, and `rules/` exist; fully-unreachable modules (`diagnostic_engine.py`, `fix_engine.py`, `fix_application.py`, `monitoring_engine.py`, `verification_engine.py`) and their tests are removed; `OPEN-ISSUES.md` is retired in favor of GitHub issues. | none (infrastructure + cleanup only) | negative (net deletion) | - |
+| SL-001 | SSDP gateway identification | `remote.identify_gateway()` discovers the LAN gateway's manufacturer/model over SSDP and reports it in `environ.scan()`, guarded by the same LAN-only check as credentialed sections. | FR-015 | ~80 | - |
+| SL-002 | Best-effort SNMP scalar probe | `netcheck/snmp.py` GETs `sysDescr`/`sysUpTime` from the modem host over SNMPv2c and reports it in `environ.scan()`, alongside (not replacing) `docsis.py`. | FR-016 | ~120 | - (turned out independent of SL-001; corrected from the original estimate) |
 
-Future slices are chosen from open GitHub issues and this PRD's not-yet-`done` requirements; none are currently `not-started`.
+Future slices are chosen from open GitHub issues and this PRD's not-yet-`done` requirements. SL-001 is `not-started`; SL-002 is `done`.
 
 ## 14. Glossary
 
@@ -233,6 +237,8 @@ Future slices are chosen from open GitHub issues and this PRD's not-yet-`done` r
 | Date | Version | Change | Reason | Affected IDs |
 |---|---|---|---|---|
 | 2026-08-07 | 1.0.0 | Initial PRD written against the already-shipped tool, as part of adopting SDD documentation and a lean-code cleanup pass. Retired `OPEN-ISSUES.md`; unresolved items filed as GitHub issues. | User requested SDD scaffolding (PRD + mandatory docs + rules) and a simplification pass. | All |
+| 2026-08-08 | 1.1.0 | Narrowed OOS-005 to explicitly permit read-only, vendor-agnostic gateway identification (it still excludes user-configurable arbitrary-host monitoring). Added FR-015 (SSDP gateway identification) and FR-016 (best-effort SNMP MIB-II scalar GET, DOCSIS table OIDs explicitly out of scope). Updated CON-004 and DR-003 to note the new identification data. Added SL-001/SL-002 to the slice plan. | User asked for the tool to identify/diagnose any router or modem more generically, research-backed and scoped to stay stdlib-only and KISS. | OOS-005, FR-015, FR-016, CON-004, DR-003, UC-003 |
+| 2026-08-08 | 1.2.0 | FR-016 shipped: `netcheck/snmp.py` (hand-rolled SNMPv2c GET) and `remote.modem_snmp()`, wired into `environ.scan()` as `modem_snmp`. | SL-002 implementation. | FR-016 |
 
 ---
 
