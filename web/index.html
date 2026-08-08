@@ -34,12 +34,13 @@
     </form>
     <h2>Saved prompts</h2>
     <label>Search <input type="search" id="search" /></label>
+    <label><input type="checkbox" id="show-archived" /> Show archived</label>
     <p id="empty-state"></p>
     <ul id="prompt-list"></ul>
   </section>
 
   <script type="module">
-    import { searchPrompts, toggleTagFilter } from "./search.mjs";
+    import { searchPrompts, toggleTagFilter, filterByActive } from "./search.mjs";
     import { buildRenderPanel } from "./panel.mjs";
     import { isCurrentVersion } from "./restore.mjs";
 
@@ -114,6 +115,15 @@
       const panel = buildRenderPanel(prompt, api);
       if (panel) details.append(panel);
       details.append(buildHistoryPanel(prompt));
+      const archiveBtn = document.createElement("button");
+      archiveBtn.type = "button";
+      archiveBtn.textContent = prompt.isActive ? "Archive" : "Restore";
+      archiveBtn.addEventListener("click", async () => {
+        await api(`prompt?id=eq.${prompt.id}`, { method: "PATCH", body: { is_active: !prompt.isActive } });
+        prompt.isActive = !prompt.isActive;
+        renderList();
+      });
+      details.append(archiveBtn);
       item.append(details);
       for (const tag of prompt.tags) {
         const chip = document.createElement("button");
@@ -135,7 +145,8 @@
 
     function renderList() {
       const query = document.getElementById("search").value;
-      const byTag = selectedTag === null ? allPrompts : allPrompts.filter((p) => p.tags.includes(selectedTag));
+      const byActive = filterByActive(allPrompts, document.getElementById("show-archived").checked);
+      const byTag = selectedTag === null ? byActive : byActive.filter((p) => p.tags.includes(selectedTag));
       const shown = searchPrompts(byTag, query);
       const list = document.getElementById("prompt-list");
       list.replaceChildren();
@@ -156,13 +167,14 @@
       // trigger fires on insert, not only update), so currentVersion is
       // always populated, one round trip, no extra query.
       const rows = await api(
-        "prompt?select=id,title,body,tag(tag),prompt_version(version_no)" +
+        "prompt?select=id,title,body,is_active,tag(tag),prompt_version(version_no)" +
           "&order=created_at.desc&prompt_version.order=version_no.desc&prompt_version.limit=1"
       );
       allPrompts = rows.map((row) => ({
         id: row.id,
         title: row.title,
         body: row.body,
+        isActive: row.is_active,
         tags: (row.tag || []).map((t) => t.tag),
         currentVersion: row.prompt_version[0].version_no,
       }));
@@ -170,6 +182,7 @@
     }
 
     document.getElementById("search").addEventListener("input", renderList);
+    document.getElementById("show-archived").addEventListener("change", renderList);
 
     document.getElementById("sign-in-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -207,7 +220,7 @@
             body: tags.map((tag) => ({ prompt_id: saved.id, tag })),
           });
         }
-        allPrompts.unshift({ id: saved.id, title: saved.title, body: saved.body, tags, currentVersion: 1 });
+        allPrompts.unshift({ id: saved.id, title: saved.title, body: saved.body, isActive: true, tags, currentVersion: 1 });
         document.getElementById("save-form").reset();
         renderList();
       } catch (err) {

@@ -3,9 +3,9 @@ title: Prompt Organizer System Requirements
 status: active
 scope: repo
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-08-08
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-011, FR-012, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, CON-001]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-011, FR-012, FR-014, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, CON-001]
 ---
 
 # System Requirements
@@ -26,7 +26,7 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 | ID | Requirement | Mechanism | Verified by |
 |---|---|---|---|
 | SR-05 | RLS enabled **and forced** on every `prompt.*` table; rows are owner-scoped. | `force row level security` + `owner_all` policy on `user_id = auth.uid()` | T-I-002, T-I-003; `pg_class` |
-| SR-06 | The grant surface is the narrowest that satisfies the shipped slices: `prompt.prompt` has `SELECT` (anon, authenticated), `INSERT` (authenticated), and, since SL-004, a column-scoped `UPDATE` on `title, body` only (`id`, `user_id`, `created_at` stay unwritable) — never `DELETE`. `prompt.prompt_version` has only `SELECT` and `INSERT`; no `UPDATE` or `DELETE` grant exists on it at all, ever (SR-19). | Postgres grants | `information_schema.role_table_grants` |
+| SR-06 | The grant surface is the narrowest that satisfies the shipped slices: `prompt.prompt` has `SELECT` (anon, authenticated), `INSERT` (authenticated), and a column-scoped `UPDATE` on `title, body` (since SL-004) plus `is_active` (since SL-011) only (`id`, `user_id`, `created_at` stay unwritable) — never `DELETE`. `prompt.prompt_version` has only `SELECT` and `INSERT`; no `UPDATE` or `DELETE` grant exists on it at all, ever (SR-19). | Postgres grants | `information_schema.role_table_grants` |
 | SR-07 | Only the anon key appears in this repo; it is public by design and RLS is the boundary. The service-role key never appears anywhere. | Key choice + grep | GATE-SHIP SH6 |
 | SR-08 | Prompt bodies (confidential, DR-002) reach only the Supabase project; no other host. | The page's two `fetch` targets | Code inspection of `web/index.html` |
 | SR-18 | Two prompts can never share a title, case-insensitively. | `unique index (lower(title))` on `prompt.prompt` | T-I-004 |
@@ -36,6 +36,7 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 | SR-24 | A prompt's tags are deleted when the prompt is, with no separate mechanism required. | `prompt_id ... references prompt.prompt(id) on delete cascade` | T-I-011 (integrator drill) |
 | SR-25 | A `prompt.usage` row can never name a `(prompt_id, version_no)` pair that was never actually created. | Composite foreign key `(prompt_id, version_no) references prompt.prompt_version(prompt_id, version_no)` — a plain `CHECK` cannot express a cross-table reference | T-I-016 |
 | SR-26 | `prompt.usage` is append-only: no caller, ever, can modify or delete a usage row. | No `UPDATE` or `DELETE` grant or policy exists on it, same absence-is-the-mechanism pattern as `prompt.prompt_version` (SR-19) | Code inspection; `information_schema.role_table_grants` |
+| SR-27 | `prompt.prompt.is_active` is a display filter, not a security boundary: an owner can always read her own archived prompt directly by id, the same as any other row she owns. Ownership (RLS) is the only access control this schema has, before and after SL-011. | The `owner_all` policy is unchanged by SL-011 — no new policy exists for `is_active` | T-I-018 |
 
 ## 3. Data integrity
 

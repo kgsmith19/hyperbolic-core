@@ -3,9 +3,9 @@ title: Prompt Organizer Data Flow Diagram
 status: active
 scope: repo
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-08-08
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-009, FR-011, FR-012, NFR-003, NFR-005, NFR-011, DR-001, DR-002, DR-005, DR-006]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-009, FR-011, FR-012, FR-014, NFR-003, NFR-005, NFR-011, DR-001, DR-002, DR-005, DR-006, DR-007]
 ---
 
 # Data Flow Diagram
@@ -66,6 +66,7 @@ One trust boundary: browser to Supabase. No third position exists, which is why 
 | F-8 | Render and copy | Browser (variable inputs, and since SL-003 one checkbox per optional section) | In-browser only, no network hop | `navigator.clipboard` | Rendered body text (confidential — the same body already in the DOM, substituted and with unselected sections removed) | None needed; the data never leaves the browser it was already fetched into. Excluding a section removes text on its way *out*, so the clipboard can only ever hold a subset of what F-4 already delivered |
 | F-9 | Add tags to a prompt | Browser form (save flow) | `POST /rest/v1/tag` | `prompt.tag` | Tag strings, trimmed/lowercased/deduplicated client-side (internal — bare category words, not confidential) | `with check` via `EXISTS (... prompt.prompt.user_id = auth.uid())`, since `tag` has no `user_id` of its own |
 | F-10 | Log usage | Browser, immediately after F-8's copy succeeds | `POST /rest/v1/usage` | `prompt.usage` | Prompt id, version number (internal — no body text, no confidential data) | `with check (user_id = auth.uid())`; the composite FK (SR-25) rejects a `version_no` that was never actually created |
+| F-11 | Archive / restore a prompt | Browser, the Archive/Restore control | `PATCH /rest/v1/prompt` | `prompt.prompt` | `is_active` boolean (internal, DR-007) | Same `owner_all` RLS as F-5; grant is column-scoped to `is_active` only (SR-06). Display filter, not a security boundary (SR-27) |
 
 Render itself (FR-004/007/010, SL-002; optional sections FR-005, SL-003) stays a pure client-side transform over data F-4 already fetched — it opens no flow to the database and carries no confidential data anywhere. F-10 (SL-007) is new and separate: it fires after a copy, not during render, and carries no body text at all. Section ids are derived from the body at read time and never stored (DR-004), so SL-003 adds no column, no table, and no flow; SL-005 will be the first slice to persist a chosen include list. Tags (FR-012, SL-006) ride the same trust boundary as everything else: ownership checked through the parent row, cascade-deleted with it (SR-24). `core.run`/`core.cost` instrumentation (NFR-010) is `blocked`, not delivered by SL-007 — see the PRD and SPEC-0008 section 2.1; this repo's own `CLAUDE.md` forbids the cross-schema write NFR-010 as worded requires.
 
@@ -73,7 +74,7 @@ Render itself (FR-004/007/010, SL-002; optional sections FR-005, SL-003) stays a
 
 | Store | Contents | Classification | Retention | Encryption |
 |---|---|---|---|---|
-| `prompt.prompt` | Titles (DR-001, internal, globally unique case-insensitively), bodies (DR-002, **confidential**), owner ids (DR-006) | per column | Forever until the user deletes — no `DELETE` grant exists at all, so today rows are effectively permanent | At rest by Supabase |
+| `prompt.prompt` | Titles (DR-001, internal, globally unique case-insensitively), bodies (DR-002, **confidential**), owner ids (DR-006), active flag (DR-007, internal, SL-011) | per column | Forever — no `DELETE` grant exists at all; "deleting" a prompt sets `is_active` false and every row stays in place | At rest by Supabase |
 | `prompt.prompt_version` | One immutable copy of `body` per insert and per distinct-value body edit (DR-002, **confidential**), owner id (DR-006) | per column | Forever — no `UPDATE` or `DELETE` grant or policy exists on this table at all, ever (NFR-005's mechanism) | At rest by Supabase |
 | `prompt.tag` | Bare tag strings, no owner id of its own (DR-001-like, internal) | internal | Forever until the owning prompt is deleted (cascade) — no `DELETE` grant exists to remove a tag on its own | At rest by Supabase |
 | `prompt.usage` | One row per copy: prompt id, version number, `config_name` (`null` until FR-008 ships), owner id (DR-005, internal) | internal | 365 days per DR-005, then aggregated to a monthly count — the aggregation job does not exist yet, same gap `toolbelt`'s own `core.event` retention has (its OOS-005) | At rest by Supabase |
