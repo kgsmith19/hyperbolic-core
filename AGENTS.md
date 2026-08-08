@@ -113,6 +113,16 @@ expressible).
 
 Rules: `.agents/invariants.md` (project invariants), `.agents/domains/` (per-cell constitutions).
 
+**Cell-guard enforcement gap:** the write guard that blocks edits to
+cell-owned paths without a declared owning cell (`.agents/task.json`) runs
+only as a local hook on Kyle's machine, via the machine-level guards engine —
+it was moved out of this repo (see commit `3af2ea6`) and nothing in this repo
+or its CI reimplements it. GitHub-hosted, cloud, or headless agent sessions —
+including Claude Code on the web or Claude Code Remote — have no mechanical
+enforcement of cell boundaries today and rely on the documented rules alone.
+Give changes proposed by such sessions extra human review care until this is
+closed (tracked in a GitHub Issue).
+
 Roadmap: `docs/roadmap.md` (living slice queue + prompts; updated every slice PR).
 Context: `docs/research/lifeos-research-final.md` (v2 synthesis) and
 `docs/research/lifeos-research-2026-07-29.md` (v3 synthesis, behind the

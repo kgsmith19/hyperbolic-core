@@ -1,6 +1,15 @@
 # Protect only mechanisms whose weakening could make PR Gate falsely green.
 /pyproject.toml @kgsmith19
 
+# High-risk cell-owned paths (see .agent/project.yaml risk.protected_paths and
+# .agents/domains/*/CONSTITUTION.md). These entries make review ownership
+# explicit and support tooling. Under the current personal-repository policy,
+# CODEOWNERS is advisory; CI-side cell-boundary enforcement is tracked separately.
+/src/kernel/ @kgsmith19
+/src/api/auth.py @kgsmith19
+/src/domains/*/dispute.py @kgsmith19
+/supabase/migrations/ @kgsmith19
+
 # Canonical control-plane ownership tail. Keep these final non-comment rules.
 /.github/workflows/ @kgsmith19
 /.github/CODEOWNERS @kgsmith19
