@@ -111,7 +111,9 @@ class DocChecker:
 
         for pattern in scaffold_patterns:
             for path in self.root.glob(f"**/{pattern}"):
-                if ".git" not in path.parts:
+                # .github/PULL_REQUEST_TEMPLATE.md and .github/ISSUE_TEMPLATE/
+                # are GitHub's own required names, not leftover scaffolding.
+                if ".git" not in path.parts and ".github" not in path.parts:
                     self.issues.append(
                         Issue(
                             file=str(path),

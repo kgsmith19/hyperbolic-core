@@ -18,6 +18,36 @@ standard, spec/test discipline) this project draws on; not all of it applies
 at this project's current scale, but nothing here contradicts it. Known
 issues and accepted risks are tracked as GitHub issues, not in this repo.
 
+This repo follows the shared [`agent-engineering-standard`](https://github.com/kgsmith19/agent-engineering-standard),
+pinned at `.agent/standard.lock`. That repo's `README.md`/`LIFECYCLE.md`/etc.
+hold the universal rationale; this file and `.agent/project.yaml` hold only
+what is specific to netcheck. Bumping the pin is an explicit, reviewed PR —
+never silent tracking of the standard's default branch.
+
+## Process
+
+- **Work item = GitHub Issue.** Raw ideas are not work until they have an
+  Issue with observable acceptance criteria. A SPEC (`specs/`) is added only
+  when the Issue alone can't unambiguously define correct behavior; most
+  changes here don't need one. PRs link their Issue and close it only when
+  its acceptance criteria are actually met.
+- **One thin slice at a time**, evidence before implementation, RED before
+  GREEN when a meaningful failing test is possible — see `rules/00-CORE.md`
+  and `rules/02-GATES.md` for the mechanics already in force here.
+- **Risk.** `R0` trivial/non-behavioral, `R1` local reversible change (most
+  diagnostics work), `R2` normal product/CLI change, `R3` sensitive boundary
+  (device credentials, Supabase schema, CI/control-plane files — listed in
+  `.agent/project.yaml`'s `risk.protected_paths`), `R4` destructive/automated
+  device writes — **out of scope by product decision**, `docs/PRD.md` OOS-001.
+  An implementer may raise risk, never lower it or drop a control it implies.
+- **`tools/check.sh` is the protected gate.** A change may run it but must
+  not weaken, skip, or edit it — or the tests/tools it invokes — to make its
+  own diff pass. A gate that looks wrong gets reported or fixed in a separate
+  PR, not bypassed in the one it's blocking.
+- **Verification before completion.** Nothing is done until `tools/check.sh`
+  exits 0 on the actual diff; state exactly what remains unverified if it
+  can't be run.
+
 ## Stack
 
 Python 3.12, **standard library only**. No pip, no npm, no build step — this is
