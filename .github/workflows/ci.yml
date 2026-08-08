@@ -1,0 +1,29 @@
+name: CI
+
+# Single lane: this repo has one test command (~2.5s, no build/lint/typecheck
+# exist by design -- see AGENTS.md), so the "fast PR lane" and "full required
+# lane" the standard describes collapse into this one job. Needs zero secrets:
+# tests run against the live Supabase project using only the public anon key
+# and committed fixture credentials (ASM-003, docs/notes/2026-08-06-supabase-project-topology.md).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - run: node --test "tests/*.test.mjs"

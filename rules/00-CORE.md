@@ -1,5 +1,7 @@
 # RULE 00: CORE
 
+> **Superseded 2026-08-08.** This repo now runs on the pinned `agent-engineering-standard` (see `/AGENTS.md` and `.agent/standard.lock`). This card and the rest of `rules/*.md` are kept because past specs in `specs/done/` cite their gate and property IDs by name (`GATE-RED R2`, `PROP-005`, ...) -- not as instructions for new work. `prompts/` (referenced below and by other cards) was never vendored into this repo and does not exist here; see `docs/notes/2026-08-07-repo-references-prompts-and-templates-it-does-not-contain.md` for why, and `/AGENTS.md` for what replaced it.
+
 Always in effect. Every prompt in `prompts/` inherits this. Do not restate it; obey it.
 
 ## Sources of truth, in order

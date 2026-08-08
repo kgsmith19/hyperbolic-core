@@ -1,12 +1,16 @@
 ---
 title: The repo references prompts/ and templates/ that are not in it
-status: active
+status: resolved
 scope: repo
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-08-08
 owner: Kyle
 traces: [NFR-003]
 ---
+
+## Resolved 2026-08-08
+
+Option 3 chosen: the SDD pack is now `kgsmith19/agent-engineering-standard`, a real published repo, pinned by commit SHA in `.agent/standard.lock`. `CLAUDE.md` was slimmed to a two-line pointer at `AGENTS.md`, which is the new operational map; `rules/00-CORE.md` now carries a superseded notice at its top rather than pretending to be the active source of truth. The `prompts/`/`templates/` references inside `rules/*.md` are not individually rewritten -- the superseded notice on `rules/00-CORE.md` is the redirect an agent hits before it would ever follow one of those paths. Self-containment now holds via a stable, pinned URL rather than a path that only resolved on Kyle's own machine.
 
 # The repo references `prompts/` and `templates/` that are not in it
 
