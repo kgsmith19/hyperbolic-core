@@ -1,0 +1,5 @@
+# Routine product work stays zero-approval. Only the engineering control plane requires owner review.
+/.github/workflows/ @kgsmith19
+/.github/CODEOWNERS @kgsmith19
+/.agent/ @kgsmith19
+/AGENTS.md @kgsmith19

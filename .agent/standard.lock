@@ -1,9 +1,7 @@
 standard: kgsmith19/agent-engineering-standard
-commit: 3e23f45363fb4e65a16427723cbd56774796c59d
+commit: 79ba6aaf18651b1c46f0b81368748fe0e4f8813e
 pinned_at: "2026-08-08"
-pinned_by: migration (SPEC-0004 follow-on, agent-engineering-standard adoption)
+pinned_by: lean PR Gate conformance
 
 # This is the ONLY file that names the shared standard's revision.
-# Upgrading the standard is an explicit change to the commit above,
-# reviewed like any other dependency bump -- never silent, never a
-# moving branch reference.
+# Upgrading is an explicit reviewed change, never silent drift onto a moving branch.
