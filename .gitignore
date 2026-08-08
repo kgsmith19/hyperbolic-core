@@ -13,3 +13,7 @@ watcher/claude-cap-watch.state.json
 node_modules/
 test-results/
 playwright-report/
+
+# Local agent worktrees and Superpowers scratch
+.worktrees/
+.superpowers/
