@@ -51,6 +51,7 @@ python -m netcheck sync                        # push to Supabase
 | `netcheck/docsis.py` | DOCSIS status-page parser |
 | `netcheck/ssdp.py` | SSDP/UPnP gateway discovery: the multicast query, the device-description parser, and `identify_gateway()` |
 | `netcheck/snmp.py` | Hand-rolled SNMPv2c GET client, scoped to MIB-II scalar OIDs, and `modem_snmp()` |
+| `netcheck/topology.py` | Address-resolution table (`arp -a`/`ip neigh`) parser and `map_devices()`, cross-referencing SSDP-identified names |
 | `netcheck/environ.py` | This host: Wi-Fi, driver, event log, TCP, MTU, Tailscale; composes `scan()` |
 | `netcheck/remote.py` | Reached over the network: modem, router, WAN address, provider status |
 | `netcheck/llmlog.py` | Transcript scraping, error classification, offsets |

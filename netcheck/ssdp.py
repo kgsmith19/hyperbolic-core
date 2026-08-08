@@ -75,6 +75,10 @@ def identify_gateway(timeout=2):
     answered the multicast -- guarded by the same _on_lan() check remote.py
     uses before sending credentials, since nothing stops a LAN device naming
     a LOCATION outside the LAN.
+
+    The `ip` field on a successful result (the LOCATION host with any port
+    stripped) is what topology.map_devices() cross-references against the
+    address-resolution table to attach this name to the matching device.
     """
     response = discover(timeout)
     if response is None:
@@ -82,7 +86,8 @@ def identify_gateway(timeout=2):
     location = parse_response(response)
     if not location:
         return remote._unavailable("SSDP response had no LOCATION header")
-    host = urllib.parse.urlparse(location).netloc
+    parsed = urllib.parse.urlparse(location)
+    host = parsed.netloc
     if not remote._on_lan(host):
         return remote._unavailable(f"device description host {host!r} is not on a local network")
 
@@ -92,4 +97,4 @@ def identify_gateway(timeout=2):
     device = parse_device_description(body)
     if device is None:
         return remote._unavailable("could not parse device description XML")
-    return dict(device, state="ok")
+    return dict(device, state="ok", ip=parsed.hostname)

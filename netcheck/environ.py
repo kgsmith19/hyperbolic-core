@@ -10,7 +10,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 
-from . import dualstack, probes, remote, snmp, ssdp, wlan_probes
+from . import dualstack, probes, remote, snmp, ssdp, topology, wlan_probes
 
 WINDOWS = probes.WINDOWS
 MACOS = probes.MACOS
@@ -209,6 +209,7 @@ def scan():
         "modem_snmp": snmp.modem_snmp(),
         "router": remote.router(),
         "gateway_id": ssdp.identify_gateway(),
+        "topology": topology.map_devices(),
         "wan": remote.wan(),
         "anthropic": remote.anthropic(),
     }
