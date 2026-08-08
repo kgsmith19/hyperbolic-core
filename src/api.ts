@@ -45,6 +45,7 @@ export const api = {
   createDirective: (b: { text: string; cwd: string; profile: string }) => req<Directive & { error?: string }>("/api/directives", b),
   launch: (id: string) => req<{ ok?: boolean; pid?: number; error?: string }>("/api/launch", { id }),
   setStatus: (id: string, status: "done" | "paused", why?: string) => req<EngineResult>("/api/directives/status", { id, status, why }),
+  note: (id: string, text: string) => req<EngineResult>("/api/directives/note", { id, text }),
   directiveLog: (id: string) => fetch(`/api/directives/log?id=${encodeURIComponent(id)}`).then((r) => (r.ok ? r.text() : "(no log yet)")),
   lane: () => req<LaneStatus>("/api/lane/status"),
   // guards / vault / runbox

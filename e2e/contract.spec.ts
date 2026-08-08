@@ -63,11 +63,29 @@ test("Start work: suggest fills the folder, GO creates + launches, Mark finished
   expect(liveIds()).toHaveLength(0);
 });
 
+test("Start work: Guide appends a note to the log without touching status or restarting", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#task").fill("tighten the guards hook checks");
+  await page.locator("#task").blur();
+  await expect(page.locator("#cwd")).toHaveValue(routeDir);
+  await page.getByRole("button", { name: "GO" }).click();
+  await expect(page.getByTestId("note")).toContainText("launched d-");
+  const ids = liveIds();
+  expect(ids).toHaveLength(1);
+
+  page.once("dialog", (d) => d.accept("focus on the retry path first, ignore the flaky one"));
+  await page.getByRole("button", { name: "Guide" }).click();
+  await expect.poll(() =>
+    fs.readFileSync(path.join(dirsDir, ids[0] + ".log.md"), "utf8")
+  ).toContain("focus on the retry path first, ignore the flaky one");
+  expect(JSON.parse(fs.readFileSync(path.join(dirsDir, ids[0] + ".json"), "utf8")).status).toBe("active");
+});
+
 test("Guards: toggle round-trips through the real server into the engine's state", async ({ page }) => {
   await page.goto("/guards");
-  await expect(page.getByText("ENABLED")).toBeVisible();
+  await expect(page.getByText("ENABLED", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Turn off" }).click();
-  await expect(page.getByText("DISABLED")).toBeVisible();
+  await expect(page.getByText("DISABLED", { exact: true })).toBeVisible();
   expect(JSON.parse(fs.readFileSync(path.join(dir, "guards-state.json"), "utf8")).enabled).toBe(false);
 });
 
