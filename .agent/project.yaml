@@ -1,36 +1,36 @@
-# Repo-specific machine-readable facts. Policy prose lives in AGENTS.md;
-# this file is only tested commands and repo facts, nothing invented.
+# Repo-specific machine-readable facts. Policy prose lives in AGENTS.md.
 name: lifeos
 type: api-service
 
 standard:
   repo: https://github.com/kgsmith19/agent-engineering-standard
-  sha: 3e23f45363fb4e65a16427723cbd56774796c59d # see .agent/standard.lock
+  sha: 79ba6aaf18651b1c46f0b81368748fe0e4f8813e
 
 commands:
   setup: python -m pip install -e .[dev]
   lint: ruff check .
   typecheck: mypy
   fast_verify: ruff check . && mypy
-  # WARNING: wipes the database DATABASE_URL points at — lifeos-test only,
-  # never prod (docs/runbook.md). CI runs this against an ephemeral service
-  # container, never a shared database.
   unit: pytest
   full_verify: ruff check . && mypy && pytest
 
 risk:
-  default: R2 # kernel + API: most changes touch surface other domains depend on
+  default: R2
   protected_paths:
-    - src/kernel/ # domain-agnostic invariants — see .agents/invariants.md
-    - src/api/auth.py # principal/claims verification
-    - src/domains/*/dispute.py # ADR 018 approval/authority gate
-    - supabase/migrations/ # schema changes
+    - src/kernel/
+    - src/api/auth.py
+    - src/domains/*/dispute.py
+    - supabase/migrations/
+    - .github/workflows/
+    - .agent/
 
 ci:
   entry: .github/workflows/ci.yml
-  required_check: "ci / checks"
+  required_check: "PR Gate"
+  required_trigger: "ready pull request + merge_group"
+  main_pipeline: "PR Gate -> docker build/push -> deploy when DEPLOY_ENABLED"
 
 deploy:
-  mechanism: "merge to main -> CI checks -> docker build+push to ghcr.io (sha-tagged) -> OIDC+tailscale SSH deploy"
-  runtime_smoke: "curl -fsS http://127.0.0.1:8000/healthz # the deploy job's own post-deploy check"
-  rollback: "no automated rollback job; images are immutable and sha-tagged in ghcr.io, so the closest existing path is git revert on main -> the normal pipeline redeploys the reverted code as a new sha-tagged image"
+  mechanism: "merge to main -> PR Gate -> docker build+push to ghcr.io (sha-tagged) -> OIDC+tailscale SSH deploy"
+  runtime_smoke: "curl -fsS http://127.0.0.1:8000/healthz"
+  rollback: "git revert on main -> normal pipeline redeploys reverted code as a new sha-tagged image"

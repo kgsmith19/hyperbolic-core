@@ -2,21 +2,22 @@ name: ci
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  merge_group:
 
 permissions:
   contents: read
 
-# PR pushes cancel their own superseded run; a push to main never cancels an
-# in-flight run — the build/deploy chain that follows must not be raced by
-# this group (deploy already has its own dedicated deploy-production group).
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
+    name: ${{ github.event.pull_request.draft && 'Draft CI (local only)' || 'PR Gate' }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -78,9 +79,6 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
     needs: build
     runs-on: ubuntu-latest
-    # No `environment:` here — it would change the OIDC subject to
-    # environment:production, splitting it from backup.yml's ref-based
-    # subject; one exact Infisical binding covers every job this way.
     permissions:
       contents: read
       id-token: write
@@ -95,7 +93,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Secrets come from Infisical via OIDC at run time — GitHub stores none (ADR 009).
       - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
@@ -114,15 +111,6 @@ jobs:
           oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ env.TS_OAUTH_SECRET }}
           tags: tag:ci
-      # Auth to the VPS is Tailscale SSH: the ephemeral tag:ci node is allowed
-      # to reach tag:prod as `deploy` by the tailnet ACL — no SSH key secrets.
-      # The image streams over that same channel (docker save | docker load),
-      # so the VPS holds no registry credentials either. The runtime .env is
-      # rendered from Infisical on every deploy; rotation = edit + re-run.
-      # LIFEOS_IMAGE is recorded in that same .env: compose interpolates its
-      # image from the project-directory .env, so the scheduled-jobs cron
-      # (ops.yml install-scheduled-jobs) runs exactly the image this deploy
-      # runs — recorded atomically with the deploy, it cannot drift.
       - name: Deploy
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
