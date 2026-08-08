@@ -29,3 +29,7 @@ supabase/.env
 
 # Ephemeral agent task declaration (see .agents/hooks/path-guard.mjs)
 .agents/task.json
+
+# Local agent worktrees and Superpowers scratch
+.worktrees/
+.superpowers/
