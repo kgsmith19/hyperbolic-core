@@ -54,7 +54,8 @@ python -m netcheck sync                        # push to Supabase
 | `netcheck/topology.py` | Address-resolution table (`arp -a`/`ip neigh`) parser and `map_devices()`, cross-referencing SSDP-identified names |
 | `netcheck/environ.py` | This host: Wi-Fi, driver, event log, TCP, MTU, Tailscale; composes `scan()` |
 | `netcheck/remote.py` | Reached over the network: modem, router, WAN address, provider status |
-| `netcheck/llmlog.py` | Transcript scraping, error classification, offsets |
+| `netcheck/llmlog.py` | Transcript scraping, error classification, offsets, and `ingest()` |
+| `netcheck/watch.py` | The `netcheck watch` loop: one probe per interval, re-resolved route |
 | `netcheck/store.py` | SQLite schema and writes; Supabase mirror |
 | `netcheck/diagnose.py` | Culprit rules for one row, error correlation, bursts |
 | `netcheck/rank.py` | `_SCAN_RULES`, `_FIXES`, and the ranked report |

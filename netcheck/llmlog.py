@@ -13,6 +13,8 @@ import json
 import re
 from pathlib import Path
 
+from . import store
+
 SOURCES = {"claude-code": Path.home() / ".claude" / "projects",
            "codex": Path.home() / ".codex"}
 
@@ -127,3 +129,15 @@ def scan_all(offsets):
         found, merged = scan(root, merged, source)
         errors.extend(found)
     return errors, merged
+
+
+def ingest(db):
+    """Pull new LLM errors into the store. Cheap: resumes from the stored
+    file offsets. Shared by every command that needs fresh errors before it
+    reads them back (diagnose, serve, watch)."""
+    conn, host = db
+    found, offsets = scan_all(store.offsets(conn))
+    for e in found:
+        store.add_error(conn, host, e)
+    store.save_offsets(conn, offsets)
+    return len(found)

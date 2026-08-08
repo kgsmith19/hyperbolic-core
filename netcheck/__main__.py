@@ -2,7 +2,7 @@
 
   netcheck watch      leave running; one sample per interval  <- the useful one
   netcheck probe      one sample, printed
-  netcheck scan       full environment snapshot
+  netcheck scan       environment snapshot (--tier quick/standard/deep)
   netcheck diagnose   ranked causes from everything collected so far
   netcheck serve      dashboard at http://127.0.0.1:8787
   netcheck sync       push unsynced rows to Supabase
@@ -14,12 +14,11 @@ import os
 import platform
 import socket
 import sys
-import time
 import webbrowser
 from pathlib import Path
 
 from . import (diagnose, environ, experiment, llmlog, probes, rank,
-               route as route_mod, server, store)
+               route as route_mod, server, store, watch)
 from . import __version__
 
 DB = Path(os.environ.get("NETCHECK_DB", Path.home() / ".netcheck" / "netcheck.db"))
@@ -45,91 +44,38 @@ def connect():
     return conn, store.host_id(conn, socket.gethostname(), platform.system())
 
 
-def _ingest_errors(db):
-    """Pull new LLM errors in. Cheap: resumes from the stored file offsets."""
-    conn, host = db
-    found, offsets = llmlog.scan_all(store.offsets(conn))
-    for e in found:
-        store.add_error(conn, host, e)
-    store.save_offsets(conn, offsets)
-    return len(found)
+def _one_probe_row(args):
+    """One FR-001 measurement, culprit-tagged. Shared by probe, scan's
+    quick tier (FR-018), and experiment --label -- all three want exactly
+    this and nothing more."""
+    gw = route_mod.gateway()
+    row = probes.sample(args.target, gw, route_mod.first_hop(gateway_ip=gw), wifi=environ.wifi())
+    row["culprit"] = diagnose.culprit(row)
+    return row
 
 
 def cmd_probe(args):
     conn, host = connect()
-    gw = route_mod.gateway()
-    row = probes.sample(args.target, gw, route_mod.first_hop(gateway_ip=gw), wifi=environ.wifi())
-    row["culprit"] = diagnose.culprit(row)
+    row = _one_probe_row(args)
     store.add_sample(conn, host, row)
     print(json.dumps(row, indent=2))
     return 0
 
 
 def cmd_watch(args):
-    db = connect()
-    route = (route_mod.gateway(), route_mod.first_hop(gateway_ip=route_mod.gateway()))
-    print(f"[netcheck] watching {args.target} every {args.interval}s "
-          f"(gateway {route[0]}, isp hop {route[1]}). Ctrl+C to stop.")
-    snapshot = environ.scan()
-    store.add_scan(db[0], db[1], {"ts": snapshot["ts"],
-                                  "payload": json.dumps(snapshot)})
-    tick = 0
-    try:
-        while True:
-            tick += 1
-            t0 = time.monotonic()
-            route = _tick(db, args, route, tick)
-            time.sleep(max(0, args.interval - (time.monotonic() - t0)))
-    except KeyboardInterrupt:
-        print(f"\n[netcheck] stopped after {tick} samples. Database: {DB}")
-    return 0
-
-
-def _ms(value):
-    """A measurement, or a dash. `None` means the layer was not measurable
-    on this host -- printing 'Nonems' every line reads like a bug."""
-    return f"{value}ms" if value is not None else "-"
-
-
-def _tick(db, args, route, tick):
-    """One watch iteration: sample, store, report.
-
-    Returns the route, which changes when the machine moves to a different
-    network mid-run -- re-resolved every tick, since a cached gateway is how
-    `watch` used to keep pinging the address it had at startup.
-    """
-    conn, host = db
-    gw, hop = route
-    current_gw = route_mod.gateway()
-    if current_gw != gw:
-        gw = current_gw
-        hop = route_mod.first_hop(gateway_ip=gw)
-        print(f"  gateway changed -> {gw} (isp hop {hop})")
-
-    row = probes.sample(args.target, gw, hop, wifi=environ.wifi())
-    row["culprit"] = diagnose.culprit(row)
-    store.add_sample(conn, host, row)
-
-    if tick % args.idle_every == 0:
-        held = probes.idle_hold(args.target, seconds=args.idle_seconds)
-        store.add_event(conn, host, {"ts": row["ts"], "kind": "idle_hold",
-                                     "detail": json.dumps(held)})
-        print(f"  idle-hold: {held['result']} after {held['held_s']}s")
-
-    found = _ingest_errors(db)
-    store.mirror(conn, os.environ.get("SUPABASE_URL"),
-                 os.environ.get("SUPABASE_KEY"), socket.gethostname())
-
-    print(f"[{row['ts']}] {row['culprit'] or 'ok':<10} gw={_ms(row['gw_ms'])} "
-          f"inet={_ms(row['inet_ms'])} dns={_ms(row['dns_router_ms'])} "
-          f"tls={_ms(row['tls_ms'])}"
-          + (f"  (+{found} llm errors)" if found else ""))
-    return gw, hop
+    return watch.run(connect(), args, DB)
 
 
 def cmd_scan(args):
+    """FR-018: quick is _one_probe_row's FR-001 measurement; standard and
+    deep are environ.scan(), the latter with deep=True."""
     conn, host = connect()
-    data = environ.scan()
+    if args.tier == "quick":
+        row = _one_probe_row(args)
+        store.add_sample(conn, host, row)
+        print(json.dumps(row, indent=2))
+        return 0
+    data = environ.scan(deep=(args.tier == "deep"))
     store.add_scan(conn, host, {"ts": data["ts"], "payload": json.dumps(data)})
     print(json.dumps(data, indent=2, default=str))
     return 0
@@ -138,7 +84,7 @@ def cmd_scan(args):
 def cmd_diagnose(args):
     db = connect()
     conn, _host = db
-    _ingest_errors(db)
+    llmlog.ingest(db)
     samples = store.samples(conn)
     raw = store.errors(conn)
     scans = store.scans(conn, 1)
@@ -168,7 +114,7 @@ def cmd_diagnose(args):
 def cmd_serve(args):
     db = connect()
     conn, _host = db
-    _ingest_errors(db)
+    llmlog.ingest(db)
     httpd = server.serve(conn, args.port)
     url = f"http://127.0.0.1:{args.port}"
     print(f"[netcheck] dashboard at {url}  (Ctrl+C to stop)")
@@ -200,10 +146,7 @@ def cmd_experiment(args):
                                     store.samples_by_label(conn, label_b))
         print(experiment.format_report(label_a, label_b, result))
         return 0
-    gw = route_mod.gateway()
-    row = probes.sample(args.target, gw, route_mod.first_hop(gateway_ip=gw), wifi=environ.wifi())
-    row["culprit"] = diagnose.culprit(row)
-    store.add_sample(conn, host, row, label=args.label)
+    store.add_sample(conn, host, _one_probe_row(args), label=args.label)
     print(f"[netcheck] stored 1 sample labeled {args.label!r}")
     return 0
 
@@ -218,7 +161,9 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("probe", help="one sample").set_defaults(fn=cmd_probe)
-    sub.add_parser("scan", help="environment snapshot").set_defaults(fn=cmd_scan)
+    sc = sub.add_parser("scan", help="environment snapshot")
+    sc.add_argument("--tier", choices=("quick", "standard", "deep"), default="standard")
+    sc.set_defaults(fn=cmd_scan)
     sub.add_parser("diagnose", help="ranked causes").set_defaults(fn=cmd_diagnose)
     sub.add_parser("sync", help="push to Supabase").set_defaults(fn=cmd_sync)
 

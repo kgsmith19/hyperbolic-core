@@ -192,8 +192,10 @@ def tailscale(target="api.anthropic.com"):
     return dict(data, state="ok")
 
 
-def scan():
-    """One full environment snapshot."""
+def scan(deep=False):
+    """One environment snapshot. `deep` (FR-018's deep tier) adds the
+    topology map (FR-017) and WAN geolocation (FR-020); the standard tier,
+    the default, omits both."""
     link = wifi()
     out = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -209,8 +211,9 @@ def scan():
         "modem_snmp": snmp.modem_snmp(),
         "router": remote.router(),
         "gateway_id": ssdp.identify_gateway(),
-        "topology": topology.map_devices(),
-        "wan": remote.wan(),
+        "wan": remote.wan(include_geo=deep),
         "anthropic": remote.anthropic(),
     }
+    if deep:
+        out["topology"] = topology.map_devices()
     return out

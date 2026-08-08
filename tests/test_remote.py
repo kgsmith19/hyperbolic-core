@@ -148,6 +148,16 @@ class WanGeolocationTest(unittest.TestCase):
         self.assertFalse(got["cgnat"])
         self.assertEqual(got["geo"]["state"], "unavailable")
 
+    def test_include_geo_false_skips_the_geolocation_lookup(self):
+        """FR-018: standard-tier scans ask wan() not to bother -- geoip is
+        deep-tier-only surface area."""
+        with patch.object(remote, "_http_get",
+                          return_value=('{"ip": "203.0.113.7"}', None)), \
+             patch.object(remote.geoip, "locate") as mock_locate:
+            got = remote.wan(include_geo=False)
+        mock_locate.assert_not_called()
+        self.assertNotIn("geo", got)
+
 
 class CredentialDestinationTest(unittest.TestCase):
     """Credentials reach these devices as HTTP Basic and as a plaintext

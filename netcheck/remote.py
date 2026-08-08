@@ -195,7 +195,7 @@ def _json_get(url):
         return None, _unavailable(f"unparseable response from {url}")
 
 
-def wan(url="https://api.ipify.org?format=json"):
+def wan(url="https://api.ipify.org?format=json", include_geo=True):
     """The address the internet sees us as — the only way to tell a bridged
     modem from one that quietly reverted to routing, and either from CGNAT.
 
@@ -203,13 +203,13 @@ def wan(url="https://api.ipify.org?format=json"):
     address, but never as a condition of this section's own state: a lookup
     that fails degrades only the "geo" sub-key, per geoip.locate()'s
     contract, so wan()'s own state/ip/double_nat/cgnat are unaffected either
-    way.
+    way. `include_geo=False` skips it entirely -- FR-018's standard tier.
     """
     data, section = _json_get(url)
     if section:
         return section
     result = classify_wan(data.get("ip"))
-    if result["state"] == "ok":
+    if include_geo and result["state"] == "ok":
         result["geo"] = geoip.locate(result["ip"])
     return result
 

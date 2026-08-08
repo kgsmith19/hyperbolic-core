@@ -190,5 +190,31 @@ class ScanShapeTest(unittest.TestCase):
             # If we reach here without exception, the test passed
 
 
+class ScanTierTest(unittest.TestCase):
+    """FR-018: deep tier adds the topology map; standard omits it. The
+    topology key's presence is real (added unconditionally by scan() itself,
+    regardless of whether the underlying probe succeeds), so it's checked
+    with a real call the same way test_scan_without_credentials_never_crashes
+    is. wan()'s include_geo wiring is mocked instead, since asserting on
+    "geo" being present would depend on a live network reaching the WAN
+    lookup, which this sandbox does not have."""
+
+    def test_standard_tier_omits_topology(self):
+        self.assertNotIn("topology", environ.scan(deep=False))
+
+    def test_deep_tier_includes_topology(self):
+        self.assertIn("topology", environ.scan(deep=True))
+
+    def test_standard_tier_tells_wan_to_skip_geolocation(self):
+        with patch.object(environ.remote, "wan") as mock_wan:
+            environ.scan(deep=False)
+        mock_wan.assert_called_once_with(include_geo=False)
+
+    def test_deep_tier_tells_wan_to_include_geolocation(self):
+        with patch.object(environ.remote, "wan") as mock_wan:
+            environ.scan(deep=True)
+        mock_wan.assert_called_once_with(include_geo=True)
+
+
 if __name__ == "__main__":
     unittest.main()
