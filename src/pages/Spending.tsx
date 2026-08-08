@@ -6,21 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LabeledInput } from "@/components/labeled-input";
 
 const TIER = {
   red: { text: "STOPPED — you hit your weekly limit", cls: "text-destructive" },
   amber: { text: "Getting expensive", cls: "text-amber-600" },
   green: { text: "Spending is fine", cls: "text-green-600" },
 };
-
-function Num({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="space-y-1">
-      <Label htmlFor={id} className="text-xs">{label}</Label>
-      <Input id={id} className="w-28" value={value} onChange={(e) => onChange(e.target.value)} />
-    </div>
-  );
-}
 
 export default function Spending() {
   const qc = useQueryClient();
@@ -40,7 +32,7 @@ export default function Spending() {
         allow: (s.dials.allow ?? []).join(", "),
       });
     }
-  }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [s]);
 
   const save = useMutation({
     mutationFn: () => api.saveDials({
@@ -71,11 +63,11 @@ export default function Spending() {
             </p>
           </div>
           <div className="flex flex-wrap gap-4">
-            <Num id="softK" label="Warn a session at (k)" value={form.softK ?? ""} onChange={set("softK")} />
-            <Num id="hardK" label="Force save at (k)" value={form.hardK ?? ""} onChange={set("hardK")} />
-            <Num id="maxFinders" label="Max helpers" value={form.maxFinders ?? ""} onChange={set("maxFinders")} />
-            <Num id="amber" label="Warn week (B tokens)" value={form.amber ?? ""} onChange={set("amber")} />
-            <Num id="red" label="STOP week (B tokens)" value={form.red ?? ""} onChange={set("red")} />
+            <LabeledInput id="softK" label="Warn a session at (k)" value={form.softK ?? ""} onChange={set("softK")} />
+            <LabeledInput id="hardK" label="Force save at (k)" value={form.hardK ?? ""} onChange={set("hardK")} />
+            <LabeledInput id="maxFinders" label="Max helpers" value={form.maxFinders ?? ""} onChange={set("maxFinders")} />
+            <LabeledInput id="amber" label="Warn week (B tokens)" value={form.amber ?? ""} onChange={set("amber")} />
+            <LabeledInput id="red" label="STOP week (B tokens)" value={form.red ?? ""} onChange={set("red")} />
           </div>
           <div className="space-y-1">
             <Label htmlFor="allow" className="text-xs">Helpers allowed (comma-separated)</Label>

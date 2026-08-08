@@ -60,5 +60,5 @@ export const api = {
   control: (action: "stop" | "resume" | "fanout") => req<EngineResult & { ok?: boolean }>("/api/process/control", { action }),
   // kernel
   kernelPolicy: () => req<{ kernel: KernelPolicy }>("/api/kernel-policy"),
-  saveKernelPolicy: (k: KernelPolicy) => req<{ ok?: boolean; error?: string }>("/api/kernel-policy", k),
+  saveKernelPolicy: (k: KernelPolicy) => req<{ ok?: boolean; kernel?: KernelPolicy; error?: string }>("/api/kernel-policy", k),
 };

@@ -1,3 +1,4 @@
+import * as React from "react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Shield, ShieldOff } from "lucide-react";
@@ -7,6 +8,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+
+// Plain <select> — no shadcn/Base UI select primitive exists in this repo,
+// and three raw <select>s below shared this exact class string verbatim.
+function SelectBox({ className, ...props }: React.ComponentProps<"select">) {
+  return <select className={cn("w-full rounded-md border bg-transparent p-1 text-sm", className)} {...props} />;
+}
 
 // One list column (secrets / locked paths / watched folders) with add/remove
 // through the engine's paired verbs.
@@ -18,9 +26,9 @@ function ProtList({ title, items, addVerb, rmVerb, onDone }:
   return (
     <div className="space-y-2">
       <h3 className="text-sm font-medium">{title}</h3>
-      <select size={4} className="w-full rounded-md border bg-transparent p-1 text-sm" value={sel} onChange={(e) => setSel(e.target.value)}>
+      <SelectBox size={4} value={sel} onChange={(e) => setSel(e.target.value)}>
         {items.map((i) => <option key={i} value={i}>{i}</option>)}
-      </select>
+      </SelectBox>
       <div className="flex gap-2">
         <Input className="text-xs" placeholder="pattern or path" value={val} onChange={(e) => setVal(e.target.value)} />
         <Button size="sm" variant="outline" disabled={!val.trim()} onClick={() => { run.mutate({ verb: addVerb, arg: val.trim() }); setVal(""); }}>Add</Button>
@@ -85,10 +93,10 @@ export default function Guards() {
                 .map((l) => ({ key: l.slice(0, l.indexOf("=")).trim(), value: l.slice(l.indexOf("=") + 1) }));
               if (pairs.length) importVault.mutate(pairs);
             }}>Save to vault</Button>
-            <select className="rounded-md border bg-transparent p-1.5 text-sm" value={vaultKey} onChange={(e) => setVaultKey(e.target.value)}>
+            <SelectBox className="w-auto p-1.5" value={vaultKey} onChange={(e) => setVaultKey(e.target.value)}>
               <option value="">(keys Claude can use)</option>
               {(s?.vaultKeys ?? []).map((k) => <option key={k} value={k}>{k}</option>)}
-            </select>
+            </SelectBox>
             <Button size="sm" variant="outline" disabled={!vaultKey} onClick={() => rmVaultKey.mutate(vaultKey)}>Delete key</Button>
           </div>
         </CardContent>
@@ -100,15 +108,15 @@ export default function Guards() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <h3 className="mb-1 text-sm font-medium">Pending</h3>
-              <select size={5} className="w-full rounded-md border bg-transparent p-1 text-sm" value={ref} onChange={(e) => setRef(e.target.value)}>
+              <SelectBox size={5} value={ref} onChange={(e) => setRef(e.target.value)}>
                 {(list.data?.pending ?? []).map((i) => <option key={`${i.label}:${i.name}`} value={`${i.label}:${i.name}`}>{i.label}:{i.name}{i.summary ? ` — ${i.summary}` : ""}</option>)}
-              </select>
+              </SelectBox>
             </div>
             <div>
               <h3 className="mb-1 text-sm font-medium">Trash (undo lives here)</h3>
-              <select size={5} className="w-full rounded-md border bg-transparent p-1 text-sm" onChange={(e) => e.target.value && engine.mutate({ verb: "restore", arg: e.target.value })}>
+              <SelectBox size={5} onChange={(e) => e.target.value && engine.mutate({ verb: "restore", arg: e.target.value })}>
                 {(list.data?.trashed ?? []).map((i) => <option key={`${i.label}:${i.name}`} value={`${i.label}:${i.name}`}>{i.label}:{i.name}</option>)}
-              </select>
+              </SelectBox>
             </div>
           </div>
           {ref && <pre className="max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs whitespace-pre-wrap">{preview.data?.content ?? preview.data?.error ?? "…"}</pre>}

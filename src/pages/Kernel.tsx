@@ -4,17 +4,7 @@ import { Cpu } from "lucide-react";
 import { api, type KernelPolicy } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-
-function Field({ id, label, value, onChange, wide }: { id: string; label: string; value: string; onChange: (v: string) => void; wide?: boolean }) {
-  return (
-    <div className="space-y-1">
-      <Label htmlFor={id} className="text-xs">{label}</Label>
-      <Input id={id} className={wide ? "max-w-md" : "w-28"} value={value} onChange={(e) => onChange(e.target.value)} />
-    </div>
-  );
-}
+import { LabeledInput } from "@/components/labeled-input";
 
 export default function Kernel() {
   const qc = useQueryClient();
@@ -34,7 +24,7 @@ export default function Kernel() {
         alwaysAllowTools: k.alwaysAllowTools.join(", "), extraDenyWriteRoots: k.extraDenyWriteRoots.join(", "),
       });
     }
-  }, [policy.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [policy.data]);
 
   const save = useMutation({
     mutationFn: () => api.saveKernelPolicy({
@@ -54,22 +44,22 @@ export default function Kernel() {
     <Card>
       <CardHeader><CardTitle className="flex items-center gap-2"><Cpu className="size-5" /> Kernel policy</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <Field id="harness" label="Harness" value={f.harness ?? ""} onChange={set("harness")} wide />
+        <LabeledInput id="harness" label="Harness" value={f.harness ?? ""} onChange={set("harness")} wide />
         <div className="flex flex-wrap gap-4">
-          <Field id="wallClockMin" label="Budget wall-clock (min)" value={f.wallClockMin ?? ""} onChange={set("wallClockMin")} />
-          <Field id="toolCalls" label="Tool calls" value={f.toolCalls ?? ""} onChange={set("toolCalls")} />
-          <Field id="tokens" label="Tokens" value={f.tokens ?? ""} onChange={set("tokens")} />
-          <Field id="hardWallClockMin" label="Hard cap wall-clock (min)" value={f.hardWallClockMin ?? ""} onChange={set("hardWallClockMin")} />
-          <Field id="checkpointMin" label="Checkpoint (min)" value={f.checkpointMin ?? ""} onChange={set("checkpointMin")} />
+          <LabeledInput id="wallClockMin" label="Budget wall-clock (min)" value={f.wallClockMin ?? ""} onChange={set("wallClockMin")} />
+          <LabeledInput id="toolCalls" label="Tool calls" value={f.toolCalls ?? ""} onChange={set("toolCalls")} />
+          <LabeledInput id="tokens" label="Tokens" value={f.tokens ?? ""} onChange={set("tokens")} />
+          <LabeledInput id="hardWallClockMin" label="Hard cap wall-clock (min)" value={f.hardWallClockMin ?? ""} onChange={set("hardWallClockMin")} />
+          <LabeledInput id="checkpointMin" label="Checkpoint (min)" value={f.checkpointMin ?? ""} onChange={set("checkpointMin")} />
         </div>
         <div className="flex flex-wrap gap-4">
-          <Field id="window" label="Autonomy window" value={f.window ?? ""} onChange={set("window")} />
-          <Field id="rejectRate" label="Reject rate" value={f.rejectRate ?? ""} onChange={set("rejectRate")} />
-          <Field id="factor" label="Tighten factor" value={f.factor ?? ""} onChange={set("factor")} />
-          <Field id="runs" label="Runs" value={f.runs ?? ""} onChange={set("runs")} />
+          <LabeledInput id="window" label="Autonomy window" value={f.window ?? ""} onChange={set("window")} />
+          <LabeledInput id="rejectRate" label="Reject rate" value={f.rejectRate ?? ""} onChange={set("rejectRate")} />
+          <LabeledInput id="factor" label="Tighten factor" value={f.factor ?? ""} onChange={set("factor")} />
+          <LabeledInput id="runs" label="Runs" value={f.runs ?? ""} onChange={set("runs")} />
         </div>
-        <Field id="alwaysAllowTools" label="Always-allow tools (comma-separated)" value={f.alwaysAllowTools ?? ""} onChange={set("alwaysAllowTools")} wide />
-        <Field id="extraDenyWriteRoots" label="Extra deny write roots (comma-separated)" value={f.extraDenyWriteRoots ?? ""} onChange={set("extraDenyWriteRoots")} wide />
+        <LabeledInput id="alwaysAllowTools" label="Always-allow tools (comma-separated)" value={f.alwaysAllowTools ?? ""} onChange={set("alwaysAllowTools")} wide />
+        <LabeledInput id="extraDenyWriteRoots" label="Extra deny write roots (comma-separated)" value={f.extraDenyWriteRoots ?? ""} onChange={set("extraDenyWriteRoots")} wide />
         <div className="flex items-center gap-3">
           <Button onClick={() => save.mutate()}>Save</Button>
           <span data-testid="kernelMsg" className="text-sm text-muted-foreground">{msg}</span>
