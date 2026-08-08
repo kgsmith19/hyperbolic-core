@@ -1,18 +1,12 @@
 name: CI
 
-# Fast PR lane and full lane are the same command here: this repo has no
-# build/lint/typecheck step and no separate slow test tier (0 dependencies,
-# deliberately — see AGENTS.md). Runs against the live toolbelt project using
-# only the public anon key already committed in the test files; no secret is
-# required or accepted (SR-14).
-
 on:
   pull_request:
-  push:
-    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: pr-gate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -20,6 +14,8 @@ permissions:
 
 jobs:
   test:
+    name: ${{ github.event.pull_request.draft && 'Draft CI (local only)' || 'PR Gate' }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

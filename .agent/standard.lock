@@ -1,10 +1,6 @@
 # Pinned agent-engineering-standard revision for this repo.
-# Bumping this is an explicit, reviewed change — never silent drift onto a
-# moving branch. Update by re-reading the standard repo's docs, diffing
-# against this repo's AGENTS.md / .agent / .github, and applying only the
-# deltas that still satisfy AGENT_RULES.md's own governing rule.
-
+# Bumping this is an explicit reviewed change, never silent drift onto a moving branch.
 standard_repo: kgsmith19/agent-engineering-standard
-standard_commit: 3e23f45363fb4e65a16427723cbd56774796c59d
+standard_commit: 79ba6aaf18651b1c46f0b81368748fe0e4f8813e
 pinned_at: 2026-08-08
-pinned_by: migration (this PR)
+pinned_by: lean PR Gate conformance
