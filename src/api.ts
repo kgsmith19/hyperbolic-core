@@ -19,7 +19,7 @@ export type GuardsStatus = {
   vaultKeys: string[]; pending: number; trashed: number;
 };
 export type RunboxItem = { label: string; name: string; summary?: string };
-export type LaneStatus = { automation: unknown[]; interactive: unknown[]; breaker: { tripped: boolean } };
+export type LaneStatus = { automation: unknown[]; breaker: { tripped: boolean } };
 export type KernelPolicy = {
   harness: string;
   budget: { wallClockMin: number; toolCalls: number; tokens: number };
