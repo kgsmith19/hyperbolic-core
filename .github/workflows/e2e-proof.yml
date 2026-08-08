@@ -1,0 +1,40 @@
+name: E2E Proof
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 10 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-proof
+  cancel-in-progress: true
+
+jobs:
+  acceptance-proof:
+    name: UI acceptance proof
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run critical browser journeys with screenshot proof
+        run: npm run e2e
+        env:
+          E2E_PROOF: '1'
+      - name: Upload acceptance proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ui-acceptance-proof
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 30

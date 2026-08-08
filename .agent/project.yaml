@@ -1,33 +1,36 @@
-# Repo-specific machine-readable facts. Policy prose lives in AGENTS.md;
-# this file is only tested commands and repo facts, nothing invented.
+# Repo-specific machine-readable facts. Policy prose lives in AGENTS.md.
 name: lifeos-ui
 type: web-app
 
 standard:
   repo: https://github.com/kgsmith19/agent-engineering-standard
-  sha: 3e23f45363fb4e65a16427723cbd56774796c59d # see .agent/standard.lock
+  sha: 79ba6aaf18651b1c46f0b81368748fe0e4f8813e
 
 commands:
   setup: npm ci
-  build: npm run build # tsc -b && vite build
+  build: npm run build
   format: npm run format
-  lint: npm run lint # oxlint
+  lint: npm run lint
   fast_verify: npm run lint
-  unit: npm run test # vitest run
-  e2e: npm run e2e # playwright test
+  unit: npm run test
+  e2e: npm run e2e
   full_verify: npm run lint && npm run test && npm run e2e && npm run build
-  gen_api: npm run gen:api # regenerate src/api/types.gen.ts from the deployed backend
+  gen_api: npm run gen:api
 
 risk:
   default: R1
   protected_paths:
-    - src/api/client.ts # sole HTTP boundary — auth header + 401 sign-out live here
-    - src/auth/ # session handling
+    - src/api/client.ts
+    - src/auth/
+    - .github/workflows/
+    - .agent/
 
 ci:
   entry: .github/workflows/ci.yml
-  required_check: "ci / checks"
+  required_check: "PR Gate"
+  required_trigger: "ready pull request + merge_group"
+  main_pipeline: "PR Gate -> deploy when DEPLOY_ENABLED"
 
 deploy:
-  mechanism: "merge to main -> CI gate -> dist scp'd to the VPS over tailnet (Infisical OIDC, no static secrets)"
-  runtime_smoke: null # none configured; HealthDot polls /healthz client-side only, not a deploy-gate check
+  mechanism: "merge to main -> PR Gate -> dist scp'd to the VPS over tailnet"
+  runtime_smoke: null
