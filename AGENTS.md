@@ -5,6 +5,11 @@ on Supabase; life domains plug in as data, not schema.
 
 Stack: Python 3.12, FastAPI, Pydantic v2, Supabase (Postgres + pgvector), pytest, ruff, mypy.
 
+Standard: [agent-engineering-standard](https://github.com/kgsmith19/agent-engineering-standard),
+pinned in `.agent/standard.lock`. Repo-specific commands/facts live in
+`.agent/project.yaml` — this file is the prose map, that one is the machine
+copy; keep them in agreement.
+
 Commands (venv at `.venv`, DB creds in `.env`):
 - test: `.venv\Scripts\python -m pytest` — WARNING: tests wipe the database in
   `.env`; point `.env` at the lifeos-test project, never prod (docs/runbook.md).
@@ -63,6 +68,28 @@ Engineering standards:
   test; reuse conftest fixtures.
 - The web UI lives in the sibling `lifeos-ui` repo; its Playwright e2e gate
   runs in that repo's CI (this repo's CI stays lint/types/migrations/pytest).
+
+Work: GitHub Issues are the durable work-item source for new work
+(`.github/ISSUE_TEMPLATE/work-item.md`); raw ideas are not work items until
+they clear outcome + acceptance criteria. `docs/roadmap.md` remains the living
+slice-queue/spec source it already was — this migration does not fold it into
+Issues, since it is actively maintained (updated every slice PR) and doing so
+would be a process rewrite, not a lean migration. One thin slice at a time, in
+a short-lived branch. Define a slice's evidence before writing it — a
+meaningful failing test (RED) before the minimum change that turns it green,
+when a failing test is possible; coverage is a diagnostic signal, not the
+goal. Code without its evidence passing is not done.
+
+Agent risk & autonomy (distinct from the product's ADR 018 approval/authority
+feature below — this is about what an implementing agent may do
+unsupervised): R0 (non-behavioral) through R2 (normal product/API change)
+proceed autonomously once the gate is green. R3 (auth, PII, secrets,
+migrations, deploy config, anything under `.agent/project.yaml`'s
+`protected_paths`) wants a human look before merge in addition to the gate;
+R4 (destructive/financial/irreversible) needs explicit authorization beyond
+that. An agent may raise a slice's declared risk, never lower it, and must not
+change the checks, ruleset, or this risk policy in the same run that does
+product work — that is a separately authorized change.
 
 Provenance convention (ADR 010): every agent-facing tool result carries
 `{source_entity_ids, source_event_ids, method, confidence}`. Direct kernel

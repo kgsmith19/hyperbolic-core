@@ -1,28 +1,18 @@
 # Open issues — lifeos
 
-Standing ledger of things raised and not fixed. Entry format and the
-resolution rule live in `C:\code\OPEN-ISSUES.md`. `/resolve-issues` works this
-list to zero.
+Historical ledger of things raised and fixed before this repo adopted GitHub
+Issues as the durable work-item source (2026-08-08 migration). New work is a
+GitHub Issue (`.github/ISSUE_TEMPLATE/work-item.md`), not an entry here.
 
-Not for this file: roadmap slices and event-triggered gates (they live in
-`docs/roadmap.md` with explicit triggers), and ADR "revisit when" clauses.
+Not for this file (unchanged): roadmap slices and event-triggered gates (they
+live in `docs/roadmap.md` with explicit triggers), and ADR "revisit when"
+clauses.
 
 ---
 
 ## Open
 
-## OI-006 H1 has no weight source until the Withings scale arrives
-- opened: 2026-07-30
-- where: `docs/roadmap.md` (slice H1), Android Health Connect ingestion
-- what: H1 ingests weight + activity from Health Connect. Kyle has the apps and
-  the permissions granted, but the scale he owned had a broken app, so a
-  Withings scale is on order from Amazon. Until it lands there is no live weight
-  writer into Health Connect — activity data is unaffected.
-- why open: hardware in transit; noted here so H1 is not planned or "verified"
-  against a weight stream that cannot exist yet.
-- done when: either H1 ships activity-first with weight explicitly deferred and
-  labelled as such, or the Withings scale is writing to Health Connect and H1 is
-  verified end-to-end against a real weight sample.
+_(none — the one open entry, OI-006, is now [Issue #64](https://github.com/kgsmith19/lifeos/issues/64))_
 
 ## Resolved
 

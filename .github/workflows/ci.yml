@@ -8,6 +8,13 @@ on:
 permissions:
   contents: read
 
+# PR pushes cancel their own superseded run; a push to main never cancels an
+# in-flight run — the build/deploy chain that follows must not be raced by
+# this group (deploy already has its own dedicated deploy-production group).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   checks:
     runs-on: ubuntu-latest
