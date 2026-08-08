@@ -4,7 +4,7 @@ status: living
 created: 2026-08-07
 updated: 2026-08-08
 owner: Kyle Smith
-version: 1.2.0
+version: 1.3.0
 ---
 
 # netcheck PRD
@@ -47,6 +47,11 @@ This is a program that runs on your computer and tells you which part of your in
 - A local web dashboard for reading recorded history without the command line
 - An optional, best-effort mirror of recorded data to a Supabase project, for reading history from more than one machine
 - Local, dry-run-capable OS-level fix scripts for the specific problems this tool can already diagnose (Wi-Fi mode, DNS, adapter power management)
+- Three selectable scan tiers (quick, standard, deep) so a routine check and a full investigation are not the same cost
+- A map of devices visible on the local network (IP, MAC where available, identified name), built from address-resolution tables already on this machine plus SSDP discovery
+- A read-only security-exposure check of devices already identified on the local network: open well-known management ports and a fixed list of no more than 20 known factory-default credential pairs, reported as evidence only, never used to modify a device or gain persistent access
+- A coarse (city/region/country) geographic location for the current WAN address, looked up from a free external API
+- A controlled-comparison mode that runs the same probes twice under two user-labeled conditions (e.g. "wifi" vs. "ethernet") and reports the measured difference between them, never asserting a difference without a sample on both sides
 
 ### 4.2 Out of scope (non-goals)
 
@@ -56,7 +61,9 @@ This is a program that runs on your computer and tells you which part of your in
 | OOS-002 | Monitoring more than one machine from a single running instance | Each machine's Wi-Fi/router/ISP path is independent; the Supabase mirror already covers "read history from elsewhere" without needing a controller process | A user asks for fleet monitoring |
 | OOS-003 | Any dependency requiring `pip install` or a build step | Python standard library only is a deliberate hard constraint (see `AGENTS.md`); it keeps the tool runnable on a machine mid-outage with no working package registry | Never |
 | OOS-004 | Diagnosing problems inside the AI provider's own infrastructure beyond "is their status page reporting an incident" | This tool has no visibility past its own network path; anything past the far side's edge is the provider's responsibility | Never |
-| OOS-005 | A general-purpose network monitor for arbitrary hosts/services chosen by the user at runtime | The entire design — the LLM-transcript correlation, the fix suggestions — is built around one target: an LLM API endpoint used by a coding CLI. Read-only identification of the user's own LAN gateway (FR-015, FR-016) is in scope because it improves diagnosis of that one fixed target's path — it does not let the tool monitor a host the user names at runtime | A second, clearly distinct target use case, or user-configurable arbitrary-host monitoring, is requested |
+| OOS-005 | A general-purpose network monitor for arbitrary hosts/services chosen by the user at runtime | The entire design — the LLM-transcript correlation, the fix suggestions — is built around one target: an LLM API endpoint used by a coding CLI. Read-only identification, mapping, and security-exposure checking of devices on the user's own LAN (FR-015 through FR-020) is in scope because it improves diagnosis of that one fixed target's path — it does not let the tool monitor or scan a host the user names at runtime that is not on their own LAN | A second, clearly distinct target use case, or user-configurable arbitrary-host monitoring, is requested |
+| OOS-006 | Capturing raw network packets (pcap-level) | Windows, this project's primary platform (CON-003), has no packet-capture path in the Python standard library; it needs Npcap, a third-party driver install, which breaks CON-001 | CON-001 or CON-003 changes |
+| OOS-007 | Any exposure check that modifies a device, exploits a vulnerability beyond an unmodified login attempt, tries more than the fixed 20-pair documented default-credential list, or persists access | FR-019's exposure check exists to tell the user what to fix on their own equipment, not to demonstrate a working intrusion; a scanner that keeps trying past a fixed, bounded list, or that changes device state, is a different kind of tool with a different risk profile | Never — a distinct, explicitly-authorized penetration-testing feature would need its own PRD, not an extension of this one |
 
 ## 5. Use cases
 
@@ -112,6 +119,32 @@ This is a program that runs on your computer and tells you which part of your in
 | Frequency | Occasional |
 | Traces to | FR-007 |
 
+### UC-005: Run a deep tiered investigation
+
+| Field | Content |
+|---|---|
+| Actor | U-001 |
+| Precondition | None |
+| Trigger | User runs `netcheck scan --tier deep` |
+| Main path | 1. Tool runs every quick-tier and standard-tier section (FR-001, FR-006). 2. Tool builds a map of devices visible on the local network. 3. Tool checks each mapped device for open well-known management ports and the fixed default-credential list. 4. Tool looks up a coarse geographic location for the current WAN address. 5. Tool includes all of the above, each with its own state, in the same ranked report as everything else. |
+| Success outcome | User sees a full local-network inventory, any exposure findings on their own devices, and a rough sense of where their traffic exits, all in one report |
+| Failure paths | Any single tier-deep section that cannot run (missing platform command, unreachable API, a device that fails the LAN check) reports `unavailable` for that section only; the rest of the report is unaffected |
+| Frequency | Occasional, when a quick or standard scan is not enough |
+| Traces to | FR-017, FR-018, FR-019, FR-020 |
+
+### UC-006: Compare two conditions with a controlled run
+
+| Field | Content |
+|---|---|
+| Actor | U-001 |
+| Precondition | None |
+| Trigger | User runs `netcheck experiment --label wifi`, then later `netcheck experiment --label ethernet` |
+| Main path | 1. Tool runs the standard probe set and stores the samples tagged with the given label. 2. User repeats the command under the other condition with a different label. 3. User runs `netcheck experiment --compare wifi ethernet`. 4. Tool reports each layer's median latency and state-mix side by side for the two labels. |
+| Success outcome | User sees which layer actually changed between the two conditions, backed by measured samples rather than a guess |
+| Failure paths | A requested label with zero stored samples is reported as having no data; the tool never fabricates or infers a comparison for it |
+| Frequency | Occasional, when isolating a suspected single variable (e.g. "is it the Wi-Fi adapter or the cable") |
+| Traces to | FR-021 |
+
 ## 6. Functional requirements
 
 | ID | Requirement | Priority | Acceptance criterion (objective) | Traces to | Status |
@@ -132,10 +165,15 @@ This is a program that runs on your computer and tells you which part of your in
 | FR-012 | The system must provide local, dry-run-capable OS-level fix scripts for Wi-Fi mode, DNS, and adapter power management, runnable independently of diagnosis. | Should | Given `tools/run_fixes.sh --dry-run`, when run, then it prints what each fix would change without applying it. | - | done |
 | FR-015 | The system must attempt to identify the LAN gateway's manufacturer and model via SSDP (UPnP) discovery, and must report `unavailable`, never `fail`, when no device responds or the discovered device-description URL does not resolve to a private address. | Should | Given a captured SSDP M-SEARCH response and device-description XML fixture, when parsed, then manufacturer and model are extracted; given no SSDP response arrives within the timeout, then the section reads `unavailable`; given the LOCATION header names a host that resolves off-LAN, then no request is made for it and the section reads `unavailable`. | UC-003 | done |
 | FR-016 | The system must attempt a best-effort SNMPv2c GET of the standard MIB-II scalar OIDs `sysDescr` and `sysUpTime` against the modem host, and must report `unavailable`, never `fail`, when the agent does not respond within the timeout. | Could | Given a captured SNMP GET-response fixture for `sysDescr`, when parsed, then the value is extracted and the section reads `ok`; given the modem host does not respond within the timeout, then the section reads `unavailable`, not `fail`. DOCSIS-indexed table OIDs requiring SNMP WALK are explicitly out of scope for this requirement. | UC-003 | done |
+| FR-017 | The system must build a map of devices on the local network from address-resolution table output (e.g. `arp -a` / `ip neigh`) plus any SSDP-discovered devices, listing each device's IP, MAC when the table provides one, and identified name when SSDP provided one, and a single device that cannot be further identified must not remove it from the map or block the rest of the map from being built. | Should | Given a captured address-resolution table fixture with 5 entries and one SSDP-discovered device matching one of those IPs, when mapped, then the map lists 5 devices, with the matching one carrying its SSDP-identified name; given the address-resolution command is unavailable on this platform, then the map section reads `unavailable` naming the missing command, not `fail`. | UC-005 | not-started |
+| FR-018 | The system must support three scan tiers — quick (FR-001's layer measurements only), standard (adds every section already defined by FR-006, FR-015, FR-016), and deep (adds FR-017, FR-019, FR-020) — selected by an explicit `--tier` flag on `netcheck scan`, defaulting to standard, and must run only the sections belonging to the requested tier or a shallower one. | Should | Given `netcheck scan --tier quick`, when run, then only FR-001's measurements are attempted and no environment-scan, topology, exposure, or geolocation section appears in the output; given `netcheck scan --tier deep`, then every section from all three tiers appears; given an unrecognized `--tier` value, then the command exits with an error before any probe runs. | UC-005 | not-started |
+| FR-019 | For each device FR-017 maps on the local network, the system must attempt to detect two exposure indicators — an open well-known management port (e.g. 23, 80, 8080, 7547), and a successful login using a fixed, documented list of no more than 20 known factory-default credential pairs against that device's own detected HTTP login endpoint — and must report each finding as evidence naming the port or the matched credential-list entry, must never modify the device, must never attempt a credential beyond the fixed list, and must refuse to run against any host that fails the existing `_on_lan()` check. | Could | Given a captured response fixture showing an open port on a mapped device, when scanned, then the finding names the port and is not treated as a device compromise; given a device's login accepts an entry from the fixed default-credential list, when detected, then the finding names which list entry matched (never the raw credential value forwarded elsewhere) and recommends changing it; given the same check is attempted against a mapped entry that fails `_on_lan()`, then no connection is attempted and its exposure section reads `unavailable` naming the reason. | UC-005 | not-started |
+| FR-020 | The system must look up a coarse (city/region/country) geographic location for the current WAN address using a free external HTTPS geolocation API, attaching it to the existing WAN section, and must report `unavailable` for the geolocation field alone (never affecting the WAN section's own `state`) when the API does not respond or returns no location. | Could | Given the WAN section already reads `ok` with an address, when geolocation is looked up, then a city/region/country string is attached; given the geolocation API is unreachable, then the WAN section's own `state`/`double_nat`/`cgnat` fields are unaffected and only the geolocation field reads `unavailable`. | UC-005 | not-started |
+| FR-021 | The system must let the user tag a run of the standard probe set with a condition label, store each label's samples separately, and on request report each measured layer's median latency and state-mix side by side for two named labels, and must report a label with zero stored samples as having no data rather than inferring or fabricating a value for it. | Could | Given labels "wifi" and "ethernet" each with 5 stored samples, when compared, then the report shows each layer's median latency and state-mix per label; given "ethernet" has zero stored samples, when compared, then the report states it has no data and shows no comparison numbers for it. | UC-006 | not-started |
 
 **Priority values:** `Must` (product does not exist without it), `Should` (product is materially worse without it), `Could` (nice, cut it first), `Won't` (recorded so it is not re-litigated).
 
-**Status values:** `not-started`, `in-slice-NNN`, `done`, `dropped`. As of this document's creation, netcheck is a mature, already-shipped tool — every FR above reflects existing, tested behavior, not a plan.
+**Status values:** `not-started`, `in-slice-NNN`, `done`, `dropped`. netcheck started (2026-08-07) as a mature, already-shipped tool, where every FR reflected existing, tested behavior rather than a plan; FRs added since then (FR-015 onward) follow the normal `not-started` → `in-slice-NNN` → `done` lifecycle like any other requirement.
 
 ## 7. Non-functional requirements
 
@@ -149,6 +187,8 @@ This is a program that runs on your computer and tells you which part of your in
 | NFR-006 | Maintainability | Hermetic test suite: no live network calls, no sleeps beyond a probe's own timing, except explicitly-skippable fault-injection tests. | 0 flaky/networked tests in the default run | `python -m unittest discover -s tests -t .` in CI | done |
 | NFR-007 | Cost | The tool must run with $0 required spend; Supabase mirroring is optional and on the free tier by design. | $0 required | Manual verification of `.env` optionality | done |
 | NFR-008 | Availability | None, because this is a single-machine local tool with no hosted uptime commitment — the thing it measures is the user's own network, not itself. | - | - | - |
+| NFR-009 | Performance | Each scan tier must complete within a fixed time budget so a routine check and a full investigation are never mistaken for a hang. | quick ≤ 10s; standard ≤ 60s (the existing `events()` PowerShell query alone measures ~21s); deep ≤ 120s | Wall-clock timing around each tier in a manual run, recorded in the SL-003 slice's own notes until an automated timing test exists | not-started |
+| NFR-010 | Security | The LAN exposure check (FR-019) must never send a request that modifies device state, must never attempt a credential outside its fixed documented list, and must never run against a host that fails `_on_lan()`. | 0 write requests issued by the exposure check; 0 credential attempts beyond the fixed list; 0 requests to a non-LAN host | Code inspection of `exposure.py`, plus `CredentialDestinationTest`-style tests asserting no request is sent to a host that fails `_on_lan()` | not-started |
 
 ## 8. Data requirements
 
@@ -159,10 +199,14 @@ This is a program that runs on your computer and tells you which part of your in
 | DR-003 | Environment scan | A full snapshot of Wi-Fi, driver, modem, and router state, including best-effort gateway manufacturer/model and SNMP scalars | `environ.scan()` | confidential (may include SSID, BSSID, adapter identity, gateway manufacturer/model) | Unbounded locally | FR-006, FR-015, FR-016 |
 | DR-004 | Modem/router credentials | Login for optional device queries | User's `.env` file, gitignored | secret | Until the user removes them from `.env`; never written to the database | NFR-004 |
 | DR-005 | Supabase mirror rows | A copy of samples/events/errors/scans on a remote Postgres project | `store.mirror()` | internal | Governed by the user's own Supabase project retention | FR-011 |
+| DR-006 | LAN topology map | Device IP/MAC/name inventory of the user's own local network | `topology.py` (address-resolution table + SSDP) | confidential (a map of the user's home network) | Unbounded locally | FR-017 |
+| DR-007 | LAN exposure finding | Which well-known port or which fixed default-credential-list entry matched on a mapped device | `exposure.py` | confidential (describes a live weakness in the user's own equipment) | Unbounded locally | FR-019 |
+| DR-008 | WAN/hop geolocation | City/region/country string for the current WAN address | External geolocation API | internal (derived from an address that is already public to anyone the user connects to) | Unbounded locally | FR-020 |
+| DR-009 | Experiment condition label | A user-chosen text label (e.g. "wifi") attached to a set of stored samples | `netcheck experiment --label` | internal | Unbounded locally | FR-021 |
 
 Rules:
 
-- Anything classified `PII` or `secret` must have a matching NFR describing how it is protected. DR-004 is covered by NFR-004.
+- Anything classified `PII` or `secret` must have a matching NFR describing how it is protected. DR-004 is covered by NFR-004. DR-007 is covered by NFR-010.
 - Retention "unbounded" here is a decision, not an oversight: this is a diagnostic history tool where old samples remain useful evidence, and the user directly controls the database file.
 
 ## 9. Constraints
@@ -173,6 +217,8 @@ Rules:
 | CON-002 | Tests use `unittest`, not a third-party test framework. | technical | Project decision, matches CON-001 | CI runs the same `python -m unittest` command and installs nothing. |
 | CON-003 | Windows is the primary, most complete platform; macOS is partial; Linux has only cross-platform probe-level support. | technical | The tool was built against the maintainer's own Windows machine first | Some `environ.py` functions report `unavailable` on non-Windows platforms until ported. |
 | CON-004 | ASUS routers and NETGEAR CAX80-style modems have no public write/read API; parsers are built against reverse-engineered or community-documented formats. | technical | Device vendor decision, outside this project's control | Some parsers (e.g. `parse_airport_info`, the ASUS write path) carry an unverified-against-live-hardware caveat until confirmed. SSDP discovery and generic SNMP scalars (FR-015, FR-016) add a best-effort, vendor-agnostic identification fallback for gateways that do not match the ASUS/NETGEAR-specific parsers, but do not replace those parsers for detailed DOCSIS/DPI diagnostics. |
+| CON-005 | Wi-Fi diagnostic depth is limited to what the OS Wi-Fi driver reports through `netsh`/`airport` — RSSI, channel, and (where the OS exposes it) a noise or SNR figure. | technical | No dedicated RF hardware (spectrum analyzer) is present on a typical developer machine; measuring the radio signal itself, not just what the driver reports about it, needs that hardware | A spectrum-analyzer USB dongle becomes a supported, commonly-owned accessory |
+| CON-006 | FR-019's exposure check uses a fixed, documented list of no more than 20 well-known factory-default credential pairs; it will miss any device with a custom or rotated password. | technical | Deliberate scope limit (OOS-007): this is a check for the most common, highest-impact mistake, not a credential-stuffing tool | Never — expanding the list is a routine content change, but the check stays fixed-list by design |
 
 ## 10. Assumptions
 
@@ -190,6 +236,7 @@ Rules:
 | EXT-003 | Cable modem (optional) | outbound | HTTP, Basic Auth or vendor token auth | DOCSIS status page or device-specific status query | `unavailable` without credentials configured | None; local segment only |
 | EXT-004 | Router (optional) | outbound | HTTP, ASUS token-auth flow | AiProtection/DPI status query, optional write for settings | `unavailable` without credentials configured | None; local segment only |
 | EXT-005 | Anthropic status page | outbound | HTTPS | Public incident/status data | `unavailable` if unreachable | Public page, no known limit |
+| EXT-006 | Geolocation API (e.g. `ipapi.co`) | outbound | HTTPS | The current WAN address (already public to anyone the user connects to); a city/region/country string returned | `unavailable` for the geolocation field only if unreachable | Free tier request limit of the chosen provider (e.g. 1,000/day); acceptable at one lookup per deep-tier scan, not per tick |
 
 ## 12. Success metrics
 
@@ -211,8 +258,13 @@ netcheck is an already-built, shipped tool (Phases 1-28 in git history predate t
 | SL-000 | SDD scaffold + lean-code pass | `docs/PRD.md`, `docs/SYSTEM-REQUIREMENTS.md`, `docs/DATA-FLOW-DIAGRAM.md`, and `rules/` exist; fully-unreachable modules (`diagnostic_engine.py`, `fix_engine.py`, `fix_application.py`, `monitoring_engine.py`, `verification_engine.py`) and their tests are removed; `OPEN-ISSUES.md` is retired in favor of GitHub issues. | none (infrastructure + cleanup only) | negative (net deletion) | - |
 | SL-001 | SSDP gateway identification | `remote.identify_gateway()` discovers the LAN gateway's manufacturer/model over SSDP and reports it in `environ.scan()`, guarded by the same LAN-only check as credentialed sections. | FR-015 | ~80 | - |
 | SL-002 | Best-effort SNMP scalar probe | `netcheck/snmp.py` GETs `sysDescr`/`sysUpTime` from the modem host over SNMPv2c and reports it in `environ.scan()`, alongside (not replacing) `docsis.py`. | FR-016 | ~120 | - (turned out independent of SL-001; corrected from the original estimate) |
+| SL-003 | Scan tiering flag | `netcheck scan --tier {quick,standard,deep}` selects which sections run; deep-tier sections (SL-004/005/006) are opt-in, not the default. | FR-018 | ~60 | - |
+| SL-004 | LAN topology map | `netcheck/topology.py` parses address-resolution table output into a device list and merges in SSDP-discovered names. | FR-017 | ~100 | - |
+| SL-005 | LAN exposure check | `netcheck/exposure.py` checks each mapped device for an open well-known port and the fixed default-credential list, guarded by `_on_lan()`. | FR-019 | ~140 | SL-004 |
+| SL-006 | WAN/hop geolocation | Adds a geolocation lookup to the WAN section via a free HTTPS API. | FR-020 | ~60 | Q-003 answered |
+| SL-007 | Controlled experiment mode | `netcheck experiment --label`/`--compare` tags sample runs and reports a side-by-side comparison. | FR-021 | ~120 | - |
 
-Future slices are chosen from open GitHub issues and this PRD's not-yet-`done` requirements. SL-001 and SL-002 are both `done`.
+Future slices are chosen from open GitHub issues and this PRD's not-yet-`done` requirements. SL-001 and SL-002 are `done`; SL-003 through SL-007 are `not-started` and follow the same thin-slice, budget-respecting, test-first discipline (`bash tools/check.sh` green before merge) as every slice before them — "minimal lines of code for the functionality delivered" is a property of each slice's implementation, not of this document.
 
 ## 14. Glossary
 
@@ -224,6 +276,10 @@ Future slices are chosen from open GitHub issues and this PRD's not-yet-`done` r
 | Burst | A group of LLM errors that arrived within 60 seconds of each other, counted as one event | Counting each individual retry as its own error |
 | Far side | The AI provider's own infrastructure, past this tool's visibility | "Internet," which refers to the general path between the user and the far side, not the far side itself |
 | Hermetic test | A test with no live network call and no sleep beyond a probe's own timing | A test that merely "usually passes" |
+| Tier | One of three selectable scan depths: quick, standard, deep | "Slice," which is a unit of development work, not a runtime option |
+| Topology map | The list of devices found on the local network, with IP/MAC/name | "Environment scan," which is this machine's own state, not other devices' |
+| Exposure finding | One reported result from FR-019's check: an open port or a matched default-credential-list entry | A confirmed compromise — a finding is evidence to act on, not proof the device was actually breached |
+| Condition label | The user-chosen text tag (e.g. "wifi") attaching a set of stored samples to one side of a comparison | "Culprit," which names a layer, not a labeled run |
 
 ## 15. Open questions
 
@@ -231,6 +287,7 @@ Future slices are chosen from open GitHub issues and this PRD's not-yet-`done` r
 |---|---|---|---|---|---|
 | Q-001 | Should automated fix-application (recommend → apply → verify → monitor) be rebuilt, and if so, wired to what command? | A future slice reintroducing that capability | Kyle Smith | When next requested | Open — the prior unwired implementation was removed 2026-08-07; see the corresponding GitHub issue |
 | Q-002 | Is Linux support (beyond the cross-platform pieces of `probes.py`) worth building, given the primary machine is Windows? | Any Linux-specific `environ.py` work | Kyle Smith | When needed | Open |
+| Q-003 | `ipapi.co` is named in EXT-006 as an example free HTTPS geolocation provider; is it the one to actually build against, or is there a preferred alternate? | SL-006 implementation | Kyle Smith | Before SL-006 starts | Open |
 
 ## 16. Change log
 
@@ -240,6 +297,7 @@ Future slices are chosen from open GitHub issues and this PRD's not-yet-`done` r
 | 2026-08-08 | 1.1.0 | Narrowed OOS-005 to explicitly permit read-only, vendor-agnostic gateway identification (it still excludes user-configurable arbitrary-host monitoring). Added FR-015 (SSDP gateway identification) and FR-016 (best-effort SNMP MIB-II scalar GET, DOCSIS table OIDs explicitly out of scope). Updated CON-004 and DR-003 to note the new identification data. Added SL-001/SL-002 to the slice plan. | User asked for the tool to identify/diagnose any router or modem more generically, research-backed and scoped to stay stdlib-only and KISS. | OOS-005, FR-015, FR-016, CON-004, DR-003, UC-003 |
 | 2026-08-08 | 1.2.0 | FR-016 shipped: `netcheck/snmp.py` (hand-rolled SNMPv2c GET) and `remote.modem_snmp()`, wired into `environ.scan()` as `modem_snmp`. | SL-002 implementation. | FR-016 |
 | 2026-08-08 | 1.2.0 | FR-015 shipped: `netcheck/ssdp.py` (SSDP/UPnP discovery) and `remote.identify_gateway()`, wired into `environ.scan()` as `gateway_id`. | SL-001 implementation. | FR-015 |
+| 2026-08-08 | 1.3.0 | Added tiered scanning (FR-018), a LAN topology map (FR-017), a LAN device exposure check bounded to detection-only against a fixed default-credential list (FR-019), WAN/hop geolocation (FR-020), and a controlled-experiment comparison mode (FR-021). Added UC-005/UC-006, NFR-009 (per-tier performance budget, replacing "otherworldly performance" with concrete numbers) and NFR-010 (exposure-check safety ceiling), DR-006 through DR-009, CON-005 (RF diagnostic depth is bounded by OS driver APIs, not raw spectrum data) and CON-006 (the credential list is deliberately fixed, not a stuffing tool), OOS-006 (no packet capture) and OOS-007 (no exploitation beyond the fixed list), EXT-006, four new glossary terms, Q-003, and SL-003 through SL-007. | User asked for a much broader, "professional grade" diagnostic scope (mapping, tiered depth, extreme logging, geographic component, a controlled-experiment method, and exposure/"back door" scanning), with explicit direction to translate every part of that ask into specific, unambiguous PRD requirements rather than vague language, while keeping each future slice minimal-LOC and test-gated. Three scope-bounding questions (exposure-scan reach, packet capture vs. CON-001, geolocation data source) were confirmed with the user before writing this amendment. | OOS-005, OOS-006, OOS-007, UC-005, UC-006, FR-017, FR-018, FR-019, FR-020, FR-021, NFR-009, NFR-010, DR-006, DR-007, DR-008, DR-009, CON-005, CON-006, EXT-006, Q-003 |
 
 ---
 
