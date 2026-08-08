@@ -1,6 +1,6 @@
 # RULE 00: CORE
 
-Always in effect. Every prompt in `prompts/` inherits this. Do not restate it; obey it.
+Always in effect for every change in this repo. This repo does not vendor a `prompts/` procedure pack (see `AGENTS.md` and the pinned `agent-engineering-standard` in `.agent/standard.lock` for the process this card sits under). Do not restate this card elsewhere; obey it directly.
 
 ## Sources of truth, in order
 

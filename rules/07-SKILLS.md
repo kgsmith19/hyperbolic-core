@@ -13,8 +13,8 @@ Invoke the skill at the named step. Every invocation carries the "must be told" 
 | Step | Skill | Must be told |
 |---|---|---|
 | Explore a problem before requirements exist | `superpowers:brainstorming` | Output feeds `docs/PRD.md`, it is not a separate artifact. Do not save a competing design doc. |
-| Turn findings into requirements | none (use `prompts/11-prd-create.md`) | |
-| Research an unknown before deciding | none (use `prompts/10-research.md`) | |
+| Turn findings into requirements | none | Edit `docs/PRD.md` directly. The SDD pack's `prompts/11-prd-create.md`/`12-prd-update.md` are not vendored into this repo -- see `AGENTS.md`. |
+| Research an unknown before deciding | none | Time-box the investigation to the decision-changing uncertainty and record the conclusion in `docs/notes/`. The SDD pack's `prompts/10-research.md` is not vendored into this repo -- see `AGENTS.md`. |
 | Isolate work for a spec | `superpowers:using-git-worktrees` | One worktree per spec. Branch `slice/SL-NNN-<kebab>`. Must reach a clean green baseline before any task starts. |
 | Break a spec into executable tasks | `superpowers:writing-plans` | **The spec is the contract; the plan is only its breakdown.** Add no behavior the spec does not require. Tasks under `{{MAX_TASK_MINUTES}}` minutes. Task 1 is always "write the red tests". |
 | Execute tasks inside a worktree | `superpowers:subagent-driven-development` | One subagent per task, fresh context, two-stage review. Give each subagent the spec, `rules/02-GATES.md`, `rules/06-TESTS.md`, and its single task. Nothing else. |

@@ -22,7 +22,7 @@ traces: [FR-009, NFR-003, SR-004]
 
 ## Required sections
 
-From `templates/SPEC.md`. None may be omitted; write "None, because \<reason\>" rather than leaving a section blank.
+The 12 sections below. None may be omitted; write "None, because \<reason\>" rather than leaving a section blank. (These originate from `templates/SPEC.md` in the SDD pack this repo was scaffolded from, not vendored into this repo -- see `AGENTS.md`. The table is the authoritative copy for this repo.)
 
 | # | Section | Hard rule |
 |---|---|---|

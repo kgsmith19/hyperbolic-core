@@ -3,7 +3,7 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [SemVer](https://semver.org/): `MAJOR.MINOR.PATCH`, bumped
 with `python tools/release.py bump {major,minor,patch}` (see
-`netcheck/docs/DEPLOYMENT.md` for the full release process). Draft entries for a new
+`docs/notes/2026-08-07-deploying-and-releasing-netcheck.md` for the full release process). Draft entries for a new
 release with `python tools/release.py changelog`, which lists commit
 subjects since the last tag — the entry itself still gets a human editorial
 pass, not full automation.
