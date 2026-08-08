@@ -1,8 +1,9 @@
 # Open issues — lifeos-ui
 
-Standing ledger of things raised and not fixed. Entry format and the
-resolution rule live in `C:\code\OPEN-ISSUES.md`. `/resolve-issues` works this
-list to zero.
+Historical ledger of things raised and fixed before this repo adopted GitHub
+Issues as the durable work-item source (2026-08-08 migration). New work is a
+GitHub Issue (`.github/ISSUE_TEMPLATE/work-item.md`), not an entry here. Kept
+for the record below; `/resolve-issues` no longer has anything to work.
 
 ---
 

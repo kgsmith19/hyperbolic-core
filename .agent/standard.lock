@@ -1,0 +1,6 @@
+# Pinned revision of github.com/kgsmith19/agent-engineering-standard this
+# repo complies with. Upgrades are an explicit edit to this file — never
+# silent drift onto a moving branch.
+repo: https://github.com/kgsmith19/agent-engineering-standard
+sha: 3e23f45363fb4e65a16427723cbd56774796c59d
+pinned_at: "2026-08-08"
