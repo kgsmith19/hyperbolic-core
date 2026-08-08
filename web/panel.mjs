@@ -4,6 +4,14 @@
 // v0.1.5 flagged it for the next slice needing to extend it).
 import { extractVariables, extractSections, render } from "./render.mjs";
 
+// SPEC-0011 AC-001: only values for a still-present variable name apply --
+// narrows a saved configuration, never widens it with a stale name.
+export function applyConfigValues(values, names) {
+  const out = {};
+  for (const name of names) if (name in values) out[name] = values[name];
+  return out;
+}
+
 // Split out of buildRenderPanel to hold it under NFR-009's 40-line function
 // budget; each returns the control map its caller needs to read at copy time.
 function addVariableInputs(panel, names) {
@@ -36,6 +44,42 @@ function addSectionBoxes(panel, ids) {
   return boxes;
 }
 
+// A select to apply a saved configuration, plus a name-and-save control
+// (SPEC-0011). Split out for the same 40-line-function reason as its siblings.
+function addConfigControls(panel, prompt, inputs, boxes, names, ids, api) {
+  const configs = prompt.configurations ?? [];
+  const select = document.createElement("select");
+  select.append(new Option("Apply a saved configuration...", ""));
+  for (const c of configs) select.append(new Option(c.name, c.name));
+  select.addEventListener("change", () => {
+    const c = configs.find((c) => c.name === select.value);
+    if (!c) return;
+    const values = applyConfigValues(c.values, names);
+    for (const name in values) inputs[name].value = values[name];
+    for (const id of ids) boxes[id].checked = c.sections.includes(id);
+  });
+
+  const nameInput = document.createElement("input");
+  nameInput.placeholder = "configuration name";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.textContent = "Save as configuration";
+  saveBtn.addEventListener("click", async () => {
+    if (nameInput.value === "") return;
+    const values = {};
+    for (const name of names) if (inputs[name].value !== "") values[name] = inputs[name].value;
+    const sections = ids.filter((id) => boxes[id].checked);
+    const [saved] = await api("configuration", {
+      method: "POST", body: { prompt_id: prompt.id, name: nameInput.value, values, sections },
+    });
+    configs.push(saved);
+    select.append(new Option(saved.name, saved.name));
+    nameInput.value = "";
+  });
+
+  panel.append(select, nameInput, saveBtn);
+}
+
 // An empty input is omitted from `values` entirely, so render() sees an
 // absent key and its missing-variable block (AC-002 of SPEC-0003) fires --
 // this is the one place "empty input" maps to "absent key".
@@ -47,6 +91,7 @@ export function buildRenderPanel(prompt, api) {
   const panel = document.createElement("div");
   const inputs = addVariableInputs(panel, names);
   const boxes = addSectionBoxes(panel, ids);
+  addConfigControls(panel, prompt, inputs, boxes, names, ids, api);
 
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
