@@ -67,9 +67,10 @@ create table if not exists env_scans (
   unique (host, ts)
 );
 
--- One row per verified fix outcome, keyed by fix_engine's fix_id. See
--- netcheck/schema.sql's fix_outcomes for the local (source of truth) table
--- this mirrors, and store.fix_success_rate for how it's read back.
+-- One row per verified fix outcome. The local SQLite table and reader this
+-- mirrored (fix_engine.py and its callers) were removed 2026-08 as
+-- unreachable code; this table is kept only as historical record, not as
+-- an active mirror target.
 create table if not exists fix_outcomes (
   id      bigserial primary key,
   host    text        not null,

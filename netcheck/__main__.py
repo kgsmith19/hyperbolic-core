@@ -22,7 +22,7 @@ from . import (diagnose, environ, llmlog, probes, rank,
 from . import __version__
 
 DB = Path(os.environ.get("NETCHECK_DB", Path.home() / ".netcheck" / "netcheck.db"))
-TARGET = os.environ.get("NETCHECK_TARGET", "api.anthropic.com")
+TARGET = environ.TARGET  # single definition in environ.py; scan and probe must never disagree
 
 
 def load_env(path=Path(".env")):

@@ -192,9 +192,6 @@ def tailscale(target="api.anthropic.com"):
     return dict(data, state="ok")
 
 
-_ASUS_UA = "asusrouter-Android-DUTUtil-1.0.0.201"
-
-
 def scan():
     """One full environment snapshot."""
     link = wifi()
