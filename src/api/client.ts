@@ -8,6 +8,9 @@ export type EntityView = components["schemas"]["EntityView"];
 export type Event = components["schemas"]["Event"];
 export type CaptureResult = components["schemas"]["CaptureResult"];
 export type ForgetResult = components["schemas"]["ForgetResult"];
+export type ProposalView = components["schemas"]["ProposalView"];
+export type DecisionResult = components["schemas"]["DecisionResult"];
+export type EmittedDraft = components["schemas"]["EmittedDraft"];
 
 export class ApiError extends Error {
   readonly status: number;
@@ -89,6 +92,29 @@ export function forgetEntity(id: string) {
     body: JSON.stringify({}),
   });
 }
+
+// ADR 018: a proposal's draft `body` rides along only while state is
+// "proposed" — reading it is the prerequisite an approval echoes back as
+// `draft_digest`. Once decided, the letter is reachable only through
+// getApprovedDraft, the one function that hands a draft out.
+export const listProposals = () => api<ProposalView[]>("/action-proposals");
+
+export function approveProposal(id: string, draft_digest: string) {
+  return api<DecisionResult>(`/action-proposals/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ draft_digest }),
+  });
+}
+
+export function rejectProposal(id: string) {
+  return api<DecisionResult>(`/action-proposals/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export const getApprovedDraft = (id: string) =>
+  api<EmittedDraft>(`/action-proposals/${id}/draft`);
 
 export type ChatCitations = {
   entity_ids: string[];

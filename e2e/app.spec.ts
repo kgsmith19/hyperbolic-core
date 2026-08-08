@@ -208,6 +208,88 @@ test("tomorrow resolves the briefing's ids into a readable cockpit", async ({
   ).toHaveCount(0);
 });
 
+// ADR 018: the listing renders a draft's body only while a proposal is
+// "proposed" — once decided, the letter comes only from the receipt-gated
+// GET .../draft. The mock below enforces that shape itself (state flips after
+// approval, and the list route never serves a body for the approved proposal)
+// so the test would fail if the page ever fell back to a stale `body`.
+test("approving a proposal reveals the draft through the gated endpoint", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.route(`${API}/healthz`, (route) =>
+    route.fulfill({ json: { status: "ok" } }),
+  );
+  let approved = false;
+  await page.route(`${API}/action-proposals`, (route) =>
+    route.fulfill({
+      json: [
+        approved
+          ? {
+              proposal_id: "p1",
+              kind: "dispute_draft",
+              state: "approved",
+              subject_ids: ["bill1"],
+              points: [],
+              unresolved_count: 1,
+              authority_receipt_id: "auth1",
+              body: null,
+              draft_digest: null,
+            }
+          : {
+              proposal_id: "p1",
+              kind: "dispute_draft",
+              state: "proposed",
+              subject_ids: ["bill1"],
+              points: [],
+              unresolved_count: 1,
+              body: "Dear Acme Billing, I am disputing charge #4471.",
+              draft_digest: "digest-1",
+            },
+      ],
+    }),
+  );
+  let approveBody: unknown;
+  await page.route(`${API}/action-proposals/p1/approve`, async (route) => {
+    approveBody = route.request().postDataJSON();
+    approved = true;
+    await route.fulfill({
+      json: {
+        proposal_id: "p1",
+        state: "approved",
+        authority_receipt_id: "auth1",
+        expires_at: "2026-08-15T00:00:00Z",
+      },
+    });
+  });
+  await page.route(`${API}/action-proposals/p1/draft`, (route) =>
+    route.fulfill({
+      json: {
+        proposal_id: "p1",
+        authority_receipt_id: "auth1",
+        channel: "on_screen",
+        permits: ["display_draft"],
+        expires_at: "2026-08-15T00:00:00Z",
+        body: "Dear Acme Billing, I am disputing charge #4471.",
+      },
+    }),
+  );
+
+  await page.goto("/approvals");
+  await expect(page.getByText(/disputing charge #4471/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "bill1" })).toHaveAttribute(
+    "href",
+    "/entities/bill1",
+  );
+  await page.getByRole("button", { name: /approve/i }).click();
+
+  await expect(page.getByText("approved")).toBeVisible();
+  // Re-rendered through GET .../draft, not carried over from the listing.
+  await expect(page.getByText(/disputing charge #4471/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /approve/i })).toHaveCount(0);
+  expect(approveBody).toEqual({ draft_digest: "digest-1" });
+});
+
 test("capture posts schema-driven attributes", async ({ page }) => {
   await signIn(page);
   await mockApi(page);

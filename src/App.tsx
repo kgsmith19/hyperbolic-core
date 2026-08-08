@@ -10,6 +10,7 @@ import Login from "./pages/Login";
 // Login is the only page on the first-paint path, so it stays eager and the
 // authenticated pages split into their own chunks — the initial bundle no
 // longer grows with every page added to the app.
+const Approvals = lazy(() => import("./pages/Approvals"));
 const Browse = lazy(() => import("./pages/Browse"));
 const Capture = lazy(() => import("./pages/Capture"));
 const Chat = lazy(() => import("./pages/Chat"));
@@ -39,6 +40,9 @@ function Shell({ children }: { children: ReactNode }) {
           </Link>
           <Link to="/tomorrow" className="hover:underline">
             Tomorrow
+          </Link>
+          <Link to="/approvals" className="hover:underline">
+            Approvals
           </Link>
         </nav>
         <div className="ml-auto flex items-center gap-3">
@@ -113,6 +117,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <EntityDetail />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/approvals"
+            element={
+              <RequireAuth>
+                <Approvals />
               </RequireAuth>
             }
           />

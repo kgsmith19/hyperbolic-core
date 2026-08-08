@@ -4,7 +4,8 @@ Web UI for [lifeos](https://github.com/kgsmith19/lifeos): a React SPA over the
 lifeos FastAPI backend (tailnet-only), signed in with Supabase Auth. Chat with
 your data, browse and search the entity graph, capture new entities (including
 daily check-ins) through schema-driven forms, read tomorrow's briefing, inspect
-an entity's edges and full event history, and erase PII (`forget`).
+an entity's edges and full event history, approve or reject proposed dispute
+drafts, and erase PII (`forget`).
 
 Stack: React 19, TypeScript strict, Vite, Tailwind v4, TanStack Query,
 React Router, Vitest + Testing Library, Playwright, oxlint + prettier.
