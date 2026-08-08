@@ -173,4 +173,5 @@ Down migration drops the function. No table, no column, no data touched.
 - [x] Ledger rows mutation-verified 2026-08-08 (see `specs/TEST-LEDGER.md`). One real bug found and fixed mid-drill: Postgres's default `PUBLIC` execute grant was masking the intended `authenticated`-only surface; `revoke ... from public` added, section 2.1.
 - [x] Existing suite still green, unmodified: 58/58 (`node --test "tests/*.test.mjs"`).
 - [x] PRD FR-013 → `done` (v0.1.14) — every PRD requirement is now `done` except nothing; FR-013 was the last one. `docs/SYSTEM-REQUIREMENTS.md` SR-30 added; `docs/DATA-FLOW-DIAGRAM.md` gains F-14.
+- [x] Maintenance note for Issue #11 (2026-08-08): this slice has no dedicated UI surface today (RPC only), so the issue's browser drill applies to archive/configuration UI controls and console health while those flows run. Any future UI that calls `rpc/render_prompt` must be included in that same real-browser drill.
 - [x] Spec moved to `done/`, dates set.

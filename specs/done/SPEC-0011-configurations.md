@@ -127,4 +127,5 @@ Down migration drops `prompt.configuration`. Revert the `index.html`/`panel.mjs`
 - [x] Existing suite still green, unmodified: 52/52 (`node --test "tests/*.test.mjs"`).
 - [x] PRD FR-008 → `done` (v0.1.11) — the last remaining `Must`-priority requirement. `docs/SYSTEM-REQUIREMENTS.md` SR-29 added; `docs/DATA-FLOW-DIAGRAM.md` gains F-13 and `prompt.configuration` in data-at-rest.
 - [x] Live browser drill **not completed**, same sandbox networking limitation recorded in SPEC-0010's Definition of Done. The select-to-apply and save-as controls issue the identical `GET`/`POST` shapes `T-I-019`/`T-I-020` already verify end to end, and `applyConfigValues` (the actual fill-in decision) is unit-tested directly. Flagged as a follow-up drill, not claimed as done.
+- [x] Maintenance follow-up (Issue #11) rerun attempted 2026-08-08 in a real Chromium session from this sandbox and still blocked by environment egress (`ERR_NAME_NOT_RESOLVED` / `TypeError: Failed to fetch` at live Supabase sign-in). Configuration save/apply remains API-verified but browser-unverified in this execution environment.
 - [x] Spec moved to `done/`, dates set.
