@@ -23,12 +23,46 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+      - name: Decide whether runtime verification is required
+        id: changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! changed=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD); then
+            echo "::warning::Could not compute the PR diff; running the full gate."
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "$changed" ]; then
+            echo "::warning::PR diff was unexpectedly empty; running the full gate."
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          printf 'Changed files:\n%s\n' "$changed"
+          runtime_files=$(printf '%s\n' "$changed" | grep -Ev '(^|/).*\.md$|^\.github/CODEOWNERS$|^\.agent/' || true)
+
+          if [ -n "$runtime_files" ]; then
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            printf 'Runtime verification required by:\n%s\n' "$runtime_files"
+          else
+            echo "runtime=false" >> "$GITHUB_OUTPUT"
+            echo 'Documentation/governance-only diff; preserving PR Gate while skipping runtime tests.'
+          fi
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.changes.outputs.runtime == 'true'
         with:
           node-version: '22'
       - name: Fast portable suite
+        if: steps.changes.outputs.runtime == 'true'
         run: npm test
       - name: Expose the integration diff to covgate
+        if: steps.changes.outputs.runtime == 'true'
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -39,4 +73,8 @@ jobs:
             git reset --soft "${{ github.event.merge_group.base_sha }}"
           fi
       - name: Changed-file coverage gate
+        if: steps.changes.outputs.runtime == 'true'
         run: npm run covgate
+      - name: Documentation/governance-only verification
+        if: steps.changes.outputs.runtime != 'true'
+        run: echo 'No runtime-affecting files changed; required PR Gate remains green.'
