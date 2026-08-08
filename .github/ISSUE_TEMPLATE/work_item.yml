@@ -1,0 +1,84 @@
+name: Work item
+description: Validated, approved work for this repo — not a raw idea or brainstorm.
+labels: ["status:ready"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Raw ideas aren't work items. This form is for something already shaped: a PRD requirement, a real bug, an incident, a security finding, an ADR follow-up, or a maintenance need with a falsifiable outcome.
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What useful result should exist when this is done?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: source
+    attributes:
+      label: Source of intent
+      options:
+        - PRD requirement (FR/NFR)
+        - Bug
+        - Incident
+        - Security finding
+        - ADR follow-up
+        - Maintenance
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable, testable. Not "it works" — what specifically must be true.
+      placeholder: |
+        - [ ] Given ... when ... then ...
+    validations:
+      required: true
+
+  - type: input
+    id: success-signal
+    attributes:
+      label: Product success signal (if applicable)
+      description: How would you know this outcome actually mattered, after it ships?
+
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk
+      description: See AGENTS.md — R3 is the default minimum for anything touching supabase/migrations, RLS, or grants.
+      options:
+        - "R0 — nonbehavioral/trivial"
+        - "R1 — local, reversible behavior"
+        - "R2 — normal product/API change"
+        - "R3 — sensitive boundary (auth, PII, secrets, migrations, external actions)"
+        - "R4 — destructive, financial, privileged, irreversible"
+    validations:
+      required: true
+
+  - type: input
+    id: spec
+    attributes:
+      label: SPEC link (only if the Issue alone can't unambiguously define correct behavior)
+
+  - type: textarea
+    id: slices
+    attributes:
+      label: Thin slices (if useful)
+      placeholder: |
+        - [ ] SL-NNN: ...
+
+  - type: textarea
+    id: blockers
+    attributes:
+      label: Blockers / dependencies
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Explicit out of scope
+    validations:
+      required: true
