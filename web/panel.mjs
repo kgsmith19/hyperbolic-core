@@ -60,7 +60,9 @@ export function buildRenderPanel(prompt, api) {
       const value = inputs[name].value;
       if (value !== "") values[name] = value;
     }
+    const startedAt = performance.now();
     const result = render(prompt.body, values, ids.filter((id) => boxes[id].checked));
+    const wallClockMs = Math.round(performance.now() - startedAt);
     if (!result.ok) {
       status.textContent = `Missing: ${result.missing.join(", ")}`;
       return;
@@ -70,6 +72,13 @@ export function buildRenderPanel(prompt, api) {
     // SPEC-0008 (FR-011): after the confirmation, not before -- a slow or
     // failed write must never delay or block the copy FR-007 promises.
     await api("usage", { method: "POST", body: { prompt_id: prompt.id, version_no: prompt.currentVersion } });
+    // SPEC-0009 (NFR-010): toolbelt's core.log_run RPC, not a direct write
+    // against core.* -- this repo's own CLAUDE.md forbids that.
+    await api("rpc/log_run", {
+      method: "POST",
+      profile: "core",
+      body: { p_app_id: "prompt-organizer", p_kind: "render", p_wall_clock_ms: wallClockMs },
+    });
   });
 
   return panel;
