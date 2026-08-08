@@ -30,3 +30,10 @@ export function toggleTagFilter(current, tag) {
 export function filterByActive(prompts, showArchived) {
   return showArchived ? prompts : prompts.filter((p) => p.isActive !== false);
 }
+
+// NFR-008: "/" focuses search from anywhere, except while a text field
+// already has focus, where it must type a literal "/" instead.
+const TYPING_TAGS = ["INPUT", "TEXTAREA", "SELECT"];
+export function shouldFocusSearch(key, targetTagName) {
+  return key === "/" && !TYPING_TAGS.includes(targetTagName);
+}

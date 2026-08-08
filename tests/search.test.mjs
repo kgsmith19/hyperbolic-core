@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { searchPrompts, filterByActive } from "../web/search.mjs";
+import { searchPrompts, filterByActive, shouldFocusSearch } from "../web/search.mjs";
 
 // AC-001 fixture (SPEC-0001 section 4), literal.
 const PROMPTS = [
@@ -131,4 +131,16 @@ test("hides_archived_prompts_by_default_and_shows_them_when_requested__T_U_027__
     { title: "Archived One", isActive: false },
     { title: "Active Two", isActive: true },
   ], "must not mutate its input");
+});
+
+// NFR-008: search must be focusable by a single keystroke from anywhere.
+
+// T-U-030 -> NFR-008. "/" focuses search, except while already typing in a
+// text field, where it must type a literal "/" instead of stealing focus.
+test("focuses_search_on_slash_except_while_already_typing__T_U_030", () => {
+  assert.equal(shouldFocusSearch("/", "BODY"), true);
+  assert.equal(shouldFocusSearch("/", "BUTTON"), true);
+  assert.equal(shouldFocusSearch("/", "INPUT"), false);
+  assert.equal(shouldFocusSearch("/", "TEXTAREA"), false);
+  assert.equal(shouldFocusSearch("a", "BODY"), false);
 });

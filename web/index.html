@@ -40,7 +40,7 @@
   </section>
 
   <script type="module">
-    import { searchPrompts, toggleTagFilter, filterByActive } from "./search.mjs";
+    import { searchPrompts, toggleTagFilter, filterByActive, shouldFocusSearch } from "./search.mjs";
     import { buildRenderPanel } from "./panel.mjs";
     import { isCurrentVersion } from "./restore.mjs";
 
@@ -186,6 +186,12 @@
 
     document.getElementById("search").addEventListener("input", renderList);
     document.getElementById("show-archived").addEventListener("change", renderList);
+    document.addEventListener("keydown", (e) => {
+      if (shouldFocusSearch(e.key, e.target.tagName)) {
+        e.preventDefault();
+        document.getElementById("search").focus();
+      }
+    });
 
     document.getElementById("sign-in-form").addEventListener("submit", async (e) => {
       e.preventDefault();
