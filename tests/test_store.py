@@ -74,6 +74,28 @@ class StoreTest(unittest.TestCase):
             store.add_sample(self.conn, self.host,
                              {"ts": "z", "gw_typo_ms": 1.0})
 
+    def test_label_round_trips_and_defaults_to_none(self):
+        """FR-021: an experiment run's label must survive a write/read cycle,
+        and an ordinary (unlabeled) sample must read back as None, never a
+        fabricated tag."""
+        store.add_sample(self.conn, self.host, {"ts": "t-plain", "gw_state": "ok"})
+        store.add_sample(self.conn, self.host,
+                         {"ts": "t-wifi", "gw_state": "ok"}, label="wifi")
+
+        got = {r["ts"]: r for r in store.samples(self.conn)}
+        self.assertIsNone(got["t-plain"]["label"])
+        self.assertEqual(got["t-wifi"]["label"], "wifi")
+
+    def test_samples_by_label_returns_only_matching_rows(self):
+        store.add_sample(self.conn, self.host, {"ts": "l1", "gw_state": "ok"}, label="wifi")
+        store.add_sample(self.conn, self.host, {"ts": "l2", "gw_state": "ok"}, label="ethernet")
+        store.add_sample(self.conn, self.host, {"ts": "l3", "gw_state": "ok"})
+
+        wifi = store.samples_by_label(self.conn, "wifi")
+        self.assertEqual([r["ts"] for r in wifi], ["l1"])
+        self.assertEqual(store.samples_by_label(self.conn, "nonexistent"), [],
+                         "a label with zero stored samples must read back empty, not raise")
+
 
 class SchemaMigrationTest(unittest.TestCase):
     """An existing user's on-disk database predates whatever columns get
@@ -113,7 +135,7 @@ class SchemaMigrationTest(unittest.TestCase):
         self.addCleanup(conn.close)
 
         current_columns = store.columns(conn, "samples")
-        for expected in ("gw_loss", "wifi_signal", "wifi_bssid", "culprit", "http_code"):
+        for expected in ("gw_loss", "wifi_signal", "wifi_bssid", "culprit", "http_code", "label"):
             self.assertIn(expected, current_columns,
                          f"schema.sql column {expected!r} was not migrated in")
 
@@ -121,6 +143,8 @@ class SchemaMigrationTest(unittest.TestCase):
         self.assertEqual(row["gw_state"], "ok")
         self.assertEqual(row["gw_ms"], 12.5)
         self.assertIsNone(row["culprit"], "new columns on old rows must be NULL, not fabricated")
+        self.assertIsNone(row["label"], "an old, unlabeled row must read back label=None, "
+                                        "never an inferred or fabricated tag")
 
     def test_migrated_database_accepts_new_writes_normally(self):
         self._make_old_database()

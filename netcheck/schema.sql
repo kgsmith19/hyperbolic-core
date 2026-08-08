@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS samples (
   wifi_rx_mbps  REAL,    wifi_tx_mbps REAL,    wifi_bssid TEXT,
 
   culprit          TEXT,             -- lan | isp | internet | router_dns | app
+  label            TEXT,             -- experiment condition tag (FR-021); NULL for ordinary probe/watch runs
   synced           INTEGER NOT NULL DEFAULT 0,
   UNIQUE (host_id, ts)
 );

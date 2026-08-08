@@ -87,8 +87,18 @@ def _insert(conn, table, host, row):
                  tuple(data.values()))
 
 
-def add_sample(conn, host, row):
+def add_sample(conn, host, row, label=None):
+    """Insert one sample. `label` tags the row for FR-021's controlled-
+    comparison mode (`netcheck experiment --label`); ordinary probe/watch
+    runs leave it unset, so they store NULL exactly as before."""
+    if label is not None:
+        row = dict(row, label=label)
     _insert(conn, "samples", host, row)
+
+
+def samples_by_label(conn, label, limit=5000):
+    return _rows(conn.execute(
+        "SELECT * FROM samples WHERE label=? ORDER BY ts DESC LIMIT ?", (label, limit)))
 
 
 def add_event(conn, host, row):

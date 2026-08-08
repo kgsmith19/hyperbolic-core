@@ -6,6 +6,7 @@
   netcheck diagnose   ranked causes from everything collected so far
   netcheck serve      dashboard at http://127.0.0.1:8787
   netcheck sync       push unsynced rows to Supabase
+  netcheck experiment tag or compare labeled probe runs (--label / --compare)
 """
 import argparse
 import json
@@ -17,7 +18,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-from . import (diagnose, environ, llmlog, probes, rank,
+from . import (diagnose, environ, experiment, llmlog, probes, rank,
                route as route_mod, server, store)
 from . import __version__
 
@@ -57,8 +58,7 @@ def _ingest_errors(db):
 def cmd_probe(args):
     conn, host = connect()
     gw = route_mod.gateway()
-    row = probes.sample(args.target, gw, route_mod.first_hop(gateway_ip=gw),
-                        wifi=environ.wifi())
+    row = probes.sample(args.target, gw, route_mod.first_hop(gateway_ip=gw), wifi=environ.wifi())
     row["culprit"] = diagnose.culprit(row)
     store.add_sample(conn, host, row)
     print(json.dumps(row, indent=2))
@@ -189,6 +189,25 @@ def cmd_sync(args):
     return 0 if result.get("state") != "fail" else 1
 
 
+def cmd_experiment(args):
+    """FR-021 / UC-006: tag one probe run with a condition label, or compare
+    two already-labeled runs. Mutually exclusive by construction (argparse's
+    mutually-exclusive group), so exactly one mode runs per invocation."""
+    conn, host = connect()
+    if args.compare:
+        label_a, label_b = args.compare
+        result = experiment.compare(store.samples_by_label(conn, label_a),
+                                    store.samples_by_label(conn, label_b))
+        print(experiment.format_report(label_a, label_b, result))
+        return 0
+    gw = route_mod.gateway()
+    row = probes.sample(args.target, gw, route_mod.first_hop(gateway_ip=gw), wifi=environ.wifi())
+    row["culprit"] = diagnose.culprit(row)
+    store.add_sample(conn, host, row, label=args.label)
+    print(f"[netcheck] stored 1 sample labeled {args.label!r}")
+    return 0
+
+
 def main(argv=None):
     load_env()
     p = argparse.ArgumentParser(prog="netcheck", description=__doc__,
@@ -213,6 +232,13 @@ def main(argv=None):
     s.add_argument("--port", type=int, default=8787)
     s.add_argument("--no-open", action="store_true", dest="no_open")
     s.set_defaults(fn=cmd_serve)
+
+    e = sub.add_parser("experiment", help="tag or compare labeled probe runs")
+    mode = e.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--label", help="tag one probe run and store it under this label")
+    mode.add_argument("--compare", nargs=2, metavar=("LABEL1", "LABEL2"),
+                      help="print median latency and state-mix for two stored labels")
+    e.set_defaults(fn=cmd_experiment)
 
     args = p.parse_args(argv)
     return args.fn(args)
