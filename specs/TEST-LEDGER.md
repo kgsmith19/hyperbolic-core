@@ -2,7 +2,7 @@
 title: Test Justification Ledger
 status: active
 created: 2026-08-06
-updated: 2026-08-07
+updated: 2026-08-08
 owner: Kyle
 ---
 
@@ -35,6 +35,8 @@ owner: Kyle
 | T-A-005 | `tests/dependencies.test.mjs` | acceptance | AC-012 -> FR-006 | The seeded dependency's target idea or reason is missing or wrong on read | Only a real read against `idea.dependency` proves the seed migration wrote what the topology note's section 3 says | No other test reads `idea.dependency` | 2026-08-07 (mutated: `UPDATE idea.dependency SET reason = 'wrong-reason'`; test went red asserting the wrong reason, reverted. Idempotence (PROP-022) also drilled: re-ran the seed migration against the live project, row count stayed 1) | 334 | If `constraint-finder`'s real dependency on `optimize-metrics` is ever removed or superseded | SL-002 |
 | T-A-006 | `tests/log_run.test.mjs` | acceptance | AC-014 -> FR-007 | The `log_run` RPC creates the wrong rows, wrong values, or fails to link `core.cost` to the `core.run` it just created | End-to-end through the real RPC is the AC as written | No other test calls this RPC | 2026-08-07 (mutated: hardcoded `wall_clock_ms` to `0` regardless of caller input; test went red asserting `[{wall_clock_ms: 0}]` !== `[{wall_clock_ms: 42}]`, reverted) | 717 | If `log_run` is replaced by a different mechanism | SL-003 |
 | T-I-009 | `tests/log_run.test.mjs` | integration | AC-015 -> FR-007 | A `log_run` call naming an unregistered tool succeeds anyway | The FK is the mechanism; this proves the RPC does not swallow or mask it | No other test calls this RPC with a bad `app_id` | 2026-08-07 (mutated the function itself, not the pre-existing FK: wrapped the `core.run` insert in an exception handler catching `foreign_key_violation` and returning `null` instead of re-raising; test went red, `200` with `null` instead of `409`; reverted -- this proves the RPC's own code doesn't swallow the error T-I-003 already proved the FK raises, a distinct claim from re-testing the FK itself) | 214 | Never; the same integrity guarantee T-I-003 proved for direct inserts | SL-003 |
+| T-A-007 | `tests/retention.test.mjs` | acceptance | AC-016 -> FR-008 | The retention job deletes a row that is not yet 90 days old, keeps a row that is, or deletes a row without first recording its month in the monthly total | End-to-end through the real function is the AC as written; deleting live event history on a boundary error is real, irreversible data loss, not a cosmetic bug | No other test calls `core.purge_old_events` | 2026-08-08 (mutated: replaced the delete's `where` clause with `where false`, leaving the aggregate insert intact; test went red asserting the old row still existed (`[{id:12,...}]` !== `[]`), reverted) | 924 | If `core.event` retention is replaced by a different mechanism (e.g. native Postgres partitioning) | SL-004 |
+| T-I-010 | `tests/retention.test.mjs` | integration | AC-017 -> FR-008 | Running the retention job on two separate days for the same calendar month overwrites the monthly total instead of adding to it, undercounting real history | The accumulate-not-replace behavior lives in one `on conflict do update` clause; nothing cheaper than actually running the function twice proves it doesn't regress to `do nothing` or a plain overwrite | T-A-007 only runs the function once; this is the distinct multi-run claim | 2026-08-08 (mutated: changed `on conflict do update set event_count = event_count + excluded.event_count` to a plain overwrite, `event_count = excluded.event_count`; both tests went red -- T-I-010 asserting `1 !== 13` (the accumulated history was discarded), T-A-007 also caught it via its own accumulated live-database history since a fresh run's total dropped below `countBefore`, a second, independent signal the same mutation is wrong; reverted) | 604 | Never; this is the durability guarantee DR-003 makes ("kept forever") | SL-004 |
 
 **Column meanings:**
 
@@ -55,11 +57,11 @@ Updated at every Test Review. A shape that inverts (many E2E, few unit) is a def
 |---|---|---|---|---|
 | Unit (`T-U-`) | 0 | ~70% | 0 | Still none. SPEC-0001 added one pure function (`latestScoresByIdea` in `web/index.html`) but left it inline rather than extracting a separately importable module for one caller (GATE-MINIMAL M2); its behavior is covered by the AC-009 browser drill instead. A real second caller would justify extracting and unit-testing it. |
 | Property (counted within unit) | 1 | 1-3 per slice | 1.4s | PROP-005 as an oracle comparison inside T-I-005 |
-| Integration (`T-I-`) | 8 | ~20% | 4.1s | T-I-001 through T-I-005, T-I-007, T-I-008, T-I-009; T-I-006 is a recorded manual drill, not executable |
-| Acceptance (`T-A-`) | 5 | 1 per AC | 2.3s | T-A-001, T-A-004, T-A-005, T-A-006 executable; T-A-002 a recorded manual drill |
+| Integration (`T-I-`) | 9 | ~20% | 4.7s | T-I-001 through T-I-005, T-I-007 through T-I-010; T-I-006 is a recorded manual drill, not executable |
+| Acceptance (`T-A-`) | 5 | 1 per AC | 3.2s | T-A-001, T-A-004, T-A-005, T-A-006, T-A-007 executable; T-A-002 a recorded manual drill |
 | E2E (`T-E-`) | 0 | ~5%, critical paths only | 0 | The browser drill covers this path without adding a dependency |
 | Regression (`T-R-`) | 0 | 1 per real defect | 0 | D-001 is covered by tightening T-A-001, not by a new test |
-| **Total** | 13 executable | | 2.0s | Under `{{MAX_SUITE_SECONDS}}` |
+| **Total** | 15 executable | | 2.5s | Under `{{MAX_SUITE_SECONDS}}` |
 
 ## 3. Regression register
 
@@ -91,12 +93,12 @@ Tests that are flaky, slow, or unproven live here with an expiry date. A quarant
 
 ## 6. Ledger self-check (GATE-LEDGER)
 
-- [x] Every test file in the repo has a matching row in section 1. Six files: `rls.test.mjs` (T-I-001, T-I-002, T-A-001), `constraints.test.mjs` (T-I-003, T-I-004), `seed.test.mjs` (T-I-005), `scores.test.mjs` (T-A-004, T-I-007, T-I-008), `dependencies.test.mjs` (T-A-005), `log_run.test.mjs` (T-A-006, T-I-009).
+- [x] Every test file in the repo has a matching row in section 1. Seven files: `rls.test.mjs` (T-I-001, T-I-002, T-A-001), `constraints.test.mjs` (T-I-003, T-I-004), `seed.test.mjs` (T-I-005), `scores.test.mjs` (T-A-004, T-I-007, T-I-008), `dependencies.test.mjs` (T-A-005), `log_run.test.mjs` (T-A-006, T-I-009), `retention.test.mjs` (T-A-007, T-I-010).
 - [x] Every row in section 1 corresponds to a test that exists. T-I-006, T-A-002, and T-A-003 are labelled as manual drills rather than executable tests, so the count is not overstated.
 - [x] Every row's `Traces to` resolves to a real `PROP-`/`AC-` and a real `FR-`/`NFR-`.
 - [x] Every row has a mutation-verified date. None left `pending`.
 - [x] Every row has a deletion criterion.
 - [x] No row's failure mode is phrased in implementation terms rather than observable terms.
-- [x] Total suite runtime is under `{{MAX_SUITE_SECONDS}}` (120): 2.0s measured, 13 tests.
+- [x] Total suite runtime is under `{{MAX_SUITE_SECONDS}}` (120): 2.5s measured, 15 tests.
 - [x] Quarantine has no expired entries. It is empty.
 - [x] Every regression row names the gate that missed the defect. D-001 names GATE-RED R4, with GATE-GREEN G7 as the backstop that also missed it.

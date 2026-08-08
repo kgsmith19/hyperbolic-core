@@ -3,9 +3,9 @@ title: toolbelt Data Flow Diagram
 status: active
 scope: repo
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-08-08
 owner: Kyle
-traces: [FR-001, FR-002, FR-004, FR-005, FR-006, FR-007, NFR-001, DR-001, DR-002, DR-003, DR-004, DR-005]
+traces: [FR-001, FR-002, FR-004, FR-005, FR-006, FR-007, FR-008, NFR-001, DR-001, DR-002, DR-003, DR-004, DR-005]
 ---
 
 # Data Flow Diagram
@@ -29,9 +29,9 @@ Where data comes from, where it goes, where it rests. What the product does live
 │  PostgREST      ──enforces──▶ RLS as role `authenticated`
 │                                                        │
 │  ┌─ Postgres ────────────────────────────────────┐    │
-│  │  schema core  (10 tables)  ← every tool writes │    │
+│  │  schema core  (11 tables)  ← every tool writes │    │
 │  │  schema idea  (3 tables)   ← the backlog       │    │
-│  │  RLS enabled AND forced on all 13              │    │
+│  │  RLS enabled AND forced on all 14              │    │
 │  └────────────────────────────────────────────────┘    │
 └────────────────────────────────────────────────────────┘
                 ▲
@@ -56,8 +56,9 @@ The only trust boundary is the browser-to-Supabase hop. There is no application 
 | F-7 | Read idea scores | Browser | HTTPS `GET /rest/v1/score` + `Accept-Profile: idea` | PostgREST → `idea.score` | Bearer token | RLS: role must be `authenticated` |
 | F-8 | Read metric names | Browser | HTTPS `GET /rest/v1/metric_def` + `Accept-Profile: core` | PostgREST → `core.metric_def` | Bearer token | RLS: role must be `authenticated` |
 | F-9 | Read idea dependencies | Browser | HTTPS `GET /rest/v1/dependency` + `Accept-Profile: idea` | PostgREST → `idea.dependency` | Bearer token | RLS: role must be `authenticated` |
+| F-10 | Purge old events | `pg_cron` (daily, `0 3 * * *`); also directly callable by any authenticated caller | Internal Postgres call, or HTTPS `POST /rest/v1/rpc/purge_old_events` | `core.purge_old_events` → reads/deletes `core.event`, writes `core.event_monthly_agg` | No caller input; the function reads `now()` itself | RLS: `security definer`, runs regardless of the calling role's own grants, same shape as F-5 |
 
-F-5 is SL-003 (SPEC-0003), shipped 2026-08-07: `prompt-organizer` is the first real caller. F-4 and F-6 remain the shape a tool uses to register itself and to log event/outcome detail directly; no tool writes those yet (PRD OOS-003). F-7 through F-9 are read by the same page load as F-3, in parallel (SPEC-0001, SPEC-0002).
+F-5 is SL-003 (SPEC-0003), shipped 2026-08-07: `prompt-organizer` is the first real caller. F-4 and F-6 remain the shape a tool uses to register itself and to log event/outcome detail directly; no tool writes those yet (PRD OOS-003). F-7 through F-9 are read by the same page load as F-3, in parallel (SPEC-0001, SPEC-0002). F-10 is SL-004 (SPEC-0004), shipped 2026-08-08.
 
 ## 3. Data at rest
 
@@ -68,10 +69,11 @@ F-5 is SL-003 (SPEC-0003), shipped 2026-08-07: `prompt-organizer` is the first r
 | `idea.score` | Empty in production; no real judgment has been entered for any idea (PRD DR-004) | internal | Forever, once a row exists | At rest by Supabase |
 | `core.metric_def` | One real row (`idea_effectiveness`, 0-10, proxy) plus test fixtures | internal | Forever | At rest by Supabase |
 | `core.app`, `core.run`, `core.cost`, `core.outcome`, `core.run_outcome`, `core.metric_value`, `core.assumption`, `core.intervention` | Empty except test fixtures | internal | `core.run` and related tables: forever (PRD DR-002) | At rest by Supabase |
-| `core.event` | Empty | internal | 90 days hot, then a monthly aggregate (PRD DR-003, default not yet implemented) | At rest by Supabase |
+| `core.event` | Empty in production; test fixtures only, self-cleaning (each is older than 90 days by the time the next retention run finds it) | internal | 90 days hot, then purged (PRD DR-003, SL-004/SPEC-0004) | At rest by Supabase |
+| `core.event_monthly_agg` | One row per calendar month that ever had a purged event, holding a count | internal | Forever (PRD DR-003) | At rest by Supabase |
 | `auth.users` | Two test-fixture accounts | internal | Until the fixtures are retired | Managed by Supabase |
 
-**`core.event` is the unbounded-growth table.** Nothing writes to it yet. Its retention job is SL-004 and is tracked as RISK-001 in SPEC-0000.
+**`core.event` no longer grows without bound.** Nothing writes to it in production yet, but its retention job (SL-004/SPEC-0004, tracked as RISK-001 in SPEC-0000) is live: `core.purge_old_events()` runs daily via `pg_cron`, deleting rows older than 90 days into `core.event_monthly_agg`'s permanent monthly counts.
 
 ## 4. Data in transit
 
