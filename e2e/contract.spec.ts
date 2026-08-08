@@ -65,9 +65,9 @@ test("Start work: suggest fills the folder, GO creates + launches, Mark finished
 
 test("Guards: toggle round-trips through the real server into the engine's state", async ({ page }) => {
   await page.goto("/guards");
-  await expect(page.getByText("ENABLED")).toBeVisible();
+  await expect(page.getByText("ENABLED", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Turn off" }).click();
-  await expect(page.getByText("DISABLED")).toBeVisible();
+  await expect(page.getByText("DISABLED", { exact: true })).toBeVisible();
   expect(JSON.parse(fs.readFileSync(path.join(dir, "guards-state.json"), "utf8")).enabled).toBe(false);
 });
 
