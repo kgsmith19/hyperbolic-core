@@ -5,7 +5,6 @@ change breaks a test rather than silently producing null metrics — with SSID,
 BSSID, MAC and GUID replaced by placeholders. A BSSID is enough to locate a
 house through Wi-Fi geolocation databases, so it does not belong in a repo.
 """
-import socket
 import unittest
 import unittest.mock
 

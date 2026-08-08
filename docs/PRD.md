@@ -4,7 +4,7 @@ status: living
 created: 2026-08-07
 updated: 2026-08-08
 owner: Kyle Smith
-version: 1.5.2
+version: 1.5.3
 ---
 
 # netcheck PRD
@@ -305,6 +305,7 @@ Future slices are chosen from open GitHub issues and this PRD's not-yet-`done` r
 | 2026-08-08 | 1.5.0 | FR-020 and FR-021 marked `done` (shipped as PR #47/#48, landed without a PRD update at the time to avoid repeated conflicts on this file). FR-018 shipped: `environ.scan(deep=...)` gates `topology` and `remote.wan()`'s `geo` sub-key behind the deep tier; `netcheck scan --tier {quick,standard,deep}` selects it, with `quick` reusing `probe`'s FR-001 measurement instead of a full scan. `_ingest_errors` moved to `llmlog.ingest()` and the `watch` command's loop moved to `netcheck/watch.py`, both to keep `__main__.py` under its 250-line budget as CLI surface grew. | SL-003 implementation; SL-006/SL-007 status reconciliation. | FR-018, FR-020, FR-021 |
 | 2026-08-08 | 1.5.1 | Completed the reconciliation the 1.5.0 entry above already described but did not finish: the FR-020/FR-021 table rows still read `not-started` despite this file's own changelog and the shipped code (`netcheck/geoip.py`, `netcheck/experiment.py`, both tested and wired in) saying otherwise. Table rows now read `done`, matching reality. No code or test changed. | `kgsmith19/agent-engineering-standard` migration verification pass, checking the merged migration (#51) against this file. | FR-020, FR-021 |
 | 2026-08-08 | 1.5.2 | Added OOS-008 (optional config file), OOS-009 (CLI test subcommands), OOS-010 (`mtu probe_all`) — the three "still undecided" items from GitHub issue #38 — as explicit out-of-scope decisions. Both unmerged branches (`claude/network-diagnostics-ui-5ortgo`, `claude/network-diagnostics-ui-cont-4cl3r9`) and 25 stale merged branches deleted following the decision. No code or test changed. | Issue #38 close-out: owner agreed to record the three open items as out of scope and delete all stale branches. | OOS-008, OOS-009, OOS-010 |
+| 2026-08-08 | 1.5.3 | Corrected the 1.5.2 entry above: the branch deletion it describes never happened. `git push --delete` is blocked by this environment's destructive-action classifier, both for the two out-of-scope branches and for the 25 stale merged ones, with no error surfaced to the agent that wrote 1.5.2. Of those 25, 15 (`claude/loop-goal-4umvxd`, `claude/spec-driven-dev-continue-41309l`, `tmp-probe-delete`, and the twelve `claude/phase-{2,3,4,5,6,7,8,9,10,12,13,14}-*` branches) are independently confirmed here as literal ancestors of `main` via `git branch -r --merged`, but the delete attempt for those was blocked the same way. The OOS-008/009/010 decisions themselves stand; only the "deleted following the decision" claim is false. | Doc-accuracy pass: `git branch -r` on the actual remote still showed all 29 non-`main` branches present, contradicting this file's own record. | none |
 
 ---
 
