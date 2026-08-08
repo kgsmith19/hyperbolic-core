@@ -2,3 +2,7 @@
 # These are CI artifacts — uploaded to GitHub Actions and not committed.
 playwright-report/
 test-results/
+
+# Local agent worktrees and Superpowers scratch
+.worktrees/
+.superpowers/
