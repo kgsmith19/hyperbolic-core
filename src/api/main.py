@@ -47,6 +47,7 @@ from domains.documents.capture import (
 )
 from domains.documents.capture import guard_capture as guard_document_capture
 from domains.episodes.capture import guard_capture as guard_episode_capture
+from domains.health_connect.ingest import IngestResult, process_payload
 from domains.intentions.focus import guard_capture as guard_intention_capture
 from kernel.access import AccessContext, ScopeError
 from kernel.env import read_env
@@ -203,6 +204,40 @@ def get_healthz() -> dict[str, str]:
     """Liveness for deploys and the compose healthcheck. Touches no data."""
     ping()
     return {"status": "ok"}
+
+
+def _hc_secret_context(request: Request) -> AccessContext:
+    """Verify the shared-secret header for the Health Connect webhook.
+
+    The Android app (mcnaveen/health-connect-webhook) sends a custom header per
+    webhook URL; we use X-HC-Secret. LIFEOS_HC_SECRET must be set in the
+    environment; if it is unset the endpoint is open — a deliberate misconfiguration
+    the startup check will catch when auth is enabled. Falls through with
+    AccessContext scoped to health_connect only (no owner-level access).
+    """
+    expected = read_env("LIFEOS_HC_SECRET")
+    if expected:
+        provided = request.headers.get("X-HC-Secret", "")
+        if provided != expected:
+            raise AuthError("invalid or missing X-HC-Secret")
+    return AccessContext.of("health_connect:read", "health_connect:write")
+
+
+HcCtx = Annotated[AccessContext, Depends(_hc_secret_context)]
+
+
+@app.post("/health-connect")
+def post_health_connect(body: dict[str, Any], context: HcCtx) -> IngestResult:
+    """Receive one Health Connect Webhook delivery (H1).
+
+    The Android app posts a rolling 48-hour window and retries on failure, so
+    duplicate delivery is the normal case. Every record is idempotent by content
+    hash — replaying the same window emits zero new events.
+
+    Auth: X-HC-Secret header (set as a custom header in the webhook URL config;
+    see docs/runbook.md for rotation). No JWT: the app cannot hold a user token.
+    """
+    return process_payload(context, body)
 
 
 @app.post("/types")
