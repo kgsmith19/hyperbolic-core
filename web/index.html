@@ -169,7 +169,7 @@
       // trigger fires on insert, not only update), so currentVersion is
       // always populated, one round trip, no extra query.
       const rows = await api(
-        "prompt?select=id,title,body,is_active,tag(tag),prompt_version(version_no)" +
+        "prompt?select=id,title,body,is_active,tag(tag),prompt_version(version_no),configuration(name,values,sections)" +
           "&order=created_at.desc&prompt_version.order=version_no.desc&prompt_version.limit=1"
       );
       allPrompts = rows.map((row) => ({
@@ -179,6 +179,7 @@
         isActive: row.is_active,
         tags: (row.tag || []).map((t) => t.tag),
         currentVersion: row.prompt_version[0].version_no,
+        configurations: row.configuration || [],
       }));
       renderList();
     }
@@ -222,7 +223,7 @@
             body: tags.map((tag) => ({ prompt_id: saved.id, tag })),
           });
         }
-        allPrompts.unshift({ id: saved.id, title: saved.title, body: saved.body, isActive: true, tags, currentVersion: 1 });
+        allPrompts.unshift({ id: saved.id, title: saved.title, body: saved.body, isActive: true, tags, currentVersion: 1, configurations: [] });
         document.getElementById("save-form").reset();
         renderList();
       } catch (err) {
