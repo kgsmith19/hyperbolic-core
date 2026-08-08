@@ -1,0 +1,53 @@
+name: Release Smoke
+
+# Runs against the REAL deployed UI + REAL backend.
+# Never triggered by PRs — only manually or on a weekly schedule.
+# Requires SMOKE_EMAIL and SMOKE_PASSWORD repository secrets
+# (dedicated staging/test account, no production writes).
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Deployed UI URL to test against (leave blank for default)'
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 06 * * 1'   # Mondays 06:00 UTC — weekly release canary
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Full-stack smoke (real auth + real backend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run release smoke test
+        run: npx playwright test --config playwright.smoke.config.ts
+        env:
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+          SMOKE_BASE_URL: ${{ inputs.base_url || '' }}
+
+      - name: Upload smoke evidence (screenshots + traces)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-smoke-evidence
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 30

@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: "**/smoke.spec.ts",
   reporter: [["line"], ["html", { open: "never" }]],
   use: {
     baseURL: "http://localhost:5173",
