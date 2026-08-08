@@ -1,0 +1,43 @@
+# Machine-readable project facts for ACC/Toolbelt and agents. Prose policy
+# lives in AGENTS.md and the pinned standard (.agent/standard.lock) — keep
+# this file to tested facts only.
+
+project:
+  name: agentic-command-center-ui
+  type: web-frontend
+  stack: [react19, vite7, typescript, tailwindcss4]
+  runtime: node
+  node_version: ">=22"
+
+commands:
+  setup: npm ci
+  build: npm run build          # tsc -b --strict && vite build
+  dev: npm run dev              # proxies /api to a running ACC server (ACC_API= to override)
+  fast_verify: npm run build    # every slice, before pushing
+  full_verify: npm run e2e      # contract e2e vs a REAL ACC server; requires ACC_DIR
+  test: npm run e2e
+  # full_verify prerequisite: a sibling checkout of kgsmith19/agentic-command-center.
+  # ACC_DIR=<path> npm run e2e; CI clones it fresh (see .github/workflows/ci.yml).
+
+platform:
+  os: [linux]   # no platform-specific behavior; CI runs ubuntu-latest only
+
+risk:
+  default: R1                   # local, reversible UI/behavior change
+  notes:
+    - "src/api.ts changes are R2: it is the typed mirror of ACC's gui/README.md contract."
+    - "Guards/vault page changes (src/pages/Guards.tsx) that alter how secret values are handled are R3: secrets boundary, even though this repo never persists them."
+  protected_paths:
+    - .github/workflows/        # CI / protected evaluator
+    - .agent/standard.lock      # standard pin
+
+ci:
+  fast_lane: [build]                    # every PR push
+  full_lane: [build, contract-e2e]      # required to merge; contract-e2e is this repo's only real correctness oracle
+  deep_lane: []                         # none: no mutation/fuzz/perf infra exists and none is justified yet (see migration report)
+
+deployment:
+  mechanism: "ACC serves this repo's built dist/ same-origin via `--ui-dist` (ADR-0006, kgsmith19/agentic-command-center)"
+  authority: "manual — Kyle runs ACC with --ui-dist on his own machine; no hosted deploy target exists"
+
+telemetry: none   # no ACC/Toolbelt integration wired yet; see migration report Remaining Gaps
