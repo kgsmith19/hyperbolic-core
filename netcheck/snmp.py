@@ -7,9 +7,14 @@ channel) are indexed and need GetNext/GetBulk to walk, a materially larger
 protocol surface docsis.py's HTML scrape already covers for the vendors that
 expose it. Split out for the same reason ssdp.py and docsis.py are: a
 self-contained protocol implementation its caller does not need to know the
-inside of.
+inside of. modem_snmp() lives here for the same reason ssdp.py holds
+identify_gateway() -- it reaches into remote's _on_lan()/_unavailable() the
+same way environ.py already reaches into probes._run().
 """
+import os
 import socket
+
+from . import remote
 
 SYS_DESCR = "1.3.6.1.2.1.1.1.0"
 SYS_UPTIME = "1.3.6.1.2.1.1.3.0"
@@ -105,3 +110,21 @@ def get(oid, host, timeout=2, request_id=1):
     except OSError:
         return None
     return parse_response(data, request_id)
+
+
+def modem_snmp(host=None, timeout=2):
+    """Best-effort SNMPv2c read of generic MIB-II scalars from the modem.
+
+    A supplement to remote.modem() (DOCSIS), never a replacement: most
+    ISP-provisioned DOCSIS modems disable LAN-side SNMP by default, so
+    `unavailable` here is the common case, not a sign of trouble.
+    """
+    host = host or os.environ.get("MODEM_HOST", remote.MODEM_HOST_DEFAULT)
+    if not remote._on_lan(host):
+        return remote._unavailable(f"modem host {host!r} is not on a local network")
+
+    descr = get(SYS_DESCR, host, timeout)
+    if descr is None:
+        return remote._unavailable(f"no SNMP response from {host} within {timeout}s")
+    return {"state": "ok", "sys_descr": descr,
+            "sys_uptime_ticks": get(SYS_UPTIME, host, timeout)}

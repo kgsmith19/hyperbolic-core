@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>0</minor>
+  </specVersion>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+    <friendlyName>ASUS Wireless Router</friendlyName>
+    <manufacturer>ASUSTeK Computer Inc.</manufacturer>
+    <manufacturerURL>http://www.asus.com</manufacturerURL>
+    <modelDescription>ASUS Wireless Router</modelDescription>
+    <modelName>RT-AX88U</modelName>
+    <modelNumber>1.0</modelNumber>
+    <modelURL>http://www.asus.com</modelURL>
+    <UDN>uuid:0000e068-20a0-00e0-20a0-48a9d2b3c1a4</UDN>
+  </device>
+</root>
