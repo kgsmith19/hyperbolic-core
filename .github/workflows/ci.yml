@@ -19,6 +19,7 @@ jobs:
     name: ${{ github.event.pull_request.draft && 'Draft CI (local only)' || 'PR Gate' }}
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -35,20 +36,66 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7
+      - name: Decide whether runtime verification is required
+        id: changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.ref }}"; then
+            echo "::warning::Could not fetch the PR base; running the full suite."
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! changed=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD); then
+            echo "::warning::Could not compute the PR diff; running the full suite."
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "$changed" ]; then
+            echo "::warning::PR diff was unexpectedly empty; running the full suite."
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          printf 'Changed files:\n%s\n' "$changed"
+          runtime_files=$(printf '%s\n' "$changed" | grep -Ev '(^|/).*\.md$|^docs/|^\.github/CODEOWNERS$|^\.agent/|^\.agents/' || true)
+
+          if [ -n "$runtime_files" ]; then
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            printf 'Runtime verification required by:\n%s\n' "$runtime_files"
+          else
+            echo "runtime=false" >> "$GITHUB_OUTPUT"
+            echo 'Documentation/governance-only diff; preserving PR Gate while skipping the runtime suite.'
+          fi
       - uses: actions/setup-python@v7
+        if: steps.changes.outputs.runtime == 'true'
         with:
           python-version: "3.14"
           cache: pip
       - run: python -m pip install -e .[dev]
+        if: steps.changes.outputs.runtime == 'true'
       - run: ruff check .
+        if: steps.changes.outputs.runtime == 'true'
       - run: mypy
+        if: steps.changes.outputs.runtime == 'true'
       - name: Apply migrations
+        if: steps.changes.outputs.runtime == 'true'
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'create schema if not exists extensions'
           for f in supabase/migrations/*.sql; do
             psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
           done
       - run: pytest
+        if: steps.changes.outputs.runtime == 'true'
+      - name: Documentation-only verification
+        if: steps.changes.outputs.runtime != 'true'
+        run: echo 'No runtime-affecting files changed; required PR Gate remains green.'
 
   build:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
