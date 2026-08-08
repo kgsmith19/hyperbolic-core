@@ -3,9 +3,9 @@ title: toolbelt System Requirements
 status: active
 scope: repo
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-08-08
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, NFR-001, NFR-002, NFR-003, NFR-004]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, NFR-001, NFR-002, NFR-003, NFR-004]
 ---
 
 # System Requirements
@@ -19,7 +19,7 @@ What the system must be, as opposed to what it must do. What it does lives in `d
 | SR-001 | The system is one Supabase Postgres project named `toolbelt`. | project ref `woltgcggxaehtuypkxqk`, region `us-east-1`, Postgres 17 | `list_projects` against the Supabase API |
 | SR-002 | There is no application server. Clients talk to Supabase's own PostgREST and GoTrue endpoints directly. | 0 custom services | No server code exists in this repo |
 | SR-003 | The web surface is one static HTML file with no build step and no framework. | `web/index.html`, 1 file | The file loads from any static file server |
-| SR-004 | Tables live only in the `core` or `idea` Postgres schema. | 2 schemas, 13 tables | `information_schema.tables` |
+| SR-004 | Tables live only in the `core` or `idea` Postgres schema. | 2 schemas, 14 tables | `information_schema.tables` |
 
 ## 2. Interfaces the system depends on
 
@@ -41,11 +41,15 @@ All four are provided by the same Supabase project as the database. None is a th
 
 This is the mechanism `prompt-organizer`'s own `CLAUDE.md` names as the boundary: "cross-schema writes belong to the owning repo." `core.run`/`core.cost` are owned here; no other repo's client code should ever contain a schema-qualified write against either.
 
+| ID | Interface | Consumer | Used for | Failure behavior |
+|---|---|---|---|---|
+| SR-029 | `POST /rest/v1/rpc/purge_old_events` (`core.purge_old_events`, `security definer`) | A daily `pg_cron` schedule; also directly callable by any authenticated caller as a manual backstop | Deleting every `core.event` row older than 90 days, recording each deleted row's month in `core.event_monthly_agg` first | Returns the count of rows deleted; a caller does not need to check `core.event` itself to know the job ran |
+
 ## 3. Security requirements
 
 | ID | Requirement | Mechanism | Verified by |
 |---|---|---|---|
-| SR-007 | Row-level security is enabled **and forced** on all 13 tables. | `alter table ... enable row level security` plus `force row level security` | `pg_class.relrowsecurity` and `relforcerowsecurity` |
+| SR-007 | Row-level security is enabled **and forced** on all 14 tables. | `alter table ... enable row level security` plus `force row level security` | `pg_class.relrowsecurity` and `relforcerowsecurity` |
 | SR-008 | An unauthenticated caller reads zero rows from every table. | RLS policies scoped to the `authenticated` role | T-I-001 |
 | SR-009 | `core.run` rows are visible only to the user who created them. | `using (user_id = auth.uid())` | T-I-002 |
 | SR-010 | The service-role key never appears in this repo, in a browser bundle, or in git history. | Only the anon key is committed; it is designed for client exposure and RLS is the real boundary | GATE-SHIP SH6 |
@@ -61,6 +65,7 @@ This is the mechanism `prompt-organizer`'s own `CLAUDE.md` names as the boundary
 | SR-015 | Every timestamp column is `timestamptz`. | Column types | `information_schema.columns` |
 | SR-016 | Money is `numeric`, never a float type. | `core.cost.usd numeric(12,6)` | `information_schema.columns` |
 | SR-026 | An `idea.score` row cannot hold a value outside its metric's declared `min_value`/`max_value`. | A trigger, not a `CHECK`: a `CHECK` constraint cannot look up another table, so `idea.enforce_score_bounds()` reads `core.metric_def` on every insert/update | T-I-007, T-I-008 |
+| SR-030 | `core.event_monthly_agg.event_count` for a given month never decreases and is never replaced by a later run; each run adds to it. | `on conflict (month) do update set event_count = event_count + excluded.event_count`, not a plain overwrite | T-I-010 |
 
 ## 5. Operational requirements
 
@@ -70,6 +75,7 @@ This is the mechanism `prompt-organizer`'s own `CLAUDE.md` names as the boundary
 | SR-018 | Re-running the seed migration leaves `idea.idea` at 33 rows. | exactly 33 | `on conflict (id) do nothing`, plus PROP-003 |
 | SR-019 | The whole test suite runs without database credentials, using only the public anon key. | 0 secrets required | `node --test "tests/*.test.mjs"` |
 | SR-020 | Marginal infrastructure cost is $0 beyond this one Supabase project. | $0 | PRD NFR-002 |
+| SR-031 | No `core.event` row is older than 90 days for long; a daily job deletes every row that crosses that age, recording its month in `core.event_monthly_agg` first. | `pg_cron` schedule `core-purge-old-events`, `0 3 * * *`, calling `core.purge_old_events()` | T-A-007 |
 
 ## 6. Maintainability limits
 

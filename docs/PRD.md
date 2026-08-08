@@ -2,9 +2,9 @@
 title: toolbelt Product Requirements Document
 status: draft
 created: 2026-08-06
-updated: 2026-08-07
+updated: 2026-08-08
 owner: Kyle
-version: 0.1.3
+version: 0.1.11
 ---
 
 # toolbelt PRD
@@ -47,6 +47,7 @@ This is one shared place in the database where every small tool Kyle builds writ
 - That page also showing which other ideas each idea depends on, where any are recorded
 - A sign-in form on that page, the minimum needed for it to hold an authenticated session (NFR-001 requires one; nothing reads `idea.idea` unauthenticated)
 - Row-level security, enabled and forced, on every table above
+- A scheduled job that deletes `core.event` rows older than 90 days, first adding their count to a monthly total that is kept forever
 
 ### 4.2 Out of scope (non-goals)
 
@@ -86,6 +87,19 @@ This is one shared place in the database where every small tool Kyle builds writ
 | Frequency | Every run, after the tool registers once |
 | Traces to | FR-002, FR-003, FR-007 |
 
+### UC-003: `core.event` is kept from growing without bound
+
+| Field | Content |
+|---|---|
+| Actor | The system itself, on a daily schedule; no human or tool actor |
+| Precondition | `core.event` has at least one row with `at` older than 90 days |
+| Trigger | The daily retention schedule fires |
+| Main path | 1. The job finds every `core.event` row with `at` older than 90 days. 2. For each such row's month, it adds 1 to that month's total in a monthly-total table, creating the month's row if none exists yet, never replacing an existing total. 3. It deletes the row from `core.event`. |
+| Success outcome | No `core.event` row is ever older than 90 days; every month that ever had events keeps a total that is never lost, reduced, or overwritten |
+| Failure paths | No `core.event` row is older than 90 days -> the job makes no change; the monthly-total table is untouched |
+| Frequency | Daily |
+| Traces to | FR-008 |
+
 ## 6. Functional requirements
 
 | ID | Requirement | Priority | Acceptance criterion (objective) | Traces to | Status |
@@ -97,6 +111,7 @@ This is one shared place in the database where every small tool Kyle builds writ
 | FR-005 | The system must reject an insert into `idea.score` whose `value` falls outside the `min_value`/`max_value` declared on its metric. | Must | Given `core.metric_def` contains `idea_effectiveness` with `min_value` `0` and `max_value` `10`, when inserting into `idea.score` with `idea_id` `prompt-organizer`, `metric_id` `idea_effectiveness`, and `value` `11`, then the insert fails and no row is created. | UC-001 | done |
 | FR-006 | The system must display, next to each idea that depends on another, the name of every idea it depends on and the recorded reason. An idea with no dependency row must show no dependency list, not an empty placeholder. | Must | Given `idea.dependency` contains a row with `idea_id` `constraint-finder`, `depends_on` `optimize-metrics`, and `reason` `Constraint Finder reads metric data to find bottlenecks; Optimize Metrics owns the metric definitions that data is measured against.`, when the idea list page loads, then `Optimize Metrics` and that reason both appear on the page for the `constraint-finder` row, and an idea with no matching `idea.dependency` row shows nothing in its dependency position. | UC-001 | done |
 | FR-007 | The system must expose a `core` schema RPC that an authenticated caller invokes (never a direct write against `core.run`/`core.cost`) to record one `core.run` row and one `core.cost` row with a supplied wall-clock time, without that caller needing to know `core.run`/`core.cost`'s column shape. | Must | Given `core.app` has a row with `id` `prompt-organizer`, when an authenticated caller calls `POST /rest/v1/rpc/log_run` with `app_id` `prompt-organizer`, `kind` `render`, `wall_clock_ms` `42`, then the response is `200` with a `run_id`, a `core.run` row with that `id` exists with `status` `ok` and `ended_at` set, and a `core.cost` row exists with that `run_id` and `wall_clock_ms` `42`. | UC-002 | done |
+| FR-008 | The system must delete every `core.event` row whose `at` is more than 90 days in the past, and before deleting a row must add 1 to a monthly total kept for that row's calendar month, forever. | Must | Given `core.event` contains a row with `at` 100 days in the past, in calendar month `2026-05`, and a row with `at` 1 day in the past, when `core.purge_old_events()` runs, then the 100-day-old row no longer exists in `core.event`, the 1-day-old row still exists, and a row for month `2026-05-01` exists in the monthly-total table with a count at least 1 higher than before the run. | UC-003 | done |
 
 ## 7. Non-functional requirements
 
@@ -154,7 +169,7 @@ None. Every tool that reads or writes this schema lives in its own repo and conn
 | SL-001 | Idea scoring | `idea.score` rows are visible next to each idea on the list page, and a score outside its metric's declared range is rejected. | FR-004, FR-005 | 150 (shipped 2026-08-07, SPEC-0001, 113 actual net source LOC) | SL-000 |
 | SL-002 | Idea dependencies | `idea.dependency` edges are visible as a simple list under each idea. | FR-006 | 150 (shipped 2026-08-07, SPEC-0002, 41 actual net source LOC) | SL-000 |
 | SL-003 | First tool writes a run | A `core`-schema RPC (Q-001's "thin wrapper library, one function," realized as a Postgres function rather than duplicated per-tool client code once `prompt-organizer`'s own `CLAUDE.md` ruled out a direct cross-schema write) lets a tool record a run, proven by Prompt Organizer's first real call. | FR-007 | 200 (shipped 2026-08-07, SPEC-0003) | SL-000, Prompt Organizer repo exists |
-| SL-004 | `core.event` retention | A scheduled job drops `core.event` rows older than 90 days, keeping a monthly aggregate. | none yet | 200 | SL-003 |
+| SL-004 | `core.event` retention | A scheduled job drops `core.event` rows older than 90 days, keeping a monthly aggregate. | FR-008 | 200 (shipped 2026-08-08, SPEC-0004, ~40 actual net source LOC) | SL-003 |
 
 Rules:
 
@@ -195,6 +210,8 @@ Q-001 and Q-002 are settled. Neither creates a requirement: SL-003 and SL-004 st
 | 2026-08-07 | 0.1.8 | Set FR-006 to `done`. SL-002 marked shipped. | SPEC-0002 delivered it: `idea.dependency` gained one seeded edge (`constraint-finder depends_on optimize-metrics`, sourced verbatim from the topology note, idempotent seed); the list page shows each idea's outgoing dependencies with their reasons (T-A-005, mutation-verified against real seeded data; the empty case browser-verified, same pattern as AC-009). No schema change was needed — `idea.dependency` was fully built in SL-000. | FR-006 |
 | 2026-08-07 | 0.1.9 | Added FR-007 (a `core` RPC recording one `core.run` + one `core.cost` row). Extended UC-002's main path to call the RPC instead of a direct insert. Set SL-003's requirements from `none yet` to FR-007, and its "what becomes true" wording from "a thin client library" to the RPC as built. Set FR-007 to `done`. | SL-003 delivered no requirement, so STOP condition 4 blocked it, same pattern as SL-001/SL-002. `prompt-organizer`'s own `CLAUDE.md` forbids any tool writing directly to `core.*` ("cross-schema writes belong to the owning repo"), which ruled out Q-001's literal phrasing ("a thin wrapper library, one function") if read as duplicated per-tool client code -- a schema change to `core.run`/`core.cost` would then need a matching code change in every calling tool's own repo, exactly the coupling `CLAUDE.md`'s rule exists to prevent. An RPC is a truer reading of "one function": one implementation, owned where the schema is owned, callable by any authenticated tool through the same REST surface every tool already uses. Kyle asked directly for the mechanism decision (2026-08-07); this is that decision, not a unilateral one. | FR-007, UC-002, SL-003 |
 | 2026-08-07 | 0.1.4 | Ratified Q-001 and Q-002 at their recorded defaults. Corrected DR-002's retention from "Not yet decided; see Q-002" to "Forever", and restated DR-003's as ratified rather than a topology-note default. | Both questions had carried a recorded default since 0.1.0 and neither had been contested; leaving them open blocked SL-003 and SL-004 for no reason. Ratifying exposed that DR-002 pointed at Q-002 for its answer, but Q-002 only ever asked about `core.event`. SL-004's slice plan entry already says the job drops `core.event` rows only, so runs being retained was implied by the plan and merely unstated here. No requirement is created: SL-003 and SL-004 still deliver no `FR-`/`NFR-`. | Q-001, Q-002, DR-002, DR-003 |
+| 2026-08-08 | 0.1.10 | Added FR-008 (`core.event` retention: delete rows older than 90 days, first adding their count to a monthly total kept forever). Added UC-003. Extended section 4.1. Set SL-004's requirements from `none yet` to FR-008. | SL-004 delivered no requirement, so STOP condition 4 blocked it, same pattern as SL-001/SL-002/SL-003. This amendment proceeds ahead of ASM-002's literal precondition ("core.event's retention policy can wait until a tool actually writes to it") rather than waiting for it -- checked live against the project, `core.event` still holds 0 rows, so this is a deliberate call, not a discovery that the precondition was already met. Grounds for making it now rather than later: the retention rule itself was already ratified (DR-003, Q-002: 90 days hot, monthly aggregate forever) and named as an accepted risk needing mitigation (`SPEC-0000` RISK-001), so only its build timing was ever open, not its shape or whether it happens; the mechanism is $0 marginal cost and fully reversible (the down migration drops both the function and the table, leaving no trace); the monthly total's shape takes the minimal reading of "aggregate" DR-003's own wording supports -- one count per calendar month, no `app_id`/`kind` breakdown, inventing no dimension the PRD never named. If this call is wrong, it is a one-command rollback, not a redesign. | FR-008, UC-003, SL-004 |
+| 2026-08-08 | 0.1.11 | Set FR-008 to `done`. SL-004 marked shipped. | SPEC-0004 delivered it: `core.event_monthly_agg` (month, event_count) plus `core.purge_old_events()`, a `security definer` function that adds each purged row's month to a permanent total before deleting it, scheduled daily via `pg_cron` and also directly callable (T-A-007, T-I-010, both mutation-verified -- disabling the delete, and separately changing the accumulate to a plain overwrite, both caught by the suite). `docs/SYSTEM-REQUIREMENTS.md` (SR-004 table count, SR-007 table count, SR-029 through SR-031) and `docs/DATA-FLOW-DIAGRAM.md` (F-10, table counts, `core.event`'s unbounded-growth note) updated in the same change. This closes the PRD's own slice plan: every slice through SL-004 is now shipped. | FR-008, SL-004 |
 
 ---
 
