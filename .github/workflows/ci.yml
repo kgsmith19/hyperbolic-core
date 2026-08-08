@@ -20,18 +20,6 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
@@ -79,6 +67,26 @@ jobs:
           --changed-files "$RUNNER_TEMP/lifeos-changed-files.txt"
           --event "$GITHUB_EVENT_PATH"
           --base-sha "${{ github.event.pull_request.base.sha }}"
+      - name: Start Postgres for runtime verification
+        if: steps.changes.outputs.runtime == 'true'
+        shell: bash
+        run: |
+          docker run --detach --name lifeos-ci-postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -p 5432:5432 \
+            pgvector/pgvector:pg17
+
+          for attempt in $(seq 1 30); do
+            if docker exec lifeos-ci-postgres pg_isready -U postgres >/dev/null 2>&1; then
+              echo 'Postgres is ready.'
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs lifeos-ci-postgres
+          echo '::error::Postgres did not become ready within 30 seconds.'
+          exit 1
       - uses: actions/setup-python@v7
         if: steps.changes.outputs.runtime == 'true'
         with:
@@ -102,6 +110,9 @@ jobs:
       - name: Documentation-only verification
         if: steps.changes.outputs.runtime != 'true'
         run: echo 'No runtime-affecting files changed; required PR Gate remains green.'
+      - name: Stop Postgres
+        if: always() && steps.changes.outputs.runtime == 'true'
+        run: docker rm --force lifeos-ci-postgres >/dev/null 2>&1 || true
 
   build:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
