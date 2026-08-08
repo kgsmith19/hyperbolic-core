@@ -15,7 +15,7 @@ import socket
 import urllib.error
 import urllib.request
 
-from . import docsis
+from . import docsis, geoip
 
 MODEM_HOST_DEFAULT = "192.168.100.1"
 ROUTER_HOST_DEFAULT = "192.168.50.1"
@@ -197,9 +197,21 @@ def _json_get(url):
 
 def wan(url="https://api.ipify.org?format=json"):
     """The address the internet sees us as — the only way to tell a bridged
-    modem from one that quietly reverted to routing, and either from CGNAT."""
+    modem from one that quietly reverted to routing, and either from CGNAT.
+
+    A coarse geolocation (FR-020) rides along under "geo" once we have an
+    address, but never as a condition of this section's own state: a lookup
+    that fails degrades only the "geo" sub-key, per geoip.locate()'s
+    contract, so wan()'s own state/ip/double_nat/cgnat are unaffected either
+    way.
+    """
     data, section = _json_get(url)
-    return section or classify_wan(data.get("ip"))
+    if section:
+        return section
+    result = classify_wan(data.get("ip"))
+    if result["state"] == "ok":
+        result["geo"] = geoip.locate(result["ip"])
+    return result
 
 
 def anthropic(url="https://status.anthropic.com/api/v2/status.json"):

@@ -77,7 +77,9 @@ class RemoteSectionTest(unittest.TestCase):
 
     def test_wan_classifies_the_address_the_service_returns(self):
         with patch.object(remote, "_http_get",
-                          return_value=('{"ip": "100.90.1.2"}', None)):
+                          return_value=('{"ip": "100.90.1.2"}', None)), \
+             patch.object(remote.geoip, "locate",
+                          return_value={"state": "unavailable", "reason": "mocked"}):
             self.assertTrue(remote.wan()["cgnat"])
 
     def test_wan_without_a_route_is_a_failed_query_not_a_verdict(self):
@@ -111,6 +113,40 @@ class RemoteSectionTest(unittest.TestCase):
             got = remote.anthropic()
         self.assertEqual(got["state"], "fail")
         self.assertNotIn("degraded", got)
+
+
+class WanGeolocationTest(unittest.TestCase):
+    """wan()'s composition of geoip.locate() (FR-020). Geolocation is
+    enrichment attached under "geo": its failure must never leak into or
+    downgrade wan()'s own state/double_nat/cgnat fields."""
+
+    def test_a_successful_wan_lookup_attaches_geo_on_success(self):
+        with patch.object(remote, "_http_get",
+                          return_value=('{"ip": "203.0.113.7"}', None)), \
+             patch.object(remote.geoip, "locate",
+                          return_value={"state": "ok", "city": "Springfield",
+                                        "region": "Oregon",
+                                        "country": "United States"}):
+            got = remote.wan()
+        self.assertEqual(got["state"], "ok")
+        self.assertEqual(got["geo"], {"state": "ok", "city": "Springfield",
+                                       "region": "Oregon",
+                                       "country": "United States"})
+
+    def test_a_failing_geolocation_does_not_affect_wans_own_state(self):
+        """The contract this class exists to pin down: a geolocation
+        failure degrades only "geo", never wan()'s own verdict."""
+        with patch.object(remote, "_http_get",
+                          return_value=('{"ip": "203.0.113.7"}', None)), \
+             patch.object(remote.geoip, "locate",
+                          return_value={"state": "unavailable",
+                                        "reason": "timeout"}):
+            got = remote.wan()
+        self.assertEqual(got["state"], "ok")
+        self.assertEqual(got["ip"], "203.0.113.7")
+        self.assertFalse(got["double_nat"])
+        self.assertFalse(got["cgnat"])
+        self.assertEqual(got["geo"]["state"], "unavailable")
 
 
 class CredentialDestinationTest(unittest.TestCase):
