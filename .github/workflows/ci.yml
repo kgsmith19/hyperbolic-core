@@ -53,9 +53,3 @@ jobs:
       - run: npm run e2e
         env:
           ACC_DIR: ${{ github.workspace }}/acc-checkout
-          # Temporary: the first CI run timed out waiting on config.webServer
-          # with zero other output, and it reproduces fine locally (ACC's
-          # server + Vite both up in <1s against a fresh clone) — this
-          # forces Playwright to print webServer start/poll activity so the
-          # real cause is visible instead of guessed at. Remove once diagnosed.
-          DEBUG: pw:webserver
