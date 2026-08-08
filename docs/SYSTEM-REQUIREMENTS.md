@@ -5,7 +5,7 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-08
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-008, FR-011, FR-012, FR-014, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, NFR-010, CON-001]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-008, FR-010, FR-011, FR-012, FR-013, FR-014, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, NFR-010, CON-001]
 ---
 
 # System Requirements
@@ -39,6 +39,7 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 | SR-27 | Every render logs a run to `toolbelt`'s shared spine, without this repo ever writing a schema-qualified statement against `core.*`. | `POST /rest/v1/rpc/log_run` under `Content-Profile: core` — a function call, not a table write; `toolbelt`'s `core.log_run` owns the actual `INSERT`s | Browser drill, 2026-08-07: a real copy produced a real `core.run`/`core.cost` row pair in `toolbelt`'s project, `wall_clock_ms` matching the render's own measured duration |
 | SR-28 | `prompt.prompt.is_active` is a display filter, not a security boundary: an owner can always read her own archived prompt directly by id, the same as any other row she owns. Ownership (RLS) is the only access control this schema has, before and after SL-011. | The `owner_all` policy is unchanged by SL-011 — no new policy exists for `is_active` | T-I-018 |
 | SR-29 | `prompt.configuration` carries no `user_id` of its own; ownership is checked through the parent `prompt.prompt` row, the same shape as `prompt.tag` (SR-23) rather than a new pattern. Grant surface is `SELECT`/`INSERT` only — no `UPDATE` or `DELETE`, not asked for by FR-008. | `EXISTS (select 1 from prompt.prompt p where p.id = prompt_id and p.user_id = auth.uid())` in both policies | T-I-019, T-I-020 |
+| SR-30 | `prompt.render_prompt(p_name, p_config)` is `security invoker`, not `definer`: it inherits the caller's own RLS with no new policy. `EXECUTE` is revoked from `PUBLIC` (Postgres's own default on every new function) and granted to `authenticated` only. | `security invoker`; `revoke execute ... from public` before the `authenticated` grant | T-I-023 (RLS composes through the RPC); T-A-007 (the grant is what's actually load-bearing, not `PUBLIC`'s default) |
 
 ## 3. Data integrity
 
