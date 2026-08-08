@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Circle, FileText, Play, Rocket } from "lucide-react";
+import { Circle, FileText, MessageSquarePlus, Play, Rocket } from "lucide-react";
 import { api, type Directive } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +27,9 @@ function Row({ d }: { d: Directive }) {
     mutationFn: () => api.launch(d.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["directives"] }),
   });
+  // Steer a running directive without restarting it — picked up on the next
+  // resume via the log tail SessionStart already injects.
+  const guide = useMutation({ mutationFn: (text: string) => api.note(d.id, text) });
   return (
     <div className="rounded-lg border p-3 text-sm">
       <div className="flex items-center gap-2">
@@ -46,6 +49,10 @@ function Row({ d }: { d: Directive }) {
         )}
         <Button size="sm" variant="outline" onClick={() => act.mutate({ status: "done", why: "finished from the Command Center" })}>Mark finished</Button>
         <Button size="sm" variant="outline" onClick={() => act.mutate({ status: "paused" })}>Stop restarting</Button>
+        <Button size="sm" variant="ghost" onClick={() => {
+          const text = window.prompt(`Guidance for ${d.id} — picked up on the next resume, no restart needed:`);
+          if (text?.trim()) guide.mutate(text.trim());
+        }}><MessageSquarePlus className="size-3.5" /> Guide</Button>
         <Button size="sm" variant="ghost" onClick={() => setLogOpen(!logOpen)}><FileText className="size-3.5" /> {logOpen ? "Hide log" : "View log"}</Button>
       </div>
       {logOpen && <pre className="mt-2 max-h-60 overflow-auto rounded-md bg-muted p-2 text-xs whitespace-pre-wrap">{log.data ?? "…"}</pre>}
