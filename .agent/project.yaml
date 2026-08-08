@@ -4,7 +4,7 @@ type: api-service
 
 standard:
   repo: https://github.com/kgsmith19/agent-engineering-standard
-  sha: 79ba6aaf18651b1c46f0b81368748fe0e4f8813e
+  sha: 81d58318a617ddf0777fef8f73d2fab25f433e34
 
 commands:
   setup: python -m pip install -e .[dev]
