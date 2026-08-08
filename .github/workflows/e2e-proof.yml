@@ -1,0 +1,46 @@
+name: E2E Proof
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 10 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-proof
+  cancel-in-progress: true
+
+jobs:
+  acceptance-proof:
+    name: UI acceptance proof
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Checkout real ACC contract server
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: kgsmith19/agentic-command-center
+          path: acc-checkout
+      - run: npx playwright install --with-deps chromium
+      - name: Run browser journeys with screenshot proof
+        run: npm run e2e
+        env:
+          ACC_DIR: ${{ github.workspace }}/acc-checkout
+          E2E_PROOF: '1'
+      - name: Upload acceptance proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ui-acceptance-proof
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 30

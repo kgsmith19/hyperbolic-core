@@ -1,0 +1,10 @@
+# Protect only mechanisms whose weakening could make PR Gate falsely green.
+/package.json @kgsmith19
+/playwright.config.ts @kgsmith19
+/e2e/contract.spec.ts @kgsmith19
+
+# Canonical control-plane ownership tail. Keep these final non-comment rules.
+/.github/workflows/ @kgsmith19
+/.github/CODEOWNERS @kgsmith19
+/.agent/ @kgsmith19
+/AGENTS.md @kgsmith19

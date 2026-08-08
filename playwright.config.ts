@@ -22,8 +22,11 @@ fs.writeFileSync(path.join(dir, "ROUTING.md"), "# routes\n```json\n" + JSON.stri
 export default defineConfig({
   testDir: "e2e",
   workers: 1, // specs share the one sandbox
+  reporter: [["line"], ["html", { open: "never" }]],
   use: {
     baseURL: "http://127.0.0.1:5173",
+    screenshot: process.env.E2E_PROOF ? "on" : "only-on-failure",
+    trace: "retain-on-failure",
     ...(process.env.ACC_PW_CHROMIUM ? { launchOptions: { executablePath: process.env.ACC_PW_CHROMIUM } } : {}),
   },
   webServer: [
@@ -40,7 +43,7 @@ export default defineConfig({
         ACC_RUNNER: path.join(ACC, "gui", "e2e", "fake-runner.e2e.mjs"),
         ACC_ROUTING_MD: path.join(dir, "ROUTING.md"),
         ACC_LANE_DIR: path.join(dir, "lane"),
-        ACC_GUI_E2E_DIR: dir, // the fakes keep their state here
+        ACC_GUI_E2E_DIR: dir,
       },
     },
     {

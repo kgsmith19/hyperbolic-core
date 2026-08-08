@@ -1,6 +1,5 @@
 # Machine-readable project facts for ACC/Toolbelt and agents. Prose policy
-# lives in AGENTS.md and the pinned standard (.agent/standard.lock) — keep
-# this file to tested facts only.
+# lives in AGENTS.md and the pinned standard.
 
 project:
   name: agentic-command-center-ui
@@ -11,33 +10,33 @@ project:
 
 commands:
   setup: npm ci
-  build: npm run build          # tsc -b --strict && vite build
-  dev: npm run dev              # proxies /api to a running ACC server (ACC_API= to override)
-  fast_verify: npm run build    # every slice, before pushing
-  full_verify: npm run e2e      # contract e2e vs a REAL ACC server; requires ACC_DIR
+  build: npm run build
+  dev: npm run dev
+  fast_verify: npm run build
+  full_verify: npm run e2e
   test: npm run e2e
-  # full_verify prerequisite: a sibling checkout of kgsmith19/agentic-command-center.
-  # ACC_DIR=<path> npm run e2e; CI clones it fresh (see .github/workflows/ci.yml).
 
 platform:
-  os: [linux]   # no platform-specific behavior; CI runs ubuntu-latest only
+  os: [linux]
 
 risk:
-  default: R1                   # local, reversible UI/behavior change
+  default: R1
   notes:
     - "src/api.ts changes are R2: it is the typed mirror of ACC's gui/README.md contract."
-    - "Guards/vault page changes (src/pages/Guards.tsx) that alter how secret values are handled are R3: secrets boundary, even though this repo never persists them."
+    - "Guards/vault changes that alter secret handling are R3."
   protected_paths:
-    - .github/workflows/        # CI / protected evaluator
-    - .agent/standard.lock      # standard pin
+    - .github/workflows/
+    - .agent/standard.lock
 
 ci:
-  fast_lane: [build]                    # every PR push
-  full_lane: [build, contract-e2e]      # required to merge; contract-e2e is this repo's only real correctness oracle
-  deep_lane: []                         # none: no mutation/fuzz/perf infra exists and none is justified yet (see migration report)
+  required_workflow: .github/workflows/ci.yml
+  required_check: "PR Gate"
+  required_trigger: "ready pull request + merge_group"
+  gate_evidence: [build, contract-e2e]
+  deep_lane: []
 
 deployment:
-  mechanism: "ACC serves this repo's built dist/ same-origin via `--ui-dist` (ADR-0006, kgsmith19/agentic-command-center)"
-  authority: "manual — Kyle runs ACC with --ui-dist on his own machine; no hosted deploy target exists"
+  mechanism: "ACC serves this repo's built dist/ same-origin via --ui-dist"
+  authority: "manual"
 
-telemetry: none   # no ACC/Toolbelt integration wired yet; see migration report Remaining Gaps
+telemetry: none
