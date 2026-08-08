@@ -8,3 +8,7 @@ __pycache__/
 .env.example
 .coverage
 coverage.xml
+
+# Local agent worktrees and Superpowers scratch
+.worktrees/
+.superpowers/
