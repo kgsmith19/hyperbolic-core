@@ -4,6 +4,13 @@
 /tools/security_review.py @kgsmith19
 /tools/documentation_check.py @kgsmith19
 
+# Risk-sensitive code paths (.agent/project.yaml risk.protected_paths).
+/netcheck/remote.py @kgsmith19
+/netcheck/docsis.py @kgsmith19
+/netcheck/snmp.py @kgsmith19
+/netcheck/store.py @kgsmith19
+/supabase/migrations/ @kgsmith19
+
 # Canonical control-plane ownership tail. Keep these final non-comment rules.
 /.github/workflows/ @kgsmith19
 /.github/CODEOWNERS @kgsmith19
