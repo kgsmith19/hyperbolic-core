@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-// SPEC-0009 (SL-011): archive a prompt via is_active, the delete half of CRUD.
+// SPEC-0010 (SL-011): archive a prompt via is_active, the delete half of CRUD.
 // Not secret: the anon key is designed for client-side exposure; RLS is the
 // boundary (docs/SYSTEM-REQUIREMENTS.md SR-05). Same project as toolbelt.
 const SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";

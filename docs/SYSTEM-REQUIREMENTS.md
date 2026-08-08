@@ -5,7 +5,7 @@ scope: repo
 created: 2026-08-07
 updated: 2026-08-08
 owner: Kyle
-traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-011, FR-012, FR-014, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, CON-001]
+traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-011, FR-012, FR-014, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, NFR-010, CON-001]
 ---
 
 # System Requirements
@@ -19,7 +19,7 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 | SR-01 | Lives in the `toolbelt` Supabase project, schema `prompt` only. No project of its own. | project ref `woltgcggxaehtuypkxqk` | CON-001; `information_schema` |
 | SR-02 | No application server. The page and tests call Supabase's own PostgREST and GoTrue directly. | 0 custom services | No server code exists in this repo |
 | SR-03 | The web surface is one static HTML file; no framework, no build step, zero dependencies. | 1 file, 0 libraries | No `package.json` exists |
-| SR-04 | This repo writes only to schema `prompt`, without exception. | 1 schema | Code inspection; grants; PRD NFR-010 is `blocked` on exactly this constraint, not silently worked around |
+| SR-04 | This repo writes only to schema `prompt` via a direct, schema-qualified statement, without exception. Calling `toolbelt`'s `core.log_run` RPC (SR-27) is not an exception to this: the RPC's own write logic lives in, and is owned by, `toolbelt`'s migration — this repo's code never contains a statement naming `core.run` or `core.cost`. | 1 schema written to directly | Code inspection; grants |
 
 ## 2. Security
 
@@ -36,7 +36,8 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 | SR-24 | A prompt's tags are deleted when the prompt is, with no separate mechanism required. | `prompt_id ... references prompt.prompt(id) on delete cascade` | T-I-011 (integrator drill) |
 | SR-25 | A `prompt.usage` row can never name a `(prompt_id, version_no)` pair that was never actually created. | Composite foreign key `(prompt_id, version_no) references prompt.prompt_version(prompt_id, version_no)` — a plain `CHECK` cannot express a cross-table reference | T-I-016 |
 | SR-26 | `prompt.usage` is append-only: no caller, ever, can modify or delete a usage row. | No `UPDATE` or `DELETE` grant or policy exists on it, same absence-is-the-mechanism pattern as `prompt.prompt_version` (SR-19) | Code inspection; `information_schema.role_table_grants` |
-| SR-27 | `prompt.prompt.is_active` is a display filter, not a security boundary: an owner can always read her own archived prompt directly by id, the same as any other row she owns. Ownership (RLS) is the only access control this schema has, before and after SL-011. | The `owner_all` policy is unchanged by SL-011 — no new policy exists for `is_active` | T-I-018 |
+| SR-27 | Every render logs a run to `toolbelt`'s shared spine, without this repo ever writing a schema-qualified statement against `core.*`. | `POST /rest/v1/rpc/log_run` under `Content-Profile: core` — a function call, not a table write; `toolbelt`'s `core.log_run` owns the actual `INSERT`s | Browser drill, 2026-08-07: a real copy produced a real `core.run`/`core.cost` row pair in `toolbelt`'s project, `wall_clock_ms` matching the render's own measured duration |
+| SR-28 | `prompt.prompt.is_active` is a display filter, not a security boundary: an owner can always read her own archived prompt directly by id, the same as any other row she owns. Ownership (RLS) is the only access control this schema has, before and after SL-011. | The `owner_all` policy is unchanged by SL-011 — no new policy exists for `is_active` | T-I-018 |
 
 ## 3. Data integrity
 

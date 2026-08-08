@@ -109,7 +109,7 @@ test("ranks_title_above_tag_above_body_only_match__T_U_014__AC_004", () => {
   assert.deepEqual(titles(result), ["sdd in Title", "Tag Only", "Body Only"]);
 });
 
-// SPEC-0009 (SL-011): archive/restore. is_active absent on every fixture
+// SPEC-0010 (SL-011): archive/restore. is_active absent on every fixture
 // above (all treated as active by searchPrompts, unaffected by this filter).
 
 // T-U-027 -> AC-001 -> FR-014. Default view hides archived prompts; the

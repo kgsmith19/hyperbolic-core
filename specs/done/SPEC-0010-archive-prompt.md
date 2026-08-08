@@ -1,6 +1,6 @@
 ---
 title: Archive a prompt (soft delete)
-spec_id: SPEC-0009-archive-prompt
+spec_id: SPEC-0010-archive-prompt
 slice: SL-011
 status: done
 created: 2026-08-08
@@ -9,7 +9,7 @@ completed: 2026-08-08
 traces: [FR-014]
 ---
 
-# SPEC-0009: Archive a prompt
+# SPEC-0010: Archive a prompt
 
 ## 1. In one sentence
 
@@ -34,7 +34,7 @@ The PRD's CRUD story was Create/Read/Update without a Delete — no `DELETE` gra
 |---|---|---|
 | Freeing an archived prompt's title for reuse | Not asked for; `prompt_title_unique` is a global case-folded index with no `where is_active` predicate today, and loosening it is a real, separate decision with its own edge cases (which of two same-titled prompts does a lookup-by-title resolve to?) | A later slice, if Kyle wants title reuse after archiving. T-I-017 pins today's behavior so a future change is a deliberate diff, not silent drift |
 | A real `DELETE` | Contradicts DR-002 and NFR-005 (see section 2) | Never, unless the PRD's durability requirements change first |
-| Excluding archived prompts at the RLS layer | `is_active` is a display filter, not a security boundary — ownership is the only thing RLS ever gated (NFR-003); an owner can always read her own archived prompt directly by id | N/A — this is a permanent design position, recorded in `docs/SYSTEM-REQUIREMENTS.md` SR-27 |
+| Excluding archived prompts at the RLS layer | `is_active` is a display filter, not a security boundary — ownership is the only thing RLS ever gated (NFR-003); an owner can always read her own archived prompt directly by id | N/A — this is a permanent design position, recorded in `docs/SYSTEM-REQUIREMENTS.md` SR-28 |
 | Archiving cascading to tags, versions, or usage rows | Nothing about those rows needs to change; they belong to the prompt regardless of its active state | N/A |
 | A separate "trash" view or auto-purge after N days | No `AC` demands it; "show archived" already answers "where did it go" | Never, most likely — same reasoning as OOS-006 |
 
@@ -127,6 +127,6 @@ Down migration drops `is_active` (and its grant with it); revert the `index.html
 - [x] T-A-006, T-I-017, T-I-018, T-U-027 red before the migration/code existed (`PGRST204`, column not found — a real 400, not an import error, and one clean assertion failure for the pure-function stub), green after.
 - [x] Ledger rows mutation-verified 2026-08-08 (see `specs/TEST-LEDGER.md` GATE-LEDGER self-check for the full account): grant-revoke reddened T-A-006 and T-I-018; an opened `owner_all` policy reddened only T-I-018, discriminating the RLS mechanism specifically; T-I-017's own assertion mutated (no new mechanism on that call path); T-U-027's `filterByActive` reduced to a no-op.
 - [x] Existing suite still green, unmodified: 49/49 (`node --test "tests/*.test.mjs"`).
-- [x] PRD FR-014 → `done` (v0.1.9); `docs/SYSTEM-REQUIREMENTS.md` SR-06 extended, SR-27 added; `docs/DATA-FLOW-DIAGRAM.md` gains F-11 and DR-007 in data-at-rest.
+- [x] PRD FR-014 → `done` (v0.1.10); `docs/SYSTEM-REQUIREMENTS.md` SR-06 extended, SR-28 added; `docs/DATA-FLOW-DIAGRAM.md` gains F-12 and DR-007 in data-at-rest.
 - [x] Live browser drill **not completed**, recorded rather than silently skipped: headless Chromium in this session's sandbox cannot reach the live Supabase host (a network-path limitation of this execution environment, not of the code), so the click-through archive/restore flow was not driven end to end in a real browser the way SL-002/SL-007/SL-008 were. The archive button's PATCH call (`prompt?id=eq.<id>`, body `{is_active}`) is the identical shape T-A-006 exercises end to end against the real database, and a static load of `web/index.html` confirmed zero console/page errors with the new import and DOM wiring in place. Flagged as a follow-up drill for whoever next has a working browser path to the project, not treated as equivalent to one.
-- [x] Spec moved to `done/`, dates set.
+- [x] Spec moved to `done/`, dates set. **Renumbered from SPEC-0009 to SPEC-0010 during merge**: this slice was built in parallel with an independent session that also claimed `SPEC-0009` (`specs/done/SPEC-0009-log-run-call.md`, NFR-010), and reused `F-11`/`SR-27` for unrelated content. Resolved on merge into `main` by renumbering every reference in this slice's own files (`F-11`→`F-12`, `SR-27`→`SR-28`, PRD version `0.1.9`→`0.1.10`); nothing about SL-011's scope, tests, or schema changed.
