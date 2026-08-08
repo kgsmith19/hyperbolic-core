@@ -1,0 +1,66 @@
+# Machine-readable, repository-specific facts only. Every command here was
+# run and verified during the migration that created this file — none are
+# invented. See AGENTS.md for the prose operating rules this data supports.
+
+project:
+  name: prompt-organizer
+  type: web-app-supabase-backed
+  language: [sql-postgres, vanilla-js]
+  standard_lock: .agent/standard.lock
+
+commands:
+  setup: null              # nothing to install; no package.json exists
+  build: null               # no build step, deliberately (0 dependencies)
+  format: null               # no formatter configured
+  lint: null                 # no linter configured
+  typecheck: null            # no type checker configured (plain JS)
+  fast_verify: node --test "tests/*.test.mjs"
+  test: node --test "tests/*.test.mjs"
+  full_verify: node --test "tests/*.test.mjs"   # same command; no separate slow tier exists
+  e2e: null                  # manual/agent-driven browser drill only; see Issue tracking the sandbox-network gap
+  serve_local: python3 -m http.server 8812
+
+platforms:
+  os: any                    # Node 22+ and a POSIX shell; no OS-specific behavior
+
+risk:
+  default: R2
+  protected_paths:
+    - supabase/migrations/**       # R3 minimum: schema, RLS, or grant changes
+    - specs/TEST-LEDGER.md          # evidence record; only append/amend with a real mutation drill behind it
+  r4_forbidden:
+    - "DELETE grant on prompt.prompt_version"
+    - "DELETE grant on prompt.usage"
+    - "service-role key committed anywhere in this repo"
+
+budget_ceilings_per_slice:
+  net_source_loc: 300
+  test_loc: 200
+  source_files: 3
+  test_files: 3
+  new_tables: 1
+  new_columns: 6
+  new_endpoints: 1
+  new_ui_surfaces: 1
+  new_libraries: 0
+  new_third_party: 0
+  new_tests: 8
+  function_loc: 40
+  file_loc: 250
+  complexity: 8
+  suite_seconds: 120
+  red_green_cycles_before_halt: 3
+
+deployment:
+  mechanism: none              # no deployment pipeline exists yet; the app is a static file served ad hoc
+  smoke_command: null
+  authority_boundary: not_applicable   # see the open Issue on deployment/hosting/security shaping
+
+ci:
+  profile_entry_point: .github/workflows/ci.yml
+  job_name: test
+  check_name: "test"           # exact name PR status checks report; verify against a real run before requiring it
+
+telemetry:
+  acc_integration: none
+  toolbelt_integration: none
