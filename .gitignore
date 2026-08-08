@@ -3,3 +3,7 @@ dist/
 test-results/
 playwright-report/
 tsconfig.tsbuildinfo
+
+# Local agent worktrees and Superpowers scratch
+.worktrees/
+.superpowers/
