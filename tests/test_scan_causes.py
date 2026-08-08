@@ -181,8 +181,10 @@ class ScanCauseTest(unittest.TestCase):
                        "in_path": True, "egress": "Tailscale"},
             mtu={"state": "unavailable", "reason": "ICMP filtered", "mtu": 1200},
             driver={"state": "unavailable", "reason": "not Windows",
-                    "adapter": "Intel(R) Wi-Fi 6 AX201", "wireless_mode": "802.11ac"}),
-            {})
+                    "adapter": "Intel(R) Wi-Fi 6 AX201", "wireless_mode": "802.11ac"},
+            exposure={"state": "unavailable", "reason": "host failed _on_lan()",
+                      "findings": [{"kind": "open_port", "ip": "192.168.1.7", "port": 80}]}
+        ), {})
 
     def test_a_failed_section_is_never_cited_either(self):
         """`fail` means the query broke, not that the thing it queries is at
@@ -207,8 +209,24 @@ class ScanCauseTest(unittest.TestCase):
                 "router": {"state": "ok", "aiprotection_enabled": True},
                 "events": {"state": "ok", "radio_off": 2},
                 "tailscale": {"state": "ok", "in_path": True},
-                "mtu": {"state": "ok", "mtu": 1400}}):
+                "mtu": {"state": "ok", "mtu": 1400},
+                "exposure": {"state": "ok", "findings": [
+                    {"kind": "open_port", "ip": "192.168.1.7", "port": 80},
+                    {"kind": "default_credential", "ip": "192.168.1.7", "entry": "DC02"}]}}):
             self.assertTrue(c["fix"], f"{c['cause']} has no fix")
+
+    def test_open_management_port_finding_is_surfaced(self):
+        got = self.causes(exposure={"state": "ok", "findings": [
+            {"kind": "open_port", "ip": "192.168.1.7", "port": 80}]})
+        self.assertIn("lan_open_management_port", got)
+        self.assertIn("192.168.1.7:80", got["lan_open_management_port"]["evidence"])
+
+    def test_default_credential_finding_names_only_the_list_entry(self):
+        got = self.causes(exposure={"state": "ok", "findings": [
+            {"kind": "default_credential", "ip": "192.168.1.7", "entry": "DC02"}]})
+        self.assertIn("lan_default_credentials", got)
+        self.assertIn("DC02", got["lan_default_credentials"]["evidence"])
+        self.assertNotIn("admin:admin", got["lan_default_credentials"]["evidence"])
 
 
 if __name__ == "__main__":

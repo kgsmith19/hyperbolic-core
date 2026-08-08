@@ -10,7 +10,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 
-from . import dualstack, probes, remote, snmp, ssdp, topology, wlan_probes
+from . import dualstack, exposure, probes, remote, snmp, ssdp, topology, wlan_probes
 
 WINDOWS = probes.WINDOWS
 MACOS = probes.MACOS
@@ -194,8 +194,8 @@ def tailscale(target="api.anthropic.com"):
 
 def scan(deep=False):
     """One environment snapshot. `deep` (FR-018's deep tier) adds the
-    topology map (FR-017) and WAN geolocation (FR-020); the standard tier,
-    the default, omits both."""
+    topology map (FR-017), LAN exposure check (FR-019), and WAN
+    geolocation (FR-020); the standard tier, the default, omits all three."""
     link = wifi()
     out = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -216,4 +216,5 @@ def scan(deep=False):
     }
     if deep:
         out["topology"] = topology.map_devices()
+        out["exposure"] = exposure.scan(out["topology"])
     return out

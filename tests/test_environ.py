@@ -191,19 +191,42 @@ class ScanShapeTest(unittest.TestCase):
 
 
 class ScanTierTest(unittest.TestCase):
-    """FR-018: deep tier adds the topology map; standard omits it. The
-    topology key's presence is real (added unconditionally by scan() itself,
-    regardless of whether the underlying probe succeeds), so it's checked
-    with a real call the same way test_scan_without_credentials_never_crashes
-    is. wan()'s include_geo wiring is mocked instead, since asserting on
-    "geo" being present would depend on a live network reaching the WAN
-    lookup, which this sandbox does not have."""
+    """FR-018/019: deep tier adds topology and exposure; standard omits both.
+    wan()'s include_geo wiring is mocked instead, since asserting on "geo"
+    directly would depend on live network reachability."""
 
     def test_standard_tier_omits_topology(self):
-        self.assertNotIn("topology", environ.scan(deep=False))
+        got = environ.scan(deep=False)
+        self.assertNotIn("topology", got)
+        self.assertNotIn("exposure", got)
 
     def test_deep_tier_includes_topology(self):
-        self.assertIn("topology", environ.scan(deep=True))
+        got = environ.scan(deep=True)
+        self.assertIn("topology", got)
+        self.assertIn("exposure", got)
+
+    def test_deep_tier_wires_topology_into_exposure(self):
+        topo = {"state": "ok", "devices": []}
+        with patch.object(environ, "wifi", return_value={"state": "ok", "channel": None,
+                                                         "bssid": None}), \
+             patch.object(environ, "congestion", return_value={"state": "unavailable"}), \
+             patch.object(environ, "driver", return_value={"state": "unavailable"}), \
+             patch.object(environ, "events", return_value={"state": "unavailable"}), \
+             patch.object(environ, "tcp_globals", return_value={"state": "unavailable"}), \
+             patch.object(environ, "mtu", return_value={"state": "unavailable"}), \
+             patch.object(environ, "tailscale", return_value={"state": "unavailable"}), \
+             patch.object(environ.dualstack, "dual_stack", return_value={"state": "unavailable"}), \
+             patch.object(environ.remote, "modem", return_value={"state": "unavailable"}), \
+             patch.object(environ.snmp, "modem_snmp", return_value={"state": "unavailable"}), \
+             patch.object(environ.remote, "router", return_value={"state": "unavailable"}), \
+             patch.object(environ.ssdp, "identify_gateway", return_value={"state": "unavailable"}), \
+             patch.object(environ.remote, "wan", return_value={"state": "unavailable"}), \
+             patch.object(environ.remote, "anthropic", return_value={"state": "unavailable"}), \
+             patch.object(environ.topology, "map_devices", return_value=topo), \
+             patch.object(environ.exposure, "scan",
+                          return_value={"state": "ok", "devices": [], "findings": []}) as mock_scan:
+            environ.scan(deep=True)
+        mock_scan.assert_called_once_with(topo)
 
     def test_standard_tier_tells_wan_to_skip_geolocation(self):
         with patch.object(environ.remote, "wan") as mock_wan:

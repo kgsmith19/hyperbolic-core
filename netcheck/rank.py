@@ -69,6 +69,12 @@ _FIXES = {
     "broken_ipv4": "IPv4 cannot reach the target but IPv6 can -- unusual, and "
                    "worth checking the adapter's IPv4 address, its default "
                    "route, and any IPv4-only firewall rule.",
+    "lan_open_management_port": "A LAN device has an open management port. If "
+                                "remote administration is not required, close "
+                                "the port or restrict access to trusted hosts.",
+    "lan_default_credentials": "A device accepted a factory-default credential "
+                               "entry. Change that device password immediately "
+                               "to a unique, strong value.",
 }
 
 
@@ -109,6 +115,19 @@ def _one_family_broken(section, broken, working):
     connection still works, so nothing else in this tool would flag it."""
     return (section.get(broken, {}).get("state") == "fail"
             and section.get(working, {}).get("state") == "ok")
+
+
+def _exposure_open_port(scan):
+    names = [f"{f.get('ip')}:{f.get('port')}" for f in (scan.get("findings") or [])
+             if f.get("kind") == "open_port"]
+    return ("open management ports detected: " + ", ".join(names)) if names else None
+
+
+def _exposure_default_credential(scan):
+    names = [f"{f.get('ip')} matched credential list entry {f.get('entry')}"
+             for f in (scan.get("findings") or [])
+             if f.get("kind") == "default_credential"]
+    return "; ".join(names) if names else None
 
 
 # Standing conditions the environment scan measures. A sample row says what
@@ -165,6 +184,8 @@ _SCAN_RULES = (
                f"its capability"
                if "Wi-Fi 6" in str(s.get("adapter") or "")
                and "ax" not in str(s.get("wireless_mode") or "").lower() else None),
+    ("lan_open_management_port", "exposure", "medium", _exposure_open_port),
+    ("lan_default_credentials", "exposure", "high", _exposure_default_credential),
 )
 
 
