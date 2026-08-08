@@ -62,8 +62,9 @@ Engineering standards:
 - Every behavior change ships with tests in the matching tier: unit (pure
   logic, no I/O), integration (service ↔ Postgres, `tests/kernel/`), e2e
   (HTTP → app → DB, `tests/api/`).
-- CI runs lint, types, migrations, and the full suite on every PR. Merge only
-  on green — there is no server-side branch protection; this rule is the gate.
+- Runtime-affecting PRs run lint, types, migrations, and the full suite in CI;
+  documentation/governance-only PRs keep the required PR Gate but skip runtime
+  work. Merge only on green.
 - Tests are lean too: assert behavior, not implementation; one concern per
   test; reuse conftest fixtures.
 - The web UI lives in the sibling `lifeos-ui` repo; its Playwright e2e gate
@@ -113,15 +114,14 @@ expressible).
 
 Rules: `.agents/invariants.md` (project invariants), `.agents/domains/` (per-cell constitutions).
 
-**Cell-guard enforcement gap:** the write guard that blocks edits to
-cell-owned paths without a declared owning cell (`.agents/task.json`) runs
-only as a local hook on Kyle's machine, via the machine-level guards engine —
-it was moved out of this repo (see commit `3af2ea6`) and nothing in this repo
-or its CI reimplements it. GitHub-hosted, cloud, or headless agent sessions —
-including Claude Code on the web or Claude Code Remote — have no mechanical
-enforcement of cell boundaries today and rely on the documented rules alone.
-Give changes proposed by such sessions extra human review care until this is
-closed (tracked in a GitHub Issue).
+**Cell-scope enforcement (ADR 020):** the local machine hook still blocks an
+edit before it happens when `.agents/task.json` declares the wrong cell. For
+GitHub-hosted/headless work, the required PR Gate independently checks the PR
+diff against the `Owns:` paths in both the base and head constitutions. Any PR
+touching cell-owned paths must list exactly those cells in its PR body, e.g.
+`Cells: bills` or `Cells: kernel, bills`; unowned-only changes need no cell.
+The base+head union prevents a PR from weakening its own scope by narrowing an
+ownership declaration in the same change.
 
 Roadmap: `docs/roadmap.md` (living slice queue + prompts; updated every slice PR).
 Context: `docs/research/lifeos-research-final.md` (v2 synthesis) and

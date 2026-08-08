@@ -23,6 +23,7 @@ risk:
     - supabase/migrations/
     - .github/workflows/
     - .agent/
+    - .agents/domains/
 
 ci:
   entry: .github/workflows/ci.yml

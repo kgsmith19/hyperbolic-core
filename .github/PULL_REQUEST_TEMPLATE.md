@@ -3,6 +3,7 @@
 Issue:
 Spec:
 Slice(s):
+Cells:
 
 ## What Changed
 
