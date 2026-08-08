@@ -138,6 +138,15 @@ class ScanCauseTest(unittest.TestCase):
             "state": "ok", "ipv4": {"state": "ok", "ms": 12.0},
             "ipv6": {"state": "ok", "ms": 14.0}}), {})
 
+    def test_non_default_tcp_autotuning_is_surfaced(self):
+        got = self.causes(tcp={"state": "ok", "autotuning": "disabled"})
+        self.assertIn("tcp_autotuning", got)
+        self.assertIn("disabled", got["tcp_autotuning"]["evidence"])
+
+    def test_default_tcp_autotuning_is_not_a_cause(self):
+        self.assertEqual(self.causes(
+            tcp={"state": "ok", "autotuning": "normal"}), {})
+
     def test_a_target_with_no_ipv6_at_all_is_not_a_cause(self):
         """`unavailable` on one family means the target has no address there.
         Reporting that as a broken stack would send the user to fix IPv6 on a
@@ -180,6 +189,8 @@ class ScanCauseTest(unittest.TestCase):
             tailscale={"state": "unavailable", "reason": "not Windows",
                        "in_path": True, "egress": "Tailscale"},
             mtu={"state": "unavailable", "reason": "ICMP filtered", "mtu": 1200},
+            tcp={"state": "unavailable", "reason": "netsh unavailable",
+                 "autotuning": "disabled"},
             driver={"state": "unavailable", "reason": "not Windows",
                     "adapter": "Intel(R) Wi-Fi 6 AX201", "wireless_mode": "802.11ac"},
             exposure={"state": "unavailable", "reason": "host failed _on_lan()",
@@ -195,6 +206,7 @@ class ScanCauseTest(unittest.TestCase):
             router={"state": "fail", "reason": "HTTP 401", "aiprotection_enabled": True},
             wan={"state": "fail", "reason": "timeout", "ip": "10.0.0.1",
                  "double_nat": True, "cgnat": False},
+            tcp={"state": "fail", "reason": "netsh unavailable", "autotuning": "disabled"},
             anthropic={"state": "fail", "reason": "timeout", "degraded": True,
                        "indicator": "major_outage"}), {})
 
@@ -210,6 +222,7 @@ class ScanCauseTest(unittest.TestCase):
                 "events": {"state": "ok", "radio_off": 2},
                 "tailscale": {"state": "ok", "in_path": True},
                 "mtu": {"state": "ok", "mtu": 1400},
+                "tcp": {"state": "ok", "autotuning": "disabled"},
                 "exposure": {"state": "ok", "findings": [
                     {"kind": "open_port", "ip": "192.168.1.7", "port": 80},
                     {"kind": "default_credential", "ip": "192.168.1.7", "entry": "DC02"}]}}):

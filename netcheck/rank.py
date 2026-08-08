@@ -10,7 +10,6 @@ job from deciding what to say about a hundred of them.
 """
 from .diagnose import bursts, culprit
 
-
 _FIXES = {
     "lan": "Wi-Fi or the link to the router. Check adapter power management, "
            "driver version, and signal (RSSI better than -67 dBm).",
@@ -69,6 +68,9 @@ _FIXES = {
     "broken_ipv4": "IPv4 cannot reach the target but IPv6 can -- unusual, and "
                    "worth checking the adapter's IPv4 address, its default "
                    "route, and any IPv4-only firewall rule.",
+    "tcp_autotuning": "TCP receive-window autotuning is not at the Windows "
+                      "default. In an elevated terminal, run `netsh interface "
+                      "tcp set global autotuninglevel=normal`, then retest.",
     "lan_open_management_port": "A LAN device has an open management port. If "
                                 "remote administration is not required, close "
                                 "the port or restrict access to trusted hosts.",
@@ -76,7 +78,6 @@ _FIXES = {
                                "entry. Change that device password immediately "
                                "to a unique, strong value.",
 }
-
 
 # Causes this repo ships a script for, and the invocation that applies each.
 # Generated into the fix text rather than written into the prose, so a script
@@ -93,7 +94,6 @@ _SCRIPTS = {
     "radio_drops": "tools/run_fixes.sh --adapter-only",
 }
 
-
 def _fix(cause):
     """The remedy for `cause`, naming the script that applies it if one exists.
 
@@ -108,7 +108,6 @@ def _fix(cause):
                  f"scripted fix would change; drop --dry-run to apply it.")
     return text
 
-
 def _one_family_broken(section, broken, working):
     """True only when one address family measured a failure and the other
     measured success. Happy Eyeballs makes that the interesting case: the
@@ -116,12 +115,10 @@ def _one_family_broken(section, broken, working):
     return (section.get(broken, {}).get("state") == "fail"
             and section.get(working, {}).get("state") == "ok")
 
-
 def _exposure_open_port(scan):
     names = [f"{f.get('ip')}:{f.get('port')}" for f in (scan.get("findings") or [])
              if f.get("kind") == "open_port"]
     return ("open management ports detected: " + ", ".join(names)) if names else None
-
 
 def _exposure_default_credential(scan):
     names = [f"{f.get('ip')} matched credential list entry {f.get('entry')}"
@@ -129,6 +126,12 @@ def _exposure_default_credential(scan):
              if f.get("kind") == "default_credential"]
     return "; ".join(names) if names else None
 
+def _tcp_autotuning(scan):
+    level = str(scan.get("autotuning") or "").strip().lower()
+    if not level or level == "normal":
+        return None
+    return ("TCP receive-window autotuning is set to "
+            f"'{scan.get('autotuning')}', not the default 'normal'")
 
 # Standing conditions the environment scan measures. A sample row says what
 # broke at an instant; these say what is wrong the whole time. Each entry is
@@ -179,6 +182,7 @@ _SCAN_RULES = (
      lambda s: f"IPv4 failed ({s['ipv4'].get('reason')}) while IPv6 reached it "
                f"in {s['ipv6'].get('ms')}ms"
                if _one_family_broken(s, "ipv4", "ipv6") else None),
+    ("tcp_autotuning", "tcp", "low", _tcp_autotuning),
     ("wifi_mode_pinned", "driver", "medium",
      lambda s: f"{s.get('adapter')} is set to '{s.get('wireless_mode')}', below "
                f"its capability"
@@ -187,7 +191,6 @@ _SCAN_RULES = (
     ("lan_open_management_port", "exposure", "medium", _exposure_open_port),
     ("lan_default_credentials", "exposure", "high", _exposure_default_credential),
 )
-
 
 def _sample_causes(samples):
     """How often each culprit recurred across the measured history."""
@@ -205,7 +208,6 @@ def _sample_causes(samples):
         "evidence": f"{n} of {total} samples ({n / total:.0%}) showed this pattern",
         "fix": _fix(cause),
     } for cause, n in sorted(counts.items(), key=lambda kv: -kv[1])]
-
 
 def _burst_causes(errors):
     """LLM errors arriving in clusters, and how many landed unmonitored."""
@@ -226,7 +228,6 @@ def _burst_causes(errors):
                "so the next burst lands beside a measured sample.",
     }]
 
-
 def _scan_causes(scan):
     """Standing conditions the environment scan actually measured."""
     out = []
@@ -239,7 +240,6 @@ def _scan_causes(scan):
             out.append({"cause": cause, "confidence": confidence,
                         "evidence": found, "fix": _fix(cause)})
     return out
-
 
 def rank(samples, errors, scan):
     """Ranked causes, most confident first, each with evidence and a fix."""
