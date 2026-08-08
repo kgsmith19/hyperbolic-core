@@ -26,3 +26,7 @@ dist-ssr
 # Test artifacts
 test-results/
 playwright-report/
+
+# Local agent worktrees and Superpowers scratch
+.worktrees/
+.superpowers/
