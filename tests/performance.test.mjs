@@ -1,9 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { render } from "../web/render.mjs";
+import { searchPrompts } from "../web/search.mjs";
 
 // NFR-002's threshold, verbatim from the PRD.
 const BUDGET_MS = 100;
+// NFR-001's threshold and library size, verbatim from the PRD.
+const SEARCH_BUDGET_MS = 300;
 
 // p95 over warm iterations. Warm-up matters: the first call pays JIT cost.
 // Iterating matters too -- a single shot is what produced the 34.7ms figure
@@ -112,4 +115,26 @@ test("section_parsing_grows_at_most_linearly__T_U_026__AC_003", () => {
   const dropped = render(interleaved, {}, []);
   assert.equal(dropped.ok, true);
   assert.equal(dropped.text, "C<!--/OPTIONAL:b-->");
+});
+
+// T-U-029 -> NFR-001. Search runs client-side over the already-fetched list
+// (docs/DATA-FLOW-DIAGRAM.md F-4), not a database query, so this is a JS
+// benchmark rather than a seeded-database timing, correcting NFR-001's own
+// stale "how measured" text -- same class of correction SR-04 has had twice.
+test("searches_1000_prompts_within_budget__T_U_029", () => {
+  const prompts = [];
+  for (let i = 0; i < 1000; i++) {
+    prompts.push({
+      title: `Prompt ${i}`,
+      body: i % 7 === 0 ? "contains spec somewhere in the body" : "ordinary prose here",
+      tags: i % 5 === 0 ? ["spec"] : [],
+    });
+  }
+
+  const measured = p95(() => searchPrompts(prompts, "spec"));
+
+  assert.ok(
+    measured < SEARCH_BUDGET_MS,
+    `NFR-001: p95 ${measured.toFixed(1)}ms must be under ${SEARCH_BUDGET_MS}ms at 1,000 prompts`,
+  );
 });
