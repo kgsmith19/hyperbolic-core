@@ -2,6 +2,11 @@
 /package.json @kgsmith19
 /hooks/covgate.mjs @kgsmith19
 
+# Guard/runbox safety mechanism paths (.agent/project.yaml risk.protected_paths).
+/hooks/guard.mjs @kgsmith19
+/hooks/engine.mjs @kgsmith19
+/config.json @kgsmith19
+
 # Canonical control-plane ownership tail. Keep these final non-comment rules.
 /.github/workflows/ @kgsmith19
 /.github/CODEOWNERS @kgsmith19
