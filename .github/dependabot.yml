@@ -6,6 +6,13 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      vite-toolchain:
+        applies-to: version-updates
+        patterns:
+          - "vite"
+          - "@vitejs/plugin-react"
+        update-types:
+          - major
       routine-updates:
         applies-to: version-updates
         patterns:
