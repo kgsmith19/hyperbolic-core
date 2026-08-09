@@ -4,9 +4,9 @@
 project:
   name: agentic-command-center-ui
   type: web-frontend
-  stack: [react19, vite7, typescript, tailwindcss4]
+  stack: [react19, vite8, typescript7, tailwindcss4]
   runtime: node
-  node_version: ">=22"
+  node_version: ">=22.22.0"
 
 commands:
   setup: npm ci

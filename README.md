@@ -6,7 +6,7 @@ Web UI for [agentic-command-center](https://github.com/kgsmith19/agentic-command
 
 ## Stack
 
-React 19 · Vite 7 · TypeScript (strict) · Tailwind v4 · shadcn/ui on Base UI (nova preset) · React Router 7 · TanStack Query 5 · Lucide. Approved-when-needed (not yet used, so not yet imported): Zustand (client state), Motion (animation), GSAP (heavy animation).
+React 19 · Vite 8 · TypeScript 7 (strict) · Tailwind v4 · shadcn/ui on Base UI (nova preset) · React Router 8 · TanStack Query 5 · Lucide. Approved-when-needed (not yet used, so not yet imported): Zustand (client state), Motion (animation), GSAP (heavy animation).
 
 ## Run
 
