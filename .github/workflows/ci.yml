@@ -1,18 +1,15 @@
 name: CI
 
 # Automatic triggers (push/pull_request) are OFF, 2026-08-06, Kyle's call:
-# hosted-runner infra has been repeatedly failing before checkout even runs
-# ("Failed to resolve action download info" - Internal Server Error/Service
-# Unavailable/Bad Gateway, GitHub's own action-download service, nothing to
-# do with this repo) enough to make CI unreliable rather than merely slow.
-# Interim plan: run the fast/portable suite (`npm test`) and, when a change
-# touches a Windows-only surface, `npm run test:windows` from a session or
-# script BEFORE merging/deploying, deploy manually and much less often, and
-# still open/merge PRs without waiting on this workflow (no branch-protection
-# rule currently requires these checks - confirmed via PR #10's
-# mergeable_state: "unstable", not "blocked"). Flip this back to push/
-# pull_request once GitHub Actions infra settles; workflow_dispatch keeps a
-# manual button live in the meantime for anyone who wants a real CI run.
+# hosted-runner infra had been repeatedly failing before checkout even runs
+# ("Failed to resolve action download info"), making CI unreliable rather
+# than merely slow. The required merge gate is pr-gate.yml's `PR Gate` check
+# (fast suite + changed-file coverage floor), enforced by the Lean PR Gate
+# ruleset; this workflow is the deep tier (Windows suite, GUI e2e) and is
+# deliberately dispatch-only so its flakiness can never block a merge. Run it
+# before deploying or when a change touches a Windows-only surface. Flip it
+# back to push/pull_request (as a non-required signal) once Actions infra
+# proves stable.
 on:
   workflow_dispatch:
 
