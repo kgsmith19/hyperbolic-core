@@ -35,7 +35,10 @@ Engineering standards (mirrors the backend repo):
 - Every behavior change ships with tests: unit/component (Vitest, colocated
   `*.test.tsx`) and e2e (Playwright in `e2e/`, network mocked with
   `page.route` scoped to the API host — never bare `**/path` patterns).
-- Merge only on green CI — no server-side branch protection; this rule is the gate.
+- Merge only on green CI. Server-side enforcement is the portfolio-standard
+  `Lean PR Gate` branch ruleset requiring the `PR Gate` status check (see
+  `agent-engineering-standard`); until that ruleset is applied to this repo,
+  this rule is the gate.
 - All HTTP goes through `src/api/client.ts` (typed by `types.gen.ts`);
   components never call fetch or supabase data APIs directly.
 - Pages own routes (`src/pages/`); shared pieces live in `src/components/`.
