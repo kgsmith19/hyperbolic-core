@@ -62,10 +62,10 @@ Engineering standards:
 - Every behavior change ships with tests in the matching tier: unit (pure
   logic, no I/O), integration (service ↔ Postgres, `tests/kernel/`), e2e
   (HTTP → app → DB, `tests/api/`).
-- Runtime-affecting PRs run lint, types, migrations, and the full suite in CI;
-  documentation/governance-only PRs still run cell-scope enforcement and the
-  required PR Gate, but do not start Postgres or the runtime suite. Merge only
-  on green.
+- Runtime-affecting PRs run lint, types, migrations, and the full suite in CI.
+  Documentation/governance-only PRs use the CI fast path: they still run
+  cell-scope enforcement and the required `PR Gate`, but do not start Postgres
+  or execute the runtime suite. Merge only on green.
 - Tests are lean too: assert behavior, not implementation; one concern per
   test; reuse conftest fixtures.
 - The web UI lives in the sibling `lifeos-ui` repo; its Playwright e2e gate
