@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   checks:
-    name: ${{ github.event.pull_request.draft && 'Draft CI (local only)' || 'PR Gate' }}
+    name: PR Gate
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -50,7 +50,7 @@ jobs:
 
           printf '%s\n' "$changed" > "$RUNNER_TEMP/lifeos-changed-files.txt"
           printf 'Changed files:\n%s\n' "$changed"
-          runtime_files=$(printf '%s\n' "$changed" | grep -Ev '(^|/).*\.md$|^docs/|^\.github/CODEOWNERS$|^\.agent/|^\.agents/' || true)
+          runtime_files=$(printf '%s\n' "$changed" | grep -Ev '(^|/).*\.md$|^docs/|^\.agent/|^\.agents/' || true)
 
           if [ -n "$runtime_files" ]; then
             echo "runtime=true" >> "$GITHUB_OUTPUT"
