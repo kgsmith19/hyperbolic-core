@@ -44,6 +44,18 @@ test("a directive survives as a file and starts unbound", async () => {
   assert.equal(m.readDirective(g.id).text, "ship the thing");
 });
 
+test("tag normalization is idempotent and enforces uniqueness", () => {
+  const once = m.normalizeDirectiveTags([" Ops ", "ops", "ui"]);
+  const twice = m.normalizeDirectiveTags(once);
+  assert.deepEqual(once, ["ops", "ui"]);
+  assert.deepEqual(twice, once);
+});
+
+test("createDirective stores deduped tags and inserts a normalized route tag", () => {
+  const g = m.createDirective({ text: "ship", tags: ["ops", "OPS"], routeTag: "Guards Team" });
+  assert.deepEqual(g.tags, ["ops", "guards-team"]);
+});
+
 test("a bad policy file falls back to no directive defaults", () => {
   const policy = path.join(DIRECTIVES_DIR, "policy.json");
   process.env.ACC_POLICY = policy;
@@ -129,6 +141,30 @@ test("directive ids cannot escape the directives directory", async () => {
 test("createDirective refuses empty/whitespace-only/absent text", () => {
   assert.throws(() => m.createDirective({ text: "   " }), /a directive needs text/);
   assert.throws(() => m.createDirective({}), /a directive needs text/, "text itself is undefined, not just blank");
+});
+
+test("createDirective refuses invalid tag input", () => {
+  assert.throws(() => m.createDirective({ text: "t", tags: "oops" }), /tags must be an array/);
+  assert.throws(() => m.createDirective({ text: "t", tags: ["ok", "__proto__"] }), /invalid tag/);
+  assert.throws(() => m.createDirective({ text: "t", tags: Array.from({ length: 17 }, (_, i) => `t${i}`) }), /at most 16/);
+});
+
+test("legacy directives without tags are read as tags:[]", () => {
+  const id = "d-legacy";
+  fs.writeFileSync(path.join(DIRECTIVES_DIR, `${id}.json`), JSON.stringify({
+    id,
+    text: "legacy",
+    cwd: "",
+    profile: "",
+    status: "active",
+    sessionId: "",
+    sessionIds: [],
+    cycles: 0,
+    budget: { wallClockMin: 0, turns: 0, tokens: 0, dollars: 0 },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }, null, 2));
+  assert.deepEqual(m.readDirective(id).tags, []);
 });
 
 test("createDirective validates doneWhen as optional single-line text within one documented limit", () => {
@@ -304,6 +340,14 @@ test("CLI: main() 'new' accepts hard-ceiling flags", () => {
     "--wall-clock-min", "45", "--turns", "20", "--tokens", "5000", "--dollars", "6.25",
   ]));
   assert.deepEqual(printed.budget, { wallClockMin: 45, turns: 20, tokens: 5000, dollars: 6.25 });
+});
+
+test("CLI: main() 'new' accepts --tag/--route-tag and stores normalized unique tags", () => {
+  const printed = JSON.parse(runMain([
+    "new", "--text", "cli directive",
+    "--tag", "Ops", "--tag", "ops", "--route-tag", "Guards Team",
+  ]));
+  assert.deepEqual(printed.tags, ["ops", "guards-team"]);
 });
 
 test("CLI: main() 'new' accepts --done-when and stores it exactly", () => {

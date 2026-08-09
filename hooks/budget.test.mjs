@@ -365,7 +365,7 @@ test("SessionStart includes doneWhen distinctly when the directive has one", () 
   process.env.ACC_DIRECTIVES_DIR = "";
   const g = gm.createDirective({ text: "resume me", doneWhen: "all acceptance tests are green" });
   const out = runSessionStart(sb, sid, { ACC_DIRECTIVE: g.id });
-  assert.match(out, /\[ACC DIRECTIVE\] Done when: all acceptance tests are green/);
+  assert.match(out, new RegExp(`\\[ACC DIRECTIVE ${g.id}\\] Done when: all acceptance tests are green`));
 });
 
 test("SessionStart stays safe for legacy directives that omit doneWhen", () => {
@@ -380,7 +380,7 @@ test("SessionStart stays safe for legacy directives that omit doneWhen", () => {
   fs.writeFileSync(p, JSON.stringify(raw, null, 2) + "\n");
   const out = runSessionStart(sb, sid, { ACC_DIRECTIVE: g.id });
   assert.match(out, /\[ACC DIRECTIVE/);
-  assert.doesNotMatch(out, /\[ACC DIRECTIVE\] Done when:/);
+  assert.doesNotMatch(out, /\[ACC DIRECTIVE [^\]]+\] Done when:/);
 });
 
 test("UserPromptSubmit warns at or above softK", () => {

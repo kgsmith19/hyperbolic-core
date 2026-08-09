@@ -169,7 +169,7 @@ function directiveContext(p) {
 
   const parts = [head, "", directive.text, ""];
   if (typeof directive.doneWhen === "string" && directive.doneWhen.trim()) {
-    parts.push(`[ACC DIRECTIVE] Done when: ${directive.doneWhen}`, "");
+    parts.push(`[ACC DIRECTIVE ${directive.id}] Done when: ${directive.doneWhen}`, "");
   }
   if (directive.cwd) parts.push(`Working folder: ${directive.cwd}`);
   if (cycle > 0) {

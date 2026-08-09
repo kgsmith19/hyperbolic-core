@@ -1,13 +1,13 @@
 ---
 title: The web GUI launches and manages headless directives; the keystroke stack retires
 spec_id: SPEC-0005-headless-launch-and-keystroke-retirement
-slice: SL-013 (PR-1), SL-011 + SL-012 (PR-2)
+slice: SL-013 (PR-1), SL-011 + SL-012 (PR-2), SL-013C (PR-3)
 status: in-progress
 created: 2026-08-08
 updated: 2026-08-09
 completed:
 owner: Kyle Smith
-traces: [FR-005, FR-011, FR-012, FR-014, NFR-007, NFR-008]
+traces: [FR-005, FR-011, FR-012, FR-013, FR-014, NFR-007, NFR-008]
 ---
 
 # SPEC-0005: Web launch surface, then keystroke-stack demolition
@@ -82,6 +82,14 @@ PR-2:
 | AC-202 | The demolished tree | the grep gate (clearbot\|winfind\|PtyHost\|sendconsole\|guards-gui\|SLICE-RUNNER\|Guards Control\|conpty\|term\.html\|stubconsole\|stubpipe\|watchdog\|autoClear\|autoCd\|pendingKicks\|consolePid) | hits only `docs/adr/`, `docs/notes/`, `specs/done/`, git history — plus the three documented pin classes: this spec itself (it orders the deletion), TEST-LEDGER's deleted-tests section (it records it), and negative assertions/fixtures that pin the machinery's ABSENCE | — |
 | AC-203 | An interactive session ends over hard budget with an active directive | Stop hook fires | systemMessage names the checkpoint, `>>> TYPE /clear NOW <<<`, and the exact `runner.mjs directive:<id>` resume command; no clear-request file is ever written | FR-011 |
 | AC-204 | A session starts with `ACC_DIRECTIVE` set | SessionStart | binds by directive id alone (no console PID, no window state) and injects the directive context | FR-011 |
+
+PR-3 (FR-013):
+
+| ID | Given | When | Then | Traces to |
+|---|---|---|---|---|
+| AC-301 | User tags (`["ops","OPS"]`) plus a routing verdict label (`guards`) | POST `/api/directives` | Created directive stores normalized unique tags including the route tag (`["ops","guards"]`) | FR-013 |
+| AC-302 | Legacy directive JSON with no `tags` field | GET `/api/directives` | Response includes `tags: []` (never `null`, no fabricated route tag) | FR-013 |
+| AC-303 | Two active directives, one tagged `guards` and one not | Select `guards` in `/guards` tag filter, then clear | Filtered view shows only `guards` tag matches; clear restores full list; directive files unchanged | FR-013 |
 
 ## 5. Properties
 

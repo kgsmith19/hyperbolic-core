@@ -46,6 +46,9 @@ function doneDir() {
 }
 
 const nowIso = () => new Date().toISOString();
+export const MAX_DIRECTIVE_TAGS = 16;
+export const DIRECTIVE_TAG_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+const DIRECTIVE_TAG_RESERVED = new Set(["__proto__", "constructor", "prototype"]);
 
 function normalizeBudgetValue(value, { name, integer = false } = {}) {
   if (value === undefined || value === null || value === "") return 0;
@@ -110,6 +113,7 @@ function safeId(id) {
 }
 
 function write(directive) {
+  directive.tags = normalizeDirectiveTags(directive.tags);
   directive.updatedAt = nowIso();
   fs.writeFileSync(directivePath(directive.id), JSON.stringify(directive, null, 2) + "\n");
   return directive;
@@ -160,7 +164,7 @@ function mutate(id, change) {
 
 export function readDirective(id) {
   const g = readJson(directivePath(id), null);
-  return g && g.id ? g : null;
+  return g && g.id ? normalizeStoredDirective(g) : null;
 }
 
 export function listDirectives() {
@@ -169,7 +173,8 @@ export function listDirectives() {
       .readdirSync(directivesDir())
       .filter((f) => f.endsWith(".json"))
       .map((f) => readJson(path.join(directivesDir(), f), null))
-      .filter((g) => g && g.id);
+      .filter((g) => g && g.id)
+      .map(normalizeStoredDirective);
   } catch {
     return [];
   }
@@ -184,10 +189,12 @@ export function directiveForSession(sessionId) {
   return activeDirectives().find((g) => g.sessionId === sessionId) || null;
 }
 
-export function createDirective({ text, doneWhen, cwd, profile, budget }) {
+export function createDirective({ text, doneWhen, cwd, profile, budget, tags, routeTag }) {
   ensureDirs();
   const t = String(text || "").trim();
   if (!t) throw new Error("a directive needs text");
+  const userTags = validateUserDirectiveTags(tags);
+  const autoRouteTag = normalizeRouteTag(routeTag);
   const normalizedDoneWhen = normalizeDoneWhen(doneWhen);
   const normalizedBudget = normalizeDirectiveBudget(budget);
   const iso = new Date().toISOString(); // 2026-07-31T04:10:27.123Z
@@ -207,6 +214,7 @@ export function createDirective({ text, doneWhen, cwd, profile, budget }) {
     sessionId: "",
     sessionIds: [],
     cycles: 0,
+    tags: normalizeDirectiveTags(userTags, autoRouteTag ? [autoRouteTag] : []),
     budget: normalizedBudget,
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -225,10 +233,11 @@ export function createDirective({ text, doneWhen, cwd, profile, budget }) {
 export function normalizeDoneWhen(value) {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw new Error("doneWhen must be a string");
-  if (!value.trim() || /[\r\n]/.test(value) || value.length > DONE_WHEN_MAX) {
+  const trimmed = value.trim();
+  if (!trimmed || /[\r\n]/.test(value) || trimmed.length > DONE_WHEN_MAX) {
     throw new Error(`doneWhen must be a single line of 1..${DONE_WHEN_MAX} characters`);
   }
-  return value;
+  return trimmed;
 }
 
 // Real Claude Code session ids are always UUIDs. bindSession is reachable by
@@ -358,6 +367,17 @@ function budgetFromArgs(argv) {
   };
 }
 
+function tagsFromArgs(argv) {
+  const out = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--tag" && argv[i + 1] !== undefined) out.push(argv[++i]);
+    else if (argv[i] === "--tags" && argv[i + 1] !== undefined) {
+      out.push(...String(argv[++i]).split(",").map((t) => t.trim()).filter(Boolean));
+    }
+  }
+  return out;
+}
+
 // Positional id, falling back to the single active directive. Every command a MODEL
 // is told to run takes an explicit id (SessionStart injects it), so this fallback
 // only serves a human at a prompt.
@@ -379,6 +399,8 @@ export function main() {
       cwd: arg(argv, "--cwd"),
       profile: arg(argv, "--profile"),
       budget: budgetFromArgs(argv),
+      tags: tagsFromArgs(argv),
+      routeTag: arg(argv, "--route-tag"),
     });
     console.log(JSON.stringify(g));
     return;
@@ -415,8 +437,51 @@ export function main() {
     return;
   }
   console.log(
-    "usage: directive.mjs new (--text T | --text-file F) [--done-when W] [--cwd D] [--profile P] [--wall-clock-min N] [--turns N] [--tokens N] [--dollars N] | list | show [id] | log [id] --text T | done [id] [--why W] | blocked [id] --why W | paused [id]"
+    "usage: directive.mjs new (--text T | --text-file F) [--done-when W] [--cwd D] [--profile P] [--tag T] [--tags a,b] [--route-tag T] [--wall-clock-min N] [--turns N] [--tokens N] [--dollars N] | list | show [id] | log [id] --text T | done [id] [--why W] | blocked [id] --why W | paused [id]"
   );
 }
 
 if (isMainModule(import.meta.url)) main();
+
+export function normalizeDirectiveTag(tag) {
+  const t = String(tag || "").trim().toLowerCase();
+  return DIRECTIVE_TAG_RE.test(t) && !DIRECTIVE_TAG_RESERVED.has(t) ? t : "";
+}
+
+export function normalizeRouteTag(tag) {
+  const t = String(tag || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalizeDirectiveTag(t);
+}
+
+export function normalizeDirectiveTags(tags = [], extra = []) {
+  const out = [];
+  const seen = new Set();
+  const all = [...(Array.isArray(tags) ? tags : []), ...(Array.isArray(extra) ? extra : [])];
+  for (const raw of all) {
+    const t = normalizeDirectiveTag(raw);
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= MAX_DIRECTIVE_TAGS) break;
+  }
+  return out;
+}
+
+function normalizeStoredDirective(directive) {
+  return { ...directive, tags: normalizeDirectiveTags(directive.tags) };
+}
+
+export function validateUserDirectiveTags(tags) {
+  if (tags === undefined) return [];
+  if (!Array.isArray(tags)) throw new Error("tags must be an array");
+  if (tags.length > MAX_DIRECTIVE_TAGS) throw new Error(`tags must have at most ${MAX_DIRECTIVE_TAGS} entries`);
+  for (const t of tags) {
+    if (typeof t !== "string") throw new Error("every tag must be a string");
+    if (!normalizeDirectiveTag(t)) throw new Error(`invalid tag: ${JSON.stringify(t)}`);
+  }
+  return tags;
+}

@@ -27,6 +27,7 @@
   <label>Done condition <input type="text" id="dirDoneWhen" style="width:520px" placeholder="Optional: when this is true, the directive is finished"></label><br>
   <label>Folder <input type="text" id="dirCwd" style="width:340px"></label>
   <span id="dirSuggest" class="muted"></span><br>
+  <label>Tags (optional, comma-separated) <input type="text" id="dirTags" style="width:340px" placeholder="guards, runner"></label><br>
   <span id="profiles"></span>
   <div style="margin:6px 0">
     <label>Wall min <input type="number" min="0" step="any" id="dirWallClockMin" style="width:70px" placeholder="0"></label>
@@ -39,6 +40,12 @@
   <span id="dirMsg" class="muted"></span>
   <div id="laneLine" class="muted"></div>
   <div style="margin-top:6px"><strong>Work in flight</strong></div>
+  <label>Filter by tag
+    <select id="dirTagFilter" style="width:220px">
+      <option value="">(all tags)</option>
+    </select>
+  </label>
+  <button id="dirTagFilterClear">Clear</button>
   <div id="dirList" class="muted"></div>
 </fieldset>
 
@@ -260,6 +267,7 @@ function fillProfiles(names) {
 }
 let openLogId = null;
 let logTimer = null;
+let directivesCache = [];
 function toggleLog(id, pre) {
   if (logTimer) { clearInterval(logTimer); logTimer = null; }
   if (openLogId === id) { openLogId = null; refreshDirectives(); return; }
@@ -274,7 +282,25 @@ function toggleLog(id, pre) {
 }
 
 async function refreshDirectives() {
-  const list = await api("/api/directives");
+  directivesCache = await api("/api/directives");
+  const tagFilter = $("dirTagFilter");
+  const previous = tagFilter.value;
+  const tags = Array.from(new Set((Array.isArray(directivesCache) ? directivesCache : [])
+    .flatMap((d) => Array.isArray(d.tags) ? d.tags : []))).sort();
+  tagFilter.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "(all tags)";
+  tagFilter.appendChild(all);
+  for (const tag of tags) {
+    const o = document.createElement("option");
+    o.value = tag;
+    o.textContent = tag;
+    tagFilter.appendChild(o);
+  }
+  tagFilter.value = tags.includes(previous) ? previous : "";
+  const list = (Array.isArray(directivesCache) ? directivesCache : [])
+    .filter((d) => !tagFilter.value || (Array.isArray(d.tags) && d.tags.includes(tagFilter.value)));
   const wrap = $("dirList");
   wrap.innerHTML = "";
   if (logTimer) { clearInterval(logTimer); logTimer = null; }
@@ -286,6 +312,7 @@ async function refreshDirectives() {
       row.style.margin = "4px 0";
       const title = document.createElement("span");
       title.textContent = `${d.running ? "● running" : "○ idle"}  ${d.id}  — ${String(d.text || "").split("\n")[0].slice(0, 90)}  (${d.cycles || 0} restarts)`;
+      if (Array.isArray(d.tags) && d.tags.length) title.textContent += `  [${d.tags.join(", ")}]`;
       title.style.color = d.running ? "#1a7a1a" : "";
       row.appendChild(title);
       const btn = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; row.appendChild(b); return b; };
@@ -321,12 +348,14 @@ async function refreshDirectives() {
 
 $("dirGo").onclick = async () => {
   const text = $("dirText").value.trim();
-  const doneWhen = $("dirDoneWhen").value;
+  const doneWhen = $("dirDoneWhen").value.trim();
   const cwd = $("dirCwd").value.trim();
   if (!text) { $("dirMsg").textContent = "describe the task first"; $("dirMsg").className = "err"; return; }
   if (!cwd) { $("dirMsg").textContent = "set the folder first"; $("dirMsg").className = "err"; return; }
   const profile = document.querySelector("input[name=profile]:checked")?.value || "";
   const body = { text, cwd, profile };
+  const tags = $("dirTags").value.split(",").map((s) => s.trim()).filter(Boolean);
+  if (tags.length) body.tags = tags;
   if (doneWhen !== "") body.doneWhen = doneWhen;
   for (const [key, id] of [["wallClockMin", "dirWallClockMin"], ["turns", "dirTurns"], ["tokens", "dirTokens"], ["dollars", "dirDollars"]]) {
     const raw = $(id).value.trim();
@@ -339,6 +368,11 @@ $("dirGo").onclick = async () => {
   $("dirMsg").textContent = l.error ? `created ${d.id} but not launched: ${l.error}` : `launched ${d.id}`;
   $("dirMsg").className = l.error ? "err" : "ok";
   if (!l.error) $("dirText").value = "";
+  await refreshDirectives();
+};
+$("dirTagFilter").onchange = refreshDirectives;
+$("dirTagFilterClear").onclick = async () => {
+  $("dirTagFilter").value = "";
   await refreshDirectives();
 };
 

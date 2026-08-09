@@ -17,7 +17,7 @@ import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadKernelPolicy, saveKernelPolicy } from "../kernel/policy.mjs";
-import { DONE_WHEN_MAX } from "../hooks/directive.mjs";
+import { DONE_WHEN_MAX, normalizeRouteTag, validateUserDirectiveTags } from "../hooks/directive.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Exact-match route map for the built-in pages — request input never touches
@@ -409,9 +409,10 @@ export function handler(req, res) {
     return readBody(req, res, async (b) => {
       const text = typeof b.text === "string" ? b.text : "";
       if (!text.trim() || text.length > 32768) return send(res, 400, { error: "text must be 1..32768 characters" });
+      const doneWhen = b.doneWhen === undefined ? undefined : String(b.doneWhen).trim();
       if (b.doneWhen !== undefined) {
         if (typeof b.doneWhen !== "string") return send(res, 400, { error: "doneWhen must be a string" });
-        if (/[\r\n]/.test(b.doneWhen) || !b.doneWhen.trim() || b.doneWhen.length > DONE_WHEN_MAX) {
+        if (/[\r\n]/.test(b.doneWhen) || !doneWhen || doneWhen.length > DONE_WHEN_MAX) {
           return send(res, 400, { error: `doneWhen must be a single line of 1..${DONE_WHEN_MAX} characters` });
         }
       }
@@ -426,8 +427,17 @@ export function handler(req, res) {
       const profiles = profileNames(policy);
       const profile = b.profile === undefined || b.profile === "" ? "" : b.profile;
       if (profile !== "" && !profiles.includes(profile)) return send(res, 400, { error: `unknown profile ${JSON.stringify(b.profile)}` });
+      let tags;
+      try { tags = validateUserDirectiveTags(b.tags); }
+      catch (e) { return send(res, 400, { error: e.message }); }
       let budget;
       try { budget = readDirectiveBudget(b); } catch (e) { return send(res, 400, { error: e.message }); }
+      // Route-tag insertion is derived from the router's own verdict only.
+      let routeTag = "";
+      try {
+        const routeText = text.replace(/\s+/g, " ").trim().slice(0, 2000);
+        if (routeText) routeTag = normalizeRouteTag((await execJson(routeScript(), ["--text", routeText], "router")).label);
+      } catch {}
       // The text travels via a temp file (--text-file), the same proven path
       // the WinForms GUI used: newlines and quotes never touch argv.
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "acc-directive-"));
@@ -435,8 +445,10 @@ export function handler(req, res) {
         const tmp = path.join(tmpDir, "text.md");
         fs.writeFileSync(tmp, text);
         const args = ["new", "--text-file", tmp, "--cwd", b.cwd];
-        if (b.doneWhen !== undefined) args.push("--done-when", b.doneWhen);
+        if (doneWhen !== undefined) args.push("--done-when", doneWhen);
         if (profile) args.push("--profile", profile);
+        for (const tag of tags) args.push("--tag", tag);
+        if (routeTag) args.push("--route-tag", routeTag);
         for (const [flag, value] of [["--wall-clock-min", budget.wallClockMin], ["--turns", budget.turns], ["--tokens", budget.tokens], ["--dollars", budget.dollars]]) {
           if (value !== undefined) args.push(flag, String(value));
         }

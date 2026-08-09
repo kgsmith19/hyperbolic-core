@@ -639,6 +639,7 @@ const newDirective = async (over = {}) => {
     doneWhen: over.doneWhen,
     cwd,
     profile: over.profile ?? "",
+    tags: over.tags,
     wallClockMin: over.wallClockMin,
     turns: over.turns,
     tokens: over.tokens,
@@ -670,15 +671,17 @@ test("AC-103: POST /api/directives creates a real store entry — text and doneW
   resetLaunch();
   const text = 'line one\nline "two" with quotes\n\nline four';
   const doneWhen = "all acceptance tests are green";
-  const { r, j } = await newDirective({ text, doneWhen });
+  const { r, j } = await newDirective({ text, doneWhen, tags: ["ops", "OPS", "ui"] });
   assert.equal(r.status, 200);
   assert.match(j.id, /^d-/);
   assert.equal(j.text, text, "newlines and quotes must survive the trip into the store");
   assert.equal(j.doneWhen, doneWhen, "doneWhen must round-trip exactly");
   assert.equal(j.status, "active");
+  assert.deepEqual(j.tags, ["ops", "ui"], "user tags are normalized and deduped");
   const list = await (await fetch(`${base}/api/directives`)).json();
   assert.equal(list.length, 1);
   assert.equal(list[0].id, j.id);
+  assert.deepEqual(list[0].tags, ["ops", "ui"]);
   assert.equal(list[0].doneWhen, doneWhen);
 });
 
@@ -696,6 +699,9 @@ test("AC-104: create refuses bad text, a relative or nonexistent cwd, and an unk
     { text: "ok", cwd: good, profile: "", turns: 1.5 },
     { text: "ok", cwd: good, profile: "", tokens: -1 },
     { text: "ok", cwd: good, profile: "", dollars: "x" },
+    { text: "ok", cwd: good, profile: "", tags: "oops" },
+    { text: "ok", cwd: good, profile: "", tags: ["good", "__proto__"] },
+    { text: "ok", cwd: good, profile: "", tags: Array.from({ length: 17 }, (_, i) => `t${i}`) },
     { text: "ok", doneWhen: 42, cwd: good, profile: "" },
     { text: "ok", doneWhen: "", cwd: good, profile: "" },
     { text: "ok", doneWhen: "line 1\nline 2", cwd: good, profile: "" },
@@ -711,6 +717,13 @@ test("AC-105: a known profile is accepted and lands on the directive", async () 
   const { r, j } = await newDirective({ profile: "Heavy" });
   assert.equal(r.status, 200);
   assert.equal(j.profile, "Heavy");
+});
+
+test("AC-105a: route verdict label is auto-added as a tag when create can route", async () => {
+  resetLaunch();
+  const { r, j } = await newDirective({ text: "tighten guards hook checks", tags: ["ops"] });
+  assert.equal(r.status, 200);
+  assert.deepEqual(j.tags, ["ops", "guards"]);
 });
 
 test("AC-105b: directive hard-ceiling fields are accepted and land on the store entry", async () => {
@@ -733,6 +746,19 @@ test("AC-106: GET /api/directives decorates each entry with live runner state fr
   fs.rmSync(pidFile(j.id));
   list = await (await fetch(`${base}/api/directives`)).json();
   assert.equal(list[0].running, false);
+});
+
+test("AC-106a: legacy directives with no tags are exposed as tags:[] (never null)", async () => {
+  resetLaunch();
+  const id = "d-20260808-120000-lega";
+  const live = path.join(LAUNCH_DIR, "runner", "directives");
+  fs.mkdirSync(live, { recursive: true });
+  fs.writeFileSync(path.join(live, `${id}.json`), JSON.stringify({
+    id, text: "legacy", cwd: ROUTE_A, profile: "", status: "active", sessionId: "", sessionIds: [], cycles: 0, budget: { wallClockMin: 0, turns: 0, tokens: 0, dollars: 0 },
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  }, null, 2));
+  const list = await (await fetch(`${base}/api/directives`)).json();
+  assert.deepEqual(list[0].tags, []);
 });
 
 test("AC-107: POST /api/directives/status marks done (archives) and paused; refusals never touch the store", async () => {

@@ -94,12 +94,50 @@ test("GO creates a real directive and hands exactly directive:<id> to the runner
   expect(stored.doneWhen).toBe(doneWhen);
   expect(stored.cwd).toBe(routeDir);
   expect(stored.profile).toBe("Normal"); // first radio is preselected
+  expect(stored.tags).toContain("guards");
   await expect.poll(() => runnerCalls().length, { timeout: 5000 }).toBeGreaterThan(0);
   expect(runnerCalls().at(-1)).toEqual([`directive:${ids[0]}`]);
-  expect(sessionStartContext(ids[0])).toContain(`[ACC DIRECTIVE] Done when: ${doneWhen}`);
+  expect(sessionStartContext(ids[0])).toContain(`[ACC DIRECTIVE ${ids[0]}] Done when: ${doneWhen}`);
   await expect(page.locator("#dirList")).toContainText(ids[0]);
   await expect(page.locator("#dirList")).toContainText("tighten the guards hook");
   await expect(page.locator("#laneLine")).toContainText("Launch lane:");
+});
+
+test("tag filter is inclusive and clear restores the full list", async ({ page }) => {
+  await page.goto("/guards");
+  await page.locator("#dirText").fill("tighten the guards hook checks");
+  await page.locator("#dirText").blur();
+  await expect(page.locator("#dirCwd")).toHaveValue(routeDir);
+  await page.locator("#dirTags").fill("ops");
+  await page.locator("#dirGo").click();
+  await expect(page.locator("#dirMsg")).toContainText("launched d-");
+  const firstId = liveIds()[0];
+  const secondId = "d-20260809-000000-e2e2";
+  fs.writeFileSync(path.join(dirsDir, `${secondId}.json`), JSON.stringify({
+    id: secondId,
+    text: "unrelated work",
+    cwd: routeDir,
+    profile: "Normal",
+    status: "active",
+    sessionId: "",
+    sessionIds: [],
+    cycles: 0,
+    tags: ["solo"],
+    budget: { wallClockMin: 0, turns: 0, tokens: 0, dollars: 0 },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }, null, 2));
+  fs.writeFileSync(path.join(dirsDir, `${secondId}.log.md`), "# Directive\n");
+  await page.reload();
+  await expect.poll(() => liveIds().length).toBe(2);
+
+  await page.locator("#dirTagFilter").selectOption("guards");
+  await expect(page.locator("#dirList")).toContainText(firstId);
+  await expect(page.locator("#dirList")).not.toContainText(secondId);
+
+  await page.locator("#dirTagFilterClear").click();
+  await expect(page.locator("#dirList")).toContainText(firstId);
+  await expect(page.locator("#dirList")).toContainText(secondId);
 });
 
 test("the profile radios come from policy.json (private keys filtered) and the choice lands on the directive", async ({ page }) => {
