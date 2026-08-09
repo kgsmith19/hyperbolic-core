@@ -52,6 +52,11 @@ risk:
     Automated writes to network devices remain out of scope. A change that
     sends configuration writes to modem/router hardware is R4.
 
+work_tracking:
+  system: github-projects
+  project: "Agentic Portfolio"
+  backing_record: github-issues
+
 platforms:
   primary: windows
   secondary: macos
