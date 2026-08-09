@@ -211,15 +211,17 @@ def _hc_secret_context(request: Request) -> AccessContext:
 
     The Android app (mcnaveen/health-connect-webhook) sends a custom header per
     webhook URL; we use X-HC-Secret. LIFEOS_HC_SECRET must be set in the
-    environment; if it is unset the endpoint is open — a deliberate misconfiguration
-    the startup check will catch when auth is enabled. Falls through with
-    AccessContext scoped to health_connect only (no owner-level access).
+    environment; if it is unset the endpoint fails closed with 503 — ingestion
+    is refused until the server is configured, even when LIFEOS_AUTH_MODE is
+    disabled (#89). Falls through with AccessContext scoped to health_connect
+    only (no owner-level access).
     """
     expected = read_env("LIFEOS_HC_SECRET")
-    if expected:
-        provided = request.headers.get("X-HC-Secret", "")
-        if provided != expected:
-            raise AuthError("invalid or missing X-HC-Secret")
+    if not expected:
+        raise AuthUnavailableError("LIFEOS_HC_SECRET is not configured; refusing ingestion")
+    provided = request.headers.get("X-HC-Secret", "")
+    if provided != expected:
+        raise AuthError("invalid or missing X-HC-Secret")
     return AccessContext.of("health_connect:read", "health_connect:write")
 
 
