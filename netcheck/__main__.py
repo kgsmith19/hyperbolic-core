@@ -13,6 +13,7 @@ import json
 import os
 import platform
 import socket
+import subprocess
 import sys
 import webbrowser
 from pathlib import Path
@@ -23,6 +24,8 @@ from . import __version__
 
 DB = Path(os.environ.get("NETCHECK_DB", Path.home() / ".netcheck" / "netcheck.db"))
 TARGET = environ.TARGET  # single definition in environ.py; scan and probe must never disagree
+SCAN_BUDGET_SECONDS = {"quick": 10, "standard": 60, "deep": 120}
+SCAN_WORKER_ENV = "NETCHECK_SCAN_WORKER"
 
 
 def load_env(path=Path(".env")):
@@ -66,9 +69,8 @@ def cmd_watch(args):
     return watch.run(connect(), args, DB)
 
 
-def cmd_scan(args):
-    """FR-018: quick is _one_probe_row's FR-001 measurement; standard and
-    deep are environ.scan(), the latter with deep=True."""
+def _cmd_scan_worker(args):
+    """Execute one scan tier inside the bounded child process."""
     conn, host = connect()
     if args.tier == "quick":
         row = _one_probe_row(args)
@@ -79,6 +81,33 @@ def cmd_scan(args):
     store.add_scan(conn, host, {"ts": data["ts"], "payload": json.dumps(data)})
     print(json.dumps(data, indent=2, default=str))
     return 0
+
+
+def cmd_scan(args):
+    """FR-018 + NFR-009: run the existing tier implementation in a child
+    process with a hard wall-clock ceiling. The child marker prevents recursive
+    spawning; existing per-probe timeouts still bound any grandchildren."""
+    if os.environ.get(SCAN_WORKER_ENV) == "1":
+        return _cmd_scan_worker(args)
+
+    budget = SCAN_BUDGET_SECONDS[args.tier]
+    env = os.environ.copy()
+    env[SCAN_WORKER_ENV] = "1"
+    env["NETCHECK_TARGET"] = args.target
+    command = [sys.executable, "-m", "netcheck", "--target", args.target,
+               "scan", "--tier", args.tier]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True,
+                                timeout=budget, env=env)
+    except subprocess.TimeoutExpired:
+        print(f"[netcheck] {args.tier} scan exceeded {budget}s budget", file=sys.stderr)
+        return 124
+
+    if result.stdout:
+        sys.stdout.write(result.stdout)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    return result.returncode
 
 
 def cmd_diagnose(args):
