@@ -160,6 +160,31 @@ def test_post_health_connect_rejects_wrong_secret(auth_hc: None) -> None:
     assert response.status_code == 401
 
 
+def test_post_health_connect_rejects_missing_header(auth_hc: None) -> None:
+    response = client.post("/health-connect", json=MOCK_PAYLOAD)
+    assert response.status_code == 401
+
+
+def test_post_health_connect_fails_closed_when_server_secret_missing() -> None:
+    prev_auth = os.environ.get("LIFEOS_AUTH_MODE")
+    prev_secret = os.environ.pop("LIFEOS_HC_SECRET", None)
+    os.environ["LIFEOS_AUTH_MODE"] = "disabled"
+    try:
+        response = client.post(
+            "/health-connect",
+            json=MOCK_PAYLOAD,
+            headers={"X-HC-Secret": "anything"},
+        )
+    finally:
+        if prev_auth is None:
+            os.environ.pop("LIFEOS_AUTH_MODE", None)
+        else:
+            os.environ["LIFEOS_AUTH_MODE"] = prev_auth
+        if prev_secret is not None:
+            os.environ["LIFEOS_HC_SECRET"] = prev_secret
+    assert response.status_code == 503
+
+
 def test_post_health_connect_empty_payload(auth_hc: None) -> None:
     response = client.post(
         "/health-connect",
