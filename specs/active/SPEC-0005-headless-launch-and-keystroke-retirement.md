@@ -4,7 +4,7 @@ spec_id: SPEC-0005-headless-launch-and-keystroke-retirement
 slice: SL-013 (PR-1), SL-011 + SL-012 (PR-2)
 status: in-progress
 created: 2026-08-08
-updated: 2026-08-08
+updated: 2026-08-09
 completed:
 owner: Kyle Smith
 traces: [FR-005, FR-011, FR-012, NFR-007, NFR-008]
@@ -158,3 +158,21 @@ Rows copied to `specs/TEST-LEDGER.md` (T-I-006, T-U-007, T-E-004). Red runs reco
 - [x] PRD statuses updated per §5 of the demolition choreography (PRD 1.3.0, same commit).
 - [ ] Kyle's Windows manual check: `npm run gui` → task → GO → real run under the shim; double-GO → 409/exit 6.
 - [ ] Spec moves to `specs/done/` after that check (with SL-008's watched real run as FR-011's proof).
+
+## 13. SL-008 watched real-run evidence block (manual Windows proof)
+
+This proof is **execution-environment bound**: it must be run on Kyle's Windows machine with the installed shim/guard stack. A cloud CI/session cannot truthfully close FR-011.
+
+### 13.1 Evidence checklist to record in this file
+
+- [ ] `npm run gui` started from current `main` on Windows under the installed shim/guard environment.
+- [ ] A bounded disposable directive was created from `/guards` with an objective `done` condition.
+- [ ] First GO launched a real `claude -p` runner with the routed folder + directive context.
+- [ ] Second GO while loop 1 was live was refused (HTTP 409 and/or runner exit 6), with no second working loop.
+- [ ] The directive reached `done` or a correctly reported `blocked` state without console keystrokes.
+- [ ] If a fresh context occurred, the next run received directive text + progress log + done/blocked protocol.
+
+### 13.2 Closeout rule
+
+- If every checkbox above passes: move this spec to `specs/done/` and set PRD `FR-011` to `done` in the same commit.
+- If any checkbox fails: keep this spec in `specs/active/`, keep PRD `FR-011` as `in-progress`, and open a regression issue with the exact observed evidence.
