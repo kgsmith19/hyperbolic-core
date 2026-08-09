@@ -2,9 +2,9 @@
 
 Testing and quality gates for network-checker.
 
-**All four workflows below trigger on `workflow_dispatch` only** (manual,
-from the Actions tab) as of 2026-08-06 -- they no longer run automatically
-on every push or pull request. That was burning through the account's
+**Every workflow below except `pr-gate.yml` triggers on `workflow_dispatch`
+only** (manual, from the Actions tab) as of 2026-08-06 -- they no longer run
+automatically on every push or pull request. That was burning through the account's
 Actions minutes quota (every push fired 3 workflows x up to 3 Python
 versions), and a quota-exhausted run fails instantly with an empty log,
 which is indistinguishable from a real failure unless you go check the
@@ -63,14 +63,12 @@ when you actually want the published GitHub Release + artifact.
 
 ## Branch protection note
 
-If **Settings -> Branches -> main** has "Require status checks to pass
-before merging" configured for `test`
-/ `quality`, a PR will now sit unmergeable forever --
-those checks no longer report anything automatically, and GitHub can't
-tell "not required" from "required but never ran." Either remove those as
-required checks (rely on `tools/check.sh` run before merge instead), or
-manually dispatch the relevant workflow from the Actions tab on a PR's
-branch when you want a real merge gate.
+`pr-gate.yml` runs automatically on pull requests and reports the `PR Gate`
+check — the one check the portfolio-standard `Lean PR Gate` ruleset requires.
+Do not configure `test` / `quality` as required status checks: those
+workflows are `workflow_dispatch`-only and never report automatically, so a
+PR requiring them would sit unmergeable forever (GitHub can't tell "not
+required" from "required but never ran").
 
 ---
 
