@@ -6,6 +6,7 @@
 import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const dir = process.env.ACC_GUI_E2E_DIR;
 const routeDir = path.join(dir, "code", "guards-target"); // the config fixture's one route
@@ -39,9 +40,32 @@ test.beforeEach(() => {
   }));
 });
 
-async function go(page, text) {
+function sessionStartContext(directiveId) {
+  const out = execFileSync(
+    process.execPath,
+    [path.join(process.cwd(), "hooks", "budget.mjs")],
+    {
+      input: JSON.stringify({
+        hook_event_name: "SessionStart",
+        session_id: "00000000-0000-4000-8000-000000000123",
+        cwd: routeDir,
+      }),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ACC_ROOT: dir,
+        ACC_POLICY: path.join(dir, "policy.json"),
+        ACC_DIRECTIVE: directiveId,
+      },
+    }
+  );
+  return JSON.parse(out).hookSpecificOutput.additionalContext;
+}
+
+async function go(page, text, doneWhen = "") {
   await page.goto("/guards");
   await page.locator("#dirText").fill(text);
+  if (doneWhen) await page.locator("#dirDoneWhen").fill(doneWhen);
   await page.locator("#dirText").blur(); // fires the folder suggestion
   await expect(page.locator("#dirCwd")).toHaveValue(routeDir);
   await page.locator("#dirGo").click();
@@ -61,15 +85,18 @@ test("typing a task suggests the routed folder; no match says so", async ({ page
 });
 
 test("GO creates a real directive and hands exactly directive:<id> to the runner", async ({ page }) => {
-  await go(page, "tighten the guards hook checks");
+  const doneWhen = "the hook checks are tightened and tests are green";
+  await go(page, "tighten the guards hook checks", doneWhen);
   const ids = liveIds();
   expect(ids).toHaveLength(1);
   const stored = JSON.parse(fs.readFileSync(path.join(dirsDir, ids[0] + ".json"), "utf8"));
   expect(stored.text).toBe("tighten the guards hook checks");
+  expect(stored.doneWhen).toBe(doneWhen);
   expect(stored.cwd).toBe(routeDir);
   expect(stored.profile).toBe("Normal"); // first radio is preselected
   await expect.poll(() => runnerCalls().length, { timeout: 5000 }).toBeGreaterThan(0);
   expect(runnerCalls().at(-1)).toEqual([`directive:${ids[0]}`]);
+  expect(sessionStartContext(ids[0])).toContain(`[ACC DIRECTIVE] Done when: ${doneWhen}`);
   await expect(page.locator("#dirList")).toContainText(ids[0]);
   await expect(page.locator("#dirList")).toContainText("tighten the guards hook");
   await expect(page.locator("#laneLine")).toContainText("Launch lane:");

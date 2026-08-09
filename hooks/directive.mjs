@@ -32,6 +32,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // injected by budget.mjs's SessionStart hook; this string only wakes the
 // session up.
 export const KICK_TEXT = "Continue the active ACC directive.";
+export const DONE_WHEN_MAX = 500;
 export function directivesDir() {
   // resolveRoot(HERE) is called fresh here, never cached in a const: a test
   // process that imports this module once and runs many cases, each against
@@ -183,10 +184,11 @@ export function directiveForSession(sessionId) {
   return activeDirectives().find((g) => g.sessionId === sessionId) || null;
 }
 
-export function createDirective({ text, cwd, profile, budget }) {
+export function createDirective({ text, doneWhen, cwd, profile, budget }) {
   ensureDirs();
   const t = String(text || "").trim();
   if (!t) throw new Error("a directive needs text");
+  const normalizedDoneWhen = normalizeDoneWhen(doneWhen);
   const normalizedBudget = normalizeDirectiveBudget(budget);
   const iso = new Date().toISOString(); // 2026-07-31T04:10:27.123Z
   const id =
@@ -209,6 +211,7 @@ export function createDirective({ text, cwd, profile, budget }) {
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
+  if (normalizedDoneWhen !== undefined) directive.doneWhen = normalizedDoneWhen;
   write(directive);
   fs.writeFileSync(
     logPath(id),
@@ -217,6 +220,15 @@ export function createDirective({ text, cwd, profile, budget }) {
       "\n## Progress\n\n"
   );
   return directive;
+}
+
+export function normalizeDoneWhen(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new Error("doneWhen must be a string");
+  if (!value.trim() || /[\r\n]/.test(value) || value.length > DONE_WHEN_MAX) {
+    throw new Error(`doneWhen must be a single line of 1..${DONE_WHEN_MAX} characters`);
+  }
+  return value;
 }
 
 // Real Claude Code session ids are always UUIDs. bindSession is reachable by
@@ -322,6 +334,10 @@ function arg(argv, name, dflt = "") {
   const i = argv.indexOf(name);
   return i >= 0 && argv[i + 1] !== undefined ? argv[i + 1] : dflt;
 }
+function optionalArg(argv, name) {
+  const i = argv.indexOf(name);
+  return i >= 0 && argv[i + 1] !== undefined ? argv[i + 1] : undefined;
+}
 
 // Directive text for `new`. --text-file exists because the caller that matters is the
 // GUI, and the GUI's node shim strips double quotes and cannot pass a newline in
@@ -359,6 +375,7 @@ export function main() {
   if (cmd === "new") {
     const g = createDirective({
       text: textFromArgs(argv),
+      doneWhen: optionalArg(argv, "--done-when"),
       cwd: arg(argv, "--cwd"),
       profile: arg(argv, "--profile"),
       budget: budgetFromArgs(argv),
@@ -398,7 +415,7 @@ export function main() {
     return;
   }
   console.log(
-    "usage: directive.mjs new (--text T | --text-file F) [--cwd D] [--profile P] [--wall-clock-min N] [--turns N] [--tokens N] [--dollars N] | list | show [id] | log [id] --text T | done [id] [--why W] | blocked [id] --why W | paused [id]"
+    "usage: directive.mjs new (--text T | --text-file F) [--done-when W] [--cwd D] [--profile P] [--wall-clock-min N] [--turns N] [--tokens N] [--dollars N] | list | show [id] | log [id] --text T | done [id] [--why W] | blocked [id] --why W | paused [id]"
   );
 }
 

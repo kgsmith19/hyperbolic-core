@@ -168,6 +168,9 @@ function directiveContext(p) {
       : `[ACC DIRECTIVE ${directive.id}] RESUMED - this is continuation ${cycle + 1}. The previous session hit the context budget and was cleared; you are the same work, not a new task. Pick up where the progress log stops.`;
 
   const parts = [head, "", directive.text, ""];
+  if (typeof directive.doneWhen === "string" && directive.doneWhen.trim()) {
+    parts.push(`[ACC DIRECTIVE] Done when: ${directive.doneWhen}`, "");
+  }
   if (directive.cwd) parts.push(`Working folder: ${directive.cwd}`);
   if (cycle > 0) {
     parts.push(

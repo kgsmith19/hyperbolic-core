@@ -68,6 +68,12 @@ test("multi-line directive text round-trips intact (OI-004: text never becomes k
   assert.equal(m.readDirective(g.id).text, text);
 });
 
+test("doneWhen round-trips byte-exact when provided", () => {
+  const doneWhen = `tests are green and PR #123 is merged`;
+  const g = m.createDirective({ text: "ship it", doneWhen });
+  assert.equal(m.readDirective(g.id).doneWhen, doneWhen);
+});
+
 test("--text-file carries a multi-line directive the command line could not (GUI path)", async () => {
   const text = "rebuild the screen\n\n- keep the tabs\n- one green button\n";
   const f = path.join(DIRECTIVES_DIR, "directive.txt");
@@ -123,6 +129,26 @@ test("directive ids cannot escape the directives directory", async () => {
 test("createDirective refuses empty/whitespace-only/absent text", () => {
   assert.throws(() => m.createDirective({ text: "   " }), /a directive needs text/);
   assert.throws(() => m.createDirective({}), /a directive needs text/, "text itself is undefined, not just blank");
+});
+
+test("createDirective validates doneWhen as optional single-line text within one documented limit", () => {
+  assert.throws(() => m.createDirective({ text: "t", doneWhen: 42 }), /doneWhen must be a string/);
+  assert.throws(() => m.createDirective({ text: "t", doneWhen: "   " }), /doneWhen must be a single line of 1\.\.500 characters/);
+  assert.throws(() => m.createDirective({ text: "t", doneWhen: "line 1\nline 2" }), /doneWhen must be a single line of 1\.\.500 characters/);
+  assert.throws(() => m.createDirective({ text: "t", doneWhen: "x".repeat(m.DONE_WHEN_MAX + 1) }), /doneWhen must be a single line of 1\.\.500 characters/);
+  const g = m.createDirective({ text: "t" });
+  assert.equal("doneWhen" in g, false, "omitting doneWhen stays backward-compatible");
+});
+
+test("legacy directives missing doneWhen still load safely", () => {
+  const g = m.createDirective({ text: "t", doneWhen: "done once CI is green" });
+  const p = path.join(DIRECTIVES_DIR, `${g.id}.json`);
+  const raw = JSON.parse(fs.readFileSync(p, "utf8"));
+  delete raw.doneWhen;
+  fs.writeFileSync(p, JSON.stringify(raw, null, 2) + "\n");
+  const loaded = m.readDirective(g.id);
+  assert.equal(loaded.id, g.id);
+  assert.equal("doneWhen" in loaded, false);
 });
 
 test("bindSession discards an explicit directiveId whose directive exists but is not active", () => {
@@ -278,6 +304,13 @@ test("CLI: main() 'new' accepts hard-ceiling flags", () => {
     "--wall-clock-min", "45", "--turns", "20", "--tokens", "5000", "--dollars", "6.25",
   ]));
   assert.deepEqual(printed.budget, { wallClockMin: 45, turns: 20, tokens: 5000, dollars: 6.25 });
+});
+
+test("CLI: main() 'new' accepts --done-when and stores it exactly", () => {
+  const doneWhen = "the flaky test is fixed and main is green";
+  const printed = JSON.parse(runMain(["new", "--text", "cli directive", "--done-when", doneWhen]));
+  assert.equal(printed.doneWhen, doneWhen);
+  assert.equal(m.readDirective(printed.id).doneWhen, doneWhen);
 });
 
 test("CLI: main() with no subcommand defaults to 'list', printing active directives as JSON", () => {

@@ -358,6 +358,31 @@ test("SessionStart resumed directive includes progress-tail framing", () => {
   assert.match(out, /Progress so far/);
 });
 
+test("SessionStart includes doneWhen distinctly when the directive has one", () => {
+  const sb = sandbox();
+  const sid = SID(10);
+  process.env.ACC_ROOT = sb.root;
+  process.env.ACC_DIRECTIVES_DIR = "";
+  const g = gm.createDirective({ text: "resume me", doneWhen: "all acceptance tests are green" });
+  const out = runSessionStart(sb, sid, { ACC_DIRECTIVE: g.id });
+  assert.match(out, /\[ACC DIRECTIVE\] Done when: all acceptance tests are green/);
+});
+
+test("SessionStart stays safe for legacy directives that omit doneWhen", () => {
+  const sb = sandbox();
+  const sid = SID(11);
+  process.env.ACC_ROOT = sb.root;
+  process.env.ACC_DIRECTIVES_DIR = "";
+  const g = gm.createDirective({ text: "resume me", doneWhen: "temporary value" });
+  const p = path.join(sb.root, "runner", "directives", `${g.id}.json`);
+  const raw = JSON.parse(fs.readFileSync(p, "utf8"));
+  delete raw.doneWhen;
+  fs.writeFileSync(p, JSON.stringify(raw, null, 2) + "\n");
+  const out = runSessionStart(sb, sid, { ACC_DIRECTIVE: g.id });
+  assert.match(out, /\[ACC DIRECTIVE/);
+  assert.doesNotMatch(out, /\[ACC DIRECTIVE\] Done when:/);
+});
+
 test("UserPromptSubmit warns at or above softK", () => {
   const sb = sandbox();
   const sid = "s-prompt-warn";

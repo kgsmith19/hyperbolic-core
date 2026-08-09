@@ -7,7 +7,7 @@ created: 2026-08-08
 updated: 2026-08-09
 completed:
 owner: Kyle Smith
-traces: [FR-005, FR-011, FR-012, NFR-007, NFR-008]
+traces: [FR-005, FR-011, FR-012, FR-014, NFR-007, NFR-008]
 ---
 
 # SPEC-0005: Web launch surface, then keystroke-stack demolition
@@ -72,6 +72,7 @@ PR-1 (all implemented red-first; server.test.mjs AC-101…AC-113, runner.test.mj
 | AC-120 | A live pid holds `state/<job>.pid` | a second `runLoop` starts | exit 6, `run` never called, holder's file untouched | FR-011 |
 | AC-121 | A stale pid file (dead pid or garbage) | `runLoop` starts | reclaimed, loop proceeds, file released on exit — every exit path (done/stop/red) releases | FR-011, FR-005 |
 | AC-122 | The `/guards` page, sandboxed backend | type task → blur → GO | folder auto-fills from the router, directive created with the chosen profile, fake runner receives `directive:<id>`, list shows it; Mark finished archives it; the open log tail picks up appended lines within 10s | FR-012, NFR-008 |
+| AC-123 | A Start-work request includes `doneWhen` | POST `/api/directives`, then SessionStart for that directive | create stores/returns exact single-line `doneWhen` and SessionStart injects it as a distinct line from task text and log tail; legacy directives missing the field still inject safely | FR-014 |
 
 PR-2:
 
@@ -90,6 +91,7 @@ PR-2:
 | PROP-102 | For all directive texts, create(text) then read yields byte-identical text (newlines, quotes) | round-trip | strings 1..32768 incl. `\n`, `"` | FR-012 |
 | PROP-103 | For all interleavings of two runLoop starts on one job, at most one proceeds; the loser exits 6 without spawning | invariant | live/stale/garbage/absent pid file states | FR-011 |
 | PROP-104 | Every runLoop exit path (0/2/3/4/5/6-loser excepted) leaves no pid file behind | invariant | done, stop-file, red-tier, normal exits | FR-011 |
+| PROP-105 | For all directives with valid `doneWhen`, create/read preserves bytes exactly and every fresh SessionStart for that directive carries the same text; when absent on legacy directives, injection remains safe and does not invent a default value | invariant | single-line strings 1..500 and legacy directives with no `doneWhen` key | FR-014 |
 
 ## 6. Budget declaration (PR-1)
 

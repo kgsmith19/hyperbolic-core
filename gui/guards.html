@@ -24,6 +24,7 @@
 <fieldset><legend>Start work</legend>
   <p class="muted">Describe the task. The Command Center suggests the folder, and GO hands it to a headless session that keeps restarting with fresh context until the work reports done.</p>
   <textarea id="dirText" rows="3" style="width:98%" placeholder="What should Claude do?"></textarea><br>
+  <label>Done condition <input type="text" id="dirDoneWhen" style="width:520px" placeholder="Optional: when this is true, the directive is finished"></label><br>
   <label>Folder <input type="text" id="dirCwd" style="width:340px"></label>
   <span id="dirSuggest" class="muted"></span><br>
   <span id="profiles"></span>
@@ -320,11 +321,13 @@ async function refreshDirectives() {
 
 $("dirGo").onclick = async () => {
   const text = $("dirText").value.trim();
+  const doneWhen = $("dirDoneWhen").value;
   const cwd = $("dirCwd").value.trim();
   if (!text) { $("dirMsg").textContent = "describe the task first"; $("dirMsg").className = "err"; return; }
   if (!cwd) { $("dirMsg").textContent = "set the folder first"; $("dirMsg").className = "err"; return; }
   const profile = document.querySelector("input[name=profile]:checked")?.value || "";
   const body = { text, cwd, profile };
+  if (doneWhen !== "") body.doneWhen = doneWhen;
   for (const [key, id] of [["wallClockMin", "dirWallClockMin"], ["turns", "dirTurns"], ["tokens", "dirTokens"], ["dollars", "dirDollars"]]) {
     const raw = $(id).value.trim();
     if (!raw) continue;

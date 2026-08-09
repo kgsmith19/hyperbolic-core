@@ -17,6 +17,7 @@ import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadKernelPolicy, saveKernelPolicy } from "../kernel/policy.mjs";
+import { DONE_WHEN_MAX } from "../hooks/directive.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Exact-match route map for the built-in pages — request input never touches
@@ -408,6 +409,12 @@ export function handler(req, res) {
     return readBody(req, res, async (b) => {
       const text = typeof b.text === "string" ? b.text : "";
       if (!text.trim() || text.length > 32768) return send(res, 400, { error: "text must be 1..32768 characters" });
+      if (b.doneWhen !== undefined) {
+        if (typeof b.doneWhen !== "string") return send(res, 400, { error: "doneWhen must be a string" });
+        if (/[\r\n]/.test(b.doneWhen) || !b.doneWhen.trim() || b.doneWhen.length > DONE_WHEN_MAX) {
+          return send(res, 400, { error: `doneWhen must be a single line of 1..${DONE_WHEN_MAX} characters` });
+        }
+      }
       // The runner refuses a cwd-less directive at launch (loadDirectiveJob),
       // so a create with no real folder would only ever produce a dud entry —
       // demand it here, where the human can still fix it.
@@ -428,6 +435,7 @@ export function handler(req, res) {
         const tmp = path.join(tmpDir, "text.md");
         fs.writeFileSync(tmp, text);
         const args = ["new", "--text-file", tmp, "--cwd", b.cwd];
+        if (b.doneWhen !== undefined) args.push("--done-when", b.doneWhen);
         if (profile) args.push("--profile", profile);
         for (const [flag, value] of [["--wall-clock-min", budget.wallClockMin], ["--turns", budget.turns], ["--tokens", budget.tokens], ["--dollars", budget.dollars]]) {
           if (value !== undefined) args.push(flag, String(value));

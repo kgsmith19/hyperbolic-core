@@ -636,6 +636,7 @@ const newDirective = async (over = {}) => {
   const cwd = over.cwd !== undefined ? over.cwd : fs.mkdtempSync(path.join(LAUNCH_DIR, "work-"));
   const r = await lpost("/api/directives", {
     text: over.text ?? "fix the tests",
+    doneWhen: over.doneWhen,
     cwd,
     profile: over.profile ?? "",
     wallClockMin: over.wallClockMin,
@@ -665,17 +666,20 @@ test("AC-102: suggest refuses a missing, empty, non-string, or oversize text bef
   }
 });
 
-test("AC-103: POST /api/directives creates a real store entry — multi-line text survives byte-exact (the --text-file path)", async () => {
+test("AC-103: POST /api/directives creates a real store entry — text and doneWhen survive byte-exact", async () => {
   resetLaunch();
   const text = 'line one\nline "two" with quotes\n\nline four';
-  const { r, j } = await newDirective({ text });
+  const doneWhen = "all acceptance tests are green";
+  const { r, j } = await newDirective({ text, doneWhen });
   assert.equal(r.status, 200);
   assert.match(j.id, /^d-/);
   assert.equal(j.text, text, "newlines and quotes must survive the trip into the store");
+  assert.equal(j.doneWhen, doneWhen, "doneWhen must round-trip exactly");
   assert.equal(j.status, "active");
   const list = await (await fetch(`${base}/api/directives`)).json();
   assert.equal(list.length, 1);
   assert.equal(list[0].id, j.id);
+  assert.equal(list[0].doneWhen, doneWhen);
 });
 
 test("AC-104: create refuses bad text, a relative or nonexistent cwd, and an unknown profile — store untouched", async () => {
@@ -692,6 +696,10 @@ test("AC-104: create refuses bad text, a relative or nonexistent cwd, and an unk
     { text: "ok", cwd: good, profile: "", turns: 1.5 },
     { text: "ok", cwd: good, profile: "", tokens: -1 },
     { text: "ok", cwd: good, profile: "", dollars: "x" },
+    { text: "ok", doneWhen: 42, cwd: good, profile: "" },
+    { text: "ok", doneWhen: "", cwd: good, profile: "" },
+    { text: "ok", doneWhen: "line 1\nline 2", cwd: good, profile: "" },
+    { text: "ok", doneWhen: "x".repeat(501), cwd: good, profile: "" },
   ]) {
     assert.equal((await lpost("/api/directives", body)).status, 400, JSON.stringify(body).slice(0, 60));
   }
