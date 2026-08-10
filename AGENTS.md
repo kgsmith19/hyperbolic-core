@@ -61,6 +61,16 @@ Commands (venv at `.venv`, DB creds in `.env`):
   [account_label]` — operator-run over a local bank-statement CSV file
   (never committed to the repo); idempotent by (account, posted_date,
   amount, normalized_desc) hash. Same receipt contract.
+- recurring (money): `.venv\Scripts\python -m domains.money.recurring` —
+  operator-run, not scheduled: deterministic recurring-charge and
+  pay-period detection over ingested transactions (roadmap C0.5). An
+  ambiguous merchant series (irregular cadence, too few occurrences, or an
+  amount past tolerance) is written `status: "review"` with a
+  `review_reason`, never silently promoted to `"confirmed"` — those
+  `recurring_charge` records ARE the review queue. Pay-period windows are
+  built only from a *confirmed* paycheck-cadence deposit series. Read/derive
+  only, same posture as `simplefin_ingest`/`csv_import` (no transfer,
+  cancellation, or other outward action). Same receipt contract.
 - deploy: merge to main → GitHub Actions checks, builds, migrates, deploys (docs/runbook.md).
 - review: `/lean-review` (five-lens codebase review; headless: `claude -p "/lean-review"`);
   `/diff-review` for just the working diff or current branch.

@@ -4,11 +4,12 @@ Owns: `src/domains/money/**`, `tests/money/**`.
 
 ## Purpose
 
-C0 slice: transaction ingestion with source receipts. Two sources, both
-read/ingest only — **no transfer, payment, or other outward-facing capability
-exists anywhere in this cell** (invariant 8; matches ADR 018's
-draft-then-approve authority-receipt model already shipped for bills, which
-this domain does not touch or need):
+C0/C0.5 slices: transaction ingestion with source receipts, plus a
+deterministic recurring-charge/pay-period detector over what was ingested.
+Every entry point is read/ingest/derive only — **no transfer, payment, or
+other outward-facing capability exists anywhere in this cell** (invariant 8;
+matches ADR 018's draft-then-approve authority-receipt model already shipped
+for bills, which this domain does not touch or need):
 
 1. **SimpleFIN Bridge access-URL pull** (`domains.money.simplefin_ingest`) —
    explicitly **user-triggered only**, run as
@@ -20,6 +21,23 @@ this domain does not touch or need):
    local file path, `python -m domains.money.csv_import <path> [account_label]`,
    mirroring `domains.bills.extract`'s "operator-run, not scheduled"
    precedent. The file never enters the repo.
+3. **Recurring-charge + pay-period detection** (`domains.money.recurring`,
+   roadmap C0.5) — operator-run, `python -m domains.money.recurring`, over
+   transactions already on record. Pure derivation, no external call: groups
+   transactions by `(account_key, normalized_desc)` and asks whether the
+   group is a single regular series (>= 3 occurrences, one cadence bucket
+   every interval agrees on, an amount within tolerance of the series
+   median). Anything short of that is written `status: "review"` with a
+   `review_reason` and is **never** promoted to `"confirmed"` — those
+   `recurring_charge` records are the review queue, the same "status the
+   promotion never fires for" shape `domains.bills.verify` uses for
+   `candidate`. `pay_period` windows are built only from a *confirmed*
+   paycheck-cadence (7/14/30-day) deposit series; a missing or ambiguous
+   paycheck series yields zero periods rather than a guessed one.
+   `recurring.months_of_cover` is a pure function over operator-supplied
+   balance/baseline numbers (C0 tracks no account balance) — no kernel read,
+   no write, no persistence; advisory and read-only by construction, not
+   merely by convention.
 
 ## Types
 
@@ -48,11 +66,23 @@ this domain does not touch or need):
   9, the calendar/cpap `source_receipt` precedent). Every `transaction` a
   pull or import writes or updates links to its receipt via a `derived_from`
   edge carrying `{method, confidence}` (ADR 010).
+- **recurring_charge** (C0.5) — one merchant series (`recurring_charge_key`
+  identity, sha256 of `account_key|normalized_desc`). `status` is
+  `"confirmed"` or `"review"`; a `"review"` record additionally carries
+  `review_reason` and omits `cadence_days` (none was established). Cites the
+  transaction entities it was built from in `provenance` (ADR 010);
+  `normalized_desc`/`typical_amount` are `x-pii`.
+- **pay_period** (C0.5) — one pay-period window (`pay_period_key` identity,
+  sha256 of `account_key|start_date`), built only from a *confirmed*
+  paycheck-cadence deposit series. `closed` is false for the still-open
+  final period, whose `end_date` is a cadence-projected estimate.
+  `typical_amount` is `x-pii`.
 
-Identity field names (`account_key`, `transaction_key`, `receipt_key`) are
-new and do not collide with any identity field name another domain already
-declares (`ExactIdentityResolver` matches by field name across every type,
-not just within a domain).
+Identity field names (`account_key`, `transaction_key`, `receipt_key`,
+`recurring_charge_key`, `pay_period_key`) are new and do not collide with
+any identity field name another domain already declares
+(`ExactIdentityResolver` matches by field name across every type, not just
+within a domain).
 
 ## Credentials
 
@@ -107,9 +137,9 @@ default date).
 
 `money_context()` = `AccessContext.of("money:read", "money:write",
 "ops:read", "ops:write")` — narrow by construction, never
-`AccessContext.all()` (ADR 012/014 precedent). Both entry points run inside
-`ops.receipts.run_job`, so every run leaves an `execution_receipt` and only
-`ok` exits 0.
+`AccessContext.all()` (ADR 012/014 precedent). All three entry points run
+inside `ops.receipts.run_job`, so every run leaves an `execution_receipt`
+and only `ok` exits 0.
 
 ## No outward-facing capability
 
@@ -117,17 +147,24 @@ Invariant 8: this cell has broad-ish read access to financial history and an
 external credentialed connection (SimpleFIN), so it must not also gain
 high-consequence write capability. It doesn't: there is no transfer, payment,
 transaction-initiation, or any other outward call anywhere in this cell's
-code, and none is planned here (recurring-charge detection is C0.5,
-unstarted; any future write-capable feature is a separately reviewed slice
-under ADR 018's draft-then-approve model, not an extension of this one).
+code, including `domains.money.recurring` (C0.5) — every function there
+either derives a read-only `recurring_charge`/`pay_period` entity from
+transactions already on record, or computes `months_of_cover` and returns it
+with no persistence at all. Any future write-capable feature is a
+separately reviewed slice under ADR 018's draft-then-approve model, not an
+extension of this one.
 
 ## Risk
 
 R3 — financial data plus an external credentialed integration (the C0
-roadmap entry's own risk rating; same class as C0/CPAP's health data).
-`/security-review` runs before merge.
+roadmap entry's own risk rating; same class as C0/CPAP's health data). C0.5
+carries the same R3 rating (derived financial data and consequential
+personal-finance output, per its own issue). `/security-review` runs before
+merge.
 
 Behavior changes land with tests in `tests/money/` (unit for CSV row
-parsing, the SimpleFIN client's redirect guard, and hash/normalize helpers;
-integration for both ingestion paths' idempotency, malformed-row handling,
-credential/source failure, and provenance).
+parsing, the SimpleFIN client's redirect guard, hash/normalize helpers, and
+the recurring/pay-period cadence-and-tolerance logic; integration for both
+ingestion paths' idempotency, malformed-row handling, credential/source
+failure, and provenance, plus the detector's idempotency and review-queue
+behavior).

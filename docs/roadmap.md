@@ -216,9 +216,21 @@ gate bounds everything after it.
   logged. Prompt §C0 below. — done 2026-08-10 (PR #99; new `money` domain:
   `account`/`transaction`/`money_source_receipt` registry types, idempotent
   by (account, posted_date, amount, normalized_desc) hash).
-- [ ] C0.5 Recurring charges + pay periods — deterministic detector, review
+- [x] C0.5 Recurring charges + pay periods — deterministic detector, review
   queue, pay_period windows from paycheck deposits. Rider: months-of-cover
-  (weekly review only). Prompt §C0.5 below.
+  (weekly review only). Prompt §C0.5 below. — done 2026-08-10 (Issue #86;
+  extends the `money` domain: `recurring_charge`/`pay_period` registry
+  types, `domains.money.recurring`. A merchant series confirms only with
+  >= 3 occurrences, one cadence bucket (7/14/30/90/365 days ± slack) every
+  interval agrees on, and an amount within 15%/$3 of its median; anything
+  short of that is written `status: "review"` with a `review_reason` —
+  those records are the review queue, never silently promoted. Pay-period
+  windows are built only from a confirmed paycheck-cadence (7/14/30-day)
+  deposit series; a missing or ambiguous paycheck series yields zero
+  fabricated periods. `months_of_cover` is a pure function over
+  operator-supplied balance/baseline numbers — no persistence, advisory
+  and read-only by construction. No transfer, cancellation or other
+  outward action anywhere in the module (ADR 018 posture unchanged).)
 - [ ] D1 Adherence rollup pack — EWMA weight trend with %/week bands, weekly
   quota scoring with freezes and a repair window, lapse-resume gap summary.
   Registry rider: elimination_window type (its comparison rollup is the
