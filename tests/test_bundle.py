@@ -19,7 +19,14 @@ _SENSITIVE_STRINGS = [
     "/Users/kyleg/.netcheck",
     _FAKE_TOKEN,
     "password=hunter2",
+    "2001:db8:85a3::8a2e:370:7334",
+    "fe80::1",
+    "::1",
 ]
+
+# Text that resembles an IPv6 address only in having colons -- must survive
+# redaction unchanged, since over-matching here would corrupt timestamps.
+_IPV6_LOOKALIKES = ["12:34:56", "2026-08-10T12:00:00+00:00"]
 
 
 class RedactTest(unittest.TestCase):
@@ -29,6 +36,12 @@ class RedactTest(unittest.TestCase):
                 out = bundle.redact({"evidence": f"prefix {raw} suffix"})
                 self.assertNotIn(raw, out["evidence"])
                 self.assertIn("[REDACTED", out["evidence"])
+
+    def test_redact_leaves_timestamp_shaped_text_alone(self):
+        for raw in _IPV6_LOOKALIKES:
+            with self.subTest(raw=raw):
+                out = bundle.redact({"generated_at": raw})
+                self.assertEqual(out["generated_at"], raw)
 
     def test_redact_recurses_through_lists_and_nested_dicts(self):
         out = bundle.redact({"a": ["x", {"b": "203.0.113.7"}]})
@@ -79,6 +92,21 @@ class BuildTest(unittest.TestCase):
         blob = json.dumps(out)
         for raw in ("203.0.113.7", "AA:BB:CC:DD:EE:FF", "192.168.50.42"):
             self.assertNotIn(raw, blob)
+
+    def test_build_never_leaks_a_raw_ipv6_address_in_scan_cause_evidence(self):
+        # broken_ipv6's evidence string embeds the connect error's `reason`,
+        # which can itself carry the address the OS reported the failure
+        # against -- the one place an IPv6 literal reaches the bundle today.
+        scan = dict(self.scan, dual_stack={
+            "state": "ok",
+            "ipv4": {"state": "ok", "ms": 12.0},
+            "ipv6": {"state": "fail", "ms": None,
+                    "reason": "ConnectionRefusedError: [Errno 111] Connection "
+                              "refused to 2001:db8:85a3::8a2e:370:7334"}})
+        out = bundle.build(self.samples, self.errors, scan, {"os_name": "Windows", "now": NOW})
+        blob = json.dumps(out)
+        self.assertNotIn("2001:db8:85a3::8a2e:370:7334", blob)
+        self.assertIn("[REDACTED-IP]", blob)
 
     def test_build_never_leaks_raw_llm_error_detail_or_secrets(self):
         out = bundle.build(self.samples, self.errors, self.scan, {"os_name": "Windows", "now": NOW})

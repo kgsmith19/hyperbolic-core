@@ -25,6 +25,15 @@ from .rank import rank
 
 _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _MAC_RE = re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b")
+# Two forms only: full 8-group (needs all 7 colons, so it can't false-positive
+# on a HH:MM:SS timestamp or a MAC's 5 colons) and any form carrying the "::"
+# zero-compression marker real IPv6 text almost always uses. An uncompressed,
+# non-full address missing that marker -- vanishingly rare in practice -- is
+# the one shape this does not catch.
+_IPV6_RE = re.compile(
+    r"\b(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}\b"
+    r"|\b(?:[0-9A-Fa-f]{1,4}:){1,6}:(?:[0-9A-Fa-f]{1,4}:){0,6}[0-9A-Fa-f]{0,4}\b"
+    r"|\B:(?::[0-9A-Fa-f]{1,4}){1,7}\b")
 _WIN_PATH_RE = re.compile(r'[A-Za-z]:\\Users\\[^\\/:*?"<>|\r\n]+')
 _UNIX_PATH_RE = re.compile(r"/(?:home|Users)/[^/\s]+")
 _SECRET_KV_RE = re.compile(
@@ -52,6 +61,7 @@ def redact(value):
     if isinstance(value, str):
         out = _IPV4_RE.sub("[REDACTED-IP]", value)
         out = _MAC_RE.sub("[REDACTED-MAC]", out)
+        out = _IPV6_RE.sub("[REDACTED-IP]", out)
         out = _WIN_PATH_RE.sub("[REDACTED-PATH]", out)
         out = _UNIX_PATH_RE.sub("[REDACTED-PATH]", out)
         out = _SECRET_KV_RE.sub(r"\1=[REDACTED-SECRET]", out)
