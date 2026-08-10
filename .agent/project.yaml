@@ -5,7 +5,7 @@ project:
   name: agentic-command-center
   type: node-cli-and-webapp
   standard: kgsmith19/agent-engineering-standard
-  standard_sha: a9d1bf7a43dd8727d8ae7f031da2abe9ad9ff0b1
+  standard_sha: e0246cd8fbd70e91b1107979c578dcfc311d179e
 
 runtime:
   node_min: "22"

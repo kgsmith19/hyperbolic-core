@@ -1,8 +1,10 @@
-name: "Orchestrator: PR Lifecycle"
+name: "Orchestrator: Review Event"
 
 on:
-  pull_request_target:
-    types: [opened, reopened, ready_for_review, converted_to_draft, synchronize, edited, labeled, unlabeled, review_requested, auto_merge_enabled, auto_merge_disabled]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
 
 # One repo-wide non-canceling authority lock shared by evaluator and orchestrator; GitHub keeps only the newest pending run per group and the six-hourly watchdog is the convergence net.
 concurrency:
@@ -10,15 +12,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  pr-event:
+  review-event:
     if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
     permissions:
+      checks: write
       contents: read
       issues: write
       pull-requests: write
     uses: kgsmith19/agent-engineering-standard/.github/workflows/pr-automation-reusable.yml@e0246cd8fbd70e91b1107979c578dcfc311d179e
     with:
-      mode: pr-event
+      mode: review-event
       pr_number: ${{ github.event.pull_request.number }}
       standard_sha: e0246cd8fbd70e91b1107979c578dcfc311d179e
     secrets:
