@@ -1,8 +1,8 @@
 // Shared by every test that calls the live project. Not secret: the anon key
 // is designed for client-side exposure; RLS is the boundary
 // (docs/SYSTEM-REQUIREMENTS.md SR-05). Same project as toolbelt.
-const SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
-const ANON_KEY =
+export const SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
+export const ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
 
 // Project-level fixture users (toolbelt SPEC-0000 ASM-003). Not real people.

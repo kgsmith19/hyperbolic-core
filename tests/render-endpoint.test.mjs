@@ -1,12 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { login, rest, USER_A, USER_B } from "./helpers.mjs";
+import { login, rest, USER_A, USER_B, SUPABASE_URL, ANON_KEY } from "./helpers.mjs";
 
 // SPEC-0012 (SL-009): render endpoint. A Postgres RPC exposed by PostgREST
 // (SR-02: no application server), not a new service.
-const SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
-const ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
 
 async function seedPrompt(token, title, body) {
   const created = await rest("prompt", { token, method: "POST", body: { title, body } });
