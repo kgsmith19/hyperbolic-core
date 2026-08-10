@@ -44,6 +44,15 @@ never silent tracking of the standard's default branch.
   not weaken, skip, or edit it — or the tests/tools it invokes — to make its
   own diff pass. A gate that looks wrong gets reported or fixed in a separate
   PR, not bypassed in the one it's blocking.
+- **No native `.github/CODEOWNERS`.** The standard's zero-reviewer auto-merge
+  lane requires it absent (its doctor flags one as a defect). Control-plane
+  protection comes from the pinned standard's control-plane path
+  classification instead: PRs touching `.github/workflows/` or `.agent/` are
+  refused auto-merge and routed to explicit authority by the standard's
+  orchestrator. `tools/check.sh`, the three quality-tool scripts it invokes,
+  and `AGENTS.md` itself are listed in `.agent/project.yaml`'s
+  `risk.protected_paths` for the same reason CODEOWNERS used to force review
+  on them: weakening the gate must never auto-merge unreviewed.
 - **Verification before completion.** Nothing is done until `tools/check.sh`
   exits 0 on the actual diff; state exactly what remains unverified if it
   can't be run.

@@ -52,7 +52,7 @@ jobs:
             echo "runtime=false" >> "$GITHUB_OUTPUT"
             echo 'Documentation/governance-only diff; preserving PR Gate while skipping the full suite.'
           fi
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
         if: steps.changes.outputs.runtime == 'true'
         with:
           python-version: '3.12'
