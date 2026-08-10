@@ -24,5 +24,11 @@ Owns: `src/domains/ops/**`, `tests/ops/**`.
   the exact scope set per entry point is the table in ADR 014.
 - `trigger_feedback` is written by a human only; no job may emit a verdict on
   its own output.
+- The source-freshness ledger (`domains.ops.freshness`, issue #90) is a pure
+  query, not a persisted type: it derives `fresh | stale | unavailable |
+  never_seen` per configured external source from existing
+  `execution_receipt` / `source_receipt` / capture timestamps, writes
+  nothing, and never fabricates a green state for a missing or failed
+  source. No LLM is involved.
 - Behavior changes land with tests in `tests/ops/` (integration against the
   kernel, unit for pure assembly logic).
