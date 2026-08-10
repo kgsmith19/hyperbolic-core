@@ -20,10 +20,10 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-    uses: kgsmith19/agent-engineering-standard/.github/workflows/pr-automation-reusable.yml@4a635f0ffd438196632886af53ba56072ca5b143
+    uses: kgsmith19/agent-engineering-standard/.github/workflows/pr-automation-reusable.yml@e0246cd8fbd70e91b1107979c578dcfc311d179e
     with:
       mode: comment-event
       pr_number: ${{ github.event.issue.number }}
-      standard_sha: 4a635f0ffd438196632886af53ba56072ca5b143
+      standard_sha: e0246cd8fbd70e91b1107979c578dcfc311d179e
     secrets:
       automation_token: ${{ secrets.AUTOMATION_TOKEN }}

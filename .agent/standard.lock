@@ -1,5 +1,5 @@
 standard: kgsmith19/agent-engineering-standard
-commit: 4a635f0ffd438196632886af53ba56072ca5b143
+commit: e0246cd8fbd70e91b1107979c578dcfc311d179e
 pinned_at: "2026-08-10"
 pinned_by: lean PR Gate conformance
 
