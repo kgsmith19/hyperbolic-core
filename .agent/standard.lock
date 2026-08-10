@@ -1,6 +1,6 @@
 standard: kgsmith19/agent-engineering-standard
-commit: a9d1bf7a43dd8727d8ae7f031da2abe9ad9ff0b1
-pinned_at: "2026-08-09"
+commit: 4a635f0ffd438196632886af53ba56072ca5b143
+pinned_at: "2026-08-10"
 pinned_by: lean PR Gate conformance
 
 # This is the ONLY file that names the shared standard's revision.

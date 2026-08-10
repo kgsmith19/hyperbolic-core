@@ -4,7 +4,7 @@ project:
 
 standard:
   repo: kgsmith19/agent-engineering-standard
-  commit: a9d1bf7a43dd8727d8ae7f031da2abe9ad9ff0b1
+  commit: 4a635f0ffd438196632886af53ba56072ca5b143
 
 commands:
   setup: "none -- no package manager, no dependencies, by design (SR-023)"
