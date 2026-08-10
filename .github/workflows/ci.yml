@@ -1,5 +1,4 @@
-name: PR Gate
-
+name: "Gate: Deterministic CI"
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
