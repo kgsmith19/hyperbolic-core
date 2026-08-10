@@ -279,7 +279,7 @@ def _job(ctx: AccessContext) -> JobResult:
     except SleepHQError as exc:
         # Class name only: a provider error can echo request contents, and
         # the request carries a bearer token derived from a client secret.
-        print(f"sleephq: FAILED - {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(f"sleephq: FAILED - {type(exc).__name__}", file=sys.stderr)
         return JobResult(
             status=STATUS_FAILED, summary=f"SleepHQ fetch failed: {type(exc).__name__}"
         )
