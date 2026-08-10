@@ -51,13 +51,6 @@ def money_context() -> AccessContext:
     return AccessContext.of(f"{DOMAIN}:read", f"{DOMAIN}:write", "ops:read", "ops:write")
 
 
-def _writable(ctx: AccessContext, entity_id: UUID, attributes: dict[str, Any]) -> dict[str, Any]:
-    """`attributes` minus everything this entity has had erased -- ingestion
-    must never write a redacted field back (invariant 9, ADR 012)."""
-    redacted = services.redacted_fields(ctx, entity_id)
-    return {k: v for k, v in attributes.items() if k not in redacted}
-
-
 @dataclass
 class ParsedTransaction:
     account_key: str
@@ -126,10 +119,6 @@ def _transaction_attributes(
     return attrs, key
 
 
-def _provenance(response_sha: str, method: str) -> dict[str, Any]:
-    return {"method": method, "confidence": 1.0, "source_sha256": response_sha}
-
-
 def write_transactions(
     ctx: AccessContext,
     method: str,
@@ -181,7 +170,8 @@ def write_transactions(
         if matches:
             if all(matches[0].attributes.get(k) == v for k, v in attrs.items()):
                 continue  # unchanged account: emit nothing
-            services.capture(ctx, "account", _writable(ctx, matches[0].id, attrs), actor=method)
+            writable = services.writable_attributes(ctx, matches[0].id, attrs)
+            services.capture(ctx, "account", writable, actor=method)
             continue
         services.capture(ctx, "account", attrs, actor=method)
         report.accounts_created += 1
@@ -198,7 +188,7 @@ def write_transactions(
         if matches and all(matches[0].attributes.get(k) == v for k, v in attributes.items()):
             continue  # unchanged transaction: emit nothing
         if matches:
-            attributes = _writable(ctx, matches[0].id, attributes)
+            attributes = services.writable_attributes(ctx, matches[0].id, attributes)
         result = services.capture(ctx, "transaction", attributes, actor=method)
         if matches:
             report.updated += 1
@@ -210,7 +200,7 @@ def write_transactions(
             DERIVED_FROM,
             receipt.entity_id,
             valid_from=fetched_at,
-            attributes=_provenance(payload_sha, method),
+            attributes=services.provenance(method, payload_sha),
             actor=method,
         )
     return report

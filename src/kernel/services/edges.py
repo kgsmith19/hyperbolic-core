@@ -13,6 +13,14 @@ from kernel.projections import apply_event
 from kernel.services.common import entity_domains, load_entity
 
 
+def provenance(method: str, source_sha256: str, confidence: float = 1.0) -> dict[str, Any]:
+    """The ADR 010 envelope for a ``derived_from`` edge's ``attributes``:
+    which method derived the entity, from what source hash, at what
+    confidence. Shared by every domain ingest path (calendar, cpap, money)
+    that links a captured entity back to the receipt it came from."""
+    return {"method": method, "confidence": confidence, "source_sha256": source_sha256}
+
+
 def _require_write_on_endpoints(
     ctx: AccessContext, conn: Connection, from_id: UUID, to_id: UUID
 ) -> None:

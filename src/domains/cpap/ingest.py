@@ -120,14 +120,7 @@ def _session_attributes(night: ParsedNight) -> dict[str, Any]:
 
 
 def _provenance(response_sha: str) -> dict[str, Any]:
-    return {"method": METHOD, "confidence": 1.0, "source_sha256": response_sha}
-
-
-def _writable(ctx: AccessContext, entity_id: UUID, attributes: dict[str, Any]) -> dict[str, Any]:
-    """`attributes` minus everything this entity has had erased -- ingestion
-    must never write a redacted field back (invariant 9, ADR 012)."""
-    redacted = services.redacted_fields(ctx, entity_id)
-    return {k: v for k, v in attributes.items() if k not in redacted}
+    return services.provenance(METHOD, response_sha)
 
 
 @dataclass
@@ -216,7 +209,7 @@ def ingest_nights(
         if matches and all(matches[0].attributes.get(k) == v for k, v in attributes.items()):
             continue  # unchanged night: emit nothing
         if matches:
-            attributes = _writable(ctx, matches[0].id, attributes)
+            attributes = services.writable_attributes(ctx, matches[0].id, attributes)
         result = services.capture(ctx, "cpap_session", attributes, actor=METHOD)
         if matches:
             report.updated += 1

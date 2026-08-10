@@ -18,8 +18,13 @@ hub and any paired workout app.
 - **activity_summary** — one exercise session; identity: `content_hash` (sha256 of
   type+start_time+duration_seconds).
 
-No PII fields in either type: weight and timestamps are not personal-identifying in
-the GDPR sense as standalone records, and Health Connect carries no free text.
+`kilograms` (weight_measurement) and the exercise metrics (`duration_seconds`,
+`distance_meters`, `steps`, `avg_cadence_spm`, `max_cadence_spm`, `stride_length_m`
+on activity_summary) are `x-pii` — they are health data about a person (invariant
+9). The `content_hash` identity keys are not PII (they are never required, matching
+the cpap `session_date` precedent), so erasure is durable: `forget()` strips the
+flagged values but the hash survives and a later replay still merges onto the same
+entity.
 
 ## Idempotency Contract
 

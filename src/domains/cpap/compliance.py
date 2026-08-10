@@ -19,7 +19,7 @@ from typing import Any
 from uuid import UUID
 
 from domains.cpap.types import DOMAIN
-from kernel import services
+from domains.ops.common import optional_find
 from kernel.access import AccessContext
 from kernel.models import Entity
 
@@ -97,15 +97,6 @@ def compute_compliance(sessions: list[SessionUsage], as_of: date) -> ComplianceR
     )
 
 
-def _optional_find(ctx: AccessContext, type_name: str) -> list[Entity]:
-    """A type that may not be defined yet -- a box with no CPAP data ingested
-    is "never connected", not a crash (mirrors domains.ops.briefing)."""
-    try:
-        return services.find(ctx, type_name=type_name)
-    except LookupError:
-        return []
-
-
 def _to_usage(entity: Entity) -> SessionUsage | None:
     raw_date = entity.attributes.get("session_date")
     usage_min = entity.attributes.get("usage_min")
@@ -128,7 +119,9 @@ def compliance_for_briefing(ctx: AccessContext, as_of: date) -> ComplianceResult
     nights missing, most present) still returns a result, and
     `nights_missing` carries the gap honestly -- only a window with *zero*
     nights of data is silence."""
-    sessions = [u for e in _optional_find(ctx, "cpap_session") if (u := _to_usage(e)) is not None]
+    sessions = [
+        u for e in optional_find(ctx, "cpap_session") if (u := _to_usage(e)) is not None
+    ]
     if not sessions:
         return None
     result = compute_compliance(sessions, as_of)

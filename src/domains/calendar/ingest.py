@@ -36,6 +36,8 @@ from domains.ops.receipts import STATUS_FAILED, STATUS_OK, STATUS_SKIPPED, JobRe
 from kernel import services
 from kernel.access import AccessContext
 from kernel.env import read_env
+from kernel.http_fetch import SameHostRedirects as _BaseSameHostRedirects
+from kernel.http_fetch import fetch_bounded
 
 MAX_FEED_BYTES = 512 * 1024  # untrusted input bound
 FETCH_TIMEOUT_S = 30
@@ -79,59 +81,31 @@ def _source_ref(url: str) -> tuple[str, str]:
     return parts.hostname, sha256(url.encode()).hexdigest()
 
 
-class SameHostRedirects(urllib.request.HTTPRedirectHandler):
+class SameHostRedirects(_BaseSameHostRedirects):
     """SSRF guard: the scheme/host check covers only the first hop, because
     urllib follows redirects to anywhere. Refuse any redirect that changes
     scheme family or leaves the configured feed host, and cap the hops — a
     hostile feed provider must not be able to point the scheduled fetch at
     internal addresses (e.g. a cloud metadata endpoint)."""
 
-    max_redirections = 3
-
-    def __init__(self, host: str) -> None:
-        self._host = host
-
-    def redirect_request(
-        self,
-        req: urllib.request.Request,
-        fp: Any,
-        code: int,
-        msg: str,
-        headers: Any,
-        newurl: str,
-    ) -> urllib.request.Request | None:
-        parts = urlsplit(newurl)
-        if parts.scheme not in ("http", "https") or parts.hostname != self._host:
-            raise ValueError(
-                f"refusing redirect off the configured feed host (to {parts.hostname!r})"
-            )
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+    def reject(self, hostname: str | None) -> Exception:
+        return ValueError(f"refusing redirect off the configured feed host (to {hostname!r})")
 
 
 def fetch_feed(url: str) -> bytes:
     host, _ = _source_ref(url)  # scheme + host check before any request
     opener = urllib.request.build_opener(SameHostRedirects(host))
-    with opener.open(url, timeout=FETCH_TIMEOUT_S) as response:  # noqa: S310
-        content: bytes = response.read(MAX_FEED_BYTES + 1)
-    if len(content) > MAX_FEED_BYTES:
-        raise ValueError(f"feed exceeds {MAX_FEED_BYTES} byte bound")
-    return content
+    return fetch_bounded(
+        opener,
+        url,
+        timeout=FETCH_TIMEOUT_S,
+        max_bytes=MAX_FEED_BYTES,
+        oversize_error=ValueError(f"feed exceeds {MAX_FEED_BYTES} byte bound"),
+    )
 
 
 def _provenance(feed_sha: str) -> dict[str, Any]:
-    return {"method": METHOD, "confidence": 1.0, "source_sha256": feed_sha}
-
-
-def _writable(ctx: AccessContext, entity_id: UUID, attributes: dict[str, Any]) -> dict[str, Any]:
-    """`attributes` minus everything this entity has had erased.
-
-    Ingestion must never write erased fields back: the feed is unchanged by
-    erasure — it still names the title, location and address that were erased —
-    so one later VEVENT edit would re-materialize them on the very same entity
-    (invariant 9, ADR 012).
-    """
-    redacted = services.redacted_fields(ctx, entity_id)
-    return {k: v for k, v in attributes.items() if k not in redacted}
+    return services.provenance(METHOD, feed_sha)
 
 
 def ingest_content(
@@ -192,7 +166,7 @@ def ingest_content(
             continue  # unchanged VEVENT: emit nothing
         attributes = occurrence.attributes
         if matches:
-            attributes = _writable(ctx, matches[0].id, attributes)
+            attributes = services.writable_attributes(ctx, matches[0].id, attributes)
         result = services.capture(ctx, "appointment", attributes, actor=METHOD)
         if matches:
             report.updated += 1  # entity.updated event; prior state stays in history
@@ -234,7 +208,7 @@ def _link_attendees(
         found = services.find(ctx, type_name="attendee", filters={"email_hash": digest})
         if found:
             attendee_id = found[0].id
-            attributes = _writable(ctx, attendee_id, attributes)
+            attributes = services.writable_attributes(ctx, attendee_id, attributes)
             if any(found[0].attributes.get(k) != v for k, v in attributes.items()):
                 services.capture(ctx, "attendee", attributes, actor=METHOD)  # e.g. a renamed CN
         else:

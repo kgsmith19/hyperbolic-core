@@ -71,6 +71,21 @@ def redacted_fields(ctx: AccessContext, entity_id: UUID) -> set[str]:
     return fields
 
 
+def writable_attributes(
+    ctx: AccessContext, entity_id: UUID, attributes: dict[str, Any]
+) -> dict[str, Any]:
+    """``attributes`` minus everything this entity has had erased.
+
+    A writer that re-materializes data from a source erasure never touched --
+    a feed, a stored document, an API pull -- must strip these fields first,
+    or its next run would silently write the erasure back (invariant 9,
+    ADR 012 "Durable erasure"). Shared by every domain ingest path that
+    upserts onto an existing entity (calendar, cpap, money).
+    """
+    redacted = redacted_fields(ctx, entity_id)
+    return {k: v for k, v in attributes.items() if k not in redacted}
+
+
 def forget(
     ctx: AccessContext,
     entity_id: UUID,

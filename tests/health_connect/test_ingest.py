@@ -16,6 +16,7 @@ from domains.health_connect.ingest import MOCK_PAYLOAD, IngestResult, process_pa
 from domains.health_connect.types import define_health_connect_types
 from kernel import services
 from kernel.access import AccessContext
+from kernel.services.privacy import forget, redacted_fields
 
 client = TestClient(app)
 
@@ -103,6 +104,66 @@ def test_unknown_field_in_weight_produces_error(hc_ctx: AccessContext) -> None:
     result = process_payload(hc_ctx, payload)
     assert result.weight_ingested == 0
     assert any("unknown weight fields" in e for e in result.errors)
+
+
+def test_forget_erases_weight_and_activity_pii(hc_ctx: AccessContext) -> None:
+    """Issue #103: weight/activity health metrics must be x-pii and erasable
+    (invariant 9) — the content-hash identity survives so a later replay
+    still merges onto the same entity instead of minting a duplicate."""
+    payload: dict = {
+        "timestamp": "2026-08-10T08:00:00+00:00",
+        "app_version": "1.0.4",
+        "weight": [{"kilograms": 79.4, "time": "2026-08-10T07:58:00+00:00"}],
+        "exercise": [
+            {
+                "type": "CYCLING",
+                "start_time": "2026-08-10T07:00:00+00:00",
+                "end_time": "2026-08-10T07:30:00+00:00",
+                "duration_seconds": 1800,
+                "distance_meters": 9000.0,
+                "steps": 0,
+            }
+        ],
+    }
+    result = process_payload(hc_ctx, payload)
+    assert result.weight_ingested == 1
+    assert result.activity_ingested == 1
+
+    (weight,) = services.find(
+        hc_ctx, type_name="weight_measurement", filters={"time": "2026-08-10T07:58:00+00:00"}
+    )
+    (activity,) = services.find(
+        hc_ctx,
+        type_name="activity_summary",
+        filters={"start_time": "2026-08-10T07:00:00+00:00"},
+    )
+
+    weight_hash = weight.attributes["content_hash"]
+    activity_hash = activity.attributes["content_hash"]
+
+    weight_result = forget(hc_ctx, weight.id)
+    assert "kilograms" in weight_result.fields
+    assert redacted_fields(hc_ctx, weight.id) >= {"kilograms"}
+
+    activity_result = forget(hc_ctx, activity.id)
+    assert set(activity_result.fields) >= {"duration_seconds", "distance_meters", "steps"}
+    assert redacted_fields(hc_ctx, activity.id) >= {
+        "duration_seconds",
+        "distance_meters",
+        "steps",
+    }
+
+    (still_there,) = services.find(
+        hc_ctx, type_name="weight_measurement", filters={"content_hash": weight_hash}
+    )
+    assert "kilograms" not in still_there.attributes
+    assert still_there.attributes["content_hash"] == weight_hash
+
+    (still_there_activity,) = services.find(
+        hc_ctx, type_name="activity_summary", filters={"content_hash": activity_hash}
+    )
+    assert "duration_seconds" not in still_there_activity.attributes
+    assert still_there_activity.attributes["content_hash"] == activity_hash
 
 
 def test_missing_required_exercise_field_produces_error(hc_ctx: AccessContext) -> None:

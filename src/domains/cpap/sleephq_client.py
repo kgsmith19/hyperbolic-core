@@ -24,6 +24,9 @@ from datetime import date
 from typing import Any
 from urllib.parse import urlsplit
 
+from kernel.http_fetch import SameHostRedirects as _BaseSameHostRedirects
+from kernel.http_fetch import fetch_json_object
+
 DEFAULT_BASE_URL = "https://sleephq.com"
 TOKEN_PATH = "/oauth/token"
 ME_PATH = "/api/v1/me"
@@ -47,30 +50,14 @@ class SleepHQAuthError(SleepHQError):
     though today both simply fail the run."""
 
 
-class _SameHostRedirects(urllib.request.HTTPRedirectHandler):
+class _SameHostRedirects(_BaseSameHostRedirects):
     """Refuse any redirect that changes scheme family or leaves the
     configured API host, and cap the hops -- a compromised or misconfigured
     host must not be able to redirect a bearer-token-bearing request to an
     internal address."""
 
-    max_redirections = 3
-
-    def __init__(self, host: str) -> None:
-        self._host = host
-
-    def redirect_request(
-        self,
-        req: urllib.request.Request,
-        fp: Any,
-        code: int,
-        msg: str,
-        headers: Any,
-        newurl: str,
-    ) -> urllib.request.Request | None:
-        parts = urlsplit(newurl)
-        if parts.scheme not in ("http", "https") or parts.hostname != self._host:
-            raise SleepHQError("refusing redirect off the configured SleepHQ host")
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+    def reject(self, hostname: str | None) -> Exception:
+        return SleepHQError("refusing redirect off the configured SleepHQ host")
 
 
 def _opener(base_url: str) -> urllib.request.OpenerDirector:
@@ -87,21 +74,19 @@ def _request_json(
         f"{base_url}{path}", data=body, method=method, headers=headers
     )
     try:
-        with _opener(base_url).open(req, timeout=FETCH_TIMEOUT_S) as response:  # noqa: S310
-            raw = response.read(MAX_RESPONSE_BYTES + 1)
+        return fetch_json_object(
+            _opener(base_url),
+            req,
+            timeout=FETCH_TIMEOUT_S,
+            max_bytes=MAX_RESPONSE_BYTES,
+            oversize_error=SleepHQError("response exceeds size bound"),
+            invalid_json_error=SleepHQError("response was not valid JSON"),
+            not_object_error=SleepHQError("response was not a JSON object"),
+        )
     except SleepHQError:
         raise
     except Exception as exc:
         raise SleepHQError(f"request failed: {type(exc).__name__}") from None
-    if len(raw) > MAX_RESPONSE_BYTES:
-        raise SleepHQError("response exceeds size bound")
-    try:
-        parsed = json.loads(raw)
-    except ValueError:
-        raise SleepHQError("response was not valid JSON") from None
-    if not isinstance(parsed, dict):
-        raise SleepHQError("response was not a JSON object")
-    return parsed
 
 
 def fetch_access_token(client_id: str, client_secret: str, base_url: str) -> str:

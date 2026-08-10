@@ -9,6 +9,13 @@ sends a rolling 48-hour window and retries — duplicate delivery must merge sil
 
 Withings scales write to Health Connect in kilograms; that is what we store.
 Convert to other units at read time, never at the edge.
+
+kilograms (weight_measurement) and the exercise metrics on activity_summary
+(steps, distance_meters, duration_seconds, cadence/stride fields) are x-pii —
+they are health data about a person (invariant 9), mirroring cpap's
+usage_min/ahi/leak_95p/pressure_95p/central_ahi precedent. As with cpap, a
+PII-flagged field cannot be `required`: forget() removes it and the next
+ingest run must still be able to write the entity without it.
 """
 
 from hashlib import sha256
@@ -35,9 +42,10 @@ WEIGHT_MEASUREMENT_SCHEMA: dict[str, Any] = {
         "time": _TIMESTAMP,
         "source": {"type": "string", "maxLength": 64},
     },
-    "required": ["content_hash", "kilograms", "time"],
+    "required": ["content_hash", "time"],
     "additionalProperties": False,
     "x-identity": ["content_hash"],
+    "x-pii": ["kilograms"],
 }
 
 ACTIVITY_SUMMARY_SCHEMA: dict[str, Any] = {
@@ -55,9 +63,17 @@ ACTIVITY_SUMMARY_SCHEMA: dict[str, Any] = {
         "stride_length_m": {"type": "number", "minimum": 0},
         "source": {"type": "string", "maxLength": 64},
     },
-    "required": ["content_hash", "exercise_type", "start_time", "duration_seconds"],
+    "required": ["content_hash", "exercise_type", "start_time"],
     "additionalProperties": False,
     "x-identity": ["content_hash"],
+    "x-pii": [
+        "duration_seconds",
+        "distance_meters",
+        "steps",
+        "avg_cadence_spm",
+        "max_cadence_spm",
+        "stride_length_m",
+    ],
 }
 
 _TYPES = {
