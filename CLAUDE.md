@@ -14,7 +14,7 @@ A guard rail and control panel that lets Claude Code sessions run longer and mor
 | 4 | The rule card a prompt names | Do not read all of `rules/` by default |
 | 5 | `specs/active/` | What is being built right now, if anything is |
 
-`docs/SYSTEM-REQUIREMENTS.md` and `docs/DATA-FLOW-DIAGRAM.md` are read when the work touches architecture, interfaces, data, or security. `docs/adr/` holds standing decisions — read the ones relevant to what you're touching (`ADR-0001` before touching the ConPTY/directive-loop mechanism, `ADR-0002` before touching the GUI, `ADR-0003` before touching the launch cap).
+`docs/SYSTEM-REQUIREMENTS.md` and `docs/DATA-FLOW-DIAGRAM.md` are read when the work touches architecture, interfaces, data, or security. `docs/adr/` holds standing decisions — read the ones relevant to what you're touching (`ADR-0005` before touching the headless runner/directive-loop continuity mechanism, `ADR-0002` before touching the GUI, `ADR-0003` before touching the launch cap).
 
 ## STOP conditions
 
@@ -96,7 +96,7 @@ MAIN_BRANCH:   main
 
 ## Review cadence
 
-No fixed slice-count cadence yet — this repo predates that discipline. Going forward: lean review and doc refresh before any change that touches more than one subsystem; security review before anything touching the guard, vault, or the ConPTY channel.
+No fixed slice-count cadence yet — this repo predates that discipline. Going forward: lean review and doc refresh before any change that touches more than one subsystem; security review before anything touching the guard, vault, or the launch lane.
 
 ## Never
 

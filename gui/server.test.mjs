@@ -11,6 +11,15 @@ import http from "node:http";
 const BASE = fs.mkdtempSync(path.join(os.tmpdir(), "acc-gui-srv-"));
 process.env.ACC_POLICY = path.join(BASE, "policy.json");
 process.env.ACC_ROOT = path.join(BASE, "root");
+// hooks/engine.mjs (like every other hook) now honours ACC_ROOT, so AC-009
+// below -- which deliberately calls the REAL engine, never the fake one, as
+// a read-only wiring proof -- needs a config.json at this sandbox root
+// instead of the live repo's. Never touches the real repo's config.json.
+fs.mkdirSync(process.env.ACC_ROOT, { recursive: true });
+fs.writeFileSync(
+  path.join(process.env.ACC_ROOT, "config.json"),
+  JSON.stringify({ enabled: true, secrets: [], protected: [] }, null, 2) + "\n"
+);
 const KERNEL = {
   harness: "claude-code",
   budget: { wallClockMin: 60, toolCalls: 200, tokens: 500000 },

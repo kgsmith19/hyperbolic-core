@@ -48,6 +48,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { isMainModule } from "./root.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const POLICY = () => process.env.ACC_POLICY || path.join(HERE, "..", "policy.json");
@@ -72,7 +73,7 @@ const DEFAULTS = {
 // dial edits apply on the next acquire with no restart.
 export function laneConfig() {
   let raw = {};
-  try { raw = JSON.parse(fs.readFileSync(POLICY(), "utf8").replace(/^﻿/, "")).lane || {}; } catch {}
+  try { raw = JSON.parse(fs.readFileSync(POLICY(), "utf8").replace(/^\uFEFF/, "")).lane || {}; } catch {}
   return { ...DEFAULTS, ...raw };
 }
 
@@ -384,10 +385,7 @@ export function runCli(argv) {
   return { ok: false, reason: `unknown command: ${cmd}` };
 }
 
-const isMain = (() => {
-  try { return process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)); } catch { return false; }
-})();
-if (isMain) {
+if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2);
   const [cmd, ...rest] = argv;
   if (cmd === "gate") {

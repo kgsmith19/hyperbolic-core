@@ -79,6 +79,44 @@ test("floors(file) applies a per-file branchFloorOverrides entry; other files an
   process.env.ACC_POLICY = saved;
 });
 
+test("floors(file) applies a per-file lineFloorOverrides entry independently of the other two metrics", () => {
+  const p = path.join(BASE, "line-override-policy.json");
+  fs.writeFileSync(p, JSON.stringify({
+    tests: {
+      lineFloorOverrides: { "hooks/lane.mjs": 96 },
+      functionFloorOverrides: { "hooks/lane.mjs": 97 },
+      branchFloorOverrides: { "hooks/lane.mjs": 85 },
+    },
+  }));
+  const saved = process.env.ACC_POLICY;
+  process.env.ACC_POLICY = p;
+  const f = floors("hooks/lane.mjs");
+  assert.equal(f.lines, 96);
+  assert.equal(f.funcs, 97);
+  assert.equal(f.branches, 85);
+  assert.equal(floors("hooks/other.mjs").lines, 100); // unrelated file: default
+  assert.equal(floors().lines, 100); // no-arg call: default
+  process.env.ACC_POLICY = saved;
+});
+
+test("floors(file) applies a per-file functionFloorOverrides entry independently of branchFloorOverrides", () => {
+  const p = path.join(BASE, "func-override-policy.json");
+  fs.writeFileSync(p, JSON.stringify({
+    tests: {
+      functionFloorOverrides: { "hooks/engine.mjs": 97 },
+      branchFloorOverrides: { "hooks/engine.mjs": 95 },
+    },
+  }));
+  const saved = process.env.ACC_POLICY;
+  process.env.ACC_POLICY = p;
+  const f = floors("hooks/engine.mjs");
+  assert.equal(f.funcs, 97);
+  assert.equal(f.branches, 95);
+  assert.equal(floors("hooks/other.mjs").funcs, 100); // unrelated file: default
+  assert.equal(floors().funcs, 100); // no-arg call: default
+  process.env.ACC_POLICY = saved;
+});
+
 test("floors() honors a real custom numeric override", () => {
   const custom = path.join(BASE, "custom-policy.json");
   fs.writeFileSync(custom, JSON.stringify({ tests: { changedLineCoverage: 42, changedFunctionCoverage: 55, changedBranchCoverage: 33 } }));

@@ -42,22 +42,27 @@ const POLICY = () => process.env.ACC_POLICY || path.join(HERE, "..", "policy.jso
 // reach; raise the dial to 100 when a file warrants that spend.
 //
 // `file` (gate-relative, forward slashes) is optional: when given, and
-// `tests.branchFloorOverrides[file]` is a finite number, it replaces the
-// branch floor for THAT file only. Escape hatch for a proven tooling
+// `tests.lineFloorOverrides[file]` / `tests.functionFloorOverrides[file]` /
+// `tests.branchFloorOverrides[file]` is a finite number, it replaces that
+// metric's floor for THAT file only. Escape hatch for a proven tooling
 // limitation, not a way to duck real gaps — node's own
-// --experimental-test-coverage merge under-reports a file's branches once
-// the full fast tier runs together; hooks/lane.mjs's true, isolated coverage
-// comfortably clears the default 90% floor (see policy.json's
-// branchFloorOverrides note for the measured numbers per file).
+// --experimental-test-coverage merge under-reports a file's branches (and,
+// less often, its lines or functions) once the full fast tier runs
+// together; the overridden files' true, isolated coverage comfortably
+// clears the default floor (see policy.json's *FloorOverrides notes for
+// the measured numbers per file).
+function overridden(t, key, file, dflt) {
+  const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  return num(file && t[key] ? t[key][file] : undefined, dflt);
+}
 export function floors(file) {
   let t = {};
-  try { t = JSON.parse(fs.readFileSync(POLICY(), "utf8").replace(/^﻿/, "")).tests || {}; } catch {}
+  try { t = JSON.parse(fs.readFileSync(POLICY(), "utf8").replace(/^\uFEFF/, "")).tests || {}; } catch {}
   const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
-  const override = file && t.branchFloorOverrides ? t.branchFloorOverrides[file] : undefined;
   return {
-    lines: num(t.changedLineCoverage, 100),
-    funcs: num(t.changedFunctionCoverage, 100),
-    branches: num(override, num(t.changedBranchCoverage, 90)),
+    lines: overridden(t, "lineFloorOverrides", file, num(t.changedLineCoverage, 100)),
+    funcs: overridden(t, "functionFloorOverrides", file, num(t.changedFunctionCoverage, 100)),
+    branches: overridden(t, "branchFloorOverrides", file, num(t.changedBranchCoverage, 90)),
   };
 }
 
