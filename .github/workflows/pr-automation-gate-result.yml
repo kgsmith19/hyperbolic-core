@@ -1,8 +1,9 @@
-name: "Orchestrator: PR Lifecycle"
+name: "Orchestrator: Gate Result"
 
 on:
-  pull_request_target:
-    types: [opened, reopened, ready_for_review, converted_to_draft, synchronize, edited, labeled, unlabeled, review_requested, auto_merge_enabled, auto_merge_disabled]
+  workflow_run:
+    workflows: ["Gate: Deterministic CI"]
+    types: [completed]
 
 # One repo-wide non-canceling authority lock shared by evaluator and orchestrator; GitHub keeps only the newest pending run per group and the six-hourly watchdog is the convergence net.
 concurrency:
@@ -10,16 +11,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  pr-event:
-    if: github.event.pull_request != null && github.event.pull_request.head.repo.full_name == github.repository
+  gate-result:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.pull_requests[0] != null
     permissions:
+      actions: write
+      checks: write
       contents: read
       issues: write
       pull-requests: write
     uses: kgsmith19/agent-engineering-standard/.github/workflows/pr-automation-reusable.yml@4a635f0ffd438196632886af53ba56072ca5b143
     with:
-      mode: pr-event
-      pr_number: ${{ github.event.pull_request.number }}
+      mode: gate-result
+      pr_number: ${{ github.event.workflow_run.pull_requests[0].number }}
+      gate_conclusion: ${{ github.event.workflow_run.conclusion }}
+      gate_head_sha: ${{ github.event.workflow_run.head_sha }}
+      gate_run_id: ${{ github.event.workflow_run.id }}
       standard_sha: 4a635f0ffd438196632886af53ba56072ca5b143
     secrets:
       automation_token: ${{ secrets.AUTOMATION_TOKEN }}
