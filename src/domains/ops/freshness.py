@@ -23,8 +23,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from domains.calendar.ingest import METHOD as CALENDAR_INGEST_JOB
+from domains.ops.common import optional_find, parse_when
 from domains.ops.receipts import STATUS_OK
-from kernel import services
 from kernel.access import AccessContext
 from kernel.models import Entity
 
@@ -111,28 +111,6 @@ def _record(
     )
 
 
-def _parse(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        moment = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
-
-
-def _optional_find(
-    ctx: AccessContext, type_name: str, filters: dict[str, object] | None = None
-) -> list[Entity]:
-    """Entities of a type that may not be defined yet -- a source with no
-    ingest job run yet, or no captured data yet, is `never_seen`, not a
-    crash (mirrors `domains.ops.briefing._optional_find`)."""
-    try:
-        return services.find(ctx, type_name=type_name, filters=filters)
-    except LookupError:
-        return []
-
-
 def _latest_at(
     entities: list[Entity], extractor: Callable[[Entity], datetime | None]
 ) -> datetime | None:
@@ -143,9 +121,9 @@ def _latest_at(
 def _calendar_freshness(ctx: AccessContext, now: datetime) -> SourceFreshness:
     # execution_receipt carries no identity field (ADR 014): every run is a
     # distinct fact, so the one with the latest started_at is the latest run.
-    receipts = _optional_find(ctx, "execution_receipt", {"job": CALENDAR_INGEST_JOB})
+    receipts = optional_find(ctx, "execution_receipt", {"job": CALENDAR_INGEST_JOB})
     epoch = datetime.min.replace(tzinfo=UTC)
-    receipts.sort(key=lambda r: _parse(r.attributes.get("started_at")) or epoch)
+    receipts.sort(key=lambda r: parse_when(r.attributes.get("started_at")) or epoch)
     latest_attempt = receipts[-1] if receipts else None
     successes = [r for r in receipts if r.attributes.get("status") == STATUS_OK]
     last_success = successes[-1] if successes else None
@@ -155,14 +133,14 @@ def _calendar_freshness(ctx: AccessContext, now: datetime) -> SourceFreshness:
     # source's own data moved, distinct from "we polled it and nothing new
     # was there".
     newest_observed_at = _latest_at(
-        _optional_find(ctx, "source_receipt"), lambda e: _parse(e.attributes.get("fetched_at"))
+        optional_find(ctx, "source_receipt"), lambda e: parse_when(e.attributes.get("fetched_at"))
     )
 
     last_attempt_at = (
-        _parse(latest_attempt.attributes.get("started_at")) if latest_attempt else None
+        parse_when(latest_attempt.attributes.get("started_at")) if latest_attempt else None
     )
     last_success_at = (
-        _parse(last_success.attributes.get("finished_at")) if last_success else None
+        parse_when(last_success.attributes.get("finished_at")) if last_success else None
     )
     failed = latest_attempt is not None and latest_attempt.attributes.get("status") != STATUS_OK
     last_failure_class = (
@@ -189,14 +167,14 @@ def _health_connect_freshness(ctx: AccessContext, now: datetime) -> SourceFreshn
     # (b) would tie freshness to ingest wall-clock time rather than the
     # data the source itself reports, the exact distinction this ledger
     # exists to preserve (issue #90's "newest source-data timestamp" field).
-    weights = _optional_find(ctx, "weight_measurement")
-    activity = _optional_find(ctx, "activity_summary")
+    weights = optional_find(ctx, "weight_measurement")
+    activity = optional_find(ctx, "activity_summary")
     newest_observed_at = max(
         (
             at
             for at in (
-                _latest_at(weights, lambda e: _parse(e.attributes.get("time"))),
-                _latest_at(activity, lambda e: _parse(e.attributes.get("start_time"))),
+                _latest_at(weights, lambda e: parse_when(e.attributes.get("time"))),
+                _latest_at(activity, lambda e: parse_when(e.attributes.get("start_time"))),
             )
             if at is not None
         ),

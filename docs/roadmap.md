@@ -231,10 +231,25 @@ gate bounds everything after it.
   operator-supplied balance/baseline numbers — no persistence, advisory
   and read-only by construction. No transfer, cancellation or other
   outward action anywhere in the module (ADR 018 posture unchanged).)
-- [ ] D1 Adherence rollup pack — EWMA weight trend with %/week bands, weekly
+- [x] D1 Adherence rollup pack — EWMA weight trend with %/week bands, weekly
   quota scoring with freezes and a repair window, lapse-resume gap summary.
   Registry rider: elimination_window type (its comparison rollup is the
-  consumer). Prompt §D1 below.
+  consumer). Prompt §D1 below. — done 2026-08-10 (Issue #87;
+  `domains.ops.adherence`: three deterministic read-only rollups, the
+  freshness-ledger query posture — nothing persisted, no LLM, no outward
+  action. Gap-aware EWMA (alpha 0.1/day) reported as signed
+  %-of-current-EWMA-weight per week against explicit bands (green =
+  0.5-1%/wk of loss, bounds inclusive; too little data reads
+  `insufficient_data`, never a fabricated band). Mon-Sun quota scoring
+  with a 24h repair window (a completing repair is counted once, ever)
+  and a 1-2 freeze allowance per rolling 4 weeks — no daily streaks;
+  targets are operator-supplied per call, the `months_of_cover`
+  precedent, so no config type until one is needed. >=7-day check-in
+  gaps are reported as measured facts only: boundary dates, gap length,
+  in-gap arrival counts — no cause, reason or narrative field exists in
+  the output. The `elimination_window` rider is deferred: the issue adds
+  it only as its comparison-rollup consumer requires it, and no
+  comparison rollup exists yet.)
 
 Order rationale (one line each): INT1 first because the briefing is thin
 without intentions and everything downstream reads them; H before C because the

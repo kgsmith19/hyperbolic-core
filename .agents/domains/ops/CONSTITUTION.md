@@ -36,5 +36,13 @@ Owns: `src/domains/ops/**`, `tests/ops/**`.
   `execution_receipt` / `source_receipt` / capture timestamps, writes
   nothing, and never fabricates a green state for a missing or failed
   source. No LLM is involved.
+- The adherence rollup pack (`domains.ops.adherence`, issue #87, roadmap D1)
+  has the same pure-query posture: EWMA weight trend with explicit %/week
+  bands, Mon-Sun weekly quota scoring with deterministic 24h-repair and
+  freeze rules (quota targets operator-supplied per call, no persisted
+  config), and >=7-day lapse/resume gap summaries reporting measured facts
+  only — never a cause, reason or narrative field. It writes nothing, no LLM
+  is involved, and it runs under read scopes only (`wellbeing:read`,
+  `health_connect:read`, `intentions:read`).
 - Behavior changes land with tests in `tests/ops/` (integration against the
   kernel, unit for pure assembly logic).

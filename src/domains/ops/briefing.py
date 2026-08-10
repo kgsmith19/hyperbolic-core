@@ -51,6 +51,7 @@ from zoneinfo import ZoneInfo
 
 from domains.cpap.compliance import compliance_for_briefing, compliance_view
 from domains.episodes.lines import usual_present
+from domains.ops.common import optional_find
 from domains.ops.receipts import JobResult, run_job
 from domains.ops.types import GATE_DAYS_PER_WEEK, GATE_WEEKS
 from kernel import services
@@ -88,19 +89,6 @@ def briefing_zone() -> tzinfo:
     return ZoneInfo(name) if name else UTC
 
 
-def _optional_find(ctx: AccessContext, type_name: str) -> list[Entity]:
-    """Entities of a type that may not be defined yet — a fresh box has no
-    calendar or wellbeing data until those slices' jobs have run. Absent type
-    means an empty section, not a crashed briefing; a missing SCOPE on a
-    defined type propagates as ScopeError instead of composing an empty
-    section forever (the PR #49 precedent: a scope-filtered view like
-    `list_types` answers "visible", never "defined")."""
-    try:
-        return services.find(ctx, type_name=type_name)
-    except LookupError:
-        return []
-
-
 def _starts_on(appointment: Entity, day: date, zone: tzinfo) -> bool:
     starts_at = appointment.attributes.get("starts_at")
     if not isinstance(starts_at, str):
@@ -125,7 +113,7 @@ def _gate_status(ctx: AccessContext, day: date) -> tuple[dict[str, Any], list[En
     window_start = day - timedelta(days=7 * GATE_WEEKS)
     counts = [0] * GATE_WEEKS
     counted: list[Entity] = []
-    for checkin in _optional_find(ctx, "daily_checkin"):
+    for checkin in optional_find(ctx, "daily_checkin"):
         raw = checkin.attributes.get("date")
         if not isinstance(raw, str):
             continue
@@ -145,11 +133,11 @@ def assemble(ctx: AccessContext, day: date, zone: tzinfo) -> dict[str, Any]:
     roadmap §INT1 composition order: focus intentions, then calendar context,
     then nothing else (the Monday edition appends gate status)."""
     focus = sorted(
-        (i for i in _optional_find(ctx, "intention") if i.attributes.get("focus") is True),
+        (i for i in optional_find(ctx, "intention") if i.attributes.get("focus") is True),
         key=lambda i: str(i.attributes.get("title", "")),
     )
     appointments = sorted(
-        (a for a in _optional_find(ctx, "appointment") if _starts_on(a, day, zone)),
+        (a for a in optional_find(ctx, "appointment") if _starts_on(a, day, zone)),
         key=lambda a: str(a.attributes.get("starts_at", "")),
     )
 
@@ -164,7 +152,7 @@ def assemble(ctx: AccessContext, day: date, zone: tzinfo) -> dict[str, Any]:
     # module docstring). The semantics live in the episodes cell; this job
     # only reads and stores — the line carries no tag, no date, no id, and
     # the contributing episodes are cited like every other section.
-    episode_line = usual_present(_optional_find(ctx, "episode"), day)
+    episode_line = usual_present(optional_find(ctx, "episode"), day)
     if episode_line is not None:
         text, contributing = episode_line
         attributes["episodes_line"] = text

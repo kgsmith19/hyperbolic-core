@@ -20,12 +20,12 @@ from domains.intentions.focus import capture_intention
 from domains.intentions.types import define_intention_types
 from domains.ops.briefing import (
     METHOD,
-    _optional_find,
     assemble,
     briefing_context,
     main,
     run_briefing,
 )
+from domains.ops.common import optional_find
 from domains.ops.types import define_ops_types
 from kernel import db
 from kernel.access import AccessContext, ScopeError
@@ -444,7 +444,7 @@ def test_briefing_context_reads_cpap_without_write() -> None:
 
 
 def test_absent_type_is_an_empty_section_not_a_crash(brief_ctx: AccessContext) -> None:
-    assert _optional_find(brief_ctx, "no_such_type_yet") == []
+    assert optional_find(brief_ctx, "no_such_type_yet") == []
 
 
 def test_scoped_out_type_refuses_rather_than_composing_empty(brief_ctx: AccessContext) -> None:
@@ -452,7 +452,7 @@ def test_scoped_out_type_refuses_rather_than_composing_empty(brief_ctx: AccessCo
     context cannot read is a ScopeError, never a silently empty section — a
     mis-built context must crash the run, not hollow out the digest."""
     with pytest.raises(ScopeError):
-        _optional_find(AccessContext.of("ops:read"), "intention")
+        optional_find(AccessContext.of("ops:read"), "intention")
 
 
 def test_briefing_cannot_write_what_it_reads(
