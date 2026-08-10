@@ -76,7 +76,11 @@ export default function Guards() {
             {enabled ? <Shield className="size-5 text-green-600" /> : <ShieldOff className="size-5 text-destructive" />}
             Guards <Badge variant={enabled ? "default" : "destructive"}>{enabled ? "ENABLED" : "DISABLED"}</Badge>
           </CardTitle>
-          <Button size="sm" variant="outline" className="ml-auto" onClick={() => engine.mutate({ verb: "toggle", arg: enabled ? "off" : "on" })}>
+          <Button size="sm" variant="outline" className="ml-auto" onClick={() => {
+            const arg = enabled ? "off" : "on";
+            const ok = enabled ? confirm("Turn Guards OFF? This disables real protections (secret scanning, locked paths, watched folders) until turned back on.") : true;
+            if (ok) engine.mutate({ verb: "toggle", arg });
+          }}>
             Turn {enabled ? "off" : "on"}
           </Button>
         </CardHeader>
@@ -126,7 +130,7 @@ export default function Guards() {
           </div>
           {ref && <pre className="max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs whitespace-pre-wrap">{preview.data?.content ?? preview.data?.error ?? "…"}</pre>}
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={!ref} onClick={() => engine.mutate({ verb: "run", arg: ref })}>Run selected</Button>
+            <Button size="sm" disabled={!ref} onClick={() => confirm(`Run "${ref}"? This executes this pending runbox item now.`) && engine.mutate({ verb: "run", arg: ref })}>Run selected</Button>
             <Button size="sm" variant="outline" disabled={!ref} onClick={() => engine.mutate({ verb: "trash", arg: ref })}>Delete (to trash)</Button>
             <Button size="sm" variant="destructive" onClick={() => confirm("Permanently delete everything in the runbox trash?") && engine.mutate({ verb: "flush", extra: { confirm: true } })}>Empty trash…</Button>
           </div>

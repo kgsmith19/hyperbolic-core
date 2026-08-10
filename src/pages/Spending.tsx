@@ -92,7 +92,7 @@ export default function Spending() {
           <div className="flex flex-wrap gap-2">
             <Button variant="destructive" onClick={() => control.mutate("stop")}><OctagonX className="size-4" /> STOP all automated work</Button>
             <Button variant="outline" onClick={() => control.mutate("resume")}><Play className="size-4" /> Resume work</Button>
-            <Button variant="outline" onClick={() => control.mutate("fanout")}><Users className="size-4" /> Extra helpers for 30 min</Button>
+            <Button variant="outline" onClick={() => confirm("Spin up extra automated helper agents for 30 minutes? This increases real agent capacity and spending.") && control.mutate("fanout")}><Users className="size-4" /> Extra helpers for 30 min</Button>
           </div>
         </CardContent>
       </Card>

@@ -46,6 +46,7 @@ test("Start work: suggest fills the folder, GO creates + launches, Mark finished
   await page.locator("#task").fill("tighten the guards hook checks");
   await page.locator("#task").blur();
   await expect(page.locator("#cwd")).toHaveValue(routeDir);
+  page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "GO" }).click();
   await expect(page.getByTestId("note")).toContainText("launched d-");
 
@@ -68,6 +69,7 @@ test("Start work: Guide appends a note to the log without touching status or res
   await page.locator("#task").fill("tighten the guards hook checks");
   await page.locator("#task").blur();
   await expect(page.locator("#cwd")).toHaveValue(routeDir);
+  page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "GO" }).click();
   await expect(page.getByTestId("note")).toContainText("launched d-");
   const ids = liveIds();
@@ -84,6 +86,7 @@ test("Start work: Guide appends a note to the log without touching status or res
 test("Guards: toggle round-trips through the real server into the engine's state", async ({ page }) => {
   await page.goto("/guards");
   await expect(page.getByText("ENABLED", { exact: true })).toBeVisible();
+  page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Turn off" }).click();
   await expect(page.getByText("DISABLED", { exact: true })).toBeVisible();
   expect(JSON.parse(fs.readFileSync(path.join(dir, "guards-state.json"), "utf8")).enabled).toBe(false);

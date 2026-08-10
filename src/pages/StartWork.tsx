@@ -45,7 +45,7 @@ function Row({ d }: { d: Directive }) {
       <p className="mt-1 truncate" title={d.text}>{d.text.split("\n")[0]}</p>
       <div className="mt-2 flex flex-wrap gap-2">
         {!d.running && (
-          <Button size="sm" variant="outline" disabled={launch.isPending} onClick={() => launch.mutate()}>
+          <Button size="sm" variant="outline" disabled={launch.isPending} onClick={() => confirm(`Relaunch ${d.id}? This starts a real agent process running again.`) && launch.mutate()}>
             <Play className="size-3.5" /> Launch
           </Button>
         )}
@@ -119,7 +119,7 @@ export default function StartWork() {
             </RadioGroup>
           )}
           <div className="flex items-center gap-3">
-            <Button disabled={!text.trim() || !cwd.trim() || go.isPending} onClick={() => go.mutate()}>
+            <Button disabled={!text.trim() || !cwd.trim() || go.isPending} onClick={() => confirm(`Create and launch a new agent directive in ${cwd.trim()}? This spawns a real process to work on: "${text.trim().slice(0, 120)}"`) && go.mutate()}>
               <Rocket className="size-4" /> GO
             </Button>
             <span data-testid="note" className="text-sm text-muted-foreground">{note}</span>
