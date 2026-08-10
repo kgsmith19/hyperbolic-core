@@ -80,19 +80,13 @@ function addConfigControls(panel, prompt, inputs, boxes, names, ids, api) {
   panel.append(select, nameInput, saveBtn);
 }
 
-// An empty input is omitted from `values` entirely, so render() sees an
-// absent key and its missing-variable block (AC-002 of SPEC-0003) fires --
-// this is the one place "empty input" maps to "absent key".
-export function buildRenderPanel(prompt, api) {
-  const names = extractVariables(prompt.body);
-  const ids = extractSections(prompt.body);
-  if (names.length === 0 && ids.length === 0) return null;
-
-  const panel = document.createElement("div");
-  const inputs = addVariableInputs(panel, names);
-  const boxes = addSectionBoxes(panel, ids);
-  addConfigControls(panel, prompt, inputs, boxes, names, ids, api);
-
+// The copy button: renders with the current inputs, copies on success, logs
+// usage after the confirmation (SPEC-0008 FR-011). An empty input is omitted
+// from `values` entirely, so render() sees an absent key and its
+// missing-variable block (AC-002 of SPEC-0003) fires -- this is the one
+// place "empty input" maps to "absent key". Split out for the same
+// 40-line-function reason as its siblings.
+function addCopyControl(panel, prompt, api, names, inputs, ids, boxes) {
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.textContent = "Copy rendered text";
@@ -125,6 +119,18 @@ export function buildRenderPanel(prompt, api) {
       body: { p_app_id: "prompt-organizer", p_kind: "render", p_wall_clock_ms: wallClockMs },
     });
   });
+}
+
+export function buildRenderPanel(prompt, api) {
+  const names = extractVariables(prompt.body);
+  const ids = extractSections(prompt.body);
+  if (names.length === 0 && ids.length === 0) return null;
+
+  const panel = document.createElement("div");
+  const inputs = addVariableInputs(panel, names);
+  const boxes = addSectionBoxes(panel, ids);
+  addConfigControls(panel, prompt, inputs, boxes, names, ids, api);
+  addCopyControl(panel, prompt, api, names, inputs, ids, boxes);
 
   return panel;
 }
