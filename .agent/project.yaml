@@ -4,7 +4,7 @@ type: web-app
 
 standard:
   repo: https://github.com/kgsmith19/agent-engineering-standard
-  sha: 4a635f0ffd438196632886af53ba56072ca5b143
+  sha: e0246cd8fbd70e91b1107979c578dcfc311d179e
 
 commands:
   setup: npm ci
