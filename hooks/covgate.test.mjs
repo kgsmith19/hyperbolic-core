@@ -132,7 +132,7 @@ test("changedLibFiles gates kernel modules, including one level of nesting", () 
       "hooks/guard.mjs",
       "kernel/run.test.mjs",
       "kernel/adapters/claude-code.test.mjs",
-      "docs/superpowers/plans/x.md",
+      "docs/notes/plans/x.md",
     ]),
     ["kernel/run.mjs", "kernel/adapters/claude-code.mjs", "hooks/guard.mjs"]
   );

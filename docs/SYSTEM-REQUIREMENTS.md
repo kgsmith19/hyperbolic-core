@@ -166,7 +166,7 @@ Not applicable in the traditional sense — ACC has no HTTP API surface except t
 | Decision | Chosen | Alternatives rejected | Why | Reversal cost | Lock-in risk |
 |---|---|---|---|---|---|
 | Test runner | `node:test` (zero deps) | Jest, Vitest, Mocha | Zero runtime/devDependency surface for a security-adjacent tool; native to the pinned Node floor | low | none — standard library |
-| GUI stack | PowerShell WinForms + C# ConPTY host | Electron, a web app | Native Windows integration (real console handles) for a single-machine tool; already migrated once from a heavier plan (former OI-022) | medium — real UI code | Windows-only by design (CON-006) |
+| GUI stack | Web (Node HTTP server + plain HTML/JS), migrated incrementally from PowerShell WinForms + C# ConPTY host (ADR-0002) | Electron, WinForms (former choice) | Cross-platform-capable, no vendored terminal assets; already migrated once from a heavier plan (former OI-022) | low — plain HTML/JS, no framework lock-in | none — standard web stack (ADR-0006 moves the UI to its own repo) |
 | Kernel harness | Claude Code CLI via `kernel/adapters/claude-code.mjs` | Direct API calls | Reuses the CLI's own tool implementations and auth; swappable by design (one config value + one adapter file) | low (that's the documented swap procedure) | low |
 
 ## 10. Capacity and limits

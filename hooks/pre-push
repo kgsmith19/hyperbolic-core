@@ -1,7 +1,8 @@
 #!/bin/sh
 # hooks/pre-push -- OI-030: gate a push to main with the coverage floors
 # BEFORE it leaves this machine, so red commits never reach CI in the first
-# place. Design: OPEN-ISSUES.md OI-030.
+# place. Design rationale: see git history for OI-030 (its OPEN-ISSUES.md
+# ledger entry predates the move to GitHub issues and no longer exists).
 #
 # Not installed by git on its own -- runbox/install-pre-push-gate.ps1 (an
 # untracked, Kyle-run-only script, same convention as every other
