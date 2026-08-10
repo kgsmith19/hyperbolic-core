@@ -3,6 +3,7 @@ import { useState, type SubmitEvent } from "react";
 import { Link } from "react-router";
 
 import { listTypes, searchEntities } from "../api/client";
+import { ErrorText, Loading } from "../components/QueryStatus";
 
 export default function Browse() {
   const [filters, setFilters] = useState<{ text?: string; type_name?: string }>(
@@ -47,10 +48,8 @@ export default function Browse() {
         </button>
       </form>
 
-      {results.isPending && <p className="text-sm text-zinc-500">Loading…</p>}
-      {results.isError && (
-        <p className="text-sm text-red-600">{String(results.error)}</p>
-      )}
+      {results.isPending && <Loading />}
+      {results.isError && <ErrorText error={results.error} />}
       <ul className="space-y-2">
         {results.data?.map((entity) => (
           <li key={entity.id}>

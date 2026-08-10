@@ -16,6 +16,7 @@ import {
   type ProposalView,
 } from "../api/client";
 import { Empty } from "../components/BriefingSections";
+import { ErrorText, Loading } from "../components/QueryStatus";
 
 function GatedDraft({ proposalId }: { proposalId: string }) {
   // Exercises the gate on every view, not just once: an authority receipt
@@ -25,8 +26,7 @@ function GatedDraft({ proposalId }: { proposalId: string }) {
     queryFn: () => getApprovedDraft(proposalId),
   });
   if (draft.isPending) return <p className="text-sm text-zinc-400">Loading…</p>;
-  if (draft.isError)
-    return <p className="text-sm text-red-600">{String(draft.error)}</p>;
+  if (draft.isError) return <ErrorText error={draft.error} />;
   return (
     <p className="whitespace-pre-wrap rounded bg-zinc-50 p-2 text-sm text-zinc-700">
       {draft.data.body}
@@ -113,10 +113,8 @@ export default function Approvals() {
     queryFn: listProposals,
   });
 
-  if (proposals.isPending)
-    return <p className="text-sm text-zinc-500">Loading…</p>;
-  if (proposals.isError)
-    return <p className="text-sm text-red-600">{String(proposals.error)}</p>;
+  if (proposals.isPending) return <Loading />;
+  if (proposals.isError) return <ErrorText error={proposals.error} />;
 
   // Proposals awaiting a decision lead; already-decided ones (approved,
   // rejected, withdrawn) trail as history. A stable sort keeps each group in

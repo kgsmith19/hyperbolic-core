@@ -5,6 +5,7 @@ import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router";
 import { supabase } from "./auth/supabase";
 import { useSession } from "./auth/useSession";
 import HealthDot from "./components/HealthDot";
+import { Loading } from "./components/QueryStatus";
 import Login from "./pages/Login";
 
 // Login is the only page on the first-paint path, so it stays eager and the
@@ -67,7 +68,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   // The shell stays put while a route chunk arrives — the nav never blinks.
   return (
     <Shell>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Loading…</p>}>
+      <Suspense fallback={<Loading />}>
         {children}
       </Suspense>
     </Shell>

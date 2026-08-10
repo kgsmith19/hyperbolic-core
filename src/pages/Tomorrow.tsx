@@ -25,6 +25,7 @@ import {
   GateStatus,
   type Resolved,
 } from "../components/BriefingSections";
+import { ErrorText, Loading } from "../components/QueryStatus";
 
 /**
  * The newest briefing that exists — never a briefing looked up by a date this
@@ -73,10 +74,8 @@ export default function Tomorrow() {
   const resolve = (id: string): Resolved =>
     resolved.get(id) ?? { id, missing: false };
 
-  if (briefings.isPending)
-    return <p className="text-sm text-zinc-500">Loading…</p>;
-  if (briefings.isError)
-    return <p className="text-sm text-red-600">{String(briefings.error)}</p>;
+  if (briefings.isPending) return <Loading />;
+  if (briefings.isError) return <ErrorText error={briefings.error} />;
 
   return (
     <div className="space-y-6">

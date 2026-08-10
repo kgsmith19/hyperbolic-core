@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
 
 import { forgetEntity, getEntity, getHistory } from "../api/client";
+import { ErrorText, Loading } from "../components/QueryStatus";
 
 export default function EntityDetail() {
   const { id = "" } = useParams();
@@ -19,9 +20,8 @@ export default function EntityDetail() {
     onSuccess: () => void queryClient.invalidateQueries(),
   });
 
-  if (view.isPending) return <p className="text-sm text-zinc-500">Loading…</p>;
-  if (view.isError)
-    return <p className="text-sm text-red-600">{String(view.error)}</p>;
+  if (view.isPending) return <Loading />;
+  if (view.isError) return <ErrorText error={view.error} />;
   const { entity, types, edges_out, edges_in } = view.data;
 
   return (
@@ -84,9 +84,7 @@ export default function EntityDetail() {
         <h2 className="mb-1 text-sm font-semibold uppercase text-zinc-500">
           History
         </h2>
-        {events.isError && (
-          <p className="text-sm text-red-600">{String(events.error)}</p>
-        )}
+        {events.isError && <ErrorText error={events.error} />}
         <ol className="space-y-1 text-sm">
           {events.data?.map((event) => (
             <li
