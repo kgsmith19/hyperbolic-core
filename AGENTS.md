@@ -51,6 +51,16 @@ Commands (venv at `.venv`, DB creds in `.env`):
   `authority_receipt`, and the gate refuses to emit a draft without a valid,
   matching, unexpired one. Same receipt contract. An existing database needs
   `scripts/migrate_bill_date_charset.py` once before the first run.
+- pull (money): `.venv\Scripts\python -m domains.money.simplefin_ingest` —
+  operator-run, **never scheduled**: pulls transactions from SimpleFIN
+  Bridge using `LIFEOS_SIMPLEFIN_ACCESS_URL` (roadmap C0). Missing the
+  access URL is a `skipped` receipt, never a crash. The access URL is
+  itself a bearer credential (SimpleFIN embeds Basic Auth in the URL) and
+  is never logged or stored. Same receipt contract.
+- import (money): `.venv\Scripts\python -m domains.money.csv_import <path>
+  [account_label]` — operator-run over a local bank-statement CSV file
+  (never committed to the repo); idempotent by (account, posted_date,
+  amount, normalized_desc) hash. Same receipt contract.
 - deploy: merge to main → GitHub Actions checks, builds, migrates, deploys (docs/runbook.md).
 - review: `/lean-review` (five-lens codebase review; headless: `claude -p "/lean-review"`);
   `/diff-review` for just the working diff or current branch.

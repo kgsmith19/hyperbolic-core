@@ -209,11 +209,13 @@ gate bounds everything after it.
 - [x] EP1 Episode support — episode + playbook types (**x-sensitive from the
   first migration**), deterministic evidence-card service, chat/briefing lines.
   Pull-only; no notification path may exist in code. Prompt §EP1 below.
-- [ ] C0 Transaction ingestion — SimpleFIN Bridge access-URL pull
+- [x] C0 Transaction ingestion — SimpleFIN Bridge access-URL pull
   (user-triggered CLI, never a daemon) + bank-CSV import.
   **/security-review pre-merge MANDATORY** (financial data). Operator pre-req:
   SimpleFIN Bridge account; access-URL via the guards vault, never stored or
-  logged. Prompt §C0 below.
+  logged. Prompt §C0 below. — done 2026-08-10 (PR #99; new `money` domain:
+  `account`/`transaction`/`money_source_receipt` registry types, idempotent
+  by (account, posted_date, amount, normalized_desc) hash).
 - [ ] C0.5 Recurring charges + pay periods — deterministic detector, review
   queue, pay_period windows from paycheck deposits. Rider: months-of-cover
   (weekly review only). Prompt §C0.5 below.

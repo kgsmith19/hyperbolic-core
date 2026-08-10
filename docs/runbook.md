@@ -26,6 +26,7 @@ Project references:
 | `LIFEOS_EXTRACT_EFFORT` | Optional effort for bill extraction; defaults to `medium`. |
 | `LIFEOS_SLEEPHQ_CLIENT_ID` / `LIFEOS_SLEEPHQ_CLIENT_SECRET` | SleepHQ OAuth2 client-credentials (roadmap H2). Provisioned via the guards vault; missing either is a `skipped` execution receipt, never a crash. |
 | `LIFEOS_SLEEPHQ_BASE_URL` | Optional SleepHQ API host override for testing; defaults to `https://sleephq.com`. |
+| `LIFEOS_SIMPLEFIN_ACCESS_URL` | SimpleFIN Bridge access URL (roadmap C0). This URL is itself a bearer credential (Basic Auth embedded in it) — provisioned via the guards vault, never logged, never stored on any record. Missing it is a `skipped` execution receipt, never a crash. Pulled only by an operator running `python -m domains.money.simplefin_ingest`; never scheduled. |
 
 ## Document blobs (ADR 015)
 
