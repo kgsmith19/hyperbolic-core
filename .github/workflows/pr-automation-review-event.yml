@@ -1,0 +1,28 @@
+name: "Orchestrator: Review Event"
+
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+# One repo-wide non-canceling authority lock shared by evaluator and orchestrator; GitHub keeps only the newest pending run per group and the six-hourly watchdog is the convergence net.
+concurrency:
+  group: automation-authority-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  review-event:
+    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      checks: write
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: kgsmith19/agent-engineering-standard/.github/workflows/pr-automation-reusable.yml@4a635f0ffd438196632886af53ba56072ca5b143
+    with:
+      mode: review-event
+      pr_number: ${{ github.event.pull_request.number }}
+      standard_sha: 4a635f0ffd438196632886af53ba56072ca5b143
+    secrets:
+      automation_token: ${{ secrets.AUTOMATION_TOKEN }}

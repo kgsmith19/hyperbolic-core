@@ -1,0 +1,33 @@
+name: "Advisory: AI Review"
+
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  issue_comment:
+    types: [created, edited, deleted]
+
+# One repo-wide non-canceling authority lock shared by evaluator and orchestrator; GitHub keeps only the newest pending run per group and the six-hourly watchdog is the convergence net.
+concurrency:
+  group: automation-authority-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  update-ai-review:
+    if: >-
+      ((github.event_name != 'pull_request_review' && github.event_name != 'pull_request_review_comment') || github.event.pull_request.draft == false) &&
+      (github.event_name != 'issue_comment' || (
+        github.event.issue.pull_request != null &&
+        (github.event.comment.user.login == 'Copilot' || github.event.comment.user.login == 'copilot-pull-request-reviewer[bot]' || github.event.comment.user.login == 'copilot-swe-agent[bot]') &&
+        (contains(github.event.comment.body, 'AI-REVIEW PASS') || contains(github.event.comment.body, 'AI-REVIEW FAIL'))
+      ))
+    permissions:
+      checks: write
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: kgsmith19/agent-engineering-standard/.github/workflows/ai-review-reusable.yml@4a635f0ffd438196632886af53ba56072ca5b143
+    with:
+      pr_number: ${{ github.event.pull_request.number || github.event.issue.number }}
+      standard_sha: 4a635f0ffd438196632886af53ba56072ca5b143
