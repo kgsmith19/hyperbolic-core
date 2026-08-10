@@ -7,6 +7,7 @@
   netcheck serve      dashboard at http://127.0.0.1:8787
   netcheck sync       push unsynced rows to Supabase
   netcheck experiment tag or compare labeled probe runs (--label / --compare)
+  netcheck export     write a redacted evidence bundle (--format json/markdown)
 """
 import argparse
 import json
@@ -18,7 +19,7 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from . import (diagnose, environ, experiment, llmlog, probes, rank,
+from . import (bundle, diagnose, environ, experiment, llmlog, probes, rank,
                route as route_mod, server, store, watch)
 from . import __version__
 
@@ -180,6 +181,37 @@ def cmd_experiment(args):
     return 0
 
 
+def cmd_export(args):
+    """Issue #74: a redacted, deterministic artifact from what's already
+    stored -- read-only, no network call (never calls llmlog.ingest)."""
+    conn, _host = connect()
+    scans = store.scans(conn, 1)
+    latest = json.loads(scans[0]["payload"]) if scans else {}
+    data = bundle.build(store.samples(conn), store.errors(conn), latest,
+                        {"os_name": platform.system()})
+    text = bundle.render_json(data) if args.format == "json" else bundle.render_markdown(data)
+    ext = "json" if args.format == "json" else "md"
+    out = args.out or DB.parent / f"evidence-bundle.{ext}"
+    out.write_text(text, encoding="utf-8")
+    print(str(out))
+    return 0
+
+
+def _add_experiment_and_export_parsers(sub):
+    """Split out of main() to keep it under the function-length budget."""
+    e = sub.add_parser("experiment", help="tag or compare labeled probe runs")
+    mode = e.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--label", help="tag one probe run and store it under this label")
+    mode.add_argument("--compare", nargs=2, metavar=("LABEL1", "LABEL2"),
+                      help="print median latency and state-mix for two stored labels")
+    e.set_defaults(fn=cmd_experiment)
+
+    x = sub.add_parser("export", help="write a redacted evidence bundle")
+    x.add_argument("--format", choices=("json", "markdown"), default="markdown")
+    x.add_argument("--out", type=Path, default=None)
+    x.set_defaults(fn=cmd_export)
+
+
 def main(argv=None):
     load_env()
     p = argparse.ArgumentParser(prog="netcheck", description=__doc__,
@@ -207,12 +239,7 @@ def main(argv=None):
     s.add_argument("--no-open", action="store_true", dest="no_open")
     s.set_defaults(fn=cmd_serve)
 
-    e = sub.add_parser("experiment", help="tag or compare labeled probe runs")
-    mode = e.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--label", help="tag one probe run and store it under this label")
-    mode.add_argument("--compare", nargs=2, metavar=("LABEL1", "LABEL2"),
-                      help="print median latency and state-mix for two stored labels")
-    e.set_defaults(fn=cmd_experiment)
+    _add_experiment_and_export_parsers(sub)
 
     args = p.parse_args(argv)
     return args.fn(args)

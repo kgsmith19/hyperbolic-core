@@ -7,7 +7,9 @@ import contextlib
 import io
 import os
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import netcheck
@@ -159,6 +161,42 @@ class ScanBudgetBoundaryTest(unittest.TestCase):
             for case_name, (duration, expect_timeout) in cases.items():
                 with self.subTest(tier=tier, case=case_name, duration=duration):
                     self._assert_case(tier, budget, duration, expect_timeout)
+
+
+class ExportCliTest(unittest.TestCase):
+    """FR-074: `netcheck export` writes one redacted artifact and never
+    touches the network or mutates the store to produce it."""
+
+    def _run(self, tmp_path, fmt="markdown"):
+        out_path = tmp_path / f"bundle.{'json' if fmt == 'json' else 'md'}"
+        with patch.object(cli, "connect", return_value=(None, "h")), \
+             patch.object(cli.store, "samples", return_value=[]), \
+             patch.object(cli.store, "errors", return_value=[]), \
+             patch.object(cli.store, "scans", return_value=[]), \
+             patch.object(cli.llmlog, "ingest") as ingest, \
+             patch("urllib.request.urlopen",
+                  side_effect=AssertionError("no network call allowed")):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = cli.cmd_export(argparse.Namespace(format=fmt, out=out_path))
+        return rc, out.getvalue(), ingest
+
+    def test_writes_the_requested_format_and_prints_its_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            rc, printed, ingest = self._run(Path(d), fmt="json")
+            out_path = Path(d) / "bundle.json"
+            self.assertEqual(rc, 0)
+            self.assertIn(str(out_path), printed)
+            self.assertTrue(out_path.exists())
+            ingest.assert_not_called()
+
+    def test_never_reads_or_writes_the_database(self):
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(cli.store, "add_sample") as add_sample, \
+                 patch.object(cli.store, "add_error") as add_error:
+                self._run(Path(d))
+            add_sample.assert_not_called()
+            add_error.assert_not_called()
 
 
 if __name__ == "__main__":
