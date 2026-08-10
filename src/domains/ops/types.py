@@ -87,6 +87,38 @@ _GATE = {
     "additionalProperties": False,
 }
 
+# CPAP rolling 30-day compliance (roadmap H2, domains.cpap.compliance): counts
+# and booleans only, the same "aggregate numbers, never a value from the
+# underlying record" shape `gate` already established. Absent entirely when
+# that day's 30-night window has zero nights of session data -- never a
+# fabricated result for a source that has reported nothing near this date.
+_CPAP_COMPLIANCE = {
+    "type": "object",
+    "properties": {
+        "window_days": {"type": "integer", "minimum": 1},
+        "nights_with_data": {"type": "integer", "minimum": 0},
+        "nights_missing": {"type": "integer", "minimum": 0},
+        "nights_ge_4h": {"type": "integer", "minimum": 0},
+        "nights_ge_8h": {"type": "integer", "minimum": 0},
+        "pct_nights_ge_4h": {"type": "number", "minimum": 0, "maximum": 1},
+        "compliant": {"type": "boolean"},
+        "current_streak_nights": {"type": "integer", "minimum": 0},
+        "full_month_streak": {"type": "boolean"},
+    },
+    "required": [
+        "window_days",
+        "nights_with_data",
+        "nights_missing",
+        "nights_ge_4h",
+        "nights_ge_8h",
+        "pct_nights_ge_4h",
+        "compliant",
+        "current_streak_nights",
+        "full_month_streak",
+    ],
+    "additionalProperties": False,
+}
+
 # The assembled daily briefing: IDs only, never the text they point at. No
 # titles, no locations, no attendee emails, no note text — so this type carries
 # no x-pii and needs no erasure path of its own, and a briefing that outlives an
@@ -99,9 +131,13 @@ _GATE = {
 # digest carries no backlog counts. `gate` appears on the Monday (weekly)
 # edition only. EP1 adds `episodes_line` — the ONE descriptive episodes line
 # (roadmap §EP1): a count in words, historical language only, never a tag name
-# or a date, and absent entirely when there is nothing to say. An existing
+# or a date, and absent entirely when there is nothing to say. H2 adds
+# `cpap_compliance` — counts and booleans from `domains.cpap.compliance`,
+# absent entirely when that day's 30-night window has zero nights of session
+# data. An existing
 # database needs `scripts/migrate_briefing_composition.py` once before the
-# first recomposed run (and re-run once after EP1 for `episodes_line`).
+# first recomposed run (and re-run once after EP1 for `episodes_line`, and
+# again after H2 for `cpap_compliance`).
 # `briefing_key` is the local date, and is deliberately NOT named `date`:
 # ExactIdentityResolver matches on identity field *name* across types and
 # daily_checkin already claims `date`, so a briefing keyed on `date` would
@@ -115,6 +151,7 @@ BRIEFING_SCHEMA: dict[str, Any] = {
         "appointment_ids": _UUID_LIST,
         "episodes_line": {"type": "string", "maxLength": 80},
         "gate": _GATE,
+        "cpap_compliance": _CPAP_COMPLIANCE,
         "provenance": _PROVENANCE,
     },
     "required": ["briefing_key", "date", "focus_intention_ids", "appointment_ids", "provenance"],

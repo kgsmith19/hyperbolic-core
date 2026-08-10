@@ -19,10 +19,13 @@ Commands (venv at `.venv`, DB creds in `.env`):
 - mcp: `.venv\Scripts\python -m mcp_server` — read-only stdio MCP server for
   agent clients; needs a minted agent token (README "Agent access over MCP").
 - jobs: `.venv\Scripts\python -m domains.calendar.ingest` / `.calendar.autolink` /
-  `.ops.briefing` — the scheduled trio, run in that order; each leaves an
-  `execution_receipt` and only `ok` exits 0 (ADR 014, docs/runbook.md). The
-  briefing is the INT1 morning digest (focus intentions, then calendar, then
-  nothing else; Mondays add utility-gate status); an existing database needs
+  `.cpap.ingest` / `.ops.briefing` — the scheduled jobs, run in that order; each
+  leaves an `execution_receipt` and only `ok` exits 0 (ADR 014, docs/runbook.md).
+  `cpap.ingest` pulls SleepHQ CPAP sessions (roadmap H2); missing
+  `LIFEOS_SLEEPHQ_CLIENT_ID`/`_SECRET` is a `skipped` receipt, never a crash.
+  The briefing is the INT1 morning digest (focus intentions, then calendar, then
+  the EP1 episodes line, then H2 CPAP compliance, then nothing else; Mondays
+  add utility-gate status); an existing database needs
   `scripts/migrate_briefing_composition.py` once before the first recomposed
   run.
 - import: `.venv\Scripts\python -m domains.intentions.import_priorities <path>` —

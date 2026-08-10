@@ -14,6 +14,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from domains.calendar.types import define_calendar_types, email_hash
+from domains.cpap.types import define_cpap_types
 from domains.episodes.types import define_episode_types
 from domains.intentions.focus import capture_intention
 from domains.intentions.types import define_intention_types
@@ -380,9 +381,66 @@ def test_briefing_without_usual_perturbations_has_no_episodes_line(
     assert "episodes_line" not in stored(brief_ctx, NO_EPISODE_DAY)
 
 
+CPAP_DAY = date(2034, 5, 20)
+NO_CPAP_DAY = CPAP_DAY - timedelta(days=365)  # far outside any inserted night's window
+
+
+@pytest.fixture(scope="module")
+def cpap_window(ctx: AccessContext, brief_ctx: AccessContext) -> list[UUID]:
+    """21 of the 30 nights before CPAP_DAY logged at >=4h -- exactly the DME
+    70% boundary -- and 9 simply absent, so the briefing's counts prove the
+    fixed-30-night denominator as well as the optional-key seam."""
+    define_cpap_types(ctx)
+    ids = []
+    for offset in range(21):
+        on = CPAP_DAY - timedelta(days=offset)
+        ids.append(
+            capture(
+                ctx,
+                "cpap_session",
+                {"session_date": on.isoformat(), "usage_min": 300, "source": "sleephq"},
+            ).entity_id
+        )
+    return ids
+
+
+def test_briefing_carries_cpap_compliance_at_the_dme_boundary(
+    ctx: AccessContext, brief_ctx: AccessContext, cpap_window: list[UUID]
+) -> None:
+    run_briefing(brief_ctx, CPAP_DAY, UTC)
+    attributes = stored(brief_ctx, CPAP_DAY)
+
+    compliance = attributes["cpap_compliance"]
+    assert compliance == {
+        "window_days": 30,
+        "nights_with_data": 21,
+        "nights_missing": 9,
+        "nights_ge_4h": 21,
+        "nights_ge_8h": 0,
+        "pct_nights_ge_4h": 0.7,
+        "compliant": True,
+        "current_streak_nights": 21,
+        "full_month_streak": False,
+    }
+    cited = set(attributes["provenance"]["source_entity_ids"])
+    assert {str(i) for i in cpap_window} <= cited
+
+
+def test_briefing_has_no_cpap_key_when_the_window_is_empty(
+    brief_ctx: AccessContext, cpap_window: list[UUID]
+) -> None:
+    run_briefing(brief_ctx, NO_CPAP_DAY, UTC)
+    assert "cpap_compliance" not in stored(brief_ctx, NO_CPAP_DAY)
+
+
 def test_briefing_context_reads_episodes_without_write() -> None:
     scopes = briefing_context().scopes
     assert "episodes:read" in scopes and "episodes:write" not in scopes
+
+
+def test_briefing_context_reads_cpap_without_write() -> None:
+    scopes = briefing_context().scopes
+    assert "cpap:read" in scopes and "cpap:write" not in scopes
 
 
 def test_absent_type_is_an_empty_section_not_a_crash(brief_ctx: AccessContext) -> None:
@@ -408,6 +466,12 @@ def test_briefing_cannot_write_what_it_reads(
         )
     with pytest.raises(ScopeError):  # and read-only on episodes (EP1)
         capture(brief_ctx, "episode", {"onset_date": "2032-12-01"})
+    with pytest.raises(ScopeError):  # and read-only on cpap (H2)
+        capture(
+            brief_ctx,
+            "cpap_session",
+            {"session_date": "2034-01-01", "usage_min": 300, "source": "sleephq"},
+        )
 
 
 def test_briefing_without_ops_write_fails_closed() -> None:

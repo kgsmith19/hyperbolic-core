@@ -8,9 +8,12 @@ when it has something to say — ONE descriptive line, a count in words computed
 by the episodes cell (`domains.episodes.lines.usual_present`), historical
 language only, never a tag name; when the count is zero the key is absent
 entirely, because a scheduled zero-count would put episode salience on a
-notification-adjacent path (the episodes cell is pull-only) — then nothing
-else until the data for later sections exists (CPAP compliance joins after
-H2). The open-review and latest-check-in pointers B3 shipped left the
+notification-adjacent path (the episodes cell is pull-only) — then the H2
+CPAP compliance result (`domains.cpap.compliance.compliance_for_briefing`):
+counts and booleans over the rolling 30-day window, absent entirely when that
+window has zero nights of session data — never a fabricated result for a
+source that has reported nothing near this date — then nothing else until
+the data for later sections exists. The open-review and latest-check-in pointers B3 shipped left the
 digest with that recomposition: feelings are pull-only, so nothing on a
 notification path references mood or symptoms (rule 1), and the digest carries
 no overdue or backlog counts (rule 2 — restart-neutral). The Monday edition
@@ -20,7 +23,7 @@ from kernel data — quota scores wait on D1 and months-of-cover on the C0.5
 rider. Display-only: no notification, no email, no outbound request of any
 kind, and it writes nothing to anything it read. An existing database needs
 ``scripts/migrate_briefing_composition.py`` once before the first recomposed
-run.
+run (and again after EP1 and after H2 — see that script's docstring).
 
 It cites entity IDs and never copies the text they point at: no titles, no
 locations, no attendee emails, no note text. An entity outlives what it quotes,
@@ -34,9 +37,10 @@ only the run's own execution receipt is new.
 
 Runs as ``python -m domains.ops.briefing`` (deploy-box scheduler) under a
 code-built AccessContext of exactly ``intentions:read`` + ``calendar:read`` +
-``wellbeing:read`` + ``episodes:read`` + ``ops:read`` + ``ops:write`` — no
-write scope on anything it reads, so it cannot modify intention, calendar,
-wellbeing or episode data by construction (ADR 014, amended by INT1 and EP1).
+``wellbeing:read`` + ``episodes:read`` + ``cpap:read`` + ``ops:read`` +
+``ops:write`` — no write scope on anything it reads, so it cannot modify
+intention, calendar, wellbeing, episode or cpap data by construction (ADR 014,
+amended by INT1, EP1 and H2).
 """
 
 from dataclasses import dataclass
@@ -45,6 +49,7 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from domains.cpap.compliance import compliance_for_briefing, compliance_view
 from domains.episodes.lines import usual_present
 from domains.ops.receipts import JobResult, run_job
 from domains.ops.types import GATE_DAYS_PER_WEEK, GATE_WEEKS
@@ -63,14 +68,16 @@ class BriefingReport:
     focus: int
     appointments: int
     gate: str | None = None  # "met" | "open" on the Monday (weekly) edition
+    cpap: str | None = None  # "compliant" | "review" when H2 data exists
     unchanged: bool = False
 
     def line(self) -> str:
         state = "unchanged" if self.unchanged else f"briefing={self.briefing_id}"
         gate = f" gate={self.gate}" if self.gate else ""
+        cpap = f" cpap={self.cpap}" if self.cpap else ""
         return (
             f"briefing {self.date}: focus={self.focus} "
-            f"appointments={self.appointments}{gate} ({state})"
+            f"appointments={self.appointments}{gate}{cpap} ({state})"
         )
 
 
@@ -162,6 +169,10 @@ def assemble(ctx: AccessContext, day: date, zone: tzinfo) -> dict[str, Any]:
         text, contributing = episode_line
         attributes["episodes_line"] = text
         cited += [e.id for e in contributing]
+    compliance = compliance_for_briefing(ctx, day)
+    if compliance is not None:
+        attributes["cpap_compliance"] = compliance_view(compliance)
+        cited += compliance.cited_entity_ids
     if day.isoweekday() == 1:  # Monday: the weekly edition
         gate, counted = _gate_status(ctx, day)
         attributes["gate"] = gate
@@ -179,12 +190,14 @@ def _report(
     day: date, briefing_id: UUID, attributes: dict[str, Any], unchanged: bool = False
 ) -> BriefingReport:
     gate = attributes.get("gate")
+    cpap = attributes.get("cpap_compliance")
     return BriefingReport(
         date=day.isoformat(),
         briefing_id=briefing_id,
         focus=len(attributes["focus_intention_ids"]),
         appointments=len(attributes["appointment_ids"]),
         gate=None if gate is None else ("met" if gate["met"] else "open"),
+        cpap=None if cpap is None else ("compliant" if cpap["compliant"] else "review"),
         unchanged=unchanged,
     )
 
@@ -212,12 +225,13 @@ def run_briefing(
 
 def briefing_context() -> AccessContext:
     """Exactly the scopes the briefing needs: read on the domains it summarizes,
-    write only on its own (ADR 014, amended by INT1 and EP1)."""
+    write only on its own (ADR 014, amended by INT1, EP1 and H2)."""
     return AccessContext.of(
         "intentions:read",
         "calendar:read",
         "wellbeing:read",
         "episodes:read",
+        "cpap:read",
         "ops:read",
         "ops:write",
     )

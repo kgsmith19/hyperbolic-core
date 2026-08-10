@@ -10,8 +10,9 @@ old schema and would refuse every recomposed capture (`additionalProperties`
 is false and `open_review_ids` was required).
 
 It syncs the stored schema to the current ``BRIEFING_SCHEMA``, so later
-composition amendments reuse it: EP1 adds the optional ``episodes_line`` —
-re-run once per environment after EP1 lands.
+composition amendments reuse it: EP1 adds the optional ``episodes_line``,
+H2 adds the optional ``cpap_compliance`` — re-run once per environment after
+each lands.
 
 Idempotent operator script, run once per environment BEFORE the first
 recomposed briefing run, against whatever DATABASE_URL kernel.env resolves:

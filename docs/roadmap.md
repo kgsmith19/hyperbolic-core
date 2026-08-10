@@ -193,13 +193,19 @@ gate bounds everything after it.
   Withings scale for weight (its Health Mate app has first-class Health Connect
   support; it is also D1's only weight input) and the phone's own Fitbit app for
   steps/activity. Prompt §H1 below.
-- [ ] H2 CPAP ingestion + rolling compliance service — SleepHQ public API v1
-  (ez Share SD pull as documented fallback) → cpap_session events + one
-  deterministic 30-day compliance service feeding the briefing. Operator
-  pre-req: SleepHQ account; credentials via the guards vault, never chat.
-  Registry rider: lab_log type (operator-tracked labs; next-due from cadence
-  config) lands here or with the briefing tickler that consumes it.
-  Prompt §H2 below.
+- [x] H2 CPAP ingestion + rolling compliance service — SleepHQ public API v1
+  (ez Share SD pull remains the documented, not-yet-implemented fallback:
+  the pre-made "no EDF parsing" decision rules out coding it this slice) →
+  cpap_session events + one deterministic 30-day compliance service
+  (`domains.cpap.compliance`, exact-Fraction threshold math, zero LLM)
+  feeding the briefing via the existing optional-key seam. Operator pre-req:
+  SleepHQ account; `LIFEOS_SLEEPHQ_CLIENT_ID`/`_SECRET` via the guards vault,
+  never chat; missing credentials are a `skipped` execution receipt, never a
+  crash. Registry rider: `lab_log` type (operator-tracked labs; next-due from
+  cadence config, `domains.cpap.lab_log.next_due`) lands here as a type only —
+  no ingestion code, no briefing consumer. Prompt §H2 below. — done 2026-08-10
+  (PR #98; existing databases run `scripts/migrate_briefing_composition.py`
+  once for `cpap_compliance`).
 - [x] EP1 Episode support — episode + playbook types (**x-sensitive from the
   first migration**), deterministic evidence-card service, chat/briefing lines.
   Pull-only; no notification path may exist in code. Prompt §EP1 below.

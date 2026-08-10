@@ -24,6 +24,8 @@ Project references:
 | `LIFEOS_BLOB_ROOT` | Optional document blob store root (ADR 015); defaults to `var/blobs` beside the process, which compose mounts as the `lifeos-blobs` volume. |
 | `LIFEOS_EXTRACT_MODEL` | Optional model for bill extraction (ADR 016); defaults to `claude-opus-5`. |
 | `LIFEOS_EXTRACT_EFFORT` | Optional effort for bill extraction; defaults to `medium`. |
+| `LIFEOS_SLEEPHQ_CLIENT_ID` / `LIFEOS_SLEEPHQ_CLIENT_SECRET` | SleepHQ OAuth2 client-credentials (roadmap H2). Provisioned via the guards vault; missing either is a `skipped` execution receipt, never a crash. |
+| `LIFEOS_SLEEPHQ_BASE_URL` | Optional SleepHQ API host override for testing; defaults to `https://sleephq.com`. |
 
 ## Document blobs (ADR 015)
 
@@ -187,12 +189,13 @@ is one whose bill now reconciles. Only `errors` exits non-zero.
 
 ## Scheduled jobs (ADR 014)
 
-Three CLIs, run in order once a day, each leaving an `execution_receipt`
+Four CLIs, run in order once a day, each leaving an `execution_receipt`
 entity (`ok` / `failed` / `skipped`; only `ok` exits 0):
 
 ```bash
 docker compose run --rm --no-deps api python -m domains.calendar.ingest
 docker compose run --rm --no-deps api python -m domains.calendar.autolink
+docker compose run --rm --no-deps api python -m domains.cpap.ingest
 docker compose run --rm --no-deps api python -m domains.ops.briefing
 ```
 
@@ -203,8 +206,9 @@ one; the wrapper still exits non-zero. "Did the cron run?" is a query, not an
 ssh session: `find(ctx, type_name="execution_receipt")`.
 
 Note that every deploy re-renders `lifeos/.env`, so job-only variables
-(`LIFEOS_ICS_URLS`, `LIFEOS_BRIEFING_TZ`) belong in Infisical `prod` **and** in
-the Deploy step's `printf`; `~/lifeos/.env.jobs` is the interim home the runbox
+(`LIFEOS_ICS_URLS`, `LIFEOS_BRIEFING_TZ`, `LIFEOS_SLEEPHQ_CLIENT_ID`,
+`LIFEOS_SLEEPHQ_CLIENT_SECRET`) belong in Infisical `prod` **and** in the
+Deploy step's `printf`; `~/lifeos/.env.jobs` is the interim home the runbox
 script writes.
 
 ## One-time setup

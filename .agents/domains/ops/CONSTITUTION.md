@@ -24,6 +24,12 @@ Owns: `src/domains/ops/**`, `tests/ops/**`.
   the exact scope set per entry point is the table in ADR 014.
 - `trigger_feedback` is written by a human only; no job may emit a verdict on
   its own output.
+- The briefing's `cpap_compliance` key (roadmap H2) is computed by the cpap
+  cell (`domains.cpap.compliance.compliance_for_briefing`) and only assembled
+  here — the same optional-key seam `gate` and `episodes_line` already use.
+  Absent entirely when that day's 30-night window has zero nights of session
+  data; `ops` never fabricates a compliance result for a source that has
+  reported nothing near this date.
 - The source-freshness ledger (`domains.ops.freshness`, issue #90) is a pure
   query, not a persisted type: it derives `fresh | stale | unavailable |
   never_seen` per configured external source from existing
