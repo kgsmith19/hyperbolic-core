@@ -22,6 +22,8 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import List
 
+from scan_cli import iter_python_files, run
+
 DECISION_NODES = (ast.If, ast.For, ast.While, ast.ExceptHandler, ast.With,
                    ast.Assert, ast.comprehension)
 NESTING_NODES = (ast.If, ast.For, ast.While, ast.With, ast.Try)
@@ -135,35 +137,13 @@ def check_file(filepath: str, intensity: str = "medium") -> List[Violation]:
 def scan_directory(root: str, intensity: str = "medium") -> List[Violation]:
     """Scan all Python files in directory."""
     violations = []
-    for filepath in Path(root).rglob("*.py"):
-        if ".git" in filepath.parts or "__pycache__" in filepath.parts:
-            continue
+    for filepath in iter_python_files(root):
         violations.extend(check_file(str(filepath), intensity))
     return violations
 
 
 def main():
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Code simplification scanner")
-    parser.add_argument("path", nargs="?", default=".", help="File or directory to scan")
-    parser.add_argument("-i", "--intensity", choices=["low", "medium", "high"], default="medium")
-    parser.add_argument("-f", "--format", choices=["text", "json"], default="text")
-
-    args = parser.parse_args()
-    path = Path(args.path)
-
-    violations = check_file(str(path), args.intensity) if path.is_file() \
-        else scan_directory(str(path), args.intensity)
-
-    if args.format == "json":
-        import json
-        print(json.dumps([vars(v) for v in violations]))
-    else:
-        for v in sorted(violations, key=lambda x: (x.file, x.line)):
-            print(f"{v.file}:{v.line}: [{v.severity}] {v.rule}: {v.message}")
-
-    return 1 if violations else 0
+    return run("Code simplification scanner", check_file, scan_directory)
 
 
 if __name__ == "__main__":

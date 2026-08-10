@@ -18,8 +18,10 @@ import ast
 import re
 import sys
 from pathlib import Path
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import List
+
+from scan_cli import iter_python_files, run
 
 
 @dataclass
@@ -144,48 +146,26 @@ def check_file(filepath: str, intensity: str = "medium") -> List[Finding]:
     return findings
 
 
+# Skip tools/, build artifacts, and tests/: the secret-pattern regexes match
+# any password=/token=/api_key= keyword argument holding a quoted string,
+# with no way to tell a real credential from a test fixture's placeholder
+# value -- excluded here the same way bandit's own test-file exclusions
+# work, not because tests are exempt from real secret hygiene (nothing in
+# this repo commits real credentials into tests; `.env` stays gitignored
+# regardless).
+EXCLUDE_DIRS = {".git", "__pycache__", "tools", "build", "dist", "tests"}
+
+
 def scan_directory(root: str, intensity: str = "medium") -> List[Finding]:
     """Scan all Python files in directory."""
     findings = []
-    for filepath in Path(root).rglob("*.py"):
-        # Skip tools directory, build artifacts, and tests: the secret-pattern
-        # regexes match any password=/token=/api_key= keyword argument
-        # holding a quoted string, with no way to tell a real credential from
-        # a test fixture's placeholder value -- excluded here the same way
-        # bandit's own test-file exclusions work, not because tests are
-        # exempt from real secret hygiene (nothing in this repo commits real
-        # credentials into tests; `.env` stays gitignored regardless).
-        if any(part in filepath.parts for part in
-               [".git", "__pycache__", "tools", "build", "dist", "tests"]):
-            continue
+    for filepath in iter_python_files(root, EXCLUDE_DIRS):
         findings.extend(check_file(str(filepath), intensity))
     return findings
 
 
 def main():
-    import argparse
-    import json
-
-    parser = argparse.ArgumentParser(description="Security review scanner")
-    parser.add_argument("path", nargs="?", default=".", help="File or directory to scan")
-    parser.add_argument("-i", "--intensity", choices=["low", "medium", "high"],
-                        default="medium", help="Detection intensity")
-    parser.add_argument("-f", "--format", choices=["text", "json"], default="text")
-
-    args = parser.parse_args()
-    path = Path(args.path)
-    findings = (check_file(str(path), args.intensity) if path.is_file()
-                else scan_directory(str(path), args.intensity))
-
-    if args.format == "json":
-        print(json.dumps([asdict(f) for f in findings]))
-    else:
-        for f in sorted(findings, key=lambda x: (x.file, x.line)):
-            print(f"{f.file}:{f.line}: [{f.severity}] {f.pattern}: {f.message}")
-            if f.code_snippet:
-                print(f"  > {f.code_snippet}")
-
-    return 1 if findings else 0
+    return run("Security review scanner", check_file, scan_directory)
 
 
 if __name__ == "__main__":

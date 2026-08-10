@@ -17,8 +17,10 @@ import ast
 import re
 import sys
 from pathlib import Path
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import List
+
+from scan_cli import run
 
 
 @dataclass
@@ -152,26 +154,15 @@ class DocChecker:
         return self.issues
 
 
+def _check(root_dir: str, intensity: str = "medium") -> List[Issue]:
+    return DocChecker(root_dir, intensity).run()
+
+
 def main():
-    import argparse
-    import json
-
-    parser = argparse.ArgumentParser(description="Documentation check")
-    parser.add_argument("path", nargs="?", default=".", help="Directory to check")
-    parser.add_argument("-i", "--intensity", choices=["low", "medium", "high"],
-                        default="medium", help="Validation intensity")
-    parser.add_argument("-f", "--format", choices=["text", "json"], default="text")
-
-    args = parser.parse_args()
-    issues = DocChecker(args.path, args.intensity).run()
-
-    if args.format == "json":
-        print(json.dumps([asdict(i) for i in issues]))
-    else:
-        for i in sorted(issues, key=lambda x: (x.file, x.line)):
-            print(f"{i.file}:{i.line}: [{i.severity}] {i.rule}: {i.message}")
-
-    return 1 if issues else 0
+    # DocChecker always evaluates a directory root, so both the file and
+    # directory branch of run() point at the same function -- unlike the
+    # other scanners, this one was never meant to run against a single file.
+    return run("Documentation check", _check, _check)
 
 
 if __name__ == "__main__":

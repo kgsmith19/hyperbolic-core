@@ -85,6 +85,7 @@ problem, and no config write from this machine addresses it.
 | `check.sh` | The gate above |
 | `deploy.sh` | Runs the gate, builds the Docker image, smoke-tests it, saves a tarball |
 | `release.py` | `bump major|minor|patch` and `changelog` (drafts entries from git log) |
+| `scan_cli.py` | Shared argparse/output plumbing the three scanners above import -- not run directly |
 
 See `docs/notes/2026-08-07-deploying-and-releasing-netcheck.md` for the
 release procedure these two are part of.
