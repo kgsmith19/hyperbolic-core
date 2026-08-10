@@ -24,6 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveRoot, isMainModule } from "./root.mjs";
 import { notify } from "./notify.mjs";
+import { writeReceiptOnce } from "./receipt.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,6 +44,14 @@ export function directivesDir() {
 }
 function doneDir() {
   return path.join(directivesDir(), "done");
+}
+
+// Receipts (issue #68) live in their own folder, independent of whether
+// archiving into doneDir() succeeds — setStatus already tolerates the
+// archive step failing (a full disk, a locked file), and a receipt is the
+// one durable fact that must survive even that.
+export function receiptsDir() {
+  return path.join(directivesDir(), "receipts");
 }
 
 const nowIso = () => new Date().toISOString();
@@ -316,6 +325,13 @@ export function logTail(id, maxChars = 3000) {
   }
 }
 
+// The store's own status vocabulary (done/blocked/dead) predates issue #68's
+// receipt; "dead" means the same thing the receipt calls "failed" — an
+// abnormal end nobody chose, as opposed to a model-reported "blocked". Only
+// this map lives at the receipt boundary; the store's own status field is
+// unchanged.
+const RECEIPT_STATUS = { done: "done", blocked: "blocked", dead: "failed" };
+
 export function setStatus(id, status, why) {
   const directive = mutate(id, (d) => {
     d.status = status;
@@ -323,10 +339,24 @@ export function setStatus(id, status, why) {
   });
   if (!directive) return null;
   if (status === "done" || status === "blocked" || status === "dead") {
+    // Captured BEFORE the "### DONE/BLOCKED/DEAD" marker below is appended:
+    // lastCycleBody reads the log's LAST "### " section, so appending first
+    // would make the receipt "see" the terminal marker's own `why` text as
+    // the run's summary instead of the actual last cycle's report.
+    const lastSummary = lastCycleBody(id);
     try {
       fs.appendFileSync(logPath(id), `\n### ${status.toUpperCase()} - ${nowIso()}\n${why || ""}\n`);
     } catch {}
     notify(`ACC directive ${status}`, `${id}: ${(directive.text || "").slice(0, 120)}`);
+    // One durable receipt per terminal state (issue #68). Written before the
+    // archive step so it survives even if archiving below fails.
+    try {
+      writeReceiptOnce(receiptsDir(), directive, {
+        status: RECEIPT_STATUS[status],
+        why: directive.why,
+        lastSummary,
+      });
+    } catch {}
     // Archive so the live directory only ever holds work in flight.
     try {
       ensureDirs();

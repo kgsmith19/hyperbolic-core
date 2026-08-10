@@ -54,5 +54,18 @@ Design constraints (deliberate):
   (config/vault untouched) — the runner only reads its own folder and the
   job workdir's status file.
 
+Outcome receipts (FR-015, issue #68): every time a directive leaves `active`
+— `done`/`blocked`/`dead` via `hooks/directive.mjs`'s `setStatus`, or a
+runner budget-ceiling halt (exit 7) — exactly one bounded JSON receipt is
+written to `runner/directives/receipts/<id>.receipt.json` (`hooks/receipt.mjs`).
+It carries status, started/finished/duration, cycle and fresh-context counts,
+profile, spend (`directive-spend.mjs`), the directive's budget, a bounded
+why/blocker classification, a few bounded "verification" lines pulled from
+the run's own closing summary, and best-effort branch/PR/Issue links found in
+that text — never a raw log, prompt, or secret. `writeReceiptOnce` never
+overwrites an existing receipt, so a retried terminal transition (or a
+budget halt re-evaluated on a later loop restart, since a budget halt does
+NOT change the directive's own `active` status) can never duplicate it.
+
 Next job candidates: doc-sync (audit docs vs reality across repos, open
 docs-only PRs), weekly doctor pass.

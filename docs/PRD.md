@@ -2,9 +2,9 @@
 title: Agentic Command Center (ACC) Product Requirements Document
 status: active
 created: 2026-08-07
-updated: 2026-08-08
+updated: 2026-08-10
 owner: Kyle Smith
-version: 1.5.0
+version: 1.7.0
 ---
 
 # Agentic Command Center PRD
@@ -123,6 +123,7 @@ This is a set of programs that watch over Claude Code (an AI coding assistant) w
 | FR-012 | The system must let Kyle create, route, launch, watch, and close a headless directive entirely from the web GUI, with at most one runner loop per directive machine-wide. | Must | Given the `/guards` page and a task description, when Kyle presses GO, then a directive exists in the store with the routed (or overridden) folder, a runner loop starts for it, the page shows its live/idle state and log tail, and a second launch of the same directive is refused (HTTP 409 / runner exit 6) while the first loop lives. | UC-001, UC-002 | done |
 | FR-013 | A directive must carry a `tags` array; the routing verdict label is added automatically at creation time; the Command Center list must be filterable by tag. | Should | Given a directive created with task text that routes to `guards`, when the list is viewed, then the directive has at least the `guards` tag; filtering by `guards` shows it and hides unrelated directives. | UC-001 | done |
 | FR-014 | A directive must carry a `doneWhen` field (natural language); the directive context injected into each session must include it so the model can self-evaluate completion without Kyle re-explaining the goal. | Should | Given a directive with `doneWhen: "the failing test is green and the PR is merged"`, when a new session starts for that directive, then the injected context includes the `doneWhen` text alongside the directive text and log tail. | UC-002 | done |
+| FR-015 | When a directive leaves `active` status (done/blocked/dead-as-failed, or a runner budget halt), the system must emit exactly one durable, bounded, machine-readable JSON receipt derived from existing directive/spend/log state — no new telemetry store, and a retried terminal transition must never duplicate it. | Should | Given a directive that transitions to `done`/`blocked`/`dead`, or that a runner budget ceiling halts, when the transition/halt is processed, then `runner/directives/receipts/<id>.receipt.json` exists with a stable schema (status, timing, cycles, spend, why/blocker class, bounded verification lines, best-effort branch/PR/Issue links) and a repeat of the same transition/halt leaves that file byte-identical. | UC-002 | done |
 
 **Priority values:** `Must` (product does not exist without it), `Should` (product is materially worse without it), `Could` (nice, cut it first), `Won't` (recorded so it is not re-litigated).
 
@@ -237,6 +238,7 @@ Forward plan (the ADR-0004 consolidation program — one Node core, delete the s
 
 | Date | Version | Change | Reason | Affected IDs |
 |---|---|---|---|---|
+| 2026-08-10 | 1.7.0 | Added FR-015 (directive outcome receipts, issue #68): one bounded JSON receipt per directive terminal state (`hooks/receipt.mjs`), written from `hooks/directive.mjs`'s `setStatus` (done/blocked/dead) and `runner/runner.mjs`'s budget halt, idempotent via `writeReceiptOnce`. No new telemetry store — derived entirely from the existing directive record, `directive-spend.mjs`, and the directive log. | Kyle wants completion rate / median cycles / median wall time / top blocker class computable across directives without re-reading logs. | FR-015 |
 | 2026-08-09 | 1.6.0 | Delivered FR-013: directive-tag normalization (legacy-safe `[]` reads), route-label auto-tag insertion at create time, and inclusive tag filtering in the Command Center list. | Make active work discoverable by domain/repo without creating a second task system. | FR-013 |
 | 2026-08-08 | 1.5.0 | Added FR-013 (directive tags + Command Center filtering) and FR-014 (directive `doneWhen` field injected into session context), sourced from issue #17's future-direction clarification. | Thread 2 (better categories) and thread 3 (more autonomy) from Kyle's 2026-08-07 remark, interpreted and scoped in `docs/notes/2026-08-08-future-direction-unpacked.md`. | FR-013, FR-014 |
 | 2026-08-07 | 1.0.0 | Initial PRD, written retroactively against the existing system. `OPEN-ISSUES.md` retired in favor of GitHub issues; its two genuinely open entries became issues #11 and #12. | Rearchitect the repo onto an SDD documentation contract and start a simplification pass. | All |

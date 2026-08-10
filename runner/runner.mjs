@@ -13,8 +13,9 @@ import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { withLaunchSlot, retryTransport } from "../hooks/lane.mjs";
 import { spawnSpec } from "../hooks/cmdline.mjs";
-import { readDirective, appendCycle, lastCycleBody, KICK_TEXT, logPath } from "../hooks/directive.mjs";
+import { readDirective, appendCycle, lastCycleBody, KICK_TEXT, logPath, receiptsDir } from "../hooks/directive.mjs";
 import { directiveSpend } from "../hooks/directive-spend.mjs";
+import { writeReceiptOnce } from "../hooks/receipt.mjs";
 import {
   appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync,
   renameSync, statSync, unlinkSync, writeFileSync,
@@ -312,6 +313,21 @@ function haltDirective(job, reason) {
       logPath(job.directiveId),
       `\n### HALTED - ${new Date().toISOString()}\n${reason}\n`
     );
+  } catch {}
+  // A budget breach halts the LOOP, not the directive itself (it stays
+  // "active" and resumable — see runner/README.md), so this is the one
+  // terminal-for-this-run state setStatus never sees. writeReceiptOnce is
+  // idempotent, so a directive halted again on a later loop restart (the
+  // exact "retries" case issue #68 calls out) never gets a second receipt.
+  try {
+    const directive = readDirective(job.directiveId);
+    if (directive) {
+      writeReceiptOnce(receiptsDir(), directive, {
+        status: "budget_exhausted",
+        why: reason,
+        lastSummary: lastCycleBody(job.directiveId),
+      });
+    }
   } catch {}
   return 7;
 }

@@ -277,6 +277,10 @@ test("killTree dispatches to the win32 branch on an injected platform, without a
   assert.doesNotThrow(() => killTree({ pid: 99999 }, "win32")); // killTreeWin32 swallows the real ENOENT itself
 });
 
+test("killTree dispatches to the posix branch on any non-win32 injected platform", () => {
+  assert.doesNotThrow(() => killTree({ pid: -1, kill: () => {} }, "linux")); // killTreePosix swallows the bad pid itself
+});
+
 test("log() rotates the log file to .1 once it reaches the size cap", () => {
   const j = job({ name: "rotatejob" });
   const logDir = path.join(process.env.ACC_RUNNER_ROOT, "logs");
@@ -761,6 +765,36 @@ test("AC-009: token/dollar directive ceilings halt the loop before another run s
   assert.ok(alerts.length >= 1);
   assert.match(D.logTail(d.id, 5000), /HALTED/);
   assert.match(D.logTail(d.id, 5000), /token ceiling reached/);
+});
+
+test("issue #68: a budget-exhausted halt writes exactly one receipt, and a retried halt never duplicates it", async () => {
+  const d = directive({ budget: { tokens: 100, dollars: 0.001 } });
+  const sid = "00000000-0000-4000-8000-000000000333";
+  D.bindSession({ sessionId: sid, directiveId: d.id });
+  writeSessionTranscript(sid, [
+    usageTurn("2026-08-01T00:00:00.000Z", { input: 90, out: 20 }),
+  ]);
+  const j = loadJob(`directive:${d.id}`);
+  const code = await runLoop(j, false, { run: async () => ({ code: 0, result: "", err: "" }) });
+  assert.equal(code, 7);
+
+  const file = path.join(D.receiptsDir(), `${d.id}.receipt.json`);
+  assert.ok(fs.existsSync(file), "a receipt must exist after a budget halt");
+  const receipt = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.equal(receipt.status, "budget_exhausted");
+  assert.match(receipt.why, /token ceiling reached/);
+  assert.equal(receipt.blockerClass, "budget-tokens");
+  // The directive itself is unchanged — still active, still resumable.
+  assert.equal(D.readDirective(d.id).status, "active");
+
+  // Retrying the loop against the still-active, still-breached directive
+  // (e.g. an operator or scheduler relaunching it) must halt again without
+  // writing a second, possibly-different receipt.
+  const code2 = await runLoop({ ...j, name: j.name + "-retry" }, false, {
+    run: async () => ({ code: 0, result: "", err: "" }),
+  });
+  assert.equal(code2, 7);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), receipt, "the original receipt is untouched by the retry");
 });
 
 test("AC-010: --install on a directive job is refused", () => {

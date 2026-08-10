@@ -320,6 +320,17 @@ context injection.
 Tests: `node --test hooks/directive.test.mjs`, plus the directive-job and
 singleton groups in `runner/runner.test.mjs`.
 
+**Outcome receipts** (FR-015, issue #68): the moment a directive leaves
+`active` — `done`/`blocked`/`dead`, or a runner budget-ceiling halt — one
+bounded, durable JSON receipt is written to
+`runner\directives\receipts\<id>.receipt.json` (`hooks/receipt.mjs`),
+derived entirely from the existing directive record, `hooks/directive-spend.mjs`,
+and the directive log — no new telemetry store. `writeReceiptOnce` never
+overwrites an existing file, so a retried terminal transition never
+duplicates it. See `runner/README.md` for the field list. Tests:
+`node --test hooks/receipt.test.mjs`, plus the receipt assertions in
+`hooks/directive.test.mjs` and `runner/runner.test.mjs`.
+
 `/directive <condition>` (user skill, still at `~\.claude\skills\goal\` on disk as of
 2026-08-07 — that path is outside this repo, so renaming it is Kyle's own manual
 step on his machine, not something this rename touched) is ACC-native: it

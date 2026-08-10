@@ -24,6 +24,11 @@ import path from "node:path";
 // fallbacks) recreate what each test needs on demand.
 const DIRECTIVES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "acc-directive-"));
 process.env.ACC_DIRECTIVES_DIR = DIRECTIVES_DIR;
+// setStatus now derives a receipt via hooks/directive-spend.mjs (issue #68),
+// which reads ~/.claude/projects by default — sandbox it exactly like
+// directive-spend.test.mjs/runner.test.mjs do, so this suite never touches a
+// real machine's session logs.
+process.env.CLAUDE_CONFIG_DIR = path.join(DIRECTIVES_DIR, "claude");
 const m = await import("./directive.mjs");
 
 beforeEach(() => {
@@ -129,6 +134,54 @@ test("a done directive is archived out of the live directory", async () => {
   assert.equal(m.listDirectives().length, 0, "live dir holds only work in flight");
   assert.ok(fs.existsSync(path.join(DIRECTIVES_DIR, "done", `${g.id}.json`)));
   assert.match(fs.readFileSync(path.join(DIRECTIVES_DIR, "done", `${g.id}.log.md`), "utf8"), /DONE/);
+});
+
+test("setStatus(done) writes exactly one outcome receipt, derived from the store (issue #68)", async () => {
+  const g = m.createDirective({ text: "fix the parser", profile: "Normal" });
+  m.appendCycle(g.id, { sessionId: "headless", ctx: 0, text: "ran `npm test`, all green" });
+  m.setStatus(g.id, "done", "shipped");
+
+  const file = path.join(m.receiptsDir(), `${g.id}.receipt.json`);
+  assert.ok(fs.existsSync(file), "a receipt file must exist after a terminal transition");
+  const receipt = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.equal(receipt.schemaVersion, 1);
+  assert.equal(receipt.directiveId, g.id);
+  assert.equal(receipt.status, "done");
+  assert.equal(receipt.why, "shipped");
+  assert.equal(receipt.cycles, 1);
+  assert.equal(receipt.profile, "Normal");
+  assert.deepEqual(receipt.verification, ["ran `npm test`, all green"]);
+  assert.equal(receipt.blockerClass, null);
+});
+
+test("setStatus(blocked) and setStatus(dead) each write a receipt with the right status mapping", async () => {
+  const g1 = m.createDirective({ text: "t1" });
+  m.setStatus(g1.id, "blocked", "waiting on a decision");
+  const r1 = JSON.parse(fs.readFileSync(path.join(m.receiptsDir(), `${g1.id}.receipt.json`), "utf8"));
+  assert.equal(r1.status, "blocked");
+  assert.equal(r1.blockerClass, "needs-decision");
+
+  const g2 = m.createDirective({ text: "t2" });
+  m.setStatus(g2.id, "dead", "crashed");
+  const r2 = JSON.parse(fs.readFileSync(path.join(m.receiptsDir(), `${g2.id}.receipt.json`), "utf8"));
+  assert.equal(r2.status, "failed", "the store's 'dead' status maps to the receipt's 'failed'");
+});
+
+test("setStatus never writes a receipt for a non-terminal status like 'paused'", async () => {
+  const g = m.createDirective({ text: "t" });
+  m.setStatus(g.id, "paused");
+  assert.equal(fs.existsSync(path.join(m.receiptsDir(), `${g.id}.receipt.json`)), false);
+});
+
+test("a retried setStatus(done) call (already archived, so a no-op) never touches or duplicates the receipt", async () => {
+  const g = m.createDirective({ text: "t" });
+  m.setStatus(g.id, "done", "first");
+  const file = path.join(m.receiptsDir(), `${g.id}.receipt.json`);
+  const first = fs.readFileSync(file, "utf8");
+  // The directive is already archived out of the live store, so a repeat
+  // call is a genuine no-op (mutate() finds nothing to change).
+  assert.equal(m.setStatus(g.id, "done", "second"), null);
+  assert.equal(fs.readFileSync(file, "utf8"), first, "the original receipt is untouched");
 });
 
 test("directive ids cannot escape the directives directory", async () => {
@@ -348,6 +401,13 @@ test("CLI: main() 'new' accepts --tag/--route-tag and stores normalized unique t
     "--tag", "Ops", "--tag", "ops", "--route-tag", "Guards Team",
   ]));
   assert.deepEqual(printed.tags, ["ops", "guards-team"]);
+});
+
+test("CLI: main() 'new' also accepts --tags as a comma-separated list", () => {
+  const printed = JSON.parse(runMain([
+    "new", "--text", "cli directive", "--tags", " Ops , ui, ops",
+  ]));
+  assert.deepEqual(printed.tags, ["ops", "ui"]);
 });
 
 test("CLI: main() 'new' accepts --done-when and stores it exactly", () => {
