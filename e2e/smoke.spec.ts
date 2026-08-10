@@ -38,9 +38,9 @@ test("sign in and verify backend health + browse renders real data", async ({
   await expect(page).toHaveURL(/\/$/, { timeout: 15_000 });
 
   // 4. The health indicator must show the backend is reachable.
-  //    HealthDot renders a green dot (title "Backend healthy") when /healthz
+  //    HealthDot renders a green dot (title "API healthy") when /healthz
   //    returns { status: "ok" }. A red dot means the backend is down.
-  const healthDot = page.locator('[title="Backend healthy"]');
+  const healthDot = page.locator('[title="API healthy"]');
   await expect(healthDot).toBeVisible({ timeout: 10_000 });
 
   // 5. Browse must render at least one entity from the live API.
