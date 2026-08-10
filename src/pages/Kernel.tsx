@@ -6,6 +6,7 @@ import { ApiError } from "@/components/api-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LabeledInput } from "@/components/labeled-input";
+import { errMsg } from "@/lib/utils";
 
 export default function Kernel() {
   const qc = useQueryClient();
@@ -38,7 +39,7 @@ export default function Kernel() {
       extraDenyWriteRoots: f.extraDenyWriteRoots.split(",").map((s) => s.trim()).filter(Boolean),
     } as KernelPolicy),
     onSuccess: (r) => { setMsg(r.error || "Saved — applies on the next guardhook fire."); qc.invalidateQueries({ queryKey: ["kernel"] }); },
-    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
+    onError: (e) => setMsg(errMsg(e)),
   });
 
   const set = (k: string) => (v: string) => setF({ ...f, [k]: v });

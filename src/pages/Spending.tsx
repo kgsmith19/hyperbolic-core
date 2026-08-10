@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LabeledInput } from "@/components/labeled-input";
+import { errMsg } from "@/lib/utils";
 
 const TIER = {
   red: { text: "STOPPED — you hit your weekly limit", cls: "text-destructive" },
@@ -42,12 +43,12 @@ export default function Spending() {
       allow: (form.allow ?? "").split(",").map((x) => x.trim()).filter(Boolean),
     } as Dials),
     onSuccess: (r) => { setMsg(r.error || "Saved — hooks pick this up on the next fire."); qc.invalidateQueries({ queryKey: ["process"] }); },
-    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
+    onError: (e) => setMsg(errMsg(e)),
   });
   const control = useMutation({
     mutationFn: api.control,
     onSuccess: (r) => { setMsg(r.error || r.out || "done"); qc.invalidateQueries({ queryKey: ["process"] }); },
-    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
+    onError: (e) => setMsg(errMsg(e)),
   });
 
   const tier = s?.tier?.tier;

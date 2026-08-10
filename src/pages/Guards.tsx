@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
+import { cn, errMsg } from "@/lib/utils";
 
 // Plain <select> — no shadcn/Base UI select primitive exists in this repo,
 // and three raw <select>s below shared this exact class string verbatim.
@@ -52,17 +52,17 @@ export default function Guards() {
   const engine = useMutation({
     mutationFn: (a: { verb: string; arg?: string; extra?: object }) => api.engine(a.verb, a.arg, a.extra),
     onSuccess: (r) => { setMsg(r.error || r.out || ""); refresh(); },
-    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
+    onError: (e) => setMsg(errMsg(e)),
   });
   const importVault = useMutation({
     mutationFn: api.vaultImport,
     onSuccess: (r) => { setVault(""); setMsg(r.error || (r.stored ? `stored: ${r.stored.join(", ")}` : r.out || "")); refresh(); },
-    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
+    onError: (e) => setMsg(errMsg(e)),
   });
   const rmVaultKey = useMutation({
     mutationFn: api.vaultRm,
     onSuccess: (r) => { setVaultKey(""); setMsg(r.error || r.out || ""); refresh(); },
-    onError: (e) => setMsg(String(e instanceof Error ? e.message : e)),
+    onError: (e) => setMsg(errMsg(e)),
   });
   const s = status.data;
   const enabled = !!s?.enabled;

@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { errMsg } from "@/lib/utils";
 
 function Row({ d }: { d: Directive }) {
   const qc = useQueryClient();
@@ -90,7 +91,7 @@ export default function StartWork() {
       return d.id;
     },
     onSuccess: (id) => { setNote(`launched ${id}`); setText(""); qc.invalidateQueries({ queryKey: ["directives"] }); },
-    onError: (e) => setNote(String(e instanceof Error ? e.message : e)),
+    onError: (e) => setNote(errMsg(e)),
   });
 
   const anyError = directives.error ?? proc.error ?? lane.error;
