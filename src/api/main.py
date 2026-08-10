@@ -5,6 +5,7 @@ the seam where scoped agent contexts bolt on later (invariant 5) without
 touching the kernel. Token verification lives in api.auth (ADR 008).
 """
 
+import hmac
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -220,7 +221,7 @@ def _hc_secret_context(request: Request) -> AccessContext:
     if not expected:
         raise AuthUnavailableError("LIFEOS_HC_SECRET is not configured; refusing ingestion")
     provided = request.headers.get("X-HC-Secret", "")
-    if provided != expected:
+    if not hmac.compare_digest(provided, expected):
         raise AuthError("invalid or missing X-HC-Secret")
     return AccessContext.of("health_connect:read", "health_connect:write")
 

@@ -185,6 +185,23 @@ def test_post_health_connect_fails_closed_when_server_secret_missing() -> None:
     assert response.status_code == 503
 
 
+def test_hc_secret_comparison_is_constant_time() -> None:
+    """A `!=` string comparison on a shared secret leaks timing information
+    (early-exit on first mismatched byte), letting a network attacker
+    recover the secret byte-by-byte. The comparison must use a constant-time
+    primitive (hmac.compare_digest / secrets.compare_digest) instead."""
+    import inspect
+
+    from api.main import _hc_secret_context
+
+    source = inspect.getsource(_hc_secret_context)
+    assert "compare_digest" in source, (
+        "_hc_secret_context must compare the X-HC-Secret header using "
+        "hmac.compare_digest or secrets.compare_digest, not `!=`"
+    )
+    assert "provided != expected" not in source
+
+
 def test_post_health_connect_empty_payload(auth_hc: None) -> None:
     response = client.post(
         "/health-connect",
