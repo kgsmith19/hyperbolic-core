@@ -100,5 +100,66 @@ class ScanBudgetTest(unittest.TestCase):
         run.assert_not_called()
 
 
+class NFR009BudgetConstantsTest(unittest.TestCase):
+    """NFR-009's numbers, pinned so a change to `SCAN_BUDGET_SECONDS` is a
+    deliberate PRD-reviewed edit, not a silent drift caught only by a human
+    rereading docs/PRD.md."""
+
+    def test_budgets_match_the_prd_figures(self):
+        self.assertEqual(cli.SCAN_BUDGET_SECONDS,
+                         {"quick": 10, "standard": 60, "deep": 120})
+
+
+class ScanBudgetBoundaryTest(unittest.TestCase):
+    """NFR-009: prove the orchestration/timeout logic in `cmd_scan` -- the
+    thing that actually enforces quick<=10s, standard<=60s, deep<=120s --
+    holds at the boundary, deterministically and without a real sleep.
+
+    `subprocess.run(..., timeout=T)` is documented to raise
+    `TimeoutExpired` once the child has run for `T` seconds without
+    finishing. A fake `subprocess.run` that decides which branch to take
+    from an injected `duration` -- never actually sleeping -- lets a test
+    walk that boundary for every tier: strictly under budget (succeeds),
+    exactly at budget (still within the contract, succeeds), and over
+    budget (the real subprocess would still be running, so it must be
+    killed and reported as 124). This is the fake probe-timing injection
+    NFR-006 requires in place of a live, flaky wall-clock measurement.
+    """
+
+    @staticmethod
+    def _fake_run(duration):
+        """Stand-in for `subprocess.run`, modelling its own documented
+        timeout contract from an injected elapsed `duration` instead of an
+        actual clock."""
+        def run(command, **kwargs):
+            timeout = kwargs["timeout"]
+            if duration > timeout:
+                raise subprocess.TimeoutExpired(command, timeout)
+            return argparse.Namespace(returncode=0, stdout="{}\n", stderr="")
+        return run
+
+    def _assert_case(self, tier, budget, duration, expect_timeout):
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(cli.subprocess, "run", self._fake_run(duration)), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.cmd_scan(argparse.Namespace(tier=tier, target="example.test"))
+        if not expect_timeout:
+            self.assertEqual((rc, out.getvalue(), err.getvalue()), (0, "{}\n", ""))
+            return
+        self.assertEqual(rc, 124)
+        self.assertIn(f"{tier} scan exceeded {budget}s budget", err.getvalue())
+
+    def test_boundary_cases_for_every_tier(self):
+        for tier, budget in cli.SCAN_BUDGET_SECONDS.items():
+            cases = {
+                "under_budget": (budget - 1, False),
+                "at_budget": (budget, False),
+                "over_budget": (budget + 1, True),
+            }
+            for case_name, (duration, expect_timeout) in cases.items():
+                with self.subTest(tier=tier, case=case_name, duration=duration):
+                    self._assert_case(tier, budget, duration, expect_timeout)
+
+
 if __name__ == "__main__":
     unittest.main()

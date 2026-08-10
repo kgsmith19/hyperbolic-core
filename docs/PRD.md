@@ -2,9 +2,9 @@
 title: netcheck Product Requirements Document
 status: living
 created: 2026-08-07
-updated: 2026-08-08
+updated: 2026-08-10
 owner: Kyle Smith
-version: 1.5.3
+version: 1.5.4
 ---
 
 # netcheck PRD
@@ -190,7 +190,7 @@ This is a program that runs on your computer and tells you which part of your in
 | NFR-006 | Maintainability | Hermetic test suite: no live network calls, no sleeps beyond a probe's own timing, except explicitly-skippable fault-injection tests. | 0 flaky/networked tests in the default run | `python -m unittest discover -s tests -t .` in CI | done |
 | NFR-007 | Cost | The tool must run with $0 required spend; Supabase mirroring is optional and on the free tier by design. | $0 required | Manual verification of `.env` optionality | done |
 | NFR-008 | Availability | None, because this is a single-machine local tool with no hosted uptime commitment — the thing it measures is the user's own network, not itself. | - | - | - |
-| NFR-009 | Performance | Each scan tier must complete within a fixed time budget so a routine check and a full investigation are never mistaken for a hang. | quick ≤ 10s; standard ≤ 60s (the existing `events()` PowerShell query alone measures ~21s); deep ≤ 120s | Wall-clock timing around each tier in a manual run, recorded in the SL-003 slice's own notes until an automated timing test exists | not-started |
+| NFR-009 | Performance | Each scan tier must complete within a fixed time budget so a routine check and a full investigation are never mistaken for a hang. | quick ≤ 10s; standard ≤ 60s (the existing `events()` PowerShell query alone measures ~21s); deep ≤ 120s | `cmd_scan`'s subprocess wall-clock ceiling is the actual enforcement mechanism (per-probe timeouts inside a tier can sum past its budget; the outer `timeout=budget` kill is what guarantees the tier never runs longer). `test_main.py::NFR009BudgetConstantsTest` pins the three budget numbers against drift; `test_main.py::ScanBudgetBoundaryTest` deterministically walks under/at/over-budget cases for all three tiers against a fake `subprocess.run` that models its documented timeout contract from an injected duration, with no live probe and no real sleep. `bash tools/check.sh` runs both in CI. One bounded manual smoke command remains for real hardware-dependent timing: `time python -m netcheck scan --tier deep` (or `quick`/`standard`) | done |
 | NFR-010 | Security | The LAN exposure check (FR-019) must never send a request that modifies device state, must never attempt a credential outside its fixed documented list, and must never run against a host that fails `_on_lan()`. | 0 write requests issued by the exposure check; 0 credential attempts beyond the fixed list; 0 requests to a non-LAN host | Code inspection of `exposure.py`, plus `CredentialDestinationTest`-style tests asserting no request is sent to a host that fails `_on_lan()` | done |
 
 ## 8. Data requirements
@@ -306,6 +306,7 @@ Future slices are chosen from open GitHub issues and this PRD's not-yet-`done` r
 | 2026-08-08 | 1.5.1 | Completed the reconciliation the 1.5.0 entry above already described but did not finish: the FR-020/FR-021 table rows still read `not-started` despite this file's own changelog and the shipped code (`netcheck/geoip.py`, `netcheck/experiment.py`, both tested and wired in) saying otherwise. Table rows now read `done`, matching reality. No code or test changed. | `kgsmith19/agent-engineering-standard` migration verification pass, checking the merged migration (#51) against this file. | FR-020, FR-021 |
 | 2026-08-08 | 1.5.2 | Added OOS-008 (optional config file), OOS-009 (CLI test subcommands), OOS-010 (`mtu probe_all`) — the three "still undecided" items from GitHub issue #38 — as explicit out-of-scope decisions. Both unmerged branches (`claude/network-diagnostics-ui-5ortgo`, `claude/network-diagnostics-ui-cont-4cl3r9`) and 25 stale merged branches deleted following the decision. No code or test changed. | Issue #38 close-out: owner agreed to record the three open items as out of scope and delete all stale branches. | OOS-008, OOS-009, OOS-010 |
 | 2026-08-08 | 1.5.3 | Corrected the 1.5.2 entry above: the branch deletion it describes never happened. `git push --delete` is blocked by this environment's destructive-action classifier, both for the two out-of-scope branches and for the 25 stale merged ones, with no error surfaced to the agent that wrote 1.5.2. Of those 25, 15 (`claude/loop-goal-4umvxd`, `claude/spec-driven-dev-continue-41309l`, `tmp-probe-delete`, and the twelve `claude/phase-{2,3,4,5,6,7,8,9,10,12,13,14}-*` branches) are independently confirmed here as literal ancestors of `main` via `git branch -r --merged`, but the delete attempt for those was blocked the same way. The OOS-008/009/010 decisions themselves stand; only the "deleted following the decision" claim is false. | Doc-accuracy pass: `git branch -r` on the actual remote still showed all 29 non-`main` branches present, contradicting this file's own record. | none |
+| 2026-08-10 | 1.5.4 | NFR-009 marked `done`: `test_main.py::NFR009BudgetConstantsTest` and `test_main.py::ScanBudgetBoundaryTest` turn the tier timing budgets into an automated, hermetic regression check (a fake `subprocess.run` models its documented timeout contract from an injected duration, walking under/at/over-budget cases for quick/standard/deep without a live probe or a real sleep), replacing the "manual run, recorded in notes" evidence the row previously pointed at. No production code changed; `cmd_scan`'s existing hard subprocess wall-clock ceiling was already the real enforcement mechanism. | Issue #71: NFR-009 was `not-started` with only a manual-note evidence trail. | NFR-009 |
 
 ---
 

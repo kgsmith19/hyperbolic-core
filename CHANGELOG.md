@@ -10,6 +10,15 @@ pass, not full automation.
 
 ## [Unreleased]
 
+### Added
+- NFR-009 (per-tier scan timing budget) now has automated regression
+  evidence instead of a manual-note (#71). `test_main.py::ScanBudgetBoundaryTest`
+  deterministically walks under/at/over-budget cases for quick/standard/deep
+  against a fake `subprocess.run` that models its own documented timeout
+  contract from an injected duration -- no live probe, no real sleep.
+  `test_main.py::NFR009BudgetConstantsTest` pins the three budget numbers.
+  No production behavior changed.
+
 ### Security
 - Device credentials are no longer sent off the local network (#30, FR-014).
   Modem and router logins travel as HTTP Basic and as a plaintext login
