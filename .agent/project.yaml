@@ -24,6 +24,10 @@ risk:
     - src/auth/
     - .github/workflows/
     - .agent/
+    - AGENTS.md
+    # PR Gate integrity: weakening either file could make the gate falsely green.
+    - package.json
+    - playwright.config.ts
 
 ci:
   entry: .github/workflows/ci.yml
