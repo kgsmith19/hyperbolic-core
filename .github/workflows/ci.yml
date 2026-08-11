@@ -26,6 +26,9 @@ jobs:
           node-version: "22"
       - name: Run Toolbelt tests
         run: node --test "tests/*.test.mjs"
+      - name: Prepare Prompt Organizer test sessions
+        run: node tests/export-test-sessions.mjs
+        working-directory: apps/prompt-organizer
       - name: Run Prompt Organizer tests
         run: node --test "tests/*.test.mjs"
         working-directory: apps/prompt-organizer
