@@ -1,42 +1,35 @@
-# Machine-readable project facts for ACC/Toolbelt and agents. Prose policy
-# lives in AGENTS.md and the pinned standard.
+# Repository-specific facts for tools and contributors. The external standard
+# reference is informational; this repository owns its workflow and settings.
 
 project:
   name: agentic-command-center-ui
   type: web-frontend
   stack: [react19, vite8, typescript7, tailwindcss4]
-  runtime: node
-  node_version: ">=22.22.0"
+
+runtime:
+  node_min: "22.22.0"
+  package_manager: npm
+  operating_systems: [linux]
 
 commands:
   setup: npm ci
   build: npm run build
+  e2e: npm run e2e
   dev: npm run dev
-  fast_verify: npm run build
-  full_verify: npm run e2e
-  test: npm run e2e
 
-platform:
-  os: [linux]
-
-risk:
-  default: R1
-  notes:
-    - "src/api.ts changes are R2: it is the typed mirror of ACC's gui/README.md contract."
-    - "Guards/vault changes that alter secret handling are R3."
-  protected_paths:
-    - .github/workflows/
-    - .agent/standard.lock
+integration:
+  repository: kgsmith19/agentic-command-center
+  contract: gui/README.md
+  local_checkout_variable: ACC_DIR
 
 ci:
-  required_workflow: .github/workflows/ci.yml
-  required_check: "PR Gate"
-  required_trigger: "ready pull request + merge_group"
-  gate_evidence: [build, contract-e2e]
-  deep_lane: []
+  workflow: .github/workflows/ci.yml
+  check: "PR Gate"
+  triggers: [pull_request, merge_group]
 
-deployment:
-  mechanism: "ACC serves this repo's built dist/ same-origin via --ui-dist"
-  authority: "manual"
+work_tracking:
+  system: github-issues
 
-telemetry: none
+standard_reference:
+  file: .agent/standard.lock
+  mode: informational
