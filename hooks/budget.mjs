@@ -220,7 +220,7 @@ export function onSessionStart(p, policy, io = PROCESS_IO) {
   const lines = [];
   if (policy.activeProfile) {
     lines.push(
-      `[ACC] Profile: ${policy.activeProfile} (launched from the Command Center). Its subagent rules apply to this session; the context budget comes from the Command Center dials.`
+      `[ACC] Profile: ${policy.activeProfile} (launched from the Command Center). Its helper limits apply to this session; the context budget comes from the Command Center dials.`
     );
   }
   // A directive is what makes this session a continuation rather than a fresh
@@ -235,8 +235,7 @@ export function onSessionStart(p, policy, io = PROCESS_IO) {
   lines.push(
     ...[
     `[ACC] Context budget: soft ${softK}k, hard ${hardK}k. Context is checked after EVERY tool call; past ${hardK}k you will be told to checkpoint and end the turn, and the Stop hook enforces it.`,
-    `[ACC] Subagents: allowlist ${JSON.stringify(policy.subagents.allow)}; implementation work goes to a runner session, not a subagent. Explore reports are capped at ${policy.subagents.exploreMaxReportLines} lines, structural only, no file dumps.`,
-    `[ACC] Reviews: /diff-review-kgs and /sec-diff-kgs are the default checks (main thread, no fan-out). /lean-review-kgs is ${policy.review.fullLeanReview}.`,
+    `[ACC] Helper limits: allowed types ${JSON.stringify(policy.subagents.allow)}; session cap ${policy.subagents.maxPerSession}; temporary fan-out cap ${policy.review.maxFinders}.`,
     ]
   );
   inject("SessionStart", lines.join("\n"), io);
@@ -415,9 +414,7 @@ export function onPreToolUseAgent(p, policy, io = PROCESS_IO) {
   if (!granted && policy.subagents.mode === "allowlist" && !policy.subagents.allow.includes(type)) {
     deny(
       `[ACC] Subagent type "${type}" is not on the allowlist (${policy.subagents.allow.join(", ")}).\n` +
-        `Do this work in the MAIN thread. Implementation of a slice task belongs in a runner session ` +
-        `(fresh context by construction, far cheaper than an Opus subagent), not here.\n` +
-        `If this genuinely needs fan-out: grant a window with ` +
+        `Adjust the allowed helper types in the Command Center, or grant a time-boxed window with ` +
         `\`node C:/code/guards/hooks/budget.mjs fanout 30\` or the Command Center Process tab.`,
       io
     );
@@ -430,7 +427,7 @@ export function onPreToolUseAgent(p, policy, io = PROCESS_IO) {
   if (n > cap) {
     deny(
       `[ACC] Subagent cap reached for this session (${cap}). ` +
-        `${granted ? "Fan-out grants are capped at review.maxFinders." : "Continue in the main thread, or clear context and start fresh."}`,
+        `${granted ? "The temporary fan-out cap was reached." : "Adjust the limit or start a fresh session."}`,
       io
     );
   }

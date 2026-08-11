@@ -1,5 +1,4 @@
-# shim/claude and hooks/pre-push are POSIX shell scripts (Git Bash) — CRLF
+# shim/claude is a POSIX shell script (Git Bash) — CRLF
 # line endings break `#!/bin/sh` on some interpreters, so pin them to LF
 # regardless of the checking-out machine's core.autocrlf.
 shim/claude text eol=lf
-hooks/pre-push text eol=lf

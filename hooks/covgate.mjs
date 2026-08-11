@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// covgate.mjs — the changed-file coverage gate the test contract binds.
+// covgate.mjs — changed-file coverage for the repository PR Gate.
 //
 //   node hooks/covgate.mjs          (run from C:\code\guards)
 //
@@ -7,8 +7,8 @@
 // the fast tier. Scope is deliberate — repo-wide 100% is a vanity number that
 // punishes whoever touches the oldest file, while changed-file 100% is cheap
 // the day you write the code and only ever gates the author of the change.
-// Coverage is a floor, not the goal: it proves the tests VISIT the code, the
-// red-first rule proves they can FAIL, and only both together gate honestly.
+// Coverage is a floor, not the goal: tests must still assert observable
+// behavior and be capable of failing when that behavior regresses.
 //
 // Mechanics: node's built-in coverage (>= 22) with the lcov reporter, no
 // dependencies. Changed = git diff against HEAD plus untracked, filtered to
@@ -21,8 +21,7 @@
 // by covgate's own suite to gate a fixture repo instead of this one.
 // Range override: ACC_COVGATE_RANGE="<oldrev> <newrev>" gates a commit range
 // instead of the working tree (git diff between the two revs, no untracked
-// files, no mutation of the caller's repo) — used by hooks/pre-push (OI-030)
-// to gate a push before it leaves the machine.
+// files and no mutation of the caller's repo) for explicit range checks.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -70,8 +69,7 @@ export function floors(file) {
 // meet in the middle regardless of who emitted which slash. Byte-identical
 // to kernel/policy.mjs's norm(), deliberately NOT imported from there: this
 // file gets copied standalone into isolated fixture trees by its own tests
-// (hooks/pre-push.test.mjs copies only hooks/, not kernel/) and by covgate's
-// own ACC_COVGATE_TESTS fixture-repo mode, so it must resolve with zero
+// and by covgate's own ACC_COVGATE_TESTS fixture-repo mode, so it must resolve with zero
 // sibling-directory dependencies.
 export const normPath = (p) => path.resolve(String(p)).replaceAll("\\", "/").toLowerCase();
 
@@ -121,14 +119,8 @@ function git(args, cwd) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).split(/\r?\n/).filter(Boolean);
 }
 
-// OI-030: a local pre-push hook must gate the COMMIT RANGE being pushed, not
-// the working tree — `git diff --name-only HEAD` (the default, above) is
-// always empty for already-committed work. Parses "<oldrev> <newrev>"
-// (whitespace-separated — the exact two fields a pre-push hook already reads
-// off its own stdin, so the caller passes them straight through with no
-// translation). Never mutates the caller's repo (no reset/checkout) — the
-// range is one `git diff` between two revs the caller names. Exported so its
-// parsing can be unit-tested without a subprocess.
+// Optional explicit commit-range mode. It never mutates the caller's repo:
+// the check is one `git diff` between two revisions supplied by the caller.
 export function parseRange(raw) {
   const parts = String(raw ?? "").trim().split(/\s+/).filter(Boolean);
   if (parts.length !== 2) return null;
@@ -204,14 +196,13 @@ function main() {
     // and cleanup, corrupting each other's JSON mid-write (found 2026-08-02,
     // real Windows run: "Warning: Could not report code coverage. SyntaxError:
     // Unexpected end of JSON input", 100% reproducible with the full fast tier).
-    // ACC_COVGATE_RANGE must not leak in either, for the identical reason as
-    // the other two: a range-mode covgate invocation (hooks/pre-push, OI-030)
-    // spawns THIS test run, which in turn spawns covgate.test.mjs's own
+    // ACC_COVGATE_RANGE must not leak into the nested test process. A range
+    // invocation spawns THIS test run, which in turn spawns covgate.test.mjs's
     // fixture covgate.mjs invocations three levels deep — those fixtures
     // gate unrelated, isolated repos with their own unrelated commit shas, so
     // inheriting the outer range would hand them oldrev/newrev that don't
     // exist in their history at all ("fatal: bad object", found while writing
-    // hooks/pre-push.test.mjs, 2026-08-04).
+    // the range-mode fixture tests).
     { cwd, encoding: "utf8", stdio: ["ignore", "inherit", "inherit"],
       env: { ...process.env, NODE_TEST_CONTEXT: undefined, NODE_V8_COVERAGE: undefined, ACC_COVGATE_RANGE: undefined } }
   );
@@ -253,5 +244,5 @@ function main() {
 
 // No cross-file import for this check (unlike the other hooks' root.mjs-based
 // isMainModule): covgate.mjs is deliberately copied standalone into fixture
-// repos (hooks/pre-push.test.mjs) and must have zero sibling-file deps.
+// repos and must have zero sibling-file dependencies.
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) main();

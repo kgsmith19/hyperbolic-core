@@ -1,8 +1,8 @@
 # Agentic Command Center
 
-Agentic Command Center (ACC) is a local guard rail, control panel, and bounded
-task runner for Claude Code sessions. Keep changes lean, preserve product
-safety, and verify the behavior you change.
+Agentic Command Center (ACC) is an adapter-driven local coding-agent service,
+guard rail, control panel, and bounded task runner. Claude Code is the current
+harness integration; generic kernel code must remain harness-neutral.
 
 ## Product map
 
@@ -17,7 +17,7 @@ safety, and verify the behavior you change.
   `kernel/README.md` before changing the kernel contract or adapters.
 - `runner/` owns directive execution and lifecycle state. Read
   `runner/README.md` before changing the directive loop.
-- `hooks/lane.mjs` serializes automated Claude launches. Every automated
+- `hooks/lane.mjs` serializes automated harness launches. Every automated
   launch must use the lane.
 - `policy.json` is product runtime configuration. Preserve unowned keys when
   updating part of it.

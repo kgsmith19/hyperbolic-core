@@ -102,7 +102,7 @@ export default function StartWork() {
       <Card>
         <CardHeader><CardTitle>Start work</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <Textarea id="task" placeholder="What should Claude do?" rows={3} value={text}
+          <Textarea id="task" placeholder="What should the coding agent do?" rows={3} value={text}
             onChange={(e) => setText(e.target.value)}
             onBlur={() => text.trim() && suggest.mutate(text.slice(0, 2000))} />
           <div className="flex flex-wrap items-center gap-3">

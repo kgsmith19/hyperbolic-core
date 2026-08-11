@@ -212,8 +212,8 @@ test("config falls back to defaults when policy.json parses but has no lane key 
 });
 
 test("POLICY() and LANE_DIR() fall back to their real defaults when the env vars are unset", () => {
-  // POLICY() and LANE_DIR() are lazy (re-read per call, unlike testplan.mjs's
-  // module-load-time ACC_ROOT), so the fallback branch is reachable in-process
+  // POLICY() and LANE_DIR() are lazy and re-read per call rather than fixed at
+  // module load, so the fallback branch is reachable in-process
   // — no subprocess needed, and safe: the real os.tmpdir()/acc-lane has no
   // other holder on this sandbox, and is cleaned up immediately.
   const savedPolicy = process.env.ACC_POLICY;

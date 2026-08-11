@@ -56,7 +56,7 @@ graph TB
 
 | ID | Container | Technology | Responsibility (one sentence) | Runs where | Traces to |
 |---|---|---|---|---|---|
-| C-001 | Hooks | Node 22, `node:test`, no runtime deps | PreToolUse/PostToolUse/SessionStart/Stop hook logic: guard, budget, directive, route, usage, lane, testplan, covgate | Any OS (CI: Linux + Windows) | FR-001, FR-003, FR-004, FR-005 |
+| C-001 | Hooks | Node 22, `node:test`, no runtime deps | Guard, budget, directive, usage, lane, route-service, and coverage logic | Any OS (CI: Linux + Windows) | FR-001, FR-003, FR-004, FR-005 |
 | C-002 | Kernel | Node 22, `node:test` | Headless bounded task runner: contract validation, guardhook enforcement, supervisor, ledger, verification | Any OS | FR-006, FR-007, FR-008 |
 | C-003 | GUI | Node HTTP server (`gui/server.mjs`) serving `gui/guards.html`/`gui/kernel.html` | Human control panel: start work (directive create + headless launch), guards, vault, runbox, spending, kernel policy | Any (loopback web) | FR-010, FR-012, UC-001 |
 | C-004 | Watcher | PowerShell | Launch-cap alerting only (`claude-cap-watch.ps1`); the keystroke/liveness watcher was deleted (ADR-0005) | Windows | NFR-007 |

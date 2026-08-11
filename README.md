@@ -1,9 +1,10 @@
 # Agentic Command Center
 
-Agentic Command Center (ACC) is a local guard rail, task service, and React
-control panel for Claude Code. It protects selected files and secrets,
+Agentic Command Center (ACC) is an adapter-driven local coding-agent service,
+guard rail, and React control panel. It protects selected files and secrets,
 provides a loopback API, runs bounded headless tasks, and carries directives
-across fresh contexts.
+across fresh contexts. Claude Code is the current harness integration; the
+kernel selects harnesses through `kernel/adapters/`.
 
 ## Requirements
 

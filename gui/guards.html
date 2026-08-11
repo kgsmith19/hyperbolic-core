@@ -23,7 +23,7 @@
 
 <fieldset><legend>Start work</legend>
   <p class="muted">Describe the task. The Command Center suggests the folder, and GO hands it to a headless session that keeps restarting with fresh context until the work reports done.</p>
-  <textarea id="dirText" rows="3" style="width:98%" placeholder="What should Claude do?"></textarea><br>
+  <textarea id="dirText" rows="3" style="width:98%" placeholder="What should the coding agent do?"></textarea><br>
   <label>Done condition <input type="text" id="dirDoneWhen" style="width:520px" placeholder="Optional: when this is true, the directive is finished"></label><br>
   <label>Folder <input type="text" id="dirCwd" style="width:340px"></label>
   <span id="dirSuggest" class="muted"></span><br>
@@ -49,7 +49,7 @@
   <div id="dirList" class="muted"></div>
 </fieldset>
 
-<fieldset><legend>What Claude cannot touch</legend>
+<fieldset><legend>What the coding agent cannot touch</legend>
   <label>Secret patterns (never read or written)<br><select id="secrets" size="4"></select></label>
   <label>Locked paths (read-only)<br><select id="protected" size="4"></select></label>
   <label>Watched folders<br><select id="projects" size="4"></select></label><br>
@@ -63,7 +63,7 @@
 </fieldset>
 
 <fieldset><legend>Passwords and keys</legend>
-  <p class="muted">Hand Claude a secret without pasting it into chat. One <code>NAME=value</code> per line — values go straight to the vault and are never shown again.</p>
+  <p class="muted">Provide the coding agent a secret without pasting it into chat. One <code>NAME=value</code> per line — values go straight to the vault and are never shown again.</p>
   <textarea id="vaultInput" rows="3" style="width:98%" placeholder="API_KEY=abc123&#10;DB_PASSWORD=hunter2"></textarea><br>
   <button id="vaultSave">Save to vault</button>
   <span id="vaultMsg" class="muted"></span><br>
@@ -71,7 +71,7 @@
   <button id="vaultRm">Delete selected key</button>
 </fieldset>
 
-<fieldset><legend>Claude's requests (runbox)</legend>
+<fieldset><legend>Agent requests (runbox)</legend>
   <label>Pending<br><select id="pending" size="6"></select></label>
   <label>Trash (undo lives here)<br><select id="trashed" size="6"></select></label><br>
   <div>Exactly what the selected script will do:</div>

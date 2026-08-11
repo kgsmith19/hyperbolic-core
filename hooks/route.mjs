@@ -8,24 +8,16 @@
 //   node route.mjs --text "add a supabase migration"   -> JSON on stdout,
 //       used by the web Start-work page (gui/server.mjs /api/route/suggest)
 //       to preselect the working folder.
-//   node route.mjs (with hook JSON on stdin)           -> UserPromptSubmit hook.
-//       Injects one advisory line when the text scores a route that differs
-//       from what was last said for this session. Otherwise silent. Advisory
-//       ONLY: it never blocks a prompt (the deny/cd-request channel died with
-//       the keystroke stack, SPEC-0005 PR-2).
+//   node route.mjs doctor                               -> completeness check.
 //
-// Fails open in every direction — a router that errors must not cost a turn.
+// Route suggestions are explicit service output. ACC does not inject them into
+// agent prompts or impose repository-process instructions.
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveRoot, readStdinJson } from "./root.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// ACC_ROOT redirects every runner/ path at a throwaway tree so tests exercise
-// THIS file without touching live session state (same contract as budget.mjs).
-const ROOT = resolveRoot(HERE);
-const STATE = path.join(ROOT, "runner", "state");
 // The table is config, not runner state: it anchors to the repo (ACC_ROOT
 // must not move it, or sandboxed tests would lose the real routes).
 const TABLE = process.env.ACC_ROUTING_MD || path.resolve(HERE, "..", "..", "ROUTING.md");
@@ -125,56 +117,10 @@ function cli(argv) {
   }
 }
 
-function hook() {
-  const p = readStdinJson(null);
-  if (p === null) return;
-  const sid = String(p.session_id || "unknown").slice(0, 40);
-  const latch = path.join(STATE, `${sid}.route`);
-
-  const r = route(String(p.prompt || ""));
-  // No signals means this prompt says nothing about scope — a follow-up, a
-  // question, a "now do the other half". Keep whatever scope is already in
-  // force rather than re-deciding on no evidence.
-  if (!r.path) return;
-
-  // Fire on every prompt, but stay silent while the verdict hasn't moved —
-  // a task switch re-scopes; ten prompts about one thing cost one line.
-  let prev = {};
-  try { prev = JSON.parse(fs.readFileSync(latch, "utf8")); } catch {}
-  if (prev.path && norm(prev.path) === norm(r.path)) return;
-
-  const cwd = p.cwd || process.cwd();
-  const save = () => fs.writeFileSync(latch, JSON.stringify({ path: r.path }));
-
-  // Already living in the routed folder: the session is scoped by cwd, nothing
-  // to say and nothing to type.
-  if (norm(r.path) === norm(cwd)) { try { save(); } catch {} return; }
-
-  try {
-    fs.mkdirSync(STATE, { recursive: true });
-    save();
-  } catch {}
-
-  const inCwd = isUnder(r.path, cwd);
-  const up = r.parent ? `widen to ${r.parent}` : "widen to the session cwd";
-
-  process.stdout.write(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "UserPromptSubmit",
-        additionalContext:
-          `[ACC route] Scope this task to ${r.label} — ${r.path} (${r.reason}).\n` +
-          `Act on it now, silently: confine reads, greps and globs to that subtree, ` +
-          `and prefer its AGENTS.md over anything wider. Do not ask permission and do not announce the scope.\n` +
-          `If it proves too narrow — a file you need genuinely lives outside it — ${up}, ` +
-          `say in one line that you widened and why, and carry on. One rung at a time.\n` +
-          (inCwd
-            ? `Session cwd is ${cwd}, so this is a narrowing. Mention /cd ${r.path} only if the task turns out to be long-running.\n`
-            : `Note: ${r.path} is outside the session cwd (${cwd}) — say so in one line, since it means the work is wider than where this session started.\n`) +
-          `Table: ${TABLE}. If the verdict is plainly wrong, ignore it and say so in one line.`,
-      },
-    }) + "\n"
-  );
+export function scanRoots(value = process.env.ACC_ROUTE_SCAN_ROOTS) {
+  return value
+    ? value.split(path.delimiter).filter(Boolean)
+    : ["C:\\code", "C:\\code\\lifeos-ecosystem"];
 }
 
 // `route.mjs doctor` - completeness check: every first-level repo dir (has
@@ -182,7 +128,7 @@ function hook() {
 // ROUTING.md. Exit 1 on gaps so it can gate.
 function doctorCli() {
   const dirs = [];
-  for (const root of ["C:\\code", "C:\\code\\lifeos-ecosystem"]) {
+  for (const root of scanRoots()) {
     let entries;
     try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { continue; }
     for (const e of entries) {
@@ -203,4 +149,3 @@ function doctorCli() {
 
 if (process.argv.includes("--text")) cli(process.argv);
 else if (process.argv[2] === "doctor") doctorCli();
-else if (process.argv[1] && norm(process.argv[1]) === norm(fileURLToPath(import.meta.url))) hook();

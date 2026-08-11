@@ -28,7 +28,7 @@ export function readStdinJson(dflt = {}) {
 // entirely (path.resolve("") is truthy, so this must check argv[1] first). No
 // try/catch: every call site passes import.meta.url, always a valid file://
 // URL, so fileURLToPath can't throw here — an unreachable catch is exactly
-// what covgate's branch floor exists to flag (see testplan.mjs, lane.mjs's
+// what covgate's branch floor exists to flag (see lane.mjs's
 // retryTransport comments for the two prior times this repo hit the same
 // thing and removed the guard instead of testing around it).
 export function isMainModule(url) {

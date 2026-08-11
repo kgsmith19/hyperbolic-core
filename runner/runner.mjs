@@ -443,6 +443,6 @@ export async function cli(argv = process.argv.slice(2)) {
   return await runLoop(job, flag === "--once");
 }
 // Guarded so the file is importable by runner.test.mjs without running the
-// CLI on import — the same shape hooks/testplan.mjs and hooks/covgate.mjs
+// CLI on import — the same shape as the other executable modules
 // already use.
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exit(await cli());

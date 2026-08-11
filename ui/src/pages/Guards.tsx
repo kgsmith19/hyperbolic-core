@@ -103,7 +103,7 @@ export default function Guards() {
               if (pairs.length) importVault.mutate(pairs);
             }}>Save to vault</Button>
             <SelectBox className="w-auto p-1.5" value={vaultKey} onChange={(e) => setVaultKey(e.target.value)}>
-              <option value="">(keys Claude can use)</option>
+              <option value="">(keys the coding agent can use)</option>
               {(s?.vaultKeys ?? []).map((k) => <option key={k} value={k}>{k}</option>)}
             </SelectBox>
             <Button size="sm" variant="outline" disabled={!vaultKey} onClick={() => rmVaultKey.mutate(vaultKey)}>Delete key</Button>
@@ -112,7 +112,7 @@ export default function Guards() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Claude's requests (runbox)</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Agent requests (runbox)</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>

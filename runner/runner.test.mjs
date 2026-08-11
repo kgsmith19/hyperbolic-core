@@ -58,12 +58,12 @@ function job(overrides = {}) {
   };
 }
 
-function usageTurn(ts, { input = 0, out = 0 } = {}) {
+function usageTurn(ts, { input = 0, out = 0, model = "claude-opus-5" } = {}) {
   return JSON.stringify({
     type: "assistant",
     timestamp: ts,
     message: {
-      model: "claude-opus-5",
+      model,
       usage: {
         input_tokens: input,
         output_tokens: out,
@@ -425,13 +425,12 @@ test("integration: a hung run is killed PROMPTLY at its timeout, not merely even
   const dir = fakeClaudeDir("hang");
   process.env.FAKE_CLAUDE_MODE = "hang";
   const t0 = Date.now();
-  // 300ms, not tighter: the fake binary is a real spawn -> sh -> node ->
-  // dynamic-import chain, and under --experimental-test-coverage
-  // instrumentation that startup alone can eat tens of ms — a too-tight
-  // timeout was observed killing the process before it even wrote pid.txt
-  // (flaked once at 30ms). The real proof is elapsed << the 15s natural
-  // hang, not a specific small number.
-  const r = await runClaudeOnce(job({ runTimeoutMin: 0.005 })); // 300ms timeout
+  // The fake binary is a real spawn -> sh -> node -> dynamic-import chain.
+  // Coverage instrumentation can make that startup take hundreds of
+  // milliseconds, so the timeout must leave enough room for the child to
+  // write its proof-of-life PID before the kill. The assertion is elapsed
+  // << the 15s natural hang, not an artificially tiny timeout.
+  const r = await runClaudeOnce(job({ runTimeoutMin: 0.02 })); // 1.2s timeout
   const elapsed = Date.now() - t0;
   assert.notEqual(r.code, 0, "a killed process must not report success");
   assert.ok(elapsed < 5000, `kill took ${elapsed}ms — the process was orphaned, not killed (see killTree)`);
@@ -765,6 +764,21 @@ test("AC-009: token/dollar directive ceilings halt the loop before another run s
   assert.ok(alerts.length >= 1);
   assert.match(D.logTail(d.id, 5000), /HALTED/);
   assert.match(D.logTail(d.id, 5000), /token ceiling reached/);
+});
+
+test("AC-009: an exact whole-dollar spend is reported without decimal noise", async () => {
+  const d = directive({ budget: { dollars: 1 } });
+  const sid = "00000000-0000-4000-8000-000000000223";
+  D.bindSession({ sessionId: sid, directiveId: d.id });
+  writeSessionTranscript(sid, [
+    usageTurn("2026-08-01T00:00:00.000Z", { input: 1_250_000, model: "claude-haiku-5" }),
+  ]);
+  const j = loadJob(`directive:${d.id}`);
+  const code = await runLoop(j, false, {
+    run: async () => ({ code: 0, result: "", err: "" }),
+  });
+  assert.equal(code, 7);
+  assert.match(D.logTail(d.id, 5000), /dollar ceiling reached \(\$1\/\$1 est\)/);
 });
 
 test("issue #68: a budget-exhausted halt writes exactly one receipt, and a retried halt never duplicates it", async () => {

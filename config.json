@@ -16,47 +16,62 @@
                   "C:/code/lifeos-ecosystem/lifeos":  {
                                                           "cells":  {
                                                                         "kernel":  [
-                                                                                       "src/kernel/",
-                                                                                       "supabase/migrations/",
-                                                                                       "tests/kernel/"
+                                                                                       "backend/src/kernel/",
+                                                                                       "backend/supabase/migrations/",
+                                                                                       "backend/tests/kernel/"
                                                                                    ],
                                                                         "interface":  [
-                                                                                          "src/api/",
-                                                                                          "tests/api/",
-                                                                                          "src/mcp_server/",
-                                                                                          "tests/mcp/"
+                                                                                          "backend/src/api/",
+                                                                                          "backend/tests/api/",
+                                                                                          "backend/src/mcp_server/",
+                                                                                          "backend/tests/mcp/"
                                                                                       ],
                                                                         "rules":  [
-                                                                                      ".agents/",
-                                                                                      "docs/adr/"
+                                                                                      "backend/.agents/",
+                                                                                      "backend/docs/adr/"
                                                                                   ],
                                                                         "calendar":  [
-                                                                                         "src/domains/calendar/",
-                                                                                         "tests/calendar/"
+                                                                                         "backend/src/domains/calendar/",
+                                                                                         "backend/tests/calendar/"
                                                                                      ],
                                                                         "ops":  [
-                                                                                    "src/domains/ops/",
-                                                                                    "tests/ops/"
+                                                                                    "backend/src/domains/ops/",
+                                                                                    "backend/tests/ops/"
                                                                                 ],
                                                                         "documents":  [
-                                                                                          "src/domains/documents/",
-                                                                                          "tests/documents/"
+                                                                                          "backend/src/domains/documents/",
+                                                                                          "backend/tests/documents/"
                                                                                       ],
                                                                         "bills":  [
-                                                                                      "src/domains/bills/",
-                                                                                      "tests/bills/"
+                                                                                      "backend/src/domains/bills/",
+                                                                                      "backend/tests/bills/"
                                                                                   ],
                                                                         "intentions":  [
-                                                                                           "src/domains/intentions/",
-                                                                                           "tests/intentions/"
+                                                                                           "backend/src/domains/intentions/",
+                                                                                           "backend/tests/intentions/"
                                                                                        ],
                                                                         "episodes":  [
-                                                                                         "src/domains/episodes/",
-                                                                                         "tests/episodes/"
+                                                                                         "backend/src/domains/episodes/",
+                                                                                         "backend/tests/episodes/"
+                                                                                     ],
+                                                                        "cpap":  [
+                                                                                     "backend/src/domains/cpap/",
+                                                                                     "backend/tests/cpap/"
+                                                                                 ],
+                                                                        "health_connect":  [
+                                                                                               "backend/src/domains/health_connect/",
+                                                                                               "backend/tests/health_connect/"
+                                                                                           ],
+                                                                        "money":  [
+                                                                                      "backend/src/domains/money/",
+                                                                                      "backend/tests/money/"
+                                                                                  ],
+                                                                        "frontend":  [
+                                                                                         "frontend/"
                                                                                      ]
                                                                     },
                                                           "alwaysAllowed":  [
-                                                                                ".agents/task.json",
+                                                                                "backend/.agents/task.json",
                                                                                 "cross-domain-change-request.md"
                                                                             ]
                                                       }
