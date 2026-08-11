@@ -1,0 +1,41 @@
+Windows IP Configuration
+
+
+Ethernet adapter Ethernet 2:
+
+   Media State . . . . . . . . . . . : Media disconnected
+   Connection-specific DNS Suffix  . :
+
+Unknown adapter Tailscale:
+
+   Connection-specific DNS Suffix  . :
+   Link-local IPv6 Address . . . . . : fe80::PLACEHOLDER%30
+   Autoconfiguration IPv4 Address. . : 169.254.83.107
+   Subnet Mask . . . . . . . . . . . : 255.255.0.0
+   Default Gateway . . . . . . . . . :
+
+Wireless LAN adapter Local Area Connection* 1:
+
+   Media State . . . . . . . . . . . : Media disconnected
+   Connection-specific DNS Suffix  . :
+
+Wireless LAN adapter Local Area Connection* 2:
+
+   Media State . . . . . . . . . . . : Media disconnected
+   Connection-specific DNS Suffix  . :
+
+Wireless LAN adapter Wi-Fi:
+
+   Connection-specific DNS Suffix  . :
+   IPv6 Address. . . . . . . . . . . : PLACEHOLDER-GLOBAL-IPV6
+   Temporary IPv6 Address. . . . . . : PLACEHOLDER-TEMP-IPV6
+   Link-local IPv6 Address . . . . . : fe80::PLACEHOLDER%16
+   IPv4 Address. . . . . . . . . . . : 10.215.141.93
+   Subnet Mask . . . . . . . . . . . : 255.255.255.0
+   Default Gateway . . . . . . . . . : fe80::PLACEHOLDER-GW%16
+                                       10.215.141.84
+
+Ethernet adapter Bluetooth Network Connection:
+
+   Media State . . . . . . . . . . . : Media disconnected
+   Connection-specific DNS Suffix  . :

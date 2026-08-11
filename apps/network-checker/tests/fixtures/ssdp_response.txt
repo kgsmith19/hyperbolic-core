@@ -1,0 +1,9 @@
+HTTP/1.1 200 OK
+CACHE-CONTROL: max-age=1800
+DATE: Sat, 08 Aug 2026 12:00:00 GMT
+EXT:
+LOCATION: http://192.168.1.1:5431/rootDesc.xml
+SERVER: Linux/3.4.11, UPnP/1.0, Portable SDK for UPnP devices/1.6.19
+ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1
+USN: uuid:0000e068-20a0-00e0-20a0-48a9d2b3c1a4::urn:schemas-upnp-org:device:InternetGatewayDevice:1
+
