@@ -2,11 +2,10 @@
 
 diagnose.py answers "what broke in this row". This answers "what should the
 user be told, and in what order" -- drawing on three sources at once: culprits
-that recurred across the sample history, LLM errors grouped into bursts, and
-the standing conditions the latest environment scan measured.
-
-The split follows the one the tests already had: reading a row is a different
-job from deciding what to say about a hundred of them.
+that recurred across the sample history, CLI-transcript API errors grouped
+into bursts, and the standing conditions the latest environment scan
+measured. Reading a row is a different job from deciding what to say about
+a hundred of them, which is why the split follows the one the tests had.
 """
 from .diagnose import bursts, culprit
 
@@ -210,7 +209,8 @@ def _sample_causes(samples):
     } for cause, n in sorted(counts.items(), key=lambda kv: -kv[1])]
 
 def _burst_causes(errors):
-    """LLM errors arriving in clusters, and how many landed unmonitored."""
+    """API errors from a CLI transcript, arriving in clusters, and how many
+    landed unmonitored -- one evidence source among the report's others."""
     grouped = bursts(errors) if errors else []
     if not grouped:
         return []
@@ -219,8 +219,9 @@ def _burst_causes(errors):
     return [{
         "cause": "llm_error_bursts",
         "confidence": "high" if len(grouped) > 3 else "medium",
-        "evidence": f"{len(errors)} LLM errors in {len(grouped)} bursts; "
-                    f"largest {worst['count']} errors over {worst['span_s']}s"
+        "evidence": f"{len(errors)} API errors from the CLI transcript in "
+                    f"{len(grouped)} bursts; largest {worst['count']} errors "
+                    f"over {worst['span_s']}s"
                     + (f"; {blind} occurred with no monitoring running"
                        if blind else ""),
         "fix": "Bursts within seconds indicate a brief total loss of "

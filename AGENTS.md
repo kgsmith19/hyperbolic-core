@@ -1,8 +1,10 @@
 # netcheck — front door
 
-Local-first network diagnostic. Names *which layer* breaks LLM API connections
-by correlating multi-layer probes against errors already recorded in Claude
-Code transcripts.
+Local-first network diagnostic. Names *which layer* of your home network
+broke — Wi-Fi, router, modem, ISP, or a specific device — by correlating
+multi-layer probes; one built-in evidence source joins that against errors
+already recorded in Claude Code transcripts. See `docs/PRD.md` section 1 and
+its 2026-08-10 pivot entry (section 16) for the full framing.
 
 ## Sources of truth, in order
 
