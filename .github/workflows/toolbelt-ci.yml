@@ -1,12 +1,14 @@
-name: "PR Gate"
+name: "Toolbelt PR Gate"
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "apps/toolbelt/**"
   merge_group:
 
 concurrency:
-  group: pr-gate-${{ github.event.pull_request.number || github.ref }}
+  group: toolbelt-pr-gate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -14,7 +16,7 @@ permissions:
 
 jobs:
   pr-gate:
-    name: PR Gate
+    name: Toolbelt PR Gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -26,20 +28,21 @@ jobs:
           python-version: "3.12"
       - name: Prepare Prompt Organizer test sessions
         run: node tests/export-test-sessions.mjs
-        working-directory: apps/prompt-organizer
+        working-directory: apps/toolbelt/apps/prompt-organizer
       - name: Run Toolbelt tests
         run: node --test "tests/*.test.mjs"
+        working-directory: apps/toolbelt
       - name: Run Prompt Organizer tests
         run: node --test "tests/*.test.mjs"
-        working-directory: apps/prompt-organizer
+        working-directory: apps/toolbelt/apps/prompt-organizer
       - name: Install Prompt Organizer browser test
         run: |
           npm install --no-save --no-package-lock @playwright/test@1.52.0
           npx playwright install --with-deps chromium
-        working-directory: apps/prompt-organizer
+        working-directory: apps/toolbelt/apps/prompt-organizer
       - name: Start Prompt Organizer
         run: python3 -m http.server 8812 --directory web >/tmp/prompt-organizer.log 2>&1 &
-        working-directory: apps/prompt-organizer
+        working-directory: apps/toolbelt/apps/prompt-organizer
       - name: Wait for Prompt Organizer
         shell: bash
         run: |
@@ -54,7 +57,7 @@ jobs:
           exit 1
       - name: Run Prompt Organizer critical browser journey
         run: npx playwright test --config playwright.config.mjs
-        working-directory: apps/prompt-organizer
+        working-directory: apps/toolbelt/apps/prompt-organizer
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:8812
       - name: Upload Prompt Organizer browser evidence
@@ -63,10 +66,10 @@ jobs:
         with:
           name: prompt-organizer-e2e-evidence
           path: |
-            apps/prompt-organizer/playwright-report/
-            apps/prompt-organizer/test-results/
+            apps/toolbelt/apps/prompt-organizer/playwright-report/
+            apps/toolbelt/apps/prompt-organizer/test-results/
           if-no-files-found: ignore
           retention-days: 14
       - name: Run Network Checker tests and deterministic scanners
         run: bash tools/check.sh
-        working-directory: apps/network-checker
+        working-directory: apps/toolbelt/apps/network-checker
