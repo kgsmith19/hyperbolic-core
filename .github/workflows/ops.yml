@@ -39,8 +39,11 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Secrets come from Infisical via OIDC at run time — GitHub stores none.
       - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
@@ -51,11 +54,12 @@ jobs:
           env-slug: prod
           domain: https://app.infisical.com
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         if: inputs.task != 'install-scheduled-jobs' && inputs.task != 'run-scheduled-jobs'
         with:
           python-version: "3.14"
           cache: pip
+          cache-dependency-path: backend/pyproject.toml
       - run: python -m pip install -e .
         if: inputs.task != 'install-scheduled-jobs' && inputs.task != 'run-scheduled-jobs'
 
