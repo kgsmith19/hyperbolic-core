@@ -25,11 +25,23 @@ jobs:
       - run: npm ci
       - name: Build
         run: npm run build
+      - name: Require ACC repository token
+        shell: bash
+        env:
+          ACC_REPOSITORY_TOKEN: ${{ secrets.ACC_REPOSITORY_TOKEN }}
+        run: |
+          if [[ -z "${ACC_REPOSITORY_TOKEN}" ]]; then
+            echo "::error::ACC_REPOSITORY_TOKEN is required to check out the private agentic-command-center repository."
+            exit 1
+          fi
       - name: Check out the ACC contract server
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: kgsmith19/agentic-command-center
           path: acc-checkout
+          token: ${{ secrets.ACC_REPOSITORY_TOKEN }}
+          persist-credentials: false
+          ref: main
       - name: Cache Playwright Chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
