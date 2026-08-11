@@ -1,27 +1,27 @@
 ---
 name: Work item
-about: A validated, approved unit of delivery work (feature, bug, maintenance, security)
+about: Describe a bug, feature, safety improvement, or maintenance outcome
 title: ''
-labels: 'status:ready'
+labels: ''
 assignees: ''
 ---
 
 ## Outcome
-What useful result should exist?
 
-## Source of Intent
-PRD / bug / incident / security / maintenance:
+What useful result should exist when this is complete?
 
-## Acceptance
+## Context
+
+What problem, observation, or dependency explains the work?
+
+## Acceptance criteria
+
 - [ ]
 
-## Risk
-R0 / R1 / R2 / R3 / R4 — see `AGENTS.md` / `.agent/project.yaml`. Add the matching `risk:RN` label.
+## Verification notes
 
-## Spec / Slices
-Spec needed (only if the Issue alone can't unambiguously define correct behavior): Yes / No
+Which behavior and commands should demonstrate success?
 
-- [ ] SL-001:
+## Out of scope
 
-## Out of Scope
 -
