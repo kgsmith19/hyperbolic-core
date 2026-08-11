@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { render } from "../web/render.mjs";
 import { searchPrompts } from "../web/search.mjs";
 
-// NFR-002's threshold, verbatim from the PRD.
+// Rendering a maximum-size prompt must stay below this p95 budget.
 const BUDGET_MS = 100;
-// NFR-001's threshold and library size, verbatim from the PRD.
+// Searching a 1,000-prompt library must stay below this p95 budget.
 const SEARCH_BUDGET_MS = 300;
 
 // p95 over warm iterations. Warm-up matters: the first call pays JIT cost.

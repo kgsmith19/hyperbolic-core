@@ -3,14 +3,14 @@ title: Prompt Organizer System Requirements
 status: active
 scope: repo
 created: 2026-08-07
-updated: 2026-08-08
+updated: 2026-08-11
 owner: Kyle
 traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-008, FR-010, FR-011, FR-012, FR-013, FR-014, NFR-003, NFR-004, NFR-005, NFR-006, NFR-007, NFR-009, NFR-010, CON-001]
 ---
 
 # System Requirements
 
-What the system must be. What it must do lives in `docs/PRD.md`.
+This document records the system's current technical constraints. Product changes begin with a GitHub Issue.
 
 ## 1. Runtime shape
 
@@ -27,7 +27,7 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 |---|---|---|---|
 | SR-05 | RLS enabled **and forced** on every `prompt.*` table; rows are owner-scoped. | `force row level security` + `owner_all` policy on `user_id = auth.uid()` | T-I-002, T-I-003; `pg_class` |
 | SR-06 | The grant surface is the narrowest that satisfies the shipped slices: `prompt.prompt` has `SELECT` (anon, authenticated), `INSERT` (authenticated), and a column-scoped `UPDATE` on `title, body` (since SL-004) plus `is_active` (since SL-011) only (`id`, `user_id`, `created_at` stay unwritable) — never `DELETE`. `prompt.prompt_version` has only `SELECT` and `INSERT`; no `UPDATE` or `DELETE` grant exists on it at all, ever (SR-19). | Postgres grants | `information_schema.role_table_grants` |
-| SR-07 | Only the anon key appears in this repo; it is public by design and RLS is the boundary. The service-role key never appears anywhere. | Key choice + grep | GATE-SHIP SH6 |
+| SR-07 | Only the anon key appears in this repo; it is public by design and RLS is the boundary. The service-role key never appears anywhere. | Key choice + grep | Repository secret scan |
 | SR-08 | Prompt bodies (confidential, DR-002) reach only the Supabase project; no other host. | The page's two `fetch` targets | Code inspection of `web/index.html` |
 | SR-18 | Two prompts can never share a title, case-insensitively. | `unique index (lower(title))` on `prompt.prompt` | T-I-004 |
 | SR-19 | A stored version row is never modified or deleted, by any caller, ever. | The absence of any `UPDATE`/`DELETE` grant or policy on `prompt.prompt_version` — an absence is the mechanism, not a rule enforced in application code | T-I-006 |
@@ -75,10 +75,10 @@ What the system must be. What it must do lives in `docs/PRD.md`.
 | Browser support matrix | One user, one current browser; baseline ES modules and `fetch` only |
 | Compliance regime | No regulated data; DR classifications are internal/confidential, protected by SR-05..SR-08 |
 
-## Appendix: GATE-SYSREQ self-check
+## Appendix: documentation self-check
 
 - [x] Every requirement has an ID, a value, and a verification method.
 - [x] Security requirements name mechanisms, not intents.
-- [x] Nothing here duplicates a PRD functional requirement.
+- [x] The document focuses on technical constraints rather than duplicating product behavior.
 - [x] "Not required" is non-empty with a reason per line.
 - [x] No unfilled placeholder remains.

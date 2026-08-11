@@ -71,7 +71,7 @@ test("filters_to_only_prompts_carrying_the_tag__T_I_009__AC_002", async () => {
 // already-fetched prompts+tags list -- clicking a chip never issues a server
 // call, so a DB round trip cannot be the mechanism that proves "second click
 // clears." The pure function it actually exercises, `toggleTagFilter`
-// (web/search.mjs), is the cheapest sufficient mechanism (rules/06-TESTS.md).
+// (web/search.mjs), is the smallest sufficient check for that state transition.
 // No DB dependency: this test does not need the migration applied to run.
 test("second_click_on_same_tag_clears_the_filter__T_I_010__AC_005", () => {
   const afterFirstClick = toggleTagFilter(null, "sdd");

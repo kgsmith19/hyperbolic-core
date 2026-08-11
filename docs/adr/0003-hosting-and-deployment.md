@@ -2,7 +2,7 @@
 
 ## Context
 
-Every PRD requirement shipped as of `v0.1.14` (2026-08-08). `web/index.html` has never been served from anything other than `python3 -m http.server 8812` on a developer laptop. Issue #12 asked for an explicit shape decision before any deployment work starts.
+Every product requirement current as of `v0.1.14` shipped by 2026-08-08. `web/index.html` has never been served from anything other than `python3 -m http.server 8812` on a developer laptop. Issue #12 asked for an explicit shape decision before any deployment work starts.
 
 The constraints that must survive the hosting choice (from `AGENTS.md`, `docs/SYSTEM-REQUIREMENTS.md`):
 
@@ -72,7 +72,7 @@ The one meaningful surface change: the page becomes reachable by anyone with the
 
 **BUILD — deploy `web/index.html` to GitHub Pages.**
 
-Option A satisfies every constraint (SR-02, SR-03, SR-07, SR-08, SR-15) with the smallest possible surface: no new account, no new secret, no new dependency, no application build step. The security posture does not change. The status quo (Option D) becomes unnecessary friction once all PRD requirements are done.
+Option A satisfies every constraint (SR-02, SR-03, SR-07, SR-08, SR-15) with the smallest possible surface: no new account, no new secret, no new dependency, no application build step. The security posture does not change. The status quo (Option D) becomes unnecessary friction once the existing product requirements are complete.
 
 ## Smallest first slice
 

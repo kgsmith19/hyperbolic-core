@@ -1,66 +1,35 @@
-# Machine-readable, repository-specific facts only. See AGENTS.md for prose policy.
+# Repository facts and executable commands.
 
 project:
   name: prompt-organizer
-  type: web-app-supabase-backed
-  language: [sql-postgres, vanilla-js]
-  standard_lock: .agent/standard.lock
+  type: static-web-app-with-supabase
+  languages:
+    - sql-postgres
+    - vanilla-javascript
 
 commands:
-  setup: null
-  build: null
-  format: null
-  lint: null
-  typecheck: null
-  fast_verify: node --test "tests/*.test.mjs"
-  test: node --test "tests/*.test.mjs"
-  full_verify: node --test "tests/*.test.mjs"
-  e2e: null
-  serve_local: python3 -m http.server 8812
-
-platforms:
-  os: any
-
-risk:
-  default: R2
-  protected_paths:
-    - supabase/migrations/**
-    - specs/TEST-LEDGER.md
-    - .github/workflows/**
-    - .agent/**
-  r4_forbidden:
-    - "DELETE grant on prompt.prompt_version"
-    - "DELETE grant on prompt.usage"
-    - "service-role key committed anywhere in this repo"
-
-budget_ceilings_per_slice:
-  net_source_loc: 300
-  test_loc: 200
-  source_files: 3
-  test_files: 3
-  new_tables: 1
-  new_columns: 6
-  new_endpoints: 1
-  new_ui_surfaces: 1
-  new_libraries: 0
-  new_third_party: 0
-  new_tests: 8
-  function_loc: 40
-  file_loc: 250
-  complexity: 8
-  suite_seconds: 120
-  red_green_cycles_before_halt: 3
-
-deployment:
-  mechanism: none
-  smoke_command: null
-  authority_boundary: not_applicable
+  unit_test: 'node --test "tests/*.test.mjs"'
+  install_browser_test: "npm install --no-save --no-package-lock @playwright/test@1.52.0"
+  install_browser: "npx playwright install --with-deps chromium"
+  browser_test: "npx playwright test --config playwright.config.mjs"
+  serve_local: "python3 -m http.server 8812 --directory web"
 
 ci:
-  profile_entry_point: .github/workflows/ci.yml
-  required_check: "PR Gate"
-  required_trigger: "ready pull request + merge_group"
+  workflow: .github/workflows/ci.yml
+  workflow_name: "PR Gate"
+  job_name: "PR Gate"
+  triggers:
+    - pull_request
+    - merge_group
 
-telemetry:
-  acc_integration: none
-  toolbelt_integration: none
+data:
+  supabase_project: toolbelt
+  supabase_project_ref: woltgcggxaehtuypkxqk
+  owned_schema: prompt
+  security_boundary: row-level-security
+  accepted_client_key: public-anon-key
+  forbidden_client_key: service-role-key
+
+standard:
+  lock_file: .agent/standard.lock
+  mode: informational

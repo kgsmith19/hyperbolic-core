@@ -1,8 +1,12 @@
 name: "PR Gate"
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
 
 concurrency:
   group: pr-gate-${{ github.event.pull_request.number || github.ref }}
@@ -12,13 +16,51 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  pr-gate:
     name: PR Gate
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
-      - run: node --test "tests/*.test.mjs"
+
+      - name: Run Node tests
+        run: node --test "tests/*.test.mjs"
+
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.52.0
+          npx playwright install --with-deps chromium
+
+      - name: Start local server
+        run: python3 -m http.server 8812 --directory web &
+        shell: bash
+
+      - name: Wait for local server
+        shell: bash
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://localhost:8812 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Local server did not become ready." >&2
+          exit 1
+
+      - name: Run critical browser journey
+        run: npx playwright test --config playwright.config.mjs
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:8812
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-evidence
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 30

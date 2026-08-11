@@ -1,26 +1,24 @@
-# Change
+## Summary
 
-## Work
-Issue: #
-Spec:
-Slice(s):
+Describe the outcome and the smallest coherent change that produces it.
 
-## What Changed
--
+## Linked Issue
 
-## Evidence
-- [ ] `node --test "tests/*.test.mjs"` passes (paste the summary line)
-- [ ] Every new test's `specs/TEST-LEDGER.md` row is mutation-verified
-- [ ] Acceptance criteria in the linked Issue/spec are satisfied
-- [ ] Migration (if any) applied to the live project, with a working `_down.sql`
+Closes #
 
-## Risk
-R0 / R1 / R2 / R3 / R4
+## Verification
 
-## Not Included
--
+- [ ] Relevant local tests pass.
+- [ ] `PR Gate` passes.
+- [ ] Affected documentation is current.
+- [ ] Any migration has a matching, verified `_down.sql` file.
 
-## Integrity
-- [ ] Tests/policies were not weakened, skipped, or bypassed to get this green
-- [ ] Scope was not unnecessarily widened beyond the linked Issue
-- [ ] Docs (PRD/spec/ADR) updated in this same PR if behavior changed
+List commands run and any check that could not be completed:
+
+## Data or Security Impact
+
+Describe schema, migration, RLS, grant, credential, or data-flow changes. Write `None` when this section does not apply.
+
+## Out of Scope
+
+List intentionally excluded work.

@@ -8,7 +8,7 @@ import { extractSections, render } from "../web/render.mjs";
 const TWO_SECTIONS =
   "head <!--OPTIONAL:a-->AAA<!--/OPTIONAL:a--> mid <!--OPTIONAL:b-->BBB<!--/OPTIONAL:b--> tail";
 
-// T-U-017 -> AC-001, PROP-003, PROP-007 -> FR-005. The PRD's literal FR-005
+// T-U-017 -> AC-001, PROP-003, PROP-007 -> FR-005. The FR-005 product
 // criterion: including only `a` keeps a's content, drops b's entirely, and
 // leaves no fence text anywhere. The surrounding text is asserted exactly so
 // a parser that over-matches (greedy content, or eating adjacent characters)

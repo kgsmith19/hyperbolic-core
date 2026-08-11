@@ -14,9 +14,8 @@ const FENCE_RE = /<!--(\/?)OPTIONAL:([A-Za-z0-9_-]+)-->/g;
 // no matching open is ignored, which is what keeps mismatched ids, stray
 // closers, and lone opening fences as literal text (SPEC-0006 AC-004, and
 // SL-002's PROP-005 byte-for-byte guarantee). Overlapping pairs are dropped
-// left-to-right, so interleaved sections degrade to the old behavior rather
-// than to corrupt output (SPEC-0007 AC-005; nesting stays undefined per
-// PRD ASM-004).
+// left-to-right, so interleaved sections degrade to the established
+// behavior instead of corrupting output; nested sections remain undefined.
 function sectionSpans(body) {
   const open = new Map();
   const pairs = [];

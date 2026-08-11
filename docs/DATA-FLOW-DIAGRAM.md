@@ -3,7 +3,7 @@ title: Prompt Organizer Data Flow Diagram
 status: active
 scope: repo
 created: 2026-08-07
-updated: 2026-08-08
+updated: 2026-08-11
 owner: Kyle
 traces: [FR-001, FR-002, FR-003, FR-004, FR-007, FR-008, FR-009, FR-010, FR-011, FR-012, FR-013, FR-014, NFR-003, NFR-005, NFR-010, NFR-011, DR-001, DR-002, DR-003, DR-005, DR-006, DR-007]
 ---
@@ -71,7 +71,7 @@ One trust boundary: browser to Supabase. No third position exists, which is why 
 | F-13 | Save / read a named configuration | Browser, the render panel's select and save controls | `GET`/`POST /rest/v1/configuration` | `prompt.configuration` | Variable values (DR-003, confidential — may name real systems), included section ids (internal) | `EXISTS`-through-parent RLS, same shape as F-9 (SR-29); grant is `SELECT`/`INSERT` only, no `UPDATE`/`DELETE` |
 | F-14 | Render over the API (U-002, an agent acting for Kyle) | Any authenticated caller, not necessarily the browser page | `GET /rest/v1/rpc/render_prompt?p_name=...&p_config=...` | `prompt.prompt`, `prompt.configuration` (read-only) | Rendered body text (confidential — the same rules as F-8, just server-side) | `security invoker` — the RPC inherits the caller's own RLS, no new policy (SR-30); `EXECUTE` scoped to `authenticated` |
 
-Render itself (FR-004/007/010, SL-002; optional sections FR-005, SL-003) stays a pure client-side transform over data F-4 already fetched — it opens no flow to the database and carries no confidential data anywhere. F-10 and F-11 (SL-007) are new and separate: both fire after a copy, not during render, and neither carries body text. Section ids are derived from the body at read time and never stored (DR-004) except when saved as part of a configuration (F-13). Tags (FR-012, SL-006) ride the same trust boundary as everything else: ownership checked through the parent row, cascade-deleted with it (SR-24). `core.run`/`core.cost` instrumentation (NFR-010) is done as of `SPEC-0009` (2026-08-07): F-11 is a function call, never a direct write against `core.*` — `SR-04`/`SR-27` are the mechanism that keeps this repo's own `CLAUDE.md` boundary real rather than conventional. F-12 (SL-011, SPEC-0010) is a display-only flag flip, carrying no confidential data and touching no other row. F-13 (SL-005, SPEC-0011) is the first flow to carry DR-003 (variable values) into storage — previously values existed only transiently in the DOM.
+Render itself (FR-004/007/010, SL-002; optional sections FR-005, SL-003) stays a pure client-side transform over data F-4 already fetched — it opens no flow to the database and carries no confidential data anywhere. F-10 and F-11 (SL-007) are new and separate: both fire after a copy, not during render, and neither carries body text. Section ids are derived from the body at read time and never stored (DR-004) except when saved as part of a configuration (F-13). Tags (FR-012, SL-006) ride the same trust boundary as everything else: ownership checked through the parent row, cascade-deleted with it (SR-24). `core.run`/`core.cost` instrumentation (NFR-010) is done as of `SPEC-0009` (2026-08-07): F-11 is a function call, never a direct write against `core.*` — `SR-04`/`SR-27` are the mechanism that preserves the repository ownership boundary documented in `AGENTS.md`. F-12 (SL-011, SPEC-0010) is a display-only flag flip, carrying no confidential data and touching no other row. F-13 (SL-005, SPEC-0011) is the first flow to carry DR-003 (variable values) into storage — previously values existed only transiently in the DOM.
 
 ## 3. Data at rest
 
@@ -99,7 +99,7 @@ Test fixture rows accumulate in `prompt.prompt`, `prompt.prompt_version`, `promp
 
 None beyond the account emails Supabase auth already holds. Prompt bodies are confidential business text, not PII; NFR-011 keeps them off every third party — this application sends them to its own database and nowhere else.
 
-## Appendix: GATE-DFD self-check
+## Appendix: documentation self-check
 
 - [x] Every flow names source, sink, transport, and authorization.
 - [x] Every store names classification and retention.

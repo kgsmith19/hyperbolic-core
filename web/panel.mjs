@@ -1,7 +1,6 @@
-// SPEC-0006 (SL-003): the render panel -- one text input per detected
-// variable, one checkbox per detected optional section. Extracted from
-// index.html, which sat at NFR-009's 250-line ceiling exactly (PRD change log
-// v0.1.5 flagged it for the next slice needing to extend it).
+// The render panel creates one text input per detected variable and one
+// checkbox per detected optional section. It is separate from index.html to
+// preserve the documented modularity boundary.
 import { extractVariables, extractSections, render } from "./render.mjs";
 
 // SPEC-0011 AC-001: only values for a still-present variable name apply --

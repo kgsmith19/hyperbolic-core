@@ -1,6 +1,5 @@
-# Pinned agent-engineering-standard revision for this repo.
-# Bumping this is an explicit reviewed change, never silent drift onto a moving branch.
-standard_repo: kgsmith19/agent-engineering-standard
-standard_commit: e0246cd8fbd70e91b1107979c578dcfc311d179e
-pinned_at: "2026-08-10"
-pinned_by: lean PR Gate conformance
+# Informational reference only; this file does not configure or enforce repository policy.
+standard: kgsmith19/agent-engineering-standard
+commit: 46beaac2e4db915661a9fb9c0f4094f5daf8298d
+pinned_at: "2026-08-11"
+mode: informational

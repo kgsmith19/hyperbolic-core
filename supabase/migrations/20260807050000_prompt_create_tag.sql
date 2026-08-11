@@ -7,9 +7,8 @@ create table prompt.tag (
   primary key (prompt_id, tag)
 );
 
--- No delete grant: removing a tag is out of scope this slice (7.1) -- the
--- PRD names only add-and-filter; tags accumulate until a future slice
--- justifies a delete path, same posture as SL-000/SL-004's grant discipline.
+-- No delete grant: tags are add-and-filter only; removal remains outside
+-- this migration until an explicit product change introduces a delete path.
 grant select, insert on prompt.tag to authenticated;
 
 alter table prompt.tag enable row level security;

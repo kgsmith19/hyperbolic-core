@@ -1,46 +1,51 @@
 # prompt-organizer
 
-## What this is
-
-A place to keep the instructions you write for AI tools, so you can find them again and reuse them instead of retyping them. Save a prompt once, mark the parts that change, fill them in later, copy the finished text. Owns schema `prompt` in the `toolbelt` Supabase project; the shared spine lives in the `toolbelt` repo.
+Prompt Organizer stores reusable AI prompts, fills their variables, and copies the rendered result. It is a zero-build static web application backed by the `prompt` schema in the shared `toolbelt` Supabase project.
 
 ## Prerequisites
 
-| Tool | Version | Why |
-|---|---|---|
-| Node | 22 or newer | Runs the tests with the built-in `node:test` runner and native `fetch`. Nothing to install; there is no `package.json`. |
-| Python | 3 (any) | Only to serve the page locally. Any static file server works. |
+- Node.js 22 or newer for the built-in test runner and native `fetch`.
+- Python 3, or another static file server, for local use.
+- Chromium for the Playwright browser journey. The CI workflow installs it automatically.
 
-## Run it
+There is no package manifest, application server, framework, or build step.
+
+## Run locally
 
 ```bash
-python3 -m http.server 8812     # from the repo root
+python3 -m http.server 8812 --directory web
 ```
 
-Open `http://localhost:8812/web/index.html`, sign in with a Supabase account on the `toolbelt` project, save a prompt, see it listed.
+Open `http://localhost:8812`, sign in to the `toolbelt` Supabase project, and use the prompt library.
 
-## Test it
+## Verify
+
+Run the Node suite:
 
 ```bash
 node --test "tests/*.test.mjs"
 ```
 
-Runs against the live project using only the public anon key. No database credentials are needed, or accepted.
+Run the critical browser journey:
 
-## Apply migrations
+```bash
+npm install --no-save --no-package-lock @playwright/test@1.52.0
+npx playwright install --with-deps chromium
+python3 -m http.server 8812 --directory web &
+PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config playwright.config.mjs
+```
 
-`supabase/migrations/*.sql`, applied through the Supabase API. Every `<name>.sql` has a matching `<name>_down.sql` that removes exactly what it added. DDL rehearses on `lifeos-test` first, per the topology convention.
+Both suites use the live Supabase project and its public anon key. A service-role key is neither required nor accepted.
 
-## Where things are
+## Migrations
 
-| Doc | Purpose |
-|---|---|
-| `docs/PRD.md` | Source of truth for what this tool delivers |
-| `docs/SYSTEM-REQUIREMENTS.md` | What the system must be |
-| `docs/DATA-FLOW-DIAGRAM.md` | Where data comes from, goes, rests |
-| `specs/active/`, `specs/done/` | Specs in progress and completed |
-| `specs/TEST-LEDGER.md` | Every test's justification |
+Apply `supabase/migrations/*.sql` through the Supabase API. Each up migration has a matching `_down.sql` migration that reverses the same change.
 
-## Workflow
+## Documentation
 
-Requirements live in `docs/PRD.md`. Each change is one spec in `specs/active/`, built red-then-green under the budgets in `CLAUDE.md`, then moved to `specs/done/`. The full procedure is Kyle's SDD pack; the rules this repo runs on are inlined in `CLAUDE.md`.
+- `docs/SYSTEM-REQUIREMENTS.md` describes current system constraints.
+- `docs/DATA-FLOW-DIAGRAM.md` describes trust boundaries and data movement.
+- `docs/adr/` and `specs/done/` preserve shipped design history.
+- `specs/TEST-LEDGER.md` is a historical evidence record, not a required planning artifact.
+
+New work starts in GitHub Issues. Pull requests are verified by the sole `.github/workflows/ci.yml` workflow, whose workflow and check names are both `PR Gate`. Successful pull requests use native squash auto-merge.

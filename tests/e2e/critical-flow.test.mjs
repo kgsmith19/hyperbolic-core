@@ -79,19 +79,20 @@ test("critical_prompt_flow__sign_in_save_render_copy__T_E_001", async ({
   // Clicking the <summary> expands the <details> which contains the panel.
   await promptSummary.click();
 
-  // The render panel exposes one text input per variable, labelled by name.
-  const repoLabel = page.locator("#prompt-list label", { hasText: "REPO" });
-  await expect(repoLabel).toBeVisible({ timeout: 3_000 });
-  const repoInput = repoLabel.locator("input");
+  // Scope every render-panel interaction to the prompt created by this run.
+  // The shared fixture account intentionally contains many other prompts.
+  const promptDetails = page.locator("#prompt-list details", {
+    has: page.locator("summary", { hasText: PROMPT_TITLE }),
+  });
+  const repoInput = promptDetails.getByRole("textbox", {
+    name: "REPO",
+    exact: true,
+  });
+  await expect(repoInput).toBeVisible({ timeout: 3_000 });
 
   // ---- Step 4: Fill the variable and copy the rendered text ----------------
   await repoInput.fill(VARIABLE_VALUE);
 
-  // Scope the click to the expanded <details> for this specific prompt to
-  // avoid ambiguity if other rendered prompts are visible.
-  const promptDetails = page.locator("#prompt-list details", {
-    has: page.locator("summary", { hasText: PROMPT_TITLE }),
-  });
   await promptDetails.locator('button:has-text("Copy rendered text")').click();
 
   // The panel shows "Copied!" after a successful navigator.clipboard.writeText.

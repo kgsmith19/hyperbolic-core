@@ -1,31 +1,21 @@
 name: Work item
-description: Validated, approved work for this repo — not a raw idea or brainstorm.
-labels: ["status:ready"]
+description: Define a concrete outcome for prompt-organizer.
+title: ""
+labels: []
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Raw ideas aren't work items. This form is for something already shaped: a PRD requirement, a real bug, an incident, a security finding, an ADR follow-up, or a maintenance need with a falsifiable outcome.
-
   - type: textarea
     id: outcome
     attributes:
       label: Outcome
-      description: What useful result should exist when this is done?
+      description: State the useful result that should exist when this work is complete.
     validations:
       required: true
 
-  - type: dropdown
-    id: source
+  - type: textarea
+    id: context
     attributes:
-      label: Source of intent
-      options:
-        - PRD requirement (FR/NFR)
-        - Bug
-        - Incident
-        - Security finding
-        - ADR follow-up
-        - Maintenance
+      label: Context
+      description: Explain the current behavior, relevant constraints, and why the change is needed.
     validations:
       required: true
 
@@ -33,52 +23,20 @@ body:
     id: acceptance
     attributes:
       label: Acceptance criteria
-      description: Observable, testable. Not "it works" — what specifically must be true.
+      description: List observable conditions that determine whether the outcome is complete.
       placeholder: |
-        - [ ] Given ... when ... then ...
+        - [ ] Given ..., when ..., then ...
     validations:
       required: true
 
-  - type: input
-    id: success-signal
+  - type: textarea
+    id: verification
     attributes:
-      label: Product success signal (if applicable)
-      description: How would you know this outcome actually mattered, after it ships?
-
-  - type: dropdown
-    id: risk
-    attributes:
-      label: Risk
-      description: See AGENTS.md — R3 is the default minimum for anything touching supabase/migrations, RLS, or grants.
-      options:
-        - "R0 — nonbehavioral/trivial"
-        - "R1 — local, reversible behavior"
-        - "R2 — normal product/API change"
-        - "R3 — sensitive boundary (auth, PII, secrets, migrations, external actions)"
-        - "R4 — destructive, financial, privileged, irreversible"
-    validations:
-      required: true
-
-  - type: input
-    id: spec
-    attributes:
-      label: SPEC link (only if the Issue alone can't unambiguously define correct behavior)
+      label: Verification
+      description: Identify the tests, checks, or manual observations that should verify the change.
 
   - type: textarea
-    id: slices
+    id: out_of_scope
     attributes:
-      label: Thin slices (if useful)
-      placeholder: |
-        - [ ] SL-NNN: ...
-
-  - type: textarea
-    id: blockers
-    attributes:
-      label: Blockers / dependencies
-
-  - type: textarea
-    id: out-of-scope
-    attributes:
-      label: Explicit out of scope
-    validations:
-      required: true
+      label: Out of scope
+      description: List related work that is intentionally excluded.

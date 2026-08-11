@@ -19,15 +19,13 @@ where not exists (select 1 from prompt.prompt_version v where v.prompt_id = p.id
 
 -- SPEC-0008 (SL-007), FR-011: a usage row per copy, naming the prompt id,
 -- the version copied, and when. Composite FK to prompt_version, not just
--- prompt: a usage row must name a version that actually existed, the
--- cheapest mechanism that keeps history honest (rules/00-CORE.md
--- principle 1). config_name stays nullable -- FR-008 (named configurations)
--- is not-started, so nothing exists yet for a user to have selected.
+-- prompt: a usage row must name a version that actually existed, the least
+-- complex mechanism that preserves referential history. config_name stays
+-- nullable because named configurations do not exist yet.
 --
--- Deliberately not built here: NFR-010's core.run/core.cost write. This
--- repo's CLAUDE.md forbids writing to any schema but prompt, which NFR-010
--- as worded requires -- a real, unresolved contradiction in this PRD, not
--- something a migration can silently reconcile. See SPEC-0008 section 2.1.
+-- Deliberately not built here: the core.run/core.cost write requires access
+-- outside this repository's prompt schema. Leave that cross-schema behavior
+-- for an explicit product change in the repository that owns core.
 create table prompt.usage (
   id          uuid primary key default gen_random_uuid(),
   prompt_id   uuid not null,
