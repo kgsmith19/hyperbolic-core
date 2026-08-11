@@ -2,13 +2,15 @@
 
 project:
   name: toolbelt
-  type: postgres-schemas-with-static-web-ui
+  type: portfolio-tool-monorepo
   languages:
     - sql-postgres
     - vanilla-javascript
 
 commands:
   test: 'node --test "tests/*.test.mjs"'
+  prompt_test: 'cd apps/prompt-organizer && node --test "tests/*.test.mjs"'
+  prompt_browser_test: "cd apps/prompt-organizer && PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config playwright.config.mjs"
   serve_local: "python3 -m http.server 8811"
   browser_check: "open http://localhost:8811/web/index.html and verify the affected flow"
   apply_migration: "use the Supabase API for project woltgcggxaehtuypkxqk"
@@ -27,6 +29,7 @@ data:
   owned_schemas:
     - core
     - idea
+    - prompt
   security_boundary: row-level-security
   accepted_client_key: public-anon-key
   forbidden_client_key: service-role-key
