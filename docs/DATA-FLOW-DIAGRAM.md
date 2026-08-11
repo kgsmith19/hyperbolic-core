@@ -2,10 +2,10 @@
 title: netcheck Data Flow Diagram
 status: living
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-08-11
 owner: Kyle Smith
 traces: [SYSTEM-REQUIREMENTS.md]
-version: 1.0.0
+version: 1.1.0
 ---
 
 # netcheck Data Flow Diagram
@@ -154,7 +154,7 @@ graph TB
 | F12 | D1 | P4 | Samples + errors for correlation | confidential | `sqlite3` local read | N/A | No | FR-003 |
 | F13 | D1 | P5 | Unsynced rows | confidential | `sqlite3` local read | N/A | No | FR-011 |
 | F14 | D1 | P6 | Samples + errors + computed causes | confidential | `sqlite3` local read | N/A | No | FR-007 |
-| F15 | P6 | E1 | JSON payload + dashboard HTML | confidential | HTTP, loopback only | No (loopback, no external exposure) | No (E1 and P6 both on the same trusted machine) | FR-007 |
+| F15 | P6 | E1 | JSON payload + dashboard HTML, pushed over SSE on change or pulled on request | confidential | HTTP, loopback only | No (loopback, no external exposure) | No (E1 and P6 both on the same trusted machine) | FR-007 |
 
 ## 5. Trust boundaries
 

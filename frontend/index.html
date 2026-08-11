@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+<meta name="description" content="Which network layer is broken, proven with data: Wi-Fi, router, ISP, DNS, TLS, or the far side.">
+<title>netcheck</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b62d6'/%3E%3Cpath d='M8 20a11 11 0 0 1 16 0M11.5 23.5a6.4 6.4 0 0 1 9 0M16 27h.01' stroke='white' stroke-width='2.3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/tokens.css">
+<link rel="stylesheet" href="/css/base.css">
+<link rel="stylesheet" href="/css/components.css">
+<script>
+  /* Applied synchronously, before first paint, so switching themes never
+     flashes the wrong one. Everything else theme-related lives in js/theme.js. */
+  (function () {
+    var t = localStorage.getItem("netcheck:theme");
+    if (t && t !== "system") document.documentElement.setAttribute("data-theme", t);
+  })();
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="sr-only" id="live-region" aria-live="polite"></div>
+
+<div class="wrap">
+
+  <header class="app-header">
+    <h1>netcheck</h1>
+    <span class="sub" id="subtitle">no data yet</span>
+    <span id="status" class="status" data-state="reconnecting" role="status">
+      <span class="dot" aria-hidden="true"></span><span>connecting…</span>
+    </span>
+    <span class="spacer"></span>
+    <div class="toolbar">
+      <button id="btn-palette" title="Command palette (Ctrl/Cmd+K)">⌘K</button>
+      <button id="btn-theme">theme: system</button>
+      <button id="btn-export-json">export JSON</button>
+      <button id="btn-export-csv">export CSV</button>
+      <button id="btn-print">print / save PDF</button>
+      <button id="btn-refresh">refresh</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- Which layer is healthy right now -->
+    <section class="card" aria-labelledby="layers-h">
+      <h2 id="layers-h">Layers — last sample</h2>
+      <div class="pills" id="pills"></div>
+    </section>
+
+    <!-- The headline -->
+    <section class="card" aria-labelledby="causes-h">
+      <h2 id="causes-h">Most likely causes</h2>
+      <div id="causes-list"></div>
+    </section>
+
+    <div class="grid">
+      <!-- Latency over time -->
+      <section class="card" style="grid-column: 1 / -1;" aria-labelledby="latency-h">
+        <h2 id="latency-h">Latency &amp; failures</h2>
+        <div class="chart-wrap">
+          <svg class="chart" id="latency-chart" preserveAspectRatio="none" role="img" aria-label="Latency over time by layer"></svg>
+          <div class="chart-tooltip" id="latency-tooltip"></div>
+        </div>
+        <div class="legend">
+          <span><i style="background:var(--ok)"></i>gateway</span>
+          <span><i style="background:var(--accent)"></i>internet</span>
+          <span><i style="background:var(--warn)"></i>TLS to target</span>
+          <span><i style="background:var(--bad);height:8px"></i>failure</span>
+          <span class="spacer" id="sample-count">0 samples</span>
+        </div>
+      </section>
+
+      <!-- Packet loss & jitter over time -->
+      <section class="card" style="grid-column: 1 / -1;" aria-labelledby="loss-h">
+        <h2 id="loss-h">Packet loss &amp; jitter</h2>
+        <div class="chart-wrap">
+          <svg class="chart" id="loss-chart" preserveAspectRatio="none" role="img" aria-label="Packet loss and gateway jitter over time"></svg>
+          <div class="chart-tooltip" id="loss-tooltip"></div>
+        </div>
+        <div class="legend">
+          <span><i style="background:var(--ok)"></i>gateway loss %</span>
+          <span><i style="background:var(--accent)"></i>internet loss %</span>
+        </div>
+      </section>
+
+      <!-- LLM errors, with the verdict that matters -->
+      <section class="card" style="grid-column: 1 / -1;" aria-labelledby="errors-h">
+        <h2 id="errors-h">LLM connection errors <span class="muted" id="burst-note"></span></h2>
+        <div id="errors-table"></div>
+      </section>
+
+      <!-- Environment -->
+      <section class="card" aria-labelledby="env-h">
+        <h2 id="env-h">Wi-Fi &amp; adapter</h2>
+        <div id="env-table"></div>
+      </section>
+
+      <section class="card" aria-labelledby="samples-h">
+        <h2 id="samples-h">Recent samples</h2>
+        <div id="samples-table"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<dialog class="palette" id="palette" aria-label="Command palette">
+  <input id="palette-input" type="text" placeholder="Type a command…" role="combobox" aria-expanded="true" aria-controls="palette-list" autocomplete="off">
+  <ul id="palette-list" role="listbox"></ul>
+</dialog>
+
+<dialog class="shortcuts" id="shortcuts" aria-label="Keyboard shortcuts">
+  <h2>Keyboard shortcuts</h2>
+  <table>
+    <tbody>
+      <tr><td><kbd>Ctrl/⌘</kbd> <kbd>K</kbd></td><td>Command palette</td></tr>
+      <tr><td><kbd>r</kbd></td><td>Refresh now</td></tr>
+      <tr><td><kbd>e</kbd></td><td>Export JSON</td></tr>
+      <tr><td><kbd>c</kbd></td><td>Export CSV</td></tr>
+      <tr><td><kbd>p</kbd></td><td>Print / save PDF</td></tr>
+      <tr><td><kbd>t</kbd></td><td>Cycle theme</td></tr>
+      <tr><td><kbd>?</kbd></td><td>This help</td></tr>
+    </tbody>
+  </table>
+  <p style="text-align:right;margin:1rem 0 0;"><button id="shortcuts-close">Close</button></p>
+</dialog>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

@@ -15,6 +15,7 @@ LABEL org.opencontainers.image.description="netcheck: which-layer network diagno
 
 WORKDIR /app
 COPY netcheck ./netcheck
+COPY frontend ./frontend
 COPY AGENTS.md README.md ./
 
 # SQLite is the source of truth (see README.md); keep it on a mountable

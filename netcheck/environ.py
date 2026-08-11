@@ -61,30 +61,29 @@ def _ps(script, timeout=25, args=()):
         return None, f"unparseable output: {out[:120]}"
 
 
-def _unavailable(reason):
-    return {"state": "unavailable", "reason": reason}
+def _run_or_unavailable(cmd, reason, timeout=15):
+    """Run a command; return its text, or an `unavailable` section if the
+    binary/platform isn't there. Shared by every section here that shells
+    out and has nothing else to say about *why* on failure."""
+    text, state = probes._run(cmd, timeout)
+    return text if state == "ok" else remote._unavailable(reason)
 
 
 def wifi():
     if MACOS:
-        text, state = probes._run([_AIRPORT, "-I"])
-        if state != "ok":
-            return _unavailable("airport unavailable")
-        return wlan_probes.parse_airport_info(text)
-    text, state = probes._run(["netsh", "wlan", "show", "interfaces"])
-    if state != "ok":
-        return _unavailable("netsh unavailable")
-    return wlan_probes.parse_wlan_interfaces(text)
+        text = _run_or_unavailable([_AIRPORT, "-I"], "airport unavailable")
+        return wlan_probes.parse_airport_info(text) if isinstance(text, str) else text
+    text = _run_or_unavailable(["netsh", "wlan", "show", "interfaces"], "netsh unavailable")
+    return wlan_probes.parse_wlan_interfaces(text) if isinstance(text, str) else text
 
 
 def congestion(channel, own_bssid=None):
     """How many other radios contend for our airtime."""
     if channel is None:
-        return _unavailable("no channel; not associated")
-    text, state = probes._run(["netsh", "wlan", "show", "networks", "mode=bssid"], 30)
-    if state != "ok":
-        return _unavailable("netsh unavailable")
-    return wlan_probes.parse_wlan_networks(text, channel, own_bssid)
+        return remote._unavailable("no channel; not associated")
+    text = _run_or_unavailable(
+        ["netsh", "wlan", "show", "networks", "mode=bssid"], "netsh unavailable", timeout=30)
+    return wlan_probes.parse_wlan_networks(text, channel, own_bssid) if isinstance(text, str) else text
 
 
 def driver(name="Wi-Fi"):
@@ -105,7 +104,7 @@ def driver(name="Wi-Fi"):
         " | ConvertTo-Json -Depth 4 -Compress",
         args=[name])
     if not data:
-        return _unavailable(reason or f"adapter {name!r} not found")
+        return remote._unavailable(reason or f"adapter {name!r} not found")
 
     props = data.get("props") or {}
     return {"state": "ok",
@@ -144,16 +143,15 @@ def events(hours=24):
         # Measured at ~21s on this machine; the default 25s left no headroom.
         timeout=60)
     if not data:
-        return _unavailable(reason or "no matching events")
+        return remote._unavailable(reason or "no matching events")
     return dict(data, state="ok")
 
 
 def tcp_globals():
-    text, state = probes._run(["netsh", "interface", "tcp", "show", "global"])
-    if state != "ok":
-        return _unavailable("netsh unavailable")
-    fields = {k.strip(): v.strip()
-              for k, _, v in (l.partition(":") for l in text.splitlines()) if v.strip()}
+    text = _run_or_unavailable(["netsh", "interface", "tcp", "show", "global"], "netsh unavailable")
+    if not isinstance(text, str):
+        return text
+    fields = {k: v for k, v in wlan_probes._fields(text).items() if v}
     return {"state": "ok", "autotuning": fields.get("Receive Window Auto-Tuning Level"),
             "rss": fields.get("Receive-Side Scaling State"),
             "ecn": fields.get("ECN Capability")}
@@ -169,7 +167,7 @@ def mtu(host="1.1.1.1", sizes=(1472, 1460, 1440, 1400, 1300, 1200)):
         text, state = probes._run(cmd, 8)
         if state == "ok" and probes.parse_ping(text)["state"] == "ok":
             return {"state": "ok", "mtu": size + 28}
-    return _unavailable("no size succeeded; ICMP may be filtered")
+    return remote._unavailable("no size succeeded; ICMP may be filtered")
 
 
 def tailscale(target="api.anthropic.com"):
@@ -188,7 +186,7 @@ def tailscale(target="api.anthropic.com"):
         " | ConvertTo-Json -Compress",
         args=[target])
     if data is None:
-        return _unavailable(reason or "could not query adapters")
+        return remote._unavailable(reason or "could not query adapters")
     return dict(data, state="ok")
 
 

@@ -121,7 +121,7 @@ def modem_snmp(host=None, timeout=2):
     """
     host = host or os.environ.get("MODEM_HOST", remote.MODEM_HOST_DEFAULT)
     if not remote._on_lan(host):
-        return remote._unavailable(f"modem host {host!r} is not on a local network")
+        return remote._off_lan(host, "modem", credentials=False)
 
     descr = get(SYS_DESCR, host, timeout)
     if descr is None:

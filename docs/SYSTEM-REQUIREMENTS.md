@@ -2,10 +2,10 @@
 title: netcheck System Requirements
 status: living
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-08-11
 owner: Kyle Smith
 traces: [README.md]
-version: 1.0.0
+version: 1.1.0
 ---
 
 # netcheck System Requirements
@@ -80,7 +80,7 @@ graph TB
 | C-002 | Probing + environment (`probes.py`, `resolver.py`, `route.py`, `dualstack.py`, `environ.py`, `remote.py`, `wlan_probes.py`, `docsis.py`) | Python 3 stdlib (`subprocess`, `socket`, `ssl`, `urllib`) | Measures every network layer and gathers device, OS, WAN, and provider state | User's machine | FR-001, FR-004, FR-005, FR-006 |
 | C-003 | Correlation + ranking (`diagnose.py`, `rank.py`, `llmlog.py`) | Pure Python 3 | Classifies errors, joins them to samples, ranks causes from both the sample history and the environment scan | User's machine | FR-002, FR-003, FR-006, FR-009, FR-010 |
 | C-005 | Store (`store.py`, `schema.sql`) | `sqlite3` stdlib, PostgREST over `urllib` | Local source of truth; optional Supabase mirror | User's machine (SQLite); Supabase cloud (mirror) | FR-011, NFR-003 |
-| C-006 | Dashboard server (`server.py`, `ui.html`) | `http.server` stdlib, Alpine.js (vendored, no CDN) | Serves JSON + the dashboard page | User's machine | FR-007 |
+| C-006 | Dashboard server (`server.py`) + frontend (`frontend/`) | `http.server` stdlib; hand-written HTML/CSS/JS, zero vendored or CDN dependencies | Serves JSON, an SSE push channel, and the static dashboard | User's machine | FR-007 |
 
 **Rule:** a new container is a major complexity purchase. netcheck deliberately stays at one process — the dashboard is a thread inside the same interpreter, not a separate deployable service, because splitting it would add a network boundary with nothing on the other side to justify it (CON-001, CON-002).
 
@@ -126,7 +126,8 @@ graph TB
 | ID | Method + path | Purpose | Request | Response | Errors | Auth | Traces to |
 |---|---|---|---|---|---|---|---|
 | API-001 | `GET /api/data` | Everything the dashboard renders, in one round trip | Query params: `limit` (optional int) | `200 {...}` JSON: samples, events, errors, causes | `400` malformed `limit` | None — loopback only | FR-007 |
-| API-002 | `GET /` | Serves `ui.html` and vendored Alpine.js | none | `200` HTML/JS | `404` unknown static path | None — loopback only | FR-007 |
+| API-002 | `GET /` and any `frontend/` path | Serves `index.html` or a static asset (CSS/JS/manifest/service worker) generically by path | none | `200` HTML/CSS/JS | `404` unknown or path-traversing request | None — loopback only | FR-007 |
+| API-003 | `GET /api/stream` | Server-Sent Events: pushes a fresh `/api/data` payload whenever the store changes, with periodic keep-alive comments | none | `200 text/event-stream`, long-lived | Connection drop; client falls back to polling | None — loopback only | FR-007 |
 
 Rules: no endpoint exists without an `FR-`; the dashboard server binds to `127.0.0.1` only, never a public interface, so no auth scheme is required for a single-user local tool.
 
@@ -202,7 +203,7 @@ Summary only. `netcheck/schema.sql` is authoritative for exact types.
 | Language/runtime | Python 3 standard library only | Any framework requiring `pip`/`npm` | Must remain runnable on a machine mid-network-outage, when a package registry may be unreachable; also the simplest cross-platform choice already present on most dev machines | High (a full rewrite) | None — stdlib is not going away |
 | Local storage | SQLite | Flat JSON/CSV files, an embedded key-value store | A cloud database cannot record an outage while it's happening; SQLite gives real queries and a durable file with zero setup | Medium (schema migration) | None — stdlib `sqlite3` |
 | Remote mirror | Supabase (Postgres + PostgREST) | Self-hosted Postgres, a custom API | Free tier, RLS built in, PostgREST means no server code to write for simple reads | Low (mirror is optional and additive) | Low — plain Postgres underneath |
-| Dashboard UI | Single HTML file + vendored Alpine.js | A full frontend framework + build step | Consistent with the no-build-step constraint (CON-001); Alpine is small enough to vendor directly, no CDN dependency | Low | None — vendored copy, not a live dependency |
+| Dashboard UI | Hand-written HTML/CSS/JS in `frontend/`, zero dependencies | A full frontend framework + build step; vendoring a third-party runtime (e.g. Alpine.js) | Consistent with the no-build-step constraint (CON-001); native ES modules, Custom-Element-free reactive rendering, and platform APIs (SSE, View Transitions, Service Worker) now cover what a small framework used to, with nothing to vendor at all | Low | None — no dependency, vendored or otherwise |
 | Test runner | `unittest` (stdlib) | `pytest` | Matches the no-dependency constraint. CI runs the same stdlib command, so there is no environment where a package is required. | Low | None |
 
 **Required for each row:** maturity, migration cost, and lock-in risk are stated in the table above; none of these choices carry meaningful lock-in given the standard-library-first constraint.

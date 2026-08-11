@@ -27,6 +27,13 @@ python -m netcheck serve      # dashboard at http://127.0.0.1:8787
 `watch` also reads Claude Code's own error logs and tells you which of your
 past API errors were actually your network, and which weren't.
 
+The dashboard (`frontend/`) pushes new samples over Server-Sent Events —
+no fixed poll interval — and installs as an offline-capable app (a Service
+Worker caches the shell and the last-known-good report, so it still opens
+and renders during the outage it's diagnosing). It's still zero dependencies
+and zero build step: hand-written HTML/CSS/JS, nothing vendored, nothing to
+`npm install`.
+
 Running in a container, or cutting a release? See
 `docs/notes/2026-08-07-deploying-and-releasing-netcheck.md`.
 

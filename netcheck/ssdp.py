@@ -89,7 +89,7 @@ def identify_gateway(timeout=2):
     parsed = urllib.parse.urlparse(location)
     host = parsed.netloc
     if not remote._on_lan(host):
-        return remote._unavailable(f"device description host {host!r} is not on a local network")
+        return remote._off_lan(host, "device description", credentials=False)
 
     body, err = remote._http_get(location, timeout=timeout)
     if err:

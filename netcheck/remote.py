@@ -105,7 +105,12 @@ def _on_lan(host):
         ipaddress.ip_address(i[4][0]).is_private for i in infos)
 
 
-def _off_lan(host, which):
+def _off_lan(host, which, credentials=True):
+    """Shared `_on_lan` guard message. `credentials=False` is for callers
+    (snmp.py, ssdp.py) that never send any -- the `.env` hint would be
+    misleading for a query that has no credential to withhold."""
+    if not credentials:
+        return _unavailable(f"{which} host {host!r} is not on a local network")
     return _unavailable(
         f"{which} host {host!r} is not on a local network, so no credentials "
         f"were sent; check {which.upper()}_HOST in .env")

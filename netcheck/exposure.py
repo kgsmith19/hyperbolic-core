@@ -30,10 +30,6 @@ _DEFAULT_CREDENTIALS = (
 )
 
 
-def _unavailable(reason):
-    return {"state": "unavailable", "reason": reason}
-
-
 def _check_open_ports(host, ports=_MANAGEMENT_PORTS, timeout=1.0):
     open_ports = []
     for port in ports:
@@ -72,7 +68,7 @@ def _credential_match(hostport, path, timeout=2):
 def _device_exposure(device):
     host = device.get("ip") or ""
     if not remote._on_lan(host):
-        return _unavailable(
+        return remote._unavailable(
             f"host {host!r} failed _on_lan(); no exposure checks were attempted")
 
     open_ports = _check_open_ports(host)
@@ -107,7 +103,7 @@ def scan(mapped=None):
     mapped = mapped if mapped is not None else topology.map_devices()
     if not isinstance(mapped, dict) or mapped.get("state") != "ok":
         reason = (mapped or {}).get("reason", "topology unavailable")
-        return _unavailable(reason)
+        return remote._unavailable(reason)
 
     devices = []
     all_findings = []

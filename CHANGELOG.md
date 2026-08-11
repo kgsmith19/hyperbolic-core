@@ -10,6 +10,36 @@ pass, not full automation.
 
 ## [Unreleased]
 
+### Changed
+- The dashboard UI moved out of `netcheck/` into a top-level `frontend/`
+  directory, cleanly separating the Python backend from the browser
+  frontend. The single 431-line `ui.html` was split into modular HTML/CSS/JS
+  files, and the vendored Alpine.js dependency was replaced with ~250 lines
+  of hand-written, dependency-free reactivity — still zero install, zero
+  build step. `server.py` now serves any file under `frontend/` generically
+  by path (with path-traversal protection) instead of one hardcoded route
+  per static file.
+- The dashboard now pushes updates over Server-Sent Events (`GET
+  /api/stream`) instead of polling `/api/data` on a fixed 15s timer, with
+  automatic fallback to polling if SSE is unavailable. A connection-status
+  indicator in the header reflects whether the view is live, reconnecting,
+  or offline.
+- The dashboard is now an installable, offline-capable PWA: a Service
+  Worker caches the app shell and the last-known-good `/api/data` response,
+  so it still paints instantly and shows real data with zero network at
+  all — the condition the dashboard exists to be useful under.
+- Added a command palette (Ctrl/Cmd+K), keyboard shortcuts, a light/dark/
+  system theme toggle, hover tooltips on both charts, and View Transitions
+  for smoother updates, plus accessibility improvements (skip link, ARIA
+  live region on culprit changes, focus-visible states).
+- `environ.py`, `exposure.py`, `snmp.py`, and `ssdp.py` now share
+  `remote._unavailable`/`remote._off_lan` instead of each defining their own
+  copy; `environ.py`'s four "run a command, degrade to unavailable"
+  call sites now go through one `_run_or_unavailable` helper; `tcp_globals()`
+  reuses `wlan_probes._fields()` instead of reimplementing the same
+  `Key : Value` parsing. No behavior change; `geoip.py` keeps its own copy
+  to avoid a circular import with `remote.py`, as documented there.
+
 ### Added
 - NFR-009 (per-tier scan timing budget) now has automated regression
   evidence instead of a manual-note (#71). `test_main.py::ScanBudgetBoundaryTest`

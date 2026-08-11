@@ -6,8 +6,10 @@ multi-layer probes and can compare them with errors already recorded in Claude
 Code transcripts.
 
 Stack: Python 3.12 standard library only. There is no package install or build
-step. Tests use `unittest`; the dashboard is a single HTML file with vendored
-Alpine.js.
+step. Tests use `unittest`; the dashboard (`frontend/`) is hand-written
+HTML/CSS/JS with zero dependencies, vendored or otherwise — native ES
+modules, Server-Sent Events, and a Service Worker cover what a small
+framework used to.
 
 The shared [agent-engineering-standard](https://github.com/kgsmith19/agent-engineering-standard)
 is an experimental, informational reference pinned in `.agent/standard.lock`.
@@ -65,7 +67,8 @@ and shell syntax checks.
 | `netcheck/watch.py` | Continuous sampling loop |
 | `netcheck/store.py` | SQLite persistence and optional mirror |
 | `netcheck/diagnose.py`, `netcheck/rank.py` | Evidence correlation and ranked causes |
-| `netcheck/server.py`, `netcheck/ui.html` | Loopback dashboard |
+| `netcheck/server.py` | Loopback dashboard server: JSON API, SSE push, static files |
+| `frontend/` | Dashboard UI — HTML/CSS/JS, no backend logic, no dependencies |
 
 ## Engineering guidance
 
