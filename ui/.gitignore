@@ -1,0 +1,8 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+tsconfig.tsbuildinfo
+
+# Local agent worktrees
+.worktrees/

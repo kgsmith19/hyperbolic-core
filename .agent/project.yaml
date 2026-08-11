@@ -3,7 +3,7 @@
 
 project:
   name: agentic-command-center
-  type: node-cli-and-webapp
+  type: node-cli-service-and-react-ui
 
 runtime:
   node_min: "22"
@@ -17,6 +17,9 @@ commands:
   test_windows: npm run test:windows
   coverage: npm run covgate
   e2e: npm run e2e:gui
+  ui_setup: cd ui && npm ci
+  ui_build: cd ui && npm run build
+  ui_e2e: cd ui && ACC_DIR=.. npm run e2e
   dev: npm run gui
 
 ci:
