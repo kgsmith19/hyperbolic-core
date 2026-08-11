@@ -4,6 +4,5 @@ test-results/
 playwright-report/
 tsconfig.tsbuildinfo
 
-# Local agent worktrees and Superpowers scratch
+# Local agent worktrees
 .worktrees/
-.superpowers/
