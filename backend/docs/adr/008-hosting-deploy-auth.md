@@ -19,10 +19,11 @@ default fails closed. Kernel tables additionally have RLS enabled with no
 policies, so the Supabase Data API roles (anon/authenticated) can never touch
 them; only the direct lifeos_app connection (table owner) works.
 
-Data durability on the free tier is our own: a nightly GitHub Actions
-`pg_dump`, age-encrypted to a public key (private key offline), kept 30 days
-as artifacts — which also generates the activity that prevents free-tier
-pausing. Move to Supabase Pro when losing a week of data would actually hurt.
+Data durability on the free tier is our own: a nightly GitHub Actions recovery
+bundle contains a `pg_dump` and the document blob-volume snapshot, is
+age-encrypted to a public key (private key offline), and is kept 90 days as an
+artifact. The database read also prevents free-tier pausing. Move to Supabase
+Pro when managed database backups and longer independent retention justify it.
 
 ## Consequences
 - ~$6/mo total (VPS); Tailscale, GitHub, and Supabase free tiers cover the

@@ -97,8 +97,9 @@ account reference, the service date, the amounts. Three places it could live:
    this would mean adding a generic blob API to another cell for one caller.
    Writing there would need `documents:write`, which the bills constitution
    forbids this cell outright ("this cell must not be able to unlink a bill's
-   blobs"). And blobs are **not** covered by the nightly `pg_dump` (ADR 015), so
-   a draft would acquire a durability story worse than the record it describes.
+   blobs"). The recovery bundle captures blobs beside the `pg_dump` (ADR 015),
+   but the two stores are not one transaction; putting derived draft state there
+   would make restore consistency worse than the structured record it describes.
 3. **Generated on demand from structured fields.** Chosen.
 
 `action_proposal` stores ids, check enum names, line indices and one integer

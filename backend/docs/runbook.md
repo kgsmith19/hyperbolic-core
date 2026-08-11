@@ -34,11 +34,10 @@ Uploaded documents keep their bytes and extracted text on the box, under the
 `lifeos-blobs` volume — never in `entity.attributes`, because attributes are
 full-text indexed and erased only per entity. Two operator consequences:
 
-- **The nightly `pg_dump` does not back these up.** The event log restores
-  every `document` entity, but a restored database points at files that a lost
-  box no longer has. Losing the VPS loses the documents; the owner's own copies
-  are the source. Adding blobs to the backup is a deliberate future decision,
-  not an oversight.
+- **The nightly encrypted recovery bundle includes these files.** It contains
+  both the `public` database schema and a read-only tar snapshot of this volume.
+  Keep the owner's original documents too: the two snapshots are taken in one
+  workflow but are not a transactional snapshot across storage systems.
 - **Erasure is not just a database write.** `POST /entities/{id}/forget` on a
   document unlinks its blobs as well; do not erase a document by any other
   route, and never restore an old volume snapshot over a live one — that would
@@ -324,17 +323,35 @@ cd ~/lifeos && sed -i 's|^LIFEOS_IMAGE=.*|LIFEOS_IMAGE=ghcr.io/kgsmith19/lifeos:
 Database changes roll forward (append-only log); never down-migrate.
 
 ## Backups and restore drill
-Nightly `backup.yml` dumps `--schema=public` with `pg_dump`, encrypts to the
-age public key, keeps 30 days of artifacts. Restore drill (quarterly, or
-before anything risky):
+Nightly `backup.yml` builds one recovery bundle containing a `--schema=public`
+PostgreSQL dump, the `/app/var/blobs` volume snapshot, and SHA-256 checksums.
+It validates both archive formats before encrypting to the age public key and
+keeps only the ciphertext artifact for 90 days.
+
+Restore only into isolated targets. Never unpack a backup over the live blob
+volume: an older archive can contain a file that a later erasure removed.
+Quarterly, and before anything risky, download an artifact and run:
 ```bash
-age -d -i lifeos-backup.key -o lifeos.dump lifeos.dump.age
-docker run -d --name restore -e POSTGRES_PASSWORD=pg -p 5433:5432 pgvector/pgvector:pg17
+age -d -i lifeos-backup.key -o lifeos-backup.tar lifeos-backup-<run-id>.tar.age
+mkdir lifeos-restore && tar -C lifeos-restore -xf lifeos-backup.tar
+(cd lifeos-restore && sha256sum --check SHA256SUMS)
+
+docker run -d --name lifeos-db-restore -e POSTGRES_PASSWORD=pg -p 5433:5432 pgvector/pgvector:pg17
+until pg_isready -h 127.0.0.1 -p 5433 -U postgres; do sleep 1; done
 psql postgresql://postgres:pg@localhost:5433/postgres -c 'create schema if not exists extensions; create extension vector with schema extensions'
-pg_restore --no-owner -d postgresql://postgres:pg@localhost:5433/postgres lifeos.dump
+pg_restore --exit-on-error --no-owner -d postgresql://postgres:pg@localhost:5433/postgres lifeos-restore/lifeos.dump
 psql postgresql://postgres:pg@localhost:5433/postgres -c 'select count(*) from event'
+
+docker volume create lifeos-blobs-restore-test
+docker run --rm -i -v lifeos-blobs-restore-test:/restore alpine:3.22 \
+  tar -C /restore -xf - < lifeos-restore/lifeos-blobs.tar
+docker run --rm -v lifeos-blobs-restore-test:/restore:ro alpine:3.22 \
+  find /restore -type f -print
 ```
-A backup that has never been restored is a hope, not a backup.
+Verify a sample of database `document.storage_ref` values against the isolated
+volume before declaring the drill successful. Then remove the test container,
+database, volume, and plaintext restore directory. A backup that has never been
+restored is a hope, not a backup.
 
 ## Local development
 `.env` in the repo root (never committed):

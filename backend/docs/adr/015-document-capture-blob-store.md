@@ -47,11 +47,12 @@ not change (ADR 003: the box and the database are both already inside it).
 A third option — a dedicated Postgres table — is kernel DDL, which invariant 1
 forbids outright.
 
-The cost is stated plainly: **the nightly `pg_dump` (ADR 008) does not cover
-blobs.** The event log restores every `document` entity, but a restored database
-points at files a lost box no longer has. The owner's own copies are the source
-of truth for the bytes. Backing up blobs is a future decision, not an oversight;
-it is in the revisit list.
+The storage split has a durability consequence: **a database dump alone does
+not cover blobs.** The nightly recovery workflow therefore captures the
+`lifeos-blobs` volume beside the `pg_dump`, validates both archive formats, and
+encrypts them as one bundle (ADR 008). The owner's original documents remain an
+independent source because the database and filesystem snapshots are not one
+cross-system transaction.
 
 **Erasure removes the bytes, and `POST /entities/{id}/forget` is still the one
 endpoint.** `forget()` is a kernel service over attributes and event payloads; it
@@ -62,8 +63,8 @@ would report an erasure that left the bill sitting in the volume. Three parts:
   step of it is *checked* rather than attempted:
   1. `require(ctx, "documents:write")` **first**, before the function touches
      the filesystem at all. `BlobStore` takes no AccessContext and cannot check
-     anything, and deleting a blob is irreversible (blobs are not in the
-     nightly `pg_dump`), so leaning on the scope check inside a later `capture`
+     anything, and deleting a blob is irreversible in the live system, so
+     leaning on the scope check inside a later `capture`
      would let a `documents:read` token — a credential whose entire guarantee
      is that it mutates nothing — destroy the bill and only then be refused.
   2. Confirm every ref the entity holds names a file that is actually in the
@@ -203,8 +204,9 @@ enforcement.
 
 ## Revisit when
 
-Blobs become worth backing up (a second copy of a bill the owner no longer has),
-images need OCR (that is a model call, so it lands with C2's LLM decision),
+The recovery bundle outgrows GitHub artifact storage or needs transactional
+cross-store snapshots, images need OCR (that is a model call, so it lands with
+C2's LLM decision),
 documents start arriving from somewhere other than the owner's own upload (then
 the MuPDF residual risk needs a sandbox, and the SSRF rule acquires something to
 apply to), a second consumer needs to read blobs (today only this module does),

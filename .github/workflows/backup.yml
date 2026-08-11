@@ -1,8 +1,8 @@
 name: backup
 
-# Nightly encrypted dump of the prod database. Doubles as database activity,
-# which keeps the Supabase free-tier project from pausing after 7 idle days.
-# The age private key never touches CI — decryption happens offline.
+# Nightly encrypted recovery bundle: the prod public schema plus the document
+# blob volume. The database read also keeps the Supabase free-tier project from
+# pausing after 7 idle days. The age private key never touches CI.
 on:
   schedule:
     - cron: "17 8 * * *"
@@ -11,11 +11,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: backup-production
+  cancel-in-progress: false
+
 jobs:
-  dump:
+  bundle:
     if: vars.BACKUP_ENABLED == 'true'
     runs-on: ubuntu-latest
-    container: postgres:17
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -28,19 +32,72 @@ jobs:
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           env-slug: prod
           domain: https://app.infisical.com
-      - name: Install age
-        run: apt-get update -qq && apt-get install -y -qq age
-      - name: Dump and encrypt
+
+      - name: Validate backup configuration
         env:
           AGE_PUBLIC_KEY: ${{ vars.AGE_PUBLIC_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
         run: |
-          pg_dump --format=custom --no-owner --schema=public \
-            --file=lifeos.dump "$DATABASE_URL"
-          age -r "$AGE_PUBLIC_KEY" -o lifeos.dump.age lifeos.dump
-          rm lifeos.dump
+          set -euo pipefail
+          test -n "$DATABASE_URL"
+          test -n "$AGE_PUBLIC_KEY"
+          test -n "$DEPLOY_HOST"
+          test -n "$TS_OAUTH_CLIENT_ID"
+          test -n "$TS_OAUTH_SECRET"
+
+      - name: Join tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Install age
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq age
+
+      - name: Create, verify, and encrypt recovery bundle
+        env:
+          AGE_PUBLIC_KEY: ${{ vars.AGE_PUBLIC_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          umask 077
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          payload="$work/payload"
+          mkdir "$payload"
+
+          # Pin the client major to the production database major. The URL is
+          # passed only through the throwaway container environment.
+          docker run --rm -e DATABASE_URL postgres:17 \
+            sh -ec 'pg_dump --format=custom --no-owner --schema=public "$DATABASE_URL"' \
+            > "$payload/lifeos.dump"
+
+          # Stream a read-only snapshot from the already-running API container;
+          # no plaintext blob archive is written to the production host.
+          ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" 'bash -s' \
+            > "$payload/lifeos-blobs.tar" <<'REMOTE'
+          set -euo pipefail
+          cd /home/deploy/lifeos
+          docker compose exec -T api python -c 'import sys, tarfile; archive = tarfile.open(fileobj=sys.stdout.buffer, mode="w|"); archive.add("/app/var/blobs", arcname="blobs", recursive=True); archive.close()'
+          REMOTE
+
+          test -s "$payload/lifeos.dump"
+          test -s "$payload/lifeos-blobs.tar"
+          docker run --rm -i postgres:17 pg_restore --list \
+            < "$payload/lifeos.dump" > /dev/null
+          tar -tf "$payload/lifeos-blobs.tar" > /dev/null
+          (cd "$payload" && sha256sum lifeos.dump lifeos-blobs.tar > SHA256SUMS)
+
+          tar -C "$payload" -cf "$work/lifeos-backup.tar" \
+            lifeos.dump lifeos-blobs.tar SHA256SUMS
+          age -r "$AGE_PUBLIC_KEY" \
+            -o "lifeos-backup-${GITHUB_RUN_ID}.tar.age" \
+            "$work/lifeos-backup.tar"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: lifeos-backup-${{ github.run_id }}
-          path: lifeos.dump.age
-          retention-days: 30
+          path: lifeos-backup-${{ github.run_id }}.tar.age
+          retention-days: 90
           if-no-files-found: error

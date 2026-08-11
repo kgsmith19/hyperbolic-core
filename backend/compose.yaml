@@ -14,9 +14,8 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      # Document bytes and extracted text (ADR 015). They deliberately do not
-      # live in Postgres, so the nightly pg_dump does not cover them — see
-      # docs/runbook.md.
+      # Document bytes and extracted text (ADR 015) live outside Postgres.
+      # backup.yml captures this volume beside the database dump.
       - lifeos-blobs:/app/var/blobs
     healthcheck:
       test:
