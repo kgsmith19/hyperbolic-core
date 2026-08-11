@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 // Scope every mock to the API host — bare '**/capture' patterns would also
 // intercept the SPA's own page navigations.
-const API = "https://lifeos-prod.taile48c9b.ts.net";
+const API = process.env.VITE_API_URL ?? "https://api.test.invalid";
 
 const ENTITY = {
   id: "e1",
