@@ -1,0 +1,14 @@
+.env
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+.venv/
+.env.example
+.coverage
+coverage.xml
+
+# Local agent worktrees and Superpowers scratch
+.worktrees/
+.superpowers/

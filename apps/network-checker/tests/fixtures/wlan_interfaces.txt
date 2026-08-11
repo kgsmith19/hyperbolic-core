@@ -1,0 +1,28 @@
+﻿
+There is 1 interface on the system: 
+
+    Name                   : Wi-Fi
+    Description            : Intel(R) Wi-Fi 6 AX201 160MHz
+    GUID                   : 00000000-0000-0000-0000-000000000000
+    Physical address       : 02:00:5e:10:00:02
+    Interface type         : Primary
+    State                  : connected
+    SSID                   : HomeNet_5G
+    AP BSSID               : 02:00:5e:10:00:01
+    Band                   : 5 GHz
+    Channel                : 44
+    Connected Akm-cipher   : [ akm = 00-0f-ac:08, cipher =  00-0f-ac:04 ]
+    Network type           : Infrastructure
+    Radio type             : 802.11ac
+    Authentication         : WPA3-Personal  (H2E)
+    Cipher                 : CCMP
+    Connection mode        : Profile
+    Receive rate (Mbps)    : 1560
+    Transmit rate (Mbps)   : 1733.3
+    Signal                 : 93% 
+    Rssi                   : -41
+    Profile                : HomeNet_5G 
+    QoS MSCS Configured         : 0
+    QoS Map Configured          : 0
+    QoS Map Allowed by Policy   : 0
+

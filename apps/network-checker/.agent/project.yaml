@@ -1,0 +1,39 @@
+# Repository facts. The shared standard reference is informational only.
+name: netcheck
+type: cli
+
+standard:
+  repository: kgsmith19/agent-engineering-standard
+  commit: 46beaac2e4db915661a9fb9c0f4094f5daf8298d
+  mode: informational
+
+stack:
+  language: python
+  version: "3.12"
+  dependencies: none
+  tests: unittest
+  platforms:
+    primary: windows
+    secondary: macos
+    ci: ubuntu-latest
+
+commands:
+  test: python3 -m unittest discover -s tests -t .
+  verify: bash tools/check.sh
+  complexity: python3 tools/code_simplification.py netcheck -i medium
+  security: python3 tools/security_review.py . -i high
+  documentation: python3 tools/documentation_check.py . -i medium
+  release_build: bash tools/deploy.sh
+
+ci:
+  workflow: .github/workflows/ci.yml
+  required_check: "PR Gate"
+  triggers:
+    - pull_request
+    - merge_group
+
+operations:
+  workflows:
+    - .github/workflows/release.yml
+
+work_tracking: github-issues
