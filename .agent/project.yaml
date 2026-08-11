@@ -1,40 +1,34 @@
-# Repo-specific machine-readable facts. Policy prose lives in AGENTS.md.
+# Repository facts. The shared standard reference is informational only.
 name: lifeos-ui
 type: web-app
 
 standard:
-  repo: https://github.com/kgsmith19/agent-engineering-standard
-  sha: e0246cd8fbd70e91b1107979c578dcfc311d179e
+  repository: kgsmith19/agent-engineering-standard
+  commit: 46beaac2e4db915661a9fb9c0f4094f5daf8298d
+  mode: informational
 
 commands:
   setup: npm ci
-  build: npm run build
   format: npm run format
   lint: npm run lint
-  fast_verify: npm run lint
+  typecheck: npx tsc -b
   unit: npm run test
   e2e: npm run e2e
-  full_verify: npm run lint && npm run test && npm run e2e && npm run build
-  gen_api: npm run gen:api
-
-risk:
-  default: R1
-  protected_paths:
-    - src/api/client.ts
-    - src/auth/
-    - .github/workflows/
-    - .agent/
-    - AGENTS.md
-    # PR Gate integrity: weakening either file could make the gate falsely green.
-    - package.json
-    - playwright.config.ts
+  build: npm run build
+  verify: npm run lint && npx tsc -b && npm run test && npm run e2e && npm run build
+  generate_api: npm run gen:api
 
 ci:
-  entry: .github/workflows/ci.yml
+  workflow: .github/workflows/ci.yml
   required_check: "PR Gate"
-  required_trigger: "ready pull request + merge_group"
-  main_pipeline: "PR Gate -> deploy when DEPLOY_ENABLED"
+  triggers:
+    - pull_request
+    - merge_group
+    - push_main
+
+operations:
+  workflows:
+    - .github/workflows/release-smoke.yml
 
 deploy:
-  mechanism: "merge to main -> PR Gate -> dist scp'd to the VPS over tailnet"
-  runtime_smoke: null
+  mechanism: "push to main -> PR Gate -> static bundle copied to the VPS when DEPLOY_ENABLED"

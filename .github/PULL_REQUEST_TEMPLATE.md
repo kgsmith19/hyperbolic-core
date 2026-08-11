@@ -1,29 +1,17 @@
-## Work
+## Issue
 
-Issue:
-Spec:
-Slice(s):
+Closes #
 
-## What Changed
+## What changed
 
 -
 
-## Evidence
+## Validation
 
-- [ ] Required checks pass
-- [ ] Acceptance satisfied
-- [ ] Protected evaluator passes when applicable
-- [ ] Risk/security checks pass when applicable
+- [ ] Relevant local checks pass
+- [ ] `PR Gate` passes
+- [ ] Linked Issue acceptance criteria are satisfied
 
-## Risk
-
-R0 / R1 / R2 / R3 / R4
-
-## Not Included
+## Not included
 
 -
-
-## Integrity
-
-- [ ] Tests/policies were not weakened
-- [ ] Scope was not unnecessarily widened

@@ -1,67 +1,68 @@
 # lifeos-ui
 
-Web UI for lifeos: a React SPA against the FastAPI backend
-(https://lifeos-prod.taile48c9b.ts.net, tailnet-only) with Supabase Auth JWTs.
+React single-page application for the LifeOS FastAPI backend. The deployed
+service is tailnet-only and authenticates with Supabase Auth JWTs.
 
-Stack: React 19, TypeScript strict, Vite, Tailwind v4, TanStack Query,
-React Router, Vitest + Testing Library, Playwright, oxlint + prettier.
+Stack: React 19, strict TypeScript, Vite, Tailwind v4, TanStack Query, React
+Router, Vitest with Testing Library, Playwright, oxlint, and Prettier.
 
-Standard: [agent-engineering-standard](https://github.com/kgsmith19/agent-engineering-standard),
-pinned in `.agent/standard.lock`. Repo-specific commands/facts live in
-`.agent/project.yaml` — this file is the prose map, that one is the machine
-copy; keep them in agreement.
+The shared [agent-engineering-standard](https://github.com/kgsmith19/agent-engineering-standard)
+is an experimental, informational reference pinned in `.agent/standard.lock`.
+This repository owns its implementation choices and CI.
 
-Product truth: this repo has no local PRD or ADRs — it is a thin client over
-the `lifeos` backend, which owns product and architecture decisions (its
-`docs/adr/`). The backend's API surface is `src/api/types.gen.ts`, generated
-by `gen:api` below; treat it as read-only.
+## Product facts
 
-Commands:
+- The backend repository owns product and architecture decisions.
+- `src/api/types.gen.ts` is generated from the backend API and must not be
+  hand-edited.
+- All HTTP calls go through `src/api/client.ts`; components do not call
+  `fetch` or Supabase data APIs directly.
+- Pages own routes in `src/pages/`; reusable UI belongs in
+  `src/components/`.
+- Every `VITE_` value is compiled into the browser bundle. Never put a secret
+  in a client environment variable.
 
-- dev: `npm run dev` — http://localhost:5173, sign in with the owner account.
-- gate: `npm run lint && npm run test && npm run e2e && npm run build`
-- gen:api: `npm run gen:api` — regenerate `src/api/types.gen.ts` whenever the
-  backend API changes; commit the result.
-- deploy: merge to main → CI gate → dist copied to the VPS →
-  https://lifeos-prod.taile48c9b.ts.net:8443
+## Commands
 
-Engineering standards (mirrors the backend repo):
+- Install: `npm ci`
+- Develop: `npm run dev`
+- Format: `npm run format`
+- Lint: `npm run lint`
+- Type-check: `npx tsc -b`
+- Unit tests: `npm run test`
+- Browser tests: `npm run e2e`
+- Build: `npm run build`
+- Regenerate API types: `npm run gen:api`
 
-- Simplest solution that fully works; fewest lines that stay clear. Never
-  trade functionality for brevity.
-- Reuse before adding. No new component, dependency, or layer without a
-  present need; delete code a change makes dead.
-- Idiomatic current-stack code; oxlint and `tsc -b` gate CI — keep them clean.
-- Every behavior change ships with tests: unit/component (Vitest, colocated
-  `*.test.tsx`) and e2e (Playwright in `e2e/`, network mocked with
-  `page.route` scoped to the API host — never bare `**/path` patterns).
-- Merge only on green CI. Server-side enforcement is the portfolio-standard
-  `Lean PR Gate` branch ruleset requiring the `PR Gate` status check (see
-  `agent-engineering-standard`); until that ruleset is applied to this repo,
-  this rule is the gate.
-- All HTTP goes through `src/api/client.ts` (typed by `types.gen.ts`);
-  components never call fetch or supabase data APIs directly.
-- Pages own routes (`src/pages/`); shared pieces live in `src/components/`.
-- `.env` holds only public-by-design values — VITE_ vars are baked into the
-  client bundle, so a secret must never appear there.
+Playwright request mocks must be scoped to the configured API host; do not use
+a bare `**/path` pattern that can intercept unrelated traffic.
 
-Work: GitHub Issues are the durable work-item source
-(`.github/ISSUE_TEMPLATE/work-item.md`); raw ideas are not work items until
-they clear outcome + acceptance criteria. One thin slice at a time, in a
-short-lived branch. Define a slice's evidence before writing it — a meaningful
-failing test (RED) before the minimum change that turns it green, when a
-failing test is possible; coverage is a diagnostic signal, not the goal. Code
-without its evidence passing is not done — do not claim completion from
-inspection alone.
+## Engineering guidance
 
-Risk: R0 (non-behavioral) through R2 (normal product/API change) proceed
-autonomously once the gate is green. R3 (auth, secrets, deploy config,
-`src/api/client.ts`/`src/auth/`, dependency bumps that change what a
-vulnerability scan flags) wants a human look before merge in addition to the
-gate; this repo has no R4 (destructive/financial/irreversible) surface today.
-An agent may raise a slice's declared risk, never lower it, and must not
-change the checks, ruleset, or risk policy governing its own run — that is a
-separately authorized change. See `.agent/project.yaml` for the default and
-protected paths.
+- Prefer the smallest clear change that fully satisfies the linked Issue.
+- Reuse existing components and utilities before adding dependencies or layers.
+- Delete code made obsolete by the change.
+- Add behavior-focused Vitest/component tests and Playwright coverage where
+  user-visible flows change.
+- Preserve unrelated work and do not weaken tests to make a change pass.
 
-Review: `/lean-review` (five-lens codebase review).
+## Work and delivery
+
+GitHub Issues are the durable source for requested work. Implement one focused
+slice on a short-lived branch, run the relevant local checks, and open a pull
+request that links the Issue and states the evidence.
+
+`.github/workflows/ci.yml` runs automatically for pull requests. Its workflow
+and required check are both named `PR Gate`; it runs lint, type checks, unit
+tests, browser tests, and the production build. Native GitHub squash
+auto-merge may merge the pull request after repository settings require that
+check.
+
+`.github/workflows/release-smoke.yml` is an independent scheduled/manual
+test of the deployed UI and backend. It is not a merge gate.
+
+AI coding agents may create branches, commits, Issues, and pull requests only
+when explicitly assigned that work. They must not submit code reviews, approve
+or block a pull request, request reviewers, or post unsolicited comments. They
+may answer in an Issue or pull request only when explicitly mentioned and
+asked a direct question.

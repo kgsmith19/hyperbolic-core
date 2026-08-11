@@ -1,32 +1,22 @@
 ---
 name: Work item
-about: A durable unit of work — bug, feature slice, or maintenance change.
+about: Define a focused bug fix, feature, or maintenance outcome
 title: ""
-labels: ["status:ready"]
+labels: []
 ---
 
 ## Outcome
 
 What useful result should exist?
 
-## Source of Intent
-
-PRD / bug / incident / security / maintenance:
-
-## Acceptance
+## Acceptance criteria
 
 - [ ]
 
-## Risk
+## Context
 
-R0 / R1 / R2 / R3 / R4 — see AGENTS.md. Apply the matching `risk:R#` label.
+Relevant behavior, constraints, links, or evidence:
 
-## Spec / Slices
-
-Spec needed: Yes / No
-
-- [ ] SL-001:
-
-## Out of Scope
+## Out of scope
 
 -
