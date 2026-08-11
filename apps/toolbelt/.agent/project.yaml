@@ -1,0 +1,46 @@
+# Repository facts and executable commands.
+
+project:
+  name: toolbelt
+  type: portfolio-tool-monorepo
+  languages:
+    - sql-postgres
+    - vanilla-javascript
+    - python
+
+applications:
+  prompt_organizer: apps/prompt-organizer
+  network_checker: apps/network-checker
+
+commands:
+  test: 'node --test "tests/*.test.mjs"'
+  prompt_test: 'cd apps/prompt-organizer && node --test "tests/*.test.mjs"'
+  prompt_browser_test: "cd apps/prompt-organizer && PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config playwright.config.mjs"
+  network_check: "cd apps/network-checker && bash tools/check.sh"
+  network_release_build: "cd apps/network-checker && bash tools/deploy.sh"
+  serve_local: "python3 -m http.server 8811"
+  browser_check: "open http://localhost:8811/web/index.html and verify the affected flow"
+  apply_migration: "use the Supabase API for project woltgcggxaehtuypkxqk"
+
+ci:
+  workflow: .github/workflows/ci.yml
+  workflow_name: "PR Gate"
+  job_name: "PR Gate"
+  triggers:
+    - pull_request
+    - merge_group
+
+data:
+  supabase_project: toolbelt
+  supabase_project_ref: woltgcggxaehtuypkxqk
+  owned_schemas:
+    - core
+    - idea
+    - prompt
+  security_boundary: row-level-security
+  accepted_client_key: public-anon-key
+  forbidden_client_key: service-role-key
+
+standard:
+  lock_file: .agent/standard.lock
+  mode: informational

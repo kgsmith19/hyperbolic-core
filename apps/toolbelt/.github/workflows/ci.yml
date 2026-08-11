@@ -1,0 +1,72 @@
+name: "PR Gate"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-gate:
+    name: PR Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Prepare Prompt Organizer test sessions
+        run: node tests/export-test-sessions.mjs
+        working-directory: apps/prompt-organizer
+      - name: Run Toolbelt tests
+        run: node --test "tests/*.test.mjs"
+      - name: Run Prompt Organizer tests
+        run: node --test "tests/*.test.mjs"
+        working-directory: apps/prompt-organizer
+      - name: Install Prompt Organizer browser test
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.52.0
+          npx playwright install --with-deps chromium
+        working-directory: apps/prompt-organizer
+      - name: Start Prompt Organizer
+        run: python3 -m http.server 8812 --directory web >/tmp/prompt-organizer.log 2>&1 &
+        working-directory: apps/prompt-organizer
+      - name: Wait for Prompt Organizer
+        shell: bash
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://localhost:8812 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/prompt-organizer.log
+          echo "Prompt Organizer did not become ready." >&2
+          exit 1
+      - name: Run Prompt Organizer critical browser journey
+        run: npx playwright test --config playwright.config.mjs
+        working-directory: apps/prompt-organizer
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:8812
+      - name: Upload Prompt Organizer browser evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: prompt-organizer-e2e-evidence
+          path: |
+            apps/prompt-organizer/playwright-report/
+            apps/prompt-organizer/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Run Network Checker tests and deterministic scanners
+        run: bash tools/check.sh
+        working-directory: apps/network-checker

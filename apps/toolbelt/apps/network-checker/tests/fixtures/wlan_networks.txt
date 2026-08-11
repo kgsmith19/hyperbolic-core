@@ -1,0 +1,23 @@
+﻿ 
+Interface name : Wi-Fi 
+There are 1 networks currently visible. 
+
+SSID 1 : HomeNet_5G
+    Network type            : Infrastructure
+    Authentication          : WPA3-Personal
+    Encryption              : CCMP 
+    BSSID 1                 : 02:00:5e:10:00:01
+         Signal             : 93%  
+         Radio type         : 802.11be
+         Band               : 5 GHz
+         Channel            : 44 
+         Details            :  (H2E supported) 
+         Bss Load:
+             Connected Stations:         3
+             Channel Utilization:        12 (4 %)
+             Medium Available Capacity:  0 (0 us/s)
+         QoS MSCS Supported    : 1
+         QoS Map Supported     : 1
+         Basic rates (Mbps) : 6 12 24
+         Other rates (Mbps) : 9 18 36 48 54
+
