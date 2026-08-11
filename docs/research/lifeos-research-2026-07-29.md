@@ -1,14 +1,11 @@
 # lifeos: Research Synthesis (v3, 2026-07-29)
 
-> Destination: `lifeos/docs/research/lifeos-research-2026-07-29.md`. Lands via the
-> normal rules-cell PR (declare the cell in `.agents/task.json` first), alongside
-> `lifeos-research-final.md` (v2, 2026-07-27), which it extends rather than
-> replaces. Point-in-time snapshot; ADRs win on conflict.
+> Point-in-time research snapshot from 2026-07-29. It is historical context,
+> not delivery policy or current implementation instructions. Current product
+> behavior, active architecture decisions, and GitHub Issues take precedence.
 >
-> Companion to the roadmap changes of the same date. The full evidence base
-> (including operator-specific ROI figures and personal context) is deliberately
-> NOT in this repo: it stays in the ecosystem-root working files, which are
-> x-sensitive and outside git. Cite those by name; never copy their content here.
+> The underlying evidence set includes sensitive operator context that remains
+> outside this repository. Do not copy that private material into source control.
 >
 > v2 established that the architecture is right. v3 establishes what the
 > architecture should be pointed at, from a second research pass (eight parallel

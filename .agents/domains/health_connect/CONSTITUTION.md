@@ -64,7 +64,9 @@ arrives, `MOCK_PAYLOAD` in `domains.health_connect.ingest` provides a faithful r
 of the expected webhook payload for development and CI. Activity data is unaffected
 — it comes from the phone's step counter and is available now.
 
-## Risk
+## Security and delivery
 
-R1 — local, reversible. Weight ingestion is blocked on hardware arrival, not design.
-Activity ingestion ships without the hardware dependency.
+Health measurements remain local and must preserve their source fidelity.
+Weight ingestion is blocked on hardware arrival, not design; activity
+ingestion has no hardware dependency. Behavior changes require relevant tests
+and the repository `PR Gate`.

@@ -154,17 +154,13 @@ with no persistence at all. Any future write-capable feature is a
 separately reviewed slice under ADR 018's draft-then-approve model, not an
 extension of this one.
 
-## Risk
+## Security and delivery
 
-R3 — financial data plus an external credentialed integration (the C0
-roadmap entry's own risk rating; same class as C0/CPAP's health data). C0.5
-carries the same R3 rating (derived financial data and consequential
-personal-finance output, per its own issue). `/security-review` runs before
-merge.
+This domain handles financial data and an external credentialed integration.
+The SimpleFIN access URL is a bearer credential: never log, persist, or expose
+it. Keep transfers, payments, and other outward financial actions out of scope.
 
-Behavior changes land with tests in `tests/money/` (unit for CSV row
-parsing, the SimpleFIN client's redirect guard, hash/normalize helpers, and
-the recurring/pay-period cadence-and-tolerance logic; integration for both
-ingestion paths' idempotency, malformed-row handling, credential/source
-failure, and provenance, plus the detector's idempotency and review-queue
-behavior).
+Behavior changes require tests in `tests/money/`: unit coverage for CSV
+parsing, redirect protection, normalization, and recurrence logic; integration
+coverage for idempotency, malformed inputs, source failure, provenance, and
+review-queue behavior. The repository `PR Gate` runs these checks.

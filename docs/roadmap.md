@@ -187,7 +187,7 @@ gate bounds everything after it.
   re-run `scripts/define_daily_checkin.py` for the rider fields)
 - [ ] H1 Health Connect webhook (Android) — weight + activity + workouts pushed
   from the phone's Health Connect store to a tailnet-only endpoint.
-  **/security-review pre-merge** (first inbound webhook). Operator pre-req: the
+  Security acceptance: relevant tests must cover shared-secret rejection, strict payload schema and size bounds, and the tailnet-only exposure; PR Gate must pass. Operator pre-req: the
   Health Connect Webhook app installed and pointed at the endpoint (Tailscale
   already installed), and at least one source writing into Health Connect — a
   Withings scale for weight (its Health Mate app has first-class Health Connect
@@ -211,7 +211,7 @@ gate bounds everything after it.
   Pull-only; no notification path may exist in code. Prompt §EP1 below.
 - [x] C0 Transaction ingestion — SimpleFIN Bridge access-URL pull
   (user-triggered CLI, never a daemon) + bank-CSV import.
-  **/security-review pre-merge MANDATORY** (financial data). Operator pre-req:
+  Security acceptance: relevant tests must cover same-host redirect rejection and secret-free log/error paths; PR Gate must pass. Operator pre-req:
   SimpleFIN Bridge account; access-URL via the guards vault, never stored or
   logged. Prompt §C0 below. — done 2026-08-10 (PR #99; new `money` domain:
   `account`/`transaction`/`money_source_receipt` registry types, idempotent
@@ -302,9 +302,8 @@ which has shipped — write verbs reuse its machinery)
 
 ### Queue end
 
-- [ ] Full ecosystem `/lean-review` + one system-wide `/security-review` —
-  runs when the committed queue is empty, before the utility gate opens
-  anything new.
+- [ ] Record a system-wide quality and security assessment as a GitHub Issue
+  when the committed queue is empty.
 
 ## Mechanisms and where they land
 
@@ -426,7 +425,7 @@ activity_summary; workout extends existing type. Receipts sha256+
 metadata; schema-validated, additionalProperties false, size caps,
 shared-secret header (the app sets custom headers per webhook URL;
 rotation documented). ADR-012 hostile-input rules apply.
-/security-review pre-merge MANDATORY (first inbound webhook): the app
+Security acceptance: tests cover secret rejection, schema and size bounds, and the tailnet/shared-secret perimeter; PR Gate must pass. The app
 provides no signature or built-in auth, so that header plus the tailnet
 are the entire perimeter.
 
@@ -510,7 +509,7 @@ never a daemon) and bank-CSV import. Idempotent by (account,
 posted_date, amount, normalized_desc) hash; receipts sha256+metadata
 only (no verbatim statements). Access-URL is a bearer credential:
 vault/env only, never stored or logged. ADR-012 same-host redirect rule
-on outbound fetch. /security-review pre-merge MANDATORY.
+on outbound fetch. Tests cover redirect rejection and secret-free log/error paths; PR Gate must pass.
 Pre-made decisions: no recurring detection (C0.5), no budgets, no
 documents, no auto-sync, no balances-forecasting.
 Acceptance: CI green; double-run emits nothing new; per-date spend

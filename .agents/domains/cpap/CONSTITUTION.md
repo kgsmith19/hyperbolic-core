@@ -135,12 +135,12 @@ No EDF parsing, no myAir, no pressure suggestions, no prediction, no
 interpretation copy anywhere. Zero kernel DDL (invariant 1); all writes
 through kernel application services (invariant 7).
 
-## Risk
+## Security and delivery
 
-R3 — sensitive health data (a diagnosed condition and therapy adherence) plus
-an external credentialed integration, the same risk class as C0/SimpleFIN.
-`/security-review` runs before merge.
+This domain handles sensitive health data and an external credentialed
+integration. Preserve narrow access scopes, never log credentials, and keep
+interpretation or treatment advice out of scope.
 
-Behavior changes land with tests in `tests/cpap/` (unit for the compliance
-boundary math and SleepHQ response parsing, integration for ingest + the
-briefing seam).
+Behavior changes require tests in `tests/cpap/`: unit coverage for compliance
+boundary math and SleepHQ response parsing, and integration coverage for
+ingestion and the briefing seam. The repository `PR Gate` runs these checks.

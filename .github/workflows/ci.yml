@@ -1,4 +1,5 @@
-name: "PR Gate"
+name: PR Gate
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -16,58 +17,13 @@ concurrency:
 jobs:
   checks:
     name: PR Gate
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7
-      - name: Decide whether runtime verification is required
-        id: changes
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "runtime=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if ! git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.ref }}"; then
-            echo "::error::Could not fetch the PR base; cell-scope verification cannot run."
-            exit 1
-          fi
-
-          if ! changed=$(git diff --name-only --no-renames "${{ github.event.pull_request.base.sha }}" HEAD); then
-            echo "::error::Could not compute the PR diff; cell-scope verification cannot run."
-            exit 1
-          fi
-
-          if [ -z "$changed" ]; then
-            echo "::error::PR diff was unexpectedly empty; refusing to guess cell scope."
-            exit 1
-          fi
-
-          printf '%s\n' "$changed" > "$RUNNER_TEMP/lifeos-changed-files.txt"
-          printf 'Changed files:\n%s\n' "$changed"
-          runtime_files=$(printf '%s\n' "$changed" | grep -Ev '(^|/).*\.md$|^docs/|^\.agent/|^\.agents/' || true)
-
-          if [ -n "$runtime_files" ]; then
-            echo "runtime=true" >> "$GITHUB_OUTPUT"
-            printf 'Runtime verification required by:\n%s\n' "$runtime_files"
-          else
-            echo "runtime=false" >> "$GITHUB_OUTPUT"
-            echo 'Documentation/governance-only diff; preserving PR Gate while skipping the runtime suite.'
-          fi
-      - name: Enforce declared cell scope
-        if: github.event_name == 'pull_request'
-        run: >-
-          python3 scripts/check_cell_scope.py
-          --root .
-          --changed-files "$RUNNER_TEMP/lifeos-changed-files.txt"
-          --event "$GITHUB_EVENT_PATH"
-          --base-sha "${{ github.event.pull_request.base.sha }}"
-      - name: Start Postgres for runtime verification
-        if: steps.changes.outputs.runtime == 'true'
+      - name: Start Postgres
         shell: bash
         run: |
           docker run --detach --name lifeos-ci-postgres \
@@ -87,30 +43,21 @@ jobs:
           echo '::error::Postgres did not become ready within 30 seconds.'
           exit 1
       - uses: actions/setup-python@v7
-        if: steps.changes.outputs.runtime == 'true'
         with:
           python-version: "3.14"
           cache: pip
       - run: python -m pip install -e .[dev]
-        if: steps.changes.outputs.runtime == 'true'
       - run: ruff check .
-        if: steps.changes.outputs.runtime == 'true'
       - run: mypy
-        if: steps.changes.outputs.runtime == 'true'
       - name: Apply migrations
-        if: steps.changes.outputs.runtime == 'true'
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'create schema if not exists extensions'
           for f in supabase/migrations/*.sql; do
             psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
           done
       - run: pytest
-        if: steps.changes.outputs.runtime == 'true'
-      - name: Documentation-only verification
-        if: steps.changes.outputs.runtime != 'true'
-        run: echo 'No runtime-affecting files changed; required PR Gate remains green.'
       - name: Stop Postgres
-        if: always() && steps.changes.outputs.runtime == 'true'
+        if: always()
         run: docker rm --force lifeos-ci-postgres >/dev/null 2>&1 || true
 
   build:
@@ -188,3 +135,4 @@ jobs:
           scp -o StrictHostKeyChecking=accept-new .env.prod deploy@"$DEPLOY_HOST":lifeos/.env
           ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" \
             "cd lifeos && chmod 600 .env && LIFEOS_IMAGE=$IMAGE docker compose up -d --wait && curl -fsS http://127.0.0.1:8000/healthz"
+

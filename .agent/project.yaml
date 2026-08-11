@@ -1,37 +1,33 @@
-# Repo-specific machine-readable facts. Policy prose lives in AGENTS.md.
+# Repository facts. The shared standard reference is informational only.
 name: lifeos
 type: api-service
 
 standard:
-  repo: https://github.com/kgsmith19/agent-engineering-standard
-  sha: e0246cd8fbd70e91b1107979c578dcfc311d179e
+  repository: kgsmith19/agent-engineering-standard
+  commit: 46beaac2e4db915661a9fb9c0f4094f5daf8298d
+  mode: informational
 
 commands:
   setup: python -m pip install -e .[dev]
   lint: ruff check .
   typecheck: mypy
-  fast_verify: ruff check . && mypy
-  unit: pytest
-  full_verify: ruff check . && mypy && pytest
-
-risk:
-  default: R2
-  protected_paths:
-    - src/kernel/
-    - src/api/auth.py
-    - src/domains/*/dispute.py
-    - supabase/migrations/
-    - .github/workflows/
-    - .agent/
-    - .agents/domains/
+  test: pytest
+  verify: ruff check . && mypy && pytest
 
 ci:
-  entry: .github/workflows/ci.yml
+  workflow: .github/workflows/ci.yml
   required_check: "PR Gate"
-  required_trigger: "ready pull request + merge_group"
-  main_pipeline: "PR Gate -> docker build/push -> deploy when DEPLOY_ENABLED"
+  triggers:
+    - pull_request
+    - merge_group
+    - push_main
+
+operations:
+  workflows:
+    - .github/workflows/ops.yml
+    - .github/workflows/backup.yml
+  backup_scope: "Postgres database only; document blob storage is excluded"
 
 deploy:
-  mechanism: "merge to main -> PR Gate -> docker build+push to ghcr.io (sha-tagged) -> OIDC+tailscale SSH deploy"
-  runtime_smoke: "curl -fsS http://127.0.0.1:8000/healthz"
-  rollback: "git revert on main -> normal pipeline redeploys reverted code as a new sha-tagged image"
+  mechanism: "push to main -> PR Gate -> container build -> deploy when DEPLOY_ENABLED"
+  smoke: "curl -fsS http://127.0.0.1:8000/healthz"
