@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Local stand-in for the CI workflows (tests.yml, code-quality.yml),
-# which now trigger on workflow_dispatch only --
-# see .github/workflows/README.md. Run this before merging a PR, since
-# nothing on GitHub is going to run these checks for you automatically
-# anymore.
+# Local verification entry point used by .github/workflows/ci.yml.
+# Run this before opening or updating a pull request.
 #
 # Usage: bash tools/check.sh
 # Exit code: 0 if every check passed, 1 if any failed.
@@ -25,10 +22,9 @@ run() {
 
 run "tests" python3 -m unittest discover -s tests -v
 
-# -i medium is exactly rules/01-BUDGETS.md's declared ceilings: 40 lines,
-# 4 params, cyclomatic 8, nesting 3. This used to run at -i low (100 lines,
-# cyclomatic 15), which no function in the repo could breach -- a gate that
-# cannot fail is not a gate. All three trees pass at the real budget.
+# The medium profile checks 40-line functions, 4 parameters, cyclomatic
+# complexity 8, and nesting depth 3. All three source trees use the same
+# explicit profile so local and hosted checks stay aligned.
 run "code simplification (netcheck)" python3 tools/code_simplification.py netcheck -i medium
 run "code simplification (tools)" python3 tools/code_simplification.py tools -i medium
 run "code simplification (tests)" python3 tools/code_simplification.py tests -i medium

@@ -103,17 +103,15 @@ class ScanBudgetTest(unittest.TestCase):
 
 
 class NFR009BudgetConstantsTest(unittest.TestCase):
-    """NFR-009's numbers, pinned so a change to `SCAN_BUDGET_SECONDS` is a
-    deliberate PRD-reviewed edit, not a silent drift caught only by a human
-    rereading docs/PRD.md."""
+    """The documented scan budgets are pinned as executable product behavior."""
 
-    def test_budgets_match_the_prd_figures(self):
+    def test_scan_budgets_match_documented_contract(self):
         self.assertEqual(cli.SCAN_BUDGET_SECONDS,
                          {"quick": 10, "standard": 60, "deep": 120})
 
 
 class ScanBudgetBoundaryTest(unittest.TestCase):
-    """NFR-009: prove the orchestration/timeout logic in `cmd_scan` -- the
+    """NFR-009: prove the coordination and timeout logic in `cmd_scan` -- the
     thing that actually enforces quick<=10s, standard<=60s, deep<=120s --
     holds at the boundary, deterministically and without a real sleep.
 

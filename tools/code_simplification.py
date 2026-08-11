@@ -13,8 +13,7 @@ Intensity levels, and the ceiling each enforces:
   - medium: 250-line files,  40-line functions, 4 params, complexity  8, nesting 3
   - high:   150-line files,  15-line functions, 3 params, complexity  6, nesting 2
 
-`medium` is exactly rules/01-BUDGETS.md's MAX_FILE_LOC / MAX_FUNCTION_LOC /
-MAX_CYCLOMATIC ceilings, and is what tools/check.sh runs.
+`medium` is the repository's PR Gate profile and is what tools/check.sh runs.
 """
 import ast
 import sys

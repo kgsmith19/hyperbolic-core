@@ -4,7 +4,7 @@ status: living
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle Smith
-traces: [PRD.md, SYSTEM-REQUIREMENTS.md]
+traces: [SYSTEM-REQUIREMENTS.md]
 version: 1.0.0
 ---
 
@@ -223,7 +223,7 @@ No boundary exists between E1 and the netcheck process, or between the process a
 - [x] No flow is unlabeled.
 - [x] No data store connects directly to another data store (P5 sits between D1 and E4/D2).
 - [x] Every process has at least one input flow and one output flow.
-- [x] Every flow's classification matches the classification of the data item in the PRD `DR-` table.
+- [x] Every flow's classification matches the data classification recorded in this document and the system requirements.
 - [x] Every boundary crossing has a named control and a verifying `SR-` or accepted-risk record.
 - [x] Every STRIDE cell is filled (a written "not applicable because..." counts).
 - [x] No PII item lacks a deletion trigger — the closest analog (confidential Wi-Fi/LAN data) has a stated manual-deletion trigger.

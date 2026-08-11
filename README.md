@@ -143,10 +143,9 @@ flag instead.
 
 ## Documentation
 
-- `docs/PRD.md` — the living source of truth: requirements, status, scope
-- `docs/SYSTEM-REQUIREMENTS.md` — functional/non-functional requirements, traced
+- `docs/SYSTEM-REQUIREMENTS.md` — current functional and system requirements
 - `docs/DATA-FLOW-DIAGRAM.md` — how a tick moves from probe to stored row to verdict
-- `AGENTS.md` — how to work in this repo: layout, standards, gates, adding a diagnostic
+- `AGENTS.md` — repository facts, commands, product invariants, and delivery guidance
 - `docs/notes/` — runbooks and design notes, including deployment and releases
 - `CHANGELOG.md` — what changed, by version
 

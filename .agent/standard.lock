@@ -1,6 +1,5 @@
-# Pinned revision of the shared engineering standard this repo follows.
-# https://github.com/kgsmith19/agent-engineering-standard
-# Upgrading is an explicit reviewed change, never silent tracking of the default branch.
+# Informational reference only; this repository does not inherit policy or automation.
 standard: kgsmith19/agent-engineering-standard
-commit: e0246cd8fbd70e91b1107979c578dcfc311d179e
-pinned_at: "2026-08-10"
+commit: 46beaac2e4db915661a9fb9c0f4094f5daf8298d
+pinned_at: "2026-08-11"
+mode: informational

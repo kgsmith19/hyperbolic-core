@@ -13,11 +13,10 @@ fixes and a JSON output mode, neither of which existed.
 bash tools/check.sh
 ```
 
-Runs the test suite, the three scanners below at the ceilings
-`rules/01-BUDGETS.md` declares, and `bash -n` over every shell script. Prints
-PASS/FAIL per step and exits non-zero if any failed.
-`.github/workflows/code-quality.yml` runs this same script, so local and CI
-cannot drift.
+Runs the test suite, the three scanners below at the configured intensities,
+and `bash -n` over every shell script. It prints PASS/FAIL per step and exits
+non-zero if any failed. `.github/workflows/ci.yml` runs this same script, so
+local and CI use the same checks.
 
 ### The three scanners
 
@@ -30,9 +29,8 @@ found anything and 0 if it did not.
 | `security_review.py` | Hardcoded secrets, `eval`/`exec`, `pickle`/`yaml.load`, `subprocess(shell=True)` | `high` adds generic-secret and URL-credential patterns |
 | `documentation_check.py` | Missing README sections, template artifacts, scaffold files | `high` adds public functions with no docstring |
 
-`medium` for `code_simplification.py` is exactly the budget in
-`rules/01-BUDGETS.md`, which is what `check.sh` runs. `low` is looser than
-anything in this repo could breach, so it is not a gate.
+`medium` is the complexity profile used by `check.sh`. `low` is intended for
+exploration and is not part of the PR Gate.
 
 ```bash
 python tools/code_simplification.py netcheck -i medium

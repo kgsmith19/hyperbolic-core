@@ -1,32 +1,22 @@
 ---
 name: Work item
-about: A validated, ready-to-build unit of work (not a raw idea or brainstorm)
+about: Define a focused bug fix, feature, or maintenance outcome
 title: ""
 labels: []
 ---
 
 ## Outcome
+
 What useful result should exist?
 
-## Source of Intent
-PRD requirement / bug / incident / security finding / ADR / maintenance:
+## Acceptance criteria
 
-## Acceptance
 - [ ]
 
-## Product Success Signal
-(if applicable — how would we know this outcome is actually useful?)
+## Context
 
-## Risk
-R0 / R1 / R2 / R3 / R4 — see `AGENTS.md`
+Relevant behavior, constraints, links, or evidence:
 
-## Spec / Slices
-Spec needed: Yes / No
+## Out of scope
 
-- [ ] SL-001:
-
-## Blockers / Dependencies
--
-
-## Out of Scope
 -

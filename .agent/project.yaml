@@ -1,66 +1,39 @@
-# Machine-readable repo facts. Prose policy lives in AGENTS.md and the pinned standard.
+# Repository facts. The shared standard reference is informational only.
+name: netcheck
+type: cli
 
-project:
-  name: netcheck
-  type: cli
-  standard: .agent/standard.lock
+standard:
+  repository: kgsmith19/agent-engineering-standard
+  commit: 46beaac2e4db915661a9fb9c0f4094f5daf8298d
+  mode: informational
 
 stack:
   language: python
-  language_version_declared: "3.12"
+  version: "3.12"
   dependencies: none
-  test_framework: unittest
+  tests: unittest
+  platforms:
+    primary: windows
+    secondary: macos
+    ci: ubuntu-latest
 
 commands:
-  setup: none
-  build: none
-  format: none
-  lint: python3 tools/code_simplification.py netcheck -i medium
-  typecheck: none
-  test_fast: python3 -m unittest discover -s tests -t .
-  test_full: bash tools/check.sh
-  e2e: none
-  security_scan: python3 tools/security_review.py . -i high
-  docs_check: python3 tools/documentation_check.py . -i medium
+  test: python3 -m unittest discover -s tests -t .
+  verify: bash tools/check.sh
+  complexity: python3 tools/code_simplification.py netcheck -i medium
+  security: python3 tools/security_review.py . -i high
+  documentation: python3 tools/documentation_check.py . -i medium
   release_build: bash tools/deploy.sh
-  release_notes: python3 tools/release.py changelog
 
-ci_profile:
-  required_workflow: .github/workflows/pr-gate.yml
+ci:
+  workflow: .github/workflows/ci.yml
   required_check: "PR Gate"
-  required_trigger: "ready pull request + merge_group"
-  required_gate: bash tools/check.sh
-  deep_or_release_workflows:
-    - .github/workflows/tests.yml
-    - .github/workflows/code-quality.yml
+  triggers:
+    - pull_request
+    - merge_group
+
+operations:
+  workflows:
     - .github/workflows/release.yml
-  note: >
-    The ~30-second local-equivalent gate runs automatically only for ready PRs
-    and merge groups. Manual workflows remain available for explicit deep/release use.
 
-risk:
-  default: R1
-  protected_paths:
-    - netcheck/remote.py
-    - netcheck/docsis.py
-    - netcheck/snmp.py
-    - netcheck/store.py
-    - supabase/migrations/
-    - tools/check.sh
-    - tools/code_simplification.py
-    - tools/security_review.py
-    - tools/documentation_check.py
-    - .github/workflows/
-    - .agent/
-    - AGENTS.md
-  notes: >
-    Automated writes to network devices remain out of scope. A change that
-    sends configuration writes to modem/router hardware is R4.
-
-work_tracking:
-  system: github-issues
-
-platforms:
-  primary: windows
-  secondary: macos
-  ci_runner: ubuntu-latest
+work_tracking: github-issues

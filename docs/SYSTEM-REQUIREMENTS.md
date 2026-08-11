@@ -4,13 +4,13 @@ status: living
 created: 2026-08-07
 updated: 2026-08-07
 owner: Kyle Smith
-traces: [PRD.md]
+traces: [README.md]
 version: 1.0.0
 ---
 
 # netcheck System Requirements
 
-> **Relationship to the PRD.** The PRD says *what the product does and why*. This document says *what the system must be so the PRD is achievable*. Every `SR-` here derives from at least one `FR-`/`NFR-`/`DR-`/`CON-`.
+> **Purpose.** This document records the system behavior and constraints that support the product described in `README.md`. Legacy `FR-`, `NFR-`, `DR-`, and `CON-` identifiers are retained for historical traceability; active changes are tracked in GitHub Issues.
 >
 > Component structure follows the C4 model (context, container, component). Verification methods follow standard practice: Test, Analysis, Inspection, Demonstration.
 
@@ -106,7 +106,7 @@ graph TB
 | SR-007 | C-005's `mirror()` must mark a row synced only after a successful push, and must never block local writes on the mirror's availability. | FR-011, NFR-003 | Test | `test_store.py::MirrorTest` | done |
 | SR-008 | No subprocess/PowerShell call in C-002 may interpolate a caller-supplied value into the command text. | NFR-005 | Test | `test_environ.py::PowerShellArgumentSafetyTest` | done |
 | SR-009 | The full test suite must run with zero live network calls, zero sleeps beyond a probe's own timing, and zero skips — a test that does not run on the machine running the suite is not coverage. | NFR-006 | Test | `python -m unittest discover -s tests -t .` reports `OK` with no `skipped` count | done |
-| SR-010 | No module in `netcheck/` may import a package outside the Python 3 standard library. | NFR-001 | Inspection | `code-quality.yml` import scan | done |
+| SR-010 | No module in `netcheck/` may import a package outside the Python 3 standard library. | NFR-001 | Inspection | `.github/workflows/ci.yml` via `tools/check.sh` | done |
 | SR-012 | C-002 must resolve a device host and confirm **every** returned address is private before sending credentials, so a name answering with both a LAN and a public address is refused. | FR-014, NFR-004 | Test | `test_remote.py::CredentialDestinationTest` | done |
 | SR-011 | C-002 must open its own socket on the requested address family rather than calling `socket.create_connection`, which re-resolves the hostname and may return the other family. | FR-013 | Test | `test_dualstack.py::test_each_family_is_connected_on_a_socket_of_that_family` | done |
 
@@ -157,7 +157,7 @@ Summary only. `netcheck/schema.sql` is authoritative for exact types.
 | `scan_offsets` | Where the transcript scan left off, per file | `path` (pk), `offset` | 1 per transcript file seen | Unbounded (small, bounded by file count) | - |
 | `env_scans` | Full environment snapshot payloads | `id`, `host_id`, `ts`, `payload` (JSON) | 1 per `scan`/`watch` startup | Unbounded locally | DR-003 |
 
-**Invariants that the database enforces itself** (cheaper than tests, per `rules/00-CORE.md` principle 1):
+**Invariants that the database enforces itself:**
 
 | ID | Invariant | Enforced by |
 |---|---|---|
@@ -217,11 +217,11 @@ Summary only. `netcheck/schema.sql` is authoritative for exact types.
 
 ## 11. Explicitly not built
 
-Mirrors the PRD's non-goals at the system level.
+Current system-level non-goals:
 
 | Thing | Why not | Revisit when |
 |---|---|---|
-| Automated device-fix apply/verify/monitor pipeline (`fix_engine.py`, `fix_application.py`, `verification_engine.py`, `monitoring_engine.py`) | Built once, fully tested, never wired to a real command — removed as dead code 2026-08-07 rather than left as an unreachable library | A specific command is designed and reviewed for it (PRD Q-001) |
+| Automated device-fix apply/verify/monitor pipeline (`fix_engine.py`, `fix_application.py`, `verification_engine.py`, `monitoring_engine.py`) | Built once, fully tested, never wired to a real command — removed as dead code 2026-08-07 rather than left as an unreachable library | A GitHub Issue defines a specific command and its safety constraints |
 | Historical-confidence/decision-tree engine (`diagnostic_engine.py`) | 39 functions imported into `diagnose.py`, zero of them called beyond the import line — removed as dead code 2026-08-07 | A specific classifier is wired directly into `diagnose.rank()`'s live path with a test proving it affects a real verdict |
 | Multi-machine fleet controller | Each machine's network path is independent; the Supabase mirror already covers cross-machine history reads | A user asks for centralized fleet monitoring |
 
@@ -229,14 +229,14 @@ Mirrors the PRD's non-goals at the system level.
 
 | Date | Version | Change | Reason | Affected IDs |
 |---|---|---|---|---|
-| 2026-08-07 | 1.0.0 | Initial system requirements, written against the already-shipped architecture, alongside the PRD and the removal of `diagnostic_engine.py`/`fix_engine.py`/`fix_application.py`/`monitoring_engine.py`/`verification_engine.py`. | Adopting SDD documentation and a lean-code cleanup pass. | All |
+| 2026-08-07 | 1.0.0 | Initial system requirements, written against the already-shipped architecture, alongside the removal of `diagnostic_engine.py`/`fix_engine.py`/`fix_application.py`/`monitoring_engine.py`/`verification_engine.py`. | Adopting SDD documentation and a lean-code cleanup pass. | All |
 
 ---
 
 ## Appendix A: System Requirements self-check (GATE-SYSREQ)
 
-- [x] Every `SR-` derives from a PRD ID that exists.
-- [x] Every PRD `NFR-` is addressed by at least one `SR-` or explicitly deferred with a reason.
+- [x] Every `SR-` names a product behavior or constraint.
+- [x] Every active non-functional constraint is addressed by at least one `SR-` or explicitly deferred with a reason.
 - [x] Every `SR-` has exactly one verification method and a named evidence artifact.
 - [x] Every container justifies why it is not merged into another (section 2's Rule).
 - [x] Every external integration states its behavior when the service is down.

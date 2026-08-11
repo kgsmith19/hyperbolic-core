@@ -1,24 +1,17 @@
-# Change
+## Issue
 
-## Work
-Issue: #
-Spec:
-Slice(s):
+Closes #
 
-## What Changed
+## What changed
+
 -
 
-## Evidence
-- [ ] `bash tools/check.sh` passes on this branch
-- [ ] Acceptance criteria in the linked Issue are satisfied
-- [ ] Risk/security checks pass when applicable (see `AGENTS.md` risk scale)
+## Validation
 
-## Risk
-R0 / R1 / R2 / R3 / R4
+- [ ] `bash tools/check.sh` passes
+- [ ] `PR Gate` passes
+- [ ] Linked Issue acceptance criteria are satisfied
 
-## Not Included
+## Not included
+
 -
-
-## Integrity
-- [ ] `tools/check.sh` and its checks were not weakened, skipped, or edited to pass this diff
-- [ ] Scope was not unnecessarily widened
