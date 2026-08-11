@@ -10,6 +10,7 @@ if (tokenA.includes("\n") || tokenB.includes("\n")) throw new Error("invalid tes
 
 await appendFile(
   environmentFile,
-  `PROMPT_TEST_TOKEN_A=${tokenA}\nPROMPT_TEST_TOKEN_B=${tokenB}\n`,
+  `TOOLBELT_TEST_TOKEN_A=${tokenA}\nTOOLBELT_TEST_TOKEN_B=${tokenB}\n` +
+    `PROMPT_TEST_TOKEN_A=${tokenA}\nPROMPT_TEST_TOKEN_B=${tokenB}\n`,
   { mode: 0o600 },
 );

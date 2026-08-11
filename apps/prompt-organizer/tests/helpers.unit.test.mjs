@@ -5,7 +5,9 @@ import { login, USER_A } from "./helpers.mjs";
 test("login uses a supplied CI session without another Auth request", async () => {
   const originalFetch = globalThis.fetch;
   const originalToken = process.env.PROMPT_TEST_TOKEN_A;
+  const originalSharedToken = process.env.TOOLBELT_TEST_TOKEN_A;
   process.env.PROMPT_TEST_TOKEN_A = "fixture-access-token";
+  process.env.TOOLBELT_TEST_TOKEN_A = "fixture-access-token";
   globalThis.fetch = async () => {
     throw new Error("Auth must not be called when a session is supplied");
   };
@@ -16,6 +18,8 @@ test("login uses a supplied CI session without another Auth request", async () =
     globalThis.fetch = originalFetch;
     if (originalToken === undefined) delete process.env.PROMPT_TEST_TOKEN_A;
     else process.env.PROMPT_TEST_TOKEN_A = originalToken;
+    if (originalSharedToken === undefined) delete process.env.TOOLBELT_TEST_TOKEN_A;
+    else process.env.TOOLBELT_TEST_TOKEN_A = originalSharedToken;
   }
 });
 

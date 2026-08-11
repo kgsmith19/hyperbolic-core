@@ -4,9 +4,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 6 * * *"
 
 concurrency:
   group: pr-gate-${{ github.event.pull_request.number || github.ref }}
@@ -24,11 +21,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-      - name: Run Toolbelt tests
-        run: node --test "tests/*.test.mjs"
       - name: Prepare Prompt Organizer test sessions
         run: node tests/export-test-sessions.mjs
         working-directory: apps/prompt-organizer
+      - name: Run Toolbelt tests
+        run: node --test "tests/*.test.mjs"
       - name: Run Prompt Organizer tests
         run: node --test "tests/*.test.mjs"
         working-directory: apps/prompt-organizer
@@ -58,7 +55,7 @@ jobs:
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:8812
       - name: Upload Prompt Organizer browser evidence
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: prompt-organizer-e2e-evidence
@@ -66,4 +63,4 @@ jobs:
             apps/prompt-organizer/playwright-report/
             apps/prompt-organizer/test-results/
           if-no-files-found: ignore
-          retention-days: 30
+          retention-days: 14
