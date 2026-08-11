@@ -64,6 +64,13 @@ jobs:
     name: Frontend checks
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      # Unit and browser tests intercept every external request. These public,
+      # non-production values let the Supabase client initialize without
+      # coupling PR validation to a deployed project.
+      VITE_SUPABASE_URL: https://test.supabase.co
+      VITE_SUPABASE_PUBLISHABLE_KEY: test-public-anon-key
+      VITE_API_URL: https://api.test.invalid
     defaults:
       run:
         working-directory: frontend
@@ -203,8 +210,6 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci && npm run build
-        working-directory: frontend
       - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
@@ -212,6 +217,18 @@ jobs:
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           env-slug: prod
           domain: https://app.infisical.com
+      - name: Build frontend with public production configuration
+        working-directory: frontend
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: |
+          test -n "$VITE_SUPABASE_URL"
+          test -n "$VITE_SUPABASE_PUBLISHABLE_KEY"
+          test -n "$VITE_API_URL"
+          npm ci
+          npm run build
       - name: Join tailnet
         uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
         with:
