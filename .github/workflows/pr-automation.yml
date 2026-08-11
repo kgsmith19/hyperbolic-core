@@ -13,6 +13,7 @@ jobs:
   pr-event:
     if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
     permissions:
+      checks: write
       contents: read
       issues: write
       pull-requests: write
