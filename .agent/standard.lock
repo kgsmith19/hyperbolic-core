@@ -1,5 +1,5 @@
-# Pinned kgsmith19/agent-engineering-standard revision this repo complies with.
-# Bumping this is an explicit migration PR; never silently follow a moving branch.
-repo: https://github.com/kgsmith19/agent-engineering-standard
-commit: e0246cd8fbd70e91b1107979c578dcfc311d179e
-pinned_at: "2026-08-10"
+# Informational reference only; this repository owns its local workflow and settings.
+standard: kgsmith19/agent-engineering-standard
+commit: 46beaac2e4db915661a9fb9c0f4094f5daf8298d
+pinned_at: "2026-08-11"
+mode: informational
