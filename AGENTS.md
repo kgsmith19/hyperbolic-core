@@ -1,78 +1,33 @@
-# lifeos
+# LifeOS repository guidance
 
-Personal Life OS built on a typed entity graph and append-only event log in
-Supabase. Life domains are data and application modules, not new kernel schema.
+LifeOS is one product with two applications:
 
-Stack: Python 3.12+, FastAPI, Pydantic v2, Postgres with pgvector, pytest,
-ruff, and mypy.
+- `backend/`: FastAPI, the typed entity graph, Postgres migrations, jobs, and tests.
+- `frontend/`: React, strict TypeScript, browser tests, and the production UI.
 
-The shared [agent-engineering-standard](https://github.com/kgsmith19/agent-engineering-standard)
-is an experimental, informational reference pinned in `.agent/standard.lock`.
-This repository owns its implementation choices and CI.
+Read the nearest `AGENTS.md` before changing either application. Backend domain changes must also preserve `backend/.agents/invariants.md` and the relevant domain constitution. Generated frontend API types are read-only; regenerate them from the backend contract.
 
 ## Essential commands
 
-Run from the repository root. Local examples assume the virtual environment is
-`.venv`.
+- Backend setup: `cd backend && python -m pip install -e .[dev]`
+- Backend checks: `cd backend && ruff check . && mypy && pytest`
+- Frontend setup: `cd frontend && npm ci`
+- Frontend checks: `cd frontend && npm run lint && npx tsc -b && npm run test && npm run e2e && npm run build`
 
-- Install: `python -m pip install -e .[dev]`
-- Test: `.venv\Scripts\python -m pytest`
-- Lint: `.venv\Scripts\python -m ruff check .`
-- Type-check: `.venv\Scripts\python -m mypy`
-- API: `.venv\Scripts\python -m uvicorn api.main:app --reload`
-- Read-only MCP server: `.venv\Scripts\python -m mcp_server`
-
-Tests use the database configured in `.env` and can erase its contents. Point
-`.env` at the LifeOS test project, never production; see `docs/runbook.md`.
-
-Operational commands and their contracts are documented beside the relevant
-domain and in `docs/runbook.md`. Important entry points include calendar,
-CPAP, and briefing jobs; intentions import; bill extraction, verification, and
-dispute drafting; and the SimpleFIN/CSV money ingestion commands.
+Tests use the configured database and may erase its contents. Use only an isolated LifeOS test database, never production.
 
 ## Engineering guidance
 
-- Prefer the smallest clear change that fully satisfies the linked Issue.
-- Reuse existing modules before adding dependencies, files, or abstractions.
-- Delete code made obsolete by the change.
-- Keep ruff and mypy clean.
-- Add behavior-focused tests at the appropriate tier: unit for pure logic,
-  integration for Postgres boundaries, and API end-to-end tests for HTTP flows.
-- Preserve unrelated work and do not weaken tests to make a change pass.
-- The web client lives in the sibling `lifeos-ui` repository.
+- Make the smallest clear change that completely resolves its linked GitHub Issue.
+- Reuse existing modules and components before adding dependencies or layers.
+- Delete obsolete code and avoid duplicate implementations.
+- Preserve behavior-focused tests; never weaken assertions to make a gate pass.
+- Keep secrets out of source control. Every `VITE_` value is public by design.
 
-## Work and delivery
+Product runtime safeguards remain mandatory: preserve provenance, keep sensitive types out of generic agent tools, retain narrow domain scopes, require the explicit human approval flow for outward bill actions, and never initiate money transfers or payments.
 
-GitHub Issues are the durable source for requested work. Implement one focused
-slice on a short-lived branch, run the relevant local checks, and open a pull
-request that links the Issue and states the evidence.
+## Delivery
 
-`.github/workflows/ci.yml` runs automatically for pull requests. Its workflow
-and required check are both named `PR Gate`; it runs lint, type checks,
-migrations, and the test suite. A passing gate is the repository's automated
-correctness signal. Native GitHub squash auto-merge may merge the pull request
-after repository settings require that check.
+GitHub Issues are the durable work source. The root `.github/workflows/ci.yml` is the only merge gate; its terminal check is `PR Gate`. It verifies both applications and deploys from `main` only when repository variables enable deployment. `ops.yml`, `backup.yml`, and `release-smoke.yml` are operational workflows, not merge gates.
 
-AI coding agents may create branches, commits, Issues, and pull requests only
-when explicitly assigned that work. They must not submit code reviews, approve
-or block a pull request, request reviewers, or post unsolicited comments. They
-may answer in an Issue or pull request only when explicitly mentioned and
-asked a direct question.
-
-## Product safety boundaries
-
-These constraints apply to product runtime behavior:
-
-- Agent-facing results preserve provenance:
-  `{source_entity_ids, source_event_ids, method, confidence}`.
-- Types marked `x-sensitive: true` remain unavailable through the generic
-  agent-tool surface.
-- Outward-facing bill actions remain draft-only until the product's explicit
-  human approval flow creates an `authority_receipt` bound to the exact
-  draft hash. This is a LifeOS runtime safety feature.
-- Money ingestion never initiates transfers or payments.
-- Domain access remains narrow; do not replace scoped contexts with
-  `AccessContext.all()`.
-
-Project invariants are in `.agents/invariants.md`; domain-specific data,
-access, and safety contracts are in `.agents/domains/`. Product architecture decisions live in `docs/adr/`.
+AI coding agents may create assigned branches, commits, Issues, and pull requests. They must not submit reviews, approve or block pull requests, request reviewers, or post unsolicited comments. They may answer in an Issue or pull request only when explicitly tagged with a direct question.
