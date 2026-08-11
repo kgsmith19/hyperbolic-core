@@ -24,10 +24,7 @@ async function signIn(page: Page) {
       refresh_token: "fake-refresh",
       user: { id: "owner", aud: "authenticated", email: "kyle@example.com" },
     };
-    window.localStorage.setItem(
-      "sb-vhbzblllaohuljtareza-auth-token",
-      JSON.stringify(session),
-    );
+    window.localStorage.setItem("sb-test-auth-token", JSON.stringify(session));
   });
   await page.route("**/auth/v1/**", (route) => route.fulfill({ json: {} }));
 }
