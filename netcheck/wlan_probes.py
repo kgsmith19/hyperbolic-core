@@ -90,7 +90,11 @@ def _block(channel):
 
     Two APs in the same block contend for airtime even on different channel
     numbers, which is why co-channel counting alone understates interference.
+    UNII-3 (149-165) channels map separately due to the gap after 144.
     """
+    if channel >= 149:
+        # UNII-3: channels 149-165 all in one interference group (block 9)
+        return 9
     return (channel - 36) // 16
 
 
