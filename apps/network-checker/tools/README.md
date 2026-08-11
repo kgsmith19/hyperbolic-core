@@ -15,8 +15,8 @@ bash tools/check.sh
 
 Runs the test suite, the three scanners below at the configured intensities,
 and `bash -n` over every shell script. It prints PASS/FAIL per step and exits
-non-zero if any failed. `.github/workflows/ci.yml` runs this same script, so
-local and CI use the same checks.
+non-zero if any failed. The Toolbelt root `.github/workflows/ci.yml` runs this
+same script from this directory, so local and CI use the same checks.
 
 ### The three scanners
 

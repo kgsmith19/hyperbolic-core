@@ -17,7 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-INIT_PY = Path(__file__).resolve().parent.parent / "netcheck" / "__init__.py"
+APP_ROOT = Path(__file__).resolve().parent.parent
+INIT_PY = APP_ROOT / "netcheck" / "__init__.py"
 VERSION_RE = re.compile(r'^__version__ = "(\d+)\.(\d+)\.(\d+)"$', re.MULTILINE)
 
 
@@ -47,8 +48,10 @@ def write_version(text, new_version):
 
 
 def _last_tag():
-    result = subprocess.run(["git", "describe", "--tags", "--abbrev=0"],
-                            capture_output=True, text=True, timeout=10)
+    result = subprocess.run(["git", "describe", "--tags", "--abbrev=0",
+                             "--match", "network-checker-v[0-9]*"],
+                            capture_output=True, text=True, timeout=10,
+                            cwd=APP_ROOT)
     return result.stdout.strip() if result.returncode == 0 else None
 
 
@@ -57,8 +60,13 @@ def changelog_entries(since=None):
     if there's no tag yet), oldest first."""
     ref = since or _last_tag()
     range_arg = f"{ref}..HEAD" if ref else "HEAD"
-    result = subprocess.run(["git", "log", "--reverse", "--format=%s", range_arg],
-                            capture_output=True, text=True, timeout=10)
+    result = subprocess.run(
+        ["git", "log", "--reverse", "--format=%s", range_arg, "--", "."],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        cwd=APP_ROOT,
+    )
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 

@@ -19,8 +19,8 @@ formula: both require a build step this project deliberately doesn't have.
 Packaging here means: clone it, run it.
 
 ```bash
-git clone https://github.com/kgsmith19/network-checker
-cd network-checker
+git clone https://github.com/kgsmith19/toolbelt
+cd toolbelt/apps/network-checker
 python -m netcheck scan
 ```
 
@@ -94,13 +94,11 @@ data center.
 
 ## Releases
 
-**As of 2026-08-06, `.github/workflows/release.yml` triggers on manual
-`workflow_dispatch` only** -- pushing a `vX.Y.Z` tag no longer runs
-anything by itself (see `.github/workflows/README.md` for why: the CI
-workflows were burning through the account's Actions minutes quota on
-every push). Building and smoke-testing the release image is now a local
-step (`tools/deploy.sh`); only dispatch the GitHub workflow when you
-specifically want the published GitHub Release + downloadable artifact.
+The Toolbelt root `.github/workflows/network-checker-release.yml` triggers on
+manual `workflow_dispatch` only. Pushing a `network-checker-vX.Y.Z` tag does
+not publish by itself. Build and smoke-test locally with `tools/deploy.sh`;
+dispatch the workflow only when you want the draft GitHub Release and
+downloadable image.
 
 To cut a release:
 
@@ -108,8 +106,8 @@ To cut a release:
 python tools/release.py bump patch   # or minor / major
 python tools/release.py changelog    # draft entries; paste into CHANGELOG.md under [Unreleased]
 # move the [Unreleased] section to a new ## [X.Y.Z] heading, commit
-git tag vX.Y.Z
-git push origin vX.Y.Z
+git tag network-checker-vX.Y.Z
+git push origin network-checker-vX.Y.Z
 bash tools/deploy.sh                 # local checks + build + smoke-test + save the image
 ```
 
@@ -117,9 +115,9 @@ bash tools/deploy.sh                 # local checks + build + smoke-test + save 
 smoke-tests it (`--version` and a real `scan`), and saves it as
 `netcheck-image-vX.Y.Z.tar.gz`. It prints the `git tag`/`gh release create`
 commands to publish from there if you want a GitHub Release; or dispatch
-the "Release" workflow manually from the Actions tab (picking the `vX.Y.Z`
-tag in "Use workflow from") to have CI build the image and open the draft
-release instead.
+the "Network Checker Release" workflow manually from the Actions tab (picking
+the `network-checker-vX.Y.Z` tag in "Use workflow from") to have CI build the
+image and open the draft release instead.
 
 ## Upgrade path for existing users
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local verification entry point used by .github/workflows/ci.yml.
+# Local verification entry point used by the Toolbelt root PR Gate.
 # Run this before opening or updating a pull request.
 #
 # Usage: bash tools/check.sh

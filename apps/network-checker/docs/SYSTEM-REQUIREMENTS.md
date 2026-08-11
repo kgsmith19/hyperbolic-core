@@ -106,7 +106,7 @@ graph TB
 | SR-007 | C-005's `mirror()` must mark a row synced only after a successful push, and must never block local writes on the mirror's availability. | FR-011, NFR-003 | Test | `test_store.py::MirrorTest` | done |
 | SR-008 | No subprocess/PowerShell call in C-002 may interpolate a caller-supplied value into the command text. | NFR-005 | Test | `test_environ.py::PowerShellArgumentSafetyTest` | done |
 | SR-009 | The full test suite must run with zero live network calls, zero sleeps beyond a probe's own timing, and zero skips — a test that does not run on the machine running the suite is not coverage. | NFR-006 | Test | `python -m unittest discover -s tests -t .` reports `OK` with no `skipped` count | done |
-| SR-010 | No module in `netcheck/` may import a package outside the Python 3 standard library. | NFR-001 | Inspection | `.github/workflows/ci.yml` via `tools/check.sh` | done |
+| SR-010 | No module in `netcheck/` may import a package outside the Python 3 standard library. | NFR-001 | Inspection | Toolbelt root `PR Gate` via `tools/check.sh` | done |
 | SR-012 | C-002 must resolve a device host and confirm **every** returned address is private before sending credentials, so a name answering with both a LAN and a public address is refused. | FR-014, NFR-004 | Test | `test_remote.py::CredentialDestinationTest` | done |
 | SR-011 | C-002 must open its own socket on the requested address family rather than calling `socket.create_connection`, which re-resolves the hostname and may return the other family. | FR-013 | Test | `test_dualstack.py::test_each_family_is_connected_on_a_socket_of_that_family` | done |
 

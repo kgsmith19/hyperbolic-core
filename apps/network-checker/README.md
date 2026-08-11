@@ -9,8 +9,8 @@ of a hunch.
 Pure Python 3 standard library — nothing to install, no `pip`, no build step.
 
 ```bash
-git clone https://github.com/kgsmith19/network-checker
-cd network-checker
+git clone https://github.com/kgsmith19/toolbelt
+cd toolbelt/apps/network-checker
 python -m netcheck scan        # one-shot snapshot of every environment section
 python -m netcheck probe       # one measured tick across every network layer
 ```
@@ -161,5 +161,5 @@ it documented functions that had never been written, and gave `correlate()`
 verdicts it has never returned. The docstrings are the reference.
 
 Known issues and accepted risks are tracked as
-[GitHub issues](https://github.com/kgsmith19/network-checker/issues), not in
-this repo.
+[Toolbelt GitHub issues](https://github.com/kgsmith19/toolbelt/issues), not in
+application documentation.

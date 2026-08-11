@@ -11,9 +11,8 @@ HTML/CSS/JS with zero dependencies, vendored or otherwise — native ES
 modules, Server-Sent Events, and a Service Worker cover what a small
 framework used to.
 
-The shared [agent-engineering-standard](https://github.com/kgsmith19/agent-engineering-standard)
-is an experimental, informational reference pinned in `.agent/standard.lock`.
-This repository owns its implementation choices and CI.
+This application follows the Toolbelt root delivery workflow. Its implementation
+choices and product safeguards remain local to this directory.
 
 ## Product invariants
 
@@ -32,7 +31,7 @@ This repository owns its implementation choices and CI.
 
 ## Commands
 
-Run from the repository root.
+Run from `apps/network-checker/`.
 
 ```bash
 python -m unittest discover -s tests -t .
@@ -87,14 +86,13 @@ GitHub Issues are the durable source for requested work. Implement one focused
 slice on a short-lived branch, run `bash tools/check.sh`, and open a pull
 request that links the Issue and states the evidence.
 
-`.github/workflows/ci.yml` runs automatically for pull requests. Its workflow
-and required check are both named `PR Gate`; it executes the same
-`tools/check.sh` command used locally. Native GitHub squash auto-merge may
-merge the pull request after repository settings require that check.
+The root `../../.github/workflows/ci.yml` runs automatically for pull requests.
+Its workflow and required check are both named `PR Gate`; it executes the same
+`tools/check.sh` command used locally.
 
-`.github/workflows/release.yml` is a separate manual workflow that validates
-the repository, builds and smoke-tests the container, and creates a draft
-release.
+The root `../../.github/workflows/network-checker-release.yml` is a separate
+manual workflow that validates this application, builds and smoke-tests the
+container, and creates a draft release.
 
 AI coding agents may create branches, commits, Issues, and pull requests only
 when explicitly assigned that work. They must not submit code reviews, approve

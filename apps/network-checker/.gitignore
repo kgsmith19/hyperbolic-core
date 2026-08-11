@@ -9,6 +9,5 @@ __pycache__/
 .coverage
 coverage.xml
 
-# Local agent worktrees and Superpowers scratch
+# Local worktrees
 .worktrees/
-.superpowers/
