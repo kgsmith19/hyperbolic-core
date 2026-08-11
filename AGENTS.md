@@ -11,6 +11,8 @@ safety, and verify the behavior you change.
 - `hooks/engine.mjs` owns guard, vault, watched-project, and runbox mutations.
 - `gui/server.mjs` serves the loopback web interface. `gui/README.md` is its
   API contract.
+- `ui/` is the React front end served through `gui/server.mjs --ui-dist`.
+  `ui/e2e/contract.spec.ts` verifies it against the real sandboxed server.
 - `kernel/` runs bounded headless tasks and records their results. Read
   `kernel/README.md` before changing the kernel contract or adapters.
 - `runner/` owns directive execution and lifecycle state. Read
@@ -51,6 +53,9 @@ npm run covgate
 npm run test:windows
 npm run e2e:gui
 npm run gui
+cd ui && npm ci
+cd ui && npm run build
+cd ui && ACC_DIR=.. npm run e2e
 ```
 
 The Windows suite also exercises:
@@ -68,7 +73,9 @@ subsystem documentation before running them.
 
 1. Start from a GitHub Issue with a concrete outcome and acceptance criteria.
 2. Implement the smallest coherent change.
-3. Add or update focused tests and run the relevant commands above.
+3. Add or update focused tests and run the relevant commands above. Changes
+   spanning the API and React client must keep `gui/README.md`, `ui/src/api.ts`,
+   and the UI contract suite consistent.
 4. Open a pull request that links the Issue and reports exact verification.
 5. Let `.github/workflows/ci.yml` produce the single required check,
    `PR Gate`.

@@ -87,10 +87,47 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e:gui
 
+  ui:
+    name: UI build and ACC contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+        working-directory: ui
+      - run: npm run build
+        working-directory: ui
+      - name: Cache Playwright Chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: acc-ui-playwright-chromium-${{ runner.os }}-${{ hashFiles('ui/package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+        working-directory: ui
+      - name: Contract end-to-end against the monorepo ACC server
+        run: npm run e2e
+        working-directory: ui
+        env:
+          ACC_DIR: ${{ github.workspace }}
+      - name: Upload UI Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: acc-ui-playwright-failure-evidence
+          path: |
+            ui/playwright-report/
+            ui/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
   pr-gate:
     name: PR Gate
     if: always()
-    needs: [portable, windows-integration, gui-e2e]
+    needs: [portable, windows-integration, gui-e2e, ui]
     runs-on: ubuntu-latest
     steps:
       - name: Confirm every correctness job passed
@@ -99,3 +136,4 @@ jobs:
           test "${{ needs.portable.result }}" = "success"
           test "${{ needs.windows-integration.result }}" = "success"
           test "${{ needs.gui-e2e.result }}" = "success"
+          test "${{ needs.ui.result }}" = "success"
