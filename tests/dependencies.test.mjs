@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { login, rest, TEST_USER_A } from "./helpers.mjs";
 
 // T-A-005 -> AC-012 -> FR-006: constraint-finder's real seeded dependency on
-// optimize-metrics is readable with its reason intact. Real data, not a
-// throwaway fixture (PRD DR-005): sourced from
+// optimize-metrics is readable with its reason intact. This is real seeded
+// data, not a throwaway fixture, and is sourced from
 // docs/notes/2026-08-06-supabase-project-topology.md section 3, which
 // states this exact edge as a literal, named pair.
 test("seeded_dependency_returns_idea_and_reason__T_A_005__AC_012", async () => {

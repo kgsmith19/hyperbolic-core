@@ -7,7 +7,7 @@
 -- Deliberately not seeded here: the note's further claim "every scoring
 -- tool depends on optimize-metrics" is a general rule, not an enumerated
 -- list. Which ideas count as "scoring tools" is Kyle's judgment, not this
--- implementer's to infer from one-liner text (PRD Q-003, unanswered).
+-- implementer's to infer from one-line text; leave it for explicit product direction.
 insert into idea.dependency (idea_id, depends_on, reason) values (
   'constraint-finder',
   'optimize-metrics',

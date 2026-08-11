@@ -59,7 +59,7 @@
     }
 
     // FR-004: idea.score is (idea, metric) -> value, appended to over time
-    // (PRD DR-004), never overwritten. Two flat reads plus a client-side
+    // and never overwritten. Two flat reads plus a client-side
     // join, rather than a cross-schema PostgREST embed (idea.score and
     // core.metric_def are different exposed schemas).
     async function fetchScores(token) {

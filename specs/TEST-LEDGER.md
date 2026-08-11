@@ -1,22 +1,18 @@
 ---
 title: Test Justification Ledger
-status: active
+status: historical
 created: 2026-08-06
-updated: 2026-08-08
+updated: 2026-08-11
 owner: Kyle
 ---
 
-# Test Justification Ledger
+# Historical Test Evidence Ledger
 
-> **Purpose.** Every test in this repo has a row here. A test with no row gets deleted at the next Test Review, no discussion. This is how test suites stay lean instead of accreting.
->
-> **Location:** `specs/TEST-LEDGER.md`. Updated in the same commit as the test it describes.
->
-> **The rule:** a test is a liability that earns its keep by catching a specific failure. Coverage is not a reason. "It might break someday" is not a reason. A named failure mode a human would care about is a reason.
+> This file preserves evidence for tests and decisions that already shipped. It is not an active process requirement: new work does not require a spec, a ledger row, mutation bookkeeping, or a separate Test Review. Track future work in GitHub Issues and keep executable tests accurate.
 
 ---
 
-## 1. Active tests
+## 1. Recorded tests
 
 | Test ID | Name / location | Level | Traces to | Failure mode caught | Why not cheaper | Why not duplicate | Mutation verified | Runtime (ms) | Deletion criterion | Added |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -61,7 +57,7 @@ Updated at every Test Review. A shape that inverts (many E2E, few unit) is a def
 | Acceptance (`T-A-`) | 5 | 1 per AC | 3.2s | T-A-001, T-A-004, T-A-005, T-A-006, T-A-007 executable; T-A-002 a recorded manual drill |
 | E2E (`T-E-`) | 0 | ~5%, critical paths only | 0 | The browser drill covers this path without adding a dependency |
 | Regression (`T-R-`) | 0 | 1 per real defect | 0 | D-001 is covered by tightening T-A-001, not by a new test |
-| **Total** | 15 executable | | 2.5s | Under `{{MAX_SUITE_SECONDS}}` |
+| **Total** | 15 executable | | 2.5s | Under `120 seconds` |
 
 ## 3. Regression register
 
@@ -69,11 +65,11 @@ Regression tests are the only tests allowed to exist without a forward-looking p
 
 | Test ID | Defect | Date found | How it reached production | Root cause | Fixed in | Also fixed by a cheaper mechanism? |
 |---|---|---|---|---|---|---|
-| D-001 (covered by T-A-001, no new test) | `idea.idea`'s `prompt-organizer` row carried `status` `idea`; FR-001 and AC-001 both name `specced`. | 2026-08-07 | The seed migration wrote `idea`, and T-A-001 was written to assert `idea` to match it. Asserting the observed value instead of the specified one is the banned behavior in `rules/00-CORE.md` ("editing a test to make it pass"). It inverted the source of truth, so the suite was green while the data contradicted the PRD. | The test was authored from the database rather than from the acceptance criterion. | `supabase/migrations/20260807010000_idea_fix_prompt_organizer_status.sql` corrects the live row; `20260806190300_seed_idea.sql` corrects fresh deploys; T-A-001 now asserts `specced`. | No. A `CHECK` constraint can restrict `status` to the allowed set (it already does) but cannot know which value a given row should hold. The assertion is the cheapest mechanism that ties a row to its acceptance criterion. |
+| D-001 (covered by T-A-001, no new test) | `idea.idea`'s `prompt-organizer` row carried `status` `idea`; FR-001 and AC-001 both name `specced`. | 2026-08-07 | The seed migration wrote `idea`, and T-A-001 was written to assert `idea` to match it. Asserting the observed value instead of the specified one is the banned behavior in `the historical testing practice` ("editing a test to make it pass"). It inverted the source of truth, so the suite was green while the data contradicted the historical requirements. | The test was authored from the database rather than from the acceptance criterion. | `supabase/migrations/20260807010000_idea_fix_prompt_organizer_status.sql` corrects the live row; `20260806190300_seed_idea.sql` corrects fresh deploys; T-A-001 now asserts `specced`. | No. A `CHECK` constraint can restrict `status` to the allowed set (it already does) but cannot know which value a given row should hold. The assertion is the cheapest mechanism that ties a row to its acceptance criterion. |
 
 **Which gate missed it:** GATE-RED R4 ("it fails for the intended reason", with the reason written in the spec *before* running). Had the expected value been taken from AC-001 before the test was run, the mismatch would have surfaced as the test's first red instead of never surfacing. GATE-GREEN G7 is the backstop that also missed it, since a line asserting `idea` traces to no acceptance criterion.
 
-**Required for every row:** "which gate missed it". A defect reaching production means a gate is wrong. Fixing only the code and not the gate guarantees a repeat.
+**Historical convention:** the regression record named which earlier check missed the defect. This remains context for the shipped fix, not a requirement for future work.
 
 ## 4. Deleted tests
 
@@ -91,7 +87,7 @@ Tests that are flaky, slow, or unproven live here with an expiry date. A quarant
 
 **Quarantine is capped at 14 days.** A test nobody will fix in two weeks is a test nobody needs.
 
-## 6. Ledger self-check (GATE-LEDGER)
+## 6. Historical ledger self-check
 
 - [x] Every test file in the repo has a matching row in section 1. Seven files: `rls.test.mjs` (T-I-001, T-I-002, T-A-001), `constraints.test.mjs` (T-I-003, T-I-004), `seed.test.mjs` (T-I-005), `scores.test.mjs` (T-A-004, T-I-007, T-I-008), `dependencies.test.mjs` (T-A-005), `log_run.test.mjs` (T-A-006, T-I-009), `retention.test.mjs` (T-A-007, T-I-010).
 - [x] Every row in section 1 corresponds to a test that exists. T-I-006, T-A-002, and T-A-003 are labelled as manual drills rather than executable tests, so the count is not overstated.
@@ -99,6 +95,6 @@ Tests that are flaky, slow, or unproven live here with an expiry date. A quarant
 - [x] Every row has a mutation-verified date. None left `pending`.
 - [x] Every row has a deletion criterion.
 - [x] No row's failure mode is phrased in implementation terms rather than observable terms.
-- [x] Total suite runtime is under `{{MAX_SUITE_SECONDS}}` (120): 2.5s measured, 15 tests.
+- [x] Total suite runtime is under `120 seconds` (120): 2.5s measured, 15 tests.
 - [x] Quarantine has no expired entries. It is empty.
 - [x] Every regression row names the gate that missed the defect. D-001 names GATE-RED R4, with GATE-GREEN G7 as the backstop that also missed it.

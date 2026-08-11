@@ -4,7 +4,7 @@
 -- data, not per-row-owned) -> policy scoped to the authenticated role
 -- generally. This is a single-user system, so "authenticated = owner" is
 -- the correct model here (Kyle, 2026-08-06). Revisit if a second identity
--- is ever added (see PRD ASM-001).
+-- is ever added.
 
 alter table core.run enable row level security;
 alter table core.run force row level security;

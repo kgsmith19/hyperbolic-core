@@ -1,36 +1,26 @@
 ---
 name: Work item
-about: A validated outcome ready to become durable work (not a raw idea)
+about: Define a concrete outcome for toolbelt
 title: ""
-labels: "status:ready"
+labels: ""
 ---
 
 ## Outcome
 
-What useful result should exist?
+State the useful result that should exist when this work is complete.
 
-## Source of Intent
+## Context
 
-PRD requirement / bug / incident / security finding / ADR / maintenance:
+Explain the current behavior, relevant constraints, and why the change is needed.
 
-## Acceptance
+## Acceptance Criteria
 
-- [ ]
+- [ ] Given ..., when ..., then ...
 
-## Risk
+## Verification
 
-R0 / R1 / R2 / R3 / R4 -- see `AGENTS.md` for this repo's default and protected paths.
-
-## Spec / Slices
-
-Spec needed: Yes / No -- a SPEC is needed only when the Issue alone cannot unambiguously define correct behavior.
-
-- [ ] SL-001:
-
-## Blockers / Dependencies
-
--
+Identify the tests, checks, or manual observations that should verify the change.
 
 ## Out of Scope
 
--
+List related work that is intentionally excluded.

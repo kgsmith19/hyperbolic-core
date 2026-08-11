@@ -3,14 +3,14 @@ title: toolbelt System Requirements
 status: active
 scope: repo
 created: 2026-08-07
-updated: 2026-08-08
+updated: 2026-08-11
 owner: Kyle
 traces: [FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, NFR-001, NFR-002, NFR-003, NFR-004]
 ---
 
 # System Requirements
 
-What the system must be, as opposed to what it must do. What it does lives in `docs/PRD.md`.
+This document records the system's current technical constraints. Product changes begin with a GitHub Issue.
 
 ## 1. Runtime shape
 
@@ -31,7 +31,7 @@ What the system must be, as opposed to what it must do. What it does lives in `d
 | SR-025 | `GET /rest/v1/metric_def` with header `Accept-Profile: core` | Supabase PostgREST | Reading metric names to label scores | Non-200 leaves the section hidden, same as SR-024 |
 | SR-027 | `GET /rest/v1/dependency` with header `Accept-Profile: idea` | Supabase PostgREST | Reading each idea's dependencies | Non-200 leaves the section hidden, same as SR-024 |
 
-All four are provided by the same Supabase project as the database. None is a third-party integration (PRD section 11).
+All four are provided by the same Supabase project as the database. None is a third-party integration (shipped requirements section 11).
 
 ## 2a. Interfaces the system provides to other tools
 
@@ -39,7 +39,7 @@ All four are provided by the same Supabase project as the database. None is a th
 |---|---|---|---|---|
 | SR-028 | `POST /rest/v1/rpc/log_run` (`core.log_run`, `security definer`) | Any authenticated tool in the portfolio (first caller: `prompt-organizer`) | Recording one `core.run` row and one `core.cost` row without the caller ever writing directly into `core.*` | A bad `app_id` returns `409`/`23503`, the caller's own responsibility to surface; any other failure is the same class of error a direct `POST /rest/v1/run` would return |
 
-This is the mechanism `prompt-organizer`'s own `CLAUDE.md` names as the boundary: "cross-schema writes belong to the owning repo." `core.run`/`core.cost` are owned here; no other repo's client code should ever contain a schema-qualified write against either.
+This preserves the repository ownership boundary documented by `prompt-organizer`: "cross-schema writes belong to the owning repo." `core.run`/`core.cost` are owned here; no other repo's client code should ever contain a schema-qualified write against either.
 
 | ID | Interface | Consumer | Used for | Failure behavior |
 |---|---|---|---|---|
@@ -52,7 +52,7 @@ This is the mechanism `prompt-organizer`'s own `CLAUDE.md` names as the boundary
 | SR-007 | Row-level security is enabled **and forced** on all 14 tables. | `alter table ... enable row level security` plus `force row level security` | `pg_class.relrowsecurity` and `relforcerowsecurity` |
 | SR-008 | An unauthenticated caller reads zero rows from every table. | RLS policies scoped to the `authenticated` role | T-I-001 |
 | SR-009 | `core.run` rows are visible only to the user who created them. | `using (user_id = auth.uid())` | T-I-002 |
-| SR-010 | The service-role key never appears in this repo, in a browser bundle, or in git history. | Only the anon key is committed; it is designed for client exposure and RLS is the real boundary | GATE-SHIP SH6 |
+| SR-010 | The service-role key never appears in this repo, in a browser bundle, or in git history. | Only the anon key is committed; it is designed for client exposure and RLS is the real boundary | Repository secret scan |
 | SR-011 | Credentials entered on the idea list page are sent only to the Supabase auth endpoint and are never persisted by the page. | The access token is held in a local variable for the lifetime of the page load; nothing is written to storage or cookies | Reading `web/index.html` |
 
 ## 4. Data integrity requirements
@@ -74,7 +74,7 @@ This is the mechanism `prompt-organizer`'s own `CLAUDE.md` names as the boundary
 | SR-017 | Every migration has a down migration that removes exactly what the up migration added. | 100% of migrations | A file named `<migration>_down.sql` exists for each; round-trip run once (SPEC-0000 section 12) |
 | SR-018 | Re-running the seed migration leaves `idea.idea` at 33 rows. | exactly 33 | `on conflict (id) do nothing`, plus PROP-003 |
 | SR-019 | The whole test suite runs without database credentials, using only the public anon key. | 0 secrets required | `node --test "tests/*.test.mjs"` |
-| SR-020 | Marginal infrastructure cost is $0 beyond this one Supabase project. | $0 | PRD NFR-002 |
+| SR-020 | Marginal infrastructure cost is $0 beyond this one Supabase project. | $0 | shipped requirements NFR-002 |
 | SR-031 | No `core.event` row is older than 90 days for long; a daily job deletes every row that crosses that age, recording its month in `core.event_monthly_agg` first. | `pg_cron` schedule `core-purge-old-events`, `0 3 * * *`, calling `core.purge_old_events()` | T-A-007 |
 
 ## 6. Maintainability limits
@@ -93,14 +93,14 @@ SR-023 is why the tests use Node's built-in `node:test` and the page uses native
 |---|---|
 | Availability or uptime target | Inherits Supabase's own SLA; not controlled by this repo |
 | Performance or latency target | One user, 33 rows, no real traffic |
-| Horizontal scalability | Single user (PRD CON-003) |
+| Horizontal scalability | Single user (shipped requirements CON-003) |
 | Browser support matrix | One user, one current browser; the page uses only baseline ES modules and `fetch` |
-| Compliance regime | No regulated data; every data item is classified `internal` (PRD section 8) |
+| Compliance regime | No regulated data; every data item is classified `internal` (shipped requirements section 8) |
 
-## Appendix: GATE-SYSREQ self-check
+## Appendix: documentation self-check
 
 - [x] Every requirement has an ID, a value, and a verification method.
-- [x] No requirement duplicates a PRD functional requirement; these constrain how, not what.
+- [x] The document focuses on technical constraints rather than duplicating product behavior.
 - [x] Every security requirement names its mechanism, not just its intent.
 - [x] Every interface names its failure behavior.
 - [x] The "not required" section is non-empty and gives a reason per line.

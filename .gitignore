@@ -8,6 +8,5 @@ node_modules/
 dist/
 .claude/worktrees/
 
-# Local agent worktrees and Superpowers scratch
+# Local worktrees
 .worktrees/
-.superpowers/

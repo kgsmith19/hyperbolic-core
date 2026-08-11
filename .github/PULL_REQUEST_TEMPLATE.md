@@ -1,31 +1,25 @@
-## Work
+## Summary
 
-Issue:
-Spec:
-Slice(s):
+Describe the outcome and the smallest coherent change that produces it.
 
-## What Changed
+## Linked Issue
 
--
+Closes #
 
-## Evidence
+## Verification
 
-- [ ] Required checks pass (`node --test "tests/*.test.mjs"`)
-- [ ] Acceptance criteria satisfied
-- [ ] `specs/TEST-LEDGER.md` updated for any new test
-- [ ] `docs/PRD.md` status column updated in this commit if a requirement moved
-- [ ] Protected evaluator passes when applicable
-- [ ] Risk/security checks pass when applicable
+- [ ] Relevant local tests pass.
+- [ ] `PR Gate` passes.
+- [ ] Affected documentation is current.
+- [ ] Any migration has a matching, verified `_down.sql` file.
+- [ ] UI changes received a focused browser check.
 
-## Risk
+List commands run and any check that could not be completed:
 
-R0 / R1 / R2 / R3 / R4
+## Data or Security Impact
 
-## Not Included
+Describe schema, migration, RLS, grant, credential, retention, or data-flow changes. Write `None` when this section does not apply.
 
--
+## Out of Scope
 
-## Integrity
-
-- [ ] Tests/policies were not weakened
-- [ ] Scope was not unnecessarily widened
+List intentionally excluded work.

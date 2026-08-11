@@ -1,52 +1,40 @@
 # toolbelt
 
-## What this is
-
-The shared spine every small tool in Kyle's tool portfolio plugs into: one Postgres schema (`core`) every tool logs runs, costs, and outcomes to, and one schema (`idea`) holding the backlog of tools not built yet. Tools themselves live in their own repos.
+`toolbelt` is the shared Supabase foundation for a portfolio of small tools. The `core` schema records runs, costs, outcomes, metrics, and events; the `idea` schema stores the tool backlog. A dependency-free static page provides the idea-list interface.
 
 ## Prerequisites
 
-| Tool | Version | Why |
-|---|---|---|
-| Node | 22 or newer | Runs the tests with the built-in `node:test` runner and native `fetch`. Nothing is installed; there is no `package.json`. |
-| Python | 3 (any) | Only to serve the page locally. Any static file server works. |
+- Node.js 22 or newer for the built-in test runner and native `fetch`.
+- Python 3, or another static file server, for local browser verification.
 
-There is no build step, no framework, and no dependency to install.
+There is no package manifest, framework, dependency installation, or build step.
 
-## Run it
+## Run locally
 
 ```bash
-python3 -m http.server 8811     # from the repo root
+python3 -m http.server 8811
 ```
 
-Open `http://localhost:8811/web/index.html`, sign in with a Supabase account
-on the `toolbelt` project, and the idea list loads.
+Open `http://localhost:8811/web/index.html`, sign in to the `toolbelt` Supabase project, and verify the affected idea-list flow.
 
-## Test it
+## Verify
 
 ```bash
 node --test "tests/*.test.mjs"
 ```
 
-The suite runs against the live `toolbelt` project using only the public anon
-key in `config.mjs`. No database credentials and no service-role key are
-needed, or accepted.
+The suite uses the live `toolbelt` Supabase project and its public anon key. A service-role key is neither required nor accepted. UI changes also receive a focused manual browser check.
 
-## Apply migrations
+## Migrations
 
-Migrations in `supabase/migrations/` are applied to the `toolbelt` project
-through the Supabase API. Each `<name>.sql` has a matching `<name>_down.sql`
-that removes exactly what it added.
+Apply `supabase/migrations/*.sql` through the Supabase API. Each up migration has a matching `_down.sql` migration that reverses the same change.
 
-## Where things are
+## Documentation
 
-| Doc | Purpose |
-|---|---|
-| `docs/PRD.md` | Source of truth for what this repo delivers |
-| `docs/SYSTEM-REQUIREMENTS.md` | What the system must be |
-| `docs/DATA-FLOW-DIAGRAM.md` | Where data comes from, goes, rests |
-| `specs/active/`, `specs/done/` | Specs in progress and completed |
+- `docs/SYSTEM-REQUIREMENTS.md` describes current system constraints.
+- `docs/DATA-FLOW-DIAGRAM.md` describes trust boundaries and data movement.
+- `docs/notes/2026-08-06-supabase-project-topology.md` describes the shared project topology.
+- `specs/done/` preserves shipped design history.
+- `specs/TEST-LEDGER.md` is a historical evidence record, not a required planning artifact.
 
-## Workflow
-
-Requirements live in `docs/PRD.md`. Each change is a spec in `specs/active/`, built red-then-green under the budgets in `rules/01-BUDGETS.md`, reviewed against `rules/02-GATES.md`, then moved to `specs/done/`. Full procedure: `prompts/` in the SDD pack this repo was scaffolded from.
+New work starts in GitHub Issues. Pull requests are verified by the sole `.github/workflows/ci.yml` workflow, whose workflow and check names are both `PR Gate`. Successful pull requests use native squash auto-merge.

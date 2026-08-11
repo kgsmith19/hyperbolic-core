@@ -19,12 +19,11 @@ test("rejects_anon_read_of_idea_idea__T_I_001__AC_002", async () => {
 // verified by hand instead, see SPEC-0000 section 12 evidence).
 //
 // 2026-08-07: this test previously asserted status 'idea', matching the seed
-// rather than AC-001, which names 'specced'. That inverted the source of
-// truth. The seed was the defect (Prompt Organizer's PRD is complete, so it
-// is specced); fixed by 20260807010000_idea_fix_prompt_organizer_status.sql.
-// Later the same day the row legitimately moved specced -> 'building' when
-// Prompt Organizer's SL-000 started (20260807030000); PRD v0.1.3 updated
-// the AC literal first, then this assertion — PRD-first, per D-001's rule.
+// rather than AC-001, which names 'specced'. The seed was the defect; migration
+// 20260807010000_idea_fix_prompt_organizer_status.sql corrected it. Later the
+// same day, migration 20260807030000 legitimately moved the row from 'specced'
+// to 'building' when implementation started. This assertion follows that
+// shipped status transition.
 test("authenticated_read_returns_seeded_prompt_organizer_row__T_A_001__AC_001", async () => {
   const token = await login(TEST_USER_A);
   const { status, json } = await rest(

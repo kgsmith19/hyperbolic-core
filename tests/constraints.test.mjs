@@ -24,8 +24,8 @@ test("rejects_metric_def_with_no_gaming_risk__T_I_004__AC_004", async () => {
     method: "POST",
     body: {
       // AC-004 names this literal id. No wall-clock suffix is needed for
-      // uniqueness (GATE-TEST-JUSTIFIED J8): the insert always fails the
-      // gaming_risk NOT NULL check, so no row is ever created to collide with.
+      // uniqueness: the insert always fails the gaming_risk NOT NULL check,
+      // so no row is created to collide with.
       id: "cost_per_requirement",
       name: "Cost per requirement",
       formula: "total cost / total requirements shipped",

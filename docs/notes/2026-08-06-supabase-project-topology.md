@@ -304,7 +304,7 @@ Rules:
 | Topic | Convention |
 |---|---|
 | Migration files | `YYYYMMDDHHMMSS_<schema>_<verb>_<object>.sql`, e.g. `20260806143000_prompt_create_prompt_version.sql` |
-| Down migrations | Required for every migration. No exceptions (halt H8 in `rules/00-CORE.md`). |
+| Down migrations | Pair every up migration with a down migration so schema changes remain explicit and reversible. |
 | Rehearsal | Every migration runs on a Supabase **branch** first, then `lifeos-test`, then production. |
 | Table names | Singular (`prompt`, not `prompts`). Consistency beats preference. |
 | Primary keys | `uuid` with `gen_random_uuid()` for user-facing rows; `bigint identity` for high-volume append-only logs |

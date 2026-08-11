@@ -1,40 +1,36 @@
+# Repository facts and executable commands.
+
 project:
   name: toolbelt
-  type: postgres-schema-plus-static-html
-
-standard:
-  repo: kgsmith19/agent-engineering-standard
-  commit: e0246cd8fbd70e91b1107979c578dcfc311d179e
+  type: postgres-schemas-with-static-web-ui
+  languages:
+    - sql-postgres
+    - vanilla-javascript
 
 commands:
-  setup: "none -- no package manager, no dependencies, by design (SR-023)"
-  build: "none -- no build step, by design"
-  format: "none -- no formatter configured"
-  lint: "none -- no linter configured"
-  typecheck: "none -- vanilla JS, no type layer"
-  test_fast: 'node --test "tests/*.test.mjs"'
-  test_full: 'node --test "tests/*.test.mjs"'
-  e2e: "none automated -- manual browser verification against web/index.html, see AGENTS.md"
-  run_local: "python3 -m http.server 8811"
-  apply_migration: "via Supabase MCP / API against project woltgcggxaehtuypkxqk -- not a local command"
-
-risk:
-  default: R2
-  protected_paths:
-    - "supabase/migrations/**"
-    - ".github/workflows/**"
-    - ".agent/**"
-    - "rules/**"
+  test: 'node --test "tests/*.test.mjs"'
+  serve_local: "python3 -m http.server 8811"
+  browser_check: "open http://localhost:8811/web/index.html and verify the affected flow"
+  apply_migration: "use the Supabase API for project woltgcggxaehtuypkxqk"
 
 ci:
-  profile: node22-no-deps
-  required_workflow: .github/workflows/ci.yml
-  required_check: "PR Gate"
-  required_trigger: "ready pull request + merge_group"
-  secrets_required: []
+  workflow: .github/workflows/ci.yml
+  workflow_name: "PR Gate"
+  job_name: "PR Gate"
+  triggers:
+    - pull_request
+    - merge_group
 
-deployment:
-  mechanism: "none -- Supabase is the hosted backend; schema changes apply directly via the Supabase API/MCP"
+data:
+  supabase_project: toolbelt
+  supabase_project_ref: woltgcggxaehtuypkxqk
+  owned_schemas:
+    - core
+    - idea
+  security_boundary: row-level-security
+  accepted_client_key: public-anon-key
+  forbidden_client_key: service-role-key
 
-telemetry:
-  integration: "none yet"
+standard:
+  lock_file: .agent/standard.lock
+  mode: informational

@@ -3,14 +3,14 @@ title: toolbelt Data Flow Diagram
 status: active
 scope: repo
 created: 2026-08-07
-updated: 2026-08-08
+updated: 2026-08-11
 owner: Kyle
 traces: [FR-001, FR-002, FR-004, FR-005, FR-006, FR-007, FR-008, NFR-001, DR-001, DR-002, DR-003, DR-004, DR-005]
 ---
 
 # Data Flow Diagram
 
-Where data comes from, where it goes, where it rests. What the product does lives in `docs/PRD.md`; what the system must be lives in `docs/SYSTEM-REQUIREMENTS.md`.
+Where data comes from, where it goes, and where it rests. Current system constraints live in `docs/SYSTEM-REQUIREMENTS.md`; product changes begin with a GitHub Issue.
 
 ## 1. Trust boundaries
 
@@ -58,7 +58,7 @@ The only trust boundary is the browser-to-Supabase hop. There is no application 
 | F-9 | Read idea dependencies | Browser | HTTPS `GET /rest/v1/dependency` + `Accept-Profile: idea` | PostgREST → `idea.dependency` | Bearer token | RLS: role must be `authenticated` |
 | F-10 | Purge old events | `pg_cron` (daily, `0 3 * * *`); also directly callable by any authenticated caller | Internal Postgres call, or HTTPS `POST /rest/v1/rpc/purge_old_events` | `core.purge_old_events` → reads/deletes `core.event`, writes `core.event_monthly_agg` | No caller input; the function reads `now()` itself | RLS: `security definer`, runs regardless of the calling role's own grants, same shape as F-5 |
 
-F-5 is SL-003 (SPEC-0003), shipped 2026-08-07: `prompt-organizer` is the first real caller. F-4 and F-6 remain the shape a tool uses to register itself and to log event/outcome detail directly; no tool writes those yet (PRD OOS-003). F-7 through F-9 are read by the same page load as F-3, in parallel (SPEC-0001, SPEC-0002). F-10 is SL-004 (SPEC-0004), shipped 2026-08-08.
+F-5 is SL-003 (SPEC-0003), shipped 2026-08-07: `prompt-organizer` is the first real caller. F-4 and F-6 remain the shape a tool uses to register itself and to log event/outcome detail directly; no tool writes those yet (shipped requirements OOS-003). F-7 through F-9 are read by the same page load as F-3, in parallel (SPEC-0001, SPEC-0002). F-10 is SL-004 (SPEC-0004), shipped 2026-08-08.
 
 ## 3. Data at rest
 
@@ -66,11 +66,11 @@ F-5 is SL-003 (SPEC-0003), shipped 2026-08-07: `prompt-organizer` is the first r
 |---|---|---|---|---|
 | `idea.idea` (33 rows) | Tool names, categories, one-liners, status | internal | Forever, until Kyle deletes a row | At rest by Supabase |
 | `idea.dependency` | One real edge (`constraint-finder depends_on optimize-metrics`, sourced from the topology note section 3) | internal | Forever, until Kyle removes an edge (DR-005) | At rest by Supabase |
-| `idea.score` | Empty in production; no real judgment has been entered for any idea (PRD DR-004) | internal | Forever, once a row exists | At rest by Supabase |
+| `idea.score` | Empty in production; no real judgment has been entered for any idea (shipped requirements DR-004) | internal | Forever, once a row exists | At rest by Supabase |
 | `core.metric_def` | One real row (`idea_effectiveness`, 0-10, proxy) plus test fixtures | internal | Forever | At rest by Supabase |
-| `core.app`, `core.run`, `core.cost`, `core.outcome`, `core.run_outcome`, `core.metric_value`, `core.assumption`, `core.intervention` | Empty except test fixtures | internal | `core.run` and related tables: forever (PRD DR-002) | At rest by Supabase |
-| `core.event` | Empty in production; test fixtures only, self-cleaning (each is older than 90 days by the time the next retention run finds it) | internal | 90 days hot, then purged (PRD DR-003, SL-004/SPEC-0004) | At rest by Supabase |
-| `core.event_monthly_agg` | One row per calendar month that ever had a purged event, holding a count | internal | Forever (PRD DR-003) | At rest by Supabase |
+| `core.app`, `core.run`, `core.cost`, `core.outcome`, `core.run_outcome`, `core.metric_value`, `core.assumption`, `core.intervention` | Empty except test fixtures | internal | `core.run` and related tables: forever (shipped requirements DR-002) | At rest by Supabase |
+| `core.event` | Empty in production; test fixtures only, self-cleaning (each is older than 90 days by the time the next retention run finds it) | internal | 90 days hot, then purged (shipped requirements DR-003, SL-004/SPEC-0004) | At rest by Supabase |
+| `core.event_monthly_agg` | One row per calendar month that ever had a purged event, holding a count | internal | Forever (shipped requirements DR-003) | At rest by Supabase |
 | `auth.users` | Two test-fixture accounts | internal | Until the fixtures are retired | Managed by Supabase |
 
 **`core.event` no longer grows without bound.** Nothing writes to it in production yet, but its retention job (SL-004/SPEC-0004, tracked as RISK-001 in SPEC-0000) is live: `core.purge_old_events()` runs daily via `pg_cron`, deleting rows older than 90 days into `core.event_monthly_agg`'s permanent monthly counts.
@@ -95,9 +95,9 @@ No data crosses any other network hop. Nothing is written to disk by the browser
 
 ## 6. Personal data
 
-None. No data item is classified PII (PRD section 8). The two test-fixture accounts use Gmail-alias addresses that are not separate real people, and the only personal data Supabase holds is the account email Kyle already gave it.
+None. No data item is classified PII (shipped requirements section 8). The two test-fixture accounts use Gmail-alias addresses that are not separate real people, and the only personal data Supabase holds is the account email Kyle already gave it.
 
-## Appendix: GATE-DFD self-check
+## Appendix: documentation self-check
 
 - [x] Every flow names its source, sink, transport, and authorization.
 - [x] Every store names its classification and retention, or says retention is undecided and where that is tracked.
