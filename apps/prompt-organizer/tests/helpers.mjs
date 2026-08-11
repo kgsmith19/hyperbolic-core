@@ -9,15 +9,47 @@ export const ANON_KEY =
 export const USER_A = { email: "kylegsmith19+toolbelt-test-a@gmail.com", password: "Test-Passw0rd-A1!" };
 export const USER_B = { email: "kylegsmith19+toolbelt-test-b@gmail.com", password: "Test-Passw0rd-B1!" };
 
+const tokenRequests = new Map();
+
+function suppliedToken(user) {
+  if (user.email === USER_A.email) return process.env.PROMPT_TEST_TOKEN_A;
+  if (user.email === USER_B.email) return process.env.PROMPT_TEST_TOKEN_B;
+  return undefined;
+}
+
+async function requestToken(user) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { apikey: ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify(user),
+    });
+    const body = await res.json();
+    if (res.ok) return body.access_token;
+    if (res.status !== 429 || attempt === 4) {
+      throw new Error(`login failed for ${user.email}: ${res.status}`);
+    }
+    const retryAfter = Number(res.headers.get("retry-after"));
+    const delayMs = Number.isFinite(retryAfter) ? retryAfter * 1000 : Math.min(1000 * 2 ** attempt, 8000);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw new Error(`login failed for ${user.email}`);
+}
+
 export async function login(user) {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-    method: "POST",
-    headers: { apikey: ANON_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify(user),
-  });
-  const body = await res.json();
-  if (!res.ok) throw new Error(`login failed for ${user.email}: ${res.status}`);
-  return body.access_token;
+  const token = suppliedToken(user);
+  if (token) return token;
+
+  if (!tokenRequests.has(user.email)) {
+    tokenRequests.set(
+      user.email,
+      requestToken(user).catch((error) => {
+        tokenRequests.delete(user.email);
+        throw error;
+      }),
+    );
+  }
+  return tokenRequests.get(user.email);
 }
 
 export async function rest(path, { token, method = "GET", body } = {}) {
