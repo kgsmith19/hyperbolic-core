@@ -5,6 +5,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
 
 concurrency:
   group: pr-gate-${{ github.event.pull_request.number || github.ref }}
@@ -22,5 +24,43 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-      - name: Run tests
+      - name: Run Toolbelt tests
         run: node --test "tests/*.test.mjs"
+      - name: Run Prompt Organizer tests
+        run: node --test "tests/*.test.mjs"
+        working-directory: apps/prompt-organizer
+      - name: Install Prompt Organizer browser test
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.52.0
+          npx playwright install --with-deps chromium
+        working-directory: apps/prompt-organizer
+      - name: Start Prompt Organizer
+        run: python3 -m http.server 8812 --directory web >/tmp/prompt-organizer.log 2>&1 &
+        working-directory: apps/prompt-organizer
+      - name: Wait for Prompt Organizer
+        shell: bash
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://localhost:8812 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/prompt-organizer.log
+          echo "Prompt Organizer did not become ready." >&2
+          exit 1
+      - name: Run Prompt Organizer critical browser journey
+        run: npx playwright test --config playwright.config.mjs
+        working-directory: apps/prompt-organizer
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:8812
+      - name: Upload Prompt Organizer browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: prompt-organizer-e2e-evidence
+          path: |
+            apps/prompt-organizer/playwright-report/
+            apps/prompt-organizer/test-results/
+          if-no-files-found: ignore
+          retention-days: 30
