@@ -23,13 +23,12 @@ var/
 node_modules/
 
 # Supabase local artifacts
-supabase/.branches/
-supabase/.temp/
-supabase/.env
+backend/supabase/.branches/
+backend/supabase/.temp/
+backend/supabase/.env
 
-# Ephemeral agent task declaration (see .agents/hooks/path-guard.mjs)
-.agents/task.json
+# Ephemeral backend task declaration
+backend/.agents/task.json
 
-# Local agent worktrees and Superpowers scratch
+# Local worktrees
 .worktrees/
-.superpowers/
