@@ -157,6 +157,29 @@ test("a lock file abandoned by a dead process (stale) is reaped, not waited out 
   assert.equal(ran, true, "a stale lock must be reaped rather than block the caller forever");
 });
 
+test("exclusive-create EPERM contention is retried and the acquired lock is still released", () => {
+  const file = path.join(L.ledgerDir(), "r11-ep.decisions.lock");
+  const realOpenSync = fs.openSync;
+  let attempts = 0;
+  let ran = false;
+  fs.openSync = (...args) => {
+    if (args[0] === file && attempts++ === 0) {
+      const error = new Error("simulated exclusive-create contention");
+      error.code = "EPERM";
+      throw error;
+    }
+    return realOpenSync(...args);
+  };
+  try {
+    L.withDecisionLock("r11-ep", () => { ran = true; });
+  } finally {
+    fs.openSync = realOpenSync;
+  }
+  assert.equal(ran, true);
+  assert.equal(attempts, 2, "the second exclusive-create attempt must acquire the lock");
+  assert.equal(fs.existsSync(file), false, "the acquired lock must still be released");
+});
+
 test("a lock held by a live, recent holder is NOT reaped as stale — acquisition blocks until it times out and throws", () => {
   const file = path.join(L.ledgerDir(), "r12.decisions.lock");
   fs.mkdirSync(path.dirname(file), { recursive: true });

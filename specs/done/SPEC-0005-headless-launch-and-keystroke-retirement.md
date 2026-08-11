@@ -2,13 +2,15 @@
 title: The web GUI launches and manages headless directives; the keystroke stack retires
 spec_id: SPEC-0005-headless-launch-and-keystroke-retirement
 slice: SL-013 (PR-1), SL-011 + SL-012 (PR-2), SL-013C (PR-3)
-status: in-progress
+status: historical
 created: 2026-08-08
-updated: 2026-08-09
-completed:
+updated: 2026-08-11
+completed: 2026-08-11
 owner: Kyle Smith
 traces: [FR-005, FR-011, FR-012, FR-013, FR-014, NFR-007, NFR-008]
 ---
+> **ARCHIVED / VOID AS PROCEDURE.** This file preserves shipped product history and technical evidence only. Do not use it as an active plan, checklist, gate, or instruction. New work starts in GitHub Issues and is verified by `PR Gate`.
+
 
 # SPEC-0005: Web launch surface, then keystroke-stack demolition
 
@@ -35,12 +37,12 @@ Kyle can type a task into the `/guards` page, press GO, and a headless `claude -
 - `runner/runner.mjs`: pid-file singleton — one loop per job machine-wide, exit 6 on refusal, stale reclaim, release in `finally`.
 - `gui/guards.html`: Start-work fieldset (suggest-on-blur folder routing, profile radios, GO = create+launch, live directive list with Mark finished / Stop restarting / 5s-polled log tail, lane/breaker line).
 - Playwright: `gui/e2e/start-work.spec.mjs` + `gui/e2e/fake-runner.e2e.mjs`; config gains `ACC_RUNNER`/`ACC_ROUTING_MD`/`ACC_LANE_DIR` sandbox env and `workers: 1` (specs share one sandbox).
-- Docs in the same commit: this spec, ADR-0005, ADR-0006, ADR-0001/0002 amendment notes, PRD FR-012 + SL-013, `gui/README.md` (the API contract the future UI repo builds against), TEST-LEDGER rows.
+- The PR-1 implementation commit also updated this record, ADR-0005, ADR-0006, ADR-0001/0002 amendment notes, the now-retired PRD's FR-012 and SL-013 entries, `gui/README.md` (the API contract used by the UI repo), and TEST-LEDGER rows.
 
 ### 3.2 In scope — PR-2 (demolition)
 
 - Delete: `guards-gui.ps1`, all four root `.cmd` launchers, `SLICE-RUNNER.md`, `gui/PtyHost.cs`, `gui/term.html`, `gui/vendor/`, `gui/ptyhost.test.ps1`, `gui/ptyhost.e2e.ps1`, `gui/guards-gui.test.mjs`, `hooks/winfind.ps1`, `hooks/clearbot.test.mjs`, `watcher/clearbot.ps1` + `sendconsole.ps1` + `stubconsole.ps1` + `stubpipe.ps1` + `screenshot-gui.ps1` + `start/stop-clearbot.cmd` + `watchdog/`, `e2e/loop.e2e.mjs`.
-- Surgery: `budget.mjs` (window/clearbot/requestClear/queued machinery out; Stop messages reworded to the runner-resume path), `directive.mjs` (kick/console fields and verbs out; `KICK_TEXT` stays as the runner bootstrap constant), `route.mjs` (deny/cd-request out — purely advisory), `statusline.mjs` (`botDead` out), `usage.mjs` (`ptyAnchorPid` out), `policy.json` (`autoClear`/`directives`/`tui`/`autoCd`/`autoApprove` out; `runner.statusFile` → `.acc/BOARD.md`), server/page cleanup controls out, CI rewrite, full doc choreography (PRD, SYSTEM-REQUIREMENTS, DATA-FLOW, AGENTS.md, CLAUDE.md, README, TEST-LEDGER, spec moves).
+- Surgery: `budget.mjs` (window/clearbot/requestClear/queued machinery out; Stop messages reworded to the runner-resume path), `directive.mjs` (kick/console fields and verbs out; `KICK_TEXT` stays as the runner bootstrap constant), `route.mjs` (deny/cd-request out — purely advisory), `statusline.mjs` (`botDead` out), `usage.mjs` (`ptyAnchorPid` out), `policy.json` (`autoClear`/`directives`/`tui`/`autoCd`/`autoApprove` out; `runner.statusFile` → `.acc/BOARD.md`), server/page cleanup controls out, CI rewrite, and historical documentation updates covering the now-retired PRD, SYSTEM-REQUIREMENTS, DATA-FLOW, AGENTS.md, CLAUDE.md, README, TEST-LEDGER, and spec locations.
 - Grep gate: no reference to any deleted path outside `docs/adr/`, `docs/notes/`, `specs/done/`.
 
 ### 3.3 Out of scope
@@ -50,8 +52,8 @@ Kyle can type a task into the `/guards` page, press GO, and a headless `claude -
 | The React UI repo (`agentic-command-center-ui`) | Different repo; ACC only needs the API contract (`gui/README.md`) and later `--ui-dist` serving | UI-repo PR-1 + ACC PR-3 (ADR-0006) |
 | `--ui-dist` static serving | First request-derived fs path in the server; wants its own traversal tests alongside a real dist to serve | ACC PR-3 |
 | Deleting built-in `guards.html`/`kernel.html` | They are the only UI until the new repo reaches parity | ADR-0006's parity criterion |
-| Porting autoApprove (runbox auto-run) to Node | It lived inside clearbot.ps1 and dies with it; reviving it is a scoped future feature, not a port | future spec if Kyle asks |
-| A per-directive hard token ceiling | Real gap, pre-existing (issue #15) | next slice after PR-2 |
+| Porting autoApprove (runbox auto-run) to Node | It lived inside clearbot.ps1 and died with it; reviving it would be a separate product change, not a port | A future GitHub Issue if requested |
+| A per-directive hard token ceiling | Real gap, pre-existing | Tracked separately in GitHub issue #15 |
 
 ## 4. Acceptance criteria
 
@@ -127,7 +129,7 @@ PR-2 is net-negative (~-5,600 LOC) — demolition has no LOC ceiling, only the g
 | `gui/e2e/start-work.spec.mjs`, `gui/e2e/fake-runner.e2e.mjs` | create | e2e + fake seam |
 | `playwright.config.mjs` | modify | sandbox env, workers:1 |
 | `gui/README.md` | create | the API contract (UI repo builds against it) |
-| PRD, ADR-0005/0006, ADR-0001/0002 notes, TEST-LEDGER, `specs/active/README.md` | modify/create | docs in the same commit |
+| Retired PRD, ADR-0005/0006, ADR-0001/0002 notes, TEST-LEDGER, `specs/active/README.md` | historical update | implementation documentation recorded in the same commit |
 
 ## 8. Test plan
 
@@ -160,29 +162,30 @@ Rows copied to `specs/TEST-LEDGER.md` (T-I-006, T-U-007, T-E-004). Red runs reco
 | ASM-101 | Playwright spec files must not share the sandbox concurrently — `workers: 1` | start-work.spec's beforeEach rewrites guards-state.json/policy.json under guards.spec mid-test (observed: 1 real failure) | suite green serialized (17/17, ~21s) | none — suite is small | no |
 | ASM-102 | `_`-prefixed keys in `policy.profiles` are documentation, not profiles | `profiles._note` exists in the live policy | AC-104 refuses `_note` as a profile | none | no |
 
-## 12. Definition of Done (GATE-SPEC-DONE)
+## 12. Recorded completion evidence
 
-- [x] PR-1 ACs green with recorded red runs (65/65, 57/57, 17/17 e2e).
-- [x] PR-1 budget actuals filled, none over.
-- [x] PR-2 ACs green (AC-201…204: fast tier 495/498 with only the pre-existing root artifact red, e2e 17/17, reworded Stop/SessionStart pins recorded red pre-surgery: budget 5, statusline 1, server 2) + grep gate clean (recorded in the PR).
-- [x] PRD statuses updated per §5 of the demolition choreography (PRD 1.3.0, same commit).
-- [ ] Kyle's Windows manual check: `npm run gui` → task → GO → real run under the shim; double-GO → 409/exit 6.
-- [ ] Spec moves to `specs/done/` after that check (with SL-008's watched real run as FR-011's proof).
+- PR-1 acceptance criteria were recorded green with red-first runs: server 65/65, runner 57/57, and browser E2E 17/17.
+- PR-1 budget actuals were recorded, with no declared ceiling exceeded.
+- PR-2 acceptance criteria AC-201…204 were recorded with a 495/498 fast tier, the pre-existing root-artifact failure identified, browser E2E 17/17, targeted red-first Stop/SessionStart evidence, and a clean deleted-path scan.
+- The now-retired PRD status changes were recorded in the implementation commit as version 1.3.0.
+- No completed record of Kyle's Windows-only live-run check appears in this file.
+- This file was archived under `specs/done/` during the 2026-08-11 lean-process reset. Its archival does not claim that unrecorded manual evidence passed.
 
-## 13. SL-008 watched real-run evidence block (manual Windows proof)
+## 13. Recorded status of Windows-only evidence
 
-This proof is **execution-environment bound**: it must be run on Kyle's Windows machine with the installed shim/guard stack. A cloud CI/session cannot truthfully close FR-011.
+The former plan reserved a Windows-only proof using Kyle's installed shim and guard environment. A cloud CI session could not produce that evidence. No completed Windows proof was recorded before archival.
 
-### 13.1 Evidence checklist to record in this file
+### 13.1 Unverified historical observations
 
-- [ ] `npm run gui` started from current `main` on Windows under the installed shim/guard environment.
-- [ ] A bounded disposable directive was created from `/guards` with an objective `done` condition.
-- [ ] First GO launched a real `claude -p` runner with the routed folder + directive context.
-- [ ] Second GO while loop 1 was live was refused (HTTP 409 and/or runner exit 6), with no second working loop.
-- [ ] The directive reached `done` or a correctly reported `blocked` state without console keystrokes.
-- [ ] If a fresh context occurred, the next run received directive text + progress log + done/blocked protocol.
+- A Windows launch through `npm run gui` under the installed shim and guard environment was not recorded.
+- Creation of a bounded disposable directive with an objective completion condition was not recorded.
+- A real `claude -p` launch with routed folder and directive context was not recorded.
+- Refusal of a second concurrent launch through HTTP 409 or runner exit 6 was not recorded.
+- Completion or a correctly reported blocked state without console keystrokes was not recorded.
+- Fresh-context receipt of directive text, progress log, and done/blocked protocol was not recorded.
 
-### 13.2 Closeout rule
+These entries preserve the former evidence questions only. They are not active tasks, merge conditions, or instructions.
 
-- If every checkbox above passes: move this spec to `specs/done/` and set PRD `FR-011` to `done` in the same commit.
-- If any checkbox fails: keep this spec in `specs/active/`, keep PRD `FR-011` as `in-progress`, and open a regression issue with the exact observed evidence.
+### 13.2 Archival outcome
+
+The former archival condition tied this file's location and retired-PRD status to the Windows checklist. That condition is void. This file now resides under `specs/done/` as historical product context only. Any future investigation starts from a GitHub Issue and records its own acceptance criteria.

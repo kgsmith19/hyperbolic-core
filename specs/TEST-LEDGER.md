@@ -1,20 +1,20 @@
 ---
 title: Test Justification Ledger
-status: active
+status: historical
 created: 2026-08-07
-updated: 2026-08-09
+updated: 2026-08-11
 owner: Kyle Smith
 ---
 
 # Test Justification Ledger
 
-> **Purpose.** Every test in this repo earns its keep by catching a specific failure. Coverage is not a reason; "it might break someday" is not a reason.
+> **Historical record.** This ledger preserves the reasons existing regression tests were added. It does not impose a current documentation or delivery process. New work is tracked in GitHub Issues and verified by the repository's `PR Gate`.
 >
-> **Adoption note:** this repo's ~445 existing tests predate this ledger and are not backfilled here row by row — that would be a multi-day mechanical exercise with no functional value, since their justification already lives where it's more durable: in `kernel/README.md`, `AGENTS.md`'s "The regression, exactly" section, and the git history of the bugs each one was written to catch (the 12-module kernel scenario-enumeration pass, closed as former `OPEN-ISSUES.md` OI-019, is the single largest example). **Section 1 starts empty and is required for every NEW test from here forward** (`rules/06-TESTS.md` GATE-TEST-JUSTIFIED). Section 3 (regression register) is seeded with the highest-value historical regressions so their "which gate missed it" lesson isn't lost.
+> **Adoption note:** this repo's ~445 existing tests predate this ledger and are not backfilled row by row. Their rationale remains in `kernel/README.md`, `AGENTS.md`'s "The regression, exactly" section, and the git history of the defects they cover. This ledger is a historical index only; it imposes no requirements on new tests or other new work. Section 3 retains selected historical regressions so their lessons are not lost.
 
 ---
 
-## 1. Active tests
+## 1. Recorded test rationale
 
 | Test ID | Name / location | Level | Traces to | Failure mode caught | Why not cheaper | Why not duplicate | Mutation verified | Runtime (ms) | Deletion criterion | Added |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -45,7 +45,7 @@ owner: Kyle Smith
 
 ## 2. Level distribution
 
-Not tracked per-level yet for the existing suite (~498 fast-tier tests across `hooks/`, `kernel/`, `gui/`, `runner/`, plus three Windows-only PowerShell suites). Populate at the first Test Review that adopts this ledger for new work.
+Not tracked per level in this historical ledger for the existing suite (~498 fast-tier tests across `hooks/`, `kernel/`, `gui/`, and `runner/`, plus three Windows-only PowerShell suites).
 
 ## 3. Regression register
 
@@ -101,9 +101,3 @@ A fresh test-quality audit (Lens B, 2026-08-07) found 5 tests that would still p
 
 *(none)*
 
-## 6. Ledger self-check (GATE-LEDGER)
-
-- [ ] Every test file in the repo has a matching row in section 1. **Not yet true — see adoption note.**
-- [x] Section 3's regressions are indexed with a real defect, root cause, and fix.
-- [x] Section 4 records every deletion made in this cleanup pass with a reason.
-- [ ] Quarantine has no expired entries. (empty, trivially true)

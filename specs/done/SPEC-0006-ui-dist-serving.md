@@ -2,13 +2,15 @@
 title: ACC serves the UI repo's built dist same-origin (--ui-dist)
 spec_id: SPEC-0006-ui-dist-serving
 slice: SL-014
-status: in-progress
+status: historical
 created: 2026-08-08
-updated: 2026-08-08
-completed:
+updated: 2026-08-11
+completed: 2026-08-11
 owner: Kyle Smith
 traces: [FR-010, FR-012, NFR-001]
 ---
+> **ARCHIVED / VOID AS PROCEDURE.** This file preserves shipped product history and technical evidence only. Do not use it as an active plan, checklist, gate, or instruction. New work starts in GitHub Issues and is verified by `PR Gate`.
+
 
 # SPEC-0006: `--ui-dist` static serving
 
@@ -34,6 +36,10 @@ The ACC half of ADR-0006 (the UI-repo split): ~45 LOC in `gui/server.mjs`, nothi
 
 PROP-301: for all request paths, the file read is inside `resolve(dist)` or is `dist/index.html` — no decoding, `\\`→`/` normalization, prefix check on the resolved path (AC-303's generator: raw/encoded/backslash traversal shapes).
 
-## 8/12. Tests, budget, done
+## 8/12. Recorded tests, budget, and outcome
 
-T-I-007 (ledger). +45 source LOC / +75 test LOC, 0 new deps. Done when: suite green (67/67), covgate `gui/server.mjs` ≥100/100/90 (actual 100/100/90.2), a real UI-repo dist verified serving via the flag with built-ins + API intact, `gui/README.md` updated same commit. Moves to done with Kyle's round-trip check (a guards toggle from the new UI landing in `config.json` — ADR-0006's verification).
+T-I-007 in the historical ledger records the integration coverage. The implementation added 45 source lines and 75 test lines with no new dependencies. Recorded automated evidence was 67/67 tests green and covgate for `gui/server.mjs` at 100/100/90.2; `gui/README.md` was updated in the same implementation commit.
+
+The former completion text also requested verification with a real UI-repository dist and Kyle's guards-toggle round trip into `config.json`. This file contains no completed record of those manual observations. They remain unverified historical evidence only, not active tasks, gates, or instructions.
+
+This file was archived under `specs/done/` during the 2026-08-11 lean-process reset. Its archival does not claim that unrecorded manual evidence passed.

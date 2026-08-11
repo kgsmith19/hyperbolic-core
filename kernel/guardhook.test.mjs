@@ -245,16 +245,27 @@ test("OI-019: the tool-call ceiling holds across CONCURRENT overlapping fires, n
   // turn, so ceiling enforcement must be safe against overlapping hook
   // processes racing each other, not just calls made one at a time like every
   // other test in this file. Fire well more than the ceiling (3) all at once.
-  const fireAsync = () => new Promise((resolve) => {
+  const fireAsync = () => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [HOOK], {
-      stdio: ["pipe", "ignore", "ignore"],
+      stdio: ["pipe", "ignore", "pipe"],
       env: { ...process.env, ACC_ROOT: ROOT, ACC_POLICY: POLICY, ACC_KERNEL_DIR: S.runDir(RUN) },
     });
+    let err = "";
+    child.stderr.on("data", (data) => { err += data; });
+    child.on("error", reject);
     child.stdin.end(JSON.stringify({ tool_name: "Read", tool_input: { file_path: path.join(BASE, "work", "a.txt") } }));
-    child.on("close", (code) => resolve(code));
+    child.on("close", (code) => resolve({ code, err }));
   });
   const results = await Promise.all(Array.from({ length: 60 }, fireAsync));
-  const allowed = results.filter((c) => c === 0).length;
+  for (const [index, result] of results.entries()) {
+    assert.ok(result.code === 0 || result.code === 2,
+      `fire ${index + 1} exited ${result.code}; stderr: ${result.err}`);
+    if (result.code === 2) {
+      assert.match(result.err, /tool-call ceiling/i,
+        `fire ${index + 1} must be an ordinary ceiling denial, not an infrastructure failure`);
+    }
+  }
+  const allowed = results.filter(({ code }) => code === 0).length;
   assert.equal(allowed, 3, `exactly the contract's toolCalls ceiling (3) may be allowed, got ${allowed} of 60 concurrent fires`);
   process.env.ACC_ROOT = ROOT;
   assert.deepEqual(L.decisionCounts(RUN), { allow: 3, deny: 57, total: 60 },

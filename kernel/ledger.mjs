@@ -109,6 +109,10 @@ export function decisionCounts(runId) {
 const lockStaleMs = () => Number(process.env.ACC_LEDGER_LOCK_STALE_MS) || 5000;
 const lockWaitTimeoutMs = () => Number(process.env.ACC_LEDGER_LOCK_TIMEOUT_MS) || 4000;
 const lockFile = (name) => path.join(ledgerDir(), `${name}.lock`);
+// Under same-file exclusive-create contention, Windows can report EPERM
+// instead of EEXIST. Both conditions mean another caller currently owns the
+// lock and are retried inside the existing bounded, fail-closed wait loop.
+const lockContention = (error) => error?.code === "EEXIST" || error?.code === "EPERM";
 
 // Atomics.wait blocks the calling thread synchronously (Node's main thread
 // supports this, unlike a browser main thread) — a real sleep, not a busy
@@ -126,7 +130,7 @@ function acquireLock(name) {
       fs.closeSync(fs.openSync(file, "wx"));
       return () => { try { fs.unlinkSync(file); } catch { /* already released */ } };
     } catch (e) {
-      if (e.code !== "EEXIST") throw e;
+      if (!lockContention(e)) throw e;
       // A lock left behind by a process that died mid-hold must not wedge
       // every future caller shut forever — reap it once it is clearly stale
       // rather than merely old (a legitimate holder's own hold is short).

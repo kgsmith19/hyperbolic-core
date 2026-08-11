@@ -610,6 +610,18 @@ const runnerCalls = () => {
   try { return fs.readFileSync(RUNNER_LOG, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); }
   catch { return []; }
 };
+const waitForProcessExit = async (pid) => {
+  for (let i = 0; i < 100; i++) {
+    try {
+      process.kill(pid, 0);
+    } catch (e) {
+      if (e.code === "ESRCH") return;
+      if (e.code !== "EPERM") throw e;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail(`spawned test runner ${pid} did not exit before fixture cleanup`);
+};
 // A routing fixture whose signals are unambiguous: "guards"/"hook" scores the
 // first route, "react" the second, "zebra" nothing.
 const ROUTING_MD = path.join(BASE, "ROUTING.md");
@@ -841,16 +853,24 @@ test("AC-109: POST /api/launch spawns the runner with directive:<id> — and 409
   assert.equal(r.status, 200);
   const out = await r.json();
   assert.ok(out.pid > 0, "the response must name the spawned pid");
-  // the detached fake runner records its argv; poll briefly for the write
+  // The detached fake runner records its argv. Wait for both the record and
+  // process exit so Windows does not retain its cwd during fixture cleanup.
   for (let i = 0; i < 40 && !runnerCalls().length; i++) await new Promise((res) => setTimeout(res, 50));
   assert.deepEqual(runnerCalls().at(-1), [`directive:${j.id}`]);
+  await waitForProcessExit(out.pid);
   // a live pid file refuses a second launch
   fs.mkdirSync(path.dirname(pidFile(j.id)), { recursive: true });
   fs.writeFileSync(pidFile(j.id), String(process.pid));
   assert.equal((await lpost("/api/launch", { id: j.id })).status, 409);
-  // a stale pid file does not block
+  // a stale pid file does not block, and the resulting process is reaped
+  // before the next test removes this launch sandbox.
   fs.writeFileSync(pidFile(j.id), "999999999");
-  assert.equal((await lpost("/api/launch", { id: j.id })).status, 200);
+  const stale = await lpost("/api/launch", { id: j.id });
+  assert.equal(stale.status, 200);
+  const staleOut = await stale.json();
+  for (let i = 0; i < 40 && runnerCalls().length < 2; i++) await new Promise((res) => setTimeout(res, 50));
+  assert.deepEqual(runnerCalls().at(-1), [`directive:${j.id}`]);
+  await waitForProcessExit(staleOut.pid);
 });
 
 test("AC-110: launch refuses a malformed id before any path or spawn", async () => {

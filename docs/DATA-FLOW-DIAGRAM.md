@@ -2,9 +2,9 @@
 title: Agentic Command Center Data Flow Diagram
 status: active
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-08-11
 owner: Kyle Smith
-traces: [PRD.md, SYSTEM-REQUIREMENTS.md]
+traces: [SYSTEM-REQUIREMENTS.md]
 version: 1.0.0
 ---
 
@@ -98,9 +98,9 @@ graph TB
 |---|---|---|---|---|
 | P1 | Guard tool calls | Allow or deny an Edit/Write/Read/Bash call against secrets, protected paths, cell ownership | `hooks/guard.mjs`, `kernel/guardhook.mjs` | FR-001, FR-002 |
 | P2 | Run bounded kernel task | Execute one contract under a deny-by-default boundary and verify the result | `kernel/run.mjs` | FR-006, FR-007, FR-008 |
-| P3 | Carry directive across /clear | Bind, inject, and resume a directive on the same console | `hooks/directive.mjs` | FR-004, FR-005 |
+| P3 | Carry a directive across fresh contexts | Bind, inject, and resume a directive across headless runs | `hooks/directive.mjs`, `runner/runner.mjs` | FR-004, FR-005 |
 | P4 | Serialize launches | Grant/refuse the one automated launch-lane slot | `hooks/lane.mjs` | FR-003 |
-| P5 | Hand off blocked ops | Turn a guard-denied or elevated operation into a reviewable script a human runs (`/approve` or the web Run button) | AGENTS.md runbox convention, `hooks/engine.mjs` | FR-010 |
+| P5 | Hand off blocked operations | Turn a guard-denied or elevated operation into a self-contained script that a human explicitly runs (`/approve` or the web Run button) | `AGENTS.md`, `hooks/engine.mjs` | FR-010 |
 
 ### 4.3 Data stores
 
@@ -150,8 +150,8 @@ graph LR
 
 | Boundary | Spoofing | Tampering | Repudiation | Information disclosure | Denial of service | Elevation of privilege |
 |---|---|---|---|---|---|---|
-| TB-1 | Not applicable — single local process, no remote identity to spoof | Guard denies a write outside allowed roots; guard itself is a convention enforcer, not an OS sandbox (CON-003) | Every kernel run is ledgered; hook decisions are not separately logged beyond the ledger (accepted gap) | Guard blocks reads of secrets-glob files; kernel readRoots scope what's visible | Wall-clock/token/tool-call ceilings bound a stuck or runaway run | `autoApprove` accepted-risk path lets a runbox script reach guard-protected machinery unattended (CON-004) — the one deliberately accepted elevation path |
-| TB-2 | Not applicable | Vault file is local-disk plaintext; tampering would require local machine access, already inside Kyle's own trust boundary | `watcher/approvals.log` records every auto-approved script | Values never leave the child process env — not printed, not re-read | n/a | n/a |
+| TB-1 | Not applicable — single local process, no remote identity to spoof | Guard denies a write outside allowed roots; guard itself is a convention enforcer, not an OS sandbox (CON-003) | Every kernel run is ledgered; hook decisions are not separately logged beyond the ledger (accepted gap) | Guard blocks reads of secrets-glob files; kernel readRoots scope what's visible | Wall-clock/token/tool-call ceilings bound a stuck or runaway run | A runbox script can reach protected machinery only after an explicit human action (CON-004) |
+| TB-2 | Not applicable | Vault file is local-disk plaintext; tampering would require local machine access, already inside Kyle's own trust boundary | No separate runbox execution log; this remains a single-operator local boundary | Values never leave the child process env — not printed, not re-read | n/a | n/a |
 
 ## 7. Data lifecycle
 
@@ -159,7 +159,7 @@ graph LR
 |---|---|---|---|---|---|---|---|
 | Vault key | Kyle (GUI upload) | D1 | `kernel/credentials.mjs` (by name) | The child process env of a run whose contract lists that key name | Kyle | Manual removal in the GUI | DR-001 |
 | Kernel run record | `kernel/run.mjs` | D2 | `kernel/ledger.mjs query` | Nobody outside this machine | Nobody — indefinite retention (audit trail) | Never (accepted, single-machine tool) | DR-002 |
-| Directive | `hooks/directive.mjs new` | D3 | SessionStart hook, GUI | Nobody outside this machine | `reapDeadDirectives()` or explicit `done`/`blocked` | Console dead, or directive completed/blocked | DR-003 |
+| Directive | `hooks/directive.mjs new` | D3 | SessionStart hook, runner, GUI | Nobody outside this machine | explicit `done`/`blocked` or a human action in the GUI | Directive completed, blocked, or manually closed | DR-003 |
 
 ## 8. Change log
 

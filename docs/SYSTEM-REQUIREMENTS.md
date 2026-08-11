@@ -2,15 +2,14 @@
 title: Agentic Command Center System Requirements
 status: active
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-08-11
 owner: Kyle Smith
-traces: [PRD.md]
-version: 1.0.0
+version: 1.0.1
 ---
 
 # Agentic Command Center System Requirements
 
-> **Relationship to the PRD.** The PRD says what ACC does and why. This document says what the system must be so the PRD is achievable. Written retroactively against the existing implementation — `Status: done` means "already true," not "planned."
+> **Scope.** This document records implemented system requirements. It was written retroactively against the existing implementation; `Status: done` means "already true," not "planned."
 
 ---
 
@@ -124,7 +123,6 @@ Not applicable in the traditional sense — ACC has no HTTP API surface except t
 | `runner/ledger/*.jsonl` | Kernel run records | `runId`, `event` (started/finalized), `outcome`, `criteria` | One line per run event | Indefinite | DR-002 |
 | `runner/directives/*.json` + `<id>.log.md` | Directive state and its progress log | `id`, `sessionId`, `status` | One file per active directive, archived on completion | Until archived to `runner/directives/done/`, then indefinite | DR-003 |
 | `vault.json` | Named secrets | `KEY` -> value | Grows with keys Kyle adds | Until Kyle removes a key | DR-001 |
-| `watcher/approvals.log` | Auto-approved runbox script runs | timestamp, script, outcome | One line per auto-run | Indefinite | DR-004 |
 
 **Invariants enforced by the storage layer itself, not a test:**
 
@@ -144,7 +142,7 @@ Not applicable in the traditional sense — ACC has no HTTP API surface except t
 | Data at rest | Nothing is encrypted at rest (single-operator machine, not a shared or cloud store); this is an accepted, documented posture, not an oversight | CON-004 |
 | Input validation | `kernel/contract.mjs`'s `validateContract` is the schema gate for every kernel-run input | FR-006 |
 | Rate limiting | Launch lane serializes to 1 concurrent automated spawn by default (`policy.json lane.slots`) | FR-003 |
-| Audit logging | Kernel ledger (every run) + `watcher/approvals.log` (every auto-approved script) | DR-002, DR-004 |
+| Audit logging | Kernel ledger records every bounded kernel run. Runbox execution requires an explicit human action. | DR-002, DR-004 |
 | Dependency policy | Zero runtime dependencies by design; the one devDependency (`@playwright/test`) is pinned in `package.json`, bumped manually | CON-002 |
 
 ## 8. Operations
@@ -158,7 +156,7 @@ Not applicable in the traditional sense — ACC has no HTTP API surface except t
 | Backups | Git is the backup for code; ledger/directive/vault files are local-disk only, not separately backed up today (accepted gap, single-machine tool). |
 | Monitoring | Runner liveness via `runner/state/<job>.pid` (the Command Center list's running badge), `runner/logs/` + `runner/alerts/`, `hooks/usage.mjs week` token tier. |
 | Alerting | Statusline warnings only (no external paging) — consistent with a single-operator tool. |
-| Logging | Kernel ledger, directive logs, `watcher/approvals.log`; no centralized log aggregation. |
+| Logging | Kernel ledger and directive logs; no centralized log aggregation. |
 | Runbook | `AGENTS.md` is the operational runbook for this repo. |
 
 ## 9. Technology decisions
@@ -179,10 +177,11 @@ Not applicable in the traditional sense — ACC has no HTTP API surface except t
 
 ## 11. Explicitly not built
 
-Mirrors PRD section 4.2. See `docs/PRD.md` — not duplicated here per `rules/04-DOCS.md`.
+ACC does not include a remote multi-user service, a shared identity boundary, or a database. Product expansion is tracked through GitHub Issues.
 
 ## 12. Change log
 
 | Date | Version | Change | Reason | Affected IDs |
 |---|---|---|---|---|
+| 2026-08-11 | 1.0.1 | Removed references to retired unattended runbox execution and the retired planning document. | Documentation cleanup | DR-004 |
 | 2026-08-07 | 1.0.0 | Initial system requirements, written retroactively. | SDD rearchitecture | All |

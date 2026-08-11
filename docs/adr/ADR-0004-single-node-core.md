@@ -54,6 +54,6 @@ The sprawl is not incidental: nearly all of it exists to automate a live Windows
 
 Languages 5 → 2 (Node + minimal PS1). Non-test prod LOC ~9,100 → ~5,700 (−≈37%). Script files 24 → ≤5. Vendored assets 1.1 MB → 0. One GUI, one continuity mechanism, one entry point per concern.
 
-## Sequencing (slice plan lives in the PRD, §13)
+## Historical implementation sequence
 
-SL-007 runner↔directive wiring (SPEC-0001) → SL-008 F1 proof (Kyle, real tokens, issue #15) → SL-009 web-GUI completion → SL-010 watcher fold-in → SL-011 keystroke-stack deletion (gated on SL-008) → SL-012 launcher/root cleanup. Every slice red-green, covgate-gated, docs in the same commit.
+The now-retired PRD §13 recorded this implementation order: SL-007 runner↔directive wiring (SPEC-0001) → SL-008 F1 proof (Kyle, real tokens, issue #15) → SL-009 web-GUI completion → SL-010 watcher fold-in → SL-011 keystroke-stack deletion (gated on SL-008) → SL-012 launcher/root cleanup. The implementation record captured red-green evidence, covgate results, and accompanying documentation in the corresponding commits.

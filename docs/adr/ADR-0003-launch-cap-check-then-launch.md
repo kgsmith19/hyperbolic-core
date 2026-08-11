@@ -12,7 +12,7 @@ superseded_by: none
 
 # ADR-0003: Launch cap is check-then-launch, with an accepted race window
 
-> Condensed from `docs/superpowers/specs/2026-08-03-claude-launch-cap-design.md` (deleted; full text in git history), which closed former OI-025.
+> Condensed from a retired launch-cap design note preserved in git history, which closed former OI-025.
 
 ## Context
 

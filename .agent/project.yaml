@@ -1,52 +1,32 @@
-# Machine-readable, repo-specific facts for the shared agent-engineering
-# standard. Large policy prose lives in the standard repo or AGENTS.md.
+# Repository-specific facts for tools and contributors. The external standard
+# reference is informational; this repository owns its workflow and settings.
 
 project:
   name: agentic-command-center
   type: node-cli-and-webapp
-  standard: kgsmith19/agent-engineering-standard
-  standard_sha: e0246cd8fbd70e91b1107979c578dcfc311d179e
 
 runtime:
   node_min: "22"
   package_manager: npm
+  operating_systems: [linux, windows]
   runtime_dependencies: 0
-  dev_dependencies:
-    - "@playwright/test"
 
 commands:
   setup: npm install
-  fast_verify: npm test
-  full_verify_windows: npm run test:windows
-  coverage_gate: npm run covgate
+  test: npm test
+  test_windows: npm run test:windows
+  coverage: npm run covgate
   e2e: npm run e2e:gui
-  dev_server: npm run gui
+  dev: npm run gui
 
 ci:
-  required_workflow: .github/workflows/pr-gate.yml
-  required_check: "PR Gate"
-  required_trigger: "ready pull request + merge_group"
-  deep_workflow: .github/workflows/ci.yml
-  deep_trigger: workflow_dispatch
-  deep_jobs:
-    - fast-tier-linux
-    - coverage-gate
-    - windows-integration
-    - gui-e2e
-
-risk:
-  default: R1
-  protected_paths:
-    - hooks/guard.mjs
-    - hooks/engine.mjs
-    - config.json
-    - "~/.claude/settings.json"
-    - .github/workflows/**
-    - .agent/**
+  workflow: .github/workflows/ci.yml
+  check: "PR Gate"
+  triggers: [pull_request, merge_group]
 
 work_tracking:
   system: github-issues
-  labels_present: [leanness-pass, test-coverage, needs-kyle, future]
 
-telemetry:
-  integration_point: none
+standard_reference:
+  file: .agent/standard.lock
+  mode: informational

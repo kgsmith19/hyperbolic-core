@@ -1,101 +1,54 @@
-name: CI
+name: PR Gate
 
-# Automatic triggers (push/pull_request) are OFF, 2026-08-06, Kyle's call:
-# hosted-runner infra had been repeatedly failing before checkout even runs
-# ("Failed to resolve action download info"), making CI unreliable rather
-# than merely slow. The required merge gate is pr-gate.yml's `PR Gate` check
-# (fast suite + changed-file coverage floor), enforced by the Lean PR Gate
-# ruleset; this workflow is the deep tier (Windows suite, GUI e2e) and is
-# deliberately dispatch-only so its flakiness can never block a merge. Run it
-# before deploying or when a change touches a Windows-only surface. Flip it
-# back to push/pull_request (as a non-required signal) once Actions infra
-# proves stable.
 on:
-  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: pr-gate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
-  # A synthetic fixture, NOT the real routing table (which lives outside this
-  # repo — see hooks/route.mjs). Only exercises the portable scoring/parent/
-  # CLI logic; the four tests that need routes' target directories to exist
-  # on disk are platform-skipped on non-Windows (hooks/route.test.mjs).
   ACC_ROUTING_MD: ${{ github.workspace }}/hooks/fixtures/ROUTING.md
 
 jobs:
-  fast-tier-linux:
-    name: Fast tier (Linux, portable)
+  portable:
+    name: Portable tests and coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      # `npm test` is the portable list (package.json). --test-concurrency=1 is
-      # baked into that script as cheap insurance against a known timing-
-      # sensitive flake in runner.test.mjs's "a hung run is killed PROMPTLY"
-      # case under loaded/nested sandboxes.
-      - run: npm test
-
-  coverage-gate:
-    name: Coverage gate (changed-file floors)
-    needs: fast-tier-linux
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-      # hooks/covgate.mjs gates `git diff --name-only HEAD` (uncommitted
-      # working-tree changes) — on a clean CI checkout that's always empty, so
-      # without rewriting HEAD here covgate would silently gate zero files and
-      # pass vacuously on every PR. Soft-reset HEAD back to the pre-change
-      # commit so the PR's/push's real changes appear as the working-tree diff.
-      - name: Rewrite HEAD so covgate sees the real diff
+      - name: Portable test suite
+        run: npm test
+      - name: Expose the integration diff to covgate
+        shell: bash
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch origin "${{ github.event.pull_request.base.ref }}" --quiet
             BASE_SHA=$(git merge-base "origin/${{ github.event.pull_request.base.ref }}" HEAD)
             git reset --soft "$BASE_SHA"
-          else
-            BEFORE="${{ github.event.before }}"
-            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-              echo "::warning::first push on a new branch (no 'before' SHA) — skipping HEAD rewrite, covgate will gate nothing this run"
-            else
-              git reset --soft "$BEFORE"
-            fi
+          elif [ "${{ github.event_name }}" = "merge_group" ]; then
+            git reset --soft "${{ github.event.merge_group.base_sha }}"
           fi
-      # Explicit list, not covgate's default auto-discovery, so this job can
-      # only ever fail for the real reason (a coverage floor miss), never a
-      # list drift.
-      - name: node hooks/covgate.mjs
-        env:
-          ACC_COVGATE_TESTS: "hooks/directive.test.mjs,hooks/usage.test.mjs,hooks/statusline.test.mjs,hooks/testplan.test.mjs,hooks/covgate.test.mjs,hooks/cmdline.test.mjs,hooks/lane.test.mjs,hooks/route.test.mjs,hooks/budget.test.mjs,runner/runner.test.mjs,kernel/adapter.test.mjs,kernel/adapters/claude-code.test.mjs,kernel/autonomy.test.mjs,kernel/contract.test.mjs,kernel/credentials.test.mjs,kernel/guard.test.mjs,kernel/guardhook.test.mjs,kernel/ledger.test.mjs,kernel/policy.test.mjs,kernel/run.test.mjs,kernel/settings.test.mjs,kernel/verifier.test.mjs,gui/server.test.mjs"
-        run: node hooks/covgate.mjs
+      - name: Changed-file coverage
+        run: npm run covgate
 
   windows-integration:
-    name: Windows integration (native)
+    name: Windows integration
     runs-on: windows-latest
-    # No `needs` — runs in parallel with the Linux jobs, not gated by them.
-    # First real run on a GH-hosted (not Kyle's) Windows box is genuinely
-    # unverified; treat a failure here as new information to investigate,
-    # not assumed-broken CI config.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-      # The fixture's routes are Windows-style paths (C:\code\...) that only
-      # correspond to real directories on Kyle's own machine. Create matching
-      # empty directories here so the four block-decision tests that are
-      # platform-skipped on Linux actually run and pass natively on Windows.
       - name: Create fixture route directories
         shell: pwsh
         run: |
@@ -105,37 +58,44 @@ jobs:
             'C:\code\lifeos-ecosystem', `
             'C:\code\lifeos-ecosystem\lifeos', `
             'C:\code\lifeos-ecosystem\lifeos-ui' | Out-Null
-      - name: Full fast tier (native)
+      - name: Native test suite
         run: npm run test:windows
-      # The three PowerShell suites that remain after the keystroke-stack
-      # demolition (SPEC-0005 PR-2) — the shim launch-cap gate and the
-      # cap-watch alerter. Before this rewrite they ran in NO job at all.
-      - name: shim/claude.test.ps1
+      - name: Launch-shim tests
         shell: pwsh
         run: powershell -File shim/claude.test.ps1
-      - name: watcher/claude-cap-watch.test.ps1
+      - name: Cap-watcher tests
         shell: pwsh
         run: powershell -File watcher/claude-cap-watch.test.ps1
-      - name: watcher/install-cap-watch-task.test.ps1
+      - name: Cap-watcher installer tests
         shell: pwsh
         run: powershell -File watcher/install-cap-watch-task.test.ps1
-      - name: Clean up fixture route directories
+      - name: Remove fixture route directories
         if: always()
         shell: pwsh
         run: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue 'C:\code'
 
   gui-e2e:
-    name: GUI e2e (Playwright)
+    name: GUI end-to-end
     runs-on: ubuntu-latest
-    # No `needs` — parallel with the other jobs, same doctrine as
-    # windows-integration. Fully sandboxed: playwright.config.mjs points
-    # ACC_POLICY/ACC_ROOT at a mkdtemp dir, never live state.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-          cache: 'npm'
+          cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e:gui
+
+  pr-gate:
+    name: PR Gate
+    if: always()
+    needs: [portable, windows-integration, gui-e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm every correctness job passed
+        shell: bash
+        run: |
+          test "${{ needs.portable.result }}" = "success"
+          test "${{ needs.windows-integration.result }}" = "success"
+          test "${{ needs.gui-e2e.result }}" = "success"

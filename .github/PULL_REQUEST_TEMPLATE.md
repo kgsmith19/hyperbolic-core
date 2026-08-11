@@ -1,25 +1,19 @@
-<!-- See AGENTS.md's "Shared engineering standard" section and rules/00-CORE.md's
-     Output contract. Fill what applies; delete what doesn't. -->
+## Issue
 
-## Work
-Issue: #
-Spec: <SPEC-NNNN or n/a>
+Closes #
 
-## What changed
+## Change
+
 -
 
-## Evidence
-- [ ] `npm test` passes (paste the pass/fail counts)
-- [ ] `npm run covgate` clean on every changed lib file (or the pre-existing gap is named and unchanged)
-- [ ] `npm run e2e:gui` passes, if the GUI changed
-- [ ] Acceptance criteria in the linked Issue/Spec are satisfied
+## Verification
 
-## Risk
-R0 / R1 / R2 / R3 / R4 — <one line why>
+- [ ] `npm test`
+- [ ] `npm run covgate`
+- [ ] `npm run test:windows`, when Windows behavior changed
+- [ ] `npm run e2e:gui`, when GUI behavior changed
+- [ ] The linked Issue's acceptance criteria are satisfied
 
 ## Not included
--
 
-## Integrity
-- [ ] No test or gate was weakened, skipped, or deleted without naming the reason in this PR
-- [ ] Scope was not widened beyond the linked Issue/Spec
+-

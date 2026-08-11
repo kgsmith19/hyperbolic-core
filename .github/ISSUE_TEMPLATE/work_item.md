@@ -1,27 +1,27 @@
 ---
 name: Work item
-about: Durable, actionable work — bug, feature, safety/maintenance need
+about: Describe a bug, feature, safety improvement, or maintenance outcome
 title: ''
 labels: ''
 assignees: ''
 ---
 
 ## Outcome
-What useful result should exist when this is done?
 
-## Source of intent
-PRD / bug / incident / security finding / ADR / maintenance need:
+What useful result should exist when this is complete?
 
-## Acceptance
+## Context
+
+What problem, observation, or dependency explains the work?
+
+## Acceptance criteria
+
 - [ ]
 
-## Risk
-R0 / R1 / R2 / R3 / R4 — see AGENTS.md's "Shared engineering standard"
+## Verification notes
 
-## Spec / slices
-Spec needed: Yes / No — <SPEC-NNNN if yes>
-
-- [ ] SL-001:
+Which behavior and commands should demonstrate success?
 
 ## Out of scope
+
 -
