@@ -1,0 +1,10 @@
+# Local dependencies installed by the documented Playwright command.
+node_modules/
+
+# Playwright E2E evidence (screenshots, traces, HTML report).
+# These are CI artifacts — uploaded to GitHub Actions and not committed.
+playwright-report/
+test-results/
+
+# Local worktrees
+.worktrees/

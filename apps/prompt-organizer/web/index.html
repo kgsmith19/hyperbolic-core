@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Prompt Organizer</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+    label { display: block; margin: 0.5rem 0; }
+    input, textarea { width: 100%; }
+    pre { white-space: pre-wrap; }
+    .error { color: #b00020; }
+    #app, #sign-in-error, #save-error, #empty-state { display: none; }
+    .tag-chip { margin-right: 0.25rem; cursor: pointer; }
+    .tag-chip[aria-pressed="true"] { background: #cde; }
+  </style>
+</head>
+<body>
+  <h1>Prompt Organizer</h1>
+
+  <form id="sign-in-form">
+    <label>Email <input type="email" id="email" required autocomplete="username" /></label>
+    <label>Password <input type="password" id="password" required autocomplete="current-password" /></label>
+    <button type="submit">Sign in</button>
+    <p id="sign-in-error" class="error"></p>
+  </form>
+
+  <section id="app">
+    <form id="save-form">
+      <label>Title <input type="text" id="title" required maxlength="200" /></label>
+      <label>Body <textarea id="body" required></textarea></label>
+      <label>Tags <input type="text" id="tags" placeholder="comma, separated, tags" /></label>
+      <button type="submit">Save</button>
+      <p id="save-error" class="error"></p>
+    </form>
+    <h2>Saved prompts</h2>
+    <label>Search <input type="search" id="search" /></label>
+    <label><input type="checkbox" id="show-archived" /> Show archived</label>
+    <p id="empty-state"></p>
+    <ul id="prompt-list"></ul>
+  </section>
+
+  <script type="module">
+    import { searchPrompts, toggleTagFilter, filterByActive, shouldFocusSearch } from "./search.mjs";
+    import { buildRenderPanel } from "./panel.mjs";
+    import { isCurrentVersion } from "./restore.mjs";
+
+    const SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
+    const ANON_KEY =
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
+    let accessToken = null;
+
+    // SPEC-0009: profile defaults to "prompt" (unchanged for every existing
+    // caller); the only caller passing "core" is the log_run RPC call.
+    async function api(path, { method = "GET", body, profile = "prompt" } = {}) {
+      const headers = { apikey: ANON_KEY, Authorization: `Bearer ${accessToken}`, "Accept-Profile": profile, "Content-Profile": profile };
+      if (body !== undefined) headers["Content-Type"] = "application/json";
+      if (method !== "GET") headers.Prefer = "return=representation";
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+        method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.message || `request failed: ${res.status}`);
+      return json;
+    }
+
+    // SPEC-0004: comma-separated tag input, trimmed, lowercased, deduplicated
+    // client-side before it reaches the wire (7.1 -- no server-side folding).
+    function parseTagInput(raw) {
+      const seen = new Set();
+      const tags = [];
+      for (const part of raw.split(",")) {
+        const tag = part.trim().toLowerCase();
+        if (tag !== "" && !seen.has(tag)) {
+          seen.add(tag);
+          tags.push(tag);
+        }
+      }
+      return tags;
+    }
+
+    // SPEC-0005 (SL-008): version history; append(string) is a safe text node (not innerHTML); restore PATCHes body via SL-004's grant.
+    function buildHistoryPanel(prompt) {
+      const panel = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "Version history";
+      const list = document.createElement("ul");
+      panel.append(summary, list);
+      panel.addEventListener("toggle", async () => {
+        const versions = await api(`prompt_version?prompt_id=eq.${prompt.id}&select=version_no,body,created_at&order=version_no.desc`);
+        for (const v of versions) {
+          const item = document.createElement("li");
+          item.append(`${new Date(v.created_at).toLocaleString()} - ${v.body.slice(0, 60)}`);
+          if (!isCurrentVersion(v.body, prompt.body)) {
+            const restoreBtn = document.createElement("button");
+            restoreBtn.type = "button";
+            restoreBtn.textContent = "Restore";
+            restoreBtn.addEventListener("click", async () => {
+              await api(`prompt?id=eq.${prompt.id}`, { method: "PATCH", body: { body: v.body } });
+              await refreshList();
+            });
+            item.append(restoreBtn);
+          }
+          list.append(item);
+        }
+      }, { once: true });
+      return panel;
+    }
+
+    function showPrompt(listEl, prompt) {
+      const item = document.createElement("li");
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = prompt.title;
+      const pre = document.createElement("pre");
+      pre.textContent = prompt.body;
+      details.append(summary, pre);
+      const panel = buildRenderPanel(prompt, api);
+      if (panel) details.append(panel);
+      details.append(buildHistoryPanel(prompt));
+      const archiveBtn = document.createElement("button");
+      archiveBtn.type = "button";
+      archiveBtn.textContent = prompt.isActive ? "Archive" : "Restore";
+      archiveBtn.addEventListener("click", async () => {
+        await api(`prompt?id=eq.${prompt.id}`, { method: "PATCH", body: { is_active: !prompt.isActive } });
+        prompt.isActive = !prompt.isActive;
+        renderList();
+      });
+      details.append(archiveBtn);
+      item.append(details);
+      for (const tag of prompt.tags) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "tag-chip";
+        chip.textContent = tag;
+        chip.setAttribute("aria-pressed", String(tag === selectedTag));
+        chip.addEventListener("click", () => {
+          selectedTag = toggleTagFilter(selectedTag, tag);
+          renderList();
+        });
+        item.append(chip);
+      }
+      listEl.append(item);
+    }
+
+    let allPrompts = [];
+    let selectedTag = null;
+
+    function renderList() {
+      const query = document.getElementById("search").value;
+      const byActive = filterByActive(allPrompts, document.getElementById("show-archived").checked);
+      const byTag = selectedTag === null ? byActive : byActive.filter((p) => p.tags.includes(selectedTag));
+      const shown = searchPrompts(byTag, query);
+      const list = document.getElementById("prompt-list");
+      list.replaceChildren();
+      for (const p of shown) showPrompt(list, p);
+      const emptyEl = document.getElementById("empty-state");
+      if (shown.length === 0 && query !== "") {
+        emptyEl.textContent = `No prompts match "${query}"`;
+        emptyEl.style.display = "block";
+        document.getElementById("title").value = query;
+      } else {
+        emptyEl.style.display = "none";
+      }
+    }
+
+    async function refreshList() {
+      // SPEC-0008: prompt_version embed scoped to its latest row only
+      // (every prompt has at least one the instant it is saved -- SL-004's
+      // trigger fires on insert, not only update), so currentVersion is
+      // always populated, one round trip, no extra query.
+      const rows = await api(
+        "prompt?select=id,title,body,is_active,tag(tag),prompt_version(version_no),configuration(name,values,sections)" +
+          "&order=created_at.desc&prompt_version.order=version_no.desc&prompt_version.limit=1"
+      );
+      allPrompts = rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        body: row.body,
+        isActive: row.is_active,
+        tags: (row.tag || []).map((t) => t.tag),
+        currentVersion: row.prompt_version[0].version_no,
+        configurations: row.configuration || [],
+      }));
+      renderList();
+    }
+
+    document.getElementById("search").addEventListener("input", renderList);
+    document.getElementById("show-archived").addEventListener("change", renderList);
+    document.addEventListener("keydown", (e) => {
+      if (shouldFocusSearch(e.key, e.target.tagName)) {
+        e.preventDefault();
+        document.getElementById("search").focus();
+      }
+    });
+
+    document.getElementById("sign-in-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById("sign-in-error");
+      errEl.style.display = "none";
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        method: "POST",
+        headers: { apikey: ANON_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ email: document.getElementById("email").value, password: document.getElementById("password").value }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        errEl.textContent = body.error_description || body.msg || `sign-in failed: ${res.status}`;
+        errEl.style.display = "block";
+        return;
+      }
+      accessToken = body.access_token;
+      document.getElementById("app").style.display = "block";
+      await refreshList();
+    });
+
+    document.getElementById("save-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById("save-error");
+      errEl.style.display = "none";
+      try {
+        const [saved] = await api("prompt", {
+          method: "POST",
+          body: { title: document.getElementById("title").value, body: document.getElementById("body").value },
+        });
+        const tags = parseTagInput(document.getElementById("tags").value);
+        if (tags.length > 0) {
+          await api("tag", {
+            method: "POST",
+            body: tags.map((tag) => ({ prompt_id: saved.id, tag })),
+          });
+        }
+        allPrompts.unshift({ id: saved.id, title: saved.title, body: saved.body, isActive: true, tags, currentVersion: 1, configurations: [] });
+        document.getElementById("save-form").reset();
+        renderList();
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.style.display = "block";
+      }
+    });
+  </script>
+</body>
+</html>

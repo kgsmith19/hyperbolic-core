@@ -2,7 +2,10 @@
 
 ## Repository purpose
 
-`toolbelt` owns the shared Supabase foundation for the portfolio: the `core` schema for runs, costs, outcomes, metrics, and events, plus the `idea` schema for the tool backlog. Its web surface is a static idea-list client.
+`toolbelt` is the monorepo for small portfolio tools. The root owns the shared
+Supabase `core` schema for runs, costs, outcomes, metrics, and events plus the
+`idea` schema and static idea-list client. `apps/prompt-organizer/` owns the
+`prompt` schema and prompt-library client.
 
 ## Working model
 
@@ -22,7 +25,8 @@ When explicitly assigned, an AI coding agent may create an Issue, branch, commit
 
 ## Product boundaries
 
-- Write product data only within the `core` and `idea` schemas owned by this repository.
+- Write product data only within this monorepo's `core`, `idea`, and `prompt`
+  schemas. Follow the narrower instructions under an application directory.
 - Use the public anon key in clients and tests. Never commit or use a service-role key in this repository.
 - Treat row-level security as the authorization boundary; do not weaken RLS or grants to make a test pass.
 - Preserve ownership constraints, foreign keys, retention behavior, and append-only records unless the linked Issue explicitly changes them.
@@ -34,6 +38,10 @@ When explicitly assigned, an AI coding agent may create an Issue, branch, commit
 ```bash
 node --test "tests/*.test.mjs"
 python3 -m http.server 8811
+cd apps/prompt-organizer && node --test "tests/*.test.mjs"
+cd apps/prompt-organizer && python3 -m http.server 8812 --directory web
+cd apps/prompt-organizer && npm install --no-save --no-package-lock @playwright/test@1.52.0
+cd apps/prompt-organizer && PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config playwright.config.mjs
 ```
 
 Open `http://localhost:8811/web/index.html` for a manual browser check when the UI changes. The Node suite calls the live Supabase project using the public anon key. Report network or rate-limit failures accurately; do not relabel them as passing.
@@ -44,7 +52,9 @@ Open `http://localhost:8811/web/index.html` for a manual browser check when the 
 - `docs/DATA-FLOW-DIAGRAM.md` records trust boundaries and data movement.
 - `docs/notes/2026-08-06-supabase-project-topology.md` records the shared project topology.
 - `specs/done/` preserves shipped design history.
-- `.agent/project.yaml` contains commands and repository facts.
+- `apps/prompt-organizer/` contains its product documentation, migrations,
+  tests, and nested `AGENTS.md`.
+- `.agent/project.yaml` contains root commands and repository facts.
 - `.agent/standard.lock` is an informational reference only and does not impose policy.
 
 ## Completion
