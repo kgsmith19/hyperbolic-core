@@ -1,13 +1,20 @@
 {
-  "enabled": true,
-  "secrets": [".env", ".env.*", "*.pem", "*.key", "id_rsa*", "vault.json"],
-  "protected": ["/absolute/path/to/your/claude/settings.json"],
-  "repos": {
-    "/absolute/path/to/a/repo/you/want/cell-owned": {
-      "cells": {
-        "example-cell": ["src/some/subdirectory/"]
-      },
-      "alwaysAllowed": ["cross-domain-change-request.md"]
+  "config.json": {
+    "_comment": "tracked base, colocated with guard.mjs -- portable fields only, the same on every machine",
+    "enabled": true,
+    "secrets": [".env", ".env.*", "*.pem", "*.key", "id_rsa*", "vault.json"]
+  },
+  "config.<profile>.json": {
+    "_comment": "tracked per-machine overlay, colocated with guard.mjs -- <profile> is GUARDS_PROFILE if set, else the lowercased hostname. Shallow-merged over config.json at read time; GUARDS_CONFIG bypasses this whole file pair and points at one fully-resolved config instead.",
+    "runboxDir": "/absolute/path/to/your/runbox",
+    "protected": ["/absolute/path/to/your/claude/settings.json"],
+    "repos": {
+      "/absolute/path/to/a/repo/you/want/cell-owned": {
+        "cells": {
+          "example-cell": ["src/some/subdirectory/"]
+        },
+        "alwaysAllowed": ["cross-domain-change-request.md"]
+      }
     }
   }
 }

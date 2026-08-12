@@ -1,0 +1,10 @@
+{
+  "runboxDir": "/fixture/runbox",
+  "protected": ["/fixture/protected-only-via-overlay"],
+  "repos": {
+    "/fixture/repo": {
+      "cells": { "core": ["src/kernel/"] },
+      "alwaysAllowed": ["cross-domain-change-request.md"]
+    }
+  }
+}

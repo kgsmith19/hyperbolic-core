@@ -16,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { decide } from "./guard.mjs";
+import { loadConfig, resolveProfile } from "./config-loader.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const GUARD_PATH = path.join(HERE, "guard.mjs");
@@ -258,4 +259,173 @@ test("wrapper: a stdin that never ends is still bounded by the read timeout, and
   // timer resolved the read, not an "end" event.
   assert.equal(code, 2);
   assert.match(err, /no hook payload/i);
+});
+
+// ---------------------------------------------------------------------------
+// Per-machine overlay loader (05-g section 3a) -- GU-2.3. config.json (real
+// tracked base) and config.fixture.json (real tracked, test-only overlay)
+// are exercised directly -- no temp fixtures needed for these. GUARDS_PROFILE
+// is always passed explicitly per call/spawn below, never relied on
+// ambiently, so these pass whether the suite is invoked plain
+// (`node --test "*.test.mjs"`) or with GUARDS_PROFILE=fixture already set in
+// the environment (both are required verification commands for this issue).
+// ---------------------------------------------------------------------------
+
+test("resolveProfile: GUARDS_PROFILE wins when set", () => {
+  assert.equal(resolveProfile({ GUARDS_PROFILE: "fixture" }), "fixture");
+});
+
+test("resolveProfile: falls back to the lowercased hostname when unset", () => {
+  assert.equal(resolveProfile({}), os.hostname().toLowerCase());
+});
+
+test("loadConfig: shallow-merges the profile overlay over the tracked base; the base file is never written", () => {
+  const configJsonPath = path.join(HERE, "config.json");
+  const before = fs.readFileSync(configJsonPath, "utf8");
+
+  const merged = loadConfig(HERE, { GUARDS_PROFILE: "fixture" });
+  assert.deepEqual(merged.secrets, JSON.parse(before).secrets); // portable field, from the base
+  assert.deepEqual(merged.protected, ["/fixture/protected-only-via-overlay"]); // machine field, from the overlay
+
+  assert.equal(fs.readFileSync(configJsonPath, "utf8"), before, "loading the overlay must not edit the tracked base config");
+});
+
+test("loadConfig: a missing overlay merges as base-only -- fails safe because secrets stay enforced", () => {
+  const merged = loadConfig(HERE, { GUARDS_PROFILE: "no-such-profile-xyz-testonly" });
+  assert.equal(merged.protected, undefined);
+  assert.ok(Array.isArray(merged.secrets) && merged.secrets.length > 0);
+});
+
+test("loadConfig: GUARDS_CONFIG bypasses profile resolution entirely, even when GUARDS_PROFILE is also set", () => {
+  const configPath = path.join(BASE, `bypass-${seq++}.json`);
+  fs.writeFileSync(configPath, JSON.stringify({ enabled: true, secrets: ["*.bypass"], protected: ["/only/here"] }));
+  const merged = loadConfig(HERE, { GUARDS_CONFIG: configPath, GUARDS_PROFILE: "fixture" });
+  assert.deepEqual(merged.protected, ["/only/here"]); // GUARDS_CONFIG's own value, not the fixture overlay's
+});
+
+test("wrapper: GUARDS_PROFILE=fixture enforces the fixture overlay's protected root with no GUARDS_CONFIG and no edit to the tracked base config (GU-2.3)", () => {
+  const configJsonPath = path.join(HERE, "config.json");
+  const before = fs.readFileSync(configJsonPath, "utf8");
+
+  const env = { ...process.env, GUARDS_PROFILE: "fixture" };
+  delete env.GUARDS_CONFIG; // prove profile resolution, not an inherited bypass
+
+  const denied = spawnSync(process.execPath, [GUARD_PATH], {
+    encoding: "utf8",
+    input: JSON.stringify(ev("Write", "/fixture/protected-only-via-overlay/x.txt")),
+    timeout: 10000,
+    env,
+  });
+  assert.equal(denied.status, 2, denied.stderr);
+  assert.match(denied.stderr, /guard machinery/i);
+
+  const allowed = spawnSync(process.execPath, [GUARD_PATH], {
+    encoding: "utf8",
+    input: JSON.stringify(ev("Write", "/fixture/elsewhere/x.txt")),
+    timeout: 10000,
+    env,
+  });
+  assert.equal(allowed.status, 0, allowed.stderr);
+
+  assert.equal(fs.readFileSync(configJsonPath, "utf8"), before, "the tracked base config must be untouched");
+});
+
+test("wrapper: an unrecognized profile falls back to base-only -- the fixture overlay's rule does not leak to other profiles", () => {
+  const env = { ...process.env, GUARDS_PROFILE: "no-such-profile-xyz-testonly" };
+  delete env.GUARDS_CONFIG;
+  const r = spawnSync(process.execPath, [GUARD_PATH], {
+    encoding: "utf8",
+    input: JSON.stringify(ev("Write", "/fixture/protected-only-via-overlay/x.txt")),
+    timeout: 10000,
+    env,
+  });
+  assert.equal(r.status, 0); // no overlay for this profile -> protected is empty -> allowed
+});
+
+// ---------------------------------------------------------------------------
+// JSONL decision audit trail (05-g section 3c) -- AUD-1, AUD-2.
+// ---------------------------------------------------------------------------
+
+test("wrapper: GUARDS_LOG set -- a denied decision appends exactly one JSONL record with ts/tool/target/allow/rule (AUD-1)", () => {
+  const logPath = path.join(BASE, `audit-${seq++}.jsonl`);
+  const configPath = path.join(BASE, `audit-cfg-${seq++}.json`);
+  fs.writeFileSync(configPath, JSON.stringify({ enabled: true, secrets: [".env"], protected: [], repos: {} }));
+
+  const r = spawnSync(process.execPath, [GUARD_PATH], {
+    encoding: "utf8",
+    input: JSON.stringify(ev("Read", "/work/.env")),
+    timeout: 10000,
+    env: { ...process.env, GUARDS_CONFIG: configPath, GUARDS_LOG: logPath },
+  });
+  assert.equal(r.status, 2);
+
+  const lines = fs.readFileSync(logPath, "utf8").trim().split("\n");
+  assert.equal(lines.length, 1);
+  const rec = JSON.parse(lines[0]); // throws (failing the test) if this is not valid JSON
+  assert.equal(rec.tool, "Read");
+  assert.match(rec.target, /\.env$/);
+  assert.equal(rec.allow, false);
+  assert.equal(rec.rule, "secret");
+  assert.ok(rec.ts);
+});
+
+test("wrapper: GUARDS_LOG set -- an allowed decision is logged too, with rule \"none\"", () => {
+  const logPath = path.join(BASE, `audit-${seq++}.jsonl`);
+  const configPath = path.join(BASE, `audit-cfg-${seq++}.json`);
+  fs.writeFileSync(configPath, JSON.stringify({ enabled: true, secrets: [], protected: [], repos: {} }));
+
+  const r = spawnSync(process.execPath, [GUARD_PATH], {
+    encoding: "utf8",
+    input: JSON.stringify(ev("Read", "/work/readme.md")),
+    timeout: 10000,
+    env: { ...process.env, GUARDS_CONFIG: configPath, GUARDS_LOG: logPath },
+  });
+  assert.equal(r.status, 0);
+
+  const rec = JSON.parse(fs.readFileSync(logPath, "utf8").trim());
+  assert.equal(rec.allow, true);
+  assert.equal(rec.rule, "none");
+});
+
+test("wrapper: GUARDS_LOG accumulates one line per invocation, never overwritten", () => {
+  const logPath = path.join(BASE, `audit-${seq++}.jsonl`);
+  const configPath = path.join(BASE, `audit-cfg-${seq++}.json`);
+  fs.writeFileSync(configPath, JSON.stringify({ enabled: true, secrets: [], protected: [], repos: {} }));
+
+  for (let i = 0; i < 3; i++) {
+    const r = spawnSync(process.execPath, [GUARD_PATH], {
+      encoding: "utf8",
+      input: JSON.stringify(ev("Read", `/work/file${i}.md`)),
+      timeout: 10000,
+      env: { ...process.env, GUARDS_CONFIG: configPath, GUARDS_LOG: logPath },
+    });
+    assert.equal(r.status, 0);
+  }
+  assert.equal(fs.readFileSync(logPath, "utf8").trim().split("\n").length, 3);
+});
+
+test("wrapper: GUARDS_LOG pointed at an unwritable path -- a failed append never changes the decision (AUD-2)", () => {
+  const logPath = path.join(BASE, "no-such-dir-xyz", "audit.jsonl"); // parent directory does not exist
+  const denyConfigPath = path.join(BASE, `audit-cfg-${seq++}.json`);
+  fs.writeFileSync(denyConfigPath, JSON.stringify({ enabled: true, secrets: [".env"], protected: [], repos: {} }));
+
+  const denied = spawnSync(process.execPath, [GUARD_PATH], {
+    encoding: "utf8",
+    input: JSON.stringify(ev("Read", "/work/.env")),
+    timeout: 10000,
+    env: { ...process.env, GUARDS_CONFIG: denyConfigPath, GUARDS_LOG: logPath },
+  });
+  assert.equal(denied.status, 2); // still denies -- unaffected by the failed log append
+  assert.match(denied.stderr, /secret pattern/i);
+
+  const allowConfigPath = path.join(BASE, `audit-cfg-${seq++}.json`);
+  fs.writeFileSync(allowConfigPath, JSON.stringify({ enabled: true, secrets: [], protected: [], repos: {} }));
+  const allowed = spawnSync(process.execPath, [GUARD_PATH], {
+    encoding: "utf8",
+    input: JSON.stringify(ev("Read", "/work/readme.md")),
+    timeout: 10000,
+    env: { ...process.env, GUARDS_CONFIG: allowConfigPath, GUARDS_LOG: logPath },
+  });
+  assert.equal(allowed.status, 0); // still allows -- unaffected by the failed log append
+  assert.equal(fs.existsSync(logPath), false); // the append genuinely never landed
 });

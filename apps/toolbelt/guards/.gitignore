@@ -1,0 +1,3 @@
+# GUARDS_LOG decision audit trail (05-g section 3c). Opt-in and per-run; if
+# an operator points GUARDS_LOG at a file colocated here, never track it.
+*.jsonl
