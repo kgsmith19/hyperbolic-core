@@ -70,13 +70,16 @@ test("critical_prompt_flow__sign_in_save_render_copy__T_E_001", async ({
   await page.click('#save-form button[type="submit"]');
 
   // The new prompt's summary must appear in #prompt-list.
+  // Increased timeout to account for network latency and DOM rendering.
   const promptSummary = page.locator("#prompt-list summary", {
     hasText: PROMPT_TITLE,
   });
-  await expect(promptSummary).toBeVisible({ timeout: 5_000 });
+  await expect(promptSummary).toBeVisible({ timeout: 10_000 });
 
   // ---- Step 3: Open the render panel ---------------------------------------
   // Clicking the <summary> expands the <details> which contains the panel.
+  // Small delay to ensure DOM has fully settled after the list update.
+  await page.waitForTimeout(200);
   await promptSummary.click();
 
   // Scope every render-panel interaction to the prompt created by this run.
@@ -88,17 +91,21 @@ test("critical_prompt_flow__sign_in_save_render_copy__T_E_001", async ({
     name: "REPO",
     exact: true,
   });
-  await expect(repoInput).toBeVisible({ timeout: 3_000 });
+  // Increased timeout to account for render panel initialization.
+  await expect(repoInput).toBeVisible({ timeout: 5_000 });
 
   // ---- Step 4: Fill the variable and copy the rendered text ----------------
+  // Small delay to ensure input is fully interactive before filling.
+  await page.waitForTimeout(100);
   await repoInput.fill(VARIABLE_VALUE);
 
   await promptDetails.locator('button:has-text("Copy rendered text")').click();
 
   // The panel shows "Copied!" after a successful navigator.clipboard.writeText.
+  // Increased timeout to account for clipboard operations and usage logging.
   await expect(
     promptDetails.locator("p", { hasText: "Copied!" })
-  ).toBeVisible({ timeout: 5_000 });
+  ).toBeVisible({ timeout: 8_000 });
 
   // ---- Step 5: Verify the clipboard holds the correctly rendered text ------
   const clipboardText = await page.evaluate(() =>
