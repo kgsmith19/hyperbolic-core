@@ -1,0 +1,192 @@
+# Operator tasks that need production credentials or shell access on the VPS.
+#
+# These used to be laptop-run scripts needing a prod DATABASE_URL in the guards
+# vault and a tailnet ACL exception for a non-CI device. Neither is necessary:
+# this workflow already holds both, by the same OIDC + Tailscale path the deploy
+# job uses (ADR 008/009), so no long-lived secret exists anywhere and nothing has
+# to be pasted by hand. Run one task at a time from the Actions tab or with:
+#
+#     gh workflow run ops.yml -f task=<task>
+#
+# Every task is idempotent and safe to re-run.
+name: ops
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: Which operator task to run
+        required: true
+        type: choice
+        options:
+          - define-daily-checkin      # A2.5: wellbeing daily_checkin type (INT1: re-run adds the rider fields)
+          - migrate-durable-erasure   # slice 7 / ADR 012: attendee email_hash identity
+          - migrate-bill-status       # C3 / ADR 017: bill+eob gain status "verified"
+          - migrate-bill-date-charset # C4 / ADR 018: service_date/due_date gain a charset pattern
+          - migrate-briefing-composition # INT1 / ADR 019: briefing becomes focus + calendar (+ Monday gate)
+          - migrate-document-ref-anchor # FIX-1 / ADR 015: document.storage_ref anchored with \Z, not $
+          - install-scheduled-jobs    # B3 / ADR 014: cron for ingest -> autolink -> briefing
+          - run-scheduled-jobs        # run the nightly trio once, now (end-to-end verification)
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ops-production
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Secrets come from Infisical via OIDC at run time — GitHub stores none.
+      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          domain: https://app.infisical.com
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        if: inputs.task != 'install-scheduled-jobs' && inputs.task != 'run-scheduled-jobs'
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: python -m pip install -e .
+        if: inputs.task != 'install-scheduled-jobs' && inputs.task != 'run-scheduled-jobs'
+
+      # The scripts read DATABASE_URL from the environment (kernel.env.read_env
+      # prefers it over the repo .env, which does not exist on a runner). None of
+      # them print it; each says only what it changed.
+      - name: Define the daily_checkin type
+        if: inputs.task == 'define-daily-checkin'
+        run: python scripts/define_daily_checkin.py
+
+      - name: Migrate calendar to durable erasure
+        if: inputs.task == 'migrate-durable-erasure'
+        run: python scripts/migrate_calendar_durable_erasure.py
+
+      - name: Migrate bill/eob schemas for verified status
+        if: inputs.task == 'migrate-bill-status'
+        run: python scripts/migrate_bill_status_verified.py
+
+      - name: Migrate bill/eob schemas for the date charset bound
+        if: inputs.task == 'migrate-bill-date-charset'
+        run: python scripts/migrate_bill_date_charset.py
+
+      - name: Migrate the briefing to the INT1 composition
+        if: inputs.task == 'migrate-briefing-composition'
+        run: python scripts/migrate_briefing_composition.py
+
+      - name: Migrate the document schema to the anchored storage_ref pattern
+        if: inputs.task == 'migrate-document-ref-anchor'
+        run: python scripts/migrate_document_ref_anchor.py
+
+      - name: Join tailnet
+        if: inputs.task == 'install-scheduled-jobs' || inputs.task == 'run-scheduled-jobs'
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      # Tailscale SSH as `deploy`, the same channel the deploy job uses — the
+      # ACL already allows tag:ci -> tag:prod, so no rule has to be widened for
+      # a personal device. The wrapper runs each job in its own throwaway
+      # container from the exact image the current deploy runs: every deploy
+      # records LIFEOS_IMAGE in ~/lifeos/.env (ci.yml Deploy step) and compose
+      # interpolates it from there, so cron and deploy can never run different
+      # images — the box loads sha-tagged images over SSH only, so the old
+      # `:main` registry-tag fallback was an image the box never had. One
+      # failing job never stops the next, and each writes its own
+      # execution_receipt (ADR 014). The wrapper owns its log and rotates it
+      # at 1 MiB, keeping one previous generation.
+      # Remote stdout from the tailnet SSH steps has not reliably reached the
+      # runner log (2026-07-29: a verified-green run showed none) — so each step
+      # captures it and re-prints it from the runner shell, and publishes it to
+      # the step summary, where the proof survives whatever eats the live stream.
+      - name: Install the scheduled-jobs cron
+        if: inputs.task == 'install-scheduled-jobs'
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          status=0
+          out=$(ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          mkdir -p /home/deploy/lifeos
+          cat > /home/deploy/lifeos/run-scheduled-jobs.sh <<'WRAPPER'
+          #!/usr/bin/env bash
+          # Managed by .github/workflows/ops.yml (task: install-scheduled-jobs).
+          # LIFEOS_IMAGE comes from ./.env, recorded by every deploy — compose
+          # interpolates it, so these jobs run the image the deploy runs.
+          cd /home/deploy/lifeos || exit 1
+          log=/home/deploy/lifeos/jobs.log
+          if [ -f "$log" ] && [ "$(stat -c %s "$log")" -ge 1048576 ]; then
+            mv -f -- "$log" "$log.1"
+          fi
+          exec >>"$log" 2>&1
+          echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) scheduled jobs ==="
+          status=0
+          for job in domains.calendar.ingest domains.calendar.autolink domains.ops.briefing; do
+            docker compose run --rm --no-deps api python -m "$job" || status=1
+          done
+          exit $status
+          WRAPPER
+          chmod 0755 /home/deploy/lifeos/run-scheduled-jobs.sh
+          tmp=$(mktemp)
+          # `crontab -l` exits non-zero when the user has no crontab yet, which
+          # under `set -e -o pipefail` killed this script before it printed
+          # anything. A first install is the normal case, not a failure.
+          { crontab -l 2>/dev/null || true; } | sed '/# >>> lifeos jobs/,/# <<< lifeos jobs/d' > "$tmp"
+          {
+            echo '# >>> lifeos jobs'
+            echo '15 6 * * *  /home/deploy/lifeos/run-scheduled-jobs.sh'
+            echo '# <<< lifeos jobs'
+          } >> "$tmp"
+          crontab "$tmp"
+          rm -f "$tmp"
+          echo "installed; crontab now:"
+          crontab -l | sed -n '/# >>> lifeos jobs/,/# <<< lifeos jobs/p'
+          REMOTE
+          ) || status=$?
+          printf '%s\n' "$out"
+          { echo '### install-scheduled-jobs'; echo '```'; printf '%s\n' "$out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      # On-demand execution of the exact wrapper cron runs, over the same
+      # channel — the only way to verify the schedule end-to-end without
+      # waiting for 06:15 box time. The wrapper writes its output to
+      # jobs.log, so the step prints the fresh tail; a failing job fails
+      # this run too, exactly as it would fail the cron.
+      - name: Run the scheduled jobs once, now
+        if: inputs.task == 'run-scheduled-jobs'
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          status=0
+          out=$(ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          test -x /home/deploy/lifeos/run-scheduled-jobs.sh || {
+            echo "wrapper not installed; run task=install-scheduled-jobs first" >&2
+            exit 1
+          }
+          status=0
+          /home/deploy/lifeos/run-scheduled-jobs.sh || status=$?
+          echo "--- jobs.log tail ---"
+          tail -n 40 /home/deploy/lifeos/jobs.log
+          exit $status
+          REMOTE
+          ) || status=$?
+          printf '%s\n' "$out"
+          { echo '### run-scheduled-jobs'; echo '```'; printf '%s\n' "$out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

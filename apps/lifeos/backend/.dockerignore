@@ -1,0 +1,5 @@
+# Whitelist: only what the image build needs may enter the build context,
+# so secrets like .env can never leak into a layer.
+*
+!pyproject.toml
+!src

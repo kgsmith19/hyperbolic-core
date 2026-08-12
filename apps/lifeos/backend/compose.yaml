@@ -1,0 +1,37 @@
+# Production runtime on the VPS (docs/runbook.md). The API listens on
+# loopback only; `tailscale serve` fronts it with HTTPS on the tailnet —
+# nothing is reachable from the public internet.
+services:
+  api:
+    # Every deploy records LIFEOS_IMAGE (a sha tag) in the project-directory
+    # .env, which compose reads for interpolation — deploy, the scheduled-jobs
+    # cron, and manual runs all resolve the same image. No fallback tag: the
+    # box only ever loads sha-tagged images over SSH (no registry creds), so a
+    # default like `:main` is an image it never has — fail loudly instead.
+    image: ${LIFEOS_IMAGE:?recorded in ./.env by every deploy (ci.yml Deploy step)}
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Document bytes and extracted text (ADR 015) live outside Postgres.
+      # backup.yml captures this volume beside the database dump.
+      - lifeos-blobs:/app/var/blobs
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  lifeos-blobs:
