@@ -1,0 +1,25 @@
+project:
+  name: hyperbolic-core
+  type: monorepo — each apps/<name>/ is independently built, tested, and
+    gated; see that app's own project.yaml for its facts.
+
+apps:
+  - apps/toolbelt
+  - apps/toolbelt/guards
+  - apps/lifeos
+  - apps/agentic-command-center
+
+ci:
+  workflows:
+    - .github/workflows/toolbelt-ci.yml
+    - .github/workflows/acc-ci.yml
+  note: apps/lifeos's own workflows are intentionally inert here (see
+    AGENTS.md's workflow safety invariant) — its CI runs from the standalone
+    lifeos repo.
+
+work_tracking:
+  system: github-issues
+
+standard:
+  repo: kgsmith19/agent-engineering-standard
+  lock_file: standard.lock

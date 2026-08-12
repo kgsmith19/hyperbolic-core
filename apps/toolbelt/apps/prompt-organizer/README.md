@@ -43,10 +43,7 @@ Apply `supabase/migrations/*.sql` through the Supabase API. Each up migration ha
 
 ## Documentation
 
-- `docs/SYSTEM-REQUIREMENTS.md` describes current system constraints.
-- `docs/DATA-FLOW-DIAGRAM.md` describes trust boundaries and data movement.
-- `docs/adr/` and `specs/done/` preserve shipped design history.
-- `specs/TEST-LEDGER.md` is a historical evidence record, not a required planning artifact.
+- `TEST_LEDGER.md` tracks this app's own test suites.
 
 New work starts in Toolbelt GitHub Issues. Pull requests are verified by the
 hyperbolic-core root's `.github/workflows/toolbelt-ci.yml`, whose workflow and

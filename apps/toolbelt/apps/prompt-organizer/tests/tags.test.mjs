@@ -105,8 +105,7 @@ test("rejects_tag_over_100_chars_with_23514__T_I_014__AC_006", async () => {
   assert.deepEqual(readBack.json, [], "no tag row must be created");
 });
 
-// T-I-011 -> PROP-001 -> FR-012: cascade delete of a prompt leaves no orphan
-// tag rows. Not executable here -- `prompt.prompt` has no DELETE grant (by
-// design), so the anon-key suite cannot create the delete this test would
-// need to observe. Recorded in specs/TEST-LEDGER.md as a manual integrator
-// drill, same posture as T-A-002 (SPEC-0004 section 8).
+// Cascade delete of a prompt leaves no orphan tag rows. Not executable here
+// -- `prompt.prompt` has no DELETE grant (by design), so the anon-key suite
+// cannot create the delete this test would need to observe. This is a
+// manual integrator drill, not an automated one.

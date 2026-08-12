@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "secrets": [".env", ".env.*", "*.pem", "*.key", "id_rsa*", "vault.json"],
+  "protected": ["/absolute/path/to/your/claude/settings.json"],
+  "repos": {
+    "/absolute/path/to/a/repo/you/want/cell-owned": {
+      "cells": {
+        "example-cell": ["src/some/subdirectory/"]
+      },
+      "alwaysAllowed": ["cross-domain-change-request.md"]
+    }
+  }
+}

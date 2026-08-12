@@ -150,11 +150,10 @@ flag instead.
 
 ## Documentation
 
-- `docs/SYSTEM-REQUIREMENTS.md` — current functional and system requirements
-- `docs/DATA-FLOW-DIAGRAM.md` — how a tick moves from probe to stored row to verdict
 - `AGENTS.md` — repository facts, commands, product invariants, and delivery guidance
 - `docs/notes/` — runbooks and design notes, including deployment and releases
-- `CHANGELOG.md` — what changed, by version
+- `CHANGELOG.md` — what changed, by version (kept: consumed by the release workflow's release-notes extraction)
+- `TEST_LEDGER.md` — this app's own test suites
 
 There is deliberately no hand-written API reference. One existed and drifted:
 it documented functions that had never been written, and gave `correlate()`
