@@ -1,0 +1,8 @@
+{
+  "name": "hyperbolic-core",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/shell"
+  ]
+}
