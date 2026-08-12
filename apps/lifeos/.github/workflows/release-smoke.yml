@@ -1,0 +1,57 @@
+name: Release Smoke
+
+# Deployed-system canary. It is manual/weekly and never a merge gate.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Deployed UI URL to test against (blank uses the default)
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 06 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Full-stack smoke (real auth and backend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Cache Playwright Chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: lifeos-smoke-chromium-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+      - name: Run release smoke test
+        run: npx playwright test --config playwright.smoke.config.ts
+        env:
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+          SMOKE_BASE_URL: ${{ inputs.base_url || '' }}
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-smoke-evidence
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: warn
+          retention-days: 30
