@@ -77,3 +77,56 @@ CREATE TABLE IF NOT EXISTS env_scans (
   UNIQUE (host_id, ts)
 );
 
+-- Device and configuration inventory (netcheck/inventory.py). Postgres
+-- mirror of these four objects: supabase/migrations/0002_inventory.sql
+
+-- One row per distinct device ever seen on the LAN (or this host itself).
+CREATE TABLE IF NOT EXISTS device (
+  id         INTEGER PRIMARY KEY,
+  host_id    INTEGER NOT NULL REFERENCES hosts(id),
+  mac        TEXT,                -- NULL allowed: FR-017 devices are never dropped
+  ip         TEXT,
+  kind       TEXT NOT NULL DEFAULT 'unknown',  -- gateway | modem | ap | client | self | unknown
+  name       TEXT,                -- SSDP friendly name, SNMP sysName, or NULL
+  vendor     TEXT,                -- OUI-derived when mac is present, else NULL
+  first_seen TEXT NOT NULL,
+  last_seen  TEXT NOT NULL,
+  synced     INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (host_id, mac, ip)
+);
+
+-- Interfaces observed on a device (this host's own adapters at minimum;
+-- router LAN/WAN sides where remote.py can see them).
+CREATE TABLE IF NOT EXISTS interface (
+  id          INTEGER PRIMARY KEY,
+  device_id   INTEGER NOT NULL REFERENCES device(id),
+  name        TEXT NOT NULL,      -- adapter or port name as reported
+  medium      TEXT,               -- wifi | ethernet | coax | virtual | unknown
+  speed_mbps  REAL,
+  observed_at TEXT NOT NULL,
+  synced      INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (device_id, name, observed_at)
+);
+
+-- Append-only configuration observations: one row per (device, key) per
+-- observation. History is the point; the view below answers "current".
+CREATE TABLE IF NOT EXISTS config_item (
+  id          INTEGER PRIMARY KEY,
+  device_id   INTEGER NOT NULL REFERENCES device(id),
+  key         TEXT NOT NULL,      -- e.g. 'dns.servers', 'wifi.channel', 'wireless_mode', 'aiprotection_enabled', 'docsis.snr_db'
+  value       TEXT,               -- canonical string/JSON encoding
+  observed_at TEXT NOT NULL,
+  source      TEXT NOT NULL,      -- module that measured it: topology | ssdp | snmp | remote | environ | change_apply
+  synced      INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (device_id, key, observed_at)
+);
+
+CREATE INDEX IF NOT EXISTS config_item_device_key ON config_item (device_id, key, observed_at);
+
+-- Latest value per (device, key): the "know every property" query surface.
+CREATE VIEW IF NOT EXISTS config_current AS
+  SELECT c.device_id, c.key, c.value, c.observed_at, c.source
+  FROM config_item c
+  WHERE c.observed_at = (SELECT MAX(c2.observed_at) FROM config_item c2
+                         WHERE c2.device_id = c.device_id AND c2.key = c.key);
+

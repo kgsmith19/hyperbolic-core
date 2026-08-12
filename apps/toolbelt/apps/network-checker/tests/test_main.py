@@ -41,16 +41,20 @@ class ScanTierCliTest(unittest.TestCase):
     def test_standard_tier_calls_environ_scan_with_deep_false(self):
         with patch.object(cli, "connect", return_value=(None, "h")), \
              patch.object(cli.store, "add_scan"), \
+             patch.object(cli.inventory, "record_inventory") as mock_inventory, \
              patch.object(cli.environ, "scan", return_value={"ts": "x"}) as mock_scan:
             cli._cmd_scan_worker(argparse.Namespace(tier="standard", target="t"))
         mock_scan.assert_called_once_with(deep=False)
+        mock_inventory.assert_called_once_with(None, "h", {"ts": "x"}, "x")
 
     def test_deep_tier_calls_environ_scan_with_deep_true(self):
         with patch.object(cli, "connect", return_value=(None, "h")), \
              patch.object(cli.store, "add_scan"), \
+             patch.object(cli.inventory, "record_inventory") as mock_inventory, \
              patch.object(cli.environ, "scan", return_value={"ts": "x"}) as mock_scan:
             cli._cmd_scan_worker(argparse.Namespace(tier="deep", target="t"))
         mock_scan.assert_called_once_with(deep=True)
+        mock_inventory.assert_called_once_with(None, "h", {"ts": "x"}, "x")
 
     def test_an_unrecognized_tier_exits_before_any_probe_runs(self):
         with patch.object(cli, "connect") as mock_connect:

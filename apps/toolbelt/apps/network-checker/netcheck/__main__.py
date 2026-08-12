@@ -4,6 +4,7 @@
   netcheck probe      one sample, printed
   netcheck scan       environment snapshot (--tier quick/standard/deep)
   netcheck diagnose   ranked causes from everything collected so far
+  netcheck inventory  device table, one device's config, or a config diff
   netcheck serve      dashboard at http://127.0.0.1:8787
   netcheck sync       push unsynced rows to Supabase
   netcheck experiment tag or compare labeled probe runs (--label / --compare)
@@ -19,8 +20,8 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from . import (bundle, diagnose, environ, experiment, llmlog, probes, rank,
-               route as route_mod, server, store, watch)
+from . import (bundle, diagnose, environ, experiment, inventory, llmlog,
+               probes, rank, route as route_mod, server, store, watch)
 from . import __version__
 
 DB = Path(os.environ.get("NETCHECK_DB", Path.home() / ".netcheck" / "netcheck.db"))
@@ -41,17 +42,15 @@ def load_env(path=Path(".env")):
 
 
 def connect():
-    """The open database and this machine's row in it. Always acquired
-    together and never used apart, so they travel as one value."""
+    """The open database and this machine's row in it, acquired together and never used apart."""
     DB.parent.mkdir(parents=True, exist_ok=True)
     conn = store.open_db(DB)
     return conn, store.host_id(conn, socket.gethostname(), platform.system())
 
 
 def _one_probe_row(args):
-    """One FR-001 measurement, culprit-tagged. Shared by probe, scan's
-    quick tier (FR-018), and experiment --label -- all three want exactly
-    this and nothing more."""
+    """One FR-001 measurement, culprit-tagged. Shared by probe, scan's quick
+    tier (FR-018), and experiment --label -- all three want exactly this."""
     gw = route_mod.gateway()
     row = probes.sample(args.target, gw, route_mod.first_hop(gateway_ip=gw), wifi=environ.wifi())
     row["culprit"] = diagnose.culprit(row)
@@ -80,14 +79,14 @@ def _cmd_scan_worker(args):
         return 0
     data = environ.scan(deep=(args.tier == "deep"))
     store.add_scan(conn, host, {"ts": data["ts"], "payload": json.dumps(data)})
+    inventory.record_inventory(conn, host, data, data["ts"])
     print(json.dumps(data, indent=2, default=str))
     return 0
 
 
 def cmd_scan(args):
-    """FR-018 + NFR-009: run the existing tier implementation in a child
-    process with a hard wall-clock ceiling. The child marker prevents recursive
-    spawning; existing per-probe timeouts still bound any grandchildren."""
+    """FR-018 + NFR-009: a child process enforces the hard wall-clock ceiling; the
+    marker prevents recursive spawning, and per-probe timeouts bound any grandchildren."""
     if os.environ.get(SCAN_WORKER_ENV) == "1":
         return _cmd_scan_worker(args)
 
@@ -112,8 +111,7 @@ def cmd_scan(args):
 
 
 def cmd_diagnose(args):
-    db = connect()
-    conn, _host = db
+    conn, _host = db = connect()
     llmlog.ingest(db)
     samples = store.samples(conn)
     raw = store.errors(conn)
@@ -121,7 +119,6 @@ def cmd_diagnose(args):
     latest = json.loads(scans[0]["payload"]) if scans else {}
     errors = diagnose.correlate(raw, samples)
     causes = rank.rank(samples, errors, latest)
-
     # ASCII only: the Windows console codepage mangles anything else.
     print(f"\nnetcheck - {len(samples)} samples, {len(raw)} LLM errors\n")
     if not causes:
@@ -141,9 +138,12 @@ def cmd_diagnose(args):
     return 0
 
 
+def cmd_inventory(args):
+    return inventory.cli(connect()[0], args)
+
+
 def cmd_serve(args):
-    db = connect()
-    conn, _host = db
+    conn, _host = db = connect()
     llmlog.ingest(db)
     httpd = server.serve(conn, args.port)
     url = f"http://127.0.0.1:{args.port}"
@@ -166,9 +166,8 @@ def cmd_sync(args):
 
 
 def cmd_experiment(args):
-    """FR-021 / UC-006: tag one probe run with a condition label, or compare
-    two already-labeled runs. Mutually exclusive by construction (argparse's
-    mutually-exclusive group), so exactly one mode runs per invocation."""
+    """FR-021 / UC-006: tag one probe run with a condition label, or compare two
+    already-labeled runs -- mutually exclusive by construction (argparse's group)."""
     conn, host = connect()
     if args.compare:
         label_a, label_b = args.compare
@@ -205,7 +204,6 @@ def _add_experiment_and_export_parsers(sub):
     mode.add_argument("--compare", nargs=2, metavar=("LABEL1", "LABEL2"),
                       help="print median latency and state-mix for two stored labels")
     e.set_defaults(fn=cmd_experiment)
-
     x = sub.add_parser("export", help="write a redacted evidence bundle")
     x.add_argument("--format", choices=("json", "markdown"), default="markdown")
     x.add_argument("--out", type=Path, default=None)
@@ -216,8 +214,7 @@ def main(argv=None):
     load_env()
     p = argparse.ArgumentParser(prog="netcheck", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--version", action="version",
-                   version=f"netcheck {__version__}")
+    p.add_argument("--version", action="version", version=f"netcheck {__version__}")
     p.add_argument("--target", default=TARGET)
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -227,13 +224,16 @@ def main(argv=None):
     sc.set_defaults(fn=cmd_scan)
     sub.add_parser("diagnose", help="ranked causes").set_defaults(fn=cmd_diagnose)
     sub.add_parser("sync", help="push to Supabase").set_defaults(fn=cmd_sync)
+    inv = sub.add_parser("inventory", help="device and configuration inventory")
+    inv.add_argument("--device", type=int, help="current config for one device id")
+    inv.add_argument("--diff", metavar="TS", help="config_item changes since TS")
+    inv.set_defaults(fn=cmd_inventory)
 
     w = sub.add_parser("watch", help="continuous monitor")
     w.add_argument("--interval", type=int, default=20)
     w.add_argument("--idle-every", type=int, default=15, dest="idle_every")
     w.add_argument("--idle-seconds", type=int, default=60, dest="idle_seconds")
     w.set_defaults(fn=cmd_watch)
-
     s = sub.add_parser("serve", help="dashboard")
     s.add_argument("--port", type=int, default=8787)
     s.add_argument("--no-open", action="store_true", dest="no_open")
