@@ -103,7 +103,6 @@ or block a pull request, request reviewers, or post unsolicited comments. They
 may answer in an Issue or pull request only when explicitly mentioned and
 asked a direct question.
 
-Product requirements and data-flow details live in
-`docs/SYSTEM-REQUIREMENTS.md` and `docs/DATA-FLOW-DIAGRAM.md`. Known
+This app does not keep committed requirements/data-flow documents. Known
 problems, decisions under investigation, and future work belong in GitHub
 Issues.

@@ -1,0 +1,34 @@
+# Repository facts. The shared standard reference is informational only.
+name: lifeos
+type: python-api-and-react-ui-monorepo
+
+standard:
+  repository: kgsmith19/agent-engineering-standard
+  commit: eb769955a895e8a3f2c985ab8d9ff675c4910d8e
+  mode: informational
+  lock_file: standard.lock
+
+commands:
+  backend_setup: cd backend && python -m pip install -e .[dev]
+  backend_verify: cd backend && ruff check . && mypy && pytest
+  frontend_setup: cd frontend && npm ci
+  frontend_verify: cd frontend && npm run lint && npx tsc -b && npm run test && npm run e2e && npm run build
+
+ci:
+  workflow: .github/workflows/ci.yml
+  required_check: "PR Gate"
+  triggers:
+    - pull_request
+    - merge_group
+    - push_main
+
+operations:
+  workflows:
+    - .github/workflows/ops.yml
+    - .github/workflows/backup.yml
+    - .github/workflows/release-smoke.yml
+  backup_scope: "Postgres database only; document blob storage is excluded"
+
+deploy:
+  mechanism: "push to main -> PR Gate -> backend and frontend deploy when DEPLOY_ENABLED"
+  smoke: "curl -fsS http://127.0.0.1:8000/healthz"

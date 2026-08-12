@@ -117,10 +117,8 @@ test("section_parsing_grows_at_most_linearly__T_U_026__AC_003", () => {
   assert.equal(dropped.text, "C<!--/OPTIONAL:b-->");
 });
 
-// T-U-029 -> NFR-001. Search runs client-side over the already-fetched list
-// (docs/DATA-FLOW-DIAGRAM.md F-4), not a database query, so this is a JS
-// benchmark rather than a seeded-database timing, correcting NFR-001's own
-// stale "how measured" text -- same class of correction SR-04 has had twice.
+// Search runs client-side over the already-fetched list, not a database
+// query, so this is a JS benchmark rather than a seeded-database timing.
 test("searches_1000_prompts_within_budget__T_U_029", () => {
   const prompts = [];
   for (let i = 0; i < 1000; i++) {

@@ -14,7 +14,7 @@ Use this lean lifecycle:
 4. Open one Toolbelt pull request and let the hyperbolic-core root's `Toolbelt PR Gate` verify the change.
 5. Successful pull requests may complete through native squash auto-merge.
 
-Completed specs, ADRs, and `specs/TEST-LEDGER.md` are historical product records. They can explain shipped decisions, but they do not require new specs, new ledger rows, independent reviews, or any separate approval process. Future work is tracked in GitHub Issues.
+This app does not keep committed specs or ADRs — see `TEST_LEDGER.md` for the current, lean test-tracking convention. Future work is tracked in GitHub Issues.
 
 ## Agent permissions
 
@@ -43,11 +43,9 @@ The Node and browser suites call the live Supabase project using the public anon
 
 ## Documentation
 
-- `docs/SYSTEM-REQUIREMENTS.md` records current system constraints.
-- `docs/DATA-FLOW-DIAGRAM.md` records trust boundaries and data movement.
-- `docs/adr/` and `specs/done/` preserve shipped design history.
-- The root `.agent/project.yaml` contains repository commands and facts.
-- The root `.agent/standard.lock` is informational and non-enforcing.
+- `TEST_LEDGER.md` tracks this app's own test suites.
+- The root `project.yaml` contains repository commands and facts.
+- The root `standard.lock` is informational and non-enforcing.
 
 ## Completion
 

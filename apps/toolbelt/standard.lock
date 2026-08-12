@@ -1,0 +1,5 @@
+# Informational reference only; this file does not configure or enforce repository policy.
+standard: kgsmith19/agent-engineering-standard
+commit: eb769955a895e8a3f2c985ab8d9ff675c4910d8e
+pinned_at: "2026-08-12"
+mode: informational

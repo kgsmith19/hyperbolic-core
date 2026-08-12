@@ -46,12 +46,10 @@ Apply `supabase/migrations/*.sql` through the Supabase API. Each up migration ha
 
 ## Documentation
 
-- `docs/SYSTEM-REQUIREMENTS.md` describes current system constraints.
-- `docs/DATA-FLOW-DIAGRAM.md` describes trust boundaries and data movement.
 - `docs/notes/2026-08-06-supabase-project-topology.md` describes the shared project topology.
-- `specs/done/` preserves shipped design history.
-- `specs/TEST-LEDGER.md` is a historical evidence record, not a required planning artifact.
+- `TEST_LEDGER.md` tracks this app's own test suites.
 - `apps/prompt-organizer/README.md` documents the prompt application.
 - `apps/network-checker/README.md` documents the network diagnostic.
+- `guards/README.md` documents the standalone guard hook.
 
 New work starts in GitHub Issues. Pull requests are verified by the sole `.github/workflows/toolbelt-ci.yml` workflow at the hyperbolic-core repo root (this project now lives at `apps/toolbelt/` inside the hyperbolic-core monorepo), whose workflow and check names are both `Toolbelt PR Gate`. Successful pull requests use native squash auto-merge.

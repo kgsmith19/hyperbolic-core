@@ -21,7 +21,7 @@ Use this lean lifecycle:
 4. Open a pull request and let the single `Toolbelt PR Gate` workflow verify the change.
 5. Successful pull requests may complete through native squash auto-merge.
 
-Completed specs and `specs/TEST-LEDGER.md` are historical product records. They can explain shipped decisions, but they do not require new specs, new ledger rows, independent reviews, or any separate approval process. Future work is tracked in GitHub Issues.
+This repository does not keep committed specs or ADRs — see `TEST_LEDGER.md` for the current, lean test-tracking convention. Future work is tracked in GitHub Issues.
 
 ## Agent permissions
 
@@ -56,16 +56,15 @@ Open `http://localhost:8811/web/index.html` for a manual browser check when the 
 
 ## Documentation
 
-- `docs/SYSTEM-REQUIREMENTS.md` records current system constraints.
-- `docs/DATA-FLOW-DIAGRAM.md` records trust boundaries and data movement.
 - `docs/notes/2026-08-06-supabase-project-topology.md` records the shared project topology.
-- `specs/done/` preserves shipped design history.
+- `TEST_LEDGER.md` tracks this app's own test suites.
 - `apps/prompt-organizer/` contains its product documentation, migrations,
   tests, and nested `AGENTS.md`.
 - `apps/network-checker/` contains its product documentation, CLI, dashboard,
   deterministic scanners, fix scripts, tests, and nested `AGENTS.md`.
-- `.agent/project.yaml` contains root commands and repository facts.
-- `.agent/standard.lock` is an informational reference only and does not impose policy.
+- `guards/` contains its own `README.md`.
+- `project.yaml` contains root commands and repository facts.
+- `standard.lock` is an informational reference only and does not impose policy.
 
 ## Completion
 
