@@ -8,7 +8,7 @@ import { rest, primaryToken } from "./helpers.mjs";
 // docs/notes/2026-08-06-supabase-project-topology.md section 3, which
 // states this exact edge as a literal, named pair.
 test("seeded_dependency_returns_idea_and_reason__T_A_005__AC_012", async () => {
-  const token = primaryToken();
+  const token = await primaryToken();
   const dep = await rest("idea", "dependency?idea_id=eq.constraint-finder&select=depends_on,reason", { token });
   assert.deepEqual(dep.json, [
     {

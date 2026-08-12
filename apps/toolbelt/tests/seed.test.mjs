@@ -43,14 +43,14 @@ const EXPECTED = [
 
 // T-I-005 -> AC-005, PROP-005 -> FR-001
 test("seeded_idea_count_is_exactly_33__T_I_005__AC_005", async () => {
-  const token = primaryToken();
+  const token = await primaryToken();
   const { status, json } = await rest("idea", "idea?select=id", { token });
   assert.equal(status, 200);
   assert.equal(json.length, 33);
 });
 
 test("seeded_ids_names_categories_match_topology_note__T_I_005__PROP_005", async () => {
-  const token = primaryToken();
+  const token = await primaryToken();
   const { json } = await rest("idea", "idea?select=id,name,category&order=id.asc", { token });
   const actual = json.map((r) => [r.id, r.name, r.category]).sort((a, b) => a[0].localeCompare(b[0]));
   const expected = [...EXPECTED].sort((a, b) => a[0].localeCompare(b[0]));

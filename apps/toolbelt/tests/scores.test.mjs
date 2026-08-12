@@ -7,7 +7,7 @@ import { rest, primaryToken } from "./helpers.mjs";
 // data (the idea list page reads it), unlike core.run/core.app in T-I-002,
 // so the throwaway row this test creates is deleted, not left behind.
 test("scored_idea_returns_value_and_metric_name__T_A_004__AC_008", async () => {
-  const token = primaryToken();
+  const token = await primaryToken();
   const inserted = await rest("idea", "score", {
     token,
     method: "POST",
@@ -31,7 +31,7 @@ test("scored_idea_returns_value_and_metric_name__T_A_004__AC_008", async () => {
 // rejected. A CHECK constraint cannot look up core.metric_def, so a trigger
 // is the mechanism; this proves it is wired.
 test("rejects_score_above_metric_max__T_I_007__AC_010", async () => {
-  const token = primaryToken();
+  const token = await primaryToken();
   const { status, json } = await rest("idea", "score", {
     token,
     method: "POST",
@@ -43,7 +43,7 @@ test("rejects_score_above_metric_max__T_I_007__AC_010", async () => {
 
 // T-I-008 -> AC-011 -> FR-005: the symmetric case, below min_value.
 test("rejects_score_below_metric_min__T_I_008__AC_011", async () => {
-  const token = primaryToken();
+  const token = await primaryToken();
   const { status, json } = await rest("idea", "score", {
     token,
     method: "POST",

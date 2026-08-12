@@ -4,7 +4,7 @@ import { rest, primaryToken } from "./helpers.mjs";
 
 // T-I-003 -> AC-003 -> FR-002: core.run.app_id must reference a real core.app row.
 test("rejects_core_run_with_unregistered_app_id__T_I_003__AC_003", async () => {
-  const token = primaryToken();
+  const token = await primaryToken();
   const { status, json } = await rest("core", "run", {
     token,
     method: "POST",
@@ -18,7 +18,7 @@ test("rejects_core_run_with_unregistered_app_id__T_I_003__AC_003", async () => {
 // design (topology note: "a metric that has not had its gaming risk
 // written down does not get to exist").
 test("rejects_metric_def_with_no_gaming_risk__T_I_004__AC_004", async () => {
-  const token = primaryToken();
+  const token = await primaryToken();
   const { status, json } = await rest("core", "metric_def", {
     token,
     method: "POST",
