@@ -43,6 +43,8 @@ When explicitly assigned, an AI coding agent may create an Issue, branch, commit
 
 ```bash
 node --test "tests/*.test.mjs"
+npm run manifests:check
+npm run manifests:check -- --registry
 python3 -m http.server 8811
 cd guards && node --test "*.test.mjs"
 cd apps/prompt-organizer && node --test "tests/*.test.mjs"

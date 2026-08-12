@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hyperbolic-core.invalid/schemas/tool.schema.json",
+  "title": "Toolbelt tool manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "kind", "version", "ownership", "entry", "schemas", "permissions", "lifecycle"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$",
+      "description": "Registry key; equals core.app.id and the directory name under apps/toolbelt/apps/."
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "kind": {
+      "enum": ["ui", "cli", "headless", "hybrid"],
+      "description": "ui: Shell-routed web surface. cli: operator-invoked command. headless: no human surface (see 3.3). hybrid: ui plus cli."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semver of the manifest's tool; bumped on any contract-visible change."
+    },
+    "description": { "type": "string", "maxLength": 500 },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "path"],
+      "properties": {
+        "owner": { "const": "kylegsmith19@gmail.com" },
+        "path": { "type": "string", "pattern": "^apps/toolbelt(/apps/[a-z0-9-]+)?$" }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "ui": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["route"],
+          "properties": {
+            "route": { "type": "string", "pattern": "^/[a-z0-9/-]*$", "description": "Shell route prefix, e.g. /ideas" },
+            "dist": { "type": "string", "description": "Build output dir relative to the tool root; omitted for tools rendered by Shell pages" }
+          }
+        },
+        "cli": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command"],
+          "properties": { "command": { "type": "string", "description": "Documented invocation, e.g. python3 -m netcheck" } }
+        },
+        "headless": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command"],
+          "properties": {
+            "command": { "type": "string" },
+            "schedule": { "type": "string", "description": "cron expression when the tool is timer-driven; absent for event-driven" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+      "uniqueItems": true,
+      "description": "Database schemas this tool OWNS (writes DDL for). Exactly one writer per schema across all manifests; the validator enforces global uniqueness except for the root spine's core/idea ownership."
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["db", "networkEgress", "llmHandler"],
+      "properties": {
+        "db": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["read", "write"],
+          "properties": {
+            "read": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+            "write": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+          }
+        },
+        "networkEgress": {
+          "type": "array",
+          "items": { "type": "string", "format": "hostname" },
+          "uniqueItems": true,
+          "description": "Exact hosts the tool contacts beyond the platform Supabase project. Empty array means no egress."
+        },
+        "llmHandler": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["access"],
+          "properties": {
+            "access": { "type": "boolean", "description": "Whether the tool may call the general-purpose LLM handler via packages/llm. Never grants Brain key access; see ADR-05." },
+            "maxUsdPerDay": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["migrate", "health", "register"],
+      "properties": {
+        "migrate": { "type": "string", "description": "Command applying this tool's supabase/migrations, or 'none' for schema-less tools" },
+        "health": { "type": "string", "description": "Command or URL path that exits 0 / returns 200 when the tool is healthy (system-wide observability rule, 03-v1-definition.md)" },
+        "register": { "type": "string", "description": "Path of the generated registration migration relative to apps/toolbelt/supabase/migrations/" }
+      }
+    }
+  }
+}
