@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { login, rest, TEST_USER_A } from "./helpers.mjs";
+import { rest, primaryToken } from "./helpers.mjs";
 
 async function newRun(token) {
   const res = await rest("core", "rpc/log_run", {
@@ -18,7 +18,7 @@ async function newRun(token) {
 // suite, and only more so as time passes), so the test is deterministic
 // regardless of when it executes.
 test("purge_deletes_old_keeps_recent_and_records_month__T_A_007__AC_016", async () => {
-  const token = await login(TEST_USER_A);
+  const token = primaryToken();
   const runId = await newRun(token);
   const monthKey = "2026-03-01";
   const recentAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
@@ -59,7 +59,7 @@ test("purge_deletes_old_keeps_recent_and_records_month__T_A_007__AC_016", async 
 // T-I-010 -> AC-017 -> FR-008: two separate purge calls for the same
 // calendar month add to the existing total rather than replacing it.
 test("purge_accumulates_monthly_total_across_calls__T_I_010__AC_017", async () => {
-  const token = await login(TEST_USER_A);
+  const token = primaryToken();
   const runId = await newRun(token);
   const monthKey = "2026-04-01";
 

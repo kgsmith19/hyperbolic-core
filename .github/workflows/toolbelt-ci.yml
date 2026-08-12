@@ -13,6 +13,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   pr-gate:
@@ -20,18 +21,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Secret scan
+        if: github.event_name == 'pull_request'
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_COMMENTS: false
       - name: Prepare Prompt Organizer test sessions
         run: node tests/export-test-sessions.mjs
         working-directory: apps/toolbelt/apps/prompt-organizer
       - name: Run Toolbelt tests
         run: node --test "tests/*.test.mjs"
         working-directory: apps/toolbelt
+        env:
+          # Positive-path suites read this when set (docs/planning/issues/
+          # m1-07-chore-platform-idp-owner-setup.md); unset today, so they
+          # fall back to the fixture-A login, which is fine under current
+          # (pre-re-pin) policies. Empty when the secret does not exist yet,
+          # which GitHub Actions resolves to an empty string, not an error.
+          TOOLBELT_OWNER_TOKEN: ${{ secrets.TOOLBELT_OWNER_TOKEN }}
       - name: Run Guards tests
         run: node --test "*.test.mjs"
         working-directory: apps/toolbelt/guards
