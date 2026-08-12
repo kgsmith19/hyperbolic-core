@@ -1,0 +1,105 @@
+"use client";
+
+import * as React from "react";
+
+import { NavRail } from "./nav-rail";
+import { Topbar } from "./topbar";
+import { CommandPalette } from "./command-palette";
+import { ShortcutsOverlay } from "./shortcuts-overlay";
+import { useGlobalKeyboardModel } from "./keyboard";
+import { ZONE_ENTRIES, type Zone } from "./zones";
+import type { PlatformSession } from "./session";
+
+/**
+ * docs/planning/05-a-hyperbolic-core.md section 7 gives this as a signature
+ * only, exactly three fields: activeZone, session, onSignOut. `children` is
+ * added here, not part of that signature -- flagged as an inferred
+ * addition, not a silent contract change: 09 section 4.1 requires a
+ * "Content" region ("remainder | zone/page content | pages own their
+ * internal layout"), and a layout-shell component structurally cannot host
+ * that region without a children slot. Every other field matches 05-a
+ * section 7 verbatim.
+ */
+export interface ChromeProps {
+  activeZone: Zone;
+  session: PlatformSession | null;
+  onSignOut: () => void;
+  children?: React.ReactNode;
+}
+
+type OverlayState = "none" | "palette" | "shortcuts";
+
+/**
+ * The one nav chrome every zone renders (05-a section 3's ownership table;
+ * contract C-3, section 9). ADR-02's reversal trigger is exactly two zones
+ * visibly drifting despite a shared component existing -- this is that
+ * component. Composes the nav rail + topbar (09 section 4.1), the
+ * navigation-only command palette (section 4.2), and the subset of the
+ * global keyboard model (section 4.3) Chrome owns: Ctrl/Cmd+K, the g-chord,
+ * and Shift+/. Toasts (m2-05) and the chat surface (m4-15) are out of
+ * scope per this issue's own text and are not rendered here.
+ *
+ * `overlay` is a single tri-state value, not two independent booleans, so
+ * the palette and the shortcuts reference can never both be open at once --
+ * that would fight over Base UI's modal focus trap and Escape handling.
+ */
+function Chrome({ activeZone, session, onSignOut, children }: ChromeProps) {
+  const [overlay, setOverlay] = React.useState<OverlayState>("none");
+
+  const openPalette = React.useCallback(() => setOverlay("palette"), []);
+  const openShortcuts = React.useCallback(() => setOverlay("shortcuts"), []);
+
+  const navigate = React.useCallback((zone: Zone) => {
+    // 05-a section 4 / ADR-02: cross-zone navigation is a full document
+    // load, not client-side routing -- there is no router for Chrome (a
+    // packages/ui component with no apps/shell yet) to assume or depend on.
+    const entry = ZONE_ENTRIES.find((candidate) => candidate.zone === zone);
+    if (entry && typeof window !== "undefined") {
+      window.location.assign(entry.href);
+    }
+  }, []);
+
+  useGlobalKeyboardModel({
+    onOpenPalette: openPalette,
+    onOpenShortcuts: openShortcuts,
+    onNavigate: navigate,
+  });
+
+  return (
+    <div data-slot="chrome" className="flex min-h-dvh bg-bg text-text">
+      {/* 09 section 4.3, Focus conventions: "a skip link is the first tab
+          stop in the chrome." Must be the first focusable element in the
+          tree below, hence its position as Chrome's very first child. */}
+      <a
+        href="#chrome-content"
+        data-slot="skip-link"
+        className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:top-2 focus-visible:left-2 focus-visible:z-50 focus-visible:rounded-lg focus-visible:border-ring focus-visible:bg-surface-raised focus-visible:px-3 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-text focus-visible:shadow-2 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+      >
+        Skip to content
+      </a>
+      <NavRail activeZone={activeZone} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Topbar
+          activeZone={activeZone}
+          session={session}
+          onSignOut={onSignOut}
+          onOpenPalette={openPalette}
+        />
+        <main id="chrome-content" data-slot="chrome-content" tabIndex={-1} className="min-w-0 flex-1">
+          {children}
+        </main>
+      </div>
+      <CommandPalette
+        open={overlay === "palette"}
+        onOpenChange={(open) => setOverlay(open ? "palette" : "none")}
+        activeZone={activeZone}
+      />
+      <ShortcutsOverlay
+        open={overlay === "shortcuts"}
+        onOpenChange={(open) => setOverlay(open ? "shortcuts" : "none")}
+      />
+    </div>
+  );
+}
+
+export { Chrome };

@@ -28,6 +28,13 @@ export {
 } from "./primitives/dialog";
 export { Tabs, TabsList, TabsTab, TabsIndicator, TabsPanel } from "./primitives/tabs";
 
+export { Chrome } from "./chrome/chrome";
+export type { ChromeProps } from "./chrome/chrome";
+export type { Zone } from "./chrome/zones";
+export type { PlatformSession } from "./chrome/session";
+export { ThemeSwitch } from "./chrome/theme-switch";
+export { paletteMatch } from "./chrome/palette-match";
+
 export { EmptyState } from "./feedback/empty-state";
 export { Skeleton, useDelayedVisible } from "./feedback/skeleton";
 export { Spinner } from "./feedback/spinner";
