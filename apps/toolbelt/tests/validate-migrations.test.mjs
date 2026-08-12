@@ -57,6 +57,38 @@ test("checkBrainSchemaReservation passes for unrelated schemas", () => {
   );
 });
 
+// Regression: caught by mutation testing, not by inspection. Dropping the
+// \b word-boundary anchor from BRAIN_SCHEMA_RE survived the rest of this
+// suite untouched, which meant nothing actually proved "brain" is matched
+// as a whole schema name rather than a prefix. A tool legitimately named
+// "brainstorm" (or any brain-prefixed name) must not be blocked by the
+// brain reservation, which is exactly "brain" and nothing else.
+test("checkBrainSchemaReservation does not flag a schema name that merely starts with 'brain'", () => {
+  withFixtureDir(
+    { "20260101000000_thing.sql": "create schema brainstorm;" },
+    (dir) => {
+      assert.deepEqual(checkBrainSchemaReservation([dir]), []);
+    },
+  );
+});
+
+// Regression: found by adversarial property-test design, not by inspection.
+// A comment merely mentioning the reservation must not itself trip the
+// lint -- only executable DDL creates a schema. The original implementation
+// scanned raw file content, so this case failed until comment-stripping was
+// added (see scripts/validate-migrations.mjs, checkBrainSchemaReservation).
+test("checkBrainSchemaReservation ignores a comment that only mentions creating the brain schema", () => {
+  withFixtureDir(
+    {
+      "20260101000000_thing.sql":
+        "-- reminder: never create schema brain here, it is reserved for phase 7\nselect 1;",
+    },
+    (dir) => {
+      assert.deepEqual(checkBrainSchemaReservation([dir]), []);
+    },
+  );
+});
+
 test("checkBrainSchemaReservation fails when a file creates the brain schema", () => {
   withFixtureDir(
     { "20260101000000_thing.sql": "create schema brain;" },

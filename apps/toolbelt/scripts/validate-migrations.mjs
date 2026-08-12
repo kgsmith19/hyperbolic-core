@@ -53,7 +53,11 @@ export function checkBrainSchemaReservation(dirs) {
   const failures = [];
   for (const dir of dirs) {
     for (const file of listSqlFiles(dir)) {
-      const sql = readFileSync(file, "utf8");
+      // Comment-strip first: a comment merely mentioning the reservation
+      // (e.g. "-- never create schema brain here") must not itself trip the
+      // lint. Found by property-based testing, not assumed correct by
+      // inspection -- see validate-migrations.property.test.mjs.
+      const sql = stripLineComments(readFileSync(file, "utf8"));
       if (BRAIN_SCHEMA_RE.test(sql)) {
         failures.push(`${file}: creates the reserved 'brain' schema (06-supabase-schema.md section 4.1 reservation)`);
       }
