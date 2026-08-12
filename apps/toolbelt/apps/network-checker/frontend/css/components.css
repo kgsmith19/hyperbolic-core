@@ -1,0 +1,164 @@
+@layer components;
+
+@layer components {
+  .wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: var(--space-5); }
+
+  header.app-header {
+    display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
+    position: sticky; top: 0; z-index: var(--z-toolbar);
+    background: color-mix(in oklab, var(--bg) 88%, transparent);
+    backdrop-filter: blur(6px); padding-block: var(--space-2); margin-inline: calc(var(--space-6) * -1);
+    padding-inline: var(--space-6);
+  }
+  header .sub { color: var(--muted); font-size: .85rem; }
+  header .spacer { margin-left: auto; }
+
+  .status {
+    display: inline-flex; align-items: center; gap: .4rem; font-size: .78rem;
+    color: var(--muted); border: 1px solid var(--line); border-radius: 999px;
+    padding: .2rem .6rem .2rem .5rem;
+  }
+  .status .dot {
+    width: .5rem; height: .5rem; border-radius: 50%; background: var(--idle);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--idle) 60%, transparent);
+  }
+  .status[data-state="live"] .dot { background: var(--ok); animation: pulse 2.2s var(--ease) infinite; }
+  .status[data-state="reconnecting"] .dot { background: var(--warn); animation: blink 1s steps(2) infinite; }
+  .status[data-state="offline"] .dot { background: var(--bad); }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--ok) 45%, transparent); }
+    70%  { box-shadow: 0 0 0 6px color-mix(in oklab, var(--ok) 0%, transparent); }
+    100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--ok) 0%, transparent); }
+  }
+  @keyframes blink { to { opacity: .25; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: var(--space-4) 1.1rem;
+    view-transition-name: none;
+  }
+  .grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+
+  /* Layer status: the fastest read on the page. */
+  .pills { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .pill {
+    display: grid; gap: .15rem; padding: .6rem .85rem; min-width: 118px;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: color-mix(in oklab, var(--tone) 9%, var(--surface));
+    border-color: color-mix(in oklab, var(--tone) 35%, var(--line));
+    transition: background var(--motion) var(--ease), border-color var(--motion) var(--ease);
+  }
+  .pill b { font-size: .95rem; color: var(--tone); }
+  .pill span { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .t-ok   { --tone: var(--ok); }
+  .t-fail { --tone: var(--bad); }
+  .t-una  { --tone: var(--idle); }
+
+  .cause {
+    display: grid; gap: .3rem; padding: .8rem 0; border-bottom: 1px solid var(--line);
+    cursor: pointer; border-radius: var(--radius-sm);
+  }
+  .cause:last-child { border-bottom: 0; }
+  .cause:hover, .cause:focus-visible { background: var(--surface-2); }
+  .cause h3 { margin: 0; font-size: .95rem; display: flex; gap: .5rem; align-items: center; }
+  .cause p { margin: 0; font-size: .85rem; color: var(--muted); }
+  .cause .fix { color: var(--text); }
+  .cause h3 .hint { margin-left: auto; font-size: .7rem; color: var(--muted); font-weight: 400; }
+  .evidence-rows { margin: .5rem 0 0; font-size: .8rem; }
+
+  .tag {
+    font-size: .68rem; text-transform: uppercase; letter-spacing: .05em;
+    padding: .1rem .45rem; border-radius: 999px; font-weight: 600;
+    background: color-mix(in oklab, var(--tone) 18%, transparent);
+    color: var(--tone); border: 1px solid color-mix(in oklab, var(--tone) 40%, transparent);
+  }
+  .high { --tone: var(--bad); } .medium { --tone: var(--warn); } .low { --tone: var(--idle); }
+  .network { --tone: var(--bad); } .server { --tone: var(--warn); }
+  .client { --tone: var(--accent); } .unknown { --tone: var(--idle); }
+
+  /* Scroll-shadow hint: a table wider than its card otherwise gives no visual
+     sign there is more to the right. `local` ties the gradient to the
+     scrolling content so it fades at the real edges, not the container's. */
+  .scroll {
+    overflow-x: auto; max-height: 340px; overflow-y: auto;
+    background:
+      linear-gradient(to right, var(--surface) 30%, transparent) local,
+      linear-gradient(to right, transparent, var(--surface) 70%) local,
+      linear-gradient(to right, color-mix(in oklab, var(--text) 20%, transparent), transparent),
+      linear-gradient(to right, transparent, color-mix(in oklab, var(--text) 20%, transparent)) 100% 0;
+    background-repeat: no-repeat;
+    background-color: var(--surface);
+    background-size: 24px 100%, 24px 100%, 8px 100%, 8px 100%;
+    background-position: 0 0, 100% 0, 0 0, 100% 0;
+  }
+  .empty { color: var(--muted); font-size: .87rem; padding: .4rem 0; }
+  .muted { color: var(--muted); }
+
+  button, .btn {
+    font: inherit; font-size: .85rem; cursor: pointer;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px; padding: .35rem .8rem;
+    display: inline-flex; align-items: center; gap: .4rem;
+  }
+  button:hover, .btn:hover { border-color: var(--accent); color: var(--accent); }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+  .toolbar { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+  .chart-wrap { position: relative; }
+  .chart { width: 100%; height: 150px; display: block; touch-action: none; }
+  .legend { display: flex; gap: 1rem; font-size: .75rem; color: var(--muted); margin-top: .4rem; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 9px; height: 2px; vertical-align: middle; margin-right: .3rem; }
+
+  .chart-tooltip {
+    position: absolute; pointer-events: none; font-size: .75rem;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: .35rem .55rem; box-shadow: var(--shadow-2); white-space: nowrap;
+    transform: translate(-50%, -110%); opacity: 0; transition: opacity var(--motion-fast) var(--ease);
+  }
+  .chart-tooltip.visible { opacity: 1; }
+  .chart-tooltip dl { margin: 0; display: grid; grid-template-columns: auto auto; gap: 0 .5rem; }
+  .chart-tooltip dt { color: var(--muted); }
+  .chart-tooltip dt::after { content: ":"; }
+  .chart-tooltip dd { margin: 0; }
+
+  /* Skeleton loading state for the first paint before any data has arrived. */
+  .skeleton {
+    background: linear-gradient(90deg, var(--surface-2) 25%, var(--line) 37%, var(--surface-2) 63%);
+    background-size: 400% 100%; animation: shimmer 1.4s ease infinite;
+    border-radius: var(--radius-sm); height: 1em; display: block;
+  }
+  @keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+  /* Command palette */
+  dialog.palette {
+    padding: 0; border: 1px solid var(--line); border-radius: var(--radius-lg);
+    width: min(560px, 92vw); background: var(--surface); color: var(--text);
+    box-shadow: var(--shadow-2);
+  }
+  dialog.palette::backdrop { background: color-mix(in oklab, black 45%, transparent); }
+  .palette input {
+    width: 100%; border: 0; border-bottom: 1px solid var(--line); background: transparent;
+    color: var(--text); font: inherit; font-size: 1rem; padding: .9rem 1rem; outline: none;
+  }
+  .palette ul { list-style: none; margin: 0; padding: .4rem; max-height: 320px; overflow-y: auto; }
+  .palette li {
+    display: flex; justify-content: space-between; gap: 1rem; padding: .55rem .7rem;
+    border-radius: var(--radius-sm); cursor: pointer; font-size: .88rem;
+  }
+  .palette li[aria-selected="true"], .palette li:hover { background: var(--surface-2); }
+  .palette li .k { color: var(--muted); font-size: .78rem; }
+
+  dialog.shortcuts { padding: var(--space-5); border-radius: var(--radius-lg);
+    border: 1px solid var(--line); background: var(--surface); color: var(--text);
+    box-shadow: var(--shadow-2); max-width: 420px; }
+  dialog.shortcuts::backdrop { background: color-mix(in oklab, black 45%, transparent); }
+  dialog.shortcuts table td:first-child { width: 5rem; }
+
+  @media print {
+    button, .btn, .toolbar, .skip-link, .status { display: none !important; }
+    header.app-header { position: static; backdrop-filter: none; }
+    body { padding: 0; }
+    .card { break-inside: avoid; border-color: #999; }
+  }
+}

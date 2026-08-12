@@ -1,0 +1,38 @@
+-- AC-005: seed idea.idea from docs/notes/2026-08-06-supabase-project-topology.md
+-- section 1. Idempotent on id (PROP-003): re-running this file leaves the
+-- table at 33 rows, never 66.
+insert into idea.idea (id, name, category, one_liner, status, project, schema_name) values
+('optimize-metrics', 'Optimize Metrics', 'Meta layer', 'Defines and owns every metric other tools score against, including each metric''s gaming risk.', 'idea', 'toolbelt', 'core'),
+('constraint-finder', 'Constraint Finder', 'Meta layer', 'Reads run, cost, and metric data to identify the current bottleneck to build next.', 'idea', 'toolbelt', 'constraint'),
+('cost-per-outcome-tracker', 'Cost-Per-Outcome Tracker', 'Meta layer', 'Tracks what each run cost against what actually shipped, the denominator for every ROI question.', 'idea', 'toolbelt', 'core'),
+('decision-journal-outcome-scoring', 'Decision Journal + Outcome Scoring', 'Meta layer', 'Logs personal decisions and scores their outcomes, aggregating de-identified summaries into toolbelt.', 'idea', 'lifeos', 'decision'),
+('step-back', 'Step Back', 'Meta layer', 'Reads outcomes and the idea backlog to prompt reconsidering direction.', 'idea', 'toolbelt', 'stepback'),
+('assumption-ledger', 'Assumption Ledger', 'Meta layer', 'Records assumptions made by every agentic run so they can be verified later.', 'idea', 'toolbelt', 'core'),
+('autonomy-trust-calibrator', 'Autonomy Trust Calibrator', 'Meta layer', 'Reads runs and interventions to calibrate how much autonomy an agent has earned.', 'idea', 'toolbelt', 'autonomy'),
+('prompt-organizer', 'Prompt Organizer', 'Agentic / LLM systems tooling', 'A place to save AI prompts and reuse them instead of retyping them.', 'specced', 'toolbelt', 'prompt'),
+('instruction-optimizer', 'Instruction Optimizer', 'Agentic / LLM systems tooling', 'Reads Prompt Organizer''s data to suggest improvements to saved prompts.', 'idea', 'toolbelt', 'prompt'),
+('prompt-agent-regression-tracker', 'Prompt/Agent Regression Tracker', 'Agentic / LLM systems tooling', 'Owns evaluation cases and runs to catch when a prompt or agent regresses.', 'idea', 'toolbelt', 'prompt'),
+('llm-to-rules-based-transition', 'LLM-to-Rules-Based Transition', 'Agentic / LLM systems tooling', 'Reads run and render data to find where an LLM call can become deterministic logic.', 'idea', 'toolbelt', 'agentic'),
+('reformat-code-context-for-llm-readability', 'Reformat Code/Context for LLM Readability', 'Agentic / LLM systems tooling', 'Measures before/after readability when reformatting code or context for an LLM.', 'idea', 'toolbelt', 'agentic'),
+('context-rot-detector', 'Context Rot Detector', 'Agentic / LLM systems tooling', 'Reads run data to detect when growing context degrades agent performance.', 'idea', 'toolbelt', 'agentic'),
+('tool-optimizer-connect-lite', 'Tool Optimizer / Connect Lite', 'Agentic / LLM systems tooling', 'Owns tool-call data to find which tool integrations are worth keeping.', 'idea', 'toolbelt', 'agentic'),
+('agent-provenance-graph', 'Agent Provenance Graph', 'Agentic / LLM systems tooling', 'Owns the event log, the spine''s record of what led to what.', 'idea', 'toolbelt', 'core'),
+('autonomous-optimizer', 'Autonomous Optimizer', 'Optimization engines', 'Reads everything in core to find optimization opportunities across the whole portfolio.', 'idea', 'toolbelt', 'optimize'),
+('workflow-time-lag-analyzer', 'Workflow Time-Lag Analyzer', 'Optimization engines', 'Reads runs and events to find where time is lost between steps.', 'idea', 'toolbelt', 'optimize'),
+('promo-optimizer', 'Promo Optimizer', 'Optimization engines', 'A standalone tool to optimize promotional content or offers.', 'idea', 'toolbelt', 'optimize'),
+('optimize-life', 'Optimize Life', 'Optimization engines', 'Applies optimization techniques to personal life data in lifeos.', 'idea', 'lifeos', 'optimize'),
+('self-correcting-code', 'Self-Correcting Code', 'Self-healing', 'Owns defects and repair attempts, automating fixes to its own detected bugs.', 'idea', 'toolbelt', 'healing'),
+('tiered-error-logging', 'Tiered Error-Logging', 'Self-healing', 'Owns a tiered error-event log, the highest write-volume table in the portfolio.', 'idea', 'toolbelt', 'healing'),
+('idea-generator', 'Idea Generator', 'Discovery and problem solving', 'Owns and generates new rows in the idea backlog.', 'idea', 'toolbelt', 'idea'),
+('golden-goose', 'Golden Goose', 'Discovery and problem solving', 'Reads and scores ideas to surface the highest-value one.', 'idea', 'toolbelt', 'idea'),
+('right-under-my-nose', 'Right Under My Nose', 'Discovery and problem solving', 'Reads the event log to surface overlooked opportunities and writes them as new ideas.', 'idea', 'toolbelt', 'idea'),
+('break-it-down-reduce-complexity', 'Break It Down / Reduce Complexity', 'Discovery and problem solving', 'Breaks a complex idea or problem into smaller, buildable pieces.', 'idea', 'toolbelt', 'idea'),
+('unconstrained-solver', 'Unconstrained Solver', 'Discovery and problem solving', 'Explores solutions to a problem without regard for current constraints.', 'idea', 'toolbelt', 'idea'),
+('personal-correlation-engine', 'Personal Correlation Engine', 'Personal instrumentation', 'Finds correlations across personal, possibly health-adjacent data in lifeos.', 'idea', 'lifeos', 'personal'),
+('learn-xyz-app', 'Learn XYZ App', 'Personal instrumentation', 'A personal app for learning a specific skill or subject.', 'idea', 'lifeos', 'learn'),
+('cognitive-load-balancer', 'Cognitive Load Balancer', 'Personal instrumentation', 'Tracks and balances personal cognitive load.', 'idea', 'lifeos', 'personal'),
+('consistency-engine', 'Consistency Engine', 'Personal instrumentation', 'Tracks personal habits to reinforce consistency.', 'idea', 'lifeos', 'personal'),
+('knowledge-half-life-tracker', 'Knowledge Half-Life Tracker', 'Knowledge and documentation', 'Owns artifacts and staleness signals to track when knowledge goes stale.', 'idea', 'toolbelt', 'knowledge'),
+('reverse-requirements-extractor', 'Reverse Requirements Extractor', 'Knowledge and documentation', 'Reads repos and writes extracted requirements inferred from existing code.', 'idea', 'toolbelt', 'knowledge'),
+('timing-opportunity-scanner', 'Timing / Opportunity Scanner', 'Timing', 'Reads metric values and the idea backlog to time when to act on an opportunity.', 'idea', 'toolbelt', 'timing')
+on conflict (id) do nothing;

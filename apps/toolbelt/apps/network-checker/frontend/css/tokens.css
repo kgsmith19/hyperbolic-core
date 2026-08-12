@@ -1,0 +1,57 @@
+/* Design tokens. Everything else in css/ reads these; nothing else in this
+   file renders anything. One place to retheme, one place to audit contrast. */
+@layer tokens;
+
+@layer tokens {
+  :root {
+    color-scheme: light dark;
+
+    --bg:        light-dark(#f6f7f9, #0d1117);
+    --surface:   light-dark(#ffffff, #161b22);
+    --surface-2: light-dark(#f0f2f5, #1c2128);
+    --line:      light-dark(#e3e6ea, #262d36);
+    --text:      light-dark(#1a1d21, #e6edf3);
+    --muted:     light-dark(#5b6570, #8b949e);
+
+    --ok:      light-dark(#1a7f4b, #3fb950);
+    --warn:    light-dark(#9a6700, #d29922);
+    --bad:     light-dark(#c02828, #f85149);
+    --idle:    light-dark(#8b949e, #6e7681);
+    --accent:  light-dark(#0b62d6, #58a6ff);
+
+    --radius-sm: 6px;
+    --radius: 10px;
+    --radius-lg: 14px;
+
+    --space-1: .25rem; --space-2: .5rem; --space-3: .75rem;
+    --space-4: 1rem;   --space-5: 1.25rem; --space-6: 1.5rem;
+
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+
+    --shadow-1: 0 1px 2px color-mix(in oklab, var(--text) 8%, transparent);
+    --shadow-2: 0 8px 24px color-mix(in oklab, var(--text) 16%, transparent);
+
+    --motion-fast: 120ms;
+    --motion: 200ms;
+    --ease: cubic-bezier(.2, .7, .2, 1);
+
+    --z-toolbar: 10;
+    --z-palette: 100;
+  }
+
+  /* An explicit toggle wins over the OS setting in both directions; the
+     media query alone only ever covers the "system" (unset) state. */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0d1117; --surface: #161b22; --surface-2: #1c2128; --line: #262d36;
+    --text: #e6edf3; --muted: #8b949e;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149; --idle: #6e7681; --accent: #58a6ff;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --line: #e3e6ea;
+    --text: #1a1d21; --muted: #5b6570;
+    --ok: #1a7f4b; --warn: #9a6700; --bad: #c02828; --idle: #8b949e; --accent: #0b62d6;
+  }
+}

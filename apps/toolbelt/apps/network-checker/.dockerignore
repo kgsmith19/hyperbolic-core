@@ -1,0 +1,14 @@
+.git
+.github
+tests
+tools
+docs
+supabase
+scripts
+*.db
+*.db-wal
+*.db-shm
+.env
+__pycache__
+*.pyc
+.venv
