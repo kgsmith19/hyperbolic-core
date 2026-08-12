@@ -1,5 +1,7 @@
 # LifeOS repository guidance
 
+**Location note.** This tree is a `git subtree` copy of `kgsmith19/lifeos` inside the `hyperbolic-core` monorepo. "`.github/workflows/`" below means `apps/lifeos/.github/workflows/`, which GitHub does **not** execute — these files are inert here. The live merge gate, deploy, backup, and ops automation run only from the standalone `kgsmith19/lifeos` repo. Never relocate these workflows to hyperbolic-core's root `.github/workflows/`.
+
 LifeOS is one product with two applications:
 
 - `backend/`: FastAPI, the typed entity graph, Postgres migrations, jobs, and tests.
