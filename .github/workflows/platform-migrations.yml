@@ -1,0 +1,71 @@
+name: Platform Migrations
+
+# Applies the platform project's (Supabase woltgcggxaehtuypkxqk) migrations.
+# Not a PR check: invoked by deploy.yml (workflow_call, added in a later
+# milestone) or manually (workflow_dispatch, used for the one-time ledger
+# baseline). PR-side validation of these same migration directories runs as
+# a step inside toolbelt-ci.yml instead, via scripts/validate-migrations.mjs.
+#
+# Directory order matches dependency order (docs/planning/06-supabase-schema.md
+# section 7.2): toolbelt root owns core/idea/platform/test, then Prompt
+# Organizer, then Idea Intake (its directory does not exist until a later
+# milestone; the step no-ops until then). All three pushes share one ledger
+# (one physical database), which is why scripts/validate-migrations.mjs also
+# checks for version-key collisions across directories, not just within one.
+
+on:
+  workflow_call: {}
+  workflow_dispatch: {}
+
+concurrency:
+  group: toolbelt-db
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  migrate:
+    name: Apply platform migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Validate migration directories
+        run: node apps/toolbelt/scripts/validate-migrations.mjs
+
+      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/"
+          domain: https://app.infisical.com
+
+      - uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3
+        with:
+          version: latest
+
+      - name: Apply toolbelt root migrations (core, idea, platform, test)
+        working-directory: apps/toolbelt
+        run: supabase db push --db-url "$SUPABASE_DB_URL" --include-all --yes
+
+      - name: Apply Prompt Organizer migrations
+        working-directory: apps/toolbelt/apps/prompt-organizer
+        run: supabase db push --db-url "$SUPABASE_DB_URL" --include-all --yes
+
+      - name: Apply Idea Intake migrations
+        working-directory: apps/toolbelt/apps/idea-intake
+        run: |
+          if [ -d supabase/migrations ]; then
+            supabase db push --db-url "$SUPABASE_DB_URL" --include-all --yes
+          else
+            echo "apps/toolbelt/apps/idea-intake/supabase/migrations does not exist yet; skipping."
+          fi

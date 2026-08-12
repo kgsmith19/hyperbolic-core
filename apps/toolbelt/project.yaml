@@ -22,7 +22,7 @@ commands:
   network_release_build: "cd apps/network-checker && bash tools/deploy.sh"
   serve_local: "python3 -m http.server 8811"
   browser_check: "open http://localhost:8811/web/index.html and verify the affected flow"
-  apply_migration: "use the Supabase API for project woltgcggxaehtuypkxqk"
+  apply_migration: "gh workflow run platform-migrations.yml (project woltgcggxaehtuypkxqk); validation runs in Toolbelt PR Gate via scripts/validate-migrations.mjs"
 
 ci:
   # Repo-root path (not relative to apps/toolbelt/ like other paths here): CI now lives outside this component's own root because apps/toolbelt/ was migrated into a shared monorepo.
