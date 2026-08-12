@@ -15,8 +15,9 @@ bash tools/check.sh
 
 Runs the test suite, the three scanners below at the configured intensities,
 and `bash -n` over every shell script. It prints PASS/FAIL per step and exits
-non-zero if any failed. The Toolbelt root `.github/workflows/ci.yml` runs this
-same script from this directory, so local and CI use the same checks.
+non-zero if any failed. The hyperbolic-core root's
+`.github/workflows/toolbelt-ci.yml` runs this same script from this
+directory, so local and CI use the same checks.
 
 ### The three scanners
 
@@ -30,7 +31,7 @@ found anything and 0 if it did not.
 | `documentation_check.py` | Missing README sections, template artifacts, scaffold files | `high` adds public functions with no docstring |
 
 `medium` is the complexity profile used by `check.sh`. `low` is intended for
-exploration and is not part of the PR Gate.
+exploration and is not part of the Toolbelt PR Gate.
 
 ```bash
 python tools/code_simplification.py netcheck -i medium

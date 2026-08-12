@@ -23,9 +23,10 @@ commands:
   apply_migration: "use the Supabase API for project woltgcggxaehtuypkxqk"
 
 ci:
-  workflow: .github/workflows/ci.yml
-  workflow_name: "PR Gate"
-  job_name: "PR Gate"
+  # Repo-root path (not relative to apps/toolbelt/ like other paths here): CI now lives outside this component's own root because apps/toolbelt/ was migrated into a shared monorepo.
+  workflow: .github/workflows/toolbelt-ci.yml
+  workflow_name: "Toolbelt PR Gate"
+  job_name: "Toolbelt PR Gate"
   triggers:
     - pull_request
     - merge_group

@@ -15,7 +15,7 @@ Use this lean lifecycle:
 1. Start with a GitHub Issue that states the outcome and acceptance criteria.
 2. Implement the smallest coherent change that satisfies the Issue.
 3. Run the relevant tests, perform any necessary browser check, and update affected product documentation.
-4. Open a pull request and let the single `PR Gate` workflow verify the change.
+4. Open a pull request and let the single `Toolbelt PR Gate` workflow verify the change.
 5. Successful pull requests may complete through native squash auto-merge.
 
 Completed specs and `specs/TEST-LEDGER.md` are historical product records. They can explain shipped decisions, but they do not require new specs, new ledger rows, independent reviews, or any separate approval process. Future work is tracked in GitHub Issues.
@@ -65,4 +65,4 @@ Open `http://localhost:8811/web/index.html` for a manual browser check when the 
 
 ## Completion
 
-A change is ready when its acceptance criteria are satisfied, relevant documentation is accurate, applicable local checks pass, and the pull request's `PR Gate` reports success. State any unverified item explicitly.
+A change is ready when its acceptance criteria are satisfied, relevant documentation is accurate, applicable local checks pass, and the pull request's `Toolbelt PR Gate` reports success. State any unverified item explicitly.

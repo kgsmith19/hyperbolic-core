@@ -86,13 +86,16 @@ GitHub Issues are the durable source for requested work. Implement one focused
 slice on a short-lived branch, run `bash tools/check.sh`, and open a pull
 request that links the Issue and states the evidence.
 
-The root `../../.github/workflows/ci.yml` runs automatically for pull requests.
-Its workflow and required check are both named `PR Gate`; it executes the same
-`tools/check.sh` command used locally.
+The hyperbolic-core root's `.github/workflows/toolbelt-ci.yml` runs
+automatically for pull requests (this project now lives at `apps/toolbelt/`
+inside the hyperbolic-core monorepo, so the workflow file is no longer under
+this project's own root). Its workflow and required check are both named
+`Toolbelt PR Gate`; it executes the same `tools/check.sh` command used
+locally.
 
-The root `../../.github/workflows/network-checker-release.yml` is a separate
-manual workflow that validates this application, builds and smoke-tests the
-container, and creates a draft release.
+The hyperbolic-core root's `.github/workflows/toolbelt-network-checker-release.yml`
+is a separate manual workflow that validates this application, builds and
+smoke-tests the container, and creates a draft release.
 
 AI coding agents may create branches, commits, Issues, and pull requests only
 when explicitly assigned that work. They must not submit code reviews, approve

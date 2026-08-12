@@ -94,7 +94,7 @@ data center.
 
 ## Releases
 
-The Toolbelt root `.github/workflows/network-checker-release.yml` triggers on
+The hyperbolic-core root's `.github/workflows/toolbelt-network-checker-release.yml` triggers on
 manual `workflow_dispatch` only. Pushing a `network-checker-vX.Y.Z` tag does
 not publish by itself. Build and smoke-test locally with `tools/deploy.sh`;
 dispatch the workflow only when you want the draft GitHub Release and

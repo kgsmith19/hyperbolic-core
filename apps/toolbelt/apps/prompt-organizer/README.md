@@ -49,5 +49,6 @@ Apply `supabase/migrations/*.sql` through the Supabase API. Each up migration ha
 - `specs/TEST-LEDGER.md` is a historical evidence record, not a required planning artifact.
 
 New work starts in Toolbelt GitHub Issues. Pull requests are verified by the
-root `.github/workflows/ci.yml`, whose workflow and check names are both
-`PR Gate`. Successful pull requests use native squash auto-merge.
+hyperbolic-core root's `.github/workflows/toolbelt-ci.yml`, whose workflow and
+check names are both `Toolbelt PR Gate`. Successful pull requests use native
+squash auto-merge.
