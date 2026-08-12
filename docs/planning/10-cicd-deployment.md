@@ -77,7 +77,7 @@ Every 05-artifact verification command must be runnable by exactly one gate:
 3. The Brain daemon container (new)
 4. Handler A container (`services/llm-handler`, new; per `08-llm-handlers.md` forced decision 7)
 
-Defense against the complexity budget: the ADR ceiling is 4 units [VERIFIED: 04-adrs.md budget table]. Handler A takes the final slot, displacing the ADR-07 Caddy reserve; that displacement is decided and recorded in `08-llm-handlers.md` section 3 (the owning artifact for handler decisions), whose gate question 1 offers the operator the reversal (defer Handler A to an Edge Function, breaching the runtime ceiling instead). If the Caddy trigger ever fires, Caddy must displace something per the budget rule. Not units, and why:
+Defense against the complexity budget: the ADR ceiling is 5 units [VERIFIED: 04-adrs.md budget table]. The five deployable units are: (1) LifeOS stack, (2) Shell static, (3) Brain daemon, (4) Handler A service, (5) hyperbolic-core platform container for shared services, migrations, and platform-layer updates. Handler A takes slot 4, displacing the ADR-07 Caddy reserve; that displacement is decided and recorded in `08-llm-handlers.md` section 3 (the owning artifact for handler decisions), whose gate question 1 offers the operator the reversal (defer Handler A to an Edge Function, breaching the runtime ceiling instead). hyperbolic-core as the platform container provides structural value by decoupling infrastructure updates from individual application deployments. A sixth deployable unit must displace one of the five per the budget rule. Not units, and why:
 
 - The two Supabase projects are managed services; nothing is built, shipped, or restarted by this repo's pipelines except their migrations (section 5). A managed database is an external dependency, not a deployable.
 - `tailscale serve` is configuration on an existing daemon, zero units by ADR-07's explicit accounting [VERIFIED: 04-adrs.md ADR-07 option A "zero new units"].
@@ -132,6 +132,18 @@ Owner workflow: `deploy.yml` jobs `build-brain` + `deploy-brain`. Pattern copied
 Owner workflow: `deploy.yml` jobs `build-llm-handler` + `deploy-llm-handler`. Identical pattern to the Brain unit (2.3) with these substitutions: image `ghcr.io/kgsmith19/hyperbolic-core/llm-handler:sha-<sha>`; Infisical identity and path `/platform/llm/` (never `/brain/`, ADR-05); compose project directory `llm-handler/`; health `curl -fsS http://127.0.0.1:8200/healthz`. CI for the service itself rides shell-ci's workspace job matrix (it is a small Node service in `services/llm-handler` sharing `packages/llm` tests) rather than a fifth workflow; if its suite outgrows that, it earns its own `llm-handler-ci.yml` then, not now.
 
 `deploy.yml` orchestration: a first `changes` job computes per-unit booleans from the pushed paths (paths-filter action, SHA-pinned; maturity: standard, cost: one small third-party action, replaceable by a `git diff --name-only` script step at zero lock-in). `migrate-platform` runs when migration paths changed (section 5). Unit jobs run only for their changed paths, each under its own `concurrency` group (`deploy-shell-production`, `deploy-brain-production`, `deploy-llm-handler-production`, cancel-in-progress false, mirroring lifeos [VERIFIED: ci.yml:152-154, 203-205]).
+
+### 2.5 Unit 5: hyperbolic-core platform container
+
+hyperbolic-core is the platform container for shared services, migrations, and platform-layer updates. Unlike the individual application units (LifeOS, Shell, Brain, Handler A), hyperbolic-core has no dedicated deploy job; its deployment is implicit when:
+
+- Supabase migrations in `apps/toolbelt/supabase/migrations/**` change (handled by `migrate-platform` job in section 5)
+- Shared packages in `packages/**` are updated (re-verification happens in shell-ci and brain-ci; no separate build needed)
+- Shared infrastructure or configuration in `services/` or the repo root is updated
+
+hyperbolic-core's primary deployable artifact is the schema state reflected in the Supabase project after migrations run. This separation provides structural value: the platform migrations and shared contracts can be versioned and tracked independently from individual application releases, enabling schema updates without necessarily redeploying applications, and allowing applications to coordinate through a known platform contract.
+
+Versioning: commit SHAs and GitHub tags on main track the full platform state; release tags of the form `v1.x.y` tag the combined state of all five units plus their migration baseline. Rollback strategy: per unit (section 8); platform rollback re-applies the previous migration baseline.
 
 ## 3. Docker strategy
 

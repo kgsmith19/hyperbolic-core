@@ -2,9 +2,11 @@
 
 Evidence date: 2026-08-12. Names per `00-canonical-names.md` ("prompt-layer" is retired; the component is Prompt Organizer). Realizes PO-1 through PO-5 of `03-v1-definition.md` under the ADR-03 auth model and the ADR complexity budget. Labels: `[VERIFIED: <path>]`, `[INFERRED]`, `[UNKNOWN]`.
 
-## 0. Framing correction
+## 0. Framing and hard requirement
 
 The brief says Prompt Organizer "must become functional". It is functional today: 60/60 tests pass against live Supabase, the web client signs in, saves, tags, searches, renders with variables and optional sections, tracks versions, restores, archives, and logs usage [VERIFIED: 01-inventory.md section 6 suite table; 02-health-audit.md headline]. The correct V1 framing is a promotion: from a personal prompt library to the system's prompt store, serving the Brain, Idea Intake, LifeOS chat, and coding harnesses through a contract, not a browser tab.
+
+**Hard requirement (operator-decided)**: All prompts must be stored and versioned in Prompt Organizer. This includes runtime-injected prompts, Brain operational prompts, LifeOS chat prompts, Idea Intake optimization prompts, test fixtures, coding harness system prompts, and review pass prompts. Application code may contain only minimal bootstrap or emergency fallback text (documented explicitly per component, e.g., "if Prompt Organizer is unavailable, use this fallback text for X"). No application code may contain a second prompt-management system. All prompt changes flow through Prompt Organizer's audit trail, versioning, and access control. This unifies prompt governance, eliminates split-brain risk, and enables version pinning for reproducibility.
 
 ## 1. Endpoint enumeration
 

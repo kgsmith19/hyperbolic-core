@@ -23,7 +23,7 @@ Consolidates every artifact's exposure: the risk register, complexity accounting
 
 | Dimension | Ceiling | End-state usage | Verdict |
 | --- | --- | --- | --- |
-| Deployable units | 4 | 4: LifeOS stack, Shell static, Brain container, Handler A container | AT ceiling; Caddy reserve displaced, recorded in 08 section 3 and 10 section 2; any fifth unit must displace one |
+| Deployable units | 5 | 5: LifeOS stack, Shell static, Brain container, Handler A service, hyperbolic-core platform container | AT ceiling (5 units approved for V1); hyperbolic-core is the platform container for shared services, migrations, platform-layer updates; Caddy reserve displaced, recorded in 08 section 3 and 10 section 2; any sixth unit must displace one |
 | Distinct runtimes | 3 (Node 22, Python, browser) | 3 (PowerShell remains operator-machine only, outside deployables) | PASS |
 | Databases | 2 Supabase projects + SQLite + ACC local JSON | unchanged; Brain state = SQLite (existing class), platform telemetry = existing project | PASS |
 | Auth flows | 1 (+ documented break-glass) | 1 platform Supabase Auth session; break-glass LifeOS disabled-mode; ACC loopback token is a local credential, not a login flow (05-b argument accepted) | PASS |
@@ -76,10 +76,13 @@ Reading: V1 is a net-additive foundation dominated by one component (the Brain p
 | Infisical paths and machine identities per ADR-05 | Infisical | config | prerequisite for M1 |
 | VPS capacity check (RAM/CPU headroom for 3 new services) | VPS | minutes | R-03 input, before M2 deploys |
 | GitHub label conventions audit for Idea Intake's scheme | GitHub repos | minutes | 05-h gate 3 |
+| Propose agent-engineering-standard exception for bounded planning engagements | agent-engineering-standard AGENTS.md §Forbidden artifacts | two sentences added to the exception list | permits temporary docs/planning/ when repository's CLAUDE.md mandates them for a bounded engagement; requires freeze after implementation starts (Issues remain durable source); resolves the C1 contradiction (13-dissent.md) |
 
 ## 6. Open Decisions Register
 
 Only items where the operator's answer changes work. Every other artifact gate question adopts its stated default silently; `11-roadmap.md` is generated against these defaults.
+
+**Authority and revisability**: This register records the current recommended decision, rationale, and owner, but is not an immutable contract. The operator retains full authority to revise any decision at any time during implementation. When a decision changes, the register is updated and the resulting implementation impact is assessed. Agents may identify the consequences of a change but must not argue with, resist, or silently reverse an operator decision.
 
 | ID | Decision | Options | Recommendation | Cost of delay |
 | --- | --- | --- | --- | --- |

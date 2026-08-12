@@ -6,7 +6,7 @@ Seven ADRs. Format per ADR: context, options (minimum three), decision with cost
 
 | Dimension | V1 hard ceiling | Today | Headroom for V1 additions |
 | --- | --- | --- | --- |
-| Deployable units | 4 | 1 (LifeOS VPS stack) | Shell/gateway serving, Brain daemon, and nothing else |
+| Deployable units | 5 | 1 (LifeOS VPS stack) | 4 V1 additions: Shell app, Brain daemon, Handler A service, hyperbolic-core platform container; any sixth unit must displace one |
 | Distinct runtimes | 3 (Node 22, Python, browser) | 4 (adds PowerShell, operator-machine only) | PowerShell stays operator-local, outside deployables |
 | Databases | 2 Supabase projects + SQLite (netcheck) + ACC local JSON stores | same | zero new database systems |
 | Separate auth flows | 1 (plus documented break-glass) | 3 disjoint | consolidation is ADR-03's whole job |

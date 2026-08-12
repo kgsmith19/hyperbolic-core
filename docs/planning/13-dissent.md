@@ -39,12 +39,12 @@ The operator asked to be pushed back on. Eight challenges to assumptions embedde
 - Instead: 07 keeps the Brain but caps V1 blast radius: kernel reuse (~4,000 LOC avoided), N=2 concurrency, per-run dollar ceilings, and the cut line stubbing everything non-essential. The economics question is a named gate question and a kill-criterion input for 12.
 - Cost of the leaner alternative (no Brain; keep ACC runner + manual orchestration): no unified task contract, no independent verification, no LifeOS handoff; the foundation the whole brief orbits would slip a version. The plan ships the Brain and accepts the watch-item.
 
-### C6. "Store all prompts" overreaches for repo-adjacent prompts
+### C6. Prompt storage: unified Organizer vs. split storage (OPERATOR-DECIDED: unified)
 
-- Assumption: Prompt Organizer stores all prompts for the entire system (brief, 05-d).
-- Why it may be wrong: prompts that version with code (harness system prompts, eval rubrics pinned to eval code, CI prompt fixtures) belong in git next to the code they test; moving them into a database adds a runtime dependency to builds and a drift channel between the prompt a test expects and the prompt the store serves.
-- Instead: 05-d stores all runtime-injected prompts (the Brain's operational prompts, LifeOS chat, Idea Intake optimization) with name@version pinning; repo-adjacent prompts stay in git, optionally mirrored read-only for visibility.
-- Cost: two homes for prompts with a stated boundary rule instead of one absolute rule; the boundary needs discipline.
+- Original dissent: prompts that version with code (harness system prompts, eval rubrics, CI prompt fixtures) belong in git next to the code they test; database storage adds a runtime dependency to builds and creates drift channels.
+- Operator decision (binding): All prompts must be stored and versioned in Prompt Organizer — the single source of truth for all runtime-injected prompts, Brain operational prompts, LifeOS chat, Idea Intake optimization, and test fixtures. Application code may contain only minimal bootstrap or emergency fallback text, documented as exceptions. No second prompt-management system.
+- Rationale for unified storage: eliminates split-brain risk, provides unified audit trail for all prompt changes, enables version history and restore capability across the entire system, simplifies runtime injection and metadata tracking, centralizes access control and change governance.
+- Cost accepted: Prompt Organizer becomes a critical runtime dependency; must be kept online for production operations. Mitigated by: fallback text in critical paths (defined per component), Prompt Organizer schema backup included in migration strategy.
 
 ### C7. Network Checker's full-configuration-control ambition is not a V1 deliverable
 
