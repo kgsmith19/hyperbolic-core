@@ -40,6 +40,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // env vars for this hook process already has stronger routes in (editing
 // config.json or ~/.claude/settings.json directly).
 const CONFIG_PATH = process.env.ACC_GUARD_CONFIG || path.join(HERE, "..", "config.json");
+// Repo root, for operator-facing command examples below — computed from this
+// file's own location so the message is correct on any checkout path/machine,
+// not hardcoded to one developer's C:\code\guards.
+const REPO_ROOT = path.join(HERE, "..");
 
 const norm = (p) => path.resolve(p).replaceAll("\\", "/").toLowerCase();
 const globRe = (g) =>
@@ -159,7 +163,7 @@ if (isMainModule(import.meta.url)) {
   try {
     payload = JSON.parse(raw);
   } catch {
-    deny(`guard: no hook payload on stdin (got ${raw.length} bytes) — failing closed rather than silently allowing. If this repeats, toggle guards off in the Command Center (http://127.0.0.1:43117/guards) or run: node C:/code/guards/hooks/engine.mjs toggle off`);
+    deny(`guard: no hook payload on stdin (got ${raw.length} bytes) — failing closed rather than silently allowing. If this repeats, toggle guards off in the Command Center (http://127.0.0.1:43117/guards) or run: node ${path.join(REPO_ROOT, "hooks", "engine.mjs")} toggle off`);
   }
 
   const d = decide(payload, config);

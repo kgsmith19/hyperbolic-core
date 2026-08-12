@@ -22,9 +22,10 @@ harness integration; generic kernel code must remain harness-neutral.
 - `policy.json` is product runtime configuration. Preserve unowned keys when
   updating part of it.
 
-Product architecture decisions remain in `docs/adr/`. Completed and
-historical implementation specifications are context, not current workflow
-requirements. GitHub Issues define new work.
+GitHub Issues define new work. This repository does not keep committed ADRs
+or SPEC documents — architectural rationale that matters operationally lives
+in the code and docs it governs (e.g. `gui/README.md`), not in a separate
+decision record; historical rationale otherwise lives in git history.
 
 ## Safety boundaries
 
@@ -51,7 +52,6 @@ npm install
 npm test
 npm run covgate
 npm run test:windows
-npm run e2e:gui
 npm run gui
 cd ui && npm ci
 cd ui && npm run build
@@ -82,7 +82,7 @@ subsystem documentation before running them.
 6. After the configured gate passes, GitHub may squash-merge the pull request
    and delete the branch.
 
-The reference in `.agent/standard.lock` is informational and non-enforcing.
+The reference in `standard.lock` is informational and non-enforcing.
 Repository code, product documentation, tests, and the local `PR Gate` remain
 the sources for implementation decisions.
 

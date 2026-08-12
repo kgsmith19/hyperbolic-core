@@ -43,10 +43,9 @@ const jpost = (route, body, headers = {}) => fetch(`${base}${route}`, {
 });
 const post = (body, headers = {}) => jpost("/api/kernel-policy", body, headers);
 
-test("GET / serves the kernel page", async () => {
+test("GET / without a dist configured is a headless API with no page to serve", async () => {
   const r = await fetch(`${base}/`);
-  assert.equal(r.status, 200);
-  assert.match(await r.text(), /id="toolCalls"/);
+  assert.equal(r.status, 404);
 });
 
 test("GET /api/kernel-policy returns the live block", async () => {
@@ -310,10 +309,9 @@ test("AC-009: the real engine answers status through the same route (read-only w
   }
 });
 
-test("GET /guards serves the guards page", async () => {
+test("GET /guards without a dist configured is a headless API with no page to serve", async () => {
   const r = await fetch(`${base}/guards`);
-  assert.equal(r.status, 200);
-  assert.match(await r.text(), /id="toggle"/);
+  assert.equal(r.status, 404);
 });
 
 test("an engine failure on the read routes surfaces as 500, never an empty 200", async () => {
@@ -899,12 +897,12 @@ test("AC-112: /api/process/status now names the launchable profiles (private key
   assert.deepEqual(j.directiveBudget, { wallClockMin: 0, turns: 0, tokens: 0, dollars: 0 });
 });
 
-// ------------------------------------------------------------- --ui-dist static serving (SPEC-0006, ADR-0006)
+// ------------------------------------------------------------- --ui-dist static serving
 // The FIRST request-derived filesystem path in this server, so the traversal
 // cases are the point: a request path must never resolve outside the dist
-// root, raw or URL-encoded. Built-ins stay reachable at /guards and
-// /kernel.html; /api/* is never shadowed; unknown paths fall back to
-// index.html (SPA client routing).
+// root, raw or URL-encoded. /api/* is never shadowed; unknown paths
+// (including the retired /guards and /kernel.html built-in routes) fall
+// back to index.html (SPA client routing).
 const DIST = path.join(BASE, "dist");
 fs.mkdirSync(path.join(DIST, "assets"), { recursive: true });
 fs.writeFileSync(path.join(DIST, "index.html"), "<!doctype html><title>ACC-UI-DIST</title>");
@@ -926,11 +924,11 @@ test("ui-dist: / serves the dist index, assets get their content type, unknown p
   } finally { delete process.env.ACC_UI_DIST; }
 });
 
-test("ui-dist: built-ins stay at /guards and /kernel.html, and /api/* is never shadowed", async () => {
+test("ui-dist: the retired /guards and /kernel.html routes now fall through to the SPA, and /api/* is never shadowed", async () => {
   process.env.ACC_UI_DIST = DIST;
   try {
-    assert.match(await (await fetch(`${base}/guards`)).text(), /id="toggle"/);
-    assert.match(await (await fetch(`${base}/kernel.html`)).text(), /id="toolCalls"/);
+    assert.match(await (await fetch(`${base}/guards`)).text(), /ACC-UI-DIST/);
+    assert.match(await (await fetch(`${base}/kernel.html`)).text(), /ACC-UI-DIST/);
     assert.equal((await fetch(`${base}/api/kernel-policy`)).status, 200);
   } finally { delete process.env.ACC_UI_DIST; }
 });
@@ -971,9 +969,9 @@ test("ui-dist: a dist with no index.html surfaces a 500, never a crash or an emp
   } finally { delete process.env.ACC_UI_DIST; }
 });
 
-test("ui-dist: unset means the old behavior exactly (/ is the kernel page)", async () => {
+test("ui-dist: unset means / is a 404 — ACC has no page of its own to fall back to", async () => {
   delete process.env.ACC_UI_DIST;
-  assert.match(await (await fetch(`${base}/`)).text(), /id="toolCalls"/);
+  assert.equal((await fetch(`${base}/`)).status, 404);
 });
 
 test("AC-113: every launch mutation demands X-ACC and local Origin", async () => {

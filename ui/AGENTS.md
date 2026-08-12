@@ -41,7 +41,7 @@ build and contract suite against the monorepo ACC server.
 6. After the configured gate passes, GitHub may squash-merge the pull request
    and delete the branch.
 
-The root `.agent/standard.lock` is informational and non-enforcing. Repository
+The root `standard.lock` is informational and non-enforcing. Repository
 code, the ACC API contract, tests, and the root `PR Gate` remain the sources
 for implementation decisions.
 

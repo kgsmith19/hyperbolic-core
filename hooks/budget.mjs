@@ -182,9 +182,9 @@ function directiveContext(p) {
   }
   parts.push(
     "",
-    `[ACC DIRECTIVE] How this ends. When the budget is reached you will be told to checkpoint; do that and stop. The Command Center's headless runner resumes this directive with your progress log (node C:/code/guards/runner/runner.mjs directive:${directive.id}) — do NOT stop early, do NOT ask whether to continue, and do NOT treat a stop as the end of the work.`,
-    `  - finished, everything verified:  node C:/code/guards/hooks/directive.mjs done ${directive.id}`,
-    `  - genuinely blocked on a human:   node C:/code/guards/hooks/directive.mjs blocked ${directive.id} --why "<one line>"`,
+    `[ACC DIRECTIVE] How this ends. When the budget is reached you will be told to checkpoint; do that and stop. The Command Center's headless runner resumes this directive with your progress log (node ${path.join(ROOT(), "runner", "runner.mjs")} directive:${directive.id}) — do NOT stop early, do NOT ask whether to continue, and do NOT treat a stop as the end of the work.`,
+    `  - finished, everything verified:  node ${path.join(ROOT(), "hooks", "directive.mjs")} done ${directive.id}`,
+    `  - genuinely blocked on a human:   node ${path.join(ROOT(), "hooks", "directive.mjs")} blocked ${directive.id} --why "<one line>"`,
     `Until one of those runs, the directive stays active and resumable.`
   );
   return parts.join("\n");
@@ -383,7 +383,7 @@ export function onStop(p, policy, io = PROCESS_IO) {
         `\n    >>> TYPE /clear NOW <<<\n\n` +
         (directive
           ? `  Directive ${directive.id} is active - cycle logged. Resume it headless:\n` +
-            `    node C:/code/guards/runner/runner.mjs directive:${directive.id}\n` +
+            `    node ${path.join(ROOT(), "runner", "runner.mjs")} directive:${directive.id}\n` +
             `  (or the Command Center Start-work page: http://127.0.0.1:43117/guards)\n`
           : `  The next session re-primes itself from ${policy.runner.statusFile}.\n`),
     })
@@ -402,7 +402,7 @@ export function onPreToolUseAgent(p, policy, io = PROCESS_IO) {
     deny(
       `[ACC KILL SWITCH] Rolling 7-day usage is at the RED line (${Math.round(weekTokens / 1e6)}M tokens). ` +
         `Subagent spawns are blocked and the runner is stopped. Main-thread work continues normally. ` +
-        `Clear it in the Command Center GUI (Process tab) or raise week.redTokens in C:/code/guards/policy.json.`,
+        `Clear it in the Command Center GUI (Process tab) or raise week.redTokens in ${path.join(ROOT(), "policy.json")}.`,
       io
     );
   }
@@ -415,7 +415,7 @@ export function onPreToolUseAgent(p, policy, io = PROCESS_IO) {
     deny(
       `[ACC] Subagent type "${type}" is not on the allowlist (${policy.subagents.allow.join(", ")}).\n` +
         `Adjust the allowed helper types in the Command Center, or grant a time-boxed window with ` +
-        `\`node C:/code/guards/hooks/budget.mjs fanout 30\` or the Command Center Process tab.`,
+        `\`node ${path.join(ROOT(), "hooks", "budget.mjs")} fanout 30\` or the Command Center Process tab.`,
       io
     );
   }

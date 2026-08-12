@@ -49,15 +49,6 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
-      - name: Create fixture route directories
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path `
-            'C:\code', `
-            'C:\code\guards', `
-            'C:\code\lifeos-ecosystem', `
-            'C:\code\lifeos-ecosystem\lifeos', `
-            'C:\code\lifeos-ecosystem\lifeos-ui' | Out-Null
       - name: Native test suite
         run: npm run test:windows
       - name: Launch-shim tests
@@ -69,23 +60,6 @@ jobs:
       - name: Cap-watcher installer tests
         shell: pwsh
         run: powershell -File watcher/install-cap-watch-task.test.ps1
-      - name: Remove fixture route directories
-        if: always()
-        shell: pwsh
-        run: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue 'C:\code'
-
-  gui-e2e:
-    name: GUI end-to-end
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm run e2e:gui
 
   ui:
     name: UI build and ACC contract
@@ -127,7 +101,7 @@ jobs:
   pr-gate:
     name: PR Gate
     if: always()
-    needs: [portable, windows-integration, gui-e2e, ui]
+    needs: [portable, windows-integration, ui]
     runs-on: ubuntu-latest
     steps:
       - name: Confirm every correctness job passed
@@ -135,5 +109,4 @@ jobs:
         run: |
           test "${{ needs.portable.result }}" = "success"
           test "${{ needs.windows-integration.result }}" = "success"
-          test "${{ needs.gui-e2e.result }}" = "success"
           test "${{ needs.ui.result }}" = "success"

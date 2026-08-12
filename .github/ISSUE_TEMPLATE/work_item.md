@@ -6,6 +6,10 @@ labels: ''
 assignees: ''
 ---
 
+## Classification
+
+`FEAT:` a new capability or behavior change. `BUG:` existing behavior is wrong. Prefix the Issue title with one.
+
 ## Outcome
 
 What useful result should exist when this is complete?

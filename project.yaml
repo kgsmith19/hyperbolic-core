@@ -16,7 +16,6 @@ commands:
   test: npm test
   test_windows: npm run test:windows
   coverage: npm run covgate
-  e2e: npm run e2e:gui
   ui_setup: cd ui && npm ci
   ui_build: cd ui && npm run build
   ui_e2e: cd ui && ACC_DIR=.. npm run e2e
@@ -24,12 +23,12 @@ commands:
 
 ci:
   workflow: .github/workflows/ci.yml
-  check: "PR Gate"
+  required_check: "PR Gate"
   triggers: [pull_request, merge_group]
 
 work_tracking:
   system: github-issues
 
-standard_reference:
-  file: .agent/standard.lock
-  mode: informational
+standard:
+  repo: kgsmith19/agent-engineering-standard
+  lock_file: standard.lock

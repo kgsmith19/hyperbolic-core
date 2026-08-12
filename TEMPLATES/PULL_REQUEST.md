@@ -12,11 +12,11 @@ Closes #
 
 ## Verification
 
-- [ ] `npm test`
-- [ ] `npm run covgate`
-- [ ] `npm run test:windows`, when Windows behavior changed
-- [ ] `cd ui && ACC_DIR=.. npm run e2e`, when the API contract or UI changed
-- [ ] The linked Issue's acceptance criteria are satisfied
+List each command or check run and its result.
+
+```text
+command — result
+```
 
 ## Scope check
 

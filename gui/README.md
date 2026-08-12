@@ -1,19 +1,23 @@
 # gui/ — the web Command Center
 
-`node gui/server.mjs --port 43117` (or `npm run gui`) serves the control panel
-on `http://127.0.0.1:43117`. Pages: `/` and `/kernel.html` (kernel settings),
-`/guards` (guards, vault, runbox, spending, start-work). Loopback only.
+`node gui/server.mjs --port 43117` (or `npm run gui`) serves the loopback API
+on `http://127.0.0.1:43117`. ACC itself is headless — it has no page of its
+own. Add `--ui-dist <path>` (or `ACC_UI_DIST`) pointing at `ui/`'s built
+`dist/` (`cd ui && npm run build`) and `/` plus every non-API GET serve that
+app same-origin (SPA fallback to its index; resolved-path containment, no URL
+decoding — traversal shapes cannot escape the dist). Without `--ui-dist`,
+every non-API GET is a 404.
 
-**External UI (ADR-0006, SPEC-0006):** add `--ui-dist <path>` (or `ACC_UI_DIST`)
-pointing at the `agentic-command-center-ui` repo's built `dist/` and `/` plus
-every non-API GET serve that app same-origin (SPA fallback to its index;
-resolved-path containment, no URL decoding — traversal shapes cannot escape
-the dist). The built-in pages stay at `/guards` and `/kernel.html` until the
-ADR-0006 parity criterion retires them.
+Previously, `/` and `/guards` served built-in plain-HTML pages
+(`kernel.html`, `guards.html`) as an incremental migration step while `ui/`
+matured. Those pages were retired once `ui/e2e/contract.spec.ts` went green
+against a live ACC server for every page it replaced (guards, vault,
+spending, start-work, kernel) — the criterion under which they were always
+meant to go. `--ui-dist` is now the only way to reach a browser UI.
 
-**This file is the API contract.** The external UI repo
-(`agentic-command-center-ui`, ADR-0006) builds against exactly what is written
-here; any route change lands in the same commit as its edit to this file.
+**This file is the API contract.** `ui/` builds against exactly what is
+written here; any route change lands in the same commit as its edit to this
+file.
 
 ## Security model (all routes)
 

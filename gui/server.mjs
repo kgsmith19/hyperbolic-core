@@ -20,18 +20,18 @@ import { loadKernelPolicy, saveKernelPolicy } from "../kernel/policy.mjs";
 import { DONE_WHEN_MAX, normalizeRouteTag, validateUserDirectiveTags } from "../hooks/directive.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// Exact-match route map for the built-in pages — request input never touches
-// a filesystem path here. The ONE request-derived path in this server is the
-// --ui-dist static route below, which is containment-checked (SPEC-0006).
-const PAGES = { "/": "kernel.html", "/kernel.html": "kernel.html", "/guards": "guards.html" };
 const BODY_CAP = 64 * 1024;
 
-// --- --ui-dist static serving (SPEC-0006, ADR-0006) ------------------------
+// --- --ui-dist static serving --------------------------------------------
 // When ACC_UI_DIST (or --ui-dist) names the UI repo's built dist/, `/` and
-// every non-API, non-built-in GET serve from it, same-origin — so the
-// loopback/X-ACC security model is unchanged and no CORS grant ever exists.
-// Built-ins stay reachable at /guards and /kernel.html until the ADR-0006
-// parity criterion retires them.
+// every non-API GET serve from it, same-origin — so the loopback/X-ACC
+// security model is unchanged and no CORS grant ever exists. The built-in
+// guards.html/kernel.html pages they replaced were retired once the UI's
+// contract suite (ui/e2e/contract.spec.ts) went green against a live server
+// for every page it covers — see gui/README.md. Without --ui-dist, ACC has
+// no browser UI at all: it is a headless core with a loopback API.
+// The ONE request-derived filesystem path in this server is the static
+// route below, which is containment-checked.
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css",
   ".svg": "image/svg+xml", ".json": "application/json", ".ico": "image/x-icon",
@@ -262,14 +262,10 @@ export function handler(req, res) {
   // future route cannot forget it. Non-POST methods carry no mutation.
   if (req.method === "POST" && req.headers["x-acc"] !== "1") return send(res, 403, { error: "missing X-ACC header" });
   const route = req.url.split("?")[0];
-  // With a dist configured, it owns "/" and every non-API, non-built-in GET;
-  // /guards and /kernel.html keep serving the built-ins (ADR-0006).
+  // With a dist configured, it owns "/" and every non-API GET.
   const dist = process.env.ACC_UI_DIST;
-  if (req.method === "GET" && dist && !route.startsWith("/api/") && (route === "/" || !PAGES[route])) {
+  if (req.method === "GET" && dist && !route.startsWith("/api/")) {
     return serveDist(res, dist, route);
-  }
-  if (req.method === "GET" && PAGES[route]) {
-    return send(res, 200, fs.readFileSync(path.join(HERE, PAGES[route])), "text/html; charset=utf-8");
   }
   if (route === "/api/kernel-policy") {
     if (req.method === "GET") {
