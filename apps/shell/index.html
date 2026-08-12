@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>hyperbolic-core</title>
+    <script>
+      // Cold-load theme flash prevention. packages/ui/src/chrome/theme.ts's
+      // own doc comment names this exact gap and names this file as its
+      // owner: "this hook cannot, by construction, prevent the very-first
+      // cold-load flash a real browser tab could show before any JavaScript
+      // runs -- that requires a blocking inline script in the HTML <head>,
+      // executed before first paint, which is apps/shell's index.html
+      // (m2-02) to own once it exists." This is that script: the exact same
+      // storage key and light/dark/system mapping theme.ts uses (applyThemeChoice),
+      // run synchronously before React (or any other script) parses, so the
+      // very first paint already carries the persisted choice.
+      (function () {
+        try {
+          var choice = window.localStorage.getItem("hyperbolic-ui-theme");
+          if (choice === "dark" || choice === "light") {
+            document.documentElement.setAttribute("data-theme", choice);
+          }
+          // choice === "system" (or unset): leave data-theme absent so
+          // tokens.css's prefers-color-scheme tier governs, matching
+          // theme.ts's applyThemeChoice behavior exactly.
+        } catch (e) {
+          // Storage can throw under locked-down storage policies; fail to
+          // the OS-default tier, same as theme.ts's own readStoredChoice.
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

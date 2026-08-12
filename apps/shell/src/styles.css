@@ -1,0 +1,6 @@
+/* Shell CSS entry. Adoption rule step 1 (docs/planning/09-design-system.md
+ * section 8): tailwindcss first, then @hyperbolic/ui's tokens -- packages/ui's
+ * own styles/tokens.css doc comment requires exactly this order and
+ * forbids a second `@import "tailwindcss"` anywhere else in the app. */
+@import "tailwindcss";
+@import "@hyperbolic/ui/styles/tokens.css";

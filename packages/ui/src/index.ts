@@ -33,6 +33,17 @@ export type { ChromeProps } from "./chrome/chrome";
 export type { Zone } from "./chrome/zones";
 export type { PlatformSession } from "./chrome/session";
 export { ThemeSwitch } from "./chrome/theme-switch";
+// Added by apps/shell (m2-02): theme-switch.tsx's own doc comment already
+// names this exact purpose -- "useThemeChoice is exported separately from
+// ./theme specifically so that [the Settings] page can build its own richer
+// control later on the exact same persistence primitive, instead of
+// duplicating the storage key or the cascade-application logic." It was
+// exported from chrome/theme.ts already, just never re-exported through
+// this package's public entry; Settings (05-a section 8, "Theme
+// (light/dark/system), persisted locally") is that consumer. Purely
+// additive -- no existing export's shape changes.
+export { useThemeChoice } from "./chrome/theme";
+export type { ThemeChoice } from "./chrome/theme";
 export { paletteMatch } from "./chrome/palette-match";
 
 export { EmptyState } from "./feedback/empty-state";
