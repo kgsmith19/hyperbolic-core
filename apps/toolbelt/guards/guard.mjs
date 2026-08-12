@@ -3,11 +3,11 @@
 //   1. secrets  — basename globs; reads AND writes blocked so keys never enter
 //                 the conversation.
 //   2. protected — guard machinery + its registration; blocks a DIRECT write.
-//                  With policy.json autoApprove.enabled:true (accepted risk,
-//                  OI-032, Kyle 2026-08-06) an agent can still reach the same
-//                  target indirectly via a runbox script the watcher runs
-//                  unattended — this is a speed bump on the direct path, not
-//                  an absolute boundary. See AGENTS.md's autoApprove note.
+//                  With an operator config's autoApprove.enabled:true
+//                  (accepted risk, an explicit opt-in) an agent can still
+//                  reach the same target indirectly via a runbox script a
+//                  watcher runs unattended — this is a speed bump on the
+//                  direct path, not an absolute boundary.
 //   3. cells    — per-repo path ownership (see config.json "repos"), matched
 //                 by the TARGET file's path — not the session folder — so a
 //                 session launched from a parent folder is guarded the same
@@ -17,33 +17,35 @@
 // Scope: only tools named in the hook matcher. Writes via Bash (redirects,
 // sed -i, tee) are NOT intercepted — convention enforcer, not a security boundary.
 //
-// decide() is the rule set, exported so hooks/guard.test.mjs can exercise it
-// directly (import + call) instead of only through a subprocess — the same
-// split kernel/guard.mjs (pure) / kernel/guardhook.mjs (I/O) already uses, and
-// the reason covgate.mjs can now actually gate this file (#22): a subprocess
-// call's coverage is invisible to the parent test process's V8 instrumentation,
-// a plain import's is not. Below decide(), the IO wrapper — config read,
-// stdin read, exit code — runs ONLY when this file is the process entry point
-// (`node hooks/guard.mjs`, exactly how the hook is invoked), never on import,
-// so guard.test.mjs can import decide() without inheriting the wrapper's
-// process.exit calls or its blocking stdin read.
+// Standalone module: no dependency on any particular caller (ACC or
+// otherwise) beyond the hook payload/config shapes below. A caller registers
+// this file directly as its PreToolUse hook and points GUARDS_CONFIG at its
+// own config.
+//
+// decide() is the rule set, exported so guard.test.mjs can exercise it
+// directly (import + call) instead of only through a subprocess. Below
+// decide(), the IO wrapper — config read, stdin read, exit code — runs ONLY
+// when this file is the process entry point (`node guard.mjs`, exactly how
+// the hook is invoked), never on import, so guard.test.mjs can import
+// decide() without inheriting the wrapper's process.exit calls or its
+// blocking stdin read.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isMainModule } from "./root.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// ACC_GUARD_CONFIG lets a test point this file at a fixture config without
-// touching the real one — same override idiom kernel/policy.mjs's POLICY()
-// already uses for policy.json. Unset in production, where it always
-// resolves to the real path; not a bypass surface, since anyone who could set
-// env vars for this hook process already has stronger routes in (editing
-// config.json or ~/.claude/settings.json directly).
-const CONFIG_PATH = process.env.ACC_GUARD_CONFIG || path.join(HERE, "..", "config.json");
-// Repo root, for operator-facing command examples below — computed from this
-// file's own location so the message is correct on any checkout path/machine,
-// not hardcoded to one developer's C:\code\guards.
-const REPO_ROOT = path.join(HERE, "..");
+// True only when this file is the process entrypoint — resolved paths on
+// both sides so `node -e` (argv[1] absent) and platform path-casing quirks
+// can't disagree.
+const isMainModule = (url) => !!process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(url));
+
+// GUARDS_CONFIG lets a caller (a test, or a deployment with its config
+// elsewhere) point this file at a different config without touching the
+// default. Unset, it resolves to a config.json colocated with this file —
+// not a bypass surface, since anyone who could set env vars for this hook
+// process already has stronger routes in (editing config.json or
+// ~/.claude/settings.json directly).
+const CONFIG_PATH = process.env.GUARDS_CONFIG || path.join(HERE, "config.json");
 
 const norm = (p) => path.resolve(p).replaceAll("\\", "/").toLowerCase();
 const globRe = (g) =>
@@ -66,7 +68,7 @@ export function decide(payload, config) {
   if ((config.secrets ?? []).some((g) => globRe(g).test(base))) {
     return {
       allow: false,
-      reason: `guard: "${base}" matches a secret pattern — reads and writes are blocked so keys never enter the conversation. Ask the user for the specific value you need, or use the guards vault (engine.mjs vault-keys / apply).`,
+      reason: `guard: "${base}" matches a secret pattern — reads and writes are blocked so keys never enter the conversation. Ask the user for the specific value you need, or use the operator's vault tooling.`,
     };
   }
 
@@ -144,7 +146,7 @@ if (isMainModule(import.meta.url)) {
   // until the hook timeout; whatever arrived by then is used. Cap is
   // env-overridable (mirrors kernel/guardhook.mjs's STDIN_TIMEOUT_MS) so a
   // test can prove the timeout path fires without a real multi-second wait.
-  const STDIN_TIMEOUT_MS = Number(process.env.ACC_GUARD_STDIN_TIMEOUT_MS) || 4000;
+  const STDIN_TIMEOUT_MS = Number(process.env.GUARDS_STDIN_TIMEOUT_MS) || 4000;
   const raw = await new Promise((resolve) => {
     let buf = "";
     const timer = setTimeout(() => resolve(buf), STDIN_TIMEOUT_MS);
@@ -163,7 +165,7 @@ if (isMainModule(import.meta.url)) {
   try {
     payload = JSON.parse(raw);
   } catch {
-    deny(`guard: no hook payload on stdin (got ${raw.length} bytes) — failing closed rather than silently allowing. If this repeats, toggle guards off in the Command Center (http://127.0.0.1:43117/guards) or run: node ${path.join(REPO_ROOT, "hooks", "engine.mjs")} toggle off`);
+    deny(`guard: no hook payload on stdin (got ${raw.length} bytes) — failing closed rather than silently allowing. If this repeats, toggle guards off: node ${path.join(HERE, "cli.mjs")} toggle off`);
   }
 
   const d = decide(payload, config);

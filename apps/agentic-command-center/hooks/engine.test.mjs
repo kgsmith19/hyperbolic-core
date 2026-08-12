@@ -1,20 +1,17 @@
-// node --test hooks/engine.test.mjs  (run from C:\code\guards)
+// node --test hooks/engine.test.mjs  (run from the repo root)
 //
-// hooks/engine.mjs is the CLI engine that owns every guard state change:
-// toggle, secrets/protected lists, projects, the runbox lifecycle
-// (list/run/trash/restore/flush), and the vault (vault-import/vault-rm/
-// vault-keys/apply). It was, before this file, the only source file in
-// hooks/ or kernel/ with no test coverage (#75) -- security-critical (vault
-// values, guard config) with zero automated proof.
+// hooks/engine.mjs is the CLI engine that owns the vault
+// (vault-import/vault-rm/vault-keys/apply) and the runbox lifecycle
+// (projects-add/rm, list/run/trash/restore/flush). Guard-config state
+// (enable/disable, secrets/protected lists) moved to
+// apps/toolbelt/guards/cli.mjs — see that module's own test suite.
 //
 // Every test below calls the exported `main({argv, io})` directly (mirrors
 // hooks/budget.mjs's own main()/io convention) against a fresh ACC_ROOT
-// sandbox created per test group, so covgate's V8 instrumentation actually
-// sees these lines execute -- a subprocess call would not (see
-// hooks/guard.test.mjs's header comment on the same limitation). A small
-// subprocess group at the bottom proves the real CLI entry point end to end
-// (argv parsing, real stdin, real exit code) the way hooks/guard.test.mjs's
-// "wrapper" group does.
+// sandbox created per test group, so coverage tooling actually sees these
+// lines execute -- a subprocess call would not. A small subprocess group at
+// the bottom proves the real CLI entry point end to end (argv parsing, real
+// stdin, real exit code).
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -34,7 +31,7 @@ function sandbox(config) {
   const root = path.join(BASE, `root-${seq++}`);
   fs.mkdirSync(root, { recursive: true });
   if (config !== null) {
-    fs.writeFileSync(path.join(root, "config.json"), JSON.stringify(config ?? { enabled: true, secrets: [], protected: [] }));
+    fs.writeFileSync(path.join(root, "config.json"), JSON.stringify(config ?? { projects: [] }));
   }
   return root;
 }
@@ -66,18 +63,15 @@ async function run(root, argv, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// status / toggle / secret-add-rm / protected-add-rm
+// status (guard-config's own status moved to apps/toolbelt/guards/cli.mjs)
 // ---------------------------------------------------------------------------
 
-test("status: reports the config's own fields plus derived vault/runbox counts", async () => {
-  const root = sandbox({ enabled: true, secrets: [".env"], protected: ["/x"], projects: [] });
+test("status: reports projects plus derived vault/runbox counts — no guard-config fields", async () => {
+  const root = sandbox({ projects: [] });
   const r = await run(root, ["status"]);
   assert.equal(r.code, 0);
   const j = JSON.parse(r.out);
-  assert.deepEqual(j, {
-    enabled: true, secrets: [".env"], protected: ["/x"], projects: [],
-    vaultKeys: [], pending: 0, trashed: 0,
-  });
+  assert.deepEqual(j, { projects: [], vaultKeys: [], pending: 0, trashed: 0 });
 });
 
 test("status: a missing config.json fails closed via CliFail, not a crash", async () => {
@@ -85,54 +79,6 @@ test("status: a missing config.json fails closed via CliFail, not a crash", asyn
   const r = await run(root, ["status"]);
   assert.equal(r.code, 1);
   assert.match(r.err, /no config\.json at/);
-});
-
-test("toggle: on/off flips config.enabled and persists it", async () => {
-  const root = sandbox({ enabled: false, secrets: [], protected: [] });
-  let r = await run(root, ["toggle", "on"]);
-  assert.equal(r.code, 0);
-  assert.match(r.out, /ENABLED/);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, "config.json"), "utf8")).enabled, true);
-
-  r = await run(root, ["toggle", "off"]);
-  assert.match(r.out, /DISABLED/);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, "config.json"), "utf8")).enabled, false);
-});
-
-test("toggle: any value other than on/off fails with usage", async () => {
-  const root = sandbox({ enabled: true, secrets: [], protected: [] });
-  const r = await run(root, ["toggle", "maybe"]);
-  assert.equal(r.code, 1);
-  assert.match(r.err, /usage: toggle on\|off/);
-});
-
-test("secret-add/rm: dedupes on add, no-ops on rm of an absent value", async () => {
-  const root = sandbox({ enabled: true, secrets: [], protected: [] });
-  let r = await run(root, ["secret-add", ".env"]);
-  assert.match(r.out, /secrets: \.env/);
-  r = await run(root, ["secret-add", ".env"]); // duplicate
-  assert.match(r.out, /secrets: \.env\n$/);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, "config.json"), "utf8")).secrets.length, 1);
-
-  r = await run(root, ["secret-rm", ".env"]);
-  assert.match(r.out, /secrets: \(empty\)/);
-  r = await run(root, ["secret-rm", "never-there"]); // no-op, not an error
-  assert.equal(r.code, 0);
-});
-
-test("secret-add: a missing value argument fails", async () => {
-  const root = sandbox({ enabled: true, secrets: [], protected: [] });
-  const r = await run(root, ["secret-add"]);
-  assert.equal(r.code, 1);
-  assert.match(r.err, /value required/);
-});
-
-test("protected-add/rm: same shape as secrets, separate list", async () => {
-  const root = sandbox({ enabled: true, secrets: [], protected: [] });
-  let r = await run(root, ["protected-add", "/guards"]);
-  assert.match(r.out, /protected: \/guards/);
-  r = await run(root, ["protected-rm", "/guards"]);
-  assert.match(r.out, /protected: \(empty\)/);
 });
 
 // ---------------------------------------------------------------------------
@@ -623,14 +569,14 @@ test("runAsMain: exits with main()'s own return code, using real process.argv", 
 // ---------------------------------------------------------------------------
 
 test("subprocess: `node hooks/engine.mjs status` against a real ACC_ROOT sandbox", () => {
-  const root = sandbox({ enabled: true, secrets: [".env"], protected: [] });
+  const root = sandbox({ projects: ["/watched"] });
   const out = execFileSync(process.execPath, [ENGINE_PATH, "status"], {
     encoding: "utf8",
     env: { ...process.env, ACC_ROOT: root },
   });
   const j = JSON.parse(out);
-  assert.equal(j.enabled, true);
-  assert.deepEqual(j.secrets, [".env"]);
+  assert.deepEqual(j.projects, ["/watched"]);
+  assert.deepEqual(j.vaultKeys, []);
 });
 
 test("subprocess: an unknown command exits 1 with usage on stderr", () => {

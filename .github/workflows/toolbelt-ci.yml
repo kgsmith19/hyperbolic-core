@@ -32,6 +32,9 @@ jobs:
       - name: Run Toolbelt tests
         run: node --test "tests/*.test.mjs"
         working-directory: apps/toolbelt
+      - name: Run Guards tests
+        run: node --test "*.test.mjs"
+        working-directory: apps/toolbelt/guards
       - name: Run Prompt Organizer tests
         run: node --test "tests/*.test.mjs"
         working-directory: apps/toolbelt/apps/prompt-organizer

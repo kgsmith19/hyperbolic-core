@@ -38,6 +38,7 @@ export default defineConfig({
         ACC_POLICY: path.join(dir, "policy.json"),
         ACC_ROOT: dir,
         ACC_ENGINE: path.join(ACC, "gui", "e2e", "fake-engine.e2e.mjs"),
+        ACC_GUARDS_CLI: path.join(ACC, "gui", "e2e", "fake-guards.e2e.mjs"),
         ACC_USAGE: path.join(ACC, "gui", "e2e", "fake-usage.e2e.mjs"),
         ACC_BUDGET: path.join(ACC, "gui", "e2e", "fake-budget.e2e.mjs"),
         ACC_RUNNER: path.join(ACC, "gui", "e2e", "fake-runner.e2e.mjs"),

@@ -163,12 +163,19 @@ test("CLI: prints LISTENING <port> and serves on it", async () => {
 });
 
 // ------------------------------------------------------------- guards API (SPEC-0002, SL-009)
-// The server shells hooks/engine.mjs, the single owner of guard state. Tests
-// drive it against a FAKE engine (runner.test.mjs's fake-claude discipline):
-// canned outputs, argv recorded, the real repo's config.json never touched.
-// ACC_ENGINE is read per request, so one suite can exercise fake and real.
+// The server shells two binaries, each the single owner of its own state:
+// hooks/engine.mjs (vault + runbox) and apps/toolbelt/guards/cli.mjs
+// (guard-config: toggle, secret/protected lists). Tests drive both against
+// FAKEs (runner.test.mjs's fake-claude discipline): canned outputs, argv
+// recorded, the real repo's config.json never touched. ACC_ENGINE/
+// ACC_GUARDS_CLI are read per request, so one suite can exercise fake and
+// real. Both fakes read the SAME list.json fixture and each returns only
+// the subset of "status" it owns — status: GET /api/guards/status composes
+// them back into the one shape the browser has always received.
 const ENGINE_DIR = path.join(BASE, "engine-state");
 const FAKE_ENGINE = path.join(BASE, "fake-engine.mjs");
+const GUARDS_DIR = path.join(BASE, "guards-state");
+const FAKE_GUARDS = path.join(BASE, "fake-guards.mjs");
 const RUNBOX = path.join(BASE, "rb");
 fs.writeFileSync(
   FAKE_ENGINE,
@@ -180,35 +187,67 @@ fs.appendFileSync(dir + "/calls.jsonl", JSON.stringify(argv) + "\\n");
 const mode = fs.existsSync(dir + "/mode.txt") ? fs.readFileSync(dir + "/mode.txt", "utf8").trim() : "ok";
 if (mode === "fail") { process.stderr.write("engine says no"); process.exit(1); }
 const lists = JSON.parse(fs.readFileSync(dir + "/list.json", "utf8"));
-if (argv[0] === "status") { console.log(JSON.stringify(lists.status)); process.exit(0); }
+if (argv[0] === "status") {
+  const { enabled, secrets, protected: p, ...rest } = lists.status;
+  console.log(JSON.stringify(rest));
+  process.exit(0);
+}
 if (argv[0] === "list" && argv[1] === "--json") { console.log(JSON.stringify(lists.pending)); process.exit(0); }
 if (argv[0] === "trash-list" && argv[1] === "--json") { console.log(JSON.stringify(lists.trashed)); process.exit(0); }
 console.log("did " + argv.join(" "));
 `.trimStart()
 );
+fs.writeFileSync(
+  FAKE_GUARDS,
+  `
+import fs from "node:fs";
+const dir = process.env.FAKE_GUARDS_DIR;
+const argv = process.argv.slice(2);
+fs.appendFileSync(dir + "/calls.jsonl", JSON.stringify(argv) + "\\n");
+const mode = fs.existsSync(dir + "/mode.txt") ? fs.readFileSync(dir + "/mode.txt", "utf8").trim() : "ok";
+if (mode === "fail") { process.stderr.write("guards says no"); process.exit(1); }
+const lists = JSON.parse(fs.readFileSync(dir + "/list.json", "utf8"));
+if (argv[0] === "status") {
+  const { enabled, secrets, protected: p } = lists.status;
+  console.log(JSON.stringify({ enabled, secrets, protected: p }));
+  process.exit(0);
+}
+console.log("did " + argv.join(" "));
+`.trimStart()
+);
 process.env.FAKE_ENGINE_DIR = ENGINE_DIR;
+process.env.FAKE_GUARDS_DIR = GUARDS_DIR;
 
 const engineCalls = () => {
   try { return fs.readFileSync(path.join(ENGINE_DIR, "calls.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); }
   catch { return []; }
 };
+const guardsCalls = () => {
+  try { return fs.readFileSync(path.join(GUARDS_DIR, "calls.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); }
+  catch { return []; }
+};
 
 function resetEngine() {
   process.env.ACC_ENGINE = FAKE_ENGINE;
+  process.env.ACC_GUARDS_CLI = FAKE_GUARDS;
   fs.rmSync(ENGINE_DIR, { recursive: true, force: true });
   fs.mkdirSync(ENGINE_DIR, { recursive: true });
+  fs.rmSync(GUARDS_DIR, { recursive: true, force: true });
+  fs.mkdirSync(GUARDS_DIR, { recursive: true });
   fs.mkdirSync(RUNBOX, { recursive: true });
   fs.writeFileSync(path.join(RUNBOX, "fix.ps1"), "# does a thing\necho hi\n");
-  fs.writeFileSync(path.join(ENGINE_DIR, "list.json"), JSON.stringify({
+  const list = JSON.stringify({
     status: { enabled: true, secrets: [".env"], protected: ["/x"], projects: [], vaultKeys: ["K"], pending: 1, trashed: 0 },
     pending: [{ label: "central", name: "fix.ps1", dir: RUNBOX, runboxDir: RUNBOX, cwd: RUNBOX, keep: false, summary: "does a thing" }],
     trashed: [],
-  }));
+  });
+  fs.writeFileSync(path.join(ENGINE_DIR, "list.json"), list);
+  fs.writeFileSync(path.join(GUARDS_DIR, "list.json"), list);
 }
 
 const gpost = jpost;
 
-test("AC-001: GET /api/guards/status passes the engine's status JSON through", async () => {
+test("AC-001: GET /api/guards/status composes guards-cli's and the engine's status JSON", async () => {
   resetEngine();
   const r = await fetch(`${base}/api/guards/status`);
   assert.equal(r.status, 200);
@@ -227,13 +266,24 @@ test("GET /api/guards/list returns pending and trashed from the --json verbs", a
   assert.deepEqual(j.trashed, []);
 });
 
-test("AC-002: an allowlisted verb builds the exact engine argv", async () => {
+test("AC-002: an allowlisted guard-config verb builds the exact guards-cli argv", async () => {
   resetEngine();
   const r = await gpost("/api/guards/engine", { verb: "toggle", arg: "on" });
   assert.equal(r.status, 200);
   const j = await r.json();
   assert.equal(j.code, 0);
-  assert.deepEqual(engineCalls().at(-1), ["toggle", "on"]);
+  assert.deepEqual(guardsCalls().at(-1), ["toggle", "on"]);
+  assert.equal(engineCalls().length, 0, "a guard-config verb must never reach the engine");
+});
+
+test("AC-002b: an allowlisted runbox verb builds the exact engine argv", async () => {
+  resetEngine();
+  const r = await gpost("/api/guards/engine", { verb: "trash", arg: "central:fix.ps1" });
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.equal(j.code, 0);
+  assert.deepEqual(engineCalls().at(-1), ["trash", "central:fix.ps1"]);
+  assert.equal(guardsCalls().length, 0, "a runbox verb must never reach guards-cli");
 });
 
 test("AC-003: a verb outside the allowlist is refused and the engine is never invoked", async () => {
@@ -259,6 +309,7 @@ test("AC-004: guards POSTs demand X-ACC and local Origin, like every mutating ro
   assert.equal((await gpost("/api/guards/engine", { verb: "toggle", arg: "on" }, { "X-ACC": "" })).status, 403);
   assert.equal((await gpost("/api/guards/engine", { verb: "toggle", arg: "on" }, { origin: "https://evil.example" })).status, 403);
   assert.equal(engineCalls().length, 0);
+  assert.equal(guardsCalls().length, 0);
 });
 
 test("AC-005: preview returns the listed script's content", async () => {

@@ -6,7 +6,10 @@
 Supabase `core` schema for runs, costs, outcomes, metrics, and events plus the
 `idea` schema and static idea-list client. `apps/prompt-organizer/` owns the
 `prompt` schema and prompt-library client. `apps/network-checker/` owns the
-local-first network diagnostic CLI and dashboard.
+local-first network diagnostic CLI and dashboard. `guards/` owns a standalone
+Claude Code `PreToolUse` security hook (secret-file blocking, protected-path
+blocking, per-repo cell ownership) with no dependency on any particular
+caller — extracted from `agentic-command-center`; see `guards/README.md`.
 
 ## Working model
 
@@ -41,6 +44,7 @@ When explicitly assigned, an AI coding agent may create an Issue, branch, commit
 ```bash
 node --test "tests/*.test.mjs"
 python3 -m http.server 8811
+cd guards && node --test "*.test.mjs"
 cd apps/prompt-organizer && node --test "tests/*.test.mjs"
 cd apps/prompt-organizer && python3 -m http.server 8812 --directory web
 cd apps/prompt-organizer && npm install --no-save --no-package-lock @playwright/test@1.52.0

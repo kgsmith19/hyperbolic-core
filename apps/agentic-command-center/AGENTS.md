@@ -6,9 +6,14 @@ harness integration; generic kernel code must remain harness-neutral.
 
 ## Product map
 
-- `hooks/guard.mjs` is the `PreToolUse` guard. It fails closed when its input
-  or configuration cannot be read.
-- `hooks/engine.mjs` owns guard, vault, watched-project, and runbox mutations.
+- The `PreToolUse` guard and its config mutations (enable/disable, secret
+  globs, protected paths) live in `apps/toolbelt/guards` — a standalone
+  module this repo does not import. The guard fails closed when its input or
+  configuration cannot be read.
+- `hooks/engine.mjs` owns the vault and runbox (watched-project) mutations.
+  `gui/server.mjs` shells both it and `apps/toolbelt/guards/cli.mjs` for
+  every guards-related route, composing them where the browser-facing API
+  still expects one shape (`GET /api/guards/status`).
 - `gui/server.mjs` serves the loopback web interface. `gui/README.md` is its
   API contract.
 - `ui/` is the React front end served through `gui/server.mjs --ui-dist`.

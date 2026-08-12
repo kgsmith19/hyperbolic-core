@@ -1,8 +1,14 @@
-// CLI engine for guards. The web GUI (gui/server.mjs) shells to this for every
-// mutation; agents use `vault-keys` and `apply` to consume user-uploaded
-// secrets without the values ever entering a conversation, and `list` /
-// `run` / `trash` to work the runbox (see AGENTS.md). Values travel
-// stdin -> vault.json -> target file, never argv and never stdout.
+// CLI engine for the vault and the runbox. The web GUI (gui/server.mjs)
+// shells to this for every vault/runbox mutation; agents use `vault-keys`
+// and `apply` to consume user-uploaded secrets without the values ever
+// entering a conversation, and `list` / `run` / `trash` to work the runbox
+// (see AGENTS.md). Values travel stdin -> vault.json -> target file, never
+// argv and never stdout.
+//
+// Guard-config mutations (enable/disable, secret globs, protected paths)
+// live in apps/toolbelt/guards/cli.mjs, a standalone module this file does
+// not import — gui/server.mjs shells both and composes their output where
+// the browser-facing API still expects one combined shape (e.g. status).
 //
 // Runbox lifecycle: scripts live in a runbox (central runbox/ here, or
 // <project>/.guards/runbox for each folder in config "projects"). A script
@@ -26,13 +32,20 @@ import { fileURLToPath } from "node:url";
 import { resolveRoot, isMainModule } from "./root.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// ACC_ROOT redirects config.json, vault.json and the central runbox at a
-// throwaway tree, same convention as every other hook (see root.mjs) -- it
-// exists so tests can exercise THIS file instead of a copy, never the live
-// vault/runbox a real Claude Code session depends on. Resolved per call, not
-// cached, so one test's ACC_ROOT can never leak into the next.
+// ACC_ROOT redirects vault.json and the central runbox at a throwaway tree,
+// same convention as every other hook (see root.mjs) -- it exists so tests
+// can exercise THIS file instead of a copy, never the live vault/runbox a
+// real Claude Code session depends on. Resolved per call, not cached, so one
+// test's ACC_ROOT can never leak into the next.
 const ROOT = () => resolveRoot(HERE);
-const CONFIG = () => path.join(ROOT(), "config.json");
+// GUARDS_CONFIG points this file at the SAME config.json guard.mjs/cli.mjs
+// read (apps/toolbelt/guards/config.json in production; gui/server.mjs sets
+// this env var when it shells this file, since it's the one place already
+// composing both modules). Falls back to ACC's own root for backward
+// compatibility with every existing sandboxed test, none of which set
+// GUARDS_CONFIG, and for standalone CLI use with a config placed there by
+// hand. This file only ever reads "runboxDir" and "projects" from it.
+const CONFIG = () => process.env.GUARDS_CONFIG || path.join(ROOT(), "config.json");
 const VAULT = () => path.join(ROOT(), "vault.json");
 
 const readJson = (p, fallback) => (existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : fallback);
@@ -209,35 +222,11 @@ export async function main({ argv = process.argv.slice(2), io = PROCESS_IO } = {
       case "status": {
         const c = config();
         say(io, JSON.stringify({
-          enabled: c.enabled,
-          secrets: c.secrets ?? [],
-          protected: c.protected ?? [],
           projects: c.projects ?? [],
           vaultKeys: Object.keys(vault()),
           pending: pendingScripts(c).length,
           trashed: trashedScripts(c).length,
         }));
-        return 0;
-      }
-      case "toggle": {
-        if (!["on", "off"].includes(args[0])) fail("usage: toggle on|off");
-        const c = config();
-        c.enabled = args[0] === "on";
-        writeJson(CONFIG(), c);
-        say(io, `guards ${c.enabled ? "ENABLED" : "DISABLED"}`);
-        return 0;
-      }
-      case "secret-add":
-      case "secret-rm":
-      case "protected-add":
-      case "protected-rm": {
-        const key = cmd.startsWith("secret") ? "secrets" : "protected";
-        const val = args[0] ?? fail("value required");
-        const c = config();
-        const list = c[key] ?? [];
-        c[key] = cmd.endsWith("add") ? [...new Set([...list, val])] : list.filter((x) => x !== val);
-        writeJson(CONFIG(), c);
-        say(io, `${key}: ${c[key].join(", ") || "(empty)"}`);
         return 0;
       }
       case "projects-add": {
@@ -393,10 +382,10 @@ export async function main({ argv = process.argv.slice(2), io = PROCESS_IO } = {
       default:
         fail([
           "usage: engine.mjs <command>",
-          "  status | toggle on|off",
-          "  secret-add/rm <glob> | protected-add/rm <path> | projects-add/rm <folder>",
+          "  status | projects-add/rm <folder>",
           "  list [--json] | run <ref> | trash <ref> | trash-list [--json] | restore <ref> | flush --really",
           "  vault-import | vault-rm <KEY> | vault-keys | apply <file> <KEY...>",
+          "guard-config commands (enable/disable, secret globs, protected paths) moved to apps/toolbelt/guards/cli.mjs",
         ].join("\n"));
     }
   } catch (e) {

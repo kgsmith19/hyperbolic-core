@@ -54,11 +54,14 @@ function serveDist(res, dist, route) {
   }
 }
 
-// --- guards API (SPEC-0002): thin shell over hooks/engine.mjs -------------
-// The engine stays the single owner of every state change — this server adds
-// transport, never logic. ACC_ENGINE
-// is resolved per request so tests can drive a fake engine (and one
-// read-only case the real one) without a restart.
+// --- guards API (SPEC-0002): thin shell over two binaries ------------------
+// Guard-config (enable/disable, secret/protected lists) lives in
+// apps/toolbelt/guards/cli.mjs; vault + runbox lifecycle stays in this
+// repo's hooks/engine.mjs. Each stays the single owner of its own state
+// change — this server adds transport and, for routes the browser still
+// expects as one shape (status), composition — never logic of its own.
+// ACC_ENGINE/ACC_GUARDS_CLI are resolved per request so tests can drive fakes
+// (and one read-only case the real ones) without a restart.
 const enginePath = () => process.env.ACC_ENGINE || path.join(HERE, "..", "hooks", "engine.mjs");
 // SPEC-0004 process controls shell the same node scripts the WinForms GUI did;
 // each path is env-overridable so a test can point at a fake that records its
@@ -136,16 +139,28 @@ function readDirectiveBudget(body) {
 // Run a node script; `stdin`, when given, is written and closed. This is the
 // ONLY channel a secret value ever travels (SPEC-0003): never argv, so it
 // cannot land in a process listing or a log; the value is not returned here
-// either — callers surface `code`/`stdout` only.
-function nodeExec(script, args, stdin) {
+// either — callers surface `code`/`stdout` only. `extraEnv`, when given, is
+// merged over this process's own env for the child only.
+function nodeExec(script, args, stdin, extraEnv) {
   return new Promise((resolveExec) => {
-    const child = execFile(process.execPath, [script, ...args], { timeout: 120000 }, (err, stdout, stderr) => {
+    const env = extraEnv ? { ...process.env, ...extraEnv } : undefined;
+    const child = execFile(process.execPath, [script, ...args], { timeout: 120000, env }, (err, stdout, stderr) => {
       resolveExec({ code: err ? (err.code ?? 1) : 0, stdout: String(stdout || ""), stderr: String(stderr || "") });
     });
     if (stdin !== undefined) { child.stdin.end(stdin); }
   });
 }
-const engineExec = (args, stdin) => nodeExec(enginePath(), args, stdin);
+// apps/toolbelt/guards is a sibling app in this monorepo — a non-breaking
+// DEFAULT, not a hard dependency: ACC_GUARDS_CLI/ACC_GUARDS_CONFIG override
+// it (tests point these at fakes/fixtures; a deployment with a different
+// layout can point them anywhere).
+const guardsCliPath = () => process.env.ACC_GUARDS_CLI || path.join(HERE, "..", "..", "toolbelt", "guards", "cli.mjs");
+const guardsConfigPath = () => process.env.ACC_GUARDS_CONFIG || path.join(HERE, "..", "..", "toolbelt", "guards", "config.json");
+// engine.mjs still owns the "projects"/"runboxDir" fields inside the SAME
+// config.json guard.mjs/cli.mjs read — GUARDS_CONFIG is how it finds it now
+// that the file lives in apps/toolbelt/guards, not ACC's own root.
+const engineExec = (args, stdin) => nodeExec(enginePath(), args, stdin, { GUARDS_CONFIG: guardsConfigPath() });
+const guardsExec = (args, stdin) => nodeExec(guardsCliPath(), args, stdin, { GUARDS_CONFIG: guardsConfigPath() });
 
 // Run a script and parse its stdout as JSON, or throw with a diagnosable
 // message — the shared shape behind every route/suggest, directive-list and
@@ -175,23 +190,37 @@ const VAULT_KEY_RESERVED = new Set(["__proto__", "constructor", "prototype"]);
 const validVaultKey = (k) => typeof k === "string" && VAULT_KEY_RE.test(k) && !VAULT_KEY_RESERVED.has(k);
 const validVaultValue = (v) => typeof v === "string" && !/[\r\n]/.test(v) && v.length <= 8192;
 
-// PROP-001: engine argv is built ONLY from this map plus one validated arg.
-// No browser string is ever a path, a flag, or shell input (execFile, no
+// PROP-001: argv is built ONLY from these maps plus one validated arg. No
+// browser string is ever a path, a flag, or shell input (execFile, no
 // shell). Verbs that consume secret values (apply, vault-import) are
 // deliberately absent — SPEC-0003 owns that surface with its own review.
+//
+// Split across two binaries: GUARDS_VERBS shells apps/toolbelt/guards'
+// cli.mjs (guard-config: enable/disable, secret/protected lists);
+// ENGINE_VERBS shells this repo's own hooks/engine.mjs (runbox lifecycle).
+// The browser-facing route/request/response shape is unchanged either way —
+// this split is an internal routing detail, not an API contract change.
 const oneRef = (b) =>
   typeof b.arg === "string" && b.arg.length > 0 && b.arg.length <= 512 && !b.arg.includes("\0")
     ? [b.arg] : null;
-const ENGINE_VERBS = {
+const GUARDS_VERBS = {
   toggle: (b) => (b.arg === "on" || b.arg === "off" ? [b.arg] : null),
   "secret-add": oneRef, "secret-rm": oneRef,
   "protected-add": oneRef, "protected-rm": oneRef,
+};
+const ENGINE_VERBS = {
   "projects-add": oneRef, "projects-rm": oneRef,
   run: oneRef, trash: oneRef, restore: oneRef,
   // Permanent deletion keeps its human gate: the browser must send an
   // explicit confirm, and only the server ever writes the --really flag.
   flush: (b) => (b.confirm === true ? ["--really"] : null),
 };
+
+async function guardsJson(args) {
+  const r = await guardsExec(args);
+  if (r.code !== 0) throw new Error(r.stderr || `guards exited ${r.code}`);
+  return JSON.parse(r.stdout);
+}
 
 async function engineJson(args) {
   const r = await engineExec(args);
@@ -280,8 +309,11 @@ export function handler(req, res) {
     }
   }
   if (route === "/api/guards/status" && req.method === "GET") {
-    return engineJson(["status"])
-      .then((j) => send(res, 200, j))
+    // Composed from two binaries (guard-config + runbox/vault) into the same
+    // combined shape the browser has always received — an internal routing
+    // detail, not an API contract change.
+    return Promise.all([guardsJson(["status"]), engineJson(["status"])])
+      .then(([g, e]) => send(res, 200, { ...g, ...e }))
       .catch((e) => send(res, 500, { error: e.message }));
   }
   if (route === "/api/guards/list" && req.method === "GET") {
@@ -295,12 +327,15 @@ export function handler(req, res) {
       // ("__proto__", "toString") would otherwise resolve to an Object
       // prototype member — non-callable ones threw here and HUNG the
       // request (found by this route's own suite, 2026-08-07).
-      const build = typeof b.verb === "string" && Object.hasOwn(ENGINE_VERBS, b.verb) ? ENGINE_VERBS[b.verb] : null;
-      const args = build && build(b);
+      const verb = typeof b.verb === "string" ? b.verb : null;
+      const table = verb && Object.hasOwn(GUARDS_VERBS, verb) ? GUARDS_VERBS
+        : verb && Object.hasOwn(ENGINE_VERBS, verb) ? ENGINE_VERBS
+        : null;
+      const args = table && table[verb](b);
       if (!args) return send(res, 400, { error: `verb "${b.verb}" is not allowed here or its arg is invalid` });
-      const r = await engineExec([b.verb, ...args]);
-      // A non-zero engine exit is a RESULT, not a transport error: 200 with
-      // the code and output tail, so the page can show exactly what failed.
+      const r = await (table === GUARDS_VERBS ? guardsExec([verb, ...args]) : engineExec([verb, ...args]));
+      // A non-zero exit is a RESULT, not a transport error: 200 with the
+      // code and output tail, so the page can show exactly what failed.
       send(res, 200, { code: r.code, out: (r.stdout + r.stderr).slice(-4000) });
     });
   }

@@ -1,15 +1,13 @@
-// node --test hooks/guard.test.mjs  (run from C:\code\guards)
+// node --test apps/toolbelt/guards/guard.test.mjs  (run from the repo root)
 //
-// hooks/guard.mjs is the interactive PreToolUse security hook Claude Code
-// calls on every Edit/Write/NotebookEdit/Read (registered in
-// ~/.claude/settings.json) -- closes #22. Split the same way kernel/guard.mjs
-// (pure decide()) / kernel/guardhook.mjs (I/O) is split: the rule-level tests
-// below import decide() directly, so covgate can actually see this file's
-// lines execute (a subprocess's coverage is invisible to the parent test
-// process's V8 instrumentation; a plain import's is not). A second, smaller
-// group spawns the real file as a subprocess -- the only way to prove the I/O
-// wrapper's fail-closed contract (bad config, unreadable stdin, exit codes)
-// end to end, mirroring kernel/guardhook.test.mjs.
+// guard.mjs is the interactive PreToolUse security hook Claude Code calls on
+// every Edit/Write/NotebookEdit/Read (registered in ~/.claude/settings.json).
+// The rule-level tests below import decide() directly, so coverage tooling
+// can actually see this file's lines execute (a subprocess's coverage is
+// invisible to the parent test process's V8 instrumentation; a plain
+// import's is not). A second, smaller group spawns the real file as a
+// subprocess -- the only way to prove the I/O wrapper's fail-closed contract
+// (bad config, unreadable stdin, exit codes) end to end.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, spawn } from "node:child_process";
@@ -193,8 +191,8 @@ test("a task.json that is not valid JSON is treated as no declaration -- owned p
 // decide() cannot cover: config/stdin failures and the enabled flag.
 // ---------------------------------------------------------------------------
 
-// Runs the REAL hooks/guard.mjs (not a copy) pointed at a fixture config via
-// ACC_GUARD_CONFIG — this file's coverage instrumentation stays attached to
+// Runs the REAL guard.mjs (not a copy) pointed at a fixture config via
+// GUARDS_CONFIG — this file's coverage instrumentation stays attached to
 // the actual source under test, unlike spawning a copy at a different path.
 let seq = 0;
 function run(config, payload) {
@@ -209,7 +207,7 @@ function run(config, payload) {
     encoding: "utf8",
     input: payload === undefined ? "" : JSON.stringify(payload),
     timeout: 10000,
-    env: { ...process.env, ACC_GUARD_CONFIG: configPath },
+    env: { ...process.env, GUARDS_CONFIG: configPath },
   });
   return { code: r.status, err: String(r.stderr || "") };
 }
@@ -245,13 +243,13 @@ test("wrapper: a real allow from decide() reaches the process as exit 0", () => 
 test("wrapper: a stdin that never ends is still bounded by the read timeout, and fails closed", async () => {
   // spawnSync's `input` always closes the write end once delivered, so it can
   // never exercise the timeout arm -- only a live, still-open stdin can.
-  // ACC_GUARD_STDIN_TIMEOUT_MS shrinks the 4s production cap to something a
+  // GUARDS_STDIN_TIMEOUT_MS shrinks the 4s production cap to something a
   // fast-tier test can actually wait out.
   const configPath = path.join(BASE, `wrapper-config-${seq++}.json`);
   fs.writeFileSync(configPath, JSON.stringify({ enabled: true }));
   const child = spawn(process.execPath, [GUARD_PATH], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, ACC_GUARD_CONFIG: configPath, ACC_GUARD_STDIN_TIMEOUT_MS: "50" },
+    env: { ...process.env, GUARDS_CONFIG: configPath, GUARDS_STDIN_TIMEOUT_MS: "50" },
   });
   let err = "";
   child.stderr.on("data", (c) => (err += c));
