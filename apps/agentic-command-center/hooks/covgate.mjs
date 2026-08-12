@@ -140,11 +140,17 @@ function main() {
         process.exit(1);
       }
       changed = changedLibFiles(
-        git(["diff", "--name-only", range.oldrev, range.newrev], cwd)
+        git(["diff", "--name-only", "--relative", range.oldrev, range.newrev], cwd)
       ).filter((f) => fs.existsSync(path.join(cwd, f)));
     } else {
       changed = changedLibFiles([
-        ...git(["diff", "--name-only", "HEAD"], cwd),
+        // --relative: paths relative to cwd, not the repo root — identical
+        // when cwd IS the repo root (the standalone repo), required when cwd
+        // is a subdirectory of a larger repo (e.g. this repo vendored into a
+        // monorepo). ls-files needs no equivalent flag: it's already
+        // cwd-relative by default (--full-name would be the opt-IN to
+        // root-relative, and this doesn't pass it).
+        ...git(["diff", "--name-only", "--relative", "HEAD"], cwd),
         ...git(["ls-files", "--others", "--exclude-standard"], cwd),
       ]).filter((f) => fs.existsSync(path.join(cwd, f)));
     }

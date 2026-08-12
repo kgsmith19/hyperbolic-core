@@ -1,19 +1,22 @@
-name: PR Gate
+name: "ACC PR Gate"
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "apps/agentic-command-center/**"
+      - "apps/toolbelt/guards/**"
   merge_group:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pr-gate-${{ github.event.pull_request.number || github.ref }}
+  group: acc-pr-gate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
-  ACC_ROUTING_MD: ${{ github.workspace }}/hooks/fixtures/ROUTING.md
+  ACC_ROUTING_MD: ${{ github.workspace }}/apps/agentic-command-center/hooks/fixtures/ROUTING.md
 
 jobs:
   portable:
@@ -28,6 +31,7 @@ jobs:
           node-version: '22'
       - name: Portable test suite
         run: npm test
+        working-directory: apps/agentic-command-center
       - name: Expose the integration diff to covgate
         shell: bash
         run: |
@@ -40,6 +44,7 @@ jobs:
           fi
       - name: Changed-file coverage
         run: npm run covgate
+        working-directory: apps/agentic-command-center
 
   windows-integration:
     name: Windows integration
@@ -51,15 +56,19 @@ jobs:
           node-version: '22'
       - name: Native test suite
         run: npm run test:windows
+        working-directory: apps/agentic-command-center
       - name: Launch-shim tests
         shell: pwsh
         run: powershell -File shim/claude.test.ps1
+        working-directory: apps/agentic-command-center
       - name: Cap-watcher tests
         shell: pwsh
         run: powershell -File watcher/claude-cap-watch.test.ps1
+        working-directory: apps/agentic-command-center
       - name: Cap-watcher installer tests
         shell: pwsh
         run: powershell -File watcher/install-cap-watch-task.test.ps1
+        working-directory: apps/agentic-command-center
 
   ui:
     name: UI build and ACC contract
@@ -70,36 +79,36 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: ui/package-lock.json
+          cache-dependency-path: apps/agentic-command-center/ui/package-lock.json
       - run: npm ci
-        working-directory: ui
+        working-directory: apps/agentic-command-center/ui
       - run: npm run build
-        working-directory: ui
+        working-directory: apps/agentic-command-center/ui
       - name: Cache Playwright Chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: acc-ui-playwright-chromium-${{ runner.os }}-${{ hashFiles('ui/package-lock.json') }}
+          key: acc-ui-playwright-chromium-${{ runner.os }}-${{ hashFiles('apps/agentic-command-center/ui/package-lock.json') }}
       - run: npx playwright install --with-deps chromium
-        working-directory: ui
+        working-directory: apps/agentic-command-center/ui
       - name: Contract end-to-end against the monorepo ACC server
         run: npm run e2e
-        working-directory: ui
+        working-directory: apps/agentic-command-center/ui
         env:
-          ACC_DIR: ${{ github.workspace }}
+          ACC_DIR: ${{ github.workspace }}/apps/agentic-command-center
       - name: Upload UI Playwright failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: acc-ui-playwright-failure-evidence
           path: |
-            ui/playwright-report/
-            ui/test-results/
+            apps/agentic-command-center/ui/playwright-report/
+            apps/agentic-command-center/ui/test-results/
           if-no-files-found: ignore
           retention-days: 14
 
   pr-gate:
-    name: PR Gate
+    name: ACC PR Gate
     if: always()
     needs: [portable, windows-integration, ui]
     runs-on: ubuntu-latest
