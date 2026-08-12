@@ -1,0 +1,18 @@
+.acc/
+vault.json
+runbox/
+runner/state/
+runner/logs/
+runner/directives/
+runner/stop/
+runner/alerts/
+runner/jobs/
+watcher/*.log
+*.bak*
+watcher/claude-cap-watch.state.json
+node_modules/
+test-results/
+playwright-report/
+
+# Local agent worktrees
+.worktrees/

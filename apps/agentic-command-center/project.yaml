@@ -1,0 +1,34 @@
+# Repository-specific facts for tools and contributors. The external standard
+# reference is informational; this repository owns its workflow and settings.
+
+project:
+  name: agentic-command-center
+  type: node-cli-service-and-react-ui
+
+runtime:
+  node_min: "22"
+  package_manager: npm
+  operating_systems: [linux, windows]
+  runtime_dependencies: 0
+
+commands:
+  setup: npm install
+  test: npm test
+  test_windows: npm run test:windows
+  coverage: npm run covgate
+  ui_setup: cd ui && npm ci
+  ui_build: cd ui && npm run build
+  ui_e2e: cd ui && ACC_DIR=.. npm run e2e
+  dev: npm run gui
+
+ci:
+  workflow: .github/workflows/ci.yml
+  required_check: "PR Gate"
+  triggers: [pull_request, merge_group]
+
+work_tracking:
+  system: github-issues
+
+standard:
+  repo: kgsmith19/agent-engineering-standard
+  lock_file: standard.lock

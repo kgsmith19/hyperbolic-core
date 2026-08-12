@@ -1,0 +1,4 @@
+# shim/claude is a POSIX shell script (Git Bash) — CRLF
+# line endings break `#!/bin/sh` on some interpreters, so pin them to LF
+# regardless of the checking-out machine's core.autocrlf.
+shim/claude text eol=lf

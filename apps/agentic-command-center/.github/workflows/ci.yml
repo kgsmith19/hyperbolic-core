@@ -1,0 +1,112 @@
+name: PR Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACC_ROUTING_MD: ${{ github.workspace }}/hooks/fixtures/ROUTING.md
+
+jobs:
+  portable:
+    name: Portable tests and coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Portable test suite
+        run: npm test
+      - name: Expose the integration diff to covgate
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin "${{ github.event.pull_request.base.ref }}" --quiet
+            BASE_SHA=$(git merge-base "origin/${{ github.event.pull_request.base.ref }}" HEAD)
+            git reset --soft "$BASE_SHA"
+          elif [ "${{ github.event_name }}" = "merge_group" ]; then
+            git reset --soft "${{ github.event.merge_group.base_sha }}"
+          fi
+      - name: Changed-file coverage
+        run: npm run covgate
+
+  windows-integration:
+    name: Windows integration
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Native test suite
+        run: npm run test:windows
+      - name: Launch-shim tests
+        shell: pwsh
+        run: powershell -File shim/claude.test.ps1
+      - name: Cap-watcher tests
+        shell: pwsh
+        run: powershell -File watcher/claude-cap-watch.test.ps1
+      - name: Cap-watcher installer tests
+        shell: pwsh
+        run: powershell -File watcher/install-cap-watch-task.test.ps1
+
+  ui:
+    name: UI build and ACC contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+        working-directory: ui
+      - run: npm run build
+        working-directory: ui
+      - name: Cache Playwright Chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: acc-ui-playwright-chromium-${{ runner.os }}-${{ hashFiles('ui/package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+        working-directory: ui
+      - name: Contract end-to-end against the monorepo ACC server
+        run: npm run e2e
+        working-directory: ui
+        env:
+          ACC_DIR: ${{ github.workspace }}
+      - name: Upload UI Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: acc-ui-playwright-failure-evidence
+          path: |
+            ui/playwright-report/
+            ui/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  pr-gate:
+    name: PR Gate
+    if: always()
+    needs: [portable, windows-integration, ui]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm every correctness job passed
+        shell: bash
+        run: |
+          test "${{ needs.portable.result }}" = "success"
+          test "${{ needs.windows-integration.result }}" = "success"
+          test "${{ needs.ui.result }}" = "success"
