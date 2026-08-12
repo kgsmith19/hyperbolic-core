@@ -14,20 +14,22 @@ Planning-only engagement. These artifacts contain architecture decisions, specif
 
 | Artifact | Phase | Status |
 | --- | --- | --- |
-| `00-canonical-names.md` | 1 | pending |
-| `01-inventory.md` | 1 | pending |
-| `02-health-audit.md` | 2 | pending |
-| `03-v1-definition.md` | 3 | pending |
-| `04-adrs.md` | 4 | pending |
-| `05-a-hyperbolic-core.md` … `05-h-idea-intake.md` | 5 | pending |
-| `06-supabase-schema.md` | 6 | pending |
-| `07-brain-architecture.md` | 7 | pending |
-| `08-llm-handlers.md` | 8 | pending |
-| `09-design-system.md` | 9 | pending |
-| `10-cicd-deployment.md` | 10 | pending |
-| `11-roadmap.md` + `issues/` | 11 | pending |
-| `12-risk-register.md` | 12 | pending |
-| `13-dissent.md` | 12 | pending |
+| `00-canonical-names.md` | 1 | complete |
+| `01-inventory.md` | 1 | complete |
+| `02-health-audit.md` | 2 | complete |
+| `03-v1-definition.md` | 3 | complete |
+| `04-adrs.md` | 4 | complete |
+| `05-a-hyperbolic-core.md` … `05-h-idea-intake.md` | 5 | complete (8 files) |
+| `06-supabase-schema.md` | 6 | complete |
+| `07-brain-architecture.md` | 7 | complete |
+| `08-llm-handlers.md` | 8 | complete |
+| `09-design-system.md` | 9 | complete |
+| `10-cicd-deployment.md` | 10 | complete |
+| `11-roadmap.md` + `issues/` (64 drafts) | 11 | complete |
+| `12-risk-register.md` | 12 | complete |
+| `13-dissent.md` | 12 | complete |
+
+The engagement is complete. The Open Decisions Register in `12-risk-register.md` section 6 lists the thirteen operator decisions (defaults adopted throughout); `11-roadmap.md` sequences all 64 issues across six milestones with the EARS coverage assertion.
 
 ## Standing note on the committed-artifacts rule
 
