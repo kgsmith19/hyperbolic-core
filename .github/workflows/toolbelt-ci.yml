@@ -39,6 +39,12 @@ jobs:
       - name: Prepare Prompt Organizer test sessions
         run: node tests/export-test-sessions.mjs
         working-directory: apps/toolbelt/apps/prompt-organizer
+      - name: Install Toolbelt dependencies
+        run: npm ci
+        working-directory: apps/toolbelt
+      - name: Check Toolbelt manifests
+        run: npm run manifests:check
+        working-directory: apps/toolbelt
       - name: Run Toolbelt tests
         run: node --test "tests/*.test.mjs"
         working-directory: apps/toolbelt
