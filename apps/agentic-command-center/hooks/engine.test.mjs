@@ -19,7 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { main, RUNNERS } from "./engine.mjs";
+import { main, RUNNERS, isDeniedVaultKey } from "./engine.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ENGINE_PATH = path.join(HERE, "engine.mjs");
@@ -427,6 +427,108 @@ test("vault-import: no KEY=VALUE lines at all fails", async () => {
   const r = await withStdin("# only a comment\n\n", () => run(root, ["vault-import"]));
   assert.equal(r.code, 1);
   assert.match(r.err, /no KEY=VALUE lines/);
+});
+
+// ---------------------------------------------------------------------------
+// vault-import: ADR-05 provider-key denylist (SEC-01) -- the vault must
+// structurally refuse API keys, not just discourage them by convention.
+// ---------------------------------------------------------------------------
+
+test("vault-import: every named provider key is refused, whole import, nothing written", async () => {
+  for (const key of [
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY",
+  ]) {
+    const root = sandbox({ enabled: true, secrets: [], protected: [] });
+    const r = await withStdin(`${key}=sk-fake-not-a-real-secret\n`, () => run(root, ["vault-import"]));
+    assert.equal(r.code, 1, `${key} must be refused`);
+    assert.match(r.err, /Infisical/, `${key}'s error must name Infisical as the destination`);
+    assert.ok(r.err.includes(key), "the error names the offending key, never the value");
+    assert.ok(!r.err.includes("sk-fake-not-a-real-secret"), "the error must never echo the value");
+    assert.ok(!fs.existsSync(path.join(root, "vault.json")), `${key} alone must leave vault.json unwritten`);
+  }
+});
+
+test("vault-import: the generic *_API_KEY suffix is refused regardless of provider name", async () => {
+  const root = sandbox({ enabled: true, secrets: [], protected: [] });
+  const r = await withStdin("SOME_FUTURE_PROVIDER_API_KEY=x\n", () => run(root, ["vault-import"]));
+  assert.equal(r.code, 1);
+  assert.match(r.err, /Infisical/);
+  assert.ok(!fs.existsSync(path.join(root, "vault.json")));
+});
+
+test("vault-import: the denylist matches case-insensitively", async () => {
+  const root = sandbox({ enabled: true, secrets: [], protected: [] });
+  const r = await withStdin("anthropic_api_key=x\n", () => run(root, ["vault-import"]));
+  assert.equal(r.code, 1);
+  assert.match(r.err, /Infisical/);
+  assert.ok(!fs.existsSync(path.join(root, "vault.json")));
+});
+
+test("vault-import: one denied key refuses the WHOLE import, including the otherwise-fine keys", async () => {
+  const root = sandbox({ enabled: true, secrets: [], protected: [] });
+  const stdin = ["FINE_KEY=abc123", "OPENAI_API_KEY=x", "ANOTHER_FINE_ONE=def456"].join("\n");
+  const r = await withStdin(stdin, () => run(root, ["vault-import"]));
+  assert.equal(r.code, 1);
+  assert.match(r.err, /Infisical/);
+  assert.ok(!fs.existsSync(path.join(root, "vault.json")), "FINE_KEY must not be stored just because it wasn't the bad one");
+});
+
+test("vault-import: a denied import leaves pre-existing vault content untouched", async () => {
+  const root = sandbox({ enabled: true, secrets: [], protected: [] });
+  fs.writeFileSync(path.join(root, "vault.json"), JSON.stringify({ EXISTING: "keepme" }));
+  const r = await withStdin("GOOGLE_API_KEY=x\n", () => run(root, ["vault-import"]));
+  assert.equal(r.code, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, "vault.json"), "utf8")), { EXISTING: "keepme" });
+});
+
+test("vault-import: non-key convenience values are unaffected by the denylist (ADR-05 scope)", async () => {
+  const root = sandbox({ enabled: true, secrets: [], protected: [] });
+  // Deliberately NOT broadened to TOKEN/SECRET-shaped names -- see ADR-05:
+  // the vault stays the right place for operator-machine convenience values.
+  const stdin = ["GITHUB_TOKEN=x", "DB_PASSWORD=y", "API_KEY=z"].join("\n");
+  const r = await withStdin(stdin, () => run(root, ["vault-import"]));
+  assert.equal(r.code, 0);
+  const v = JSON.parse(fs.readFileSync(path.join(root, "vault.json"), "utf8"));
+  assert.deepEqual(v, { GITHUB_TOKEN: "x", DB_PASSWORD: "y", API_KEY: "z" });
+});
+
+// isDeniedVaultKey, direct and exhaustive (the real denylist is small and
+// fixed, so exhaustive is cheap and stronger than sampling): every casing of
+// every named provider key is denied.
+//
+// Honest limitation, found by mutation testing rather than assumed away:
+// every one of the five named providers already ends in "_API_KEY", so the
+// `_API_KEY$` regex branch alone catches all five regardless of case: there
+// is currently no input that can distinguish "the Set lookup's own
+// `.toUpperCase()` normalization works" from "it's a no-op", because the
+// regex branch's independent `/i` flag masks it completely. Confirmed:
+// deleting `.toUpperCase()` from the implementation left this entire suite,
+// including the case below, fully green. That normalization is kept anyway
+// as forward-compatible defensive code -- it becomes load-bearing the
+// moment DENIED_VAULT_KEYS gains an entry that doesn't end in "_API_KEY" --
+// but claiming a test here "covers" it would be false confidence. Recorded
+// as an accepted, understood gap rather than a silently unverified one.
+test("isDeniedVaultKey: every casing of every named provider key is denied", () => {
+  const names = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"];
+  const casings = (s) => [s, s.toLowerCase(), s[0] + s.slice(1).toLowerCase(), s.split("").map((c, i) => (i % 2 ? c.toLowerCase() : c)).join("")];
+  for (const name of names) {
+    for (const variant of casings(name)) {
+      assert.equal(isDeniedVaultKey(variant), true, `expected ${variant} to be denied`);
+    }
+  }
+});
+
+test("isDeniedVaultKey: an unrelated name is not denied, including near-miss substrings", () => {
+  for (const safe of ["GITHUB_TOKEN", "DB_PASSWORD", "API_KEY", "ANTHROPIC_API_KEYS", "MY_ANTHROPIC_API_KEY_BACKUP"]) {
+    // ANTHROPIC_API_KEYS (trailing S) and MY_..._BACKUP (suffix after the
+    // match) are deliberate near-misses: neither the exact Set nor the
+    // end-anchored regex should fire on them.
+    assert.equal(isDeniedVaultKey(safe), false, `expected ${safe} to be allowed`);
+  }
 });
 
 test("vault-rm: removes an existing key, fails on a missing one", async () => {

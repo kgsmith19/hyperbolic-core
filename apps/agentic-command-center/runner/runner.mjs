@@ -129,8 +129,9 @@ export function killTree(child, platform = process.platform) {
 export function runClaudeOnce(job) {
   return new Promise((resolveRun) => {
     // Deliberately NOT --bare: each session must keep the user's hook stack —
-    // guard.mjs is the safety layer that makes bypassPermissions acceptable.
-    // The bootstrap goes over STDIN, never argv — argv is now quoted/shell-
+    // the PreToolUse guard in apps/toolbelt/guards (extracted from this repo's
+    // former hooks/guard.mjs) is the safety layer that makes bypassPermissions
+    // acceptable. The bootstrap goes over STDIN, never argv — argv is now quoted/shell-
     // free per platform via hooks/cmdline.mjs (see OI-023); a multi-word
     // prompt in argv still would not survive the shell boundary intact.
     const args = [
