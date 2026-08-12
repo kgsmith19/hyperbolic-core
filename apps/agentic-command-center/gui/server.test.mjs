@@ -30,10 +30,31 @@ const KERNEL = {
 const resetPolicy = () => fs.writeFileSync(process.env.ACC_POLICY, JSON.stringify({ kernel: { ...KERNEL, _note: "fixture" } }, null, 2));
 
 const { startServer, handler, cli } = await import("./server.mjs");
-let srv, base;
-before(async () => { const s = await startServer({ port: 0 }); srv = s.server; base = `http://127.0.0.1:${s.port}`; });
+let srv, base, TOKEN;
+// ACC-5: every /api/* request now needs X-ACC-Token. This suite has ~60
+// request call sites (bare `fetch(...)` plus the jpost/gpost/ppost/lpost
+// helpers below, which are all just aliases of jpost) — rather than touch
+// each one, the shared sandbox server's token is attached here, once, to any
+// request this file sends to ITS OWN `base`. `fetch` is looked up by every
+// call site at call time (plain global reference, not imported), so
+// patching it here before any test body runs is enough; `after` restores it.
+// The token-specific negative cases (missing / wrong header) below each spin
+// up their own dedicated server instead of reusing this one, so they are
+// never shadowed by this default.
+const REAL_FETCH = globalThis.fetch;
+before(async () => {
+  const s = await startServer({ port: 0 });
+  srv = s.server; base = `http://127.0.0.1:${s.port}`; TOKEN = s.token;
+  globalThis.fetch = (input, init) => {
+    const url = typeof input === "string" ? input : input.url;
+    const authed = url.startsWith(base) && url.includes("/api/")
+      ? { ...init, headers: { ...(init && init.headers), "X-ACC-Token": TOKEN } }
+      : init;
+    return REAL_FETCH(input, authed);
+  };
+});
 beforeEach(resetPolicy);
-after(() => { srv.close(); fs.rmSync(BASE, { recursive: true, force: true }); });
+after(() => { globalThis.fetch = REAL_FETCH; srv.close(); fs.rmSync(BASE, { recursive: true, force: true }); });
 
 const good = () => ({ ...KERNEL, budget: { ...KERNEL.budget, toolCalls: 150 } });
 // One JSON-POST helper for every group; each group aliases it for readability.
@@ -140,7 +161,8 @@ test("cli(): starts a server and logs LISTENING <port>; --port is optional (defa
     withoutPort = await cli(["node", "server.mjs"]);
     assert.match(logs.join("\n"), /^LISTENING \d+$/m);
     assert.ok(withPort.port > 0 && withoutPort.port > 0);
-    const r = await fetch(`http://127.0.0.1:${withPort.port}/api/kernel-policy`);
+    assert.match(logs.join("\n"), /^http:\/\/127\.0\.0\.1:\d+\/#acc-token=.+$/m, "the one-time bootstrap fragment URL must be printed too");
+    const r = await fetch(`http://127.0.0.1:${withPort.port}/api/kernel-policy`, { headers: { "X-ACC-Token": withPort.token } });
     assert.equal(r.status, 200);
   } finally {
     console.log = orig;
@@ -157,7 +179,12 @@ test("CLI: prints LISTENING <port> and serves on it", async () => {
   const line = await new Promise((res) => child.stdout.once("data", (d) => res(String(d))));
   const m = line.match(/^LISTENING (\d+)/);
   assert.ok(m, `expected LISTENING banner, got: ${line}`);
-  const r = await fetch(`http://127.0.0.1:${m[1]}/api/kernel-policy`);
+  // The subprocess inherits this process's ACC_ROOT (unchanged so far), so it
+  // reads the same token file the shared sandbox server above already
+  // created — read it straight from disk rather than racing stdout buffering
+  // for a second line.
+  const token = fs.readFileSync(path.join(process.env.ACC_ROOT, "gui-token"), "utf8").split(/\r?\n/, 1)[0];
+  const r = await fetch(`http://127.0.0.1:${m[1]}/api/kernel-policy`, { headers: { "X-ACC-Token": token } });
   assert.equal(r.status, 200);
   child.kill();
 });
@@ -1035,3 +1062,152 @@ test("AC-113: every launch mutation demands X-ACC and local Origin", async () =>
   assert.deepEqual(await (await fetch(`${base}/api/directives`)).json(), []);
   assert.equal(runnerCalls().length, 0);
 });
+
+// ------------------------------------------------------------- session credential (ACC-5, SEC-04 closure, m2-09)
+// X-ACC-Token is the actual auth boundary, additive on top of the CSRF-
+// hygiene checks proven all through this file already (loopback bind, local
+// Host, local Origin, X-ACC on POST) — none of them move or weaken. Every
+// case below gets its OWN fresh ACC_ROOT via mkdtempSync and calls
+// REAL_FETCH directly: the shared sandbox server's token (TOKEN, attached
+// automatically to `base` requests above) was already created long before
+// any test body in this file runs, so it is the wrong server to observe
+// "no token file yet" on, and the wrong token to send when a test's whole
+// point is a missing/wrong one.
+function withTempAccRoot(run) {
+  const root = fs.mkdtempSync(path.join(BASE, "token-"));
+  const savedRoot = process.env.ACC_ROOT, savedPolicy = process.env.ACC_POLICY;
+  process.env.ACC_ROOT = root;
+  process.env.ACC_POLICY = path.join(root, "policy.json");
+  fs.writeFileSync(process.env.ACC_POLICY, JSON.stringify({ kernel: KERNEL }, null, 2));
+  return Promise.resolve().then(() => run(root)).finally(() => {
+    process.env.ACC_ROOT = savedRoot; process.env.ACC_POLICY = savedPolicy;
+  });
+}
+
+test("ACC-5: the token file is created with owner-only permissions on first start, absent before", () =>
+  withTempAccRoot(async (root) => {
+    const tokenPath = path.join(root, "gui-token");
+    assert.equal(fs.existsSync(tokenPath), false, "precondition: no token file yet");
+    const s = await startServer({ port: 0 });
+    try {
+      assert.ok(fs.existsSync(tokenPath), "starting the server must create the token file");
+      assert.equal(typeof s.token, "string");
+      assert.equal(s.token.length, 43, "32 random bytes as unpadded base64url is 43 characters");
+      assert.match(s.token, /^[A-Za-z0-9_-]+$/, "base64url alphabet only");
+      assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), s.token, "the file must hold exactly the token the server is using");
+      if (process.platform !== "win32") {
+        assert.equal(fs.statSync(tokenPath).mode & 0o777, 0o600, "token file must be owner-only (0600)");
+      }
+    } finally { s.server.close(); }
+  })
+);
+
+test("ACC-5: an existing token file is loaded verbatim, never regenerated", () =>
+  withTempAccRoot(async (root) => {
+    const tokenPath = path.join(root, "gui-token");
+    fs.writeFileSync(tokenPath, "fixture-preexisting-token-value\n", { mode: 0o600 });
+    const s = await startServer({ port: 0 });
+    try {
+      assert.equal(s.token, "fixture-preexisting-token-value");
+      assert.equal(fs.readFileSync(tokenPath, "utf8"), "fixture-preexisting-token-value\n", "an existing file must not be rewritten — restart reuses it, only deleting it rotates (gui/README.md)");
+    } finally { s.server.close(); }
+  })
+);
+
+test("ACC-5: an existing but empty/whitespace-only token file is treated as absent — a fresh token is minted, never an empty credential", () =>
+  withTempAccRoot(async (root) => {
+    const tokenPath = path.join(root, "gui-token");
+    fs.writeFileSync(tokenPath, "   \n", { mode: 0o600 }); // corrupt/truncated write, e.g. a crash mid-create
+    const s = await startServer({ port: 0 });
+    const b = `http://127.0.0.1:${s.port}`;
+    try {
+      assert.ok(s.token.length > 0, "must never operate with an empty in-memory token");
+      assert.notEqual(s.token.trim(), "");
+      // If the empty fixture had become the live credential, a request with
+      // NO header at all (presented "" via tokenMatches' own fallback) would
+      // wrongly match an empty stored token. It must not.
+      assert.equal((await REAL_FETCH(`${b}/api/kernel-policy`)).status, 401);
+      assert.equal((await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": s.token } })).status, 200);
+    } finally { s.server.close(); }
+  })
+);
+
+test("ACC-5: ACC_GUI_TOKEN_FILE redirects the token path, mirroring the ACC_ROOT/ACC_POLICY seam style", () =>
+  withTempAccRoot(async (root) => {
+    const customPath = path.join(BASE, "custom-gui-token");
+    fs.rmSync(customPath, { force: true });
+    process.env.ACC_GUI_TOKEN_FILE = customPath;
+    try {
+      const s = await startServer({ port: 0 });
+      try {
+        assert.ok(fs.existsSync(customPath), "token must be created at ACC_GUI_TOKEN_FILE when set");
+        assert.equal(fs.existsSync(path.join(root, "gui-token")), false, "the default <ACC_ROOT>/gui-token path must be untouched once redirected");
+        assert.equal(fs.readFileSync(customPath, "utf8").trim(), s.token);
+      } finally { s.server.close(); }
+    } finally { delete process.env.ACC_GUI_TOKEN_FILE; }
+  })
+);
+
+test("ACC-5: /api/* rejects a missing token, a wrong token (same length, different length, and empty), and accepts the correct one", () =>
+  withTempAccRoot(async () => {
+    const s = await startServer({ port: 0 });
+    const b = `http://127.0.0.1:${s.port}`;
+    try {
+      const noHeader = await REAL_FETCH(`${b}/api/kernel-policy`);
+      assert.equal(noHeader.status, 401);
+      assert.deepEqual(await noHeader.json(), { error: "unauthorized" }, "must match gui/README.md's error envelope exactly");
+
+      // Same length as the real token: exercises the fixed-length hash-then-
+      // compare path rather than any length-mismatch shortcut.
+      const wrongSameLength = s.token.slice(0, -1) + (s.token.at(-1) === "A" ? "B" : "A");
+      assert.equal(wrongSameLength.length, s.token.length);
+      assert.notEqual(wrongSameLength, s.token);
+      const wrongResp = await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": wrongSameLength } });
+      assert.equal(wrongResp.status, 401);
+
+      assert.equal((await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": "short" } })).status, 401);
+      assert.equal((await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": "" } })).status, 401);
+
+      const ok = await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": s.token } });
+      assert.equal(ok.status, 200);
+    } finally { s.server.close(); }
+  })
+);
+
+// Mutation-testing note (honest limitation, not a gap this suite can close):
+// a hand-designed mutant that replaces tokenMatches' hash-then-compare with
+// the naive "if (presented.length !== token.length) return false; then
+// timingSafeEqual on the raw bytes" pattern survives this entire file
+// unchanged -- every functional assertion above (right token, wrong token at
+// every length, empty, missing) still produces the identical status code,
+// because a timing side-channel is by definition invisible to a pass/fail
+// functional assertion. That naive pattern is the textbook-wrong version:
+// it leaks the real token's length through response latency (an early
+// return on mismatch is fast; a full compare is not), which is exactly what
+// hashing both sides to a fixed 32-byte digest before comparing (see
+// tokenMatches in server.mjs) exists to eliminate. The current
+// implementation is correct by code review and by the SHA-256 hash
+// construction itself, not by anything this functional suite can
+// independently prove -- deliberately not "fixed" with a real-timing
+// measurement test, since a threshold that's reliable across this
+// environment's noise would itself be a source of flakiness, which is worse
+// than an honestly-documented gap.
+test("ACC-5: the check is additive (a correct token never bypasses Origin/Host) and leaves no route-existence oracle for an unauthenticated caller", () =>
+  withTempAccRoot(async () => {
+    const s = await startServer({ port: 0 });
+    const b = `http://127.0.0.1:${s.port}`;
+    try {
+      assert.equal((await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": s.token } })).status, 200, "sanity: the correct token alone succeeds");
+      assert.equal(
+        (await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": s.token, origin: "https://evil.example" } })).status,
+        403,
+        "a foreign Origin must still be refused even with a correct token — additive, not a replacement"
+      );
+      const knownRoute = await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": "wrong" } });
+      const unknownRoute = await REAL_FETCH(`${b}/api/this-route-does-not-exist`, { headers: { "X-ACC-Token": "wrong" } });
+      assert.equal(knownRoute.status, 401);
+      assert.equal(unknownRoute.status, 401);
+      assert.deepEqual(await knownRoute.json(), await unknownRoute.json(), "a known vs unknown route must be indistinguishable before auth");
+    } finally { s.server.close(); }
+  })
+);

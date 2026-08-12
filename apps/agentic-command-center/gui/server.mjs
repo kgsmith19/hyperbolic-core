@@ -4,18 +4,23 @@
 // alongside. Loopback-only, ZERO business logic — reads and writes go through
 // kernel/policy.mjs, the same single owner the WinForms tab used.
 //
-// Ethos answer (OI-022's recorded tension): binds 127.0.0.1 only. A same-user
-// local process could already edit policy.json directly, so no new privilege
-// exists here. The genuinely new risk is web-borne CSRF against a localhost
-// mutator; it is closed by construction — mutating routes demand the custom
-// X-ACC header (unsettable cross-origin without a CORS grant this server
-// never issues), Origin/Host must be local, and no CORS header ever leaves.
+// Ethos answer (OI-022's recorded tension): binds 127.0.0.1 only. The
+// web-borne risk — CSRF against a localhost mutator — is closed by
+// construction: mutating routes demand the custom X-ACC header (unsettable
+// cross-origin without a CORS grant this server never issues), Origin/Host
+// must be local, and no CORS header ever leaves. That left one gap SEC-04
+// named explicitly: X-ACC is CSRF hygiene, not auth, so any OTHER same-user
+// local process could already drive this API just by knowing the port. ACC-5
+// closes it additively — every /api/* request now also demands the
+// X-ACC-Token session credential (see the "session credential" block below)
+// — without moving or weakening anything above.
 import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { randomBytes, timingSafeEqual, createHash } from "node:crypto";
 import { loadKernelPolicy, saveKernelPolicy } from "../kernel/policy.mjs";
 import { DONE_WHEN_MAX, normalizeRouteTag, validateUserDirectiveTags } from "../hooks/directive.mjs";
 
@@ -283,7 +288,67 @@ function send(res, code, body, type = "application/json") {
   res.end(type === "application/json" ? JSON.stringify(body) : body);
 }
 
-export function handler(req, res) {
+// --- session credential (ACC-5 / SEC-04 closure, issue m2-09) --------------
+// The loopback bind + Host/Origin + X-ACC checks above are CSRF hygiene
+// (SEC-04): they stop a web page from driving this API, but any OTHER local
+// process on the machine could already speak to the port with no privilege
+// check at all. X-ACC-Token is the actual auth boundary — additive to every
+// check above; none of them move or weaken. A shared secret, not
+// platform-JWT verification: ACC makes zero network calls today and must
+// keep working fully offline on a single-operator machine, so JWKS fetching
+// (or any other network dependency) is the wrong shape for a loopback socket
+// like this one.
+//
+// Token file: one line, 32 random bytes base64url, mode 0600, created on
+// first use if absent. ACC_GUI_TOKEN_FILE redirects the path (same seam
+// style as ACC_ROOT/ACC_POLICY above); the default is "<ACC_ROOT>/gui-token".
+// Rotation has no dedicated mechanism: delete the file and restart, and a
+// fresh one is minted (gui/README.md documents this for the operator).
+//
+// Read/created exactly once, at the moment a server actually starts
+// (startServer(), below) — NOT re-resolved per request. A real deployment
+// starts one server per process and ACC_ROOT never moves under it, so this
+// is a single filesystem touch for the process's whole life; startServer()
+// pins the result into that server's request handler, so every request
+// after startup is a plain in-memory compare, never a re-read or a
+// re-resolve of ACC_ROOT/ACC_GUI_TOKEN_FILE. (Deliberately NOT a
+// module-global cache keyed off "the current env": this suite exercises one
+// long-lived shared server while freely repointing ACC_ROOT at other
+// sandboxes for unrelated fixtures, same as every other env seam in this
+// file — a cache that silently re-derived on that would rotate the running
+// server's credential out from under it.)
+const tokenFile = () => process.env.ACC_GUI_TOKEN_FILE || path.join(repoRoot(), "gui-token");
+
+function loadOrCreateToken() {
+  const file = tokenFile();
+  try {
+    const line = fs.readFileSync(file, "utf8").split(/\r?\n/, 1)[0].trim();
+    if (line) return line;
+  } catch {} // absent, unreadable, or empty -> mint a fresh one below
+  const fresh = randomBytes(32).toString("base64url");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, fresh + "\n", { mode: 0o600 });
+  return fresh;
+}
+
+// Constant-time compare that never branches on length first: both sides are
+// hashed to a fixed 32-byte SHA-256 digest before crypto.timingSafeEqual, so
+// it always compares equal-length buffers — a length mismatch (the common
+// shape of a guess) can neither throw nor short-circuit the comparison
+// before it starts.
+function tokenMatches(presented, token) {
+  const want = createHash("sha256").update(token).digest();
+  const got = createHash("sha256").update(typeof presented === "string" ? presented : "").digest();
+  return timingSafeEqual(want, got);
+}
+
+// `token` defaults to a freshly loaded/created one so `handler(req, res)` —
+// called directly with no server behind it at all, e.g. a test exercising a
+// single defensive check — still works. startServer() below instead pins ONE
+// token per server instance and passes it explicitly (a closure, not this
+// default), so independent server instances in the same process can never
+// cross-contaminate each other's credential.
+export function handler(req, res, token = loadOrCreateToken()) {
   if (!localHost(req.headers.host)) return send(res, 403, { error: "non-local Host" });
   if (!localOrigin(req.headers.origin)) return send(res, 403, { error: "non-local Origin" });
   // Every mutating route demands the custom header (unsettable cross-origin
@@ -291,6 +356,15 @@ export function handler(req, res) {
   // future route cannot forget it. Non-POST methods carry no mutation.
   if (req.method === "POST" && req.headers["x-acc"] !== "1") return send(res, 403, { error: "missing X-ACC header" });
   const route = req.url.split("?")[0];
+  // Every /api/* request needs the session credential, GET and POST alike
+  // (ACC-5) — checked before any route match so an unauthenticated caller
+  // gets the identical 401 whether the path exists or not: no route-
+  // existence oracle. Non-API GETs (the --ui-dist static path, already open
+  // by design) are unaffected: the browser has to load that page at all
+  // before it can ever hold a token to send.
+  if (route.startsWith("/api/") && !tokenMatches(req.headers["x-acc-token"], token)) {
+    return send(res, 401, { error: "unauthorized" });
+  }
   // With a dist configured, it owns "/" and every non-API GET.
   const dist = process.env.ACC_UI_DIST;
   if (req.method === "GET" && dist && !route.startsWith("/api/")) {
@@ -571,9 +645,10 @@ export function handler(req, res) {
 }
 
 export function startServer({ port = 0 } = {}) {
-  const server = http.createServer(handler);
+  const token = loadOrCreateToken(); // once, before the socket can accept a single request
+  const server = http.createServer((req, res) => handler(req, res, token));
   return new Promise((resolve) => {
-    server.listen(port, "127.0.0.1", () => resolve({ server, port: server.address().port }));
+    server.listen(port, "127.0.0.1", () => resolve({ server, port: server.address().port, token }));
   });
 }
 
@@ -587,6 +662,11 @@ export async function cli(argv = process.argv) {
   if (d !== -1 && argv[d + 1]) process.env.ACC_UI_DIST = argv[d + 1];
   const s = await startServer({ port: i === -1 ? 0 : Number(argv[i + 1]) });
   console.log(`LISTENING ${s.port}`); // consumers (Playwright, scripts) parse this line
+  // One-time bootstrap (ACC-5): the browser reads this URL fragment once to
+  // seed sessionStorage, then strips it (see ui/src/api.ts) — fragments never
+  // reach this server, or any server, which is the whole point. The token
+  // value is never printed or logged anywhere else.
+  console.log(`http://127.0.0.1:${s.port}/#acc-token=${s.token}`);
   return s;
 }
 
