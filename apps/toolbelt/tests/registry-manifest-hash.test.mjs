@@ -85,21 +85,18 @@ for (const { toolId, manifestPath, migrationPath } of REGISTRATIONS) {
 
 import { readdirSync } from "node:fs";
 
-const M3_02_MIGRATION_BASENAMES = [
-  "20260812230000_core_app_registry_extension.sql",
-  "20260812230000_core_app_registry_extension_down.sql",
-  "20260812235000_register_toolbelt.sql",
-  "20260812235000_register_toolbelt_down.sql",
-  "20260812240000_register_prompt-organizer.sql",
-  "20260812240000_register_prompt-organizer_down.sql",
-  "20260812250000_register_network-checker.sql",
-  "20260812250000_register_network-checker_down.sql",
-  "20260813173000_register_network-checker-v1.sql",
-  "20260813173000_register_network-checker-v1_down.sql",
-];
+const REGISTRY_EXTENSION_VERSION = "20260812230000";
+const REGISTRY_MIGRATION_BASENAMES = readdirSync(MIGRATIONS_DIR)
+  .filter((name) => {
+    const version = /^(\d{14})_/.exec(name)?.[1];
+    if (!version || version < REGISTRY_EXTENSION_VERSION || !name.endsWith(".sql")) return false;
+    return /\bcore\.app\b/i.test(readFileSync(join(MIGRATIONS_DIR, name), "utf8"));
+  })
+  .sort();
 
-test("none of the m3-02 migrations (up or down) ever delete a core.app row", () => {
-  for (const name of M3_02_MIGRATION_BASENAMES) {
+test("no on-disk registry-era migration that touches core.app ever deletes a row", () => {
+  assert.ok(REGISTRY_MIGRATION_BASENAMES.length > 0, "expected to discover registry-era core.app migrations on disk");
+  for (const name of REGISTRY_MIGRATION_BASENAMES) {
     const sql = readFileSync(join(MIGRATIONS_DIR, name), "utf8");
     assert.doesNotMatch(
       sql.toLowerCase(),

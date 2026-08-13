@@ -1290,6 +1290,23 @@ test("ACC Shell bridge: one exact configured origin gets a narrow PNA preflight 
         assert.equal(denied.status, 403);
         assert.equal(denied.headers.get("access-control-allow-origin"), null);
       }
+
+      for (const [route, origin, error] of [
+        ["/api/process/status", "https://foreign.example", "non-local Origin"],
+        ["/guards", "https://shell.example", "cross-origin preflight denied"],
+      ]) {
+        const denied = await REAL_FETCH(`${b}${route}`, {
+          method: "OPTIONS",
+          headers: {
+            Origin: origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "X-ACC-Token",
+          },
+        });
+        assert.equal(denied.status, 403, `${origin} must not preflight ${route}`);
+        assert.deepEqual(await denied.json(), { error });
+        assert.equal(denied.headers.get("access-control-allow-origin"), null);
+      }
     } finally {
       s.server.close();
       if (saved === undefined) delete process.env.ACC_ALLOWED_ORIGIN;

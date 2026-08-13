@@ -60,10 +60,10 @@ function coreEventRetentionWithoutCron() {
   return full.slice(0, idx);
 }
 
-// Minimal auth stub: core.run.user_id references auth.users(id) and
-// defaults to auth.uid(), so both must exist for core.run's CREATE TABLE
-// to compile, even though every fixture insert below supplies user_id
-// explicitly (null) and never actually invokes the default.
+// Minimal Supabase stubs: core.run.user_id references auth.users(id) and
+// defaults to auth.uid(), while the baseline migrations grant privileges
+// to Supabase's cluster-wide API roles. Each role creation handles its own
+// duplicate so concurrent scratch-database suites can safely share a cluster.
 const HARNESS_SQL = `
 create schema if not exists auth;
 create table if not exists auth.users (
@@ -72,6 +72,25 @@ create table if not exists auth.users (
 create or replace function auth.uid() returns uuid
 language sql stable
 as $$ select null::uuid $$;
+
+do $$
+begin
+  create role anon nologin;
+exception when duplicate_object then null;
+end
+$$;
+do $$
+begin
+  create role authenticated nologin;
+exception when duplicate_object then null;
+end
+$$;
+do $$
+begin
+  create role service_role nologin;
+exception when duplicate_object then null;
+end
+$$;
 `;
 
 const RUN_ID = "55555555-5555-5555-5555-555555555555";

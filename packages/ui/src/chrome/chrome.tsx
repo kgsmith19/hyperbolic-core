@@ -7,14 +7,13 @@ import { Topbar } from "./topbar";
 import { CommandPalette } from "./command-palette";
 import { ShortcutsOverlay } from "./shortcuts-overlay";
 import { useGlobalKeyboardModel } from "./keyboard";
-import { ZONE_ENTRIES, type Zone } from "./zones";
+import { ZONE_ENTRIES, type NavigateAdapter, type Zone } from "./zones";
 import type { PlatformSession } from "./session";
 import type { ToolPaletteEntry } from "./tool-entry";
 import { NotificationToaster } from "../notifications/toast-stack";
 import { useNotificationStack } from "../notifications/use-notification-stack";
 import { getNotificationSurface } from "../notifications/surface";
 import type { NotificationSurface } from "../notifications/types";
-import type { NavigationHandler } from "./navigation";
 
 /**
  * docs/planning/05-a-hyperbolic-core.md section 7 gives this as a signature
@@ -43,6 +42,22 @@ import type { NavigationHandler } from "./navigation";
  * surface, and a zone publishing through `getNotificationSurface()` reaches
  * that same instance with no prop threading. Passing an explicit surface is
  * for tests and for a document that genuinely needs an isolated one.
+ *
+ * `navigate` is Finding #70's addition (PR #8 security review): NavRail and
+ * CommandPalette previously rendered every ZONE_ENTRIES item -- five
+ * genuinely internal Shell routes alongside `life`, the one real cross-zone
+ * entry -- as a plain `<a href>`, forcing a full document reload on every
+ * click regardless of which zone was clicked. This optional adapter lets a
+ * consumer that DOES own a router (apps/shell, via react-router's
+ * `useNavigate()`) hand Chrome a `(href) => void` callback; internal-route
+ * clicks then call it instead of following the native anchor. Left
+ * undefined by default -- this package still has no router of its own to
+ * assume or depend on (see the `hardNavigateToZone` callback below, which
+ * covers the ONE navigation Chrome performs on its own, the g-chord, and is
+ * unaffected by this prop) -- so every existing caller that doesn't wire a
+ * navigator keeps today's plain-anchor behavior unchanged. `hardNavigate`
+ * entries (currently just `life`) always hard-navigate regardless of what's
+ * wired here; see zones.ts's `shouldNavigateClientSide`.
  */
 export interface ChromeProps {
   activeZone: Zone;
@@ -50,8 +65,7 @@ export interface ChromeProps {
   onSignOut: () => void;
   tools?: readonly ToolPaletteEntry[];
   notifications?: NotificationSurface;
-  /** Lets a host SPA route its own paths while retaining real anchor hrefs. */
-  onNavigate?: NavigationHandler;
+  navigate?: NavigateAdapter;
   children?: React.ReactNode;
 }
 
@@ -79,7 +93,7 @@ function Chrome({
   onSignOut,
   tools,
   notifications,
-  onNavigate,
+  navigate,
   children,
 }: ChromeProps) {
   const [overlay, setOverlay] = React.useState<OverlayState>("none");
@@ -96,20 +110,27 @@ function Chrome({
   const openPalette = React.useCallback(() => setOverlay("palette"), []);
   const openShortcuts = React.useCallback(() => setOverlay("shortcuts"), []);
 
-  const navigate = React.useCallback((zone: Zone) => {
-    // Chrome owns no router. A host adapter decides whether a href belongs
-    // to its SPA; without one, keyboard navigation uses a document load.
+  // The g-chord's own navigation, kept as an always-hard-navigate callback
+  // distinct from the `navigate` PROP above (Finding #70's client-side
+  // adapter) -- deliberately out of that finding's scope, which named only
+  // nav-rail.tsx and command-palette.tsx's anchor-click behavior, not this
+  // keyboard shortcut. Renamed from the prior `navigate` to avoid shadowing
+  // the new prop of the same conceptual name but a different signature
+  // (Zone here vs. href for the prop).
+  const hardNavigateToZone = React.useCallback((zone: Zone) => {
+    // 05-a section 4 / ADR-02: cross-zone navigation is a full document
+    // load, not client-side routing -- there is no router for Chrome (a
+    // packages/ui component with no apps/shell yet) to assume or depend on.
     const entry = ZONE_ENTRIES.find((candidate) => candidate.zone === zone);
-    if (entry) {
-      if (onNavigate) onNavigate(entry.href);
-      else if (typeof window !== "undefined") window.location.assign(entry.href);
+    if (entry && typeof window !== "undefined") {
+      window.location.assign(entry.href);
     }
-  }, [onNavigate]);
+  }, []);
 
   useGlobalKeyboardModel({
     onOpenPalette: openPalette,
     onOpenShortcuts: openShortcuts,
-    onNavigate: navigate,
+    onNavigate: hardNavigateToZone,
   });
 
   return (
@@ -124,7 +145,7 @@ function Chrome({
       >
         Skip to content
       </a>
-      <NavRail activeZone={activeZone} onNavigate={onNavigate} />
+      <NavRail activeZone={activeZone} navigate={navigate} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
           activeZone={activeZone}
@@ -145,7 +166,7 @@ function Chrome({
         onOpenChange={(open) => setOverlay(open ? "palette" : "none")}
         activeZone={activeZone}
         tools={tools}
-        onNavigate={onNavigate}
+        navigate={navigate}
       />
       <ShortcutsOverlay
         open={overlay === "shortcuts"}

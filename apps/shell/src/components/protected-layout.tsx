@@ -82,7 +82,7 @@ function ProtectedLayout({ auth, onSignOut }: ProtectedLayoutProps) {
       onSignOut={onSignOut}
       tools={toolEntries}
       notifications={notificationSurface}
-      onNavigate={navigate}
+      navigate={navigate}
     >
       {/* SH-2a's e2e assertion (05-a section 12) checks for the LITERAL
           absence of [data-app-data] while gated. One coarse wrapper here

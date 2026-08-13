@@ -34,6 +34,7 @@ function bootstrapTokenFromFragment(): void {
   try {
     if (token) {
       window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+      rejectedBootstrapToken = false;
     } else {
       rejectedBootstrapToken = true;
       window.sessionStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -54,6 +55,9 @@ function bootstrapTokenFromFragment(): void {
   }
 }
 bootstrapTokenFromFragment();
+if (typeof window !== "undefined") {
+  window.addEventListener("hashchange", bootstrapTokenFromFragment);
+}
 
 function currentToken(): string {
   if (rejectedBootstrapToken) return "";
