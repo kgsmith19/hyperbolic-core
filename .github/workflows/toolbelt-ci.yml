@@ -62,6 +62,7 @@ jobs:
             tests/registry-manifest-hash.test.mjs \
             tests/registry-migrations-idempotency.test.mjs \
             tests/stage-migrations.test.mjs \
+            tests/toolbelt-workflow.test.mjs \
             tests/validate-manifests.test.mjs \
             tests/validate-migrations.property.test.mjs \
             tests/validate-migrations.test.mjs
@@ -102,7 +103,7 @@ jobs:
       - name: Install browser test dependency
         run: |
           npm install --no-save --no-package-lock @playwright/test@1.52.0
-          npx playwright install --with-deps chromium
+          ./node_modules/.bin/playwright install --with-deps chromium
         working-directory: apps/toolbelt
       - name: Start Prompt Organizer
         run: python3 -m http.server 8812 --directory web >/tmp/prompt-organizer.log 2>&1 &
@@ -120,8 +121,8 @@ jobs:
           echo "Prompt Organizer did not become ready." >&2
           exit 1
       - name: Run Prompt Organizer critical browser journey
-        run: npx playwright test --config playwright.config.mjs
-        working-directory: apps/toolbelt/apps/prompt-organizer
+        run: ./node_modules/.bin/playwright test --config apps/prompt-organizer/playwright.config.mjs
+        working-directory: apps/toolbelt
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:8812
           PROMPT_E2E_MOCK: "1"
@@ -159,8 +160,8 @@ jobs:
           echo "Network Checker did not become ready." >&2
           exit 1
       - name: Run Network Checker critical browser journey
-        run: npx playwright test --config playwright.config.mjs
-        working-directory: apps/toolbelt/apps/network-checker
+        run: ./node_modules/.bin/playwright test --config apps/network-checker/playwright.config.mjs
+        working-directory: apps/toolbelt
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:8787
       - name: Upload Network Checker browser evidence

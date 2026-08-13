@@ -112,7 +112,7 @@ jobs:
         run: npm run healthz-check --workspace=apps/shell
 
       - name: Enforce UI size budget
-        run: npm run size-check --workspace=packages/ui
+        run: node packages/ui/test/size-check.mjs
 
       - name: Enforce Shell size budget
         run: npm run size-check --workspace=apps/shell
