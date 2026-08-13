@@ -63,6 +63,14 @@ begin
   if not exists (select from pg_roles where rolname = 'service_role') then
     create role service_role;
   end if;
+  -- intake_create_schema.sql's own last statement ("alter role authenticator
+  -- set pgrst.db_schemas = ...", mirroring every other schema-exposure
+  -- migration in this repo) needs this role to exist. This sandbox's
+  -- persistent Postgres cluster already had it from other fixtures/prior
+  -- runs, which hid this gap locally; a fresh CI runner's Postgres does not.
+  if not exists (select from pg_roles where rolname = 'authenticator') then
+    create role authenticator;
+  end if;
 end
 $$;
 `;
