@@ -140,6 +140,15 @@ jobs:
       - name: Production build
         run: npm run build --workspace=apps/shell
 
+      - name: Healthz static-asset check (SH-5, m2-04)
+        # Proves dist/healthz is a real static file returning 200 with the
+        # right content when served the same way `vite preview` (and, by
+        # the m2-04 route table, `tailscale serve`) would -- see
+        # apps/shell/test/healthz-check.mjs's own header comment for why a
+        # bare "curl returns 200" is not by itself sufficient proof for an
+        # SPA.
+        run: npm run healthz-check --workspace=apps/shell
+
       - name: Upload Playwright failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
