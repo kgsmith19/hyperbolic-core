@@ -21,6 +21,7 @@ flowchart TD
     m1_10[m1-10 secret scan]
     m1_11[m1-11 ACC defect sweep]
     m1_12[m1-12 Guards overlay + audit]
+    m1_13[m1-13 production bootstrap]
   end
   subgraph M2 [M2 Shell and auth]
     m2_01[m2-01 chrome + palette]
@@ -88,6 +89,8 @@ flowchart TD
   m1_01 --> m1_02
   m1_01 --> m1_03 --> m1_04
   m1_05 --> m1_06 --> m1_07 --> m1_08 --> m1_09
+  m1_05 --> m1_13
+  m2_07 --> m1_13
   m1_02 --> m2_02
   m1_03 --> m2_01
   m1_04 --> m2_01
@@ -202,7 +205,7 @@ What serializes and what parallelizes:
 
 | Milestone | Issues | Theme | Why this order |
 | --- | --- | --- | --- |
-| M1 Platform foundations | 12 | workspace, packages/platform-client and ui tokens/primitives, migrations workflow, IdP owner setup, RLS re-pin sequence, secret scan, ACC defect sweep, Guards config hardening | Everything else consumes these. The 06 migration sequence is order-mandated (S1-S6) and closes SEC-03; the workspace unlocks every package; tokens/primitives unlock every UI issue. |
+| M1 Platform foundations | 13 | workspace, packages/platform-client and ui tokens/primitives, migrations workflow, IdP owner setup, RLS re-pin sequence, secret scan, ACC defect sweep, Guards config hardening, production bootstrap (m1-13, added post-M1) | Everything else consumes these. The 06 migration sequence is order-mandated (S1-S6) and closes SEC-03; the workspace unlocks every package; tokens/primitives unlock every UI issue. |
 | M2 Shell and auth | 9 | shell app, single session, zones, serve routes, shell-ci, deploy.yml Shell unit, LifeOS login migration, ACC loopback token | SH rows are the product's front door and ADR-03's session is a precondition for PO/LifeOS/Intake surfaces. ACC-5 lands here because it is auth work, not a component upgrade. |
 | M3 Toolbelt platform and Idea Intake | 9 | manifests, registry, scaffold, intake schema/API/UI, Forgepad supersession, root client deletion | The platform layer must exist before Idea Intake proves it (05-c conclusion: contract + registry first, then tools are cheap). Deletions land last in the milestone so one idea view is always live. |
 | M4 The Brain | 21 | packages/llm, Handler A, prompt injection path, 16 granular Brain FEAT issues in dependency order, Guards registration, service deploys | Largest addition, deliberately after the platform (DB, auth, deploy pipeline) exists so every Brain issue lands on running rails. The Brain is split per the 07 section map so each slice is one reviewable PR. |
@@ -283,8 +286,11 @@ LOC is the estimated net delta from each issue file. Depends/Blocks list issue i
 | 62 | m6-02-feat-shell-cost-dashboard.md | FEAT(shell): platform cost dashboard | M6 | m4-17, m4-05 | none | +300 |
 | 63 | m6-03-chore-ci-platform-backup.md | CHORE(ci): platform-project backup workflow | M6 | m1-05 | none | +90 |
 | 64 | m6-04-docs-planning-freeze.md | DOCS(planning): freeze docs/planning and record risk sign-offs | M6 | m6-01, m6-02, m6-03 | none | +80 |
+| 65 | m1-13-chore-platform-production-bootstrap.md | CHORE(platform): production bootstrap -- Infisical, VPS, branch protection | M1 | m1-05, m2-07 | none | +60 |
 
-Totals: 64 issues (M1: 12, M2: 9, M3: 9, M4: 21 of which 16 are Brain-specific FEAT slices, M5: 9, M6: 4). Estimated LOC across the set: roughly +22,200 added, -1,700 deleted, net about +20,500, dominated by the Brain (07 section 7.14) and the llm/handler stack (08 section 8); the ACC, Forgepad, root-client, and Network Checker deletions carry the negative side, consistent with the per-artifact LOC tables.
+Totals: 65 issues (M1: 13, M2: 9, M3: 9, M4: 21 of which 16 are Brain-specific FEAT slices, M5: 9, M6: 4). Estimated LOC across the set: roughly +22,260 added, -1,700 deleted, net about +20,560, dominated by the Brain (07 section 7.14) and the llm/handler stack (08 section 8); the ACC, Forgepad, root-client, and Network Checker deletions carry the negative side, consistent with the per-artifact LOC tables.
+
+Issue 65 (m1-13) is a late addition, discovered post-M1 by an implementation-time audit rather than during the original planning phase: `deploy.yml` and `platform-migrations.yml` both landed as real, complete pipelines (per m2-07 and m1-05) but neither had ever been allowed to run to a real outcome, and the concrete Infisical/VPS/branch-protection checklist to change that had never been consolidated into one owned, acceptance-criteria-bearing issue -- only scattered across this file's own gate question 4, `12-risk-register.md`'s Out-of-Brief Register, and (after the PR #9 stabilization pass) `docs/ops/runbook.md`. Numbered 65 rather than resequenced into the M1 block to avoid renumbering every issue after it in this table; its dependency edges in the graph above place it correctly regardless of row position.
 
 ## 5. Coverage assertion: every 03-v1-definition EARS row to its delivering issues
 
@@ -340,7 +346,7 @@ Rows that required issues beyond the per-component 05 plans: none required a new
 1. Command palette (inside m2-01) remains the named cuttable item (05-a gate question 1); confirm keep or cut before M2 starts, it changes only m2-01's scope.
 2. Golden Goose stays out of V1 with the pre-approved conditional slot (05-c section 8.1); if Idea Intake lands under estimate, the addition would enter as a new M5 issue, not an edit to this set.
 3. The Brain harness-economics question (07 gate question 1, 13-dissent C5) does not block the M4 issue order, but its recorded decision is a hard exit criterion of m6-04; answering it before m4-10 avoids rework if operator-machine workers are chosen.
-4. Branch protection for the four required checks (10 gate question 1) is a settings change with no issue file; confirm it is applied when m2-06 and m4-08 land their workflows.
+4. Branch protection for the four required checks (10 gate question 1) is a settings change; the first three checks (Toolbelt, ACC, Shell) now have an owning issue, m1-13, added post-M1 once an implementation-time audit found this was still open; confirm it is applied there, and add `Brain PR Gate` as a fourth required check when m4-08 lands that workflow.
 5. The freeze rule itself (13 gate question 1) is executed by m6-04; a no from the operator converts that issue to a documentation-update issue instead of a freeze.
 
 ## Self-check (Section 10)

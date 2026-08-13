@@ -152,6 +152,27 @@ jobs:
           env-slug: prod
           secret-path: "/platform/shell-deploy/"
           domain: https://app.infisical.com
+      - name: Load the deploy SSH key
+        # Infisical/secrets-action only ever exports secrets as plain
+        # environment variables (GITHUB_ENV) or a .env file -- it has no
+        # SSH-key-file or ssh-agent feature of its own [confirmed against
+        # the action's own README]. Every ssh/scp call below authenticates
+        # as deploy@$DEPLOY_HOST with no -i flag, relying on OpenSSH's
+        # default identity-file lookup, so the private key injected from
+        # Infisical's /platform/shell-deploy/ path (variable name
+        # SHELL_DEPLOY_SSH_KEY, this job's own convention) must be
+        # materialized at that default path before the first ssh call.
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${SHELL_DEPLOY_SSH_KEY:-}" ]; then
+            echo "::error::SHELL_DEPLOY_SSH_KEY was not injected from Infisical (/platform/shell-deploy/) -- cannot authenticate to the deploy host." >&2
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SHELL_DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
       - name: Join tailnet
         uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
         with:
