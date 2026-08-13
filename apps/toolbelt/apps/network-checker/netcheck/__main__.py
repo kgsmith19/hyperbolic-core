@@ -5,6 +5,7 @@
   netcheck scan       environment snapshot (--tier quick/standard/deep)
   netcheck diagnose   ranked causes from everything collected so far
   netcheck inventory  device table, one device's config, or a config diff
+  netcheck change     propose/approve/apply a gated device change
   netcheck serve      dashboard at http://127.0.0.1:8787
   netcheck sync       push unsynced rows to Supabase
   netcheck experiment tag or compare labeled probe runs (--label / --compare)
@@ -20,8 +21,8 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from . import (bundle, diagnose, environ, experiment, inventory, llmlog,
-               probes, rank, route as route_mod, server, store, watch)
+from . import (bundle, change_cli, diagnose, environ, experiment, inventory,
+               llmlog, probes, rank, route as route_mod, server, store, watch)
 from . import __version__
 
 DB = Path(os.environ.get("NETCHECK_DB", Path.home() / ".netcheck" / "netcheck.db"))
@@ -217,7 +218,6 @@ def main(argv=None):
     p.add_argument("--version", action="version", version=f"netcheck {__version__}")
     p.add_argument("--target", default=TARGET)
     sub = p.add_subparsers(dest="cmd", required=True)
-
     sub.add_parser("probe", help="one sample").set_defaults(fn=cmd_probe)
     sc = sub.add_parser("scan", help="environment snapshot")
     sc.add_argument("--tier", choices=("quick", "standard", "deep"), default="standard")
@@ -228,7 +228,7 @@ def main(argv=None):
     inv.add_argument("--device", type=int, help="current config for one device id")
     inv.add_argument("--diff", metavar="TS", help="config_item changes since TS")
     inv.set_defaults(fn=cmd_inventory)
-
+    change_cli.add_subparser(sub).set_defaults(fn=lambda a: change_cli.cli(*connect(), a))
     w = sub.add_parser("watch", help="continuous monitor")
     w.add_argument("--interval", type=int, default=20)
     w.add_argument("--idle-every", type=int, default=15, dest="idle_every")

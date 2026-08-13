@@ -130,3 +130,29 @@ CREATE VIEW IF NOT EXISTS config_current AS
   WHERE c.observed_at = (SELECT MAX(c2.observed_at) FROM config_item c2
                          WHERE c2.device_id = c.device_id AND c2.key = c.key);
 
+-- The consent-gated change lifecycle (netcheck/change.py). Realizes NC-4:
+-- no configuration write without a recorded dry run and an explicit
+-- interactive approval token. DDL per docs/planning/05-f-network-checker.md
+-- section 4.1, verbatim -- a contract, not a suggestion.
+CREATE TABLE IF NOT EXISTS change_request (
+  id             INTEGER PRIMARY KEY,
+  created_at     TEXT NOT NULL,
+  device_id      INTEGER REFERENCES device(id),  -- NULL means this host itself
+  cause          TEXT,                -- rank cause that motivated it, if any
+  title          TEXT NOT NULL,
+  change_cmd     TEXT NOT NULL,       -- exact command that applies the change
+  inverse_cmd    TEXT NOT NULL,       -- exact command that reverses it; REQUIRED at propose time
+  verify_probe   TEXT NOT NULL,       -- netcheck probe expression that must pass post-apply
+  dry_run_output TEXT,                -- captured evidence from change test
+  dry_run_at     TEXT,
+  approval_token TEXT,                -- sha256 hex over (id, change_cmd, inverse_cmd, sha256(dry_run_output), approved_at)
+  approved_at    TEXT,
+  applied_at     TEXT,
+  apply_output   TEXT,
+  verified_at    TEXT,
+  rolled_back_at TEXT,
+  status         TEXT NOT NULL DEFAULT 'proposed'
+    CHECK (status IN ('proposed','tested','approved','applied','verified','rolled_back','rejected')),
+  synced         INTEGER NOT NULL DEFAULT 0
+);
+

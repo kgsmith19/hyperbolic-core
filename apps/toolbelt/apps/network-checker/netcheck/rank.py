@@ -7,6 +7,7 @@ into bursts, and the standing conditions the latest environment scan
 measured. Reading a row is a different job from deciding what to say about
 a hundred of them, which is why the split follows the one the tests had.
 """
+from . import change_templates
 from .diagnose import bursts, culprit
 
 _FIXES = {
@@ -78,33 +79,32 @@ _FIXES = {
                                "to a unique, strong value.",
 }
 
-# Causes this repo ships a script for, and the invocation that applies each.
-# Generated into the fix text rather than written into the prose, so a script
-# that is renamed or deleted cannot leave a fix quietly recommending it --
-# test_rank.py checks both directions against the filesystem.
-#
-# Only run_fixes.sh takes --dry-run; the individual fix_*.sh do not, and its
-# dry-run prints what it would run without executing anything, which is why
-# that is the invocation offered first.
-_SCRIPTS = {
-    "wifi_mode_pinned": "tools/run_fixes.sh --wifi-only",
-    "router_dns": "tools/run_fixes.sh --dns-only",
-    "dns": "tools/run_fixes.sh --dns-only",
-    "radio_drops": "tools/run_fixes.sh --adapter-only",
+# Causes this repo ships a proposable change template for (change_templates.py),
+# and which one. Generated into the fix text, not written into the prose, so
+# a renamed/deleted template script cannot leave a fix quietly recommending
+# it -- test_rank.py checks both directions. Raw scripts are never invoked
+# directly any more (05-f section 4.5): every write goes through change
+# propose/test/approve/apply instead of an unattended script.
+_TEMPLATES = {
+    "wifi_mode_pinned": "wifi_mode",
+    "router_dns": "dns",
+    "dns": "dns",
+    "radio_drops": "adapter_power",
 }
 
 def _fix(cause):
-    """The remedy for `cause`, naming the script that applies it if one exists.
-
-    These are Linux shell scripts. On Windows -- this project's primary
-    target -- the fix text names the PowerShell equivalent inline where there
-    is one, and is a manual instruction where there is not.
-    """
+    """The remedy for `cause`, plus the gated change lifecycle command when
+    this repo ships a proposable template for it (05-f section 4)."""
     text = _FIXES.get(cause, "")
-    invocation = _SCRIPTS.get(cause)
-    if invocation:
-        text += (f" On Linux, `sudo bash {invocation} --dry-run` shows what a "
-                 f"scripted fix would change; drop --dry-run to apply it.")
+    name = _TEMPLATES.get(cause)
+    if name:
+        t = change_templates.TEMPLATES[name]
+        text += (f" A proposable '{name}' change template exists for this: "
+                 f"`python -m netcheck change propose --title \"{t['title']}\" "
+                 f"--cmd \"{t['change_cmd']}\" --inverse \"{t['inverse_cmd']}\" "
+                 f"--verify \"{t['verify_probe']}\"`, then `change test <id>` to "
+                 f"dry-run it and `change show <id>` to review the evidence "
+                 f"before `change approve <id>`.")
     return text
 
 def _one_family_broken(section, broken, working):

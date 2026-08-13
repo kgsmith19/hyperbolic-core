@@ -27,7 +27,9 @@ choices and product safeguards remain local to this directory.
   push leaves rows available for retry.
 - Device credentials are sent only after every resolved destination address is
   confirmed private.
-- Automated device configuration writes are outside the product's scope.
+- Every write requires a recorded dry run and an explicit interactive
+  approval, and the only automatic write permitted is the pre-recorded
+  rollback of a change that just failed verification.
 
 ## Commands
 

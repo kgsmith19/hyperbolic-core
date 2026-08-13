@@ -9,7 +9,7 @@ something the user can act on.
 import unittest
 from pathlib import Path
 
-from netcheck import rank
+from netcheck import change_templates, rank
 
 from tests.test_diagnose import row
 
@@ -41,16 +41,16 @@ class RankTest(unittest.TestCase):
 
 
 class ScriptedFixTest(unittest.TestCase):
-    """A cause this repo ships a script for must say so.
+    """A cause this repo ships a change template for must say so.
 
     Three of the fix scripts exist for causes `diagnose` already names, and
-    nothing connected the two: the user read "set the adapter's DNS to
-    1.1.1.1" and did it by hand, with tools/fix_dns.sh sitting unmentioned in
-    the repo. That is the "recommendation" half of #31 -- the scripts were
-    built, they were just never recommended.
+    the fix text now points at the gated change lifecycle (05-f section 4.5)
+    instead of a raw script invocation -- `run_fixes.sh` is deleted, and
+    every device write goes through propose/test/approve/apply.
 
-    The invocation is generated from a table rather than written into the
-    prose so the two cannot drift apart.
+    The invocation is generated from a table checked against both the
+    filesystem and change_templates.TEMPLATES so the three cannot drift
+    apart.
     """
 
     def fix_for(self, cause, **sections):
@@ -58,34 +58,44 @@ class ScriptedFixTest(unittest.TestCase):
                                                 [], sections)}
         return got[cause]["fix"]
 
-    def test_a_dns_cause_names_the_dns_script(self):
+    def test_a_dns_cause_names_the_change_lifecycle(self):
         fix = self.fix_for("router_dns")
-        self.assertIn("run_fixes.sh --dns-only", fix)
-        self.assertIn("--dry-run", fix, "the safe invocation comes first")
+        self.assertIn("netcheck change propose", fix)
+        self.assertIn("change test", fix)
+        self.assertIn("change show", fix)
+        self.assertNotIn("run_fixes.sh", fix)
 
-    def test_a_radio_cause_names_the_adapter_script(self):
+    def test_a_radio_cause_names_the_adapter_power_template(self):
         fix = {c["cause"]: c for c in rank.rank(
             [row()], [], {"events": {"state": "ok", "radio_off": 3}})}["radio_drops"]["fix"]
-        self.assertIn("run_fixes.sh --adapter-only", fix)
+        self.assertIn("adapter_power", fix)
+        self.assertIn("netcheck change propose", fix)
 
-    def test_a_cause_with_no_script_does_not_invent_one(self):
+    def test_a_cause_with_no_template_does_not_invent_one(self):
         fix = {c["cause"]: c for c in rank.rank([row()], [], {
             "wan": {"state": "ok", "ip": "100.90.1.2",
                     "double_nat": False, "cgnat": True}})}["cgnat"]["fix"]
-        self.assertNotIn("run_fixes.sh", fix)
+        self.assertNotIn("netcheck change propose", fix)
 
-    def test_every_named_script_exists_on_disk(self):
-        """A fix naming a script that was deleted is worse than no fix."""
+    def test_every_named_template_script_exists_on_disk(self):
+        """A fix naming a template whose script was deleted is worse than no fix."""
         repo = Path(__file__).resolve().parent.parent
-        for cause, invocation in rank._SCRIPTS.items():
-            script = invocation.split()[0]
+        for cause, name in rank._TEMPLATES.items():
+            script = change_templates.TEMPLATES[name]["change_cmd"].split()[0]
             self.assertTrue((repo / script).is_file(),
-                            f"{cause} names {script}, which does not exist")
+                            f"{cause} names template {name!r} pointing at "
+                            f"{script}, which does not exist")
 
-    def test_every_scripted_cause_is_a_real_cause(self):
-        """A script wired to a cause the ranker never emits is dead wiring."""
-        for cause in rank._SCRIPTS:
+    def test_every_templated_cause_is_a_real_cause(self):
+        """A template wired to a cause the ranker never emits is dead wiring."""
+        for cause in rank._TEMPLATES:
             self.assertIn(cause, rank._FIXES)
+
+    def test_every_template_name_resolves(self):
+        """A cause pointing at a template name missing from
+        change_templates.TEMPLATES is a typo, not a feature."""
+        for cause, name in rank._TEMPLATES.items():
+            self.assertIn(name, change_templates.TEMPLATES)
 
 
 if __name__ == "__main__":
