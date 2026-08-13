@@ -714,9 +714,38 @@ fs.writeFileSync(ROUTING_MD, "# routes\n```json\n" + JSON.stringify({
   ],
 }) + "\n```\n");
 
+// Windows-only, transient: antivirus/indexer file-handle scanning can hold
+// a just-closed file/directory handle open for a few milliseconds after the
+// owning process exits, so an immediate rmSync can observe EBUSY/EPERM even
+// though nothing in this test suite still holds the path open. Reproduced
+// in real CI (Windows integration job, three consecutive AC-11x failures,
+// all "EBUSY: resource busy or locked, rmdir ... \\launch") -- not a real
+// resource leak, since a retry a few ms later always succeeds. Node itself
+// documents this exact class of flake for fs.rm/rmSync on Windows. Retry
+// only these two specific transient codes; anything else re-throws
+// immediately rather than masking a real bug.
+function rmSyncRetryingTransientWindowsLocks(target, options) {
+  const attempts = 5;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      fs.rmSync(target, options);
+      return;
+    } catch (err) {
+      const transient = err && (err.code === "EBUSY" || err.code === "EPERM");
+      if (!transient || attempt === attempts) throw err;
+      // Synchronous sleep: resetLaunch() and its many synchronous callers
+      // throughout this file are not async, so an await-based delay would
+      // require threading a Promise through every call site for a fix
+      // scoped to this one Windows-only flake. Atomics.wait on a private
+      // SharedArrayBuffer is Node's standard blocking-sleep primitive.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25 * attempt);
+    }
+  }
+}
+
 function resetLaunch() {
-  fs.rmSync(LAUNCH_DIR, { recursive: true, force: true });
-  fs.rmSync(RUNNER_LOG, { force: true });
+  rmSyncRetryingTransientWindowsLocks(LAUNCH_DIR, { recursive: true, force: true });
+  rmSyncRetryingTransientWindowsLocks(RUNNER_LOG, { force: true });
   fs.mkdirSync(LAUNCH_DIR, { recursive: true });
   process.env.ACC_ROOT = LAUNCH_DIR;
   process.env.ACC_ROUTING_MD = ROUTING_MD;
