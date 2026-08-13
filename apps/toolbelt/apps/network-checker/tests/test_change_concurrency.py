@@ -68,7 +68,7 @@ class ConcurrentApplyClaimTest(unittest.TestCase):
             db_path = str(Path(tmp) / "netcheck.db")
             seed = store.open_db(db_path)
             host = store.host_id(seed, "race-host", "Linux")
-            cid, token = _propose_tested_approved(seed, host)
+            cid, token = _propose_tested_approved(seed)
             seed.close()
 
             calls, results = _run_two_concurrent_applies(db_path, host, cid, token)
@@ -97,7 +97,7 @@ class StatusGuardTest(unittest.TestCase):
         self.host = store.host_id(self.conn, "guard-test-host", "Linux")
 
     def _verified_row(self):
-        cid, token = _propose_tested_approved(self.conn, self.host)
+        cid, token = _propose_tested_approved(self.conn)
         with patch.object(change, "execute", return_value=(0, "ok", "")), \
              patch.object(change, "_verify_with_retry", return_value=(True, [])), \
              contextlib.redirect_stdout(io.StringIO()):
@@ -141,7 +141,7 @@ class StatusGuardTest(unittest.TestCase):
     def test_reject_still_works_on_a_row_that_is_merely_approved(self):
         """Sanity check that the guard is scoped correctly: reject() must
         remain usable on the states it always could act on."""
-        cid, _token = _propose_tested_approved(self.conn, self.host)
+        cid, _token = _propose_tested_approved(self.conn)
         with contextlib.redirect_stdout(io.StringIO()):
             rc = change_cli.reject(self.conn, _args(action="reject", id=cid))
         self.assertEqual(rc, 0)

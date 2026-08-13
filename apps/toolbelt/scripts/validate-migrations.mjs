@@ -9,76 +9,64 @@
 //      policies rely on (06 section 5.6)
 // Also asserts no two migration files across all directories share a version key
 // (the CLI's ledger is keyed by version; a collision breaks the shared ledger).
-import { readdirSync, readFileSync } from "node:fs";
-import { join, basename, dirname } from "node:path";
-import { findManifestPaths, TOOLBELT_ROOT } from "./validate-manifests.mjs";
+import { existsSync, realpathSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join, basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { findManifestPaths } from "./validate-manifests.mjs";
 
-// discoverMigrationDirs replaces what used to be a hardcoded, three-entry
-// MIGRATION_DIRS literal (Finding 26, independent security review of this
-// repo, re-verified against current HEAD: "Scaffolding emits nested
-// migrations, but workflow and validator hard-code known app directories.
-// That contradicts the promised three-step/no-outside-edits path.").
-//
-// The concrete, ALREADY-EXISTING proof this was a real gap and not a
-// hypothetical: apps/toolbelt/apps/network-checker/ has had its own
-// supabase/migrations/ directory (0001_init.sql, 0002_inventory.sql) since
-// before this fix, and it was correctly never added to the old hardcoded
-// list -- but that correctness depended entirely on a human remembering the
-// documented reason (see its own registration migration's header comment,
-// 20260812250000_register_network-checker.sql: "network-checker's own
-// supabase/migrations/ is absent from both [this workflow's directory list
-// and MIGRATION_DIRS]" as a DELIBERATE fact about a separate, optional
-// mirror project, not the shared platform database). A tool scaffolded by
-// packages/toolbelt-cli's tool:new with --schema, by contrast, is SUPPOSED
-// to ride the shared platform pipeline automatically, per the CLI's own
-// promised "no manual framework edits" 3-step flow -- and nothing enforced
-// that a human ever actually performed the manual edit the old
-// MIGRATION_DIRS literal required. Both are real; the fix has to tell them
-// apart without a human doing it by hand each time.
-//
-// The discriminator is exactly what already distinguishes these two real
-// cases on disk: whether the tool's own tool.json declares a non-empty
-// `schemas` array -- i.e. whether it owns a schema in the shared toolbelt
-// Supabase project at all (Network Checker's manifest declares `"schemas":
-// []`, the one real no-schema manifest per templates.mjs's own comment; the
-// three tools this list used to hardcode -- the root spine, Prompt
-// Organizer, Idea Intake -- all declare a non-empty `schemas` array). This
-// is deliberately NOT a blind "every supabase/migrations directory found by
-// walking the tree" scan (the review's own alternative suggestion): that
-// naive version would have swept Network Checker's directory into the
-// shared platform validation/staging pipeline, which is exactly backwards --
-// its Supabase project is a genuinely separate database, and treating its
-// migrations as part of the shared platform's version-key namespace or
-// pushing them via `supabase db push` against the platform project would be
-// a real, active regression, not a fix. Schema-ownership is the one signal
-// that already means "this tool's migrations belong to the shared platform
-// database" throughout the rest of this codebase (see
-// packages/toolbelt-cli/src/templates.mjs's buildManifest: hasSchema is
-// exactly what decides whether tool:new even generates a
-// supabase/migrations/ directory for a new tool in the first place).
-//
-// findManifestPaths (imported, not reimplemented, from
-// validate-manifests.mjs -- the same function apps/toolbelt/scripts/
-// validate-manifests.mjs's own findManifestPaths walk already uses to
-// discover every real tool.json, root spine included) is the single source
-// of "which tools exist" for this scan; a manifest that fails to parse is
-// silently skipped here the same way collisions.mjs's own findManifestIds
-// does (a malformed manifest is validate-manifests.mjs's own concern to
-// report, not this discovery pass's).
-export function discoverMigrationDirs(root = TOOLBELT_ROOT) {
-  const dirs = [];
-  for (const manifestPath of findManifestPaths(root)) {
-    let manifest;
-    try {
-      manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    } catch {
-      continue;
-    }
-    if (!Array.isArray(manifest.schemas) || manifest.schemas.length === 0) continue;
-    dirs.push(join(dirname(manifestPath), "supabase", "migrations"));
-  }
-  return dirs;
+const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const TOOLBELT_ROOT = resolve(REPOSITORY_ROOT, "apps/toolbelt");
+
+function inside(root, candidate) {
+  const rel = relative(root, candidate);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
+
+/** Discovers the shared-ledger roots from manifests, never an app allowlist. */
+export function discoverMigrationDirs(toolbeltRoot = TOOLBELT_ROOT) {
+  const root = resolve(toolbeltRoot);
+  const rootManifest = join(root, "tool.json");
+  if (!existsSync(rootManifest) || !statSync(rootManifest).isFile()) {
+    throw new Error(`${rootManifest}: required root tool manifest does not exist`);
+  }
+  const realRoot = realpathSync(root);
+  const manifestPaths = findManifestPaths(root);
+  const directories = [];
+
+  for (const manifestPath of manifestPaths) {
+    const realManifest = realpathSync(manifestPath);
+    if (!inside(realRoot, realManifest)) {
+      throw new Error(`${manifestPath}: manifest escapes the toolbelt root`);
+    }
+    let manifest;
+    try { manifest = JSON.parse(readFileSync(realManifest, "utf8")); }
+    catch (error) { throw new Error(`${manifestPath}: cannot parse tool manifest (${error.message})`); }
+    if (!Array.isArray(manifest.schemas)) {
+      throw new Error(`${manifestPath}: schemas must be an array before migrations can be discovered`);
+    }
+
+    const isRoot = resolve(manifestPath) === rootManifest;
+    if (!isRoot && manifest.schemas.length === 0) continue;
+    const migrationDir = resolve(dirname(manifestPath), "supabase", "migrations");
+    let realMigrationDir;
+    try { realMigrationDir = realpathSync(migrationDir); }
+    catch (error) {
+      if (error?.code === "ENOENT") throw new Error(`${migrationDir}: required migration directory does not exist`);
+      throw error;
+    }
+    if (!statSync(realMigrationDir).isDirectory()) {
+      throw new Error(`${migrationDir}: required migration path is not a directory`);
+    }
+    if (!inside(realRoot, realMigrationDir)) {
+      throw new Error(`${migrationDir}: migration directory escapes the toolbelt root`);
+    }
+    directories.push(migrationDir);
+  }
+
+  return [directories[0], ...directories.slice(1).sort()].filter((dir, index, all) => all.indexOf(dir) === index);
+}
+
+export const MIGRATION_DIRS = discoverMigrationDirs();
 
 function listSqlFiles(dir, { existsOnly = true } = {}) {
   try {
@@ -111,23 +99,9 @@ export function checkDownPairing(dirs) {
 
 const BRAIN_SCHEMA_RE = /create\s+schema\s+(if\s+not\s+exists\s+)?brain\b/i;
 
-// Independent security review, Finding 45 (re-verified against current
-// HEAD): a double-quoted identifier evades BRAIN_SCHEMA_RE outright --
-// `create schema "brain"` creates the exact same real, lowercase `brain`
-// schema Postgres would create for the unquoted `create schema brain`, but
-// the regex requires literal whitespace immediately before the bare word
-// `brain` and never sees past the `"`. Only the EXACT lowercase quoted form
-// `"brain"` is normalized away (by stripping its quotes so the existing
-// case-insensitive regex can see it) -- deliberately NOT every
-// double-quoted identifier: Postgres's own real folding rules make
-// `"Brain"` or `"BRAIN"` a case-sensitive, genuinely DIFFERENT identifier
-// from the reserved lowercase `brain` (only an UNQUOTED name folds to
-// lowercase regardless of how it was typed; a quoted one is taken verbatim
-// as written). Normalizing every double-quoted identifier indiscriminately
-// would turn that into a false positive -- flagging a legitimately
-// different, unreserved schema name. This narrow, literal replacement is
-// exactly and only the one case that actually collides with the reserved
-// name.
+// PostgreSQL folds an unquoted identifier to lowercase. The exact quoted
+// spelling "brain" therefore names the same reserved schema and must not
+// bypass the lint; differently-cased quoted identifiers are distinct.
 function normalizeQuotedBrainIdentifier(sql) {
   return sql.replace(/"brain"/g, "brain");
 }
@@ -149,104 +123,66 @@ export function checkBrainSchemaReservation(dirs) {
   return failures;
 }
 
-// Independent security review, Finding 45 (re-verified against current
-// HEAD): the original implementation split on "\n" and truncated each line
-// at its first literal "--", with no awareness of SQL string-literal
-// quoting or block comments -- two real, exploitable gaps in a lint this
-// repo's own CI treats as a real gate (checkBrainSchemaReservation and
-// checkOwnerCallWrapping both depend on this function to see the real,
-// non-comment SQL):
-//
-//   1. A single-quoted string literal containing the two characters `--`
-//      (e.g. a `title`/`description`/`source` default or seed value like
-//      'a--b') would have everything after that point on the same physical
-//      line silently discarded as if it were a comment -- including real,
-//      executable SQL that happened to follow on that line.
-//   2. No `/* ... */` block-comment handling at all: a block comment
-//      spanning or containing what looks like the reserved schema name or a
-//      bare platform.owner() call was invisible to this function one way
-//      (never stripped, so its CONTENTS could itself accidentally trip a
-//      check) while also not preventing REAL code after it on the same
-//      line from being misread if the block comment shared a line with a
-//      line comment marker.
-//
-// Fix (proportionate -- this remains a single-purpose lint, not a real SQL
-// parser): a small single-pass state machine over the whole file text
-// (never per-line -- a single-quoted string, like a block comment, can
-// legitimately span multiple physical lines in real SQL) that tracks
-// exactly three states -- inside a single-quoted string (with `''`
-// doubled-quote escaping, the standard SQL escape), inside a `/* */` block
-// comment (nestable, matching Postgres's own actual behavior -- `/* /* */
-// */` is one complete comment, not a syntax error), and default/code -- and
-// strips `--`-to-end-of-line only in the default state, and block comments
-// in any state but a string. Deliberately NOT dollar-quoted ($$...$$)
-// string aware: every dollar-quoted function body in this repo's real
-// migrations is, by construction, valid SQL/plpgsql whose own single-quoted
-// string literals are already balanced (an unbalanced quote inside a $$
-// body would be invalid SQL to begin with), so whole-file single-quote
-// tracking stays correct straight through a $$ body without needing to
-// special-case its boundaries -- confirmed by running this exact
-// implementation against every real committed migration in this repository
-// with zero behavioral change from the previous implementation (see
-// validate-migrations.test.mjs's "against the real repository" case).
-// Preserves line numbers exactly (needed by checkOwnerCallWrapping's own
-// line-number reporting): a block comment's interior characters are
-// replaced by nothing except its own embedded newlines, which are kept.
+// Remove SQL line and nested block comments without treating comment markers
+// inside a single-quoted string as syntax. Newlines are preserved so lint
+// diagnostics continue to report source line numbers accurately.
 export function stripLineComments(sql) {
   let result = "";
   let inString = false;
   let blockDepth = 0;
-  const n = sql.length;
-  for (let i = 0; i < n; ) {
+
+  for (let index = 0; index < sql.length; ) {
+    const current = sql[index];
+    const next = sql[index + 1];
+
     if (inString) {
-      const ch = sql[i];
-      if (ch === "'") {
-        if (sql[i + 1] === "'") {
+      if (current === "'") {
+        if (next === "'") {
           result += "''";
-          i += 2;
+          index += 2;
           continue;
         }
         inString = false;
-        result += "'";
-        i += 1;
-        continue;
       }
-      result += ch;
-      i += 1;
+      result += current;
+      index += 1;
       continue;
     }
+
     if (blockDepth > 0) {
-      if (sql[i] === "/" && sql[i + 1] === "*") {
+      if (current === "/" && next === "*") {
         blockDepth += 1;
-        i += 2;
+        index += 2;
         continue;
       }
-      if (sql[i] === "*" && sql[i + 1] === "/") {
+      if (current === "*" && next === "/") {
         blockDepth -= 1;
-        i += 2;
+        index += 2;
         continue;
       }
-      if (sql[i] === "\n") result += "\n";
-      i += 1;
+      if (current === "\n") result += "\n";
+      index += 1;
       continue;
     }
-    if (sql[i] === "'") {
+
+    if (current === "'") {
       inString = true;
-      result += "'";
-      i += 1;
+      result += current;
+      index += 1;
       continue;
     }
-    if (sql[i] === "-" && sql[i + 1] === "-") {
-      while (i < n && sql[i] !== "\n") i += 1;
+    if (current === "-" && next === "-") {
+      while (index < sql.length && sql[index] !== "\n") index += 1;
       continue;
     }
-    if (sql[i] === "/" && sql[i + 1] === "*") {
+    if (current === "/" && next === "*") {
       blockDepth = 1;
-      i += 2;
+      index += 2;
       continue;
     }
-    result += sql[i];
-    i += 1;
+
+    result += current;
+    index += 1;
   }
   return result;
 }
@@ -290,39 +226,52 @@ export function checkOwnerCallWrapping(dirs) {
   return failures;
 }
 
-// A version key is shared legitimately by exactly one up file and its own
-// paired down file (the toolbelt convention: <ts>_name.sql + <ts>_name_down.sql).
-// It is a real collision only when a version prefix is claimed by more than
-// one DISTINCT logical migration (differing base name once "_down" is
-// stripped) -- e.g. two unrelated files from different tool directories that
-// happened to pick the same timestamp. Comparing raw filenames instead of
-// stems would flag every existing, correct up/down pair as a collision.
+// The Supabase ledger has one global row per version. Exactly one forward
+// source file may claim a version; its paired down file is review-only and is
+// not staged. This deliberately rejects byte/name-identical forward files in
+// different owner directories too: staging by basename would otherwise
+// overwrite one silently.
 export function checkVersionCollisions(dirs) {
-  const seen = new Map(); // version -> Map(stem -> [files])
+  const seen = new Map(); // version -> forward source files
   for (const dir of dirs) {
     for (const file of listSqlFiles(dir)) {
       const name = basename(file, ".sql");
+      if (name.endsWith("_down")) continue;
       const version = name.split("_")[0];
       if (!/^\d+$/.test(version)) continue;
-      const stem = name.endsWith("_down") ? name.slice(0, -"_down".length) : name;
-      const byStem = seen.get(version) ?? new Map();
-      const list = byStem.get(stem) ?? [];
+      const list = seen.get(version) ?? [];
       list.push(file);
-      byStem.set(stem, list);
-      seen.set(version, byStem);
+      seen.set(version, list);
     }
   }
   const failures = [];
-  for (const [version, byStem] of seen) {
-    if (byStem.size > 1) {
-      const allFiles = [...byStem.values()].flat();
-      failures.push(`version ${version} shared by ${byStem.size} distinct migrations: ${allFiles.join(", ")}`);
+  for (const [version, files] of seen) {
+    if (files.length > 1) {
+      failures.push(`version ${version} shared by ${files.length} forward migrations: ${files.join(", ")}`);
     }
   }
   return failures;
 }
 
-export function validateAll(dirs = discoverMigrationDirs()) {
+export function checkRequiredDirectories(dirs) {
+  const failures = [];
+  for (const dir of dirs) {
+    try {
+      readdirSync(dir);
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        failures.push(`${dir}: required migration directory does not exist`);
+        continue;
+      }
+      throw err;
+    }
+  }
+  return failures;
+}
+
+export function validateAll(dirs = MIGRATION_DIRS) {
+  const directoryFailures = checkRequiredDirectories(dirs);
+  if (directoryFailures.length > 0) return directoryFailures;
   return [
     ...checkDownPairing(dirs),
     ...checkBrainSchemaReservation(dirs),
@@ -341,6 +290,6 @@ function main() {
   console.log("Platform migration validation passed.");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }

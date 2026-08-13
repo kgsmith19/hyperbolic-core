@@ -1,6 +1,6 @@
 // m4-03-feat-po-injection-rpc (05-d-prompt-organizer.md section 3, PO-4):
 // real-Postgres proof of the starter-prompt seed migration
-// (20260813130000_prompt_seed_starters.sql / _down.sql), applying the real,
+// (20260813160000_prompt_seed_starters.sql / _down.sql), applying the real,
 // committed migration files from disk verbatim. Mirrors the
 // detection/skip mechanics and harness technique get-prompt.test.mjs (this
 // same issue) and apps/toolbelt/apps/idea-intake/tests/intake-guards.test.mjs
@@ -14,10 +14,14 @@
 // directly against the 8 categories in the section 3 table.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  asAuthenticated,
+  createPostgresHarness,
+  supabaseHarnessSql,
+} from "./postgres-harness.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "supabase", "migrations");
@@ -40,9 +44,10 @@ const PO_MIGRATIONS_IN_ORDER = [
   "20260812180000_prompt_owner_pin.sql",
   "20260812200000_prompt_observed_query_indexes.sql",
   "20260813120000_prompt_create_get_prompt_function.sql",
+  "20260813151000_prompt_scope_title_uniqueness.sql",
 ];
-const SEED_UP = join(PO_MIGRATIONS_DIR, "20260813130000_prompt_seed_starters.sql");
-const SEED_DOWN = join(PO_MIGRATIONS_DIR, "20260813130000_prompt_seed_starters_down.sql");
+const SEED_UP = join(PO_MIGRATIONS_DIR, "20260813160000_prompt_seed_starters.sql");
+const SEED_DOWN = join(PO_MIGRATIONS_DIR, "20260813160000_prompt_seed_starters_down.sql");
 
 const OWNER_UUID = "9a50a35a-8a1e-4f0c-8495-7f26777982d8";
 
@@ -74,87 +79,16 @@ const SEEDED_TITLES = [
   "idea-intake/optimize-v1",
 ];
 
-const HARNESS_SQL = `
-create schema if not exists auth;
-create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid()
-);
-create or replace function auth.uid() returns uuid
-language sql stable
-as $$ select nullif(current_setting('app.test_uid', true), '')::uuid $$;
-
-do $$
-begin
-  if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticator') then create role authenticator nologin; end if;
-end
-$$;
-
-insert into auth.users (id) values ('${OWNER_UUID}');
-`;
+const HARNESS_SQL = supabaseHarnessSql([OWNER_UUID]);
 
 const OWNER_BOOTSTRAP_SQL = `insert into platform.config (owner_uuid) values ('${OWNER_UUID}');`;
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], { encoding: "utf8", timeout: 5000 });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); the seed migration is not " +
-    "applied on the live Supabase project yet, so this suite has nothing honest to assert against either target " +
-    "without a reachable engine";
-
-function psql(dbName, sqlText, extraArgs = []) {
-  return spawnSync(
-    RUNNER.cmd,
-    [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose", "-tA", "-q", ...extraArgs],
-    { encoding: "utf8", input: sqlText, timeout: 20000 },
-  );
-}
-
-function psqlOk(dbName, sqlText, extraArgs = []) {
-  const result = psql(dbName, sqlText, extraArgs);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
+const PG = createPostgresHarness("m4_03_seed_test");
+const { psql, psqlOk, applyMigrationWithRetry } = PG;
+const SKIP_REASON = PG.skipReason;
 
 // See get-prompt.test.mjs for the "tuple concurrently updated" rationale
 // (20260807020000's unscoped `alter role authenticator set pgrst.db_schemas`).
-function applyMigrationWithRetry(dbName, sqlText, attempts = 5) {
-  const wrapped = `begin;\n${sqlText}\ncommit;\n`;
-  let lastResult;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    lastResult = psql(dbName, wrapped);
-    if (lastResult.status === 0) return lastResult.stdout;
-    if (!/tuple concurrently updated/.test(lastResult.stderr || "")) break;
-  }
-  assert.equal(lastResult.status, 0, `psql failed against ${dbName}: ${lastResult.stderr || lastResult.stdout}`);
-  return lastResult.stdout;
-}
-
-function asAuthenticated(uuid, sqlText) {
-  return `set role authenticated;\ndo $$ begin perform set_config('app.test_uid', '${uuid}', false); end $$;\n${sqlText}`;
-}
-
-function freshDbName() {
-  return `m4_03_seed_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
-
 function buildBaseSchema(db) {
   psqlOk(db, HARNESS_SQL);
   psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
@@ -167,13 +101,7 @@ function buildBaseSchema(db) {
 }
 
 function withDb(fn) {
-  const db = freshDbName();
-  psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
-  try {
-    return fn(db);
-  } finally {
-    psqlOk("postgres", `drop database if exists ${db};`);
-  }
+  return PG.withDatabase(fn);
 }
 
 test("real Postgres: the seed migration inserts one active prompt per each of the 8 taxonomy categories (PO-4)", { skip: SKIP_REASON }, () => {
@@ -266,7 +194,7 @@ test("real Postgres: re-applying the seed migration is idempotent (0 new rows, n
 });
 
 test(
-  "real Postgres: a pre-existing personal prompt sharing a seeded title is left completely untouched (collision safety)",
+  "real Postgres: a pre-existing title collision survives both seed and rollback untouched",
   { skip: SKIP_REASON },
   () => {
     withDb((db) => {
@@ -294,6 +222,58 @@ test(
         asAuthenticated(OWNER_UUID, "select count(*) from prompt.prompt where lower(title) = lower('ops/runbooks/deploy-verify');"),
       ).trim();
       assert.equal(dupCount, "1", "the conflicting seed row must be skipped, not inserted alongside the personal one");
+
+      psqlOk(db, readFileSync(SEED_DOWN, "utf8"));
+      const afterRollback = psqlOk(
+        db,
+        asAuthenticated(
+          OWNER_UUID,
+          "select body from prompt.prompt where lower(title) = lower('ops/runbooks/deploy-verify');",
+        ),
+      ).trim();
+      assert.equal(afterRollback, "MY PERSONAL PRE-EXISTING BODY, NOT THE SEED TEXT");
+    });
+  },
+);
+
+test(
+  "real Postgres: an inaccessible legacy fixture title cannot squat an owner seed",
+  { skip: SKIP_REASON },
+  () => {
+    withDb((db) => {
+      buildBaseSchema(db);
+      const foreignId = "9a50a35a-8a1e-4f0c-8495-7f26777982d9";
+      psqlOk(db, `insert into auth.users (id) values ('${foreignId}');`);
+      psqlOk(
+        db,
+        `insert into prompt.prompt (user_id, title, body)
+         values ('${foreignId}', 'ops/runbooks/deploy-verify', 'FOREIGN FIXTURE BODY');`,
+      );
+
+      psqlOk(db, readFileSync(SEED_UP, "utf8"));
+
+      const ownerBody = psqlOk(
+        db,
+        asAuthenticated(
+          OWNER_UUID,
+          "select body from prompt.prompt where lower(title) = lower('ops/runbooks/deploy-verify');",
+        ),
+      ).trim();
+      assert.notEqual(ownerBody, "FOREIGN FIXTURE BODY");
+      assert.equal(
+        psqlOk(db, "select count(*) from prompt.prompt where lower(title) = lower('ops/runbooks/deploy-verify');").trim(),
+        "2",
+      );
+
+      psqlOk(db, readFileSync(SEED_DOWN, "utf8"));
+      assert.equal(
+        psqlOk(
+          db,
+          `select body from prompt.prompt
+           where user_id = '${foreignId}' and lower(title) = lower('ops/runbooks/deploy-verify');`,
+        ).trim(),
+        "FOREIGN FIXTURE BODY",
+      );
     });
   },
 );

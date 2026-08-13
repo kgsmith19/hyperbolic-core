@@ -31,6 +31,22 @@ const INTAKE_MIGRATIONS_DIR = join(TOOL_DIR, "supabase", "migrations");
 
 const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
 const INTAKE_UP = join(INTAKE_MIGRATIONS_DIR, "20260813002605_intake_create_schema.sql");
+const INTAKE_SUBMISSION_RPC_UP = join(
+  INTAKE_MIGRATIONS_DIR,
+  "20260814040000_intake_mark_submitted_to_github_rpc.sql",
+);
+const INTAKE_SOURCE_DEDUP_UP = join(
+  INTAKE_MIGRATIONS_DIR,
+  "20260814050000_intake_forgepad_source_dedup.sql",
+);
+const INTAKE_IDEMPOTENCY_UP = join(
+  INTAKE_MIGRATIONS_DIR,
+  "20260814120100_intake_forgepad_idempotency_key.sql",
+);
+const INTAKE_HARDENING_UP = join(
+  INTAKE_MIGRATIONS_DIR,
+  "20260814120000_intake_submission_metadata_integrity.sql",
+);
 const INTAKE_DOWN = join(INTAKE_MIGRATIONS_DIR, "20260813002605_intake_create_schema_down.sql");
 
 const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
@@ -78,6 +94,9 @@ function detectRunner() {
 }
 
 const RUNNER = detectRunner();
+if (process.env.TOOLBELT_REQUIRE_POSTGRES === "1" && !RUNNER) {
+  throw new Error("TOOLBELT_REQUIRE_POSTGRES=1 but no local PostgreSQL server is reachable");
+}
 const SKIP_REASON = RUNNER
   ? false
   : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); " +
@@ -150,9 +169,10 @@ function freshDbName() {
   return `m3_05_intake_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
 }
 
-// Applies the harness stub plus the two real, committed migrations
-// (platform bootstrap, then the intake schema) to a fresh scratch database,
-// then hands the db name to fn. Always drops the db afterward.
+// Applies the harness stub plus the real forward chain used by production:
+// platform bootstrap, immutable intake schema, submission RPC, legacy
+// source-key reconciliation, stable idempotency identity, and the additive
+// integrity hardening. Always drops the db afterward.
 function withMigratedDb(fn) {
   const db = freshDbName();
   psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
@@ -161,6 +181,10 @@ function withMigratedDb(fn) {
     psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
     psqlOk(db, OWNER_BOOTSTRAP_SQL);
     applyMigrationWithRetry(db, readFileSync(INTAKE_UP, "utf8"));
+    applyMigrationWithRetry(db, readFileSync(INTAKE_SUBMISSION_RPC_UP, "utf8"));
+    applyMigrationWithRetry(db, readFileSync(INTAKE_SOURCE_DEDUP_UP, "utf8"));
+    applyMigrationWithRetry(db, readFileSync(INTAKE_IDEMPOTENCY_UP, "utf8"));
+    applyMigrationWithRetry(db, readFileSync(INTAKE_HARDENING_UP, "utf8"));
     return fn(db);
   } finally {
     psqlOk("postgres", `drop database if exists ${db};`);
@@ -382,26 +406,28 @@ test(
 );
 
 test(
-  "real Postgres: guard_idea_update rule 3 independently rejects a partial github_issue_number set on a non-submitting update, distinct from the submitted_fields_all_or_none CHECK",
+  "real Postgres: submitted_fields_all_or_none rejects every one- and two-field GitHub metadata subset outside submission",
   { skip: SKIP_REASON },
   () => {
-    // Mutation-testing finding: the CHECK constraint only requires "not all
-    // three github fields non-null" when status != submitted_to_github, so
-    // it does NOT by itself reject setting github_issue_number alone (url
-    // and submitted_at left null) on an idea->idea update. Only trigger
-    // rule 3 catches this specific partial-field case. Proven by disabling
-    // rule 3 in isolation (a copy of the migration with only that clause
-    // removed) and showing the CHECK alone lets the partial set through.
     withMigratedDb((db) => {
-      const id = psqlOk(
-        db,
-        asAuthenticated(OWNER_UUID, "insert into intake.idea (title, target_repo) values ('t1', 'kgsmith19/scratch') returning id;"),
-      ).trim();
-      psqlOk(db, asAuthenticated(OWNER_UUID, `update intake.idea set status = 'idea' where id = '${id}';`));
-
-      const r = psql(db, asAuthenticated(OWNER_UUID, `update intake.idea set github_issue_number = 999 where id = '${id}';`));
-      assert.notEqual(r.status, 0);
-      assert.match(r.stderr, /II-1: github fields may be set only by the submit transition/);
+      psqlOk(db, "alter table intake.idea disable trigger idea_guard_update;");
+      const assignments = [
+        "github_issue_number = 999",
+        "github_issue_url = 'https://example.invalid/999'",
+        "submitted_at = now()",
+        "github_issue_number = 999, github_issue_url = 'https://example.invalid/999'",
+        "github_issue_number = 999, submitted_at = now()",
+        "github_issue_url = 'https://example.invalid/999', submitted_at = now()",
+      ];
+      for (const [index, assignment] of assignments.entries()) {
+        const id = psqlOk(
+          db,
+          `insert into intake.idea (title, user_id) values ('subset ${index}', '${OWNER_UUID}') returning id;`,
+        ).trim();
+        const result = psql(db, `update intake.idea set ${assignment} where id = '${id}';`);
+        assert.notEqual(result.status, 0, `subset unexpectedly accepted: ${assignment}`);
+        assert.match(result.stderr, /submitted_fields_all_or_none/);
+      }
     });
   },
 );
@@ -499,6 +525,35 @@ test(
       const del = psql(db, asAuthenticated(OWNER_UUID, `delete from intake.optimization where id = '${optId}';`));
       assert.notEqual(del.status, 0);
       assert.match(del.stderr, /permission denied for table optimization/);
+    });
+  },
+);
+
+test(
+  "real Postgres: deleting an optimized draft removes its dependent telemetry",
+  { skip: SKIP_REASON },
+  () => {
+    withMigratedDb((db) => {
+      const inputId = psqlOk(
+        db,
+        asAuthenticated(OWNER_UUID, "insert into intake.idea (title) values ('optimized input') returning id;"),
+      ).trim();
+      const outputId = psqlOk(
+        db,
+        asAuthenticated(OWNER_UUID, "insert into intake.idea (title) values ('optimized output') returning id;"),
+      ).trim();
+      psqlOk(
+        db,
+        asAuthenticated(
+          OWNER_UUID,
+          `insert into intake.optimization (input_idea_id, output_idea_id, prompt_name, model) ` +
+            `values ('${inputId}', '${outputId}', 'idea-intake/optimize-v1', 'test-model');`,
+        ),
+      );
+
+      psqlOk(db, asAuthenticated(OWNER_UUID, `delete from intake.idea where id = '${outputId}';`));
+      assert.equal(psqlOk(db, "select count(*) from intake.optimization;").trim(), "0");
+      assert.equal(psqlOk(db, `select count(*) from intake.idea where id = '${inputId}';`).trim(), "1");
     });
   },
 );

@@ -47,9 +47,15 @@ export function withFixtureToolbeltRoot(layout, fn) {
       mkdirSync(dirname(fullPath), { recursive: true });
       writeFileSync(fullPath, typeof contents === "string" ? contents : `${JSON.stringify(contents, null, 2)}\n`);
     }
-    return fn(dir);
-  } finally {
+    const result = fn(dir);
+    if (result && typeof result.then === "function") {
+      return result.finally(() => rmSync(dir, { recursive: true, force: true }));
+    }
     rmSync(dir, { recursive: true, force: true });
+    return result;
+  } catch (error) {
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
   }
 }
 

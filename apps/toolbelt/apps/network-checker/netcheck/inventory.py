@@ -21,8 +21,9 @@ _upsert_device() looks up an existing row with `IS`, not `=`, and upserts by
 hand instead of leaning on INSERT OR IGNORE.
 """
 import json
+import re
 
-from . import store
+from .inventory_query import changes_since, cli, device_config, devices
 
 _WIFI_KEYS = ("ssid", "bssid", "band", "channel", "signal_pct", "rssi_dbm",
               "rx_mbps", "tx_mbps", "radio")
@@ -33,13 +34,18 @@ _DOCSIS_KEYS = ("connectivity", "boot_state", "security", "uptime",
                 "snr_db", "power_dbmv", "uncorrectables")
 _SNMP_KEYS = ("sys_descr", "sys_uptime_ticks")
 
-DEVICE_FMT = "{id:<4} {name:<28} {kind:<10} {ip:<15} {mac:<17} {last_seen}"
-CONFIG_FMT = "{key:<28} {value:<24} {observed_at}  ({source})"
-CHANGE_FMT = "device {device_id:<4} {key:<28} {value:<24} {observed_at}"
-
-
 def _ok(section):
     return bool(section) and section.get("state") == "ok"
+
+
+def _mac(value):
+    """Canonical colon-separated lower-case hardware address, or None."""
+    if not value:
+        return None
+    compact = re.sub(r"[^0-9a-fA-F]", "", value)
+    if len(compact) != 12:
+        return None
+    return ":".join(compact[i:i + 2] for i in range(0, 12, 2)).lower()
 
 
 def _section_items(source, prefix, section, keys):
@@ -53,18 +59,19 @@ def _section_items(source, prefix, section, keys):
 
 def _upsert_device(conn, host_id, fact):
     """Insert or update one device row, matched by (mac, ip) with `IS` so a
-    NULL mac/ip still finds its own earlier row across scans. `kind` only
-    promotes away from 'unknown'; Finding 62: UPDATE also resets synced=0."""
-    mac, ip = fact["mac"], fact["ip"]
+    NULL mac/ip still finds its own earlier row across scans. `kind` is only
+    ever promoted away from 'unknown', never back to it. Returns the id."""
+    mac, ip = _mac(fact["mac"]), fact["ip"]
     row = conn.execute(
-        "SELECT id FROM device WHERE host_id=? AND mac IS ? AND ip IS ?",
-        (host_id, mac, ip)).fetchone()
+        "SELECT id FROM device WHERE host_id=? AND "
+        "((? IS NOT NULL AND mac=?) OR (? IS NULL AND mac IS NULL AND ip IS ?))",
+        (host_id, mac, mac, mac, ip)).fetchone()
     if row:
         conn.execute(
-            "UPDATE device SET last_seen=?,"
+            "UPDATE device SET mac=?, ip=?, last_seen=?, synced=0,"
             " kind=CASE WHEN ?<>'unknown' THEN ? ELSE kind END,"
-            " name=COALESCE(?, name), vendor=COALESCE(?, vendor), synced=0 WHERE id=?",
-            (fact["ts"], fact["kind"], fact["kind"], fact.get("name"),
+            " name=COALESCE(?, name), vendor=COALESCE(?, vendor) WHERE id=?",
+            (mac, ip, fact["ts"], fact["kind"], fact["kind"], fact.get("name"),
              fact.get("vendor"), row["id"]))
         return row["id"]
     cur = conn.execute(
@@ -86,7 +93,7 @@ def _add_config(conn, device_id, ts, batch):
         encoded = value if isinstance(value, str) else json.dumps(value)
         cur = conn.execute(
             "INSERT OR IGNORE INTO config_item"
-            " (device_id, key, value, observed_at, source) VALUES (?, ?, ?, ?, ?)",
+            " (device_id, key, value, observed_at, source, synced) VALUES (?, ?, ?, ?, ?, 0)",
             (device_id, key, encoded, ts, source))
         written += cur.rowcount
     return written
@@ -137,8 +144,9 @@ def _map_self_interface(conn, device_id, scan_payload, ts):
         return 0
     name = driver.get("adapter") or "Wi-Fi"
     cur = conn.execute(
-        "INSERT OR IGNORE INTO interface (device_id, name, medium, speed_mbps, observed_at)"
-        " VALUES (?, ?, 'wifi', ?, ?)", (device_id, name, wifi.get("rx_mbps"), ts))
+        "INSERT OR IGNORE INTO interface"
+        " (device_id, name, medium, speed_mbps, observed_at, synced)"
+        " VALUES (?, ?, 'wifi', ?, ?, 0)", (device_id, name, wifi.get("rx_mbps"), ts))
     return cur.rowcount
 
 
@@ -185,65 +193,32 @@ def _map_router(conn, host_id, router, ts):
 
 def record_inventory(conn, host_id, scan_payload, ts):
     """Map an environ.scan()/topology/exposure payload into device,
-    interface, and config_item rows (Finding 63: inside one
-    store.transaction()). Returns counts per table; pure mapping, no network calls."""
-    with store.transaction(conn):
-        topo_ids, n_cfg = _map_topology(conn, host_id, scan_payload.get("topology"), ts)
-        device_ids = set(topo_ids)
+    interface, and config_item rows. Returns counts per table. Pure
+    mapping over an already-collected payload; no network calls."""
+    conn.execute("SAVEPOINT inventory_scan")
+    try:
+        result = _record(conn, host_id, scan_payload, ts)
+        conn.execute("RELEASE inventory_scan")
+        return result
+    except Exception:
+        conn.execute("ROLLBACK TO inventory_scan")
+        conn.execute("RELEASE inventory_scan")
+        raise
 
-        gw_id, cfg = _map_gateway(conn, host_id, scan_payload.get("gateway_id"), ts)
+
+def _record(conn, host_id, scan_payload, ts):
+    topo_ids, n_cfg = _map_topology(conn, host_id, scan_payload.get("topology"), ts)
+    ids = set(topo_ids)
+    gw_id, cfg = _map_gateway(conn, host_id, scan_payload.get("gateway_id"), ts)
+    n_cfg += cfg
+    if gw_id is not None:
+        ids.add(gw_id)
+    self_id, n_iface, cfg = _map_self(conn, host_id, scan_payload, ts)
+    ids.add(self_id)
+    n_cfg += cfg
+    for device_id, cfg in (_map_modem(conn, host_id, scan_payload, ts),
+                           _map_router(conn, host_id, scan_payload.get("router"), ts)):
         n_cfg += cfg
-        if gw_id is not None:
-            device_ids.add(gw_id)
-
-        self_id, n_iface, cfg = _map_self(conn, host_id, scan_payload, ts)
-        device_ids.add(self_id)
-        n_cfg += cfg
-
-        modem_id, cfg = _map_modem(conn, host_id, scan_payload, ts)
-        n_cfg += cfg
-        if modem_id is not None:
-            device_ids.add(modem_id)
-
-        router_id, cfg = _map_router(conn, host_id, scan_payload.get("router"), ts)
-        n_cfg += cfg
-        if router_id is not None:
-            device_ids.add(router_id)
-
-        return {"device": len(device_ids), "interface": n_iface, "config_item": n_cfg}
-
-
-def devices(conn, limit=1000):
-    """The device table for `netcheck inventory`, most recently seen first."""
-    return store._rows(conn.execute(
-        "SELECT id, COALESCE(name,'') name, kind, COALESCE(ip,'') ip,"
-        " COALESCE(mac,'') mac, first_seen, last_seen"
-        " FROM device ORDER BY last_seen DESC LIMIT ?", (limit,)))
-
-
-def device_config(conn, device_id, limit=500):
-    """One device's current configuration: `netcheck inventory --device`."""
-    return store._rows(conn.execute(
-        "SELECT key, value, observed_at, source FROM config_current"
-        " WHERE device_id=? ORDER BY key LIMIT ?", (device_id, limit)))
-
-
-def changes_since(conn, since, limit=2000):
-    """config_item rows observed after `since`: `netcheck inventory --diff`."""
-    return store._rows(conn.execute(
-        "SELECT device_id, key, value, observed_at, source FROM config_item"
-        " WHERE observed_at>? ORDER BY observed_at LIMIT ?", (since, limit)))
-
-
-def cli(conn, args):
-    """netcheck inventory: the device table by default; --device for one
-    device's current config; --diff TS for config_item changes since TS."""
-    if args.device is not None:
-        rows, fmt = device_config(conn, args.device), CONFIG_FMT
-    elif args.diff is not None:
-        rows, fmt = changes_since(conn, args.diff), CHANGE_FMT
-    else:
-        rows, fmt = devices(conn), DEVICE_FMT
-    for row in rows:
-        print(fmt.format(**row))
-    return 0
+        if device_id is not None:
+            ids.add(device_id)
+    return {"device": len(ids), "interface": n_iface, "config_item": n_cfg}

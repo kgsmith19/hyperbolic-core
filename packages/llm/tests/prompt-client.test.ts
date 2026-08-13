@@ -26,25 +26,23 @@ async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Prom
   }
 }
 
-/** Wraps a handler that only cares about the rpc/get_prompt call: every
- * other path (the best-effort supplementary raw-fetch calls a fresh miss
- * also issues to populate the cache -- see prompt-client.ts's own header
- * comment) is answered with an empty result, harmlessly skipping cache
- * population, so these request-shape tests can assert on the RPC call
- * alone without asserting a specific total call count. */
+/** Wraps a handler that only cares about prompt RPCs. Any table path gets an
+ * empty response so the request-shape tests fail at their own assertions if
+ * the client ever regresses to schema-aware reads. */
 function onlyRpc(handler: FetchImpl): FetchImpl {
   return async (input, init) => {
     const url = new URL(String(input));
-    if (url.pathname === "/rest/v1/rpc/get_prompt") return handler(input, init);
+    if (url.pathname.startsWith("/rest/v1/rpc/")) return handler(input, init);
     return jsonResponse([]);
   };
 }
 
-test("getPrompt(name) with no opts sends p_version/p_config/p_values/p_sections all null, POST, apikey+Authorization+profile headers", async (t) => {
+test("getPrompt(name) with no config uses the cache-source RPC with conditional fields null and the required headers", async (t) => {
   const spy = t.mock.fn(
     onlyRpc(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
       assert.equal(url.origin, new URL(FIXTURE_URL).origin);
+      assert.equal(url.pathname, "/rest/v1/rpc/get_prompt_source");
       assert.equal(init?.method, "POST");
 
       const headers = new Headers(init?.headers);
@@ -54,9 +52,9 @@ test("getPrompt(name) with no opts sends p_version/p_config/p_values/p_sections 
       assert.equal(headers.get("Content-Profile"), "prompt");
 
       const body = JSON.parse(String(init?.body));
-      assert.deepEqual(body, { p_name: "lifeos/chat/system", p_version: null, p_config: null, p_values: null, p_sections: null });
+      assert.deepEqual(body, { p_name: "lifeos/chat/system", p_version: null, p_if_version: null });
 
-      return jsonResponse({ text: "hi", version_no: 4, rendered_at: "2026-08-13T00:00:00Z" });
+      return jsonResponse({ body: "hi", version_no: 4, not_modified: false });
     }),
   );
 
@@ -65,14 +63,17 @@ test("getPrompt(name) with no opts sends p_version/p_config/p_values/p_sections 
     return client.getPrompt("lifeos/chat/system");
   });
 
-  const rpcCalls = spy.mock.calls.filter((c) => new URL(String(c.arguments[0])).pathname === "/rest/v1/rpc/get_prompt");
+  const rpcCalls = spy.mock.calls.filter((c) => new URL(String(c.arguments[0])).pathname === "/rest/v1/rpc/get_prompt_source");
   assert.equal(rpcCalls.length, 1);
-  assert.deepEqual(result, { text: "hi", version: 4, renderedAt: "2026-08-13T00:00:00Z" });
+  assert.equal(result.text, "hi");
+  assert.equal(result.version, 4);
+  assert.ok(Number.isFinite(Date.parse(result.renderedAt)));
 });
 
 test("getPrompt(name, {version, variables, sections, config}) passes every field through under its RPC parameter name", async (t) => {
   const spy = t.mock.fn(
     onlyRpc(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      assert.equal(new URL(String(_input)).pathname, "/rest/v1/rpc/get_prompt");
       const body = JSON.parse(String(init?.body));
       assert.deepEqual(body, {
         p_name: "brain/task-contract",
@@ -95,22 +96,28 @@ test("getPrompt(name, {version, variables, sections, config}) passes every field
 });
 
 test("a call naming a saved `config` always goes to the network, even when the name@version is already cached", async (t) => {
-  let rpcCalls = 0;
+  let sourceCalls = 0;
+  let renderRpcCalls = 0;
   const spy = t.mock.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.pathname === "/rest/v1/rpc/get_prompt") {
-      rpcCalls += 1;
+      renderRpcCalls += 1;
       return jsonResponse({ text: "x", version_no: 1, rendered_at: "2026-08-13T00:00:00Z" });
     }
-    return jsonResponse([]); // the best-effort supplementary raw-fetch calls; empty is fine, caching is skipped
+    if (url.pathname === "/rest/v1/rpc/get_prompt_source") {
+      sourceCalls += 1;
+      return jsonResponse({ body: "x", version_no: 1, not_modified: false });
+    }
+    return jsonResponse([]);
   });
 
   await withPatchedFetch(spy, async () => {
     const client = createPromptClient(FIXTURE_URL, async () => FIXTURE_TOKEN);
     await client.getPrompt("coding/system/kernel-run", { version: 1 });
-    assert.equal(rpcCalls, 1);
+    assert.equal(sourceCalls, 1);
+    assert.equal(renderRpcCalls, 0);
     await client.getPrompt("coding/system/kernel-run", { version: 1, config: "lean" });
-    assert.equal(rpcCalls, 2, "a config-bearing call must bypass the cache and hit the RPC again");
+    assert.equal(renderRpcCalls, 1, "a config-bearing call must bypass the cache and hit get_prompt");
   });
 });
 
@@ -119,7 +126,7 @@ test("options.anonKey overrides the default apikey header", async (t) => {
     onlyRpc(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       assert.equal(headers.get("apikey"), "custom-anon-key");
-      return jsonResponse({ text: "x", version_no: 1, rendered_at: "2026-08-13T00:00:00Z" });
+      return jsonResponse({ body: "x", version_no: 1, not_modified: false });
     }),
   );
 
@@ -128,16 +135,61 @@ test("options.anonKey overrides the default apikey header", async (t) => {
     await client.getPrompt("brain/task-contract", { version: 1 });
   });
 
-  const rpcCalls = spy.mock.calls.filter((c) => new URL(String(c.arguments[0])).pathname === "/rest/v1/rpc/get_prompt");
+  const rpcCalls = spy.mock.calls.filter((c) => new URL(String(c.arguments[0])).pathname === "/rest/v1/rpc/get_prompt_source");
   assert.equal(rpcCalls.length, 1);
+});
+
+test("maxPinnedEntries rejects non-positive and non-integer capacities at construction", () => {
+  for (const maxPinnedEntries of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(
+      () => createPromptClient(FIXTURE_URL, async () => FIXTURE_TOKEN, { maxPinnedEntries }),
+      RangeError,
+      String(maxPinnedEntries),
+    );
+  }
+});
+
+test("latestTtlMs rejects non-positive and non-integer TTLs at construction", () => {
+  for (const latestTtlMs of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(
+      () => createPromptClient(FIXTURE_URL, async () => FIXTURE_TOKEN, { latestTtlMs }),
+      RangeError,
+      String(latestTtlMs),
+    );
+  }
+});
+
+test("expired latest entries send their cached version as p_if_version and accept a no-body not-modified response", async () => {
+  const requestBodies: unknown[] = [];
+  await withPatchedFetch(
+    onlyRpc(async (input, init) => {
+      assert.equal(new URL(String(input)).pathname, "/rest/v1/rpc/get_prompt_source");
+      const body = JSON.parse(String(init?.body));
+      requestBodies.push(body);
+      return requestBodies.length === 1
+        ? jsonResponse({ body: "Hello {{NAME}}", version_no: 7, not_modified: false })
+        : jsonResponse({ body: null, version_no: 7, not_modified: true });
+    }),
+    async () => {
+      const client = createPromptClient(FIXTURE_URL, async () => FIXTURE_TOKEN, { latestTtlMs: 5 });
+      assert.equal((await client.getPrompt("latest/conditional", { variables: { NAME: "A" } })).text, "Hello A");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal((await client.getPrompt("latest/conditional", { variables: { NAME: "B" } })).text, "Hello B");
+    },
+  );
+
+  assert.deepEqual(requestBodies, [
+    { p_name: "latest/conditional", p_version: null, p_if_version: null },
+    { p_name: "latest/conditional", p_version: null, p_if_version: 7 },
+  ]);
 });
 
 test("a trailing slash on supabaseUrl is normalized (no double slash in the request path)", async (t) => {
   const spy = t.mock.fn(
     onlyRpc(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
-      assert.equal(url.pathname, "/rest/v1/rpc/get_prompt");
-      return jsonResponse({ text: "x", version_no: 1, rendered_at: "2026-08-13T00:00:00Z" });
+      assert.equal(url.pathname, "/rest/v1/rpc/get_prompt_source");
+      return jsonResponse({ body: "x", version_no: 1, not_modified: false });
     }),
   );
 
@@ -154,6 +206,49 @@ test("a non-404/422 non-ok RPC response rejects with a descriptive error naming 
     const client = createPromptClient(FIXTURE_URL, async () => FIXTURE_TOKEN);
     await assert.rejects(() => client.getPrompt("brain/task-contract", { version: 1 }), /500/);
   });
+});
+
+test("ordinary HTTP 404/422 failures are not misclassified as prompt-domain PT404/PT422 errors", async () => {
+  for (const fixture of [
+    { status: 404, body: { code: "PGRST202", message: "function is missing" } },
+    { status: 422, body: { code: "PGRST102", message: "malformed request body" } },
+    { status: 422, body: { code: "PT422", message: "p_values must be a JSON object" } },
+  ]) {
+    await withPatchedFetch(onlyRpc(async () => jsonResponse(fixture.body, fixture.status)), async () => {
+      const client = createPromptClient(FIXTURE_URL, async () => FIXTURE_TOKEN);
+      await assert.rejects(
+        () => client.getPrompt("brain/task-contract", { version: 1 }),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal(error instanceof PromptNotFoundError, false);
+          assert.equal(error instanceof MissingVariablesError, false);
+          assert.match(error.message, new RegExp(String(fixture.status)));
+          return true;
+        },
+      );
+    });
+  }
+});
+
+test("config-backed get_prompt rejects malformed successful payloads", async () => {
+  const malformed = [
+    null,
+    {},
+    { text: 1, version_no: 1, rendered_at: "2026-08-13T00:00:00Z" },
+    { text: "x", version_no: 0, rendered_at: "2026-08-13T00:00:00Z" },
+    { text: "x", version_no: 2, rendered_at: "2026-08-13T00:00:00Z" },
+    { text: "x", version_no: 1, rendered_at: "not-a-date" },
+  ];
+
+  for (const payload of malformed) {
+    await withPatchedFetch(onlyRpc(async () => jsonResponse(payload)), async () => {
+      const client = createPromptClient(FIXTURE_URL, async () => FIXTURE_TOKEN);
+      await assert.rejects(
+        () => client.getPrompt("brain/task-contract", { version: 1, config: "default" }),
+        /invalid get_prompt response/,
+      );
+    });
+  }
 });
 
 test("PromptNotFoundError and MissingVariablesError are real Error instances with a distinct name", async (t) => {

@@ -98,6 +98,9 @@ function detectRunner() {
 }
 
 const RUNNER = detectRunner();
+if (process.env.PROMPT_REQUIRE_POSTGRES === "1" && !RUNNER) {
+  throw new Error("PROMPT_REQUIRE_POSTGRES=1 but no local PostgreSQL server is reachable");
+}
 const SKIP_REASON = RUNNER
   ? false
   : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); " +
@@ -296,3 +299,4 @@ test("the down migration restores the exact original racy two-statement body", (
   const aggregateBlock = downSql.slice(0, aggregateBlockEnd);
   assert.match(aggregateBlock, /from prompt\.usage\s*\n\s*where created_at < now\(\)/);
 });
+

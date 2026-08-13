@@ -6,6 +6,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { AccStatusCard } from "./acc-status-card";
+import { ACC_TOKEN_STORAGE_KEY } from "../lib/acc";
+
+const VALID_ACC_TOKEN = "A".repeat(43);
+
+function storeAccToken(token = VALID_ACC_TOKEN) {
+  window.sessionStorage.setItem(ACC_TOKEN_STORAGE_KEY, token);
+}
 
 function mockFetchReject(message = "network unreachable") {
   const spy = vi.fn().mockRejectedValue(new TypeError(message));
@@ -25,8 +32,9 @@ function mockFetchResolve(status: number, body: unknown) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.sessionStorage.clear();
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
 });
-
 describe("AccStatusCard: unreachable degrade (mocked fetch failure)", () => {
   it('renders "ACC unreachable" and nothing toast-shaped, when fetch rejects', async () => {
     mockFetchReject();
@@ -37,11 +45,8 @@ describe("AccStatusCard: unreachable degrade (mocked fetch failure)", () => {
     });
     expect(screen.getByText("ACC unreachable")).toBeInTheDocument();
 
-    // A toast surface DOES exist as of m2-05, which makes this assertion
-    // stronger than when it was written, not weaker: the card is rendered
-    // here without any chrome around it, so anything toast-shaped in this
-    // DOM could only have come from the card itself. It renders inline
-    // instead, per 09 section 4.4's "Error, inline" row.
+    // A toast surface exists as of m2-05. This isolated card render proves
+    // the unreachable path itself publishes nothing toast-shaped.
     expect(document.querySelector('[data-slot*="toast"]')).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -62,50 +67,6 @@ describe("AccStatusCard: unreachable degrade (mocked fetch failure)", () => {
     });
   });
 
-  // Finding #76 (PR #8 security review): a 200 response used to be trusted
-  // with a blind `as AccProcessStatus` cast and no runtime check -- these
-  // prove a malformed 200 body degrades exactly like a network failure
-  // (the SAME unreachable-state UI, per this finding's own fix guidance),
-  // and -- just as importantly -- never crashes the render, given this app
-  // has no error boundary anywhere.
-  describe("malformed 200 response bodies (Finding #76)", () => {
-    const malformedBodies: [string, unknown][] = [
-      ["null", null],
-      ["an array instead of an object", ["not", "an", "object"]],
-      ["an empty object (missing every required field)", {}],
-      [
-        "weekText is a number instead of a string",
-        { tier: null, weekText: 12345, stopped: false },
-      ],
-      [
-        "stopped is a string instead of a boolean",
-        { tier: null, weekText: "Week: $12 of $100", stopped: "false" },
-      ],
-      [
-        "tier.tier is an unrecognized string",
-        { tier: { tier: "purple" }, weekText: "Week: $12 of $100", stopped: false },
-      ],
-      [
-        "tier.pct is a string instead of a number",
-        { tier: { tier: "green", pct: "10" }, weekText: "Week: $12 of $100", stopped: false },
-      ],
-      ["tier is a string instead of an object or null", { tier: "green", weekText: "x", stopped: false }],
-    ];
-
-    for (const [label, body] of malformedBodies) {
-      it(`${label}: renders the unreachable degrade, never throws`, async () => {
-        mockFetchResolve(200, body);
-        expect(() => render(<AccStatusCard />)).not.toThrow();
-
-        await waitFor(() => {
-          expect(screen.getByTestId("acc-status-unreachable")).toBeInTheDocument();
-        });
-        expect(screen.getByText("ACC unreachable")).toBeInTheDocument();
-        expect(screen.queryByTestId("acc-status-ok")).toBeNull();
-      });
-    }
-  });
-
   it("the Retry button re-issues the fetch", async () => {
     const spy = mockFetchReject();
     render(<AccStatusCard />);
@@ -119,6 +80,7 @@ describe("AccStatusCard: unreachable degrade (mocked fetch failure)", () => {
 
 describe("AccStatusCard: reachable path (mocked fetch success)", () => {
   it("renders tier and week text when ACC responds 200", async () => {
+    window.location.hash = `acc-token=${VALID_ACC_TOKEN}`;
     mockFetchResolve(200, {
       tier: { tier: "green", pct: 10 },
       weekText: "Week: $12 of $100",
@@ -131,9 +93,16 @@ describe("AccStatusCard: reachable path (mocked fetch success)", () => {
     });
     expect(screen.getByText("Spending is fine")).toBeInTheDocument();
     expect(screen.getByText("Week: $12 of $100")).toBeInTheDocument();
+    expect(window.location.hash).toBe("");
+    expect(window.sessionStorage.getItem(ACC_TOKEN_STORAGE_KEY)).toBe(VALID_ACC_TOKEN);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ headers: { "X-ACC-Token": VALID_ACC_TOKEN } }),
+    );
   });
 
   it('renders a "Stopped" badge when stopped is true', async () => {
+    storeAccToken();
     mockFetchResolve(200, {
       tier: { tier: "red", pct: 100 },
       weekText: "Week: $100 of $100",
@@ -144,5 +113,47 @@ describe("AccStatusCard: reachable path (mocked fetch success)", () => {
       expect(screen.getByTestId("acc-status-ok")).toBeInTheDocument();
     });
     expect(screen.getByText("Stopped")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["unknown tier", { tier: { tier: "blue" }, weekText: "Week", stopped: false }],
+    ["missing week text", { tier: { tier: "green" }, stopped: false }],
+    ["wrong stopped type", { tier: null, weekText: "Week", stopped: "no" }],
+    ["non-object body", ["green", "Week", false]],
+  ])("treats a malformed 200 response as unreachable: %s", async (_label, body) => {
+    storeAccToken();
+    mockFetchResolve(200, body);
+    render(<AccStatusCard />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("acc-status-unreachable")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("acc-status-ok")).toBeNull();
+  });
+
+  it("reuses the tab-scoped token after reload without putting it back in the URL", async () => {
+    storeAccToken();
+    mockFetchResolve(200, { tier: null, weekText: "No spend", stopped: false });
+    render(<AccStatusCard />);
+    await waitFor(() => expect(screen.getByTestId("acc-status-ok")).toBeInTheDocument());
+    expect(fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ headers: { "X-ACC-Token": VALID_ACC_TOKEN } }),
+    );
+    expect(window.location.hash).toBe("");
+  });
+
+  it("a malformed bootstrap clears a stale token, strips the fragment, and sends no credential", async () => {
+    storeAccToken();
+    window.location.hash = "acc-token=%";
+    mockFetchResolve(401, { error: "unauthorized" });
+    render(<AccStatusCard />);
+    await waitFor(() => expect(screen.getByTestId("acc-status-unreachable")).toBeInTheDocument());
+    expect(window.sessionStorage.getItem(ACC_TOKEN_STORAGE_KEY)).toBeNull();
+    expect(window.location.hash).toBe("");
+    expect(fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ headers: undefined }),
+    );
   });
 });

@@ -5,13 +5,12 @@
 # Do not broaden this allowlist beyond those two categories; do not weaken
 # the scan any other way.
 #
-# Uses the singular [allowlist] table (not [[allowlists]]) because
-# gitleaks-action defaults to gitleaks CLI 8.24.3, whose top-level allowlist
-# support is singular-only; the newer plural syntax is silently ignored by
-# that version. All entries live in one `regexes` array (not split across a
+# Uses the singular [allowlist] table supported by the checksum-pinned
+# Gitleaks CLI in .github/workflows/secret-scan.yml. All entries live in one
+# `regexes` array (not split across a
 # `paths` filter) deliberately: gitleaks' allowlist match semantics AND
 # categories together when more than one is present on the same table, and
-# this repo's build cannot use a second [[allowlists]] table (see above) to
+# this repo's scan keeps one table to
 # separate them safely. Adding a `paths` scope here would silently break the
 # anon-key regexes below, since those keys live in application code, not
 # under a `paths` filter scoped to docs/.

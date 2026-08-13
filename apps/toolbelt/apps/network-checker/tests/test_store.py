@@ -223,7 +223,8 @@ class MirrorTest(unittest.TestCase):
                        {"ts": "t3", "payload": '{"wifi": {"channel": 44}}'})
         url, received = self._stub()
         store.mirror(self.conn, url, "key", "surface")
-        scan = next(b[0] for p, b in received if p.endswith("env_scans"))
+        scan = next(b[0] for p, b in received
+                    if p.partition("?")[0].endswith("env_scans"))
         self.assertEqual(scan["payload"], {"wifi": {"channel": 44}})
 
     def test_unconfigured_mirror_is_unavailable_and_marks_nothing(self):

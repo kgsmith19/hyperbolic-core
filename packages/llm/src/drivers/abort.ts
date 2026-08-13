@@ -11,9 +11,11 @@
 export function createAttemptController(request: { timeoutMs: number; signal?: AbortSignal }): {
   controller: AbortController;
   hardTimer: ReturnType<typeof setTimeout>;
+  cleanup: () => void;
 } {
   const controller = new AbortController();
   const callerSignal = request.signal;
+  let cleanup = (): void => {};
   if (callerSignal) {
     if (callerSignal.aborted) {
       // Already aborted before this attempt even started (e.g. a caller
@@ -22,9 +24,11 @@ export function createAttemptController(request: { timeoutMs: number; signal?: A
       // already-fired signal will never emit again.
       controller.abort(callerSignal.reason);
     } else {
-      callerSignal.addEventListener("abort", () => controller.abort(callerSignal.reason), { once: true });
+      const onAbort = (): void => controller.abort(callerSignal.reason);
+      callerSignal.addEventListener("abort", onAbort, { once: true });
+      cleanup = (): void => callerSignal.removeEventListener("abort", onAbort);
     }
   }
   const hardTimer = setTimeout(() => controller.abort(), request.timeoutMs);
-  return { controller, hardTimer };
+  return { controller, hardTimer, cleanup };
 }

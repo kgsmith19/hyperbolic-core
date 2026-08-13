@@ -158,6 +158,7 @@ function NotificationBell({ inbox, unreadCount, onOpenInbox, onDismiss }: Notifi
                       {notification.href && (
                         <a
                           href={notification.href}
+                          onClick={() => setOpen(false)}
                           className="text-sm font-medium text-text underline underline-offset-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                         >
                           View details

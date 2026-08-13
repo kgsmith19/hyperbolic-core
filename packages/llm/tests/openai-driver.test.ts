@@ -342,6 +342,30 @@ test("openaiDriver.complete: a response with an empty choices array is a provide
   );
 });
 
+test("openaiDriver.complete: malformed choice or model fields are provider_bug responses", async () => {
+  const malformedResponses = [
+    fixtureChatCompletion({ choices: [{ index: 0, finish_reason: "stop", logprobs: null }] }),
+    fixtureChatCompletion({ model: null }),
+  ];
+
+  for (const response of malformedResponses) {
+    await withPatchedFetch(
+      async () => jsonResponse(response),
+      async () => {
+        await assert.rejects(
+          () => openaiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+          (error: unknown) => {
+            assert.ok(isLlmError(error));
+            assert.equal(error.class, "provider_bug");
+            assert.equal(error.retryable, false);
+            return true;
+          },
+        );
+      },
+    );
+  }
+});
+
 test("openaiDriver.complete: the existing refusal (message.refusal) path still works unchanged -- not reclassified as provider_bug", async () => {
   const response = await withPatchedFetch(
     async () =>

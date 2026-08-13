@@ -224,6 +224,35 @@ describe("NotificationSurface contract (05-a section 7)", () => {
     assert.notEqual(first, second);
   });
 
+  test("publish rejects malformed, oversized, cross-origin, and duplicate-id input", () => {
+    const malformed = [
+      { ...INFO, title: "" },
+      { ...INFO, title: "x".repeat(201) },
+      { ...INFO, level: "critical" },
+      { ...INFO, source: "unknown" },
+      { ...INFO, body: "x".repeat(10_001) },
+      { ...INFO, href: "https://attacker.invalid/steal" },
+      { ...INFO, href: "//attacker.invalid/steal" },
+      { ...INFO, href: "javascript:alert(1)" },
+    ];
+    for (const notification of malformed) {
+      const surface = localSurface();
+      assert.throws(() => surface.publish(notification), TypeError);
+      assert.deepEqual(surface.list(), []);
+    }
+
+    const surface = localSurface({ createId: () => "one-id" });
+    surface.publish(INFO);
+    assert.throws(() => surface.publish(INFO), /duplicate notification id/);
+    assert.equal(surface.list().length, 1);
+  });
+
+  test("invalid maxEntries values fail at construction", () => {
+    for (const value of [0, -1, 1.5, Number.NaN, 10_001]) {
+      assert.throws(() => localSurface({ maxEntries: value }), RangeError);
+    }
+  });
+
   test("publish fills in id and an ISO-8601 createdAt, preserving every given field", () => {
     const surface = localSurface({ now: () => Date.parse("2026-08-13T10:00:00.000Z") });
     const id = surface.publish({
@@ -299,6 +328,52 @@ describe("NotificationSurface contract (05-a section 7)", () => {
     assert.deepEqual(first, second);
   });
 
+  test("a throwing subscriber cannot block another subscriber or publishing", () => {
+    const posted = [];
+    let onmessage = null;
+    const surface = surfaceFor({
+      createChannel: () => ({
+        postMessage(message) {
+          posted.push(message);
+        },
+        close() {},
+        set onmessage(handler) {
+          onmessage = handler;
+        },
+        get onmessage() {
+          return onmessage;
+        },
+      }),
+    });
+    const seen = [];
+    surface.subscribe(() => {
+      throw new Error("bad notification consumer");
+    });
+    surface.subscribe((all) => seen.push(all.map((entry) => entry.title)));
+
+    assert.doesNotThrow(() => surface.publish(INFO));
+    assert.deepEqual(seen, [[INFO.title]]);
+    assert.equal(surface.list().length, 1);
+    assert.equal(posted.length, 1, "subscriber failure blocked cross-zone delivery");
+  });
+
+  test("publish copies only contract fields onto the surface and wire message", () => {
+    const posted = [];
+    const surface = surfaceFor({
+      createChannel: () => ({
+        postMessage(message) {
+          posted.push(message);
+        },
+        close() {},
+        onmessage: null,
+      }),
+    });
+    surface.publish({ ...INFO, privateToken: "must-not-cross-zones" });
+
+    assert.equal(Object.hasOwn(surface.list()[0], "privateToken"), false);
+    assert.equal(Object.hasOwn(posted[0].notification, "privateToken"), false);
+  });
+
   test("entries are ordered oldest-first by (createdAt, id), whatever the arrival order", () => {
     // Two documents receiving the same three notifications in DIFFERENT
     // orders must still agree on one order -- the property that keeps two
@@ -370,6 +445,11 @@ describe("NotificationSurface contract (05-a section 7)", () => {
 // ---------------------------------------------------------------------
 
 describe("cross-zone transport over BroadcastChannel", () => {
+  function nodeChannel() {
+    const channel = new BroadcastChannel(NOTIFICATION_CHANNEL);
+    channel.unref?.();
+    return channel;
+  }
   /**
    * Polls instead of sleeping a fixed 20ms. A fixed sleep made the FIRST
    * real-channel test in this process flaky (~1 run in 3): Node's very
@@ -395,8 +475,8 @@ describe("cross-zone transport over BroadcastChannel", () => {
   });
 
   test("a publish in one surface reaches another surface on the same channel", async () => {
-    const zoneA = surfaceFor();
-    const zoneB = surfaceFor();
+    const zoneA = surfaceFor({ createChannel: nodeChannel });
+    const zoneB = surfaceFor({ createChannel: nodeChannel });
     const id = zoneA.publish({ level: "error", title: "Run failed", source: "brain" });
     await waitFor(() => zoneB.list().length === 1);
     const received = zoneB.list();
@@ -407,8 +487,8 @@ describe("cross-zone transport over BroadcastChannel", () => {
   });
 
   test("a dismiss in one surface clears the other surface's copy", async () => {
-    const zoneA = surfaceFor();
-    const zoneB = surfaceFor();
+    const zoneA = surfaceFor({ createChannel: nodeChannel });
+    const zoneB = surfaceFor({ createChannel: nodeChannel });
     const id = zoneA.publish(INFO);
     await waitFor(() => zoneB.list().length === 1);
     zoneB.dismiss(id);
@@ -418,9 +498,9 @@ describe("cross-zone transport over BroadcastChannel", () => {
   });
 
   test("a received notification is applied but not re-broadcast (no ping-pong, no duplicates)", async () => {
-    const zoneA = surfaceFor();
-    const zoneB = surfaceFor();
-    const zoneC = surfaceFor();
+    const zoneA = surfaceFor({ createChannel: nodeChannel });
+    const zoneB = surfaceFor({ createChannel: nodeChannel });
+    const zoneC = surfaceFor({ createChannel: nodeChannel });
     zoneA.publish(INFO);
     await waitFor(() => zoneB.list().length === 1 && zoneC.list().length === 1);
     // A second settle: if anything DID re-broadcast, the duplicate would
@@ -432,8 +512,8 @@ describe("cross-zone transport over BroadcastChannel", () => {
   });
 
   test("a subscriber in the receiving zone is notified", async () => {
-    const zoneA = surfaceFor();
-    const zoneB = surfaceFor();
+    const zoneA = surfaceFor({ createChannel: nodeChannel });
+    const zoneB = surfaceFor({ createChannel: nodeChannel });
     const seen = [];
     zoneB.subscribe((all) => seen.push(all.length));
     zoneA.publish(INFO);
@@ -442,7 +522,7 @@ describe("cross-zone transport over BroadcastChannel", () => {
   });
 
   test("malformed and hostile channel traffic is ignored, not stored or thrown on", async () => {
-    const zoneB = surfaceFor();
+    const zoneB = surfaceFor({ createChannel: nodeChannel });
     const raw = new BroadcastChannel(NOTIFICATION_CHANNEL);
     raw.unref?.();
     for (const junk of [
@@ -455,6 +535,9 @@ describe("cross-zone transport over BroadcastChannel", () => {
       { kind: "publish", notification: { ...INFO, id: "x", createdAt: 1, level: "info" } },
       { kind: "publish", notification: { ...INFO, id: "x", createdAt: "now", level: "critical" } },
       { kind: "publish", notification: { ...INFO, id: "x", createdAt: "now", source: "evil" } },
+      { kind: "publish", notification: { ...INFO, id: "x", createdAt: "not-a-date" } },
+      { kind: "publish", notification: { ...INFO, id: "x", createdAt: "2026-08-13" } },
+      { kind: "publish", notification: { ...INFO, id: "x", createdAt: new Date().toISOString(), href: "https://attacker.invalid/" } },
       { kind: "dismiss" },
       { kind: "explode" },
     ]) {
@@ -491,10 +574,13 @@ describe("public entry (dist/index.cjs)", () => {
     assert.equal(ui.NOTIFICATION_CHANNEL, "platform-notifications");
   });
 
-  test("getNotificationSurface returns the SAME surface every call (one per document)", () => {
+  test("getNotificationSurface does not share state across server renders", () => {
     const ui = createRequire(import.meta.url)(distEntry);
     const first = ui.getNotificationSurface();
-    assert.equal(ui.getNotificationSurface(), first);
+    const second = ui.getNotificationSurface();
+    assert.notEqual(second, first, "there is no document on the server to own a singleton");
+    first.publish(INFO);
+    assert.deepEqual(second.list(), []);
     for (const method of ["publish", "dismiss", "list", "subscribe"]) {
       assert.equal(typeof first[method], "function", `missing ${method}`);
     }

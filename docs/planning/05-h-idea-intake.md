@@ -63,10 +63,15 @@ create table intake.idea (
 
   -- github fields exist exactly when submitted: one CHECK binds state to payload
   constraint submitted_fields_all_or_none check (
-    (status = 'submitted_to_github')
-    = (github_issue_number is not null
-       and github_issue_url is not null
-       and submitted_at is not null)
+    (status = 'submitted_to_github'
+     and github_issue_number is not null
+     and github_issue_url is not null
+     and submitted_at is not null)
+    or
+    (status <> 'submitted_to_github'
+     and github_issue_number is null
+     and github_issue_url is null
+     and submitted_at is null)
   ),
   -- an idea cannot be promoted without a destination repo
   constraint repo_required_beyond_draft check (
@@ -82,8 +87,8 @@ create index idea_status   on intake.idea (status, updated_at desc);
 
 create table intake.optimization (
   id              uuid primary key default gen_random_uuid(),
-  input_idea_id   uuid not null references intake.idea(id),
-  output_idea_id  uuid references intake.idea(id),
+  input_idea_id   uuid not null references intake.idea(id) on delete cascade,
+  output_idea_id  uuid references intake.idea(id) on delete cascade,
   prompt_name     text not null,
   model           text not null,
   handler_run_id  uuid,
@@ -140,7 +145,7 @@ Every forbidden transition and why it is structurally impossible:
 | any field edit on a submitted row | update guard trigger rule 1 |
 | DELETE of a submitted row | delete guard trigger |
 | INSERT born as idea or submitted | insert guard trigger rule 1 |
-| setting `github_issue_number` while not transitioning to submitted | CHECK `submitted_fields_all_or_none` plus update guard rule 3 |
+| setting any GitHub metadata field while not transitioning to submitted | CHECK `submitted_fields_all_or_none` plus update guard rule 3 |
 | changing `github_issue_number` after submit | update guard rule 1 (and no second UPDATE can ever run) |
 | changing `id`, `idempotency_key`, `parent_idea_id`, `user_id`, `created_at` at any time | absent from the UPDATE column grant (Section 3.2): PostgREST cannot even name them in an update |
 | derivative of an unsubmitted idea | insert guard trigger rule 2 (unsubmitted ideas are edited in place, not forked) |
@@ -160,9 +165,12 @@ create function intake.guard_idea_update() returns trigger
 --   rule 2: IF (old.status, new.status) is not one of
 --     (draft,draft),(draft,idea),(idea,idea),(idea,submitted_to_github) THEN
 --     RAISE EXCEPTION 'II-1: illegal transition % -> %', old.status, new.status;
---   rule 3: IF new.status <> 'submitted_to_github' AND new.github_issue_number IS NOT NULL THEN
+--   rule 3: IF new.status <> 'submitted_to_github' AND any of
+--     github_issue_number, github_issue_url, or submitted_at is non-null THEN
 --     RAISE EXCEPTION 'II-1: github fields may be set only by the submit transition';
---   otherwise: NEW.updated_at := now(); RETURN NEW;
+--   otherwise: NEW.updated_at := now(); RETURN NEW. The one-shot Forgepad
+--     importer may preserve its source timestamp only when both an explicit
+--     transaction-local opt-in is set and current_user is superuser/BYPASSRLS.
 
 create trigger idea_guard_update
   before update on intake.idea
@@ -384,7 +392,7 @@ Field mapping (forgepad -> intake):
 
 | Forgepad field | Intake column | Mapping rule |
 | --- | --- | --- |
-| `id` (`f-<hex8>`) | `source` | prefixed provenance: `forgepad:f-xxxxxxxx` (original `source` value appended after `; ` when present) |
+| `id` (`f-<hex8>`) | `idempotency_key` and `source` | a deterministic UUID key derived only from the immutable Forgepad id is the database-enforced identity; `source` retains the readable `forgepad:f-xxxxxxxx` provenance plus the original source text |
 | `title` | `title` | direct (both cap at 200 [VERIFIED: store.mjs validateFields; intake CHECK]) |
 | `problem` | `problem` | direct |
 | `outcome` | `outcome` | direct |
@@ -396,10 +404,10 @@ Field mapping (forgepad -> intake):
 | `state = rejected` | not migrated | intake has no rejected state by design; the migration prints the skipped count and file ids for the operator's one-time review |
 | `target` | `target_repo` or `notes` | `target_repo` when it matches the DDL pattern; otherwise appended to notes |
 | `source` | `source` | appended per the id row above |
-| `created` / `updated` | `created_at` / `updated_at` | preserved for `draft`/`research-needed` rows (a single INSERT, no later UPDATE). **Not** preserved for `state = definite` rows: the importer INSERTs as `draft` then promotes to `idea` with a separate UPDATE (row above), and `intake.guard_idea_update`'s trigger unconditionally sets `updated_at := now()` on every UPDATE regardless of caller — a hard database invariant, not a gap in the importer. Validated by `apps/toolbelt/apps/idea-intake/tests/migrate-forgepad-e2e.test.mjs`, which asserts this deviation directly (independent review, Finding 13) rather than leaving it as an unremarked exception to the "preserved" claim above |
-| `githubIssue` | ignored | reserved and never populated [VERIFIED: store.mjs initializes null; INFERRED: no code path writes it since promote-to-GitHub was never built, per the ACC inventory] |
+| `created` / `updated` | `created_at` / `updated_at` | preserved; the migration runs in a service context, bypassing the PostgREST column grants that hide these from API callers |
+| `githubIssue` | migration blocker when non-null | null is the expected legacy shape; a non-null value is printed and rejected for operator review so GitHub provenance can never be silently discarded |
 
-Migration mechanics (CLI spec, one-shot): `node apps/toolbelt/apps/idea-intake/tools/migrate-forgepad.mjs --acc-root <path> [--dry-run]`; reads `f-*.json`, inserts per the mapping, prints per-state counts, exits non-zero on any unparseable file without partial silence. After the operator confirms counts, the ACC-side deletion executes per `05-b`: `forgepad/store.mjs` (137), `forgepad/store.test.mjs` (161), `gui/forgepad.html` (313), total -611 LOC [VERIFIED: wc -l], satisfying ACC-4 (`grep -rn forgepad apps/agentic-command-center --include='*.mjs' --include='*.html'` returns zero hits [VERIFIED: 03-v1-definition.md ACC-4]).
+Migration mechanics (CLI spec, one-shot): `node apps/toolbelt/apps/idea-intake/tools/migrate-forgepad.mjs --acc-root <path> [--dry-run]`; requires the ACC root and ideas directory to exist, verifies filename/id parity and canonical ISO timestamps, rejects duplicate ids and non-null `githubIssue`, and sends one encoded JSON recordset to PostgreSQL. Apply takes a transaction-scoped advisory lock, requires a superuser/BYPASSRLS deployment role and configured platform owner, preserves both timestamps, and inserts with a database-enforced idempotency key. A rerun compares every mapped field and fails on divergence rather than certifying stale or duplicate data. Only after the operator records dry-run counts, a successful apply receipt, the ACC-4b query, and a zero-insert second run may the ACC-side deletion execute per `05-b`.
 
 ## 11. Latency budgets (new paths)
 

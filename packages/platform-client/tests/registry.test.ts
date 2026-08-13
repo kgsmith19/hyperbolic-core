@@ -107,6 +107,31 @@ test("listTools issues GET /rest/v1/app with apikey + Authorization headers and 
   assert.equal(tools.length, 1);
 });
 
+test("a project override sends its matching publishable key instead of the default project key", async (t) => {
+  const overrideUrl = "https://local-project.example";
+  const overrideKey = "local-project-publishable-key";
+  const spy = t.mock.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.equal(new URL(String(input)).origin, overrideUrl);
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get("apikey"), overrideKey);
+    assert.equal(headers.get("authorization"), `Bearer ${FIXTURE_TOKEN}`);
+    return jsonResponse([]);
+  });
+
+  await withPatchedFetch(spy, async () => {
+    const client = createRegistryClient(overrideUrl, async () => FIXTURE_TOKEN, overrideKey);
+    await client.listTools();
+  });
+  assert.equal(spy.mock.callCount(), 1);
+});
+
+test("an empty explicit publishable key fails before any request", () => {
+  assert.throws(
+    () => createRegistryClient(FIXTURE_URL, async () => FIXTURE_TOKEN, "  "),
+    /publishable key is required/,
+  );
+});
+
 test("listTools maps snake_case PostgREST columns to the RegisteredTool camelCase shape exactly", async (t) => {
   const spy = t.mock.fn(async () =>
     jsonResponse([

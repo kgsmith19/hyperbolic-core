@@ -1,4 +1,4 @@
-// m4-03-feat-po-injection-rpc: real-Postgres proof of prompt.get_prompt's
+// m4-03/m4-04: real-Postgres proof of prompt.get_prompt's
 // branching logic (pinned-vs-latest resolution, the PT404/PT422 raise
 // conditions, and the p_values-over-p_config / p_sections-override merge
 // order), run against an actual PostgreSQL engine, applying the real,
@@ -37,10 +37,15 @@
 // skipping it does not weaken this suite's coverage of get_prompt itself.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  asAuthenticated,
+  asJwtRole,
+  createPostgresHarness,
+  supabaseHarnessSql,
+} from "./postgres-harness.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "supabase", "migrations");
@@ -59,75 +64,27 @@ const PO_MIGRATIONS_IN_ORDER = [
   "20260812180000_prompt_owner_pin.sql",
   "20260812200000_prompt_observed_query_indexes.sql",
   "20260813120000_prompt_create_get_prompt_function.sql",
+  "20260813140000_prompt_security_hardening.sql",
+  "20260813150000_prompt_create_get_prompt_source_function.sql",
 ];
 const GET_PROMPT_DOWN = join(PO_MIGRATIONS_DIR, "20260813120000_prompt_create_get_prompt_function_down.sql");
+const GET_PROMPT_HARDENING_DOWN = join(
+  PO_MIGRATIONS_DIR,
+  "20260813140000_prompt_security_hardening_down.sql",
+);
+const GET_PROMPT_SOURCE_DOWN = join(PO_MIGRATIONS_DIR, "20260813150000_prompt_create_get_prompt_source_function_down.sql");
 
 const OWNER_UUID = "9a50a35a-8a1e-4f0c-8495-7f26777982d8";
 const STRANGER_UUID = "b2222222-2222-4222-8222-222222222222";
+const AGENT_UUID = "c3333333-3333-4333-8333-333333333333";
 
-const HARNESS_SQL = `
-create schema if not exists auth;
-create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid()
-);
-create or replace function auth.uid() returns uuid
-language sql stable
-as $$ select nullif(current_setting('app.test_uid', true), '')::uuid $$;
-
-do $$
-begin
-  if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticator') then create role authenticator nologin; end if;
-end
-$$;
-
-insert into auth.users (id) values ('${OWNER_UUID}'), ('${STRANGER_UUID}');
-`;
+const HARNESS_SQL = supabaseHarnessSql([OWNER_UUID, STRANGER_UUID]);
 
 const OWNER_BOOTSTRAP_SQL = `insert into platform.config (owner_uuid) values ('${OWNER_UUID}');`;
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], { encoding: "utf8", timeout: 5000 });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); get_prompt does not exist " +
-    "on the live Supabase project yet (confirmed live: rpc/get_prompt returns PGRST202), so this suite has " +
-    "nothing honest to assert against either target without a reachable engine";
-
-function psql(dbName, sqlText) {
-  // VERBOSITY=verbose: psql's default error display omits the SQLSTATE
-  // ("ERROR:  prompt not found"), which is exactly the PT404/PT422 class
-  // these tests assert on; verbose mode prefixes it ("ERROR:  PT404:
-  // prompt not found"), matching what a PostgREST-fronted caller actually
-  // sees in the `code` field of its JSON error body.
-  return spawnSync(
-    RUNNER.cmd,
-    [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose", "-tA", "-q"],
-    { encoding: "utf8", input: sqlText, timeout: 20000 },
-  );
-}
-
-function psqlOk(dbName, sqlText) {
-  const result = psql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
+const PG = createPostgresHarness("m4_03_get_prompt_test");
+const { psql, psqlOk, applyMigrationWithRetry } = PG;
+const SKIP_REASON = PG.skipReason;
 
 // 20260807020000 sets a role-wide GUC (`alter role authenticator set
 // pgrst.db_schemas = ...`, unscoped -- no `IN DATABASE`), which contends
@@ -137,32 +94,8 @@ function psqlOk(dbName, sqlText) {
 // concurrently updated" error safe: DDL is transactional, so a failed
 // attempt rolls back cleanly and a retry starts from scratch. Established
 // in intake-guards.test.mjs; reused verbatim here for the same file.
-function applyMigrationWithRetry(dbName, sqlText, attempts = 5) {
-  const wrapped = `begin;\n${sqlText}\ncommit;\n`;
-  let lastResult;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    lastResult = psql(dbName, wrapped);
-    if (lastResult.status === 0) return lastResult.stdout;
-    if (!/tuple concurrently updated/.test(lastResult.stderr || "")) break;
-  }
-  assert.equal(lastResult.status, 0, `psql failed against ${dbName}: ${lastResult.stderr || lastResult.stdout}`);
-  return lastResult.stdout;
-}
-
-// Runs sqlText as `authenticated` with auth.uid() pinned to uuid for one
-// psql invocation, mirroring what PostgREST does per-request.
-function asAuthenticated(uuid, sqlText) {
-  return `set role authenticated;\ndo $$ begin perform set_config('app.test_uid', '${uuid}', false); end $$;\n${sqlText}`;
-}
-
-function freshDbName() {
-  return `m4_03_get_prompt_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
-
 function withMigratedDb(fn) {
-  const db = freshDbName();
-  psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
-  try {
+  return PG.withDatabase((db) => {
     psqlOk(db, HARNESS_SQL);
     psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
     psqlOk(db, OWNER_BOOTSTRAP_SQL);
@@ -172,9 +105,7 @@ function withMigratedDb(fn) {
       else psqlOk(db, sql);
     }
     return fn(db);
-  } finally {
-    psqlOk("postgres", `drop database if exists ${db};`);
-  }
+  });
 }
 
 function callGetPrompt(db, uuid, argsSql) {
@@ -189,6 +120,22 @@ function callGetPromptJson(db, uuid, argsSql) {
 
 function callGetPromptError(db, uuid, argsSql) {
   const result = callGetPrompt(db, uuid, argsSql);
+  assert.notEqual(result.status, 0, "expected an error, call succeeded");
+  return result.stderr;
+}
+
+function callGetPromptSource(db, uuid, argsSql) {
+  return psql(db, asAuthenticated(uuid, `select prompt.get_prompt_source(${argsSql});`));
+}
+
+function callGetPromptSourceJson(db, uuid, argsSql) {
+  const result = callGetPromptSource(db, uuid, argsSql);
+  assert.equal(result.status, 0, `expected success, got: ${result.stderr}`);
+  return JSON.parse(result.stdout.trim());
+}
+
+function callGetPromptSourceError(db, uuid, argsSql) {
+  const result = callGetPromptSource(db, uuid, argsSql);
   assert.notEqual(result.status, 0, "expected an error, call succeeded");
   return result.stderr;
 }
@@ -225,6 +172,28 @@ test("real Postgres: missing template variables after merge raise the PT422 clas
     assert.match(stderr, /PT422/);
     assert.match(stderr, /\bB\b/, "the error must name the missing variable");
     assert.doesNotMatch(stderr, /\bA\b needs/, "must not name a variable that WAS supplied");
+  });
+});
+
+test("real Postgres: p_values must be a JSON object", { skip: SKIP_REASON }, () => {
+  withMigratedDb((db) => {
+    psqlOk(db, asAuthenticated(OWNER_UUID, "insert into prompt.prompt (title, body) values ('gp/value-shape', '{{A}}');"));
+
+    const stderr = callGetPromptError(db, OWNER_UUID, "'gp/value-shape', null, null, '[\"x\"]'::jsonb, null");
+
+    assert.match(stderr, /PT422/);
+    assert.match(stderr, /object of string values/i);
+  });
+});
+
+test("real Postgres: every p_values member must be a JSON string", { skip: SKIP_REASON }, () => {
+  withMigratedDb((db) => {
+    psqlOk(db, asAuthenticated(OWNER_UUID, "insert into prompt.prompt (title, body) values ('gp/value-types', '{{A}}');"));
+
+    const stderr = callGetPromptError(db, OWNER_UUID, "'gp/value-types', null, null, '{\"A\":1}'::jsonb, null");
+
+    assert.match(stderr, /PT422/);
+    assert.match(stderr, /only string values/i);
   });
 });
 
@@ -312,6 +281,43 @@ test(
 );
 
 test(
+  "real Postgres: get_prompt_source conditionally returns an atomic latest body/version pair",
+  { skip: SKIP_REASON },
+  () => {
+    withMigratedDb((db) => {
+      psqlOk(db, asAuthenticated(OWNER_UUID, "insert into prompt.prompt (title, body) values ('gp/source', 'v1 body {{X}}');"));
+
+      const initial = callGetPromptSourceJson(db, OWNER_UUID, "'gp/source', null, null");
+      assert.deepEqual(initial, { body: "v1 body {{X}}", version_no: 1, not_modified: false });
+
+      const unchanged = callGetPromptSourceJson(db, OWNER_UUID, "'gp/source', null, 1");
+      assert.deepEqual(unchanged, { body: null, version_no: 1, not_modified: true });
+
+      psqlOk(db, asAuthenticated(OWNER_UUID, "update prompt.prompt set body = 'v2 body {{X}}' where title = 'gp/source';"));
+      const changed = callGetPromptSourceJson(db, OWNER_UUID, "'gp/source', null, 1");
+      assert.deepEqual(changed, { body: "v2 body {{X}}", version_no: 2, not_modified: false });
+    });
+  },
+);
+
+test(
+  "real Postgres: get_prompt_source rejects archived latest while preserving pinned source reads",
+  { skip: SKIP_REASON },
+  () => {
+    withMigratedDb((db) => {
+      psqlOk(db, asAuthenticated(OWNER_UUID, "insert into prompt.prompt (title, body) values ('gp/source-archive', 'body {{X}}');"));
+      psqlOk(db, asAuthenticated(OWNER_UUID, "update prompt.prompt set is_active = false where title = 'gp/source-archive';"));
+
+      assert.match(callGetPromptSourceError(db, OWNER_UUID, "'gp/source-archive', null, 1"), /PT404/);
+      assert.deepEqual(
+        callGetPromptSourceJson(db, OWNER_UUID, "'gp/source-archive', 1, null"),
+        { body: "body {{X}}", version_no: 1, not_modified: false },
+      );
+    });
+  },
+);
+
+test(
   "real Postgres: p_values overrides p_config on a shared key; config-only keys are kept (merge order)",
   { skip: SKIP_REASON },
   () => {
@@ -371,7 +377,7 @@ test(
 );
 
 test(
-  "real Postgres: security invoker -- a different authenticated user gets PT404, never another owner's row (no leak)",
+  "real Postgres: a different authenticated user without prompt:get is denied before any row can leak",
   { skip: SKIP_REASON },
   () => {
     withMigratedDb((db) => {
@@ -379,7 +385,35 @@ test(
 
       const stderr = callGetPromptError(db, STRANGER_UUID, "'gp/owner-only', null, null, null, null");
 
-      assert.match(stderr, /PT404/, "RLS makes the row invisible, surfacing as the same not-found class, not a leak");
+      assert.match(stderr, /42501/);
+      assert.doesNotMatch(stderr, /no vars here/, "the response must not disclose prompt data");
+    });
+  },
+);
+
+test(
+  "real Postgres: SECURITY DEFINER get_prompt never resolves a legacy foreign prompt, version, or configuration",
+  { skip: SKIP_REASON },
+  () => {
+    withMigratedDb((db) => {
+      psqlOk(
+        db,
+        `insert into prompt.prompt (user_id, title, body)
+         values ('${STRANGER_UUID}', 'gp/foreign-legacy', 'foreign {{SECRET}}')
+         returning id \\gset
+         insert into prompt.configuration (prompt_id, name, values, sections)
+         values (:'id', 'foreign-config', '{"SECRET":"must-not-leak"}'::jsonb, '{}'::text[]);`,
+      );
+
+      for (const args of [
+        "'gp/foreign-legacy', null, null, null, null",
+        "'gp/foreign-legacy', 1, null, '{\"SECRET\":\"x\"}'::jsonb, null",
+        "'gp/foreign-legacy', null, 'foreign-config', null, null",
+      ]) {
+        const stderr = callGetPromptError(db, OWNER_UUID, args);
+        assert.match(stderr, /PT404/);
+        assert.doesNotMatch(stderr, /foreign|must-not-leak/i);
+      }
     });
   },
 );
@@ -397,7 +431,68 @@ test(
 );
 
 test(
-  "real Postgres: an unauthenticated session (authenticated role, no uid ever set) gets PT404, not a crash or a leak",
+  "real Postgres: prompt_get_agent with prompt:get can execute both RPCs but cannot select their tables",
+  { skip: SKIP_REASON },
+  () => {
+    withMigratedDb((db) => {
+      psqlOk(db, asAuthenticated(OWNER_UUID, "insert into prompt.prompt (title, body) values ('gp/agent', 'agent sees {{X}}');"));
+
+      const rpc = psql(
+        db,
+        asJwtRole(
+          "prompt_get_agent",
+          { sub: AGENT_UUID, scope: "prompt:get" },
+          "select prompt.get_prompt('gp/agent', null, null, '{\"X\":\"only rpc\"}'::jsonb, null);",
+        ),
+      );
+      assert.equal(rpc.status, 0, rpc.stderr);
+      assert.equal(JSON.parse(rpc.stdout.trim()).text, "agent sees only rpc");
+
+      const sourceRpc = psql(
+        db,
+        asJwtRole(
+          "prompt_get_agent",
+          { sub: AGENT_UUID, scope: "prompt:get" },
+          "select prompt.get_prompt_source('gp/agent', null, null);",
+        ),
+      );
+      assert.equal(sourceRpc.status, 0, sourceRpc.stderr);
+      assert.deepEqual(
+        JSON.parse(sourceRpc.stdout.trim()),
+        { body: "agent sees {{X}}", version_no: 1, not_modified: false },
+      );
+
+      const tableRead = psql(
+        db,
+        asJwtRole("prompt_get_agent", { sub: AGENT_UUID, scope: "prompt:get" }, "select title from prompt.prompt;"),
+      );
+      assert.notEqual(tableRead.status, 0);
+      assert.match(tableRead.stderr, /permission denied/i);
+    });
+  },
+);
+
+test("real Postgres: prompt_get_agent without the exact prompt:get scope is denied by both RPCs", { skip: SKIP_REASON }, () => {
+  withMigratedDb((db) => {
+    psqlOk(db, asAuthenticated(OWNER_UUID, "insert into prompt.prompt (title, body) values ('gp/agent-scope', 'secret');"));
+
+    for (const call of [
+      "select prompt.get_prompt('gp/agent-scope', null, null, null, null);",
+      "select prompt.get_prompt_source('gp/agent-scope', null, null);",
+    ]) {
+      const result = psql(
+        db,
+        asJwtRole("prompt_get_agent", { sub: AGENT_UUID, scope: "prompt:list prompt:get-all" }, call),
+      );
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /42501/);
+    }
+  });
+});
+
+test(
+  "real Postgres: an authenticated database role without a JWT subject is denied",
   { skip: SKIP_REASON },
   () => {
     withMigratedDb((db) => {
@@ -406,13 +501,24 @@ test(
       const result = psql(db, "set role authenticated;\nselect prompt.get_prompt('gp/needs-session', null, null, null, null);");
 
       assert.notEqual(result.status, 0);
-      assert.match(result.stderr, /PT404/);
+      assert.match(result.stderr, /42501/);
     });
   },
 );
 
-test("real Postgres: the down migration drops get_prompt cleanly", { skip: SKIP_REASON }, () => {
+test("real Postgres: reverse-order down migrations drop both prompt RPCs cleanly", { skip: SKIP_REASON }, () => {
   withMigratedDb((db) => {
+    psqlOk(db, readFileSync(GET_PROMPT_SOURCE_DOWN, "utf8"));
+    const sourceResult = psql(db, "select prompt.get_prompt_source('anything', null, null);");
+    assert.notEqual(sourceResult.status, 0);
+    assert.match(sourceResult.stderr, /does not exist/i);
+
+    psqlOk(db, readFileSync(GET_PROMPT_HARDENING_DOWN, "utf8"));
+
+    const restored = psql(db, asAuthenticated(OWNER_UUID, "select prompt.get_prompt('anything', null, null, null, null);"));
+    assert.notEqual(restored.status, 0);
+    assert.match(restored.stderr, /PT404/, "hardening down restores the original function rather than dropping it");
+
     psqlOk(db, readFileSync(GET_PROMPT_DOWN, "utf8"));
 
     const result = psql(db, "select prompt.get_prompt('anything', null, null, null, null);");

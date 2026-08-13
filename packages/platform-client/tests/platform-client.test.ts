@@ -676,6 +676,84 @@ test("authedFetch: an absolute URL on the configured Supabase origin proceeds an
   assert.equal(captured[0]?.headers.get("authorization"), "Bearer fixture.access.token");
 });
 
+test("authedFetch: a Request input keeps its method, body, and headers and disables automatic redirects", async (t) => {
+  let received: Request | undefined;
+  const spy = t.mock.fn(
+    makeFetchStub({
+      onOther: async (input, init) => {
+        received = new Request(input, init);
+        return jsonResponse({ ok: true });
+      },
+    })
+  );
+
+  await withPatchedFetch(spy, async () => {
+    const client = createPlatformClient(FIXTURE_CONFIG);
+    await client.auth.signInWithPassword(FIXTURE_EMAIL, FIXTURE_PASSWORD);
+    await client.fetch(
+      new Request(`${FIXTURE_CONFIG.supabaseUrl}/rest/v1/app`, {
+        method: "POST",
+        headers: { "X-From-Request": "preserved" },
+        body: "request-body",
+      })
+    );
+  });
+
+  assert.ok(received);
+  assert.equal(received.url, `${FIXTURE_CONFIG.supabaseUrl}/rest/v1/app`);
+  assert.equal(received.method, "POST");
+  assert.equal(await received.text(), "request-body");
+  assert.equal(received.headers.get("x-from-request"), "preserved");
+  assert.equal(received.headers.get("authorization"), "Bearer fixture.access.token");
+  assert.equal(received.redirect, "manual");
+});
+
+test("authedFetch: RequestInit overrides Request fields without dropping unaffected Request headers", async (t) => {
+  let received: Request | undefined;
+  const spy = t.mock.fn(
+    makeFetchStub({
+      onOther: async (input, init) => {
+        received = new Request(input, init);
+        return jsonResponse({ ok: true });
+      },
+    })
+  );
+
+  await withPatchedFetch(spy, async () => {
+    const client = createPlatformClient(FIXTURE_CONFIG);
+    await client.auth.signInWithPassword(FIXTURE_EMAIL, FIXTURE_PASSWORD);
+    const request = new Request(`${FIXTURE_CONFIG.supabaseUrl}/rest/v1/app`, {
+      method: "POST",
+      headers: {
+        "X-From-Request": "preserved",
+        "X-Overridden": "request",
+        Authorization: "Bearer stale-request-token",
+      },
+      body: "request-body",
+    });
+
+    await client.fetch(request, {
+      method: "PUT",
+      headers: {
+        "X-From-Init": "applied",
+        "X-Overridden": "init",
+        Authorization: "Bearer stale-init-token",
+      },
+      body: "init-body",
+      redirect: "follow",
+    });
+  });
+
+  assert.ok(received);
+  assert.equal(received.method, "PUT");
+  assert.equal(await received.text(), "init-body");
+  assert.equal(received.headers.get("x-from-request"), "preserved");
+  assert.equal(received.headers.get("x-from-init"), "applied");
+  assert.equal(received.headers.get("x-overridden"), "init");
+  assert.equal(received.headers.get("authorization"), "Bearer fixture.access.token");
+  assert.equal(received.redirect, "manual");
+});
+
 test(
   "authedFetch: an absolute URL to a different, non-allowlisted origin is rejected and the " +
     "Authorization header is NEVER attached or sent (the actual point of the fix)",
@@ -698,6 +776,38 @@ test(
     assert.equal(captured.length, 0);
   }
 );
+
+test("authedFetch: rejects an untrusted target before re-checking session ownership", async (t) => {
+  let ownerRpcCalls = 0;
+  let resourceCalls = 0;
+  const spy = t.mock.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (isSignInUrl(url)) {
+      return jsonResponse(fixtureSignInBody(nowSeconds() + 3600));
+    }
+    if (isOwnerRpcUrl(url)) {
+      ownerRpcCalls += 1;
+      return isOwnerRpcResponse(init);
+    }
+    resourceCalls += 1;
+    return jsonResponse({ ok: true });
+  });
+
+  await withPatchedFetch(spy, async () => {
+    const client = createPlatformClient(FIXTURE_CONFIG);
+    await client.auth.signInWithPassword(FIXTURE_EMAIL, FIXTURE_PASSWORD);
+    const rpcCallsAfterSignIn = ownerRpcCalls;
+
+    await assert.rejects(
+      () => client.fetch("https://evil.invalid/steal"),
+      /refusing to attach the platform session token/
+    );
+
+    assert.equal(ownerRpcCalls, rpcCallsAfterSignIn);
+  });
+
+  assert.equal(resourceCalls, 0);
+});
 
 test(
   "authedFetch: a protocol-relative URL (//evil.invalid/...) pointed at a non-allowlisted host is rejected, " +

@@ -2,25 +2,48 @@ name: Toolbelt Network Checker Release
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing network-checker-vX.Y.Z tag to release
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: network-checker-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    outputs:
+      release-sha: ${{ steps.validate-release.outputs.release-sha }}
     defaults:
       run:
         working-directory: apps/toolbelt/apps/network-checker
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Validate selected release tag
+      - name: Validate selected release tag and generated versions
+        id: validate-release
         shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          [[ "$GITHUB_REF_NAME" =~ ^network-checker-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_TAG" =~ ^network-checker-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
+          [[ "$(git rev-parse HEAD)" == "$(git rev-parse "$RELEASE_TAG^{commit}")" ]]
+          version="$(python3 tools/release.py check)"
+          [[ "$RELEASE_TAG" == "network-checker-v${version}" ]]
+          echo "release-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - run: bash tools/check.sh
 
   build-and-verify-image:
@@ -28,40 +51,56 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.test.outputs.release-sha }}
+          fetch-depth: 0
+          persist-credentials: false
       - name: Build and smoke-test image
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          version="${RELEASE_TAG#network-checker-}"
+          version="${RELEASE_TAG#network-checker-v}"
           docker build -t "netcheck:$version" apps/toolbelt/apps/network-checker
-          docker run --rm "netcheck:$version" --version
-          docker run --rm "netcheck:$version" scan
+          [[ "$(docker run --rm "netcheck:$version" --version)" == "netcheck $version" ]]
+          docker run --rm "netcheck:$version" --help >/dev/null
       - name: Save image
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          version="${RELEASE_TAG#network-checker-}"
-          docker save "netcheck:$version" | gzip > netcheck-image.tar.gz
+          version="${RELEASE_TAG#network-checker-v}"
+          docker save "netcheck:$version" | gzip > "netcheck-image-v${version}.tar.gz"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: network-checker-image
-          path: netcheck-image.tar.gz
+          path: netcheck-image-v*.tar.gz
           if-no-files-found: error
           retention-days: 14
 
   publish-draft:
-    needs: build-and-verify-image
+    needs: [test, build-and-verify-image]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.test.outputs.release-sha }}
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: network-checker-image
+      - name: Revalidate existing tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ needs.test.outputs.release-sha }}
+        run: |
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
+          [[ "$(git rev-parse "$RELEASE_TAG^{commit}")" == "$RELEASE_SHA" ]]
       - name: Extract release notes
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           python3 - "${RELEASE_TAG#network-checker-v}" <<'PYEOF' > network-checker-release-notes.md
           import re
@@ -73,10 +112,14 @@ jobs:
           match = re.search(pattern, text, re.DOTALL)
           print(match.group(1).strip() if match else f"See CHANGELOG.md for {version}.")
           PYEOF
-      - name: Create draft release
-        uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
-        with:
-          name: Network Checker ${{ github.ref_name }}
-          body_path: network-checker-release-notes.md
-          files: netcheck-image.tar.gz
-          draft: true
+      - name: Create draft release for existing tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            --verify-tag \
+            --draft \
+            --title "Network Checker $RELEASE_TAG" \
+            --notes-file network-checker-release-notes.md \
+            netcheck-image-v*.tar.gz

@@ -165,6 +165,52 @@ test("stream(): a ToolResultPart on a UserMessage is rejected as invalid_request
   assert.equal(primary.calls, 0);
 });
 
+test("complete(): malformed system/tool roles and unknown roles are rejected before dispatch", async () => {
+  const primary = fakeDriver("anthropic", { complete: async () => fixtureResponse("anthropic", "primary-model") });
+  const malformedCases = [
+    { role: "system", content: [{ type: "text", text: "system content must be a string" }] },
+    { role: "tool", content: "tool content must be structured" },
+    { role: "unknown", content: "unsupported role" },
+  ];
+
+  for (const message of malformedCases) {
+    await assert.rejects(
+      () => complete({ ...BASE_REQUEST, messages: [malformedMessage(message)] }, CREDENTIALS, { drivers: { anthropic: primary } }),
+      (error: { class: string }) => error.class === "invalid_request",
+    );
+  }
+  assert.equal(primary.calls, 0);
+});
+
+test("complete(): malformed part payloads are rejected before dispatch", async () => {
+  const primary = fakeDriver("anthropic", { complete: async () => fixtureResponse("anthropic", "primary-model") });
+  const malformedCases = [
+    { role: "user", content: [{ type: "text" }] },
+    { role: "assistant", content: [{ type: "tool_use", id: "call_1", input: {} }] },
+    { role: "assistant", content: [{ type: "tool_use", id: "call_1", name: "lookup", input: undefined }] },
+    { role: "tool", content: [{ type: "tool_result", toolUseId: 1, content: "result" }] },
+    { role: "tool", content: [{ type: "tool_result", toolUseId: "call_1", content: [{ type: "text" }] }] },
+  ];
+
+  for (const message of malformedCases) {
+    await assert.rejects(
+      () => complete({ ...BASE_REQUEST, messages: [malformedMessage(message)] }, CREDENTIALS, { drivers: { anthropic: primary } }),
+      (error: { class: string }) => error.class === "invalid_request",
+    );
+  }
+  assert.equal(primary.calls, 0);
+});
+
+test("complete(): a non-array messages value is a typed invalid_request before dispatch", async () => {
+  const primary = fakeDriver("anthropic", { complete: async () => fixtureResponse("anthropic", "primary-model") });
+  const request = { ...BASE_REQUEST, messages: null } as unknown as LlmRequest;
+  await assert.rejects(
+    () => complete(request, CREDENTIALS, { drivers: { anthropic: primary } }),
+    (error: { class: string }) => error.class === "invalid_request",
+  );
+  assert.equal(primary.calls, 0);
+});
+
 // ---------------------------------------------------------------------------
 // Positive control: every legal role/part combination, across all three
 // providers, is accepted normally and actually reaches the driver. (No

@@ -267,6 +267,20 @@ function main() {
     console.error("--subset-file and --stop-before-owner-dependency are mutually exclusive");
     process.exit(2);
   }
+  if (subsetIdx !== -1 && (!args[subsetIdx + 1] || args[subsetIdx + 1].startsWith("--"))) {
+    console.error("--subset-file requires a path");
+    process.exit(2);
+  }
+  const recognized = new Set([destRoot, "--stop-before-owner-dependency"]);
+  if (subsetIdx !== -1) {
+    recognized.add("--subset-file");
+    recognized.add(args[subsetIdx + 1]);
+  }
+  const unknown = args.find((arg) => !recognized.has(arg));
+  if (unknown) {
+    console.error(`unknown argument: ${unknown}`);
+    process.exit(2);
+  }
 
   const all = collectStagedFiles();
   let files;

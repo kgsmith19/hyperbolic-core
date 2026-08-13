@@ -247,10 +247,10 @@ export declare function createRegistryClient(
 | Step | Command | Effect |
 | --- | --- | --- |
 | 1. scaffold | `npm run tool:new -- --id <id> --name "<Name>" --kind <kind> [flags]` | Generates the tool directory, `tool.json`, schema-migration skeleton, and the registration migration pair. All writes land under the new tool directory plus the generated registration files, satisfying TB-3's edit boundary. |
-| 2. migrate | `supabase db push` (from `apps/toolbelt/`) | Applies the new schema migration(s) to the platform Supabase project. |
-| 3. register | same `supabase db push` batch applies the generated `register_<id>` migration; verification: `RegistryClient.getTool(id)` returns the row | The tool appears in Shell discovery with no Shell code change (TB-2). |
+| 2. migrate | Validate with `node apps/toolbelt/scripts/validate-migrations.mjs`, then run the root `platform-migrations.yml` workflow from `main` | Dynamic discovery stages this tool's forward schema migration into the platform project's one global, version-sorted ledger. Paired downs stay in the source directory and are never passed to `supabase db push`. |
+| 3. register | The same single workflow batch applies the generated `register_<id>` forward migration; verification: `RegistryClient.getTool(id)` returns the row | The tool appears in Shell discovery with no Shell code change (TB-2). |
 
-Steps 2 and 3 are separate migrations applied by one push; they remain distinct steps because register may be deferred (a tool can be built and tested before its row goes to `building`).
+Steps 2 and 3 are separate migrations applied by one globally staged push. They remain conceptually distinct because registration is independently reviewable and versioned; they are never separate per-directory CLI pushes against the shared database ledger.
 
 ### 5.1 Scaffold CLI usage spec
 

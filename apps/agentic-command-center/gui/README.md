@@ -21,32 +21,37 @@ file.
 
 ## Security model (all routes)
 
-- Binds `127.0.0.1` only. `Host` must be local, `Origin` absent or local — otherwise 403.
+- Binds `127.0.0.1` only. `Host` must be local. `Origin` must be absent/local or byte-equal to the one validated `ACC_ALLOWED_ORIGIN` captured at startup — otherwise 403.
 - Every `/api/*` request — GET and POST alike — demands the header `X-ACC-Token: <value>` (ACC-5), compared to the session credential constant-time; see "Session credential" below. Missing or wrong is `401 {"error":"unauthorized"}`, identical whether the route exists or not, so an unauthenticated caller can't use responses to enumerate routes. This is additive: none of the other checks on this list are replaced or weakened by it.
-- Every POST demands the header `X-ACC: 1`, enforced once globally in the handler (unsettable cross-origin without a CORS grant this server never issues) — an unknown POST without it is 403, not 404. No CORS header ever leaves.
+- Every POST demands the header `X-ACC: 1`, enforced once globally in the handler — an unknown POST without it is 403, not 404. The optional Shell bridge grants only the configured origin, fixed `GET, POST` methods, and fixed `X-ACC-Token, X-ACC, Content-Type` headers; it never echoes arbitrary preflight input or enables cookies.
 - Bodies are JSON, capped at 64 KiB (over-cap connections are destroyed unparsed).
 - The server holds zero business logic: it shells the real owners (`hooks/engine.mjs`, `hooks/budget.mjs`, `hooks/usage.mjs`, `hooks/route.mjs`, `hooks/directive.mjs`, `hooks/lane.mjs`, `runner/runner.mjs`, `kernel/policy.mjs`) via `execFile` — never a shell, never a browser string as a path or flag.
 - Directive ids match `/^d-[A-Za-z0-9_-]{1,38}$/` and are validated **before** any path is built from one.
 
 ## Session credential (ACC-5)
 
-Closes SEC-04: every check above is CSRF hygiene, not authentication — any
-*other* local process on the machine could already reach this port with no
-privilege check at all. `X-ACC-Token` is the actual auth boundary. A shared
-secret, not a platform-JWT verification, because ACC makes zero network
+Closes the browser/other-user portion of SEC-04: every check above is CSRF
+hygiene, not authentication. `X-ACC-Token` adds a credential boundary for
+browsers and other OS users, but it does not isolate ACC from arbitrary
+processes already running as the same OS user; those processes can inspect
+that user's files or browser state. A shared secret, not platform-JWT
+verification, because ACC makes zero network
 calls today and must keep working fully offline on a single-operator
 machine — JWKS fetching would be a new network dependency and failure mode
 for a loopback socket that has never needed one.
 
-- **Token file**: `<ACC_ROOT>/gui-token` — one line, 32 random bytes
-  base64url, created with owner-only permissions (mode `0600`) the first
-  time a server starts and finds none. An existing file is loaded verbatim
-  and never rewritten. Loaded once at startup and cached in memory for that
-  server's life — never re-read per request.
+- **Token file**: `<ACC_ROOT>/.acc/gui-token` — an ignored private-state path
+  containing one line of 32 random bytes as base64url. It is created with an
+  exclusive atomic open, no-follow semantics, and owner-only permissions
+  (`0600` on POSIX; an owner ACL on Windows). A malformed, linked,
+  wrong-owner, or group/world-readable existing file fails startup closed;
+  it is never silently replaced. Loaded once at startup and cached in memory
+  for that server's life — never re-read per request.
 - **Header**: `X-ACC-Token: <value>`, required on every `/api/*` request.
-  Compared with `crypto.timingSafeEqual` over a fixed-length SHA-256 digest
-  of each side (never a raw comparison), so a mismatched length can neither
-  throw nor short-circuit the check.
+  Valid 43-character candidates are compared with `crypto.timingSafeEqual`
+  over fixed-length SHA-256 digests (never as raw secrets). Malformed public
+  token shapes are rejected early. This avoids a raw-secret comparison; it
+  is not a claim that full HTTP response timing is constant.
 - **Bootstrap**: on startup the server prints
   `http://127.0.0.1:43117/#acc-token=<value>` to the console once — the one
   intentional place the token is ever printed. `ui/src/api.ts` reads the
@@ -55,13 +60,20 @@ for a loopback socket that has never needed one.
   attaches it as `X-ACC-Token` on every API call after that. A fragment
   never reaches the server (or any server) at all, which is why the token
   travels there instead of a query string.
+- **Shell bootstrap**: when `ACC_ALLOWED_ORIGIN` is set, startup also prints
+  `<origin>/acc#acc-token=<value>`. The Shell consumes that exact fragment
+  into its own tab-scoped storage and strips it before its first status read.
+  The server accepts that origin only after a strict HTTPS origin-only parse
+  (HTTP is permitted solely for loopback development) and answers the narrow
+  Chrome Private Network Access preflight. Host, token, and `X-ACC` checks
+  remain mandatory on the actual request.
+  Current Chrome releases can also show an operator-controlled Local Network
+  Access permission prompt for the loopback fetch; allow it for the trusted
+  Shell origin, then use the card's Retry action.
 - **Rotation**: no dedicated mechanism beyond deleting the token file and
   restarting the server — a fresh one is minted on the next start.
 - **Env seam**: `ACC_GUI_TOKEN_FILE` redirects the token file path (see the
   env seams table below).
-- Out of scope for now (see the ACC-5 issue): CORS / Chrome Private Network
-  Access grants. Not needed while the UI stays same-origin loopback; ships
-  when the Shell absorbs ACC's UI pages.
 
 ## Error envelope
 
@@ -117,7 +129,8 @@ a transport error.
 |---|---|
 | `ACC_POLICY` | `policy.json` path |
 | `ACC_ROOT` | repo-root-relative state (stop files, directive store, runner pid files) |
-| `ACC_GUI_TOKEN_FILE` | the session-credential token file path (default `<ACC_ROOT>/gui-token`) |
+| `ACC_GUI_TOKEN_FILE` | the session-credential token file path (default `<ACC_ROOT>/.acc/gui-token`) |
+| `ACC_ALLOWED_ORIGIN` | optional exact HTTPS Shell origin for the token-gated CORS/PNA bridge (loopback HTTP allowed for development) |
 | `ACC_ENGINE` / `ACC_USAGE` / `ACC_BUDGET` / `ACC_RUNNER` | the shelled script for each owner (fakes in tests; `ACC_RUNNER` is what `/api/launch` spawns) |
 | `ACC_DIRECTIVES_DIR` | directive store dir (mirrors `hooks/directive.mjs`) |
 | `ACC_ROUTING_MD` | the routing table `route.mjs` reads |
@@ -127,7 +140,7 @@ Tests: `node --test gui/server.test.mjs` (API), `cd ui && ACC_DIR=.. npm run e2e
 (Playwright, single worker — all specs share one sandbox dir). The Playwright
 contract suite carries the session credential the same way a real browser
 does: `contract.spec.ts` reads the token straight from the sandbox server's
-own `<ACC_ROOT>/gui-token` file (the test harness already knows that path)
+own `<ACC_ROOT>/.acc/gui-token` file (the test harness already knows that path)
 and appends it as a `#acc-token=<value>` fragment on each test's first
 `page.goto()`, exactly like the one-time bootstrap link the server prints
 for a human. Every test gets a fresh browser context (fresh, empty

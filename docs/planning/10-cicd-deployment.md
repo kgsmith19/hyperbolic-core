@@ -246,9 +246,9 @@ graph TD
 
 ## 5. Migration application in the pipeline
 
-`06-supabase-schema.md` does not exist on disk yet [VERIFIED: directory listing], so this is the interface contract Phase 6 must land on; if 06 decides differently it must amend this section.
+`06-supabase-schema.md` section 7.2 is the authoritative migration-ledger contract; this section describes its deployment integration.
 
-- Migration source of truth: `apps/toolbelt/supabase/migrations/` for the platform project, up/down pairs (`<utc-ts>_<name>.sql` + `_down.sql`), the existing toolbelt convention [VERIFIED: 05-c-toolbelt.md file-name contract; apps/toolbelt AGENTS.md migration pairing rule cited there]. The lifeos project's migrations stay in the standalone repo's pipeline, untouched.
+- Migration source of truth: the Toolbelt root and every schema-owning tool's manifest-adjacent `supabase/migrations/` directory, with globally unique up/down pairs (`<utc-ts>_<name>.sql` + `_down.sql`). CI discovers those directories from manifests and stages only forward files into one temporary ledger tree. The LifeOS project's migrations stay in the standalone repo's pipeline, untouched.
 - Owner workflow: `platform-migrations.yml` (NEW), `workflow_call` + `workflow_dispatch`.
 
 Job `migrate` spec:
@@ -258,7 +258,7 @@ Job `migrate` spec:
 | checkout | pinned action |
 | Infisical OIDC | machine identity `platform-migrations`, project env `prod`, scoped to path `/platform/` only (ADR-05 one-identity-per-pipeline rule [VERIFIED: 04-adrs.md ADR-05 CI mechanics]) |
 | setup supabase CLI | pinned action, same as lifeos [VERIFIED: ci.yml:169-171] |
-| apply | `supabase db push` against the platform project using the connection value injected from `/platform/` (the lifeos `--db-url` shape [VERIFIED: ci.yml:174]), `--include-all --yes`, working directory `apps/toolbelt` |
+| apply | validate manifest ownership and global versions; stage every forward migration (never `_down.sql`) in one version-sorted temporary `supabase/migrations/`; require remote-ledger prefix, owner preflight, and live-drift checks; run dry-run, one SHA-bound `supabase db push --include-all --yes`, then a final dry-run proof |
 
 - Gating: inside `deploy.yml`, `migrate-platform` (a `uses:` call to this workflow) runs when migration paths changed and both `deploy-shell` and `deploy-brain` declare `needs: migrate-platform`, so schema always lands before code that expects it. Migration-only pushes still trigger `deploy.yml` (the path filter includes migrations) and run only the migrate job.
 - Destructive-migration rule: section 8.4.
@@ -320,7 +320,7 @@ Identical mechanism to 8.3 with `LLM_HANDLER_IMAGE` in `~/llm-handler/.env`; the
 
 ### 8.4 Migrations
 
-- Every migration ships with its `_down.sql` pair; rollback is applying the down file via the same `platform-migrations.yml` dispatch (input: explicit file name), never hand-typed psql against prod [VERIFIED: paired-down convention, 05-c-toolbelt.md file-name contract and 05-d down-migration usage].
+- Every migration ships with its `_down.sql` pair, but downs never enter the Supabase CLI's forward directory and are never run automatically. An operator follows the reviewed runbook to apply the exact down file with `psql -X --no-psqlrc --set=ON_ERROR_STOP=1`, reconcile the ledger deliberately, and immediately verify the contract; a forward fix remains the default [VERIFIED: paired-down convention and 06-supabase-schema.md section 7.2].
 - Destructive migrations (drop, irreversible rewrite, PII erasure) require a backup-first step: the deploy is blocked until a fresh backup artifact exists, i.e. run the backup workflow and record its run id in the PR before merge. Platform-project data currently has no backup pipeline of its own; extending the age-encrypted backup pattern to the platform project is a Phase 11 issue (section 9), and until it lands, destructive platform migrations are forbidden by rule.
 - Down migrations that cannot restore data (dropped rows) must say so in a header comment; for those, the real rollback is restore-from-backup, and the runbook row must point at it.
 

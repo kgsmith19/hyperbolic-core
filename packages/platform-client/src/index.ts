@@ -246,11 +246,6 @@ export function createPlatformClient(config: PlatformClientConfig): PlatformClie
   const allowedOrigins = buildAllowedOrigins(config);
 
   const authedFetch: AuthedFetch = async (input, init) => {
-    const session = await auth.getSession();
-    if (!session) {
-      throw new Error("platform-client: no active session, refusing to send request");
-    }
-
     // P1 fix (see resolveRequestOrigin's doc comment for the full writeup):
     // refuse to attach the live bearer token to any request whose resolved
     // origin isn't same-origin-with-the-page or on the explicit allowlist.
@@ -270,9 +265,17 @@ export function createPlatformClient(config: PlatformClientConfig): PlatformClie
       );
     }
 
-    const headers = new Headers(init?.headers);
+    const session = await auth.getSession();
+    if (!session) {
+      throw new Error("platform-client: no active session, refusing to send request");
+    }
+
+    const headers = new Headers(input instanceof Request ? input.headers : undefined);
+    new Headers(init?.headers).forEach((value, name) => {
+      headers.set(name, value);
+    });
     headers.set("Authorization", `Bearer ${session.accessToken}`);
-    return globalThis.fetch(input, { ...init, headers });
+    return globalThis.fetch(input, { ...init, headers, redirect: "manual" });
   };
 
   return { auth, fetch: authedFetch };
@@ -314,7 +317,7 @@ function buildAllowedOrigins(config: PlatformClientConfig): ReadonlySet<string> 
  * Resolves `input` to the absolute origin `globalThis.fetch` will actually
  * send the request to, and is the crux of the P1 fix this function exists
  * for (packages/platform-client/src/index.ts, authedFetch): before this
- * existed, `input` (typed `string | URL`, see AuthedFetch in ./types.ts) was
+ * existed, `input` (typed `RequestInfo | URL`, see AuthedFetch in ./types.ts) was
  * handed straight to `fetch` with the live bearer token attached and NO
  * origin check at all -- any absolute URL, from a caller bug, a compromised
  * dependency, or attacker-controlled input reaching a call site three layers
@@ -361,21 +364,15 @@ function buildAllowedOrigins(config: PlatformClientConfig): ReadonlySet<string> 
  * browser, so a relative path in that environment was already broken before
  * this fix: the new behavior is only where in the code the throw happens.
  *
- * Redirect-based exfiltration (an allowlisted origin 30x-redirects to an
- * attacker origin) is deliberately OUT of scope for this check: the Fetch
- * Standard's HTTP-redirect-fetch algorithm strips the `Authorization`
- * request header whenever a redirect's destination origin differs from the
- * request's current origin (https://fetch.spec.whatwg.org/#http-redirect-fetch),
- * and both browsers and Node's `undici`-backed `fetch` (Node 18+, this
- * repo's runtime) implement that step -- so the bearer token is already
- * dropped by the fetch implementation itself before it would ever reach a
- * cross-origin redirect target. Reimplementing that check here would be
- * redundant with a guarantee the runtime already provides, not a gap this
- * function needs to close.
+ * `authedFetch` also forces `redirect: "manual"`, so an allowlisted origin
+ * cannot redirect the authenticated request to a target that was never
+ * checked here. Callers receive the 3xx response and can choose a new target
+ * explicitly, which sends that target through this same origin check.
  */
-function resolveRequestOrigin(input: string | URL): string {
+function resolveRequestOrigin(input: RequestInfo | URL): string {
   const base = typeof globalThis.location !== "undefined" ? globalThis.location.href : undefined;
-  return new URL(input, base).origin;
+  const target = input instanceof Request ? input.url : input;
+  return new URL(target, base).origin;
 }
 
 function isOriginAllowed(origin: string, allowedOrigins: ReadonlySet<string>): boolean {

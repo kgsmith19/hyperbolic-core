@@ -3,24 +3,11 @@
 // status card ... the card degrades to 'ACC unreachable' when the operator
 // machine is not the browsing machine."
 //
-// Judgment call, flagged explicitly (no planning-doc section pins this down
-// for the Shell side): this fetch carries no X-ACC-Token. ACC's shipped
-// session-credential contract (05-b section 4, gui/README.md "Session
-// credential") requires that header on every /api/* route, but the token
-// only ever reaches a browser via ACC's OWN UI reading its startup URL
-// fragment (gui/README.md "Browser bootstrap") -- there is no bootstrap path
-// for the Shell to obtain it, and 05-b section 4's "Shell relationship"
-// paragraph explicitly defers the cross-origin grant ACC needs to accept
-// Shell-issued requests at all ("ACC_ALLOWED_ORIGIN ... ships with the
-// absorption step, not before"). Practically: today, any fetch from the
-// Shell's origin to ACC's loopback API is either same-origin-only reachable
-// (operator machine, but still 401s with no token) or blocked by the
-// browser's CORS policy entirely (any other machine) -- both cases surface
-// to fetch() as an opaque failure, which is exactly the "ACC unreachable"
-// state this card must render. Sending a token this module doesn't have
-// isn't an option; a 401 is treated the same as a network failure below,
-// which is the correct degrade either way until ACC-5's CORS grant and a
-// real Shell-side bootstrap exist.
+// ACC prints an optional Shell bootstrap URL when ACC_ALLOWED_ORIGIN is set.
+// Its fragment is consumed into this tab's sessionStorage, stripped before
+// the first request, and then sent as X-ACC-Token. A token is never a build
+// variable or durable browser credential. ACC still binds loopback and grants
+// CORS/PNA to one exact configured Shell origin only.
 import { useEffect, useState } from "react";
 
 // Optional chaining on import.meta.env itself, not just the property: this
@@ -30,6 +17,66 @@ import { useEffect, useState } from "react";
 // entirely, not just missing individual keys).
 export const ACC_BASE_URL = (import.meta.env?.VITE_ACC_API || "http://127.0.0.1:43117").replace(/\/+$/, "");
 export const ACC_STATUS_URL = `${ACC_BASE_URL}/api/process/status`;
+export const ACC_TOKEN_STORAGE_KEY = "hyperbolic-shell-acc-token";
+const ACC_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+
+function readStoredAccToken(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const token = window.sessionStorage.getItem(ACC_TOKEN_STORAGE_KEY) ?? "";
+    if (token && !ACC_TOKEN_RE.test(token)) {
+      window.sessionStorage.removeItem(ACC_TOKEN_STORAGE_KEY);
+      return "";
+    }
+    return token;
+  } catch {
+    return "";
+  }
+}
+
+/** Consumes only the exact ACC bootstrap fragment and always strips attempted credentials. */
+export function consumeAccTokenBootstrap(): string {
+  if (typeof window === "undefined") return "";
+  const hash = window.location.hash;
+  if (!/(?:^#|&)acc-token(?:=|&|$)/.test(hash)) return readStoredAccToken();
+
+  const match = /^#acc-token=([^&]*)$/.exec(hash);
+  let token = "";
+  if (match) {
+    try {
+      const decoded = decodeURIComponent(match[1]);
+      if (ACC_TOKEN_RE.test(decoded)) token = decoded;
+    } catch {
+      // Untrusted percent encoding is handled as an invalid credential.
+    }
+  }
+  try {
+    if (token) window.sessionStorage.setItem(ACC_TOKEN_STORAGE_KEY, token);
+    else window.sessionStorage.removeItem(ACC_TOKEN_STORAGE_KEY);
+  } catch {
+    token = "";
+  } finally {
+    try {
+      const url = new URL(window.location.href);
+      url.hash = "";
+      window.history.replaceState(null, "", url.toString());
+    } catch {
+      // History replacement is best-effort; auth still fails closed.
+    }
+  }
+  return token;
+}
+
+// App imports the ACC page eagerly, so consume before ProtectedLayout can
+// redirect a signed-out `/acc#acc-token=...` visit to `/login`. The return
+// query carries only `/acc`; the credential remains tab-scoped storage.
+consumeAccTokenBootstrap();
+
+/** Builds the authenticated ACC link only at click time so the token is never rendered into the Shell DOM. */
+export function authenticatedAccUiUrl(): string {
+  const token = readStoredAccToken();
+  return token ? `${ACC_BASE_URL}/#acc-token=${encodeURIComponent(token)}` : ACC_BASE_URL;
+}
 
 /** The subset of gui/README.md's `/api/process/status` shape 05-b section 5 names for the Shell. */
 export interface AccProcessStatus {
@@ -38,45 +85,43 @@ export interface AccProcessStatus {
   stopped: boolean;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function parseAccProcessStatus(value: unknown): AccProcessStatus | null {
+  if (!isRecord(value) || typeof value.weekText !== "string" || value.weekText.length > 512) {
+    return null;
+  }
+  if (typeof value.stopped !== "boolean") return null;
+
+  let tier: AccProcessStatus["tier"] = null;
+  if (value.tier !== null) {
+    if (!isRecord(value.tier)) return null;
+    if (value.tier.tier !== "green" && value.tier.tier !== "amber" && value.tier.tier !== "red") {
+      return null;
+    }
+    if (
+      value.tier.pct !== undefined &&
+      (typeof value.tier.pct !== "number" || !Number.isFinite(value.tier.pct) || value.tier.pct < 0)
+    ) {
+      return null;
+    }
+    tier = {
+      tier: value.tier.tier,
+      ...(value.tier.pct === undefined ? {} : { pct: value.tier.pct }),
+    };
+  }
+
+  return { tier, weekText: value.weekText, stopped: value.stopped };
+}
+
 export type AccStatusResult =
   | { state: "loading" }
   | { state: "ok"; data: AccProcessStatus }
   | { state: "unreachable" };
 
 const DEFAULT_TIMEOUT_MS = 4000;
-
-const ACC_TIERS = new Set(["green", "amber", "red"]);
-
-/**
- * Finding #76 (PR #8 security review): a 200 response's body was trusted
- * with a blind `as AccProcessStatus` type assertion -- no runtime check --
- * and acc-status-card.tsx renders `.tier`/`.stopped`/`.weekText` straight
- * off it. This app has no error boundary anywhere (confirmed by grep for
- * ErrorBoundary/componentDidCatch), so a malformed body from ACC (a bug on
- * ACC's own side, a proxy/gateway returning something ACC never sent, or
- * simply a future ACC response-shape change this Shell hasn't caught up
- * with yet) would otherwise be a render crash, not a graceful degrade.
- *
- * A hand-written guard is deliberately enough here -- this shape is small
- * and well-known (05-b section 5), not worth a schema-validation
- * dependency for.
- */
-function isAccProcessStatus(value: unknown): value is AccProcessStatus {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Record<string, unknown>;
-
-  if (typeof candidate.weekText !== "string") return false;
-  if (typeof candidate.stopped !== "boolean") return false;
-
-  const tier = candidate.tier;
-  if (tier === null) return true;
-  if (typeof tier !== "object") return false;
-  const tierCandidate = tier as Record<string, unknown>;
-  if (typeof tierCandidate.tier !== "string" || !ACC_TIERS.has(tierCandidate.tier)) return false;
-  if (tierCandidate.pct !== undefined && typeof tierCandidate.pct !== "number") return false;
-
-  return true;
-}
 
 /**
  * Fetches ACC's process status once per mount (plus on-demand via `retry`).
@@ -96,20 +141,18 @@ export function useAccStatus(timeoutMs: number = DEFAULT_TIMEOUT_MS): AccStatusR
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    fetch(ACC_STATUS_URL, { signal: controller.signal })
+    const token = consumeAccTokenBootstrap();
+    const headers = token ? { "X-ACC-Token": token } : undefined;
+    fetch(ACC_STATUS_URL, { signal: controller.signal, headers })
       .then(async (res) => {
         if (cancelled) return;
         if (!res.ok) {
           setResult({ state: "unreachable" });
           return;
         }
-        const data: unknown = await res.json();
+        const data = parseAccProcessStatus(await res.json());
         if (cancelled) return;
-        if (!isAccProcessStatus(data)) {
-          // Same degrade as a network failure/timeout below (05-b section
-          // 5's one documented "ACC unreachable" state) -- reusing it
-          // exactly rather than inventing a second error state, per
-          // Finding #76's own fix guidance.
+        if (!data) {
           setResult({ state: "unreachable" });
           return;
         }

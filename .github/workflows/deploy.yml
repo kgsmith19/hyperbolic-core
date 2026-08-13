@@ -1,157 +1,85 @@
 name: Platform Deploy
 
-# docs/planning/10-cicd-deployment.md section 2 (orchestration) and section
-# 2.2 (Shell unit spec). This is a REAL, ACTIVE root workflow -- unlike
-# apps/lifeos/.github/workflows/*, which are inert copies GitHub never
-# executes from a nested path (root AGENTS.md's "Workflow safety
-# invariant"), everything below runs for real on every push to `main`.
-#
-# THE SINGLE MOST IMPORTANT SAFETY PROPERTY IN THIS FILE: while the
-# `DEPLOY_ENABLED` repository variable is not the literal string 'true',
-# neither build-shell nor deploy-shell (nor, once m4-21 adds them,
-# build-brain/deploy-brain) shall run at all -- not run-and-no-op, actually
-# reported by GitHub as skipped. The gate is `vars.DEPLOY_ENABLED == 'true'`
-# directly on each of those two jobs' own `if:`, the exact same expression
-# apps/lifeos/.github/workflows/ci.yml already uses on its deploy-backend
-# and deploy-frontend jobs (read as a reference pattern only -- that file is
-# inert here, never executed, see the location note above and in its own
-# AGENTS.md). AGENTS.md's own warning about ci.yml's ungated build-backend
-# job is the exact class of bug this gate exists to prevent; both deploy
-# jobs below carry it independently rather than relying on a single
-# upstream check that something could bypass.
-#
-# `migrate-platform` is DELIBERATELY NOT gated by DEPLOY_ENABLED -- see that
-# job's own comment below for why this asymmetry is intentional, not an
-# oversight.
-
 on:
   push:
     branches: [main]
-    # docs/planning/10-cicd-deployment.md section 1's table row for
-    # deploy.yml, verbatim. `services/brain/**` does not exist yet (Unit 3,
-    # m4-21, out of scope for this issue) -- listing it now is inert until
-    # that path exists, the same "reserved, not configured" convention
-    # docs/ops/runbook.md already uses for the /brain/stream route and
-    # docs/ops/tailscale-serve-apply.sh uses for its ROUTES array.
     paths:
+      - ".github/workflows/deploy.yml"
       - "apps/shell/**"
       - "packages/**"
-      - "services/brain/**"
-      - "apps/toolbelt/supabase/migrations/**"
-  workflow_dispatch: {}
-  # No `paths:` filter applies to workflow_dispatch (GitHub does not support
-  # one for that trigger) -- see the `changes` job below for how a manual
-  # dispatch is handled: it deploys every in-scope unit unconditionally,
-  # the same "operator explicitly said deploy now" semantics
-  # platform-migrations.yml's own workflow_dispatch trigger already uses
-  # for the one-time ledger baseline.
-
-# Deliberately no top-level `concurrency:` block. Section 2's forced
-# decision is PER-UNIT concurrency groups (`deploy-shell-production`, and
-# later `deploy-brain-production`) so that a Shell deploy and a future Brain
-# deploy never queue-block each other; only the same unit's deploys must
-# serialize against themselves. That group lives on deploy-shell below,
-# mirroring apps/lifeos/.github/workflows/ci.yml's deploy-backend/
-# deploy-frontend concurrency groups (read as reference pattern; that file
-# is inert and never executes from apps/lifeos/.github/workflows/).
+      - "apps/toolbelt/**/supabase/migrations/**"
+      - "docs/ops/prune-dist-dirs.sh"
+  workflow_dispatch:
+    inputs:
+      deploy_shell:
+        description: Build and deploy Shell from the current main commit.
+        required: true
+        type: boolean
+        default: true
+      apply_migrations:
+        description: Apply pending platform migrations before Shell deploy.
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  # Section 2: "a first `changes` job computes per-unit booleans from the
-  # pushed paths (paths-filter action, SHA-pinned; ... replaceable by a
-  # `git diff --name-only` script step at zero lock-in)". dorny/paths-filter
-  # is used here in its no-checkout "API mode" (default when no prior
-  # `actions/checkout` step exists in the job): it queries the GitHub
-  # Compare Commits API directly for push events, so this job needs no
-  # checkout step and no extra fetch-depth tuning to see `github.event.before`.
   changes:
     name: Determine changed units
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: read
     outputs:
-      shell: ${{ steps.dispatch.outputs.shell || steps.filter.outputs.shell }}
-      migrations: ${{ steps.dispatch.outputs.migrations || steps.filter.outputs.migrations }}
+      shell: ${{ steps.changes.outputs.shell }}
+      migrations: ${{ steps.changes.outputs.migrations }}
     steps:
-      # Manual dispatch has no "before" commit to diff against (dorny/
-      # paths-filter has no reliable default base for workflow_dispatch),
-      # and a human explicitly running `gh workflow run deploy.yml` is
-      # asking to deploy now -- so treat dispatch as "every unit changed"
-      # rather than trying to infer a diff. GitHub expression `||` treats a
-      # skipped step's empty-string output as falsy, so whichever of these
-      # two steps actually ran is the one that wins in the `outputs:` block
-      # above.
-      - name: Manual dispatch deploys every in-scope unit
-        id: dispatch
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          echo "shell=true" >> "$GITHUB_OUTPUT"
-          echo "migrations=true" >> "$GITHUB_OUTPUT"
-
-      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        id: filter
-        if: github.event_name != 'workflow_dispatch'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          filters: |
-            shell:
-              - 'apps/shell/**'
-              - 'packages/**'
-            migrations:
-              - 'apps/toolbelt/supabase/migrations/**'
+          fetch-depth: 0
+          persist-credentials: false
+      - id: changes
+        name: Classify deployable changes
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "shell=${{ inputs.deploy_shell }}" >> "$GITHUB_OUTPUT"
+            echo "migrations=${{ inputs.apply_migrations }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$BEFORE" =~ ^0+$ ]]; then
+            echo "shell=true" >> "$GITHUB_OUTPUT"
+            echo "migrations=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only "$BEFORE" "$GITHUB_SHA" > "$RUNNER_TEMP/changed-paths"
+          if grep -Eq '^(apps/shell/|packages/|docs/ops/prune-dist-dirs\.sh$|\.github/workflows/deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
+            echo "shell=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "shell=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -Eq '^apps/toolbelt/(.*/)?supabase/migrations/' "$RUNNER_TEMP/changed-paths"; then
+            echo "migrations=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "migrations=false" >> "$GITHUB_OUTPUT"
+          fi
 
-  # Section 5: "migrate-platform (a `uses:` call to this workflow) runs
-  # when migration paths changed". Calling a same-repo reusable workflow by
-  # relative path (`uses: ./.github/workflows/...`) -- NOT a copy of its
-  # jobs; platform-migrations.yml is untouched (this issue's constraints
-  # forbid modifying it) and remains the single source of truth for how
-  # platform migrations are applied.
-  #
-  # DELIBERATELY NOT GATED BY DEPLOY_ENABLED, unlike build-shell/deploy-shell
-  # below. Three independent reasons this is the spec's actual intent, not
-  # an oversight:
-  #   1. Section 2.5 names the platform's migration state as Unit 5's
-  #      deployable artifact and says explicitly it "has no dedicated
-  #      deploy job; its deployment is implicit when Supabase migrations...
-  #      change" -- i.e. migrations are not modeled as gated the way the
-  #      four *application* units are.
-  #   2. Section 5's own gating line ("migrate-platform ... runs when
-  #      migration paths changed and both deploy-shell and deploy-brain
-  #      declare needs: migrate-platform") names DEPLOY_ENABLED nowhere;
-  #      the gate row in section 2.2's table attaches DEPLOY_ENABLED only
-  #      to deploy-shell.
-  #   3. platform-migrations.yml's own header comment already treats itself
-  #      as independently, unconditionally runnable ("invoked by deploy.yml
-  #      ... or manually (workflow_dispatch, used for the one-time ledger
-  #      baseline)") with no DEPLOY_ENABLED gate inside it either.
-  # Net effect: a migration-only push still applies the schema even while
-  # DEPLOY_ENABLED is false (app deploys stay off; the schema is free to
-  # move ahead of code that depends on it, per section 5's "migration-only
-  # pushes still trigger deploy.yml ... and run only the migrate job").
-  # This is the acceptance criteria's literal scope too: "no DEPLOY job
-  # shall run" names build-shell/deploy-shell, not the migration job.
   migrate-platform:
     name: Apply platform migrations
     needs: changes
-    if: needs.changes.outputs.migrations == 'true'
+    if: >-
+      needs.changes.outputs.migrations == 'true' &&
+      github.ref == 'refs/heads/main'
     permissions:
       contents: read
       id-token: write
     uses: ./.github/workflows/platform-migrations.yml
+    secrets: inherit
 
-  # Section 2.2's Build row, with the same workspace build order shell-ci.yml
-  # already had to learn the hard way (see that workflow's "Build packages/ui"
-  # step comment for the two real CI failures that order fixes: packages/ui
-  # is the one workspace member apps/shell resolves through built dist/
-  # output, not a TS path mapping, so it must get a REAL `vite build`
-  # before apps/shell's own build runs).
-  #
-  # Gated on DEPLOY_ENABLED directly (not just inherited by cascading from
-  # deploy-shell) so this job is independently, visibly skipped -- not just
-  # run-and-discarded -- exactly matching the m2-07 issue's instruction to
-  # verify the gate blocks execution, not merely blocks activation.
   build-shell:
     name: Build Shell
     needs: changes
@@ -160,69 +88,29 @@ jobs:
       vars.DEPLOY_ENABLED == 'true' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20 # ~2x the <=10 min per-unit deploy budget (10-cicd-deployment.md section 10.3)
-    permissions:
-      contents: read
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: package-lock.json
-
-      - name: Install workspace dependencies
-        run: npm ci
-
-      - name: Build packages/ui
-        # Same real build (not declaration-only) shell-ci.yml's identically
-        # named step performs, and for the identical reason: apps/shell
-        # resolves "@hyperbolic/ui" through dist/index.cjs via plain node
-        # module resolution, which only a real `vite build` produces.
-        run: npm run build --workspace=packages/ui
-
-      - name: Build apps/shell (production)
-        # DELIBERATE CORRECTION of 10-cicd-deployment.md section 2.2's
-        # literal wording ("public VITE_ values from repo vars, each
-        # asserted non-empty before build, the lifeos guard pattern") --
-        # flagged explicitly per this issue's instructions rather than
-        # silently applied. That guard is right for lifeos/frontend, whose
-        # VITE_ values have NO built-in fallback and an empty value there is
-        # a genuine misconfiguration (apps/lifeos/.github/workflows/ci.yml
-        # lines 227-229, `test -n "$VAR"` before build). apps/shell is
-        # different by design: every one of its VITE_ vars already carries a
-        # correct, real PRODUCTION default baked directly into source --
-        # VITE_SUPABASE_URL/VITE_SUPABASE_PUBLISHABLE_KEY default to the
-        # actual toolbelt platform IdP project in src/lib/session.ts (ADR-03:
-        # "the anon key is designed for client-side exposure... hardcoding
-        # them as the default here is deliberate, not a leak"), VITE_ACC_API
-        # defaults to ACC's documented loopback port (each operator's own
-        # local ACC instance, never a served prod URL), and VITE_LIFEOS_API
-        # defaults to the production same-origin path `/life/api`. All four
-        # are documented in apps/shell/.env.example as *overrides for a
-        # non-default scenario*, not required production configuration. An
-        # empty repo var here means "use the correct built-in default",
-        # not "misconfigured" -- so asserting non-empty would be actively
-        # wrong for this app, not just redundant. Repo vars still pass
-        # through if set, for the day an operator genuinely needs to point
-        # at a non-default project.
+      - run: npm ci
+      - run: npm run build --workspace=packages/ui
+      - name: Build production Shell
         env:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_ACC_API: ${{ vars.VITE_ACC_API }}
           VITE_LIFEOS_API: ${{ vars.VITE_LIFEOS_API }}
-        run: npm run build --workspace=apps/shell
-
-      - name: Healthz static-asset check (SH-5)
-        # Re-proves apps/shell/test/healthz-check.mjs's property against
-        # THIS build's actual dist/ output right before it ships -- shell-ci.yml
-        # already proves this on every PR, but re-checking the exact
-        # artifact about to be deployed catches any drift between what PR
-        # gate built and what this job built (different Node/npm resolution,
-        # a flaky workspace link, etc.) before it reaches production.
-        run: npm run healthz-check --workspace=apps/shell
-
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build:app --workspace=apps/shell
+          npm run healthz-check --workspace=apps/shell
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: shell-dist-${{ github.sha }}
@@ -230,27 +118,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Section 2.2's Transport/Activation/Health/Gate rows. Pattern copied from
-  # apps/lifeos/.github/workflows/ci.yml's deploy-frontend job SHAPE only
-  # (Infisical OIDC step, tailnet join step, concurrency group) -- read as a
-  # reference for proven job shapes per this issue's own risk mitigation,
-  # never executed from there (inert, see file header). The one deliberate
-  # improvement over that shape, per section 2.2: versioned dist-<sha> dirs
-  # with a `current` symlink and pruning, instead of lifeos-frontend's
-  # `rm -rf` in-place swap.
   deploy-shell:
     name: Deploy Shell
     needs: [changes, migrate-platform, build-shell]
-    # `always()` is required here specifically so this condition can still
-    # evaluate needs.migrate-platform.result when that job was SKIPPED
-    # (no migration paths in this push) rather than GitHub cascading a
-    # skip onto deploy-shell by default the instant any `needs:` entry is
-    # skipped. Every other condition below is still fully enforced inside
-    # this expression -- `always()` disables only the implicit
-    # "skip if any dependency skipped" default, nothing else. This is the
-    # acceptance criteria's "deploy-shell shall wait for migrate-platform
-    # ONLY when migration paths changed in the same push" made precise:
-    # required on success, tolerated on skip, blocking on failure.
     if: >-
       always() &&
       needs.changes.outputs.shell == 'true' &&
@@ -259,7 +129,7 @@ jobs:
       needs.build-shell.result == 'success' &&
       (needs.migrate-platform.result == 'success' || needs.migrate-platform.result == 'skipped')
     runs-on: ubuntu-latest
-    timeout-minutes: 20 # ~2x the <=10 min per-unit deploy budget (10-cicd-deployment.md section 10.3)
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
@@ -268,83 +138,109 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        # Needed for docs/ops/prune-dist-dirs.sh, shipped to the deploy host
-        # below -- see that file's own header comment for why pruning is
-        # externalized into a tested script rather than inline `run:` YAML.
-
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: shell-dist-${{ github.sha }}
           path: shell-dist
-
-      # Secrets come from Infisical via OIDC at run time -- GitHub stores
-      # none (section 6: "shell-deploy reads /platform/, the tailnet OAuth
-      # values"). ADR-05's one-identity-per-pipeline rule means this
-      # identity is distinct from platform-migrations's own
-      # INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID (see platform-migrations.yml),
-      # even though both currently read the same /platform/ secret path.
       - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_SHELL_DEPLOY_IDENTITY_ID }}
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           env-slug: prod
-          secret-path: "/platform/"
+          secret-path: "/platform/shell-deploy/"
           domain: https://app.infisical.com
-
       - name: Join tailnet
-        # Identical action, SHA, and tag:ci pattern as
-        # apps/lifeos/.github/workflows/ci.yml's own tailnet joins (read as
-        # reference shape only; that file never executes). TS_OAUTH_CLIENT_ID
-        # / TS_OAUTH_SECRET arrive as process env vars from the Infisical
-        # step above, the same implicit hand-off lifeos's ci.yml and ops.yml
-        # already rely on (neither declares them via an explicit `env:`
-        # block either -- Infisical/secrets-action injects secrets into the
-        # job environment for later steps to read directly).
         uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
         with:
           oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ env.TS_OAUTH_SECRET }}
           tags: tag:ci
-
-      - name: Ship the build to the deploy host
+          ping: ${{ vars.DEPLOY_HOST }}
+      - name: Validate deploy target
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        shell: bash
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" 'mkdir -p shell'
-          scp -o StrictHostKeyChecking=accept-new -r shell-dist deploy@"$DEPLOY_HOST":shell-incoming
-          scp -o StrictHostKeyChecking=accept-new docs/ops/prune-dist-dirs.sh deploy@"$DEPLOY_HOST":shell/prune-dist-dirs.sh
-
-      - name: Activate the new build and prune old versions (section 2.2, section 8.2)
-        # Order matches section 2.2's Activation row exactly: mv into
-        # dist-<sha>, THEN repoint `current`, THEN prune -- so `current`
-        # never points at a half-moved directory, and the just-activated
-        # dir is always safe from pruning (it is definitionally the newest).
+          if [[ ! "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}[A-Za-z0-9]$ ]]; then
+            echo "DEPLOY_HOST must be a non-empty DNS name or IPv4 address." >&2
+            exit 1
+          fi
+      - name: Stage release on the deploy host
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          INCOMING: shell/incoming-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "rm -rf -- '$INCOMING'; mkdir -p -- '$INCOMING' shell"
+          scp "${ssh_options[@]}" -r shell-dist/. "deploy@$DEPLOY_HOST:$INCOMING/"
+          scp "${ssh_options[@]}" docs/ops/prune-dist-dirs.sh "deploy@$DEPLOY_HOST:shell/prune-dist-dirs.sh"
+      - name: Activate staged release
+        id: activate
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          INCOMING: shell/incoming-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           SHA: ${{ github.sha }}
-        run: |
-          ssh -o StrictHostKeyChecking=accept-new deploy@"$DEPLOY_HOST" \
-            "set -euo pipefail && rm -rf shell/dist-$SHA && mv shell-incoming shell/dist-$SHA && ln -sfn dist-$SHA shell/current && bash shell/prune-dist-dirs.sh shell"
-
-      - name: Confirm the deployed Shell health route and asset hash (SH-5)
-        # Section 2.2's Health row: "curl -fsS the origin root over the
-        # tailnet from the joined runner, assert 200 and the built asset
-        # hash present in index.html". Runs directly from this
-        # already-tailnet-joined runner against the real public origin
-        # (tailscale serve terminates real TLS at :443, see
-        # docs/ops/tailscale-serve-apply.sh) -- NOT over ssh/loopback, since
-        # the Shell has no server process at all (static files served by
-        # tailscaled itself, docs/ops/runbook.md's route table). This is
-        # SH-5's own verification command form, exactly:
-        # `curl -s -o /dev/null -w '%{http_code}' https://<origin>/healthz`.
-        env:
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          RELEASE: dist-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
         run: |
           set -euo pipefail
-          status=$(curl -s -o /dev/null -w '%{http_code}' "https://$DEPLOY_HOST/healthz")
-          test "$status" = "200"
-          asset=$(grep -oE '/assets/[A-Za-z0-9_.-]+\.js' shell-dist/index.html | head -1)
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          previous="$(ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'readlink shell/current 2>/dev/null || true')"
+          if [[ -n "$previous" && ! "$previous" =~ ^dist-[0-9a-f]{40}(-[0-9]+-[0-9]+)?$ ]]; then
+            echo "Refusing to replace an unexpected current target: $previous" >&2
+            exit 1
+          fi
+          echo "previous=${previous:-__none__}" >> "$GITHUB_OUTPUT"
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "
+            set -euo pipefail
+            target='shell/$RELEASE'
+            test ! -e \"\$target\"
+            mv -- '$INCOMING' \"\$target\"
+            next='shell/current.next-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'
+            rm -f -- \"\$next\"
+            ln -s '$RELEASE' \"\$next\"
+            mv -Tf -- \"\$next\" shell/current
+          "
+      - name: Verify live release
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(curl --fail --silent --show-error --max-time 15 "https://$DEPLOY_HOST/healthz")" = '{"status":"ok"}'
+          asset="$(grep -m1 -oE '/assets/[A-Za-z0-9_.-]+\.js' shell-dist/index.html)"
           test -n "$asset"
-          curl -fsS "https://$DEPLOY_HOST/" | grep -qF "$asset"
+          curl --fail --silent --show-error --max-time 15 "https://$DEPLOY_HOST/" > "$RUNNER_TEMP/live-shell.html"
+          grep -qF "$asset" "$RUNNER_TEMP/live-shell.html"
+      - name: Roll back an unhealthy release
+        if: ${{ failure() && steps.activate.outputs.previous != '' }}
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          PREVIOUS: ${{ steps.activate.outputs.previous }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          if [[ "$PREVIOUS" == "__none__" ]]; then
+            ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'rm -f -- shell/current'
+          else
+            ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "
+              set -euo pipefail
+              ln -s '$PREVIOUS' shell/current.rollback
+              mv -Tf -- shell/current.rollback shell/current
+            "
+          fi
+      - name: Prune superseded releases
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'chmod 0755 shell/prune-dist-dirs.sh && shell/prune-dist-dirs.sh shell'

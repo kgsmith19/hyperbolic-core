@@ -61,7 +61,7 @@ Target: `vault.json` holds operator-machine convenience values only; API keys li
 
 ### Shell relationship
 
-ADR-03 names this the "session credential defined in ADR-03" for ACC; concretely the credential is ACC-local, not the platform JWT, for the offline reason above. When the Shell later absorbs ACC pages (Section 6), the page is served from the tailnet origin while the API stays at `http://127.0.0.1:43117`, which means a cross-origin fetch from a secure context to loopback: ACC must then add an explicit single-origin CORS grant (`ACC_ALLOWED_ORIGIN`) plus the Chrome Private Network Access preflight header, with the token still mandatory. That grant ships with the absorption step, not before [INFERRED: granting CORS before any cross-origin consumer exists only widens the surface].
+ADR-03 names this the "session credential defined in ADR-03" for ACC; concretely the credential is ACC-local, not the platform JWT, for the offline reason above. The V1 Shell status card is already a cross-origin consumer: the tailnet Shell reads the API at `http://127.0.0.1:43117`. ACC therefore ships an explicit single-origin CORS grant (`ACC_ALLOWED_ORIGIN`) plus the Chrome Private Network Access preflight, with Host validation and the token still mandatory. Startup prints a one-time Shell `/acc#acc-token=...` bootstrap URL; the Shell stores it for that tab and strips the fragment before its first request. Full page absorption reuses this narrow bridge rather than widening it.
 
 ## 5. Interface contract for the Shell (what the Shell may call)
 
@@ -79,7 +79,7 @@ V1 Shell footprint is exactly one read (`/api/process/status`) for the `/acc` st
 
 ## 6. ACC UI absorption path into the Shell
 
-Preconditions (all before page one): ACC-5 shipped; `ACC_ALLOWED_ORIGIN` CORS + Private Network Access contract added and contract-tested; `packages/ui` chrome available. Then a mechanical port, one page per PR, each page being one file plus its `ui/src/api.ts` slice [VERIFIED: page sizes below]:
+Preconditions (all before page one): ACC-5 and the exact-origin `ACC_ALLOWED_ORIGIN` CORS + Private Network Access contract shipped and contract-tested by the V1 status card; `packages/ui` chrome available. Then a mechanical port, one page per PR, each page being one file plus its `ui/src/api.ts` slice [VERIFIED: page sizes below]:
 
 | Order | Page | Size today | Why this order |
 | --- | --- | --- | --- |
@@ -111,7 +111,7 @@ Source shape per `createIdea` [VERIFIED: forgepad/store.mjs:63-84]: `{id, title,
 | `state: rejected` | not migrated | archived to a local tarball by the migration tool; gate question 2 |
 | `target`, `source` | `target`, `source` | verbatim |
 | `created` / `updated` | `created_at` / `updated_at` | verbatim ISO timestamps |
-| `githubIssue` | `github_issue` | expected null everywhere [INFERRED: promote-to-GitHub was only ever planned in docs/notes/2026-08-09-forgepad-shape.md, never implemented] |
+| `githubIssue` | `github_issue` | expected null everywhere [INFERRED: promote-to-GitHub was only ever planned in `apps/agentic-command-center/docs/notes/2026-08-09-forgepad-shape.md`, never implemented] |
 
 Migration tool (one-shot CLI owned by Idea Intake, usage spec only):
 

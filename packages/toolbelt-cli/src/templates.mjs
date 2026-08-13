@@ -2,7 +2,6 @@
 // scaffold.mjs's orchestration so each template can be unit-tested (and
 // schema-validated) in isolation.
 import { manifestHash } from "./manifests-shared.mjs";
-import { defaultSchemaName } from "./args.mjs";
 
 function sqlQuote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
@@ -72,46 +71,21 @@ export function buildManifest({ id, name, kind, route, hasSchema, schema, llm, r
     schemas: hasSchema ? [schema] : [],
     permissions: {
       db: {
-        // Precedent split, judgment call (flagged in the m3-03 implementation
-        // report): a schema-owning tool defaults to write:[schema,"core"],
-        // mirroring apps/toolbelt/apps/prompt-organizer/tool.json (the one
-        // real schema-owning UI manifest, which writes core.run rows via
-        // core.log_run per 05-c-toolbelt.md section 3.3's observability
-        // requirement). A --no-schema tool defaults to read:[]/write:[],
-        // mirroring apps/toolbelt/apps/network-checker/tool.json (the one
-        // real no-schema manifest). Either default is schema-valid either
-        // way; review (05-c section 3.2) is what actually enforces it.
+        // TB-5 is fail closed: generated tools may write only their declared
+        // schema. Shared-schema writes require a separately reviewed grant.
         read: hasSchema ? [schema] : [],
-        write: hasSchema ? [schema, "core"] : [],
+        write: hasSchema ? [schema] : [],
       },
       networkEgress: [],
       llmHandler: { access: llm === true },
     },
     lifecycle: {
-      // "none" for a schema-less tool (tool.schema.json's own description
-      // for lifecycle.migrate); otherwise "supabase db push", matching
-      // apps/toolbelt/apps/network-checker/tool.json's precedent.
-      //
-      // Historical note (accurate only up to Finding 26's fix, independent
-      // security review of this repo, re-verified against current HEAD):
-      // this used to be deliberately NOT "gh workflow run
-      // platform-migrations.yml" (Prompt Organizer's value) because that
-      // workflow's underlying directory list was a hardcoded 3-entry
-      // literal (validate-migrations.mjs's old MIGRATION_DIRS) that could
-      // never include a freshly scaffolded tool's own
-      // apps/toolbelt/apps/<id>/supabase/migrations until a human edited it
-      // by hand. That is no longer true: apps/toolbelt/scripts/
-      // validate-migrations.mjs's discoverMigrationDirs() now finds this
-      // exact directory automatically the moment this tool's own tool.json
-      // (schemas non-empty) and its migrations directory both exist on
-      // disk, and platform-migrations.yml's staging step
-      // (stage-migrations.mjs's collectStagedFiles()) is driven by that
-      // same discovery, with no workflow-file edit required. "supabase db
-      // push" is kept as the default here anyway, deliberately: it remains
-      // the correct LOCAL instruction for testing this tool's schema
-      // against a live project before ever pushing, independent of how the
-      // shared CI/deploy pipeline later discovers and applies it.
-      migrate: hasSchema ? "supabase db push" : "none",
+      // Every schema-owning tool shares one physical database and one global
+      // Supabase migration ledger. App directories also retain paired down
+      // files, which must never be handed directly to `supabase db push`.
+      // The root workflow discovers all owners, validates one global version
+      // sequence, stages forward files only, and performs one push.
+      migrate: hasSchema ? "gh workflow run platform-migrations.yml" : "none",
       health: 'node --test "tests/*.test.mjs"',
       register: registerBasename,
     },
@@ -130,7 +104,7 @@ export function manifestToCompactJSON(manifest) {
 
 export function buildAgentsMd({ id, name, hasSchema, schema }) {
   const schemaLine = hasSchema
-    ? `- Owns the \`${schema}\` schema in the shared toolbelt Supabase project. Write only within that schema (plus \`core\`, for \`core.log_run\` if this tool logs runs). Cross-schema writes belong to the repository that owns the target schema.`
+    ? `- Owns the \`${schema}\` schema in the shared toolbelt Supabase project. Write only within that schema. Cross-schema writes belong to the repository that owns the target schema.`
     : `- Owns no database schema (scaffolded with --no-schema). If that changes, re-run \`tool:new\`'s reasoning by hand: add a schema-creation migration pair and update \`tool.json\`'s \`schemas\`/\`permissions.db\` fields and \`lifecycle.migrate\`.`;
 
   return `# AGENTS.md
@@ -161,7 +135,7 @@ node --test "tests/*.test.mjs"
 - Give this tool a real \`description\` in \`tool.json\` (optional field, currently omitted -- no \`--description\` flag exists in the scaffold CLI).${
     hasSchema
       ? `
-- This tool's own \`supabase/migrations/\` is picked up automatically by both \`apps/toolbelt/scripts/validate-migrations.mjs\` and the live \`platform-migrations.yml\` deployment workflow -- no manual edit to either is needed. Run \`supabase db push\` from this tool's own directory to apply its schema locally before relying on the automated push.`
+- This tool's own \`supabase/migrations/\` is picked up automatically by both \`apps/toolbelt/scripts/validate-migrations.mjs\` and the live \`platform-migrations.yml\` deployment workflow -- no manual edit to either is needed. Validate with \`npm run migrations:check\` from \`apps/toolbelt/\`; apply only through the root workflow so paired down files never enter the Supabase CLI ledger.`
       : ""
   }
 - Run \`npm run manifests:check\` from \`apps/toolbelt/\` after any \`tool.json\` edit.
@@ -331,47 +305,16 @@ test("the registration migration's literal manifest_hash equals manifestHash() o
 export function buildRegistrationUpSql({ manifest, id, name, schema, kind, route }) {
   const compact = manifestToCompactJSON(manifest);
   const hash = manifestHash(manifest);
-  // core.app.schema_name is declared `text not null`
-  // (apps/toolbelt/supabase/migrations/20260806190000_core_create_schema.sql).
-  // A --no-schema tool owns no real schema, so `schema` here is the JS value
-  // null -- but sqlQuote(null) would stringify it via String(null) into the
-  // four-character STRING literal 'null' before quoting, a value that
-  // happened to satisfy the NOT NULL constraint by accident while meaning
-  // nothing (Finding 88, independent security review of this repo,
-  // re-verified against current HEAD). Instead, fall back to a nominal
-  // registry-key identifier derived from the tool's own id, exactly matching
-  // this repo's own existing precedent for a schema-less tool
-  // (20260812250000_register_network-checker.sql: schema_name = 'netcheck',
-  // "recorded here as a nominal identifier ... rather than a claim that a
-  // `netcheck` schema exists in this project"). schema_name is therefore a
-  // nominal registry key for tool identity when the tool owns no real
-  // schema, never a live schema claim -- tool.json's own `schemas` array
-  // (see buildManifest) stays correctly empty for a --no-schema tool
-  // regardless of what lands in this column. id is already
-  // ID_PATTERN-restricted ([a-z0-9-], no leading/trailing dash), so this can
-  // never introduce a SQL-unsafe character; defaultSchemaName's
-  // dash-to-underscore transform (the same transform args.mjs uses for the
-  // default *real* schema name) keeps this value shaped like every other
-  // schema_name in the table -- a valid unquoted Postgres identifier -- even
-  // though, like 'netcheck', it names no schema that actually exists.
-  const schemaName = schema === null || schema === undefined ? defaultSchemaName(id) : schema;
   return `-- Generated registration migration (docs/planning/05-c-toolbelt.md
 -- section 4.2) for apps/toolbelt/apps/${id}/tool.json, produced by
 -- packages/toolbelt-cli's tool:new (m3-03). The shape follows section 4.2's
--- contract exactly: one idempotent upsert of the core.app row from tool.json
+-- contract exactly: one collision-safe insert of the core.app row from tool.json
 -- fields, matching m3-02's hand-written precedent
 -- (apps/toolbelt/supabase/migrations/20260812240000_register_prompt-organizer.sql).
 --
--- This is a brand-new row: the scaffold CLI's collision check (id taken on
--- disk, id already claimed by a manifest, or id already claimed by an
--- existing *_register_<id>.sql on disk) refuses to generate this migration
--- at all if '${id}' were already registered, so the ON CONFLICT branch below
--- exists only to make a re-run of this same migration safe, never to avoid
--- clobbering someone else's insert (same posture as
--- 20260812250000_register_network-checker.sql). \`status\` is deliberately
--- absent from the UPDATE SET list: re-running registration must never
--- clobber a status a separate, dedicated status-transition migration set
--- (e.g. a future promotion to 'live', or retirement to 'retired').
+-- Local checks provide fast feedback; the core.app primary key remains the
+-- authority for DB-only rows and concurrent generators. An exact reapply is
+-- a no-op, while a different manifest at the same id aborts with 23505.
 --
 -- manifest_hash is the sha256 hex digest of the canonicalized manifest
 -- (RFC-8785-style key-sorted JSON, no insignificant whitespace), computed by
@@ -381,6 +324,8 @@ export function buildRegistrationUpSql({ manifest, id, name, schema, kind, route
 -- asserts this literal string equals manifestHash() computed fresh over the
 -- real manifest file on disk, so the two can never silently drift apart
 -- (TB-1b parity, docs/planning/05-c-toolbelt.md section 11).
+do $tool_new$
+begin
 insert into core.app (
   id, name, schema_name, status, kind, route, version, description,
   manifest, manifest_hash, registered_at
@@ -388,7 +333,7 @@ insert into core.app (
 values (
   ${sqlQuote(id)},
   ${sqlQuote(name)},
-  ${sqlQuote(schemaName)},
+  ${sqlLiteralOrNull(schema)},
   'building',
   ${sqlQuote(kind)},
   ${sqlLiteralOrNull(route)},
@@ -398,16 +343,19 @@ values (
   ${sqlQuote(hash)},
   now()
 )
-on conflict (id) do update set
-  name          = excluded.name,
-  schema_name   = excluded.schema_name,
-  kind          = excluded.kind,
-  route         = excluded.route,
-  version       = excluded.version,
-  description   = excluded.description,
-  manifest      = excluded.manifest,
-  manifest_hash = excluded.manifest_hash,
-  registered_at = excluded.registered_at;
+on conflict (id) do nothing;
+
+if not exists (
+  select 1
+  from core.app
+  where id = ${sqlQuote(id)}
+    and manifest_hash = ${sqlQuote(hash)}
+    and manifest = ${sqlQuote(compact)}::jsonb
+) then
+  raise exception 'core.app id collision for %', ${sqlQuote(id)} using errcode = '23505';
+end if;
+end
+$tool_new$;
 `;
 }
 

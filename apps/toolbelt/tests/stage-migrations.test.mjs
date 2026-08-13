@@ -37,6 +37,7 @@ function withFixtureDirs(dirSpecs, fn) {
 function withFixtureToolbeltRoot(layout, fn) {
   const dir = mkdtempSync(join(tmpdir(), "stage-toolbelt-fixture-"));
   try {
+    mkdirSync(join(dir, "supabase", "migrations"), { recursive: true });
     for (const [relPath, contents] of Object.entries(layout)) {
       const fullPath = join(dir, relPath);
       mkdirSync(dirname(fullPath), { recursive: true });
@@ -272,6 +273,19 @@ test("CLI: --subset-file naming an unknown version exits nonzero and names the c
   });
 });
 
+test("CLI rejects a missing --subset-file value and unknown options", () => {
+  withDestDir((dest) => {
+    assert.throws(
+      () => execFileSync(process.execPath, [SCRIPT, dest, "--subset-file"], { encoding: "utf8", stdio: "pipe" }),
+      (error) => error.status === 2 && /requires a path/.test(error.stderr),
+    );
+    assert.throws(
+      () => execFileSync(process.execPath, [SCRIPT, dest, "--typo"], { encoding: "utf8", stdio: "pipe" }),
+      (error) => error.status === 2 && /unknown argument/.test(error.stderr),
+    );
+  });
+});
+
 test("splitAtOwnerDependency splits before the first file whose SQL body references platform.owner()", () => {
   withFixtureDirs(
     [
@@ -459,4 +473,63 @@ test("collectStagedFiles runs against the repository's real migration directorie
   const versions = files.map((f) => f.version);
   const sorted = [...versions].sort();
   assert.deepEqual(versions, sorted, "real migration set must come out version-sorted");
+});
+
+const PLATFORM_WORKFLOW = new URL("../../../.github/workflows/platform-migrations.yml", import.meta.url);
+
+test("canonical owner split preserves the reviewed 18-version legacy and 20-version S1 prefixes", () => {
+  const files = collectStagedFiles();
+  const { preOwner } = splitAtOwnerDependency(files);
+  assert.equal(files.filter((file) => file.version <= "20260808130000").length, 18);
+  assert.equal(preOwner.length, 20);
+  assert.deepEqual(preOwner.slice(-2).map((file) => file.name), [
+    "20260812140000_platform_owner_bootstrap.sql",
+    "20260812150000_test_create_fence.sql",
+  ]);
+});
+
+test("the migration workflow installs validator dependencies and stages one down-free global ledger", () => {
+  const workflow = readFileSync(PLATFORM_WORKFLOW, "utf8");
+  assert.match(workflow, /cache-dependency-path: apps\/toolbelt\/package-lock\.json/);
+  assert.match(workflow, /npm ci --prefix apps\/toolbelt/);
+  assert.match(workflow, /scripts\/stage-migrations\.mjs/);
+  assert.doesNotMatch(workflow, /working-directory: apps\/toolbelt\/apps\//);
+});
+
+test("the workflow probes ledger existence, accepts only an exact prefix, and bounds PostgreSQL connects", () => {
+  const workflow = readFileSync(PLATFORM_WORKFLOW, "utf8");
+  const existenceProbe = workflow.indexOf("select to_regclass('supabase_migrations.schema_migrations') is not null");
+  const versionQuery = workflow.indexOf("select version::text from supabase_migrations.schema_migrations");
+  assert.ok(existenceProbe >= 0 && existenceProbe < versionQuery);
+  assert.doesNotMatch(workflow, /case when to_regclass\([^)]+\).*schema_migrations/s);
+  assert.match(workflow, /Remote ledger is not a local prefix at position/);
+  assert.match(workflow, /timeout-minutes: 20\n\s+env:\n\s+PGCONNECT_TIMEOUT: "15"/);
+});
+
+test("baseline adoption is restartable and proves legacy non-schema effects before repair", () => {
+  const workflow = readFileSync(PLATFORM_WORKFLOW, "utf8");
+  for (const invariant of [
+    "Remote ledger diverges at position",
+    "33 reviewed idea seeds",
+    "legacy idea seed payloads differ",
+    "legacy prompt-organizer registry row",
+    "legacy idea_effectiveness metric",
+    "legacy constraint-finder dependency",
+    "legacy prompt version history is incomplete",
+    "legacy API schema usage grants are missing",
+    "legacy Prompt Organizer table grants are missing",
+    "legacy API function grants are missing",
+    "legacy PostgREST exposed-schema configuration is missing or stale",
+    "core-purge-old-events",
+  ]) assert.match(workflow, new RegExp(invariant));
+  assert.match(workflow, /repair_from="\$\{#remote_versions\[@\]\}"/);
+});
+
+test("every deployment mutation is main-SHA pinned and normal apply rejects schema drift", () => {
+  const workflow = readFileSync(PLATFORM_WORKFLOW, "utf8");
+  assert.match(workflow, /gh api "repos\/\$\{GITHUB_REPOSITORY\}\/git\/ref\/heads\/main"/);
+  assert.match(workflow, /main moved during baseline verification; refusing ledger repair/);
+  assert.match(workflow, /main moved after migration preview; refusing database mutation/);
+  assert.match(workflow, /Prove the ledger-applied schema has not drifted/);
+  assert.match(workflow, /The live schema has drifted from its applied migration ledger/);
 });

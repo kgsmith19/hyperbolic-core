@@ -329,6 +329,39 @@ test("stream(): rejects fallback+tools before attempting the primary stream", as
 // fires -- see drivers/abort.ts).
 // ---------------------------------------------------------------------------
 
+test("complete(): a pre-aborted signal rejects before dispatch even when a custom driver ignores signals", async () => {
+  const reason = new Error("cancelled before complete");
+  const controller = new AbortController();
+  controller.abort(reason);
+  const primary = fakeDriver("anthropic", {
+    complete: async () => fixtureResponse("anthropic", "primary-model"),
+  });
+
+  await assert.rejects(
+    () => complete({ ...BASE_REQUEST, signal: controller.signal }, CREDENTIALS, { drivers: { anthropic: primary } }),
+    (error: unknown) => error === reason,
+  );
+  assert.equal(primary.calls, 0);
+});
+
+test("stream(): a pre-aborted signal rejects before dispatch even when a custom driver ignores signals", async () => {
+  const reason = new Error("cancelled before stream");
+  const controller = new AbortController();
+  controller.abort(reason);
+  const primary = fakeDriver("anthropic", {
+    async *stream(request) {
+      yield { kind: "done", response: fixtureResponse("anthropic", request.model) } as const;
+    },
+  });
+
+  await assert.rejects(async () => {
+    for await (const _delta of stream({ ...BASE_REQUEST, signal: controller.signal }, CREDENTIALS, { drivers: { anthropic: primary } })) {
+      // never reached
+    }
+  }, (error: unknown) => error === reason);
+  assert.equal(primary.calls, 0);
+});
+
 test("complete(): once the caller's signal has fired, a retryable error stops immediately instead of retrying or failing over", async () => {
   const controller = new AbortController();
   const primary = fakeDriver("anthropic", {

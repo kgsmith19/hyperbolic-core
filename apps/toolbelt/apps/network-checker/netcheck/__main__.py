@@ -24,12 +24,12 @@ from pathlib import Path
 from . import (bundle, change_cli, diagnose, environ, experiment, inventory,
                llmlog, probes, rank, route as route_mod, server, store, watch)
 from . import __version__
+from .cli_types import positive_int
 
 DB = Path(os.environ.get("NETCHECK_DB", Path.home() / ".netcheck" / "netcheck.db"))
 TARGET = environ.TARGET  # single definition in environ.py; scan and probe must never disagree
 SCAN_BUDGET_SECONDS = {"quick": 10, "standard": 60, "deep": 120}
 SCAN_WORKER_ENV = "NETCHECK_SCAN_WORKER"
-
 
 def load_env(path=Path(".env")):
     """Minimal .env reader. Credentials never belong in the repo or in argv."""
@@ -230,9 +230,9 @@ def main(argv=None):
     inv.set_defaults(fn=cmd_inventory)
     change_cli.add_subparser(sub).set_defaults(fn=lambda a: change_cli.cli(*connect(), a))
     w = sub.add_parser("watch", help="continuous monitor")
-    w.add_argument("--interval", type=watch._positive_int, default=20)
-    w.add_argument("--idle-every", type=watch._positive_int, default=15, dest="idle_every")
-    w.add_argument("--idle-seconds", type=int, default=60, dest="idle_seconds")
+    w.add_argument("--interval", type=positive_int, default=20)
+    w.add_argument("--idle-every", type=positive_int, default=15, dest="idle_every")
+    w.add_argument("--idle-seconds", type=positive_int, default=60, dest="idle_seconds")
     w.set_defaults(fn=cmd_watch)
     s = sub.add_parser("serve", help="dashboard")
     s.add_argument("--port", type=int, default=8787)

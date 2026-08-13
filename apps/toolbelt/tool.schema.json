@@ -78,8 +78,18 @@
           "additionalProperties": false,
           "required": ["read", "write"],
           "properties": {
-            "read": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-            "write": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+            "read": {
+              "type": "array",
+              "items": { "type": "string" },
+              "uniqueItems": true,
+              "description": "Schemas this tool may read, including schemas owned by another manifest."
+            },
+            "write": {
+              "type": "array",
+              "items": { "type": "string" },
+              "uniqueItems": true,
+              "description": "Schemas this tool may write. Every entry must be owned by this same manifest."
+            }
           }
         },
         "networkEgress": {

@@ -420,14 +420,11 @@ test("geminiDriver.complete: a request whose message shape trips a local TypeErr
   assert.equal(fetchCalls, 0, "a local construction bug must never reach the network layer at all");
 });
 
-test("complete(): a Gemini request that passes role/part validation but trips a local construction bug in toGeminiContents fails on the FIRST attempt, not retried MAX_RETRIES times, and is classified invalid_request rather than transport", async (t) => {
-  // A tool_result whose `content` is neither a string nor a TextPart[]
-  // (here: a bare number) passes finding #81's role/part guard (its `.type`
-  // is a legitimate "tool_result" on a "tool" message) but still trips a
-  // genuine local TypeError deep inside toGeminiContents's toPlainText call
-  // -- this is the "reaches the real driver through the real orchestration
-  // stack" companion to the direct-driver test above.
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+test("complete(): malformed tool_result content is rejected centrally before the Gemini driver is dispatched", async () => {
+  // The central role/part guard now validates each part's payload as well as
+  // its discriminator, so a bare number cannot reach provider-specific
+  // request construction. The direct-driver test above still pins Gemini's
+  // standalone defensive classification.
   let fetchCalls = 0;
   let driverCalls = 0;
   const countingGeminiDriver = {
@@ -453,23 +450,13 @@ test("complete(): a Gemini request that passes role/part validation but trips a 
     },
     () => complete(malformedRequest, { gemini: { apiKey: "fixture-key" } }, { drivers: { gemini: countingGeminiDriver } }),
   );
-  let settled: { ok: boolean; error?: { class: string; retryable: boolean } } | undefined;
-  promise.then(
-    () => (settled = { ok: true }),
-    (error) => (settled = { ok: false, error }),
-  );
-  for (let i = 0; i < 20 && !settled; i++) {
-    t.mock.timers.tick(1000);
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  await promise.catch(() => undefined);
-
-  assert.ok(settled, "must settle without hanging on a retry/backoff loop");
-  assert.equal(settled?.ok, false);
-  assert.ok(isLlmError(settled?.error));
-  assert.equal(settled?.error?.class, "invalid_request", "must be classified as a local/caller bug, not transport noise");
-  assert.equal(settled?.error?.retryable, false);
-  assert.equal(driverCalls, 1, "must fail on the very first attempt -- not retried MAX_RETRIES times");
+  await assert.rejects(promise, (error: unknown) => {
+    assert.ok(isLlmError(error));
+    assert.equal(error.class, "invalid_request");
+    assert.equal(error.retryable, false);
+    return true;
+  });
+  assert.equal(driverCalls, 0, "central validation must reject before driver dispatch");
   assert.equal(fetchCalls, 0, "must never reach the network layer at all");
 });
 
@@ -548,6 +535,29 @@ test("geminiDriver.stream: yields text and tool_call deltas, a usage delta, and 
   assert.equal(done?.response.stopReason, "tool_use");
   assert.deepEqual(done?.response.toolCalls, [{ id: "call_1", name: "get_weather", input: { city: "Paris" } }]);
   assert.equal(deltas.at(-1)?.kind, "done");
+});
+
+test("geminiDriver.stream: a naturally closed response with no candidate or block reason is provider_bug", async () => {
+  await withPatchedFetch(
+    async () =>
+      sseResponse([
+        {
+          modelVersion: "gemini-fixture-resolved",
+          usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 0, totalTokenCount: 10 },
+        },
+      ]),
+    async () => {
+      await assert.rejects(
+        () => collectStream(geminiDriver.stream({ ...BASE_REQUEST, stream: true }, { apiKey: "fixture-key" })),
+        (error: unknown) => {
+          assert.ok(isLlmError(error));
+          assert.equal(error.class, "provider_bug");
+          assert.equal(error.retryable, false);
+          return true;
+        },
+      );
+    },
+  );
 });
 
 test("geminiDriver.stream: aborts as transport when no delta arrives for 60 seconds", async (t) => {

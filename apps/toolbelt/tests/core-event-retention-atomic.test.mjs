@@ -109,6 +109,9 @@ function detectRunner() {
 }
 
 const RUNNER = detectRunner();
+if (process.env.TOOLBELT_REQUIRE_POSTGRES === "1" && !RUNNER) {
+  throw new Error("TOOLBELT_REQUIRE_POSTGRES=1 but no local PostgreSQL server is reachable");
+}
 const SKIP_REASON = RUNNER
   ? false
   : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); " +

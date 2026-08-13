@@ -425,18 +425,17 @@ function buildClient(credentials: Credentials): GoogleGenAI {
 
 async function completeImpl(request: LlmRequest, credentials: Credentials): Promise<LlmResponse> {
   const client = buildClient(credentials);
-  const { controller, hardTimer } = createAttemptController(request);
-  // Request-shape construction happens outside the retry-relevant try block
-  // below -- see buildRequestShape's own comment (finding #83).
-  const { contents, config } = buildRequestShape(request, controller.signal);
+  const { controller, hardTimer, cleanup } = createAttemptController(request);
   const startedAt = Date.now();
   try {
+    const { contents, config } = buildRequestShape(request, controller.signal);
     const response = await client.models.generateContent({ model: request.model, contents, config });
     return fromGeminiResponse(response, request.model, Date.now() - startedAt);
   } catch (err) {
     throw classifyGeminiError(err, controller.signal.aborted);
   } finally {
     clearTimeout(hardTimer);
+    cleanup();
   }
 }
 
@@ -461,10 +460,7 @@ async function completeImpl(request: LlmRequest, credentials: Credentials): Prom
 async function* streamImpl(request: LlmRequest, credentials: Credentials): AsyncGenerator<LlmDelta, void, unknown> {
   const client = buildClient(credentials);
   const startedAt = Date.now();
-  const { controller, hardTimer } = createAttemptController(request);
-  // Request-shape construction happens outside the retry-relevant try block
-  // below -- see buildRequestShape's own comment (finding #83).
-  const { contents, config } = buildRequestShape(request, controller.signal);
+  const { controller, hardTimer, cleanup } = createAttemptController(request);
   // Correctness fix (see 08-llm-handlers.md's stall-detection requirement):
   // the watchdog must reset only on an actual LlmDelta yield, never on raw
   // transport activity. It used to reset unconditionally once per chunk at
@@ -486,8 +482,10 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
   let usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
   let modelVersion: string | undefined;
   let toolCallIndex = 0;
+  let sawCandidate = false;
 
   try {
+    const { contents, config } = buildRequestShape(request, controller.signal);
     const stream = await client.models.generateContentStream({ model: request.model, contents, config });
     for await (const chunk of stream) {
       if (chunk.modelVersion) {
@@ -505,6 +503,7 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
       if (!candidate) {
         continue;
       }
+      sawCandidate = true;
       if (candidate.finishReason) {
         finishReason = candidate.finishReason;
       }
@@ -539,6 +538,11 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
         }
       }
     }
+    if (!sawCandidate && !blocked) {
+      throw createLlmError("provider_bug", "gemini driver: stream ended with no candidates and no promptFeedback.blockReason", {
+        cause: { modelVersion, usage },
+      });
+    }
     const response: LlmResponse = {
       text: blocked ? null : text.length > 0 ? text : null,
       toolCalls,
@@ -554,6 +558,7 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
     throw classifyGeminiError(err, controller.signal.aborted);
   } finally {
     clearTimeout(hardTimer);
+    cleanup();
     watchdog.clear();
   }
 }
