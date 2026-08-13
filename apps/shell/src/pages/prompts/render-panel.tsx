@@ -5,12 +5,14 @@
 // configuration select/save pair, and a preview+copy action. Ported from
 // apps/toolbelt/apps/prompt-organizer/web/panel.mjs's exact behavior (same
 // empty-input-means-absent-key rule, same post-confirmation fire-and-forget
-// usage log) onto @hyperbolic/llm's shared render()/extractVariables()/
-// extractSections() instead of a third copy of the algorithm.
+// usage log) onto ../../lib/prompt-render's render()/extractVariables()/
+// extractSections() -- a local copy, not @hyperbolic/llm's (see that
+// package's own index.ts comment on why importing it here blew the bundle
+// budget).
 import { useMemo, useState } from "react";
-import { extractSections, extractVariables, render } from "@hyperbolic/llm";
 import { Button, Input, Label, Select, SelectItem } from "@hyperbolic/ui";
 import { estimateTokenCount, recordUsage, saveConfiguration, type Configuration, type Prompt } from "../../lib/prompts";
+import { extractSections, extractVariables, render } from "../../lib/prompt-render";
 
 const APPLY_CONFIG_PLACEHOLDER = "";
 

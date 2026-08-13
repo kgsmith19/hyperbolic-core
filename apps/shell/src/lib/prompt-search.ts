@@ -1,11 +1,10 @@
 // Ported verbatim (algorithm unchanged, only types added) from
-// apps/toolbelt/apps/prompt-organizer/web/search.mjs. Not shared through
-// @hyperbolic/llm like prompt-render.ts: this logic is Shell-list-UI-only
+// apps/toolbelt/apps/prompt-organizer/web/search.mjs -- the same
+// "narrow, deliberate duplication" ./prompt-render.ts documents for its
+// own port, for the same reason: this logic is Shell-list-UI-only
 // (title/tag/body search, tag-filter toggling, archived-visibility, the "/"
 // focus shortcut) with no other TypeScript consumer to justify a shared
-// package location -- packages/llm's own export exists specifically because
-// packages/llm/src/prompt-client.ts needs render() for its cache, which none
-// of these four functions apply to.
+// package location.
 import type { Prompt } from "./prompts";
 
 /** SPEC-0001, extended by SPEC-0004 (SL-006): case-insensitive literal
