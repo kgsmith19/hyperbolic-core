@@ -25,5 +25,11 @@ export default defineConfig({
     url: "http://127.0.0.1:4173",
     reuseExistingServer: false,
     timeout: 120_000,
+    // m2-03's e2e-only test hook (src/lib/session.ts): exposes the shared
+    // platform-client instance on `window` so single-session.spec.ts and
+    // idp-down.spec.ts can drive the frozen PlatformAuth/AuthedFetch
+    // contract directly against a real production build. Set ONLY here --
+    // a plain `npm run build` (any real deploy) never sets it.
+    env: { ...process.env, VITE_E2E_HOOKS: "1" },
   },
 });

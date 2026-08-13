@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { DEPLOYABLE_UNITS } from "../src/lib/units";
+import { mockAuth, fillAndSubmitLogin } from "./support/auth";
 
 // SH-1a (docs/planning/05-a-hyperbolic-core.md section 12): "When an
 // authenticated operator requests /, /acc, /tools, /prompts, or /ideas, the
@@ -8,7 +9,22 @@ import { DEPLOYABLE_UNITS } from "../src/lib/units";
 // works end to end -- route rendering, nav-testid, settings health rows, and
 // the /acc degrade case, all against a real production build served by
 // `vite preview` (see playwright.config.ts's webServer).
+//
+// m2-03 made every route require a real, authenticated session (this file
+// predates that gate, from m2-02, when every route rendered for free under
+// a permanent stub session). Every test here now logs in first through the
+// real UI so "authenticated operator" -- SH-1a's own precondition -- is
+// actually true, not assumed; e2e/auth-gate.spec.ts and
+// e2e/single-session.spec.ts are what prove the gate and session
+// propagation themselves.
 const ROUTE_GROUPS = ["/", "/acc", "/tools", "/prompts", "/ideas"] as const;
+
+test.beforeEach(async ({ page }) => {
+  await mockAuth(page);
+  await page.goto("/");
+  await fillAndSubmitLogin(page);
+  await page.waitForURL((url) => url.pathname === "/");
+});
 
 test.describe("Chrome renders on every route group (SH-1a)", () => {
   for (const route of ROUTE_GROUPS) {

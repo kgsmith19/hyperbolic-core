@@ -15,11 +15,10 @@ const BREAK_GLASS_URL =
 
 interface SettingsPageProps {
   session: PlatformSession;
-  isStubSession: boolean;
   onSignOut: () => void;
 }
 
-function SettingsPage({ session, isStubSession, onSignOut }: SettingsPageProps) {
+function SettingsPage({ session, onSignOut }: SettingsPageProps) {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
       <div>
@@ -42,12 +41,6 @@ function SettingsPage({ session, isStubSession, onSignOut }: SettingsPageProps) 
           <CardTitle>Session</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3" data-testid="session-card">
-          {isStubSession && (
-            <p className="text-xs text-text-secondary" data-testid="session-stub-note">
-              No real login flow exists yet (m2-03). This is a placeholder session so every zone
-              can render as an authenticated operator in the meantime.
-            </p>
-          )}
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
             <dt className="text-text-secondary">User</dt>
             <dd className="truncate font-mono text-text">{session.userId}</dd>

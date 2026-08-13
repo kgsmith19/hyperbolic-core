@@ -1,0 +1,97 @@
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes } from "react-router";
+import LoginPage from "./login";
+import type { SessionStatus } from "../lib/session";
+
+function renderLogin(initialPath: string, status: SessionStatus, onSignIn = vi.fn()) {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <Routes>
+        <Route path="/login" element={<LoginPage status={status} onSignIn={onSignIn} />} />
+        <Route path="/tools" element={<div data-testid="tools-page">tools</div>} />
+        <Route path="/" element={<div data-testid="home-page">home</div>} />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
+describe("LoginPage: rendering by status", () => {
+  it("renders the login form with email/password inputs and a submit button when signed out", () => {
+    renderLogin("/login", "signed-out");
+    expect(screen.getByTestId("login-form")).toBeInTheDocument();
+    expect(screen.getByTestId("login-email")).toBeInTheDocument();
+    expect(screen.getByTestId("login-password")).toBeInTheDocument();
+    expect(screen.getByTestId("login-submit")).toBeInTheDocument();
+  });
+
+  it("renders no form while status is checking (avoids a flash of the wrong surface)", () => {
+    renderLogin("/login", "checking");
+    expect(screen.queryByTestId("login-form")).toBeNull();
+    expect(screen.getByTestId("auth-checking")).toBeInTheDocument();
+  });
+
+  it("redirects to / when already signed in and no return target is given", () => {
+    renderLogin("/login", "signed-in");
+    expect(screen.getByTestId("home-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("login-form")).toBeNull();
+  });
+
+  it("redirects to the sanitized ?return= target when already signed in", () => {
+    renderLogin("/login?return=%2Ftools", "signed-in");
+    expect(screen.getByTestId("tools-page")).toBeInTheDocument();
+  });
+
+  it("falls back to / when already signed in with an unsafe ?return= target", () => {
+    renderLogin("/login?return=" + encodeURIComponent("https://evil.example.com"), "signed-in");
+    expect(screen.getByTestId("home-page")).toBeInTheDocument();
+  });
+});
+
+describe("LoginPage: submitting", () => {
+  it("calls onSignIn with the typed credentials and navigates to the return target on success", async () => {
+    const user = userEvent.setup();
+    const onSignIn = vi.fn().mockResolvedValue(undefined);
+    renderLogin("/login?return=%2Ftools", "signed-out", onSignIn);
+
+    await user.type(screen.getByTestId("login-email"), "operator@example.com");
+    await user.type(screen.getByTestId("login-password"), "hunter2");
+    await user.click(screen.getByTestId("login-submit"));
+
+    await waitFor(() => expect(onSignIn).toHaveBeenCalledWith("operator@example.com", "hunter2"));
+    await waitFor(() => expect(screen.getByTestId("tools-page")).toBeInTheDocument());
+  });
+
+  it("shows an error message and keeps the form when sign-in rejects, without navigating away", async () => {
+    const user = userEvent.setup();
+    const onSignIn = vi.fn().mockRejectedValue(new Error("Invalid login credentials"));
+    renderLogin("/login", "signed-out", onSignIn);
+
+    await user.type(screen.getByTestId("login-email"), "operator@example.com");
+    await user.type(screen.getByTestId("login-password"), "wrong");
+    await user.click(screen.getByTestId("login-submit"));
+
+    await waitFor(() => expect(screen.getByTestId("login-error")).toHaveTextContent("Invalid login credentials"));
+    expect(screen.getByTestId("login-form")).toBeInTheDocument();
+  });
+
+  it("disables the submit button while a sign-in is in flight", async () => {
+    const user = userEvent.setup();
+    let resolveSignIn: () => void = () => {};
+    const onSignIn = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSignIn = resolve;
+        })
+    );
+    renderLogin("/login", "signed-out", onSignIn);
+
+    await user.type(screen.getByTestId("login-email"), "operator@example.com");
+    await user.type(screen.getByTestId("login-password"), "hunter2");
+    await user.click(screen.getByTestId("login-submit"));
+
+    await waitFor(() => expect(screen.getByTestId("login-submit")).toBeDisabled());
+    resolveSignIn();
+  });
+});

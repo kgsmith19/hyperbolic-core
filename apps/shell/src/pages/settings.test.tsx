@@ -30,7 +30,7 @@ describe("SettingsPage: unit health (05-a section 8)", () => {
 
   it("renders exactly one health row per deployable unit, keyed by unit id", () => {
     mockFetchReject();
-    render(<SettingsPage session={FIXTURE_SESSION} isStubSession onSignOut={() => {}} />);
+    render(<SettingsPage session={FIXTURE_SESSION} onSignOut={() => {}} />);
 
     const rows = screen.getAllByTestId("unit-health-row");
     expect(rows).toHaveLength(EXPECTED_UNIT_IDS.length);
@@ -42,7 +42,7 @@ describe("SettingsPage: unit health (05-a section 8)", () => {
 
   it("renders the session card, theme switch, version info, and break-glass link", () => {
     mockFetchReject();
-    render(<SettingsPage session={FIXTURE_SESSION} isStubSession={false} onSignOut={() => {}} />);
+    render(<SettingsPage session={FIXTURE_SESSION} onSignOut={() => {}} />);
 
     expect(screen.getByTestId("session-card")).toBeInTheDocument();
     expect(screen.getByText("test-user-id")).toBeInTheDocument();
@@ -50,19 +50,10 @@ describe("SettingsPage: unit health (05-a section 8)", () => {
     expect(screen.getByText(/break-glass runbook/i)).toBeInTheDocument();
   });
 
-  it("shows the stub-session note only when isStubSession is true", () => {
-    mockFetchReject();
-    const { rerender } = render(<SettingsPage session={FIXTURE_SESSION} isStubSession onSignOut={() => {}} />);
-    expect(screen.getByTestId("session-stub-note")).toBeInTheDocument();
-
-    rerender(<SettingsPage session={FIXTURE_SESSION} isStubSession={false} onSignOut={() => {}} />);
-    expect(screen.queryByTestId("session-stub-note")).toBeNull();
-  });
-
   it("calls onSignOut when the sign-out button is clicked", () => {
     mockFetchReject();
     const onSignOut = vi.fn();
-    render(<SettingsPage session={FIXTURE_SESSION} isStubSession onSignOut={onSignOut} />);
+    render(<SettingsPage session={FIXTURE_SESSION} onSignOut={onSignOut} />);
     screen.getByRole("button", { name: "Sign out" }).click();
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
