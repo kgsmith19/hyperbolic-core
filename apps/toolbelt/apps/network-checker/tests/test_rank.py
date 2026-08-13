@@ -41,35 +41,27 @@ class RankTest(unittest.TestCase):
 
 
 class ScriptedFixTest(unittest.TestCase):
-    """A cause this repo ships a change template for must say so.
-
-    Three of the fix scripts exist for causes `diagnose` already names, and
-    the fix text now points at the gated change lifecycle (05-f section 4.5)
-    instead of a raw script invocation -- `run_fixes.sh` is deleted, and
-    every device write goes through propose/test/approve/apply.
-
-    The invocation is generated from a table checked against both the
-    filesystem and change_templates.TEMPLATES so the three cannot drift
-    apart.
-    """
+    """Unsafe templates stay unavailable while manual remedy text remains."""
 
     def fix_for(self, cause, **sections):
         got = {c["cause"]: c for c in rank.rank([row(dns_router_state="fail")] * 3,
                                                 [], sections)}
         return got[cause]["fix"]
 
-    def test_a_dns_cause_names_the_change_lifecycle(self):
+    def test_a_dns_cause_does_not_offer_an_unreversible_template(self):
         fix = self.fix_for("router_dns")
-        self.assertIn("netcheck change propose", fix)
-        self.assertIn("change test", fix)
-        self.assertIn("change show", fix)
-        self.assertNotIn("run_fixes.sh", fix)
+        self.assertNotIn("netcheck change propose", fix)
+        self.assertIn("1.1.1.1", fix)
 
-    def test_a_radio_cause_names_the_adapter_power_template(self):
+    def test_a_radio_cause_keeps_a_manual_remedy_only(self):
         fix = {c["cause"]: c for c in rank.rank(
             [row()], [], {"events": {"state": "ok", "radio_off": 3}})}["radio_drops"]["fix"]
-        self.assertIn("adapter_power", fix)
-        self.assertIn("netcheck change propose", fix)
+        self.assertNotIn("netcheck change propose", fix)
+        self.assertIn("Device Manager", fix)
+
+    def test_no_template_is_exposed_without_exact_prestate_restore(self):
+        self.assertEqual(change_templates.TEMPLATES, {})
+        self.assertEqual(rank._TEMPLATES, {})
 
     def test_a_cause_with_no_template_does_not_invent_one(self):
         fix = {c["cause"]: c for c in rank.rank([row()], [], {

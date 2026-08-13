@@ -79,22 +79,12 @@ _FIXES = {
                                "to a unique, strong value.",
 }
 
-# Causes this repo ships a proposable change template for (change_templates.py),
-# and which one. Generated into the fix text, not written into the prose, so
-# a renamed/deleted template script cannot leave a fix quietly recommending
-# it -- test_rank.py checks both directions. Raw scripts are never invoked
-# directly any more (05-f section 4.5): every write goes through change
-# propose/test/approve/apply instead of an unattended script.
-_TEMPLATES = {
-    "wifi_mode_pinned": "wifi_mode",
-    "router_dns": "dns",
-    "dns": "dns",
-    "radio_drops": "adapter_power",
-}
+# Reserved cause-to-template mapping. It stays empty with the template registry,
+# so every ranked cause provides a manual remedy only.
+_TEMPLATES = {}
 
 def _fix(cause):
-    """The remedy for `cause`, plus the gated change lifecycle command when
-    this repo ships a proposable template for it (05-f section 4)."""
+    """Return the manual remedy and, if ever enabled, its gated template."""
     text = _FIXES.get(cause, "")
     name = _TEMPLATES.get(cause)
     if name:
