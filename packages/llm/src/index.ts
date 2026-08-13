@@ -8,6 +8,7 @@
  */
 
 export type {
+  AssistantContentPart,
   AssistantMessage,
   Credentials,
   CredentialsByProvider,
@@ -33,10 +34,11 @@ export type {
   ToolResultPart,
   ToolUsePart,
   Usage,
+  UserContentPart,
   UserMessage,
 } from "./types.ts";
 
-export { createLlmError, isLlmError } from "./errors.ts";
+export { ALL_ERROR_CLASSES, createLlmError, isLlmError, RETRYABLE_CLASSES } from "./errors.ts";
 export type { CreateLlmErrorOptions } from "./errors.ts";
 
 export { MAX_RETRIES, RETRY_BASE_MS, RETRY_CAP_MS, STREAM_STALL_MS, computeBackoffMs, withRetry } from "./retry.ts";

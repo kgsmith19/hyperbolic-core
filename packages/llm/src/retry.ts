@@ -8,7 +8,7 @@
  * `node:timers/promises`), so `node --test`'s MockTimers can drive the
  * exact-numbers tests without spending real wall-clock seconds.
  */
-import { isLlmError } from "./errors.ts";
+import { isLlmError, RETRYABLE_CLASSES } from "./errors.ts";
 
 export const RETRY_BASE_MS = 2000;
 export const RETRY_CAP_MS = 30000;
@@ -47,10 +47,17 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 /**
  * Runs `run` with up to MAX_RETRIES retries. Only retries when the thrown
- * value is an LlmError with `retryable: true` (rate_limit | overloaded |
- * transport -- see errors.ts, where that derivation is enforced). Honors
- * `retryAfterMs` verbatim when the error carries one; otherwise waits the
- * full-jitter backoff for that retry's index.
+ * value is an LlmError whose `class` is one of RETRYABLE_CLASSES (rate_limit
+ * | overloaded | transport). Retryability is derived fresh from `class` at
+ * this decision point (finding #85) -- via RETRYABLE_CLASSES.has(err.class),
+ * never by trusting the error's own stored `.retryable` field -- so a
+ * forged/duck-typed error object with a mismatched `retryable` flag is
+ * judged by its class, not its claim. Every error createLlmError actually
+ * produces already has `retryable` derived the same way, so this changes
+ * nothing for any legitimate error; it only closes the gap for a
+ * hypothetical forged one. Honors `retryAfterMs` verbatim when the error
+ * carries one; otherwise waits the full-jitter backoff for that retry's
+ * index.
  */
 export async function withRetry<T>(run: () => Promise<T>, opts: { random?: () => number; signal?: AbortSignal } = {}): Promise<T> {
   const random = opts.random ?? Math.random;
@@ -58,9 +65,17 @@ export async function withRetry<T>(run: () => Promise<T>, opts: { random?: () =>
     try {
       return await run();
     } catch (err) {
-      const retryable = isLlmError(err) && err.retryable;
+      const retryable = isLlmError(err) && RETRYABLE_CLASSES.has(err.class);
       const isLastAttempt = attemptIndex >= MAX_RETRIES;
-      if (!retryable || isLastAttempt) {
+      // Finding #87: a caller signal that has already fired stops retrying
+      // immediately, regardless of the error's own class -- the same
+      // reasoning as `isLastAttempt` above, just triggered by cancellation
+      // instead of running out of budget. This is what keeps a driver call
+      // that aborted because of `opts.signal` (composed into its own
+      // per-attempt AbortController -- see drivers/abort.ts) from being
+      // retried just because its resulting error still carries a retryable
+      // class like "transport".
+      if (!retryable || isLastAttempt || opts.signal?.aborted) {
         throw err;
       }
       const waitMs = isLlmError(err) && err.retryAfterMs !== undefined ? err.retryAfterMs : computeBackoffMs(attemptIndex, random);

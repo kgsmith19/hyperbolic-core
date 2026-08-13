@@ -27,8 +27,9 @@
  */
 import { ApiError, FinishReason, FunctionCallingConfigMode, GoogleGenAI } from "@google/genai";
 import type { Content, FunctionCall, FunctionDeclaration, GenerateContentConfig, GenerateContentResponse, Part, ToolConfig } from "@google/genai";
-import { createLlmError } from "../errors.ts";
+import { createLlmError, isLlmError } from "../errors.ts";
 import { createStallWatchdog, STREAM_STALL_MS } from "../retry.ts";
+import { createAttemptController } from "./abort.ts";
 import type {
   Credentials,
   LlmDelta,
@@ -184,6 +185,32 @@ function buildConfig(request: LlmRequest, abortSignal: AbortSignal): GenerateCon
   };
 }
 
+/**
+ * Finding #83's fix: `toGeminiContents`/`buildConfig` are deterministic,
+ * local mapping code -- given the same malformed `LlmRequest` shape (one
+ * that has slipped past types.ts's compile-time contract, e.g. a hand-built
+ * or JSON-deserialized request), they fail identically on every call. Both
+ * `completeImpl` and `streamImpl` therefore run this construction step
+ * *before* their own timeout timer starts and *outside* the try block that
+ * wraps the real SDK call, and wrap any failure here as a non-retryable
+ * `invalid_request` LlmError instead of letting it fall into
+ * `classifyGeminiError`'s catch-all (which defaults anything that isn't an
+ * `ApiError` to `"transport"` -- retryable, and capable of triggering
+ * cross-provider fallover -- exactly wrong for a bug that will reproduce on
+ * every retry).
+ */
+function buildRequestShape(request: LlmRequest, abortSignal: AbortSignal): { contents: Content[]; config: GenerateContentConfig } {
+  try {
+    return { contents: toGeminiContents(request.messages), config: buildConfig(request, abortSignal) };
+  } catch (err) {
+    throw createLlmError(
+      "invalid_request",
+      `gemini driver: failed to construct the request from LlmRequest -- this is a local mapping bug (malformed message/tool shape), not a transport failure: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Response mapping: Gemini wire shapes -> our provider-agnostic shapes.
 // ---------------------------------------------------------------------------
@@ -267,11 +294,23 @@ function usageFromMetadata(usage: GenerateContentResponse["usageMetadata"]): Usa
 
 function fromGeminiResponse(response: GenerateContentResponse, requestedModel: string, latencyMs: number): LlmResponse {
   const candidate = response.candidates?.[0];
+  const blocked = (response.candidates?.length ?? 0) === 0 && response.promptFeedback?.blockReason !== undefined;
+  if (!candidate && !blocked) {
+    // A genuinely malformed 2xx (finding #84): Gemini's own documented
+    // blocked-prompt shape (no candidates, promptFeedback.blockReason set)
+    // is excluded above and left to the existing `blocked` handling below,
+    // untouched -- this branch only catches the case that is neither a real
+    // candidate nor a documented block, which this driver cannot interpret
+    // as an empty-but-valid success. Thrown as a properly classified
+    // LlmError so classifyGeminiError's isLlmError passthrough (finding #83)
+    // keeps it provider_bug rather than falling into that function's own
+    // "transport" default for non-ApiError exceptions.
+    throw createLlmError("provider_bug", "gemini driver: response has no candidates and no promptFeedback.blockReason -- cannot be interpreted as a valid completion", { cause: response });
+  }
   const parts = candidate?.content?.parts ?? [];
   const textParts = parts.filter((p) => p.text !== undefined && !p.thought);
   const functionCallParts = parts.filter((p) => p.functionCall !== undefined);
   const toolCalls = functionCallParts.map((p, index) => toToolCall(p.functionCall as FunctionCall, index));
-  const blocked = (response.candidates?.length ?? 0) === 0 && response.promptFeedback?.blockReason !== undefined;
   const text = textParts.length > 0 ? textParts.map((p) => p.text).join("") : null;
   return {
     text: blocked ? null : text,
@@ -345,8 +384,20 @@ function classifyByStatus(status: number): LlmErrorClass {
  * conservative status-only mapping was chosen instead of guessing.
  */
 function classifyGeminiError(err: unknown, wasAborted: boolean): LlmError {
+  // A local construction/serialization guard (buildRequestShape, or the
+  // stream loop's own JSON.stringify guard below) has already produced a
+  // correctly-classed, non-retryable LlmError -- trust it verbatim rather
+  // than re-wrapping it here, which would otherwise fall through to the
+  // "transport" default below and undo the whole point of classifying it
+  // early (see finding #83).
+  if (isLlmError(err)) {
+    return err;
+  }
   if (wasAborted) {
-    return createLlmError("transport", "gemini driver: attempt aborted (timeoutMs exceeded or stream stalled)", { cause: err });
+    // Same controller now also fires on a caller-supplied LlmRequest.signal
+    // (finding #87, see createAttemptController) as well as the pre-existing
+    // timeoutMs/stream-stall triggers -- see anthropic.ts's identical note.
+    return createLlmError("transport", "gemini driver: attempt aborted (timeoutMs exceeded, stream stalled, or a caller-supplied AbortSignal fired)", { cause: err });
   }
   if (err instanceof ApiError) {
     return createLlmError(classifyByStatus(err.status), err.message, { cause: err });
@@ -374,15 +425,13 @@ function buildClient(credentials: Credentials): GoogleGenAI {
 
 async function completeImpl(request: LlmRequest, credentials: Credentials): Promise<LlmResponse> {
   const client = buildClient(credentials);
-  const controller = new AbortController();
-  const hardTimer = setTimeout(() => controller.abort(), request.timeoutMs);
+  const { controller, hardTimer } = createAttemptController(request);
+  // Request-shape construction happens outside the retry-relevant try block
+  // below -- see buildRequestShape's own comment (finding #83).
+  const { contents, config } = buildRequestShape(request, controller.signal);
   const startedAt = Date.now();
   try {
-    const response = await client.models.generateContent({
-      model: request.model,
-      contents: toGeminiContents(request.messages),
-      config: buildConfig(request, controller.signal),
-    });
+    const response = await client.models.generateContent({ model: request.model, contents, config });
     return fromGeminiResponse(response, request.model, Date.now() - startedAt);
   } catch (err) {
     throw classifyGeminiError(err, controller.signal.aborted);
@@ -411,9 +460,11 @@ async function completeImpl(request: LlmRequest, credentials: Credentials): Prom
  */
 async function* streamImpl(request: LlmRequest, credentials: Credentials): AsyncGenerator<LlmDelta, void, unknown> {
   const client = buildClient(credentials);
-  const controller = new AbortController();
   const startedAt = Date.now();
-  const hardTimer = setTimeout(() => controller.abort(), request.timeoutMs);
+  const { controller, hardTimer } = createAttemptController(request);
+  // Request-shape construction happens outside the retry-relevant try block
+  // below -- see buildRequestShape's own comment (finding #83).
+  const { contents, config } = buildRequestShape(request, controller.signal);
   // Correctness fix (see 08-llm-handlers.md's stall-detection requirement):
   // the watchdog must reset only on an actual LlmDelta yield, never on raw
   // transport activity. It used to reset unconditionally once per chunk at
@@ -437,11 +488,7 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
   let toolCallIndex = 0;
 
   try {
-    const stream = await client.models.generateContentStream({
-      model: request.model,
-      contents: toGeminiContents(request.messages),
-      config: buildConfig(request, controller.signal),
-    });
+    const stream = await client.models.generateContentStream({ model: request.model, contents, config });
     for await (const chunk of stream) {
       if (chunk.modelVersion) {
         modelVersion = chunk.modelVersion;
@@ -465,8 +512,25 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
         if (part.functionCall) {
           const call = toToolCall(part.functionCall, toolCallIndex);
           toolCalls.push(call);
+          // Serialization, like buildRequestShape above, is local mapping
+          // work, not a transport concern -- a failure here (e.g. a
+          // non-JSON-serializable value slipping through as `call.input`)
+          // must not be classified/retried as transport noise either (see
+          // finding #83). Guarded independently of the outer try/catch's
+          // classifyGeminiError so it gets its own non-retryable class
+          // rather than falling into the catch-all default.
+          let inputJsonDelta: string;
+          try {
+            inputJsonDelta = JSON.stringify(call.input);
+          } catch (err) {
+            throw createLlmError(
+              "invalid_request",
+              `gemini driver: failed to serialize a tool call's arguments to JSON -- this is a local mapping bug, not a transport failure: ${err instanceof Error ? err.message : String(err)}`,
+              { cause: err },
+            );
+          }
           watchdog.reset();
-          yield { kind: "tool_call", partial: { index: toolCallIndex, id: call.id, name: call.name, inputJsonDelta: JSON.stringify(call.input) } };
+          yield { kind: "tool_call", partial: { index: toolCallIndex, id: call.id, name: call.name, inputJsonDelta } };
           toolCallIndex++;
         } else if (part.text !== undefined && !part.thought) {
           text += part.text;

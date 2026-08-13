@@ -54,14 +54,33 @@ export interface SystemMessage {
   content: string;
 }
 
+/**
+ * Only plain text belongs on a user turn: a ToolUsePart is assistant-issued
+ * (a model doesn't receive one from the caller) and a ToolResultPart belongs
+ * on ToolMessage, never here. Narrower than the general MessagePart union on
+ * purpose -- see complete.ts's assertValidMessageParts, which enforces this
+ * same rule at runtime too, since a caller can still hand this package an
+ * untyped/JSON-built payload that bypasses the compiler entirely.
+ */
+export type UserContentPart = TextPart;
+
 export interface UserMessage {
   role: "user";
-  content: string | MessagePart[];
+  content: string | UserContentPart[];
 }
+
+/**
+ * Text and the assistant's own tool-use requests belong on an assistant
+ * turn; a ToolResultPart never does (that is a caller's reply, carried on
+ * ToolMessage). Narrower than the general MessagePart union on purpose --
+ * see the UserContentPart comment above and complete.ts's
+ * assertValidMessageParts.
+ */
+export type AssistantContentPart = TextPart | ToolUsePart;
 
 export interface AssistantMessage {
   role: "assistant";
-  content: string | MessagePart[];
+  content: string | AssistantContentPart[];
 }
 
 /**
@@ -151,6 +170,20 @@ export interface LlmRequest {
    * even attempted.
    */
   fallback?: FallbackTarget[];
+  /**
+   * Caller-driven cancellation (finding #87). When supplied: composed into
+   * every attempt's own per-attempt AbortController alongside the existing
+   * timeoutMs/stream-stall abort mechanisms (never replacing them -- see
+   * each driver's completeImpl/streamImpl), so an in-flight SDK call is
+   * aborted promptly rather than left to run out its own timeoutMs; and
+   * checked at every retry/fallover decision point (withRetry, complete()'s
+   * hop fallover, stream()'s manual retry loop and its backoff `sleep`) so
+   * an aborted call stops immediately instead of waiting out a queued
+   * backoff sleep or failing over to another hop/provider. Optional and
+   * unused unless supplied -- a request with no `signal` behaves exactly as
+   * it did before this field existed.
+   */
+  signal?: AbortSignal;
 }
 
 export type StopReason = "end" | "tool_use" | "max_tokens" | "refusal";

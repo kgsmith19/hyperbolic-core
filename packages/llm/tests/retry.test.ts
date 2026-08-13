@@ -163,6 +163,97 @@ test("withRetry: honors retryAfterMs verbatim instead of the computed backoff, e
 });
 
 // ---------------------------------------------------------------------------
+// Finding #85: retryability is derived fresh from `class` at withRetry's own
+// decision point (RETRYABLE_CLASSES.has(err.class)), never by trusting a
+// possibly-forged/duck-typed error's own stored `.retryable` field.
+// ---------------------------------------------------------------------------
+
+test("withRetry: a duck-typed error with class \"transport\" (retryable) but a forged retryable:false is still retried -- judged by class, not the claimed flag", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let calls = 0;
+  const forged = Object.assign(new Error("transport-classed but claims non-retryable"), { class: "transport", retryable: false });
+  const promise = withRetry(async () => {
+    calls += 1;
+    if (calls === 1) {
+      throw forged;
+    }
+    return "recovered";
+  });
+  let result: string | undefined;
+  promise.then((value) => (result = value));
+  await advance(t, 5_000);
+  assert.equal(calls, 2, "class transport must be retried regardless of the forged retryable:false flag");
+  assert.equal(result, "recovered");
+});
+
+test("withRetry: a duck-typed error with class \"invalid_request\" (non-retryable) but a forged retryable:true is never retried -- judged by class, not the claimed flag", async () => {
+  let calls = 0;
+  const forged = Object.assign(new Error("invalid_request-classed but claims retryable"), { class: "invalid_request", retryable: true });
+  await assert.rejects(() =>
+    withRetry(async () => {
+      calls += 1;
+      throw forged;
+    }),
+  );
+  assert.equal(calls, 1, "class invalid_request must never be retried regardless of the forged retryable:true flag");
+});
+
+// ---------------------------------------------------------------------------
+// Finding #87: caller cancellation (opts.signal) stops withRetry promptly --
+// both mid-backoff-sleep (already partly supported before this fix, via
+// sleep's own signal handling) and at the retry-decision point itself
+// (newly added: opts.signal?.aborted now also gates whether a retryable
+// error is retried at all).
+// ---------------------------------------------------------------------------
+
+test("withRetry: an already-aborted signal stops retrying immediately after the first failure, without sleeping out the backoff", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let calls = 0;
+  const start = Date.now();
+  await assert.rejects(() =>
+    withRetry(
+      async () => {
+        calls += 1;
+        throw createLlmError("transport", "would normally retry");
+      },
+      { signal: controller.signal },
+    ),
+  );
+  const elapsedMs = Date.now() - start;
+  assert.equal(calls, 1, "must not retry once the signal is already aborted, even though the error class is retryable");
+  assert.ok(elapsedMs < 500, `must not wait out any backoff once already aborted (took ${elapsedMs}ms)`);
+});
+
+test("withRetry: a signal that fires DURING the backoff sleep cuts the wait short instead of sleeping out the full backoff", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  setTimeout(() => controller.abort(), 30);
+  const start = Date.now();
+  await assert.rejects(() =>
+    withRetry(
+      async () => {
+        calls += 1;
+        // A deliberately long explicit wait (well above anything a computed
+        // backoff would produce) so a real, uninterrupted sleep would take
+        // seconds -- proving the abort actually cuts it short, not that the
+        // wait just happened to be short already.
+        throw createLlmError("transport", "still down", { retryAfterMs: 5000 });
+      },
+      { signal: controller.signal },
+    ),
+  );
+  const elapsedMs = Date.now() - start;
+  assert.equal(calls, 1, "the first attempt's own failure already carries a 5s retryAfterMs -- the abort must land during that sleep, before a second attempt");
+  assert.ok(elapsedMs < 1000, `expected the signal to cut the 5s backoff short, took ${elapsedMs}ms`);
+});
+
+// (No-signal regression coverage: every pre-existing test in this file above
+// calls withRetry with no `opts.signal` at all and is unchanged by this fix
+// -- e.g. "retries a retryable class up to MAX_RETRIES times" and "succeeds
+// after exactly one retry" both still pass unmodified.)
+
+// ---------------------------------------------------------------------------
 // createStallWatchdog: fires only after `ms` with no reset()
 // ---------------------------------------------------------------------------
 

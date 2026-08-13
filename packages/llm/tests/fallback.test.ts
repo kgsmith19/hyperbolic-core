@@ -131,6 +131,78 @@ test("complete(): rejects fallback+tools as invalid_request before attempting th
 });
 
 // ---------------------------------------------------------------------------
+// Finding #82: fallback+tools is only rejected ACROSS providers -- a
+// same-provider fallback (a different model on the same provider) is legal,
+// since it's the same tool-calling wire contract on both ends.
+// ---------------------------------------------------------------------------
+
+test("complete(): a same-provider fallback with tools attached is accepted (not rejected the way a cross-provider one is)", async () => {
+  // A same-provider fallback hop shares its provider key with the primary
+  // request, so it resolves to this same registered driver -- there is only
+  // ever one driver per provider in the registry, unlike the cross-provider
+  // case where primary/fallback are genuinely different drivers.
+  const anthropicDriver = fakeDriver("anthropic", { complete: async (request) => fixtureResponse("anthropic", request.model) });
+  const request: LlmRequest = {
+    ...BASE_REQUEST,
+    fallback: [{ provider: "anthropic", model: "primary-model-b" }],
+    tools: [{ name: "noop", inputSchema: { type: "object" } }],
+  };
+
+  const response = await complete(request, CREDENTIALS, { drivers: { anthropic: anthropicDriver } });
+  assert.equal(anthropicDriver.calls, 1, "the primary attempt alone should succeed; assertNoFallbackWithTools must not have rejected this request");
+  assert.equal(response.provider, "anthropic");
+  assert.equal(response.model, "primary-model");
+});
+
+test("complete(): a same-provider fallback with tools actually fails over on retryable-exhaustion, same as the no-tools case", async (t) => {
+  // A same-provider fallback hop reuses the SAME registered driver as the
+  // primary (there is exactly one driver per provider key in the registry),
+  // so this fakeDriver has to distinguish primary vs. fallback by the
+  // *model* each hop actually requests, not by which driver instance was
+  // called -- unlike the cross-provider tests above, where primary and
+  // fallback are genuinely different driver objects.
+  const anthropicDriver = fakeDriver("anthropic", {
+    complete: async (request) => {
+      if (request.model === BASE_REQUEST.model) {
+        throw createLlmError("transport", "primary model down");
+      }
+      return fixtureResponse("anthropic", request.model);
+    },
+  });
+  const request: LlmRequest = {
+    ...BASE_REQUEST,
+    fallback: [{ provider: "anthropic", model: "fallback-model-same-provider" }],
+    tools: [{ name: "noop", inputSchema: { type: "object" } }],
+  };
+
+  const response = await withFakeTimers(t, () => complete(request, CREDENTIALS, { drivers: { anthropic: anthropicDriver } }));
+  assert.equal(anthropicDriver.calls, MAX_RETRIES + 1 + 1, "primary's own retry budget (MAX_RETRIES+1 calls), then one more call for the fallback hop");
+  assert.equal(response.model, "fallback-model-same-provider");
+});
+
+test("complete(): tools + a fallback list mixing a same-provider hop and a cross-provider hop is still rejected (any cross-provider hop triggers it)", async () => {
+  const primary = fakeDriver("anthropic", {
+    complete: async () => {
+      throw new Error("must never be attempted: rejected before dispatch");
+    },
+  });
+  const request: LlmRequest = {
+    ...BASE_REQUEST,
+    fallback: [
+      { provider: "anthropic", model: "same-provider-model" },
+      { provider: "openai", model: "cross-provider-model" },
+    ],
+    tools: [{ name: "noop", inputSchema: { type: "object" } }],
+  };
+
+  await assert.rejects(
+    () => complete(request, CREDENTIALS, { drivers: { anthropic: primary } }),
+    (error: { class: string }) => error.class === "invalid_request",
+  );
+  assert.equal(primary.calls, 0);
+});
+
+// ---------------------------------------------------------------------------
 // complete(): fails over only on retryable-exhaustion
 // ---------------------------------------------------------------------------
 
@@ -246,6 +318,115 @@ test("stream(): rejects fallback+tools before attempting the primary stream", as
     }
   }, (error: { class: string }) => error.class === "invalid_request");
   assert.equal(primary.calls, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Finding #87: caller cancellation (LlmRequest.signal) stops retry/fallover
+// immediately -- neither complete() nor stream() retries the same hop or
+// fails over to another one once the caller's own signal has fired, even if
+// the driver's error is otherwise a retryable class (e.g. "transport",
+// exactly what a real driver reports when its own composed AbortController
+// fires -- see drivers/abort.ts).
+// ---------------------------------------------------------------------------
+
+test("complete(): once the caller's signal has fired, a retryable error stops immediately instead of retrying or failing over", async () => {
+  const controller = new AbortController();
+  const primary = fakeDriver("anthropic", {
+    complete: async () => {
+      // Simulates what a real driver does once its own per-attempt
+      // AbortController (composed with this caller signal) fires mid-flight.
+      controller.abort();
+      throw createLlmError("transport", "aborted mid-flight");
+    },
+  });
+  const fallback = fakeDriver("openai", {
+    complete: async () => {
+      throw new Error("fallback must never be attempted once the caller has cancelled");
+    },
+  });
+  const request: LlmRequest = { ...BASE_REQUEST, signal: controller.signal };
+
+  const start = Date.now();
+  await assert.rejects(() => complete(request, CREDENTIALS, { drivers: { anthropic: primary, openai: fallback } }));
+  const elapsedMs = Date.now() - start;
+
+  assert.equal(primary.calls, 1, "must not retry the primary once the caller's signal has fired");
+  assert.equal(fallback.calls, 0, "must not fail over to another provider once the caller's signal has fired");
+  assert.ok(elapsedMs < 500, `must not wait out a computed backoff sleep once the signal is already aborted (took ${elapsedMs}ms)`);
+});
+
+test("complete(): a signal that fires DURING backoff (between retries) cuts the wait short instead of sleeping out the full backoff", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const primary = fakeDriver("anthropic", {
+    complete: async () => {
+      calls += 1;
+      // A deliberately long explicit wait so an uninterrupted sleep would
+      // take seconds -- proves the abort actually cuts it short.
+      throw createLlmError("transport", "still down", { retryAfterMs: 5000 });
+    },
+  });
+  const request: LlmRequest = { ...BASE_REQUEST, fallback: undefined, signal: controller.signal };
+  setTimeout(() => controller.abort(), 30);
+
+  const start = Date.now();
+  await assert.rejects(() => complete(request, CREDENTIALS, { drivers: { anthropic: primary } }));
+  const elapsedMs = Date.now() - start;
+
+  assert.equal(calls, 1, "the abort must land during the first backoff sleep, before a second attempt");
+  assert.ok(elapsedMs < 1000, `expected the signal to cut the 5s backoff short, took ${elapsedMs}ms`);
+});
+
+test("stream(): once the caller's signal has fired before any delta, a retryable error stops immediately instead of retrying or failing over", async () => {
+  const controller = new AbortController();
+  const primary = fakeDriver("anthropic", {
+    async *stream() {
+      controller.abort();
+      throw createLlmError("transport", "aborted mid-flight");
+    },
+  });
+  const fallback = fakeDriver("openai", {
+    async *stream() {
+      throw new Error("fallback must never be attempted once the caller has cancelled");
+    },
+  });
+  const request: LlmRequest = { ...BASE_REQUEST, signal: controller.signal };
+
+  const start = Date.now();
+  await assert.rejects(async () => {
+    for await (const _delta of stream(request, CREDENTIALS, { drivers: { anthropic: primary, openai: fallback } })) {
+      // never reached
+    }
+  });
+  const elapsedMs = Date.now() - start;
+
+  assert.equal(primary.calls, 1, "must not retry the primary hop once the caller's signal has fired");
+  assert.equal(fallback.calls, 0, "must not fail over to another provider once the caller's signal has fired");
+  assert.ok(elapsedMs < 500, `must not wait out a computed backoff sleep once the signal is already aborted (took ${elapsedMs}ms)`);
+});
+
+test("stream(): a signal that fires DURING backoff cuts the wait short (proves request.signal is actually threaded into the manual sleep() call)", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const primary = fakeDriver("anthropic", {
+    async *stream() {
+      calls += 1;
+      throw createLlmError("transport", "still down", { retryAfterMs: 5000 });
+    },
+  });
+  const request: LlmRequest = { ...BASE_REQUEST, fallback: undefined, signal: controller.signal };
+  setTimeout(() => controller.abort(), 30);
+
+  const start = Date.now();
+  await assert.rejects(async () => {
+    for await (const _delta of stream(request, CREDENTIALS, { drivers: { anthropic: primary } })) {
+      // never reached
+    }
+  });
+  const elapsedMs = Date.now() - start;
+
+  assert.equal(calls, 1, "the abort must land during the first backoff sleep, before a second attempt");
+  assert.ok(elapsedMs < 1000, `expected the signal to cut the 5s backoff short, took ${elapsedMs}ms`);
 });
 
 // ---------------------------------------------------------------------------

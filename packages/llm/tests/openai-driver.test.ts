@@ -321,6 +321,55 @@ test("openaiDriver.complete: finish_reason length maps to max_tokens", async () 
 });
 
 // ---------------------------------------------------------------------------
+// Finding #84: a malformed 2xx response (empty `choices`) must not be
+// silently accepted as an empty-but-valid success.
+// ---------------------------------------------------------------------------
+
+test("openaiDriver.complete: a response with an empty choices array is a provider_bug, not a silent empty success", async () => {
+  await withPatchedFetch(
+    async () => jsonResponse(fixtureChatCompletion({ choices: [] })),
+    async () => {
+      await assert.rejects(
+        () => openaiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+        (error: unknown) => {
+          assert.ok(isLlmError(error));
+          assert.equal((error as { class: string }).class, "provider_bug");
+          assert.equal((error as { retryable: boolean }).retryable, false);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("openaiDriver.complete: the existing refusal (message.refusal) path still works unchanged -- not reclassified as provider_bug", async () => {
+  const response = await withPatchedFetch(
+    async () =>
+      jsonResponse(
+        fixtureChatCompletion({
+          choices: [{ index: 0, finish_reason: "stop", logprobs: null, message: { role: "assistant", content: null, refusal: "I can't help with that." } }],
+        }),
+      ),
+    () => openaiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+  );
+  assert.equal(response.stopReason, "refusal");
+  assert.equal(response.text, "I can't help with that.");
+});
+
+test("openaiDriver.complete: the existing content_filter path still works unchanged -- not reclassified as provider_bug", async () => {
+  const response = await withPatchedFetch(
+    async () =>
+      jsonResponse(
+        fixtureChatCompletion({
+          choices: [{ index: 0, finish_reason: "content_filter", logprobs: null, message: { role: "assistant", content: null, refusal: null } }],
+        }),
+      ),
+    () => openaiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+  );
+  assert.equal(response.stopReason, "refusal");
+});
+
+// ---------------------------------------------------------------------------
 // Error taxonomy + retry, exercised through the real driver via complete()
 // ---------------------------------------------------------------------------
 
@@ -425,6 +474,95 @@ test("complete(): honors a 429 retry-after header verbatim, not the computed bac
     },
   );
   assert.ok(result);
+});
+
+// ---------------------------------------------------------------------------
+// Finding #86: Retry-After as an HTTP-date (RFC 7231's other valid form, not
+// just delta-seconds) is honored too, end-to-end through the real driver --
+// see tests/retry-after.test.ts for the parser's own isolated unit tests.
+// ---------------------------------------------------------------------------
+
+test("complete(): honors an HTTP-date retry-after header (not just delta-seconds), then recovers", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let fetchCalls = 0;
+  // Computed from real wall-clock time (this test does not fake Date, only
+  // setTimeout): ~5s out, same as the numeric-form test above, so the same
+  // coarse tickInSteps windows apply with the same margins.
+  const retryAfterDate = new Date(Date.now() + 5000).toUTCString();
+  const result = await withPatchedFetch(
+    async () => {
+      fetchCalls += 1;
+      if (fetchCalls < 2) {
+        return openaiErrorResponse(429, "slow down", { "retry-after": retryAfterDate });
+      }
+      return jsonResponse(fixtureChatCompletion());
+    },
+    async () => {
+      const inner = complete(BASE_REQUEST, { openai: { apiKey: "fixture-key" } }, { drivers: { openai: openaiDriver } });
+      let settled: { ok: boolean; value?: unknown } | undefined;
+      inner.then(
+        (value) => (settled = { ok: true, value }),
+        () => (settled = { ok: false }),
+      );
+      await tickInSteps(t, 3000, 100);
+      assert.equal(fetchCalls, 1, "must not retry within the computed-backoff window");
+      await tickInSteps(t, 4000, 100);
+      assert.equal(fetchCalls, 2, "must retry per the ~5s HTTP-date retry-after, not the ~0-2s computed backoff");
+      assert.equal(settled?.ok, true);
+      return settled?.value;
+    },
+  );
+  assert.ok(result);
+});
+
+// ---------------------------------------------------------------------------
+// Finding #87: caller cancellation (LlmRequest.signal) aborts an in-flight
+// call promptly, composed into the same per-attempt AbortController the
+// timeout/stall mechanisms already use (createAttemptController).
+// ---------------------------------------------------------------------------
+
+test("openaiDriver.stream: a caller-supplied AbortSignal aborts the in-flight call promptly, through the same controller the timeout/stall mechanism uses", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const startChunk = { id: "chatcmpl_fixture", object: "chat.completion.chunk", created: 1_700_000_000, model: "gpt-fixture-resolved", choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] };
+  const callerController = new AbortController();
+
+  const outcome = await withPatchedFetch(
+    async (_input, init) => sseResponse([startChunk], { signal: init?.signal ?? undefined, holdOpen: true }),
+    async () => {
+      const gen = openaiDriver.stream({ ...BASE_REQUEST, stream: true, timeoutMs: 120_000, signal: callerController.signal }, { apiKey: "fixture-key" });
+      const drain = (async () => {
+        try {
+          for await (const _delta of gen) {
+            // draining only; the abort happens before any further delta.
+          }
+          return { ok: true as const };
+        } catch (error) {
+          return { ok: false as const, error };
+        }
+      })();
+
+      let settled: Awaited<typeof drain> | undefined;
+      drain.then((value) => (settled = value));
+
+      // Fire the caller's own cancellation well before either the 60s stall
+      // watchdog or the 120s hard timeout would ever trigger on their own.
+      t.mock.timers.tick(2000);
+      await new Promise((resolve) => setImmediate(resolve));
+      callerController.abort();
+
+      for (let i = 0; i < 10 && !settled; i++) {
+        t.mock.timers.tick(100);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return settled;
+    },
+  );
+
+  assert.ok(outcome, "must reject promptly once the caller's own signal fires, without waiting for the 60s stall or 120s timeout");
+  assert.equal(outcome?.ok, false);
+  const error = (outcome as { ok: false; error: unknown }).error;
+  assert.ok(isLlmError(error));
+  assert.equal((error as { class: string }).class, "transport");
 });
 
 test("openaiDriver.complete: malformed tool-call JSON arguments surface as a genuinely typed provider_bug LlmError, not a bare SyntaxError", async () => {

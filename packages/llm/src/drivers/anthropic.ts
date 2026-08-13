@@ -16,6 +16,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createLlmError } from "../errors.ts";
 import { createStallWatchdog, STREAM_STALL_MS } from "../retry.ts";
+import { createAttemptController } from "./abort.ts";
+import { parseRetryAfterMs } from "./retry-after.ts";
 import type {
   Credentials,
   LlmDelta,
@@ -206,18 +208,6 @@ function classifyByStatus(status: number | undefined): LlmErrorClass {
   return "provider_bug";
 }
 
-function parseRetryAfterMs(headers: Headers | undefined): number | undefined {
-  const raw = headers?.get("retry-after");
-  if (!raw) {
-    return undefined;
-  }
-  const seconds = Number(raw);
-  if (!Number.isFinite(seconds) || seconds < 0) {
-    return undefined;
-  }
-  return seconds * 1000;
-}
-
 /**
  * `content_policy` is part of the shared taxonomy for provider-agnostic
  * completeness (a future driver may throw it), but Anthropic's own content
@@ -228,7 +218,13 @@ function parseRetryAfterMs(headers: Headers | undefined): number | undefined {
  */
 function classifyAnthropicError(err: unknown, wasAborted: boolean): LlmError {
   if (wasAborted) {
-    return createLlmError("transport", "anthropic driver: attempt aborted (timeoutMs exceeded or stream stalled)", { cause: err });
+    // Same controller now also fires on a caller-supplied LlmRequest.signal
+    // (finding #87, see createAttemptController) as well as the pre-existing
+    // timeoutMs/stream-stall triggers -- this class/retryability is
+    // unchanged (still "transport"), but the orchestration layer in
+    // complete.ts additionally refuses to retry or fail over further once
+    // the caller's own signal has fired, regardless of this class.
+    return createLlmError("transport", "anthropic driver: attempt aborted (timeoutMs exceeded, stream stalled, or a caller-supplied AbortSignal fired)", { cause: err });
   }
   if (err instanceof Anthropic.APIConnectionError) {
     // Also covers APIConnectionTimeoutError (a subclass of this). Note
@@ -269,8 +265,7 @@ function buildClient(credentials: Credentials): Anthropic {
 async function completeImpl(request: LlmRequest, credentials: Credentials): Promise<LlmResponse> {
   const client = buildClient(credentials);
   const params = buildParams(request);
-  const controller = new AbortController();
-  const hardTimer = setTimeout(() => controller.abort(), request.timeoutMs);
+  const { controller, hardTimer } = createAttemptController(request);
   const startedAt = Date.now();
   try {
     const message = await client.messages.create({ ...params, stream: false }, { signal: controller.signal });
@@ -289,9 +284,8 @@ async function completeImpl(request: LlmRequest, credentials: Credentials): Prom
 async function* streamImpl(request: LlmRequest, credentials: Credentials): AsyncGenerator<LlmDelta, void, unknown> {
   const client = buildClient(credentials);
   const params = buildParams(request);
-  const controller = new AbortController();
   const startedAt = Date.now();
-  const hardTimer = setTimeout(() => controller.abort(), request.timeoutMs);
+  const { controller, hardTimer } = createAttemptController(request);
   // Correctness fix (see 08-llm-handlers.md's stall-detection requirement):
   // the watchdog must reset only on an actual LlmDelta yield, never on raw
   // SSE transport activity. It used to reset unconditionally once per event

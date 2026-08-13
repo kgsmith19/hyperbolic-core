@@ -383,6 +383,130 @@ test("complete(): a raw connection failure (fetch rejects, no ApiError wrapper) 
 });
 
 // ---------------------------------------------------------------------------
+// Finding #83: a local mapping/construction bug (a malformed message shape
+// this driver cannot map onto the wire) must fail immediately, once, as a
+// non-retryable error -- never retried MAX_RETRIES times as if it were
+// transport noise, since it will fail identically on every retry.
+// ---------------------------------------------------------------------------
+
+test("geminiDriver.complete: a request whose message shape trips a local TypeError during construction fails immediately, before any network call, as a non-retryable invalid_request", async () => {
+  // `content: null` on a tool-role message trips `m.content.map(...)` inside
+  // toGeminiContents with a genuine local TypeError -- this driver is called
+  // directly (bypassing complete()'s own assertValidMessageParts guard,
+  // finding #81), the same way "rejects with no API key" above does, since
+  // this fix must hold even for a caller that uses the driver standalone.
+  let fetchCalls = 0;
+  const malformedRequest: LlmRequest = {
+    ...BASE_REQUEST,
+    messages: [{ role: "tool", content: null }] as unknown as LlmRequest["messages"],
+  };
+  await withPatchedFetch(
+    async () => {
+      fetchCalls += 1;
+      throw new Error("must not be called: construction must fail before any network attempt");
+    },
+    async () => {
+      await assert.rejects(
+        () => geminiDriver.complete(malformedRequest, { apiKey: "fixture-key" }),
+        (error: unknown) => {
+          assert.ok(isLlmError(error));
+          assert.equal((error as { class: string }).class, "invalid_request");
+          assert.equal((error as { retryable: boolean }).retryable, false);
+          return true;
+        },
+      );
+    },
+  );
+  assert.equal(fetchCalls, 0, "a local construction bug must never reach the network layer at all");
+});
+
+test("complete(): a Gemini request that passes role/part validation but trips a local construction bug in toGeminiContents fails on the FIRST attempt, not retried MAX_RETRIES times, and is classified invalid_request rather than transport", async (t) => {
+  // A tool_result whose `content` is neither a string nor a TextPart[]
+  // (here: a bare number) passes finding #81's role/part guard (its `.type`
+  // is a legitimate "tool_result" on a "tool" message) but still trips a
+  // genuine local TypeError deep inside toGeminiContents's toPlainText call
+  // -- this is the "reaches the real driver through the real orchestration
+  // stack" companion to the direct-driver test above.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let fetchCalls = 0;
+  let driverCalls = 0;
+  const countingGeminiDriver = {
+    provider: "gemini" as const,
+    complete: (request: LlmRequest, credentials: { apiKey: string }) => {
+      driverCalls += 1;
+      return geminiDriver.complete(request, credentials);
+    },
+    stream: geminiDriver.stream,
+  };
+  const malformedRequest: LlmRequest = {
+    ...BASE_REQUEST,
+    messages: [
+      { role: "user", content: "go" },
+      { role: "tool", content: [{ type: "tool_result", toolUseId: "call_1", content: 42 as unknown as string }] },
+    ],
+  };
+
+  const promise = withPatchedFetch(
+    async () => {
+      fetchCalls += 1;
+      throw new Error("must not be called: construction must fail before any network attempt");
+    },
+    () => complete(malformedRequest, { gemini: { apiKey: "fixture-key" } }, { drivers: { gemini: countingGeminiDriver } }),
+  );
+  let settled: { ok: boolean; error?: { class: string; retryable: boolean } } | undefined;
+  promise.then(
+    () => (settled = { ok: true }),
+    (error) => (settled = { ok: false, error }),
+  );
+  for (let i = 0; i < 20 && !settled; i++) {
+    t.mock.timers.tick(1000);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await promise.catch(() => undefined);
+
+  assert.ok(settled, "must settle without hanging on a retry/backoff loop");
+  assert.equal(settled?.ok, false);
+  assert.ok(isLlmError(settled?.error));
+  assert.equal(settled?.error?.class, "invalid_request", "must be classified as a local/caller bug, not transport noise");
+  assert.equal(settled?.error?.retryable, false);
+  assert.equal(driverCalls, 1, "must fail on the very first attempt -- not retried MAX_RETRIES times");
+  assert.equal(fetchCalls, 0, "must never reach the network layer at all");
+});
+
+// ---------------------------------------------------------------------------
+// Finding #84: a malformed 2xx response (no candidates, and not the
+// documented blocked-prompt shape either) must not be silently accepted as
+// an empty-but-valid success.
+// ---------------------------------------------------------------------------
+
+test("geminiDriver.complete: a response with no candidates and no promptFeedback.blockReason is a provider_bug, not a silent empty success", async () => {
+  await withPatchedFetch(
+    async () => jsonResponse({ usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 0 } }),
+    async () => {
+      await assert.rejects(
+        () => geminiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+        (error: unknown) => {
+          assert.ok(isLlmError(error));
+          assert.equal((error as { class: string }).class, "provider_bug");
+          assert.equal((error as { retryable: boolean }).retryable, false);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("geminiDriver.complete: the documented blocked-prompt shape (no candidates, promptFeedback.blockReason set) still works unchanged -- not reclassified as provider_bug", async () => {
+  const response = await withPatchedFetch(
+    async () => jsonResponse({ promptFeedback: { blockReason: "SAFETY" }, usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 0 } }),
+    () => geminiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+  );
+  assert.equal(response.stopReason, "refusal");
+  assert.equal(response.text, null);
+  assert.deepEqual(response.toolCalls, []);
+});
+
+// ---------------------------------------------------------------------------
 // Streaming: success (text + tool_call deltas + usage + done), and the
 // 60-second stall-aborts-as-transport case.
 // ---------------------------------------------------------------------------
