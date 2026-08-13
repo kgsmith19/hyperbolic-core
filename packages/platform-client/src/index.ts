@@ -1,4 +1,4 @@
-import { createClient, type Session } from "@supabase/supabase-js";
+import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import type {
   AuthedFetch,
   PlatformAuth,
@@ -40,6 +40,114 @@ function toPlatformSession(session: Session | null): PlatformSession | null {
 }
 
 /**
+ * Finding #47 (PR #8 security review, re-verified against current HEAD):
+ * this client used to hand back any authenticated Supabase subject's
+ * session, though types.ts's own PlatformSession doc comment has always
+ * said the subject "Must equal the owner UUID; any other subject is a bug
+ * (ADR-03, fail closed)". `core.is_platform_owner()`
+ * (apps/toolbelt/supabase/migrations/20260814060000_core_is_platform_owner_rpc.sql)
+ * is the narrow, PostgREST-exposed, SECURITY DEFINER RPC that closes the
+ * gap: it answers `auth.uid() = platform.owner()` for the CALLING request's
+ * bearer token without ever exposing the owner UUID itself.
+ *
+ * Deliberately a raw `fetch` with `session.accessToken` attached explicitly
+ * -- NOT `supabase.rpc()` -- for exactly the session-race reason this
+ * finding calls out by name: `supabase.rpc()` resolves its own Authorization
+ * header from whatever session is LIVE on the client at the moment the
+ * request is actually sent (see `fetchWithAuth` in
+ * `@supabase/supabase-js`'s `src/lib/fetch.ts`), not necessarily the
+ * `session` object a caller here is about to accept or reject. Between this
+ * function being called with a session snapshot and its underlying request
+ * actually reaching the network, the live client session can change (a
+ * background token refresh, a cross-tab sign-in/sign-out via
+ * `onAuthStateChange`'s own broadcast channel) -- if the RPC's identity were
+ * resolved from "whatever is live now" instead of "the exact session this
+ * call is about", a caller could receive a session object that was never
+ * actually the one checked (e.g. `getSession()` snapshots a non-owner
+ * session A, a same-tick cross-tab sign-in swaps the live client session to
+ * owner session B before the request goes out, `supabase.rpc()` would
+ * answer "true" for B while this function still hands back A's unvetted
+ * token). Pinning the bearer token to `session.accessToken` makes that race
+ * impossible by construction: this RPC can only ever answer for the exact
+ * session passed in, never a different one that happens to be live.
+ *
+ * Same request shape `packages/platform-client/src/registry.ts` already
+ * uses for its own PostgREST calls (raw `fetch`, explicit `apikey` +
+ * `Authorization`), for the same underlying reason documented there: this
+ * package's frozen interfaces resolve exactly the token a caller already
+ * has in hand, never one implicitly re-resolved by a client's own live
+ * state. `Content-Profile: core` selects the schema this RPC lives in
+ * (PostgREST's schema-switching header for POST/RPC requests; `core` is
+ * already exposed via `pgrst.db_schemas` -- see the migration's own header
+ * comment for why it is not `platform`).
+ *
+ * Fails closed on every inconclusive outcome, not just an explicit `false`:
+ * a network error, a non-2xx response, or any body other than the literal
+ * boolean `true` all mean "not proven to be the owner", never "assume yes".
+ */
+async function isOwnerSession(
+  config: PlatformClientConfig,
+  session: PlatformSession
+): Promise<boolean> {
+  try {
+    const res = await globalThis.fetch(
+      `${config.supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/is_platform_owner`,
+      {
+        method: "POST",
+        headers: {
+          apikey: config.publishableKey,
+          Authorization: `Bearer ${session.accessToken}`,
+          "Content-Profile": "core",
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      }
+    );
+    if (!res.ok) {
+      return false;
+    }
+    const data: unknown = await res.json();
+    return data === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The single place every session-resolution path (signInWithPassword's
+ * success path, getSession's resolution, and every onAuthStateChange
+ * delivery) routes through to enforce Finding #47's fail-closed contract --
+ * deliberately inside platform-client itself, not apps/shell: every zone
+ * that will ever consume this package (not just the Shell) gets the
+ * guarantee for free, consistent with this package's role as the frozen
+ * ADR-03 contract (see this file's own top-of-file doc comment on
+ * createPlatformClient).
+ *
+ * A `null` input (no session at all) passes through untouched -- there is
+ * nothing to check ownership of. A non-null session that is NOT the owner
+ * is best-effort signed out (mirrors apps/shell/src/lib/session.ts's own
+ * signOut(), which also swallows a failed network call rather than letting
+ * it block state transitions) so a non-owner session never lingers half-real
+ * in browser storage, and this function resolves `null` either way --
+ * callers never see a non-owner session shape, only ever a real owner
+ * session or nothing.
+ */
+async function enforceOwner(
+  supabase: SupabaseClient,
+  config: PlatformClientConfig,
+  session: PlatformSession | null
+): Promise<PlatformSession | null> {
+  if (!session) {
+    return null;
+  }
+  if (await isOwnerSession(config, session)) {
+    return session;
+  }
+  await supabase.auth.signOut().catch(() => {});
+  return null;
+}
+
+/**
  * Creates the platform session client (ADR-03). This is the ONLY entry point
  * in this package that can construct a client or sign a user in: zones other
  * than the Shell must call only `auth.getSession()`, `auth.onAuthStateChange()`,
@@ -65,7 +173,21 @@ export function createPlatformClient(config: PlatformClientConfig): PlatformClie
       if (error || !session) {
         throw error ?? new Error("platform-client: sign-in returned no session");
       }
-      return session;
+      // Finding #47 (fail closed, ADR-03): a real, successfully-authenticated
+      // Supabase session is not enough -- it must also be the platform
+      // owner. enforceOwner already signs a non-owner session out before
+      // resolving null here, so there is nothing left to clean up on this
+      // rejection path; it only needs to turn that null into a thrown error,
+      // since this method's contract (types.ts) is Promise<PlatformSession>,
+      // never a null.
+      const ownerSession = await enforceOwner(supabase, config, session);
+      if (!ownerSession) {
+        throw new Error(
+          "platform-client: sign-in succeeded but the authenticated subject is not the " +
+            "platform owner (ADR-03, fail closed); session revoked"
+        );
+      }
+      return ownerSession;
     },
 
     async getSession() {
@@ -78,7 +200,11 @@ export function createPlatformClient(config: PlatformClientConfig): PlatformClie
           // the stale, expired access token to a caller.
           return null;
         }
-        return toPlatformSession(data.session);
+        // Finding #47: a restored session must clear the same owner check
+        // as a fresh sign-in -- enforceOwner returns null for a non-owner
+        // subject (and best-effort signs it out), matching this method's
+        // documented "resolves null, never throws" contract exactly.
+        return await enforceOwner(supabase, config, toPlatformSession(data.session));
       } catch {
         return null;
       }
@@ -88,7 +214,23 @@ export function createPlatformClient(config: PlatformClientConfig): PlatformClie
       const {
         data: { subscription },
       } = supabase.auth.onAuthStateChange((_event, session) => {
-        handler(toPlatformSession(session));
+        const platformSession = toPlatformSession(session);
+        if (!platformSession) {
+          handler(null);
+          return;
+        }
+        // Finding #47: every live auth-state delivery gets the same
+        // fail-closed owner check as the other two entry points, not just
+        // the initial resolution -- e.g. a background TOKEN_REFRESHED event
+        // must not silently keep reporting a non-owner subject as signed in
+        // just because it was already past the sign-in/getSession gate once.
+        // Deliberately not awaited by this callback itself (only the
+        // eventual `handler` call is): supabase-js's own onAuthStateChange
+        // callback may run async work and call other auth methods (signOut,
+        // inside enforceOwner) safely from here -- the one documented hazard
+        // is triggering a nested refresh from a TOKEN_REFRESHED handler,
+        // which this never does.
+        void enforceOwner(supabase, config, platformSession).then(handler);
       });
       return () => subscription.unsubscribe();
     },

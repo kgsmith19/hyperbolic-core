@@ -35,19 +35,41 @@ export interface PlatformSession {
   readonly accessToken: string;
   /** Epoch seconds. */
   readonly expiresAt: number;
-  /** Must equal the owner UUID; any other subject is a bug (ADR-03, fail closed). */
+  /**
+   * Must equal the owner UUID; any other subject is a bug (ADR-03, fail
+   * closed). Enforced, not just documented: every `PlatformAuth` method that
+   * can resolve a session (`signInWithPassword`, `getSession`,
+   * `onAuthStateChange`) calls the `core.is_platform_owner()` RPC
+   * (Finding #47, src/index.ts's `enforceOwner`) before ever handing one
+   * back, and signs out + discards any session that fails that check. A
+   * `PlatformSession` a caller actually receives is therefore always the
+   * owner's -- this field is never a value a consumer needs to re-check.
+   */
   readonly userId: string;
 }
 
 export interface PlatformAuth {
-  /** The Shell's login flow only (ADR-03); other zones must not call this. */
+  /**
+   * The Shell's login flow only (ADR-03); other zones must not call this.
+   * Rejects (never resolves) when the authenticated subject is not the
+   * platform owner -- see `core.is_platform_owner()` (Finding #47) -- even
+   * though the credentials themselves were valid; the session is signed
+   * back out before this rejects.
+   */
   signInWithPassword(email: string, password: string): Promise<PlatformSession>;
   /**
    * Returns the current session, refreshing it first if it is expired.
-   * Resolves `null` (never throws) when there is no session, or when a
-   * required refresh cannot complete (IdP unreachable, refresh rejected).
+   * Resolves `null` (never throws) when there is no session, when a
+   * required refresh cannot complete (IdP unreachable, refresh rejected),
+   * or when the resolved session's subject is not the platform owner
+   * (Finding #47, fail closed -- the non-owner session is signed out first).
    */
   getSession(): Promise<PlatformSession | null>;
+  /**
+   * `handler` is invoked with `null`, never a non-owner session, for the
+   * same reason as `getSession` (Finding #47): every live delivery is
+   * checked before the handler sees it.
+   */
   onAuthStateChange(handler: (session: PlatformSession | null) => void): Unsubscribe;
   signOut(): Promise<void>;
 }
