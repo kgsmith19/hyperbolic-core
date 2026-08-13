@@ -133,7 +133,29 @@ CREATE VIEW IF NOT EXISTS config_current AS
 -- The consent-gated change lifecycle (netcheck/change.py). Realizes NC-4:
 -- no configuration write without a recorded dry run and an explicit
 -- interactive approval token. DDL per docs/planning/05-f-network-checker.md
--- section 4.1, verbatim -- a contract, not a suggestion.
+-- section 4.1, as a base -- extended by an independent security review's
+-- findings 15-17 (see netcheck/change.py's module docstring for the full
+-- rationale each column/status change below closes):
+--   * approved_by: verifier-identity column (finding 15c) -- the OS user
+--     who ran the interactive `change approve` flow, folded into
+--     change._token()'s HMAC material so tampering with it after the fact
+--     invalidates the token exactly like tampering with change_cmd does.
+--   * 'applying' status: apply()'s atomic claim (finding 16) -- a row sits
+--     here for the duration of one apply() call, claimed via
+--     `UPDATE ... WHERE status='approved'` with the affected-row count
+--     checked, so two concurrent applies on the same row cannot both pass.
+--   * 'apply_failed' / 'rollback_failed' statuses: real terminal outcomes
+--     for the two failure shapes finding 17 found silently mislabeled --
+--     the forward command itself returning nonzero, and the automatic
+--     rollback (inverse command and/or its own post-restore verify) not
+--     actually confirming success.
+-- NOTE for anyone maintaining an existing on-disk database created before
+-- this change: SQLite cannot ALTER a CHECK constraint in place, and
+-- netcheck/store.py's _migrate() only adds missing columns (approved_by
+-- will pick up there), not constraint changes -- an existing DB's
+-- change_request table keeps enforcing the OLD status list until it is
+-- recreated. Tracked as a known gap; out of this change's file scope
+-- (store.py) to fix.
 CREATE TABLE IF NOT EXISTS change_request (
   id             INTEGER PRIMARY KEY,
   created_at     TEXT NOT NULL,
@@ -145,14 +167,20 @@ CREATE TABLE IF NOT EXISTS change_request (
   verify_probe   TEXT NOT NULL,       -- netcheck probe expression that must pass post-apply
   dry_run_output TEXT,                -- captured evidence from change test
   dry_run_at     TEXT,
-  approval_token TEXT,                -- sha256 hex over (id, change_cmd, inverse_cmd, sha256(dry_run_output), approved_at)
+  approval_token TEXT,                -- HMAC-SHA256 hex, keyed by change._load_or_create_key(),
+                                       -- over a length-framed (id, change_cmd, inverse_cmd,
+                                       -- sha256(dry_run_output), approved_at, approved_by)
   approved_at    TEXT,
+  approved_by    TEXT,                -- OS user who ran `change approve` (audit trail, not a
+                                       -- security boundary by itself -- see change._current_user())
   applied_at     TEXT,
   apply_output   TEXT,
   verified_at    TEXT,
-  rolled_back_at TEXT,
+  rolled_back_at TEXT,                -- set only when rollback actually confirmed restored; NULL
+                                       -- for status='rollback_failed'
   status         TEXT NOT NULL DEFAULT 'proposed'
-    CHECK (status IN ('proposed','tested','approved','applied','verified','rolled_back','rejected')),
+    CHECK (status IN ('proposed','tested','approved','applying','applied','verified',
+                      'rolled_back','apply_failed','rollback_failed','rejected')),
   synced         INTEGER NOT NULL DEFAULT 0
 );
 

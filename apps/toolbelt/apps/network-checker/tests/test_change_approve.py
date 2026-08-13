@@ -126,7 +126,9 @@ class ApproveConfirmationFlowTest(unittest.TestCase):
         row = change._get(self.conn, cid)
         self.assertEqual(row["status"], "approved")
         self.assertIsNotNone(row["approval_token"])
-        self.assertEqual(row["approval_token"], change._token(row, row["approved_at"]))
+        self.assertEqual(row["approved_by"], change._current_user())
+        self.assertEqual(row["approval_token"],
+                         change._token(row, row["approved_at"], row["approved_by"]))
 
     def test_typing_the_wrong_id_aborts_without_approving(self):
         cid = self._propose_and_test()

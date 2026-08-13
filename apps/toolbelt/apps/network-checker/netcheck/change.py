@@ -4,31 +4,59 @@ apply / verify / rollback. Every device write needs a recorded dry run and
 an explicit, interactive approval; the only automatic write this module
 makes is the pre-approved inverse of a change that just failed verification.
 CLI presentation (show/list/reject, argparse wiring) lives in
-change_cli.py, split out to keep this file's own line budget free for the
-security-relevant half (the same reason watch.py was split out of
-__main__.py).
+change_cli.py; the security-relevant primitives (real subprocess
+execution, live verification, and the keyed approval-token machinery)
+live in change_security.py; persisting an already-computed outcome (plus
+the config_item audit trail) lives in change_outcomes.py -- all three
+split out to keep this file's own line budget under the repo's
+medium-profile ceiling, the same reason watch.py was split out of
+__main__.py.
 
-`execute()` is the one seam touching a real subprocess -- change_cmd and
-inverse_cmd both pass through it and only it, so a test can
-`patch.object(change, "execute", fake)` and prove a rejected apply never
-reaches a real device. `_run_verify` is the other real seam (route_mod.*,
-probes.sample, environ.wifi), imported and referenced exactly like
-tests/test_watch.py's seams so it patches the same way.
+`execute` (from change_security) is the one seam touching a real
+subprocess -- change_cmd and inverse_cmd both pass through it and only it,
+so a test can `patch.object(change, "execute", fake)` and prove a rejected
+apply never reaches a real device. `_run_verify`/`_verify_with_retry` are
+the other real seam (route_mod.*, probes.sample, environ.wifi). All three
+names are re-exported here via `from .change_security import ...` rather
+than referenced as `change_security.execute(...)`, specifically so that
+existing pattern still intercepts calls made from this module's own
+`_run_change()`/`_rollback()` below -- see change_security.py's own
+module docstring for why that's safe. Those two functions (and only
+those two) stay in this module rather than moving to change_outcomes.py
+with the rest of the post-apply bookkeeping, precisely so that seam holds:
+change_outcomes.py's own functions never call execute()/`_verify_with_retry`
+themselves, only persist the (reason, final_status) this module already
+computed.
+
+Findings 15/16/17/19 from an independent security review, fixed together
+since they touch the same state machine: (15) `_token()` (change_security.py)
+is a keyed HMAC that also binds `approved_by`, not the old unkeyed sha256;
+(16) `apply()` claims its row atomically before `execute()` runs, and
+`test()`/`approve()`/change_cli's `reject()` all refuse a `_LOCKED_STATUSES`
+row; (17) `_run_change()`/`_rollback()` branch on the real rc/rrc instead
+of trusting the verify probe alone (see `_persist_apply()`'s four
+outcomes); (19) `execute()` (change_security.py) runs with an explicit
+`cwd` and its own process group, killed whole on timeout.
 """
-import hashlib
 import hmac
-import json
-import subprocess
 import sys
-import time
-from datetime import datetime, timezone
 
-from . import environ, probes
-from . import route as route_mod
+from .change_outcomes import _persist_apply
+from .change_security import (
+    _APP_ROOT, _current_user, _key_file, _load_or_create_key, _now, _run_verify,
+    _token, _verify_with_retry, execute,
+)
 
-
-def _now():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+_TERMINAL_STATUSES = frozenset({
+    "applied", "verified", "rolled_back", "apply_failed", "rollback_failed", "rejected",
+})
+# 'applying' is not itself a dead end, but a row an in-flight apply() owns
+# must be just as off-limits to test()/approve()/reject() as a terminal row
+# (Finding 16) -- built from the frozenset above so the SQL text below and
+# the Python-side membership checks can't drift; safe to splice into SQL
+# since every member is a fixed identifier this module owns, never input.
+_LOCKED_STATUSES = _TERMINAL_STATUSES | {"applying"}
+_LOCKED_SQL = "(" + ",".join(f"'{s}'" for s in sorted(_LOCKED_STATUSES)) + ")"
 
 
 def _get(conn, change_id):
@@ -39,84 +67,6 @@ def _get(conn, change_id):
 def _missing(change_id):
     print(f"change {change_id} not found", file=sys.stderr)
     return 1
-
-
-def execute(cmd):
-    """Run one shell command for real, capturing its output. `/bin/sh -c`
-    rather than `shell=True` -- the identical execution semantics, spelled
-    so the security scanner's shell-injection pattern (which only matches
-    the literal keyword) does not flag it; the actual authorization boundary
-    is upstream of here, at the token check in apply()."""
-    try:
-        proc = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True,
-                              text=True, timeout=90)
-        return proc.returncode, proc.stdout, proc.stderr
-    except subprocess.TimeoutExpired as e:
-        return 124, e.stdout or "", (e.stderr or "") + "\n[change] timed out"
-
-
-def _run_verify(expr):
-    """Parse a `field:state` probe expression (e.g. `dns_public:ok`) and
-    measure it for real. The only place this module calls probes.sample."""
-    field, _, want = expr.partition(":")
-    gw = route_mod.gateway()
-    row = probes.sample(environ.TARGET, gw, route_mod.first_hop(gateway_ip=gw),
-                        wifi=environ.wifi())
-    got = row.get(f"{field}_state")
-    return got == want, {"field": field, "want": want, "got": got}
-
-
-def _verify_with_retry(expr, attempts=3, budget_s=90):
-    """05-f section 4.4: up to 3 attempts over at most 90 seconds."""
-    log = []
-    for i in range(attempts):
-        ok, detail = _run_verify(expr)
-        log.append({"attempt": i + 1, "ok": ok, **detail})
-        if ok:
-            return True, log
-        if i < attempts - 1:
-            time.sleep(budget_s / attempts)
-    return False, log
-
-
-def _token(row, approved_at):
-    """sha256 hex over (id, change_cmd, inverse_cmd, sha256(dry_run_output),
-    approved_at) -- 05-f section 4.3's exact formula. Recomputed here from
-    whatever change_cmd/inverse_cmd the row *currently* holds, never read
-    off the frozen `approval_token` column, which is what makes a
-    post-approval edit to either command invalidate the token that was
-    already issued (NC-4.3)."""
-    evidence = hashlib.sha256((row["dry_run_output"] or "").encode()).hexdigest()
-    material = f"{row['id']}{row['change_cmd']}{row['inverse_cmd']}{evidence}{approved_at}"
-    return hashlib.sha256(material.encode()).hexdigest()
-
-
-def _resolve_device_id(conn, host_id, device_id):
-    """The device a change's config_item row belongs to: the change's own
-    device_id if it named one, else this host's 'self' singleton (the same
-    convention inventory.py's _map_self uses), created if inventory has
-    never scanned yet."""
-    if device_id is not None:
-        return device_id
-    row = conn.execute(
-        "SELECT id FROM device WHERE host_id=? AND ip='self'", (host_id,)).fetchone()
-    if row:
-        return row["id"]
-    now = _now()
-    cur = conn.execute(
-        "INSERT INTO device (host_id, mac, ip, kind, first_seen, last_seen)"
-        " VALUES (?, NULL, 'self', 'self', ?, ?)", (host_id, now, now))
-    return cur.lastrowid
-
-
-def _record_config_item(conn, host_id, row, status_label):
-    """05-f section 4.4: one config_item row per apply/rollback, source
-    'change_apply', so the inventory history and the change ledger agree."""
-    device_id = _resolve_device_id(conn, host_id, row["device_id"])
-    conn.execute(
-        "INSERT OR IGNORE INTO config_item (device_id, key, value, observed_at, source)"
-        " VALUES (?, ?, ?, ?, 'change_apply')",
-        (device_id, f"change.{row['id']}", status_label, _now()))
 
 
 def propose(conn, args):
@@ -131,19 +81,32 @@ def propose(conn, args):
 def test(conn, args):
     """The dry-run form (05-f section 4.2): measures verify_probe once,
     read-only, and records the outcome as evidence. Never runs change_cmd or
-    inverse_cmd -- this is the 'run_fixes.sh --dry-run' semantics the old
-    wrapper had, ported to the lifecycle instead of a script flag."""
+    inverse_cmd.
+
+    Finding 16: the final UPDATE is guarded `WHERE status NOT IN
+    _LOCKED_SQL`, checked via rowcount -- before this, test() reset any
+    row's status to 'tested' unconditionally, including an already-
+    terminal one or one an in-flight apply() owns."""
     row = _get(conn, args.id)
     if row is None:
         return _missing(args.id)
+    if row["status"] in _LOCKED_STATUSES:
+        print(f"change {args.id} is '{row['status']}'; cannot be (re)tested",
+              file=sys.stderr)
+        return 1
     ok, detail = _run_verify(row["verify_probe"])
     output = (f"DRY-RUN: would run: {row['change_cmd']}\n"
              f"DRY-RUN: inverse on failed verify: {row['inverse_cmd']}\n"
              f"DRY-RUN: current state ({row['verify_probe']}): "
              f"{'already satisfied' if ok else 'not yet satisfied'} ({detail})")
-    conn.execute(
-        "UPDATE change_request SET dry_run_output=?, dry_run_at=?, status='tested' WHERE id=?",
+    cur = conn.execute(
+        f"UPDATE change_request SET dry_run_output=?, dry_run_at=?, status='tested'"
+        f" WHERE id=? AND status NOT IN {_LOCKED_SQL}",
         (output, _now(), args.id))
+    if cur.rowcount == 0:
+        print(f"change {args.id} status changed while this dry run was measured; "
+              "not recorded", file=sys.stderr)
+        return 1
     print(output)
     return 0
 
@@ -159,10 +122,16 @@ def _print_record(row):
 
 
 def approve(conn, args):
-    """05-f section 4.3: interactive only. Refuses outright when stdin is
-    not a TTY -- never scriptable, never automatic, never grantable by an
-    agent -- then requires the operator to type the id back before minting
-    the token."""
+    """05-f section 4.3: interactive only. Refuses when stdin is not a
+    TTY -- never scriptable, never automatic -- then requires the operator
+    to type the id back before minting the token.
+
+    Finding 16: requires status=='tested', and the minting UPDATE is a
+    compare-and-swap guarded `WHERE status='tested'` -- before this, any
+    row with `dry_run_output` ever set (which never clears) could be
+    re-approved regardless of current status. Finding 15c: `approved_by`
+    is frozen into the row and folded into the token, so tampering with it
+    afterward invalidates the token like a tampered change_cmd."""
     if not sys.stdin.isatty():
         print("change approve requires an interactive terminal (stdin is not "
               "a TTY); refusing -- approval is never scriptable", file=sys.stderr)
@@ -170,8 +139,9 @@ def approve(conn, args):
     row = _get(conn, args.id)
     if row is None:
         return _missing(args.id)
-    if not row["dry_run_output"]:
-        print("change has no recorded dry run; run `change test` first", file=sys.stderr)
+    if row["status"] != "tested":
+        print(f"change {args.id} is '{row['status']}', not 'tested'; approve "
+              "requires a fresh dry run first (run `change test`)", file=sys.stderr)
         return 1
     _print_record(row)
     typed = input(f"Type the change id ({row['id']}) to approve, anything else to abort: ")
@@ -179,69 +149,97 @@ def approve(conn, args):
         print("approval aborted; id did not match", file=sys.stderr)
         return 1
     approved_at = _now()
-    token = _token(row, approved_at)
-    conn.execute(
-        "UPDATE change_request SET approved_at=?, approval_token=?, status='approved'"
-        " WHERE id=?", (approved_at, token, row["id"]))
+    verifier = _current_user()
+    token = _token(row, approved_at, verifier)
+    cur = conn.execute(
+        "UPDATE change_request SET approved_at=?, approved_by=?, approval_token=?,"
+        " status='approved' WHERE id=? AND status='tested'",
+        (approved_at, verifier, token, row["id"]))
+    if cur.rowcount == 0:
+        print(f"change {row['id']} status changed during approval (no longer "
+              "'tested'); refusing to mint a token", file=sys.stderr)
+        return 1
     print(f"approved. token (use with `change apply --token`): {token}")
     return 0
 
 
-def _run_change(row):
-    """Apply change_cmd for real, then verify it. Never touches inverse_cmd
-    -- the caller decides whether the failure warrants a rollback."""
-    rc, out, err = execute(row["change_cmd"])
-    applied_at = _now()
-    result = {"apply": {"returncode": rc, "stdout": out, "stderr": err}}
-    ok, log = _verify_with_retry(row["verify_probe"])
-    result["verify_attempts"] = log
-    return applied_at, result, ok
-
-
-def _rollback(row, result):
-    """05-f section 4.4: run inverse_cmd once verification has already
-    failed, then a single follow-up verify to confirm restoration. The only
-    automatic device write this module ever makes."""
-    rrc, rout, rerr = execute(row["inverse_cmd"])
-    result["rollback"] = {"returncode": rrc, "stdout": rout, "stderr": rerr}
-    _ok, log = _verify_with_retry(row["verify_probe"], attempts=1, budget_s=30)
-    result["rollback_verify"] = log
-
-
-def _persist_apply(conn, host_id, row, outcome):
-    applied_at, result, ok = outcome
-    if ok:
-        conn.execute(
-            "UPDATE change_request SET applied_at=?, apply_output=?, verified_at=?,"
-            " status='verified' WHERE id=?",
-            (applied_at, json.dumps(result), _now(), row["id"]))
-        _record_config_item(conn, host_id, row, "applied")
-        print(f"change {row['id']} applied and verified")
-        return 0
-    _rollback(row, result)
-    conn.execute(
-        "UPDATE change_request SET applied_at=?, apply_output=?, rolled_back_at=?,"
-        " status='rolled_back' WHERE id=?",
-        (applied_at, json.dumps(result), _now(), row["id"]))
-    _record_config_item(conn, host_id, row, "rolled_back")
-    print(f"change {row['id']} failed verification; rolled back", file=sys.stderr)
-    return 1
-
-
 def apply(conn, host_id, args):
-    """05-f section 4.1 invariant 2 and section 4.3: a row cannot reach
-    `applied` without a valid, freshly-recomputed approval token. Every
-    precondition below is checked before execute() is ever called, so a
-    rejected apply makes no device write at all (NC-4.1)."""
+    """05-f section 4.1 invariant 2 / section 4.3: a row cannot reach
+    `applied` without a valid, freshly-recomputed approval token; every
+    precondition is checked before execute() runs, so a rejected apply
+    makes no device write at all (NC-4.1).
+
+    Finding 16: after the token check, this claims the row atomically --
+    `UPDATE ... SET status='applying' WHERE id=? AND status='approved'`,
+    checked via rowcount -- before `_run_change()`/`execute()` ever run.
+    SQLite serializes writers on one database, so of two concurrent
+    `apply` calls on the same row only one UPDATE can observe 'approved';
+    the loser observes 'applying' and refuses (return 3) without calling
+    execute(). This also closes the old crash-consistency gap: a crash
+    between execute() and the final UPDATE used to leave the row
+    'approved' with its still-valid token, replayable; now it leaves
+    'applying' -- not 'approved', so it cannot be replayed, intentionally
+    stuck pending manual inspection (fail-closed, for a device write)."""
     row = _get(conn, args.id)
     if row is None:
         return _missing(args.id)
     if row["status"] != "approved" or not row["approval_token"] or not row["approved_at"]:
         print("change is not approved; run `change approve` first", file=sys.stderr)
         return 1
-    if not hmac.compare_digest(_token(row, row["approved_at"]), args.token or ""):
-        print("approval token invalid or stale (change_cmd/inverse_cmd changed since "
-              "approval, or the wrong token was supplied); refusing, no write made",
-              file=sys.stderr)
+    if not hmac.compare_digest(
+            _token(row, row["approved_at"], row["approved_by"]), args.token or ""):
+        print("approval token invalid or stale (change_cmd/inverse_cmd/approved_by "
+              "changed since approval, or the wrong token was supplied); refusing, "
+              "no write made", file=sys.stderr)
         return 2
-    return _persist_apply(conn, host_id, row, _run_change(row))
+    cur = conn.execute(
+        "UPDATE change_request SET status='applying' WHERE id=? AND status='approved'",
+        (row["id"],))
+    if cur.rowcount != 1:
+        print(f"change {row['id']} could not be claimed for apply (its status "
+              "changed since the check above -- most likely a concurrent `apply` "
+              "already claimed it); refusing, no write made", file=sys.stderr)
+        return 3
+    applied_at, result, reason = _run_change(row)
+    final_status = _rollback(row, result) if reason == "verify_failed" else None
+    return _persist_apply(conn, host_id, row, (applied_at, result, reason, final_status))
+
+
+def _run_change(row):
+    """Apply change_cmd for real, then verify it. Returns (applied_at,
+    result, reason); reason is "apply_failed" | "verified" | "verify_failed".
+
+    Finding 17: `rc` is now a first-class outcome, not just captured. A
+    nonzero rc skips verification outright ("apply_failed") instead of
+    trusting a probe that might read 'ok' for reasons unrelated to this
+    command -- matching AGENTS.md's automatic-write invariant precisely: a
+    command that failed outright never reached verification, so apply()
+    never runs inverse_cmd for this outcome."""
+    rc, out, err = execute(row["change_cmd"])
+    applied_at = _now()
+    result = {"apply": {"returncode": rc, "stdout": out, "stderr": err}}
+    if rc != 0:
+        return applied_at, result, "apply_failed"
+    ok, log = _verify_with_retry(row["verify_probe"])
+    result["verify_attempts"] = log
+    return applied_at, result, ("verified" if ok else "verify_failed")
+
+
+def _rollback(row, result):
+    """05-f section 4.4: run inverse_cmd once verification has failed, then
+    one follow-up verify to confirm restoration -- the only automatic
+    device write this module makes. Returns "rolled_back" or
+    "rollback_failed".
+
+    Finding 17: `rrc` and the post-restore verify now both decide the
+    result (the old code captured `rrc` but never checked it, and bound
+    the post-restore verify to `_ok`, this codebase's convention for
+    "deliberately unused" -- reporting 'rolled_back' regardless of whether
+    the restore worked was the bug). 'rolled_back' now requires both to
+    confirm success; anything else is 'rollback_failed', the most urgent
+    status this lifecycle can reach."""
+    rrc, rout, rerr = execute(row["inverse_cmd"])
+    result["rollback"] = {"returncode": rrc, "stdout": rout, "stderr": rerr}
+    rollback_ok, log = _verify_with_retry(row["verify_probe"], attempts=1, budget_s=30)
+    result["rollback_verify"] = log
+    return "rolled_back" if (rrc == 0 and rollback_ok) else "rollback_failed"

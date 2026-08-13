@@ -4,13 +4,14 @@ lifecycle engine (propose/test/approve/apply/verify/rollback all live
 there; this file is show/list/reject plus dispatch and parser setup).
 """
 import json
+import sys
 
 from . import change
 from . import store
 
 _SHOW_FIELDS = ("id", "status", "title", "cause", "device_id", "change_cmd",
                 "inverse_cmd", "verify_probe", "dry_run_at", "approved_at",
-                "applied_at", "verified_at", "rolled_back_at")
+                "approved_by", "applied_at", "verified_at", "rolled_back_at")
 
 
 def verify(conn, args):
@@ -41,15 +42,29 @@ def list_(conn, args):
     else:
         rows = store._rows(conn.execute("SELECT * FROM change_request ORDER BY id"))
     for r in rows:
-        print(f"{r['id']:<4} {r['status']:<10} {r['title']}")
+        # <16 rather than the original <10: 'rollback_failed' (Finding 17's
+        # new terminal status) is 15 characters, one past the old width.
+        print(f"{r['id']:<4} {r['status']:<16} {r['title']}")
     return 0
 
 
 def reject(conn, args):
+    """Finding 16: guarded exactly like change.test()/change.approve() --
+    a row already in change._LOCKED_STATUSES (a terminal outcome, or one an
+    in-flight apply() currently owns) cannot be marked 'rejected' out from
+    under its real, already-decided outcome. Before this guard, reject()
+    unconditionally overwrote status on any row, including one already
+    verified/rolled back/applied."""
     row = change._get(conn, args.id)
     if row is None:
         return change._missing(args.id)
-    conn.execute("UPDATE change_request SET status='rejected' WHERE id=?", (args.id,))
+    cur = conn.execute(
+        f"UPDATE change_request SET status='rejected'"
+        f" WHERE id=? AND status NOT IN {change._LOCKED_SQL}", (args.id,))
+    if cur.rowcount == 0:
+        print(f"change {args.id} is '{row['status']}'; cannot be rejected",
+              file=sys.stderr)
+        return 1
     print(f"change {args.id} rejected")
     return 0
 

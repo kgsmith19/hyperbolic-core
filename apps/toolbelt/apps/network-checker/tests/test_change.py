@@ -87,7 +87,7 @@ class ApplyWithoutDryRunOrTokenTest(ChangeTestCase):
              contextlib.redirect_stdout(io.StringIO()):
             change.test(self.conn, _args(action="test", id=cid))
         row = change._get(self.conn, cid)
-        real_token = change._token(row, row["approved_at"])
+        real_token = change._token(row, row["approved_at"], row["approved_by"])
         with patch.object(change, "execute") as executor, \
              contextlib.redirect_stdout(io.StringIO()), \
              contextlib.redirect_stderr(io.StringIO()):
@@ -107,10 +107,10 @@ class TokenBindingTest(ChangeTestCase):
             change.test(self.conn, _args(action="test", id=cid))
         row = change._get(self.conn, cid)
         approved_at = change._now()
-        token = change._token(row, approved_at)
+        token = change._token(row, approved_at, "tester")
         self.conn.execute(
-            "UPDATE change_request SET approved_at=?, approval_token=?, status='approved' WHERE id=?",
-            (approved_at, token, cid))
+            "UPDATE change_request SET approved_at=?, approved_by=?, approval_token=?, status='approved' WHERE id=?",
+            (approved_at, "tester", token, cid))
         return token
 
     def test_unmodified_token_applies_cleanly(self):
@@ -148,11 +148,10 @@ class TokenBindingTest(ChangeTestCase):
         executor.assert_not_called()
 
     def test_expired_token_from_a_different_approved_at_is_rejected(self):
-        """An old, well-formed token for a different approved_at must not verify."""
         cid = self.propose()
         real_token = self._approve(cid)
         row = change._get(self.conn, cid)
-        stale_token = change._token(row, "2000-01-01T00:00:00+00:00")
+        stale_token = change._token(row, "2000-01-01T00:00:00+00:00", row["approved_by"])
         self.assertNotEqual(real_token, stale_token)
         with patch.object(change, "execute") as executor, \
              contextlib.redirect_stdout(io.StringIO()), \
@@ -173,10 +172,10 @@ class RollbackTest(ChangeTestCase):
             change.test(self.conn, _args(action="test", id=cid))
         row = change._get(self.conn, cid)
         approved_at = change._now()
-        token = change._token(row, approved_at)
+        token = change._token(row, approved_at, "tester")
         self.conn.execute(
-            "UPDATE change_request SET approved_at=?, approval_token=?, status='approved' WHERE id=?",
-            (approved_at, token, cid))
+            "UPDATE change_request SET approved_at=?, approved_by=?, approval_token=?, status='approved' WHERE id=?",
+            (approved_at, "tester", token, cid))
         return cid, token
 
     def test_failed_verify_runs_inverse_and_lands_rolled_back(self):
@@ -207,8 +206,9 @@ class RollbackTest(ChangeTestCase):
 
     def test_rollback_appends_a_config_item_row_with_source_change_apply(self):
         cid, token = self._approved()
+        verify_results = [(False, []), (True, [])]  # Finding 17: distinct per-call results
         with patch.object(change, "execute", return_value=(0, "", "")), \
-             patch.object(change, "_verify_with_retry", return_value=(False, [])), \
+             patch.object(change, "_verify_with_retry", side_effect=verify_results), \
              contextlib.redirect_stdout(io.StringIO()), \
              contextlib.redirect_stderr(io.StringIO()):
             change.apply(self.conn, self.host, _args(action="apply", id=cid, token=token))
