@@ -16,3 +16,7 @@ import "./openai-driver.test.ts";
 import "./gemini-driver.test.ts";
 import "./fallback.test.ts";
 import "./real-driver-fallback.test.ts";
+import "./prompt-render-parity.test.mjs";
+import "./prompt-client.test.ts";
+import "./cache.test.mjs";
+import "./real-pg.test.ts";

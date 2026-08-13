@@ -48,3 +48,6 @@ export { openaiDriver } from "./drivers/openai.ts";
 
 export { complete, stream } from "./complete.ts";
 export type { OrchestrationOptions } from "./complete.ts";
+
+export { createPromptClient, MissingVariablesError, PromptNotFoundError } from "./prompt-client.ts";
+export type { GetPromptOptions, PromptClient, PromptClientOptions, RenderedPrompt } from "./prompt-client.ts";
