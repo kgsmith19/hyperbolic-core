@@ -2,6 +2,7 @@
 // scaffold.mjs's orchestration so each template can be unit-tested (and
 // schema-validated) in isolation.
 import { manifestHash } from "./manifests-shared.mjs";
+import { defaultSchemaName } from "./args.mjs";
 
 function sqlQuote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
@@ -9,6 +10,22 @@ function sqlQuote(value) {
 
 function sqlLiteralOrNull(value) {
   return value === null || value === undefined ? "null" : sqlQuote(value);
+}
+
+// Double-quotes a Postgres identifier per the standard SQL identifier-quoting
+// rule (an embedded `"` is doubled, exactly like sqlQuote doubles an embedded
+// `'` for string literals). Finding 89 (independent security review of this
+// repo, re-verified against current HEAD): SCHEMA_PATTERN's charset cannot
+// produce anything SQL-injection-capable, but it permits exact matches for
+// fully-reserved Postgres keywords (`order`, `user`, `group`, `table`, ...),
+// which would otherwise produce a schema name that is syntactically legal to
+// this CLI but a parse error at `supabase db push` time. Quoting every
+// schema identifier interpolated into DDL sidesteps that category of bug
+// entirely -- more robust than maintaining a reserved-word blocklist, and a
+// no-op change in meaning for a schema name that was never reserved to begin
+// with.
+function quoteIdent(identifier) {
+  return `"${String(identifier).replaceAll('"', '""')}"`;
 }
 
 // --- tool.json ------------------------------------------------------------
@@ -153,12 +170,40 @@ node --test "tests/*.test.mjs"
 
 // --- web/index.html (kind ui|hybrid only) ------------------------------
 
+// Escapes the five characters that matter for safe interpolation into HTML
+// text content (never attribute-value or script/style context, which this
+// generator never interpolates into): `&` first (so it cannot double-escape
+// entities produced by the other replacements), then `<` `>` `"` `'`.
+// Finding 90 (P2, security-severity, independent security review of this
+// repo, re-verified against current HEAD -- confirmed by reading the whole
+// of this file before this fix: no escaping function existed anywhere in
+// it): buildWebIndexHtml previously interpolated `name` (fully
+// attacker/operator-controlled free text; only length-checked by
+// validateOptions in args.mjs, no character-class restriction) raw into
+// `<title>` and `<h1>`, so a --name of `</title><script>alert(1)</script>`
+// would land as live, executable markup in the scaffolded tool's own
+// web/index.html. Applied to every HTML interpolation site below, including
+// `id` -- which is already ID_PATTERN-restricted to `[a-z0-9-]` and so needs
+// no escaping to be safe today, but costs nothing to escape defensively here
+// too, in case that pattern is ever loosened without this file being
+// revisited.
+export function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 export function buildWebIndexHtml({ id, name }) {
+  const safeName = escapeHtml(name);
+  const safeId = escapeHtml(id);
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>${name}</title>
+    <title>${safeName}</title>
   </head>
   <body>
     <!--
@@ -169,8 +214,8 @@ export function buildWebIndexHtml({ id, name }) {
       once the Shell absorbs this route; replace this placeholder before
       entry.ui.route in tool.json is considered live.
     -->
-    <h1>${name}</h1>
-    <p>Placeholder page for apps/toolbelt/apps/${id}. Not yet implemented.</p>
+    <h1>${safeName}</h1>
+    <p>Placeholder page for apps/toolbelt/apps/${safeId}. Not yet implemented.</p>
   </body>
 </html>
 `;
@@ -208,16 +253,16 @@ export function buildSchemaCreateSql({ id, schema }) {
 -- apps/toolbelt/apps/prompt-organizer/supabase/migrations/20260807020000_prompt_create_prompt.sql
 -- as the concrete template (and remember to record the prior value in that
 -- migration's own down file, same as that one does).
-create schema ${schema};
+create schema ${quoteIdent(schema)};
 
 -- Base Postgres grants; RLS (per-table, added later) is the actual
 -- row-level boundary. Without these, PostgREST gets "permission denied for
 -- schema ${schema}" even with correct RLS policies on a later table, since
 -- GRANT and RLS are independent layers (mirrors
 -- apps/toolbelt/supabase/migrations/20260806190100_idea_create_schema.sql).
-grant usage on schema ${schema} to anon, authenticated, service_role;
-alter default privileges in schema ${schema} grant all on tables to anon, authenticated, service_role;
-alter default privileges in schema ${schema} grant all on sequences to anon, authenticated, service_role;
+grant usage on schema ${quoteIdent(schema)} to anon, authenticated, service_role;
+alter default privileges in schema ${quoteIdent(schema)} grant all on tables to anon, authenticated, service_role;
+alter default privileges in schema ${quoteIdent(schema)} grant all on sequences to anon, authenticated, service_role;
 `;
 }
 
@@ -225,7 +270,7 @@ export function buildSchemaCreateDownSql({ id, schema }) {
   return `-- Reverts the schema-creation migration generated for
 -- apps/toolbelt/apps/${id}/tool.json. No tables exist yet at scaffold time
 -- (the up migration creates none), so this only drops the schema itself.
-drop schema if exists ${schema} cascade;
+drop schema if exists ${quoteIdent(schema)} cascade;
 `;
 }
 
@@ -286,6 +331,30 @@ test("the registration migration's literal manifest_hash equals manifestHash() o
 export function buildRegistrationUpSql({ manifest, id, name, schema, kind, route }) {
   const compact = manifestToCompactJSON(manifest);
   const hash = manifestHash(manifest);
+  // core.app.schema_name is declared `text not null`
+  // (apps/toolbelt/supabase/migrations/20260806190000_core_create_schema.sql).
+  // A --no-schema tool owns no real schema, so `schema` here is the JS value
+  // null -- but sqlQuote(null) would stringify it via String(null) into the
+  // four-character STRING literal 'null' before quoting, a value that
+  // happened to satisfy the NOT NULL constraint by accident while meaning
+  // nothing (Finding 88, independent security review of this repo,
+  // re-verified against current HEAD). Instead, fall back to a nominal
+  // registry-key identifier derived from the tool's own id, exactly matching
+  // this repo's own existing precedent for a schema-less tool
+  // (20260812250000_register_network-checker.sql: schema_name = 'netcheck',
+  // "recorded here as a nominal identifier ... rather than a claim that a
+  // `netcheck` schema exists in this project"). schema_name is therefore a
+  // nominal registry key for tool identity when the tool owns no real
+  // schema, never a live schema claim -- tool.json's own `schemas` array
+  // (see buildManifest) stays correctly empty for a --no-schema tool
+  // regardless of what lands in this column. id is already
+  // ID_PATTERN-restricted ([a-z0-9-], no leading/trailing dash), so this can
+  // never introduce a SQL-unsafe character; defaultSchemaName's
+  // dash-to-underscore transform (the same transform args.mjs uses for the
+  // default *real* schema name) keeps this value shaped like every other
+  // schema_name in the table -- a valid unquoted Postgres identifier -- even
+  // though, like 'netcheck', it names no schema that actually exists.
+  const schemaName = schema === null || schema === undefined ? defaultSchemaName(id) : schema;
   return `-- Generated registration migration (docs/planning/05-c-toolbelt.md
 -- section 4.2) for apps/toolbelt/apps/${id}/tool.json, produced by
 -- packages/toolbelt-cli's tool:new (m3-03). The shape follows section 4.2's
@@ -319,7 +388,7 @@ insert into core.app (
 values (
   ${sqlQuote(id)},
   ${sqlQuote(name)},
-  ${sqlQuote(schema)},
+  ${sqlQuote(schemaName)},
   'building',
   ${sqlQuote(kind)},
   ${sqlLiteralOrNull(route)},

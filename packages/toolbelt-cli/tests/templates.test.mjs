@@ -21,6 +21,7 @@ import {
   buildSchemaCreateSql,
   buildSchemaCreateDownSql,
   buildRegistrationTestMjs,
+  escapeHtml,
 } from "../src/templates.mjs";
 import { checkManifestShape, manifestHash } from "../src/manifests-shared.mjs";
 
@@ -151,6 +152,76 @@ test("buildRegistrationUpSql never deletes a core.app row (m3-02 invariant)", ()
   assert.doesNotMatch(sql, /delete\s+from\s+core\.app/);
 });
 
+// Finding 88 (P2, independent security review of this repo, re-verified
+// against current HEAD): resolveSchema returns { hasSchema: false, schema:
+// null } for --no-schema, and buildRegistrationUpSql used to insert that
+// via sqlQuote(schema), which stringifies ANY value (including JS null) via
+// String(value) before quoting -- so schema_name landed as the four-character
+// STRING literal 'null', not a genuine SQL NULL, in a column declared `text
+// not null`. The fix derives a nominal registry-key identifier from the
+// tool's own id instead, matching this repo's own network-checker precedent
+// (schema_name = 'netcheck' for a schema-less tool).
+test("buildRegistrationUpSql for a --no-schema tool writes a nominal schema_name derived from id, never the literal string 'null'", () => {
+  const manifest = buildManifest(CASES[2].opts); // "cli without schema", id: scratch-noschema, hasSchema: false, schema: null
+  const sql = buildRegistrationUpSql({
+    manifest,
+    id: manifest.id,
+    name: manifest.name,
+    schema: null,
+    kind: manifest.kind,
+    route: null,
+  });
+
+  // The bogus string literal must never appear.
+  assert.ok(!sql.includes("'null'"), "expected no literal string 'null' anywhere in the generated SQL");
+
+  // Nor a bare (unquoted) `null` in the schema_name column position -- that
+  // would violate `core.app.schema_name`'s NOT NULL constraint outright.
+  // schema_name is the third column in the values() tuple, immediately
+  // after id and name.
+  assert.match(
+    sql,
+    /'scratch-noschema',\s*\n\s*'Scratch No Schema',\s*\n\s*'scratch_noschema',/,
+    "expected the nominal identifier 'scratch_noschema' (derived from id via the same dash->underscore transform args.mjs's defaultSchemaName uses), quoted as a real string literal, in the schema_name column position",
+  );
+});
+
+test("buildRegistrationUpSql for a --no-schema tool with a dashed id derives the nominal schema_name via the same dash->underscore transform as the real default schema name", () => {
+  const manifest = buildManifest({
+    id: "multi-word-tool",
+    name: "Multi Word Tool",
+    kind: "headless",
+    route: undefined,
+    hasSchema: false,
+    schema: null,
+    llm: false,
+    registerBasename: "20260101000000_register_multi-word-tool.sql",
+  });
+  const sql = buildRegistrationUpSql({
+    manifest,
+    id: manifest.id,
+    name: manifest.name,
+    schema: null,
+    kind: manifest.kind,
+    route: null,
+  });
+  assert.ok(sql.includes("'multi_word_tool'"), "expected dashes in id replaced with underscores in the nominal schema_name");
+  assert.ok(!sql.includes("'null'"));
+});
+
+test("buildRegistrationUpSql for a SCHEMA-OWNING tool is unaffected: schema_name is still the tool's real schema, not derived from id", () => {
+  const manifest = buildManifest(CASES[0].opts); // "ui with schema", schema: scratch_ui
+  const sql = buildRegistrationUpSql({
+    manifest,
+    id: manifest.id,
+    name: manifest.name,
+    schema: "scratch_ui",
+    kind: manifest.kind,
+    route: "/scratch-ui",
+  });
+  assert.match(sql, /'scratch-ui',\s*\n\s*'Scratch UI',\s*\n\s*'scratch_ui',/);
+});
+
 test("buildRegistrationDownSql never deletes a core.app row and resets to the registry-extension bare defaults", () => {
   const sql = buildRegistrationDownSql({ id: "scratch-ui" }).toLowerCase();
   assert.doesNotMatch(sql, /delete\s+from\s+core\.app/);
@@ -197,10 +268,73 @@ test("buildWebIndexHtml includes the tool's name and id", () => {
   assert.match(html, /apps\/toolbelt\/apps\/scratch-ui/);
 });
 
-test("buildSchemaCreateSql creates exactly the given schema and grants usage to anon/authenticated/service_role", () => {
+// --- Finding 90 (P2, security-severity, independent security review of this
+// repo, re-verified against current HEAD): buildWebIndexHtml used to
+// interpolate `name` raw into both <title> and <h1> with no escaping
+// function anywhere in templates.mjs. `id` is already ID_PATTERN-restricted
+// and so cannot carry this payload, but is escaped defensively anyway. ---
+
+test("escapeHtml escapes all five HTML-significant characters, & first so it cannot double-escape the others' output", () => {
+  assert.equal(escapeHtml(`&<>"'`), "&amp;&lt;&gt;&quot;&#39;");
+  assert.equal(escapeHtml("plain text"), "plain text");
+});
+
+test("buildWebIndexHtml HTML-escapes a --name containing a markup-injection payload: the raw <script> tag never appears in the emitted HTML", () => {
+  const evilName = `</title><script>alert(1)</script>`;
+  const html = buildWebIndexHtml({ id: "scratch-ui", name: evilName });
+
+  // The literal, unescaped payload must not appear anywhere in the output.
+  assert.doesNotMatch(html, /<script>/);
+  assert.doesNotMatch(html, /<\/title><script>/);
+
+  // The escaped form must appear instead, in both interpolation sites
+  // (<title> and <h1>). Plain substring checks (not a dynamically-built
+  // RegExp) deliberately, since the payload's own `(` `)` characters would
+  // otherwise be reinterpreted as regex grouping metacharacters.
+  const escaped = "&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;";
+  assert.ok(html.includes(`<title>${escaped}</title>`), "expected the escaped payload inside <title>");
+  assert.ok(html.includes(`<h1>${escaped}</h1>`), "expected the escaped payload inside <h1>");
+
+  // And the whole document must still be well-formed enough that exactly
+  // ONE real <title> element exists and NO real <script> element exists
+  // anywhere in the byte stream -- i.e. the payload did not manage to open a
+  // second real <title> or inject a real <script> element.
+  assert.equal((html.match(/<title>/g) ?? []).length, 1);
+  assert.ok(!html.includes("<script"), "expected no literal <script substring anywhere in the emitted HTML");
+});
+
+test("buildWebIndexHtml HTML-escapes double and single quotes in --name (defense against a future attribute-context interpolation site)", () => {
+  const html = buildWebIndexHtml({ id: "scratch-ui", name: `"onmouseover="alert(1)` });
+  assert.doesNotMatch(html, /"onmouseover="alert\(1\)/);
+  assert.match(html, /&quot;onmouseover=&quot;alert\(1\)/);
+});
+
+test("buildSchemaCreateSql creates exactly the given schema (double-quoted identifier) and grants usage to anon/authenticated/service_role", () => {
   const sql = buildSchemaCreateSql({ id: "scratch-ui", schema: "scratch_ui" });
-  assert.match(sql, /create schema scratch_ui;/);
-  assert.match(sql, /grant usage on schema scratch_ui to anon, authenticated, service_role;/);
+  assert.match(sql, /create schema "scratch_ui";/);
+  assert.match(sql, /grant usage on schema "scratch_ui" to anon, authenticated, service_role;/);
+});
+
+// Finding 89 (P2, independent security review of this repo, re-verified
+// against current HEAD): SCHEMA_PATTERN's charset permits exact matches for
+// fully-reserved Postgres keywords (order, user, group, table, ...), which
+// would previously produce a syntax error only at `supabase db push` time,
+// opaquely. Double-quoting the identifier everywhere it is interpolated
+// into DDL sidesteps the whole category instead of maintaining a
+// reserved-word blocklist.
+test("buildSchemaCreateSql double-quotes a reserved-word schema name (--schema order) so every DDL statement stays syntactically valid", () => {
+  const sql = buildSchemaCreateSql({ id: "order-tool", schema: "order" });
+  assert.match(sql, /create schema "order";/);
+  assert.match(sql, /grant usage on schema "order" to anon, authenticated, service_role;/);
+  assert.match(sql, /alter default privileges in schema "order" grant all on tables to anon, authenticated, service_role;/);
+  assert.match(sql, /alter default privileges in schema "order" grant all on sequences to anon, authenticated, service_role;/);
+  // Never an UNQUOTED bare `order` immediately after `schema ` in a real
+  // (non-comment) statement -- a bare match would be exactly the
+  // reserved-word syntax-error case this fix exists to prevent.
+  const codeLines = sql.split("\n").filter((line) => !line.trim().startsWith("--"));
+  for (const line of codeLines) {
+    assert.doesNotMatch(line, /schema order\b/i, `unexpected unquoted reserved-word schema reference: ${line}`);
+  }
 });
 
 test("buildSchemaCreateSql never creates the reserved brain schema", () => {
@@ -216,10 +350,15 @@ test("buildSchemaCreateSql's only platform.owner() mentions are inside line comm
   }
 });
 
-test("buildSchemaCreateDownSql drops exactly the given schema and never touches core.app", () => {
+test("buildSchemaCreateDownSql drops exactly the given schema (double-quoted identifier) and never touches core.app", () => {
   const sql = buildSchemaCreateDownSql({ id: "x", schema: "scratch_ui" });
-  assert.match(sql, /drop schema if exists scratch_ui cascade;/);
+  assert.match(sql, /drop schema if exists "scratch_ui" cascade;/);
   assert.doesNotMatch(sql.toLowerCase(), /core\.app/);
+});
+
+test("buildSchemaCreateDownSql double-quotes a reserved-word schema name (--schema order)", () => {
+  const sql = buildSchemaCreateDownSql({ id: "order-tool", schema: "order" });
+  assert.match(sql, /drop schema if exists "order" cascade;/);
 });
 
 test("buildRegistrationTestMjs embeds the given registration basename and is syntactically valid JS", () => {

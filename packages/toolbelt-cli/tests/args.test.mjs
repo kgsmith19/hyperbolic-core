@@ -70,6 +70,41 @@ test("validateOptions requires --name", () => {
   assert.ok(errors.some((e) => e.includes("--name is required")));
 });
 
+// Finding 90 (P2, security-severity, independent security review of this
+// repo, re-verified against current HEAD): validateOptions previously only
+// checked options.name.length, with no character-class or control-character
+// restriction. A --name that is all-whitespace, or that contains a raw
+// control character, is not a meaningful display name and must be rejected
+// here -- independent of whatever HTML-escaping templates.mjs now also does
+// at the point `name` is interpolated into generated markup.
+test("validateOptions rejects a --name that is all whitespace (passes the length check but is not a meaningful name)", () => {
+  const errors = validateOptions(validOptions({ name: "   " }));
+  assert.ok(errors.some((e) => e.includes("whitespace")), `expected a whitespace-only --name error, got: ${JSON.stringify(errors)}`);
+});
+
+test("validateOptions rejects a --name containing a raw control character (tab)", () => {
+  const errors = validateOptions(validOptions({ name: "Foo\tBar" }));
+  assert.ok(errors.some((e) => e.includes("control character")), `expected a control-character --name error, got: ${JSON.stringify(errors)}`);
+});
+
+test("validateOptions rejects a --name containing a raw control character (embedded NUL byte)", () => {
+  const errors = validateOptions(validOptions({ name: `Foo${String.fromCharCode(0)}Bar` }));
+  assert.ok(errors.some((e) => e.includes("control character")), `expected a control-character --name error, got: ${JSON.stringify(errors)}`);
+});
+
+test("validateOptions rejects a --name containing a raw control character (embedded newline)", () => {
+  const errors = validateOptions(validOptions({ name: "Foo\nBar" }));
+  assert.ok(errors.some((e) => e.includes("control character")));
+});
+
+test("validateOptions accepts an ordinary --name containing punctuation and non-ASCII characters (control-char check does not over-reject)", () => {
+  assert.deepEqual(validateOptions(validOptions({ name: "Kyle's Café Tool!" })), []);
+});
+
+test("validateOptions accepts a --name that merely CONTAINS an HTML-markup-shaped payload (this is a validation boundary, not an escaping boundary -- templates.mjs's escapeHtml is what actually neutralizes it)", () => {
+  assert.deepEqual(validateOptions(validOptions({ name: "</title><script>alert(1)</script>" })), []);
+});
+
 test("validateOptions requires --kind and rejects an unknown kind", () => {
   assert.ok(validateOptions(validOptions({ kind: undefined })).some((e) => e.includes("--kind is required")));
   assert.ok(validateOptions(validOptions({ kind: "bogus" })).some((e) => e.includes("--kind must be one of")));
@@ -108,6 +143,65 @@ test("validateOptions rejects --schema together with --no-schema (bad flag combi
 test("validateOptions rejects a malformed --schema", () => {
   const errors = validateOptions(validOptions({ kind: "cli", route: undefined, schema: "Not_Valid!" }));
   assert.ok(errors.some((e) => e.includes("--schema")));
+});
+
+// Finding 89 (P2, independent security review of this repo, re-verified
+// against current HEAD): both an explicit --schema and a --schema DEFAULTED
+// from --id must be capped at Postgres's 63-byte NAMEDATALEN identifier
+// limit -- Postgres silently TRUNCATES an over-limit identifier rather than
+// erroring, so an uncapped name here could make the schema this CLI
+// actually creates silently diverge from what its own generated
+// tool.json/migration comments claim.
+
+test("validateOptions accepts an explicit --schema of exactly 63 characters", () => {
+  const schema63 = "s" + "c".repeat(62);
+  assert.equal(schema63.length, 63);
+  const errors = validateOptions(validOptions({ kind: "cli", route: undefined, schema: schema63 }));
+  assert.deepEqual(errors, []);
+});
+
+test("validateOptions rejects an explicit --schema of 64 characters with a clear, specific error message", () => {
+  const schema64 = "s" + "c".repeat(63);
+  assert.equal(schema64.length, 64);
+  const errors = validateOptions(validOptions({ kind: "cli", route: undefined, schema: schema64 }));
+  assert.ok(
+    errors.some((e) => e.includes("--schema") && e.includes("63") && /byte/i.test(e)),
+    `expected a clear 63-byte-limit --schema error, got: ${JSON.stringify(errors)}`,
+  );
+});
+
+test("validateOptions accepts a --schema that is an exact match for a reserved Postgres keyword (charset alone cannot forbid it; templates.mjs double-quotes the identifier in generated DDL instead)", () => {
+  const errors = validateOptions(validOptions({ kind: "cli", route: undefined, schema: "order" }));
+  assert.deepEqual(errors, []);
+});
+
+test("validateOptions accepts a 63-character --id whose DEFAULTED schema name (dash->underscore, same length) is exactly 63 characters", () => {
+  const id63 = "a" + "b".repeat(61) + "c"; // 63 chars, matches ID_PATTERN
+  assert.equal(id63.length, 63);
+  const errors = validateOptions(validOptions({ id: id63, kind: "cli", route: undefined, schema: undefined }));
+  assert.deepEqual(errors, []);
+});
+
+test("validateOptions rejects a 64-character --id whose DEFAULTED schema name would be 64 characters, with a clear error message, even though --id's own pattern permits 64 characters", () => {
+  const id64 = "a" + "b".repeat(62) + "c"; // 64 chars, still matches ID_PATTERN
+  assert.equal(id64.length, 64);
+  const errors = validateOptions(validOptions({ id: id64, kind: "cli", route: undefined, schema: undefined }));
+  assert.ok(
+    errors.some((e) => e.includes(id64) && e.includes("63") && /byte/i.test(e)),
+    `expected a clear default-schema-too-long error for a 64-char --id, got: ${JSON.stringify(errors)}`,
+  );
+});
+
+test("validateOptions does NOT apply the defaulted-schema length check when an explicit --schema is given (the explicit-schema check above is what applies instead)", () => {
+  const id64 = "a" + "b".repeat(62) + "c";
+  const errors = validateOptions(validOptions({ id: id64, kind: "cli", route: undefined, schema: "short_schema" }));
+  assert.deepEqual(errors, []);
+});
+
+test("validateOptions does NOT apply the defaulted-schema length check for --no-schema (no schema name is ever derived)", () => {
+  const id64 = "a" + "b".repeat(62) + "c";
+  const errors = validateOptions(validOptions({ id: id64, kind: "cli", route: undefined, schema: undefined, noSchema: true }));
+  assert.deepEqual(errors, []);
 });
 
 test("validateOptions is silent (empty array) for every valid combination across all four kinds", () => {
