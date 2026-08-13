@@ -1,15 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getEntity, health, searchEntities } from "./client";
-import { supabase } from "../auth/supabase";
+import { platformClient } from "../lib/session";
 
-vi.mock("../auth/supabase", () => ({
-  supabase: {
+vi.mock("../lib/session", () => ({
+  platformClient: {
     auth: {
-      getSession: vi
-        .fn()
-        .mockResolvedValue({ data: { session: { access_token: "tok-123" } } }),
-      signOut: vi.fn().mockResolvedValue({}),
+      getSession: vi.fn().mockResolvedValue({
+        accessToken: "tok-123",
+        expiresAt: 0,
+        userId: "owner",
+      }),
+      signOut: vi.fn().mockResolvedValue(undefined),
     },
   },
 }));
@@ -44,7 +46,7 @@ describe("api client", () => {
     const assign = vi.fn();
     vi.stubGlobal("location", { assign });
     await expect(getEntity("e1")).rejects.toThrow("signed out");
-    expect(supabase.auth.signOut).toHaveBeenCalled();
+    expect(platformClient.auth.signOut).toHaveBeenCalled();
     expect(assign).toHaveBeenCalledWith("/login");
   });
 

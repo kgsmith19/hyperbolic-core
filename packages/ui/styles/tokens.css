@@ -1,0 +1,299 @@
+/*
+ * @hyperbolic/ui design tokens
+ *
+ * Single source of truth for color, typography, shape, elevation, and motion
+ * across every zone. See docs/planning/09-design-system.md section 3.
+ *
+ * Consumption (the ONE adoption step covering tokens + primitives styling):
+ *   the consuming app's own CSS entry must, in this order:
+ *     @import "tailwindcss";
+ *     @import "@hyperbolic/ui/styles/tokens.css";
+ *   Do not add a second `@import "tailwindcss"` here -- tailwindcss is a
+ *   peer dependency; the consuming app owns the one build-wide import and
+ *   this file only supplies token definitions plus the @theme mapping that
+ *   the app's build folds in. The @source directive below makes the app's
+ *   Tailwind build scan this package's primitives for utility classes
+ *   automatically, so consumers never need a manual content-glob step.
+ *
+ * Theme cascade (binding, see section 3.1 -- do not restructure):
+ *   1. Bare `:root` defines the complete LIGHT palette. Every token gets
+ *      its base definition here, including tokens that never change by
+ *      theme (typography, shape, motion).
+ *   2. `@media (prefers-color-scheme: dark)` guarded as
+ *      `:root:not([data-theme="light"])` redefines the dark values --
+ *      this is the "follow the OS" tier.
+ *   3. `:root[data-theme="dark"]` redefines them again, unconditionally --
+ *      this is the "explicit user choice" tier, and it wins over OS
+ *      preference in both directions (an explicit data-theme="light" with
+ *      a dark OS stays light, because neither dark block's selector
+ *      matches; an explicit data-theme="dark" with a light OS still goes
+ *      dark, because tier 3 does not depend on prefers-color-scheme).
+ *   No token may be defined ONLY inside tier 2 or tier 3 -- every token
+ *   that varies by theme gets all three definitions, in this exact order.
+ *   `data-theme` itself is written to the document root by the shared
+ *   theme-switch component (out of scope for this package).
+ */
+
+@import "@fontsource-variable/geist";
+
+@source "../src";
+
+@theme inline {
+  /* color */
+  --color-bg: var(--color-bg);
+  --color-bg-subtle: var(--color-bg-subtle);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-overlay: var(--color-overlay);
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+  --color-text: var(--color-text);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+  --color-accent: var(--color-accent);
+  --color-accent-fg: var(--color-accent-fg);
+  --color-accent-muted: var(--color-accent-muted);
+  --color-success: var(--color-success);
+  --color-success-bg: var(--color-success-bg);
+  --color-warn: var(--color-warn);
+  --color-warn-bg: var(--color-warn-bg);
+  --color-danger: var(--color-danger);
+  --color-danger-bg: var(--color-danger-bg);
+  --color-info: var(--color-info);
+  --color-info-bg: var(--color-info-bg);
+  --color-ring: var(--color-ring);
+
+  /* typography */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --text-xs: var(--text-xs);
+  --text-xs--line-height: var(--text-xs--line-height);
+  --text-sm: var(--text-sm);
+  --text-sm--line-height: var(--text-sm--line-height);
+  --text-base: var(--text-base);
+  --text-base--line-height: var(--text-base--line-height);
+  --text-md: var(--text-md);
+  --text-md--line-height: var(--text-md--line-height);
+  --text-lg: var(--text-lg);
+  --text-lg--line-height: var(--text-lg--line-height);
+  --text-xl: var(--text-xl);
+  --text-xl--line-height: var(--text-xl--line-height);
+  --text-2xl: var(--text-2xl);
+  --text-2xl--line-height: var(--text-2xl--line-height);
+  --font-weight-normal: var(--font-weight-normal);
+  --font-weight-medium: var(--font-weight-medium);
+  --font-weight-semibold: var(--font-weight-semibold);
+
+  /* shape (bare --radius is an internal multiplier base, not itself a
+     Tailwind namespace member -- matches the ACC reference file) */
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-full: var(--radius-full);
+
+  /* elevation */
+  --shadow-0: var(--shadow-0);
+  --shadow-1: var(--shadow-1);
+  --shadow-2: var(--shadow-2);
+  --shadow-3: var(--shadow-3);
+
+  /* motion */
+  --duration-fast: var(--duration-fast);
+  --duration-base: var(--duration-base);
+  --duration-slow: var(--duration-slow);
+  --ease-standard: var(--ease-standard);
+  --ease-exit: var(--ease-exit);
+}
+
+:root {
+  /* color -- light (reference values; --color-warn/-danger/-info/-ring
+     were tuned from docs/planning/09-design-system.md's reference oklch
+     numbers -- see the "contrast tuning" note at the end of this file) */
+  --color-bg: oklch(1 0 0);
+  --color-bg-subtle: oklch(0.97 0 0);
+  --color-surface: oklch(1 0 0);
+  --color-surface-raised: oklch(1 0 0);
+  --color-overlay: oklch(0 0 0 / 45%);
+  --color-border: oklch(0.922 0 0);
+  --color-border-strong: oklch(0.87 0 0);
+  --color-text: oklch(0.145 0 0);
+  --color-text-secondary: oklch(0.44 0 0);
+  --color-text-muted: oklch(0.556 0 0);
+  --color-accent: oklch(0.205 0 0);
+  --color-accent-fg: oklch(0.985 0 0);
+  --color-accent-muted: oklch(0.97 0 0);
+  --color-success: oklch(0.52 0.15 150);
+  --color-success-bg: oklch(0.96 0.04 150);
+  --color-warn: oklch(0.54 0.13 80);
+  --color-warn-bg: oklch(0.97 0.05 90);
+  --color-danger: oklch(0.55 0.245 27);
+  --color-danger-bg: oklch(0.97 0.03 27);
+  --color-info: oklch(0.53 0.14 250);
+  --color-info-bg: oklch(0.96 0.03 250);
+  --color-ring: oklch(0.64 0 0);
+
+  /* typography (theme-invariant) */
+  --font-sans: "Geist Variable", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --text-xs: 0.75rem; /* 12px */
+  --text-xs--line-height: 1rem; /* 16px */
+  --text-sm: 0.8125rem; /* 13px */
+  --text-sm--line-height: 1.125rem; /* 18px */
+  --text-base: 0.875rem; /* 14px */
+  --text-base--line-height: 1.3125rem; /* 21px */
+  --text-md: 1rem; /* 16px */
+  --text-md--line-height: 1.5rem; /* 24px */
+  --text-lg: 1.125rem; /* 18px */
+  --text-lg--line-height: 1.625rem; /* 26px */
+  --text-xl: 1.375rem; /* 22px */
+  --text-xl--line-height: 1.75rem; /* 28px */
+  --text-2xl: 1.75rem; /* 28px */
+  --text-2xl--line-height: 2.125rem; /* 34px */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* shape (theme-invariant) */
+  --radius: 0.625rem;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-full: 9999px;
+
+  /* elevation -- light (shadows never encode meaning, only depth) */
+  --shadow-0: none;
+  --shadow-1: 0 1px 2px 0 oklch(0 0 0 / 4%), 0 1px 3px 0 oklch(0 0 0 / 8%);
+  --shadow-2: 0 4px 6px -1px oklch(0 0 0 / 8%), 0 2px 4px -2px oklch(0 0 0 / 8%);
+  --shadow-3: 0 20px 25px -5px oklch(0 0 0 / 12%), 0 8px 10px -6px oklch(0 0 0 / 10%);
+
+  /* motion (theme-invariant; enter decelerates, exit accelerates) */
+  --duration-fast: 100ms;
+  --duration-base: 180ms;
+  --duration-slow: 300ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Tier 2: follow the OS, unless an explicit choice says otherwise. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: oklch(0.145 0 0);
+    --color-bg-subtle: oklch(0.185 0 0);
+    --color-surface: oklch(0.205 0 0);
+    --color-surface-raised: oklch(0.245 0 0);
+    --color-overlay: oklch(0 0 0 / 60%);
+    --color-border: oklch(1 0 0 / 10%);
+    --color-border-strong: oklch(1 0 0 / 18%);
+    --color-text: oklch(0.985 0 0);
+    --color-text-secondary: oklch(0.78 0 0);
+    --color-text-muted: oklch(0.708 0 0);
+    --color-accent: oklch(0.922 0 0);
+    --color-accent-fg: oklch(0.205 0 0);
+    --color-accent-muted: oklch(0.269 0 0);
+    --color-success: oklch(0.75 0.16 150);
+    --color-success-bg: oklch(0.28 0.06 150);
+    --color-warn: oklch(0.8 0.14 85);
+    --color-warn-bg: oklch(0.3 0.06 85);
+    --color-danger: oklch(0.704 0.191 22);
+    --color-danger-bg: oklch(0.3 0.08 25);
+    --color-info: oklch(0.75 0.13 250);
+    --color-info-bg: oklch(0.29 0.06 250);
+    --color-ring: oklch(0.556 0 0);
+
+    /* elevation -- dark halves the alpha of every layer vs. light */
+    --shadow-1: 0 1px 2px 0 oklch(0 0 0 / 2%), 0 1px 3px 0 oklch(0 0 0 / 4%);
+    --shadow-2: 0 4px 6px -1px oklch(0 0 0 / 4%), 0 2px 4px -2px oklch(0 0 0 / 4%);
+    --shadow-3: 0 20px 25px -5px oklch(0 0 0 / 6%), 0 8px 10px -6px oklch(0 0 0 / 5%);
+  }
+}
+
+/* Tier 3: explicit user choice, wins over OS preference in both directions. */
+:root[data-theme="dark"] {
+  --color-bg: oklch(0.145 0 0);
+  --color-bg-subtle: oklch(0.185 0 0);
+  --color-surface: oklch(0.205 0 0);
+  --color-surface-raised: oklch(0.245 0 0);
+  --color-overlay: oklch(0 0 0 / 60%);
+  --color-border: oklch(1 0 0 / 10%);
+  --color-border-strong: oklch(1 0 0 / 18%);
+  --color-text: oklch(0.985 0 0);
+  --color-text-secondary: oklch(0.78 0 0);
+  --color-text-muted: oklch(0.708 0 0);
+  --color-accent: oklch(0.922 0 0);
+  --color-accent-fg: oklch(0.205 0 0);
+  --color-accent-muted: oklch(0.269 0 0);
+  --color-success: oklch(0.75 0.16 150);
+  --color-success-bg: oklch(0.28 0.06 150);
+  --color-warn: oklch(0.8 0.14 85);
+  --color-warn-bg: oklch(0.3 0.06 85);
+  --color-danger: oklch(0.704 0.191 22);
+  --color-danger-bg: oklch(0.3 0.08 25);
+  --color-info: oklch(0.75 0.13 250);
+  --color-info-bg: oklch(0.29 0.06 250);
+  --color-ring: oklch(0.556 0 0);
+
+  /* elevation -- dark halves the alpha of every layer vs. light */
+  --shadow-1: 0 1px 2px 0 oklch(0 0 0 / 2%), 0 1px 3px 0 oklch(0 0 0 / 4%);
+  --shadow-2: 0 4px 6px -1px oklch(0 0 0 / 4%), 0 2px 4px -2px oklch(0 0 0 / 4%);
+  --shadow-3: 0 20px 25px -5px oklch(0 0 0 / 6%), 0 8px 10px -6px oklch(0 0 0 / 5%);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+    outline-color: color-mix(in oklch, var(--color-ring) 50%, transparent);
+  }
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+  }
+  html {
+    font-family: var(--font-sans);
+  }
+}
+
+/*
+ * prefers-reduced-motion (Finding #75, PR #8 security review -- the
+ * reduced-motion half only; the contrast half of that same original
+ * finding is a separate, already-bounded scope decision and is untouched
+ * here). A single, global override: every transition/animation this
+ * package (or any consumer built on its tokens) declares collapses to
+ * effectively-instant for anyone whose OS has requested reduced motion.
+ * Deliberately NOT a per-component redesign -- the
+ * `prefers-reduced-motion: reduce` media feature just needs motion
+ * suppressed, not replaced with a bespoke reduced variant per animation;
+ * `0.01ms` (not `0s`/`none`) is the standard trick that keeps
+ * transitionend/animationend events still firing for any code that awaits
+ * them, just too fast to visually register.
+ *
+ * `!important` is intentional here (used nowhere else in this file):
+ * Tailwind utility classes (e.g. nav-rail.tsx's own
+ * `transition-colors duration-base ease-standard`) set
+ * transition-duration/animation-duration directly at utility-class
+ * specificity, and this rule must win over every one of them
+ * unconditionally, not just the ones it happens to out-specificity.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Contrast tuning note (WCAG 2.1 AA, computed by test/contrast.test.mjs):
+ * four LIGHT-theme values above were nudged from the reference oklch
+ * numbers in docs/planning/09-design-system.md section 3.2, lightness
+ * only, hue/chroma untouched, because the reference values measured
+ * under the 4.5:1 / 3:1 floors. All dark-theme reference values passed
+ * unchanged. Exact before/after ratios are reported alongside this
+ * package's verification output; see also the "known non-passing pairs"
+ * comment in test/contrast.test.mjs for the two pairs left intentionally
+ * out of the automated gate.
+ */

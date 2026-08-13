@@ -2,7 +2,7 @@
 
 A standalone Claude Code `PreToolUse` security hook: blocks reads/writes of
 secret-shaped files, blocks direct writes to a protected path list, and
-enforces per-repo "cell" path ownership declared in `config.json`.
+enforces per-repo "cell" path ownership declared in `config.<profile>.json`.
 
 Extracted from `agentic-command-center`'s guard system so it can be used
 independently of any particular control-panel/runner. This module has no
@@ -15,20 +15,46 @@ stdin and a config file.
   set (exported for tests); the rest of the file is an I/O wrapper that only
   runs when this file is the process entry point (`node guard.mjs`, exactly
   how Claude Code invokes a hook).
-- `cli.mjs` — mutates `config.json`: `status`, `toggle on|off`,
-  `secret-add/rm <glob>`, `protected-add/rm <path>`. A caller (e.g. a web
-  control panel) shells this for every guard-config change; `guard.mjs`
-  itself never writes its config.
-- `config.json` — the real, live config, tracked as-is (this repo's copy is
-  the operator's own — secrets/protected paths/repo cell data). See
-  `config.example.json` for the shape without real values.
+- `cli.mjs` — mutates the config: `status`, `toggle on|off`,
+  `secret-add/rm <glob>` (base `config.json`), `protected-add/rm <path>`
+  (the resolved overlay). A caller (e.g. a web control panel) shells this for
+  every guard-config change; `guard.mjs` itself never writes its config.
+- `config.json` — the tracked base config: `enabled` and `secrets`, the
+  parts that don't vary by machine.
+- `config.<profile>.json` — a tracked per-machine overlay carrying the
+  machine-varying parts (`runboxDir`, `protected`, `repos`); this repo's
+  `config.kyleg-machine.json` is the operator's own. See `config.example.json`
+  for the shape of both files without real values.
+- `config-loader.mjs` — shared by `guard.mjs` and `cli.mjs`: resolves and
+  shallow-merges the base + overlay pair described below.
 
 ## Configuration
 
-Both files resolve their config path the same way: the `GUARDS_CONFIG`
-environment variable if set, otherwise `config.json` colocated with the
-script. There is no dependency on any particular directory layout beyond
-that — set `GUARDS_CONFIG` to point at a config anywhere.
+Both files resolve their config the same way (`config-loader.mjs`):
+
+1. `GUARDS_CONFIG` environment variable, if set — an absolute pointer to one
+   fully-resolved config file, bypassing everything below exactly as before
+   this module had a profile concept. Existing callers (tests, an embedding
+   caller's subprocess calls) are unaffected by anything below.
+2. Otherwise, the tracked `config.json` colocated with the script (base) is
+   shallow-merged with a tracked per-machine overlay `config.<profile>.json`,
+   also colocated with the script, where `<profile>` is the `GUARDS_PROFILE`
+   environment variable if set, else the lowercased hostname. A missing
+   overlay merges as base-only — the secret globs (the read-blocking check)
+   still apply, but the machine-specific protected/repo rules are empty on an
+   unrecognized machine.
+
+There is no dependency on any particular directory layout beyond that — set
+`GUARDS_CONFIG` to point at a config anywhere, on any machine.
+
+## Decision audit trail
+
+If the `GUARDS_LOG` environment variable is set, `guard.mjs` appends exactly
+one JSONL record per decision (`ts`, `tool`, `target`, `allow`, `rule`, and
+`reason`/`profile` when applicable) to the file it names. Logging is
+best-effort and always happens after the allow/deny decision is already
+final: a failed append (unwritable path, etc.) never changes the decision.
+Unset, nothing is written.
 
 ## Registering the hook
 

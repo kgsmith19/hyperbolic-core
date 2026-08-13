@@ -1,5 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render } from "../web/render.mjs";
 import { searchPrompts } from "../web/search.mjs";
 
@@ -7,6 +11,9 @@ import { searchPrompts } from "../web/search.mjs";
 const BUDGET_MS = 100;
 // Searching a 1,000-prompt library must stay below this p95 budget.
 const SEARCH_BUDGET_MS = 300;
+// PO-2 (05-d-prompt-organizer.md section 4): rpc/get_prompt, warm client,
+// network included, p95 budget.
+const GET_PROMPT_BUDGET_MS = 150;
 
 // p95 over warm iterations. Warm-up matters: the first call pays JIT cost.
 // Iterating matters too -- a single shot is what produced the 34.7ms figure
@@ -136,3 +143,201 @@ test("searches_1000_prompts_within_budget__T_U_029", () => {
     `NFR-001: p95 ${measured.toFixed(1)}ms must be under ${SEARCH_BUDGET_MS}ms at 1,000 prompts`,
   );
 });
+
+// m4-03-feat-po-injection-rpc, PO-2: p95 over 50 rpc/get_prompt calls under
+// 150ms. The issue's own verification command names this exact budget
+// against rpc/get_prompt (05-d-prompt-organizer.md section 4's table:
+// "warm client, network included").
+//
+// What this section CAN and CANNOT prove, stated plainly: get_prompt does
+// not exist on the live Supabase project yet (confirmed live while
+// implementing this issue: POST rest/v1/rpc/get_prompt with the public
+// anon key returns PGRST202, "Could not find the function
+// prompt.get_prompt(p_name) in the schema cache" -- platform-migrations.yml
+// has not deployed this migration pair). There is therefore no reachable
+// target yet for the literal PO-2 measurement (PostgREST HTTP round trip,
+// auth, network). What IS reachable and genuinely measured here is
+// get_prompt's own execution latency against a real PostgreSQL 16 engine,
+// on a warm session (planner/JIT warmed by 5 untimed iterations first,
+// matching this file's own p95() convention above) -- the RPC body's real
+// cost, with the HTTP/PostgREST/network layer this budget nominally
+// includes necessarily absent until deployment. This is a narrower, honest
+// proxy for PO-2, not a claim of having measured the full path; the gap is
+// closed and this section can be extended to the live target as soon as
+// platform-migrations.yml has actually applied the migration.
+//
+// Detection/skip mechanics match get-prompt.test.mjs and seed.test.mjs
+// (this same issue): skip cleanly, via node:test's own mechanism, when no
+// local Postgres is reachable, rather than fabricate a number.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "supabase", "migrations");
+const PO_MIGRATIONS_DIR = join(__dirname, "..", "supabase", "migrations");
+const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
+const PO_MIGRATIONS_IN_ORDER = [
+  "20260807020000_prompt_create_prompt.sql",
+  "20260807041000_prompt_versions_and_unique_title.sql",
+  "20260807051000_prompt_create_tag.sql",
+  "20260807070000_prompt_create_usage.sql",
+  "20260808000000_prompt_add_is_active.sql",
+  "20260808100000_prompt_create_configuration.sql",
+  "20260808130000_prompt_create_render_function.sql",
+  "20260812180000_prompt_owner_pin.sql",
+  "20260812200000_prompt_observed_query_indexes.sql",
+  "20260813120000_prompt_create_get_prompt_function.sql",
+];
+
+const PERF_OWNER_UUID = "9a50a35a-8a1e-4f0c-8495-7f26777982d8";
+
+const PERF_HARNESS_SQL = `
+create schema if not exists auth;
+create table if not exists auth.users (
+  id uuid primary key default gen_random_uuid()
+);
+create or replace function auth.uid() returns uuid
+language sql stable
+as $$ select nullif(current_setting('app.test_uid', true), '')::uuid $$;
+
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
+  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
+  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
+  if not exists (select 1 from pg_roles where rolname = 'authenticator') then create role authenticator nologin; end if;
+end
+$$;
+
+insert into auth.users (id) values ('${PERF_OWNER_UUID}');
+`;
+
+function perfTryRunner(cmd, args) {
+  try {
+    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], { encoding: "utf8", timeout: 5000 });
+    return result.status === 0 && result.stdout.trim() === "1";
+  } catch {
+    return false;
+  }
+}
+
+function perfDetectRunner() {
+  if (perfTryRunner("psql", [])) return { cmd: "psql", args: [] };
+  if (perfTryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
+  return null;
+}
+
+const PERF_RUNNER = perfDetectRunner();
+const PERF_SKIP_REASON = PERF_RUNNER
+  ? false
+  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); get_prompt is not deployed " +
+    "on the live Supabase project yet (confirmed live: rpc/get_prompt returns PGRST202), so this suite has " +
+    "nothing honest to measure against either target without a reachable engine";
+
+function perfPsql(dbName, sqlText) {
+  return spawnSync(PERF_RUNNER.cmd, [...PERF_RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
+    encoding: "utf8",
+    input: sqlText,
+    timeout: 30000,
+  });
+}
+
+function perfPsqlOk(dbName, sqlText) {
+  const result = perfPsql(dbName, sqlText);
+  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
+  return result.stdout;
+}
+
+// See get-prompt.test.mjs for the "tuple concurrently updated" rationale.
+function perfApplyWithRetry(dbName, sqlText, attempts = 5) {
+  const wrapped = `begin;\n${sqlText}\ncommit;\n`;
+  let lastResult;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    lastResult = perfPsql(dbName, wrapped);
+    if (lastResult.status === 0) return lastResult.stdout;
+    if (!/tuple concurrently updated/.test(lastResult.stderr || "")) break;
+  }
+  assert.equal(lastResult.status, 0, `psql failed against ${dbName}: ${lastResult.stderr || lastResult.stdout}`);
+  return lastResult.stdout;
+}
+
+function perfFreshDbName() {
+  return `m4_03_perf_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+}
+
+test(
+  "real Postgres: rpc/get_prompt p95 over 50 warm calls stays under the PO-2 150ms budget (engine-level; see comment above for the network-layer gap)",
+  { skip: PERF_SKIP_REASON },
+  () => {
+    const db = perfFreshDbName();
+    perfPsqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
+    try {
+      perfPsqlOk(db, PERF_HARNESS_SQL);
+      perfPsqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
+      perfPsqlOk(db, `insert into platform.config (owner_uuid) values ('${PERF_OWNER_UUID}');`);
+      for (const name of PO_MIGRATIONS_IN_ORDER) {
+        const sql = readFileSync(join(PO_MIGRATIONS_DIR, name), "utf8");
+        if (name === "20260807020000_prompt_create_prompt.sql") perfApplyWithRetry(db, sql);
+        else perfPsqlOk(db, sql);
+      }
+
+      // A realistic-sized prompt (variables + an optional section), not a
+      // trivial one-token body, so the measured cost reflects the same
+      // section-then-variable resolution work a real injection call does.
+      perfPsqlOk(
+        db,
+        `set role authenticated;
+         do $$ begin perform set_config('app.test_uid', '${PERF_OWNER_UUID}', false); end $$;
+         insert into prompt.prompt (title, body) values (
+           'perf/get-prompt-fixture',
+           'Head {{A}}. <!--OPTIONAL:s-->Section {{B}} {{C}}.<!--/OPTIONAL:s--> Tail {{D}} {{E}}.'
+         );
+         insert into prompt.configuration (prompt_id, name, values, sections)
+         select id, 'perf', '{"A":"1","B":"2","C":"3","D":"4","E":"5"}'::jsonb, '{s}'::text[]
+         from prompt.prompt where title = 'perf/get-prompt-fixture';`,
+      );
+
+      const samplesRaw = perfPsqlOk(
+        db,
+        `set role authenticated;
+         do $$ begin perform set_config('app.test_uid', '${PERF_OWNER_UUID}', false); end $$;
+         create temp table perf_samples (ms double precision);
+         do $$
+         declare
+           t0 timestamptz;
+           t1 timestamptz;
+           i int;
+         begin
+           -- Warmup: JIT/plan caching, matching this file's own p95()
+           -- convention (5 untimed calls before any timed sample).
+           for i in 1..5 loop
+             perform prompt.get_prompt('perf/get-prompt-fixture', null, 'perf', null, null);
+           end loop;
+           for i in 1..50 loop
+             t0 := clock_timestamp();
+             perform prompt.get_prompt('perf/get-prompt-fixture', null, 'perf', null, null);
+             t1 := clock_timestamp();
+             insert into perf_samples (ms) values (extract(epoch from (t1 - t0)) * 1000);
+           end loop;
+         end
+         $$;
+         select ms from perf_samples order by ms;`,
+      );
+
+      const samples = samplesRaw
+        .trim()
+        .split("\n")
+        .map(Number)
+        .filter((n) => Number.isFinite(n));
+      assert.equal(samples.length, 50, `expected 50 timed samples, got ${samples.length}`);
+
+      const p95Index = Math.floor(samples.length * 0.95);
+      const measured = samples[Math.min(p95Index, samples.length - 1)];
+
+      assert.ok(
+        measured < GET_PROMPT_BUDGET_MS,
+        `PO-2 (engine-level proxy): p95 ${measured.toFixed(2)}ms must be under ${GET_PROMPT_BUDGET_MS}ms ` +
+          `(all 50 samples: ${samples.map((n) => n.toFixed(2)).join(", ")})`,
+      );
+    } finally {
+      perfPsqlOk("postgres", `drop database if exists ${db};`);
+    }
+  },
+);

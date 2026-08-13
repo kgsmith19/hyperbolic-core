@@ -1,0 +1,60 @@
+-- Independent review, Finding 11 (idea-intake, m3-08 follow-up): closes the
+-- half of the migrate-forgepad.mjs idempotency bug that only a real
+-- database constraint can close.
+--
+-- tools/migrate-forgepad.mjs's `fetchExistingSources` checks for an already-
+-- migrated row by exact `source` string match BEFORE the insert transaction
+-- opens (a plain SELECT, its own separate psql invocation) -- a genuine
+-- TOCTOU window: two concurrent runs of the CLI (e.g. an operator re-running
+-- it while a previous run is still in flight) can both pass that pre-check
+-- for the same forgepad idea and both attempt to insert it.
+-- `intake.idea.source` (20260813002605_intake_create_schema.sql) has never
+-- had any uniqueness guarantee at all -- so without this migration, that
+-- race lands two rows in the database, not zero or one.
+--
+-- Application-level in-batch dedupe (partitionNewRows, tools/migrate-forgepad.mjs)
+-- separately closes the "two files mapping to the same forgepad id within
+-- ONE run" half of Finding 11 -- that is pure JS logic with no database
+-- component and needs none here. This migration, paired with the
+-- `ON CONFLICT ... DO NOTHING` this issue's fix adds to the CLI's INSERT
+-- (buildRowSql), closes the "two SEPARATE runs racing" half atomically: the
+-- pre-check becomes an optimization (skip an obviously-already-done row
+-- without touching the DB) rather than the only thing standing between a
+-- race and a duplicate row, matching this schema's existing II-1/II-3
+-- posture of enforcing correctness as a database property, not app
+-- discipline alone.
+--
+-- Why a partial expression index on a SUBSTRING of `source`, not a plain
+-- unique constraint on the whole `source` column, and not a new dedicated
+-- provenance column (both considered):
+--
+--   * `source` is a general free-text field every idea carries, forgepad-
+--     migrated or not (section 1.2's DDL: `source text not null default
+--     ''`). A unique index on the full column would wrongly reject two
+--     unrelated ideas that both happen to have left `source` at its default
+--     '', or two independently-authored ideas that happen to share the same
+--     freeform provenance text -- correctness this migration must not
+--     regress.
+--   * The actual immutable, stable provenance key is the fixed-width
+--     `forgepad:f-<8 lowercase hex chars>` PREFIX that buildSource()
+--     (tools/migrate-forgepad.mjs) always writes first; everything after it
+--     is the forgepad idea's own OPTIONAL, mutable original `source` text,
+--     appended verbatim after "; ". Indexing the whole string would treat
+--     two rows for the SAME forgepad id as distinct if that trailing text
+--     ever differed even slightly -- exactly the mutable-string weakness
+--     Finding 11 named. Indexing just the prefix ties uniqueness to the one
+--     part of the string that is actually a stable identifier.
+--   * A dedicated `external_ref`/provenance column was considered and
+--     rejected as more invasive than this bug calls for: it would need its
+--     own grants/RLS/PostgREST-exposure updates (section 3.2) for a column
+--     nothing else in 05-h's schema references, to fix a bug a partial
+--     index on the already-existing column closes completely and
+--     additively.
+--
+-- The index is scoped (`where source like 'forgepad:f-________%'`) to rows
+-- that actually carry the forgepad provenance prefix, so it imposes zero
+-- constraint on any other idea's `source` value -- purely additive, per
+-- this repo's migration convention.
+create unique index intake_idea_forgepad_source_ref
+  on intake.idea (substring(source from '^forgepad:f-[0-9a-f]{8}'))
+  where source like 'forgepad:f-________%';

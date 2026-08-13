@@ -54,6 +54,25 @@ export async function login(user) {
   return tokenRequests.get(user.email);
 }
 
+const OWNER_TOKEN_ENV = "TOOLBELT_OWNER_TOKEN";
+
+// The identity positive-path suites authenticate as (docs/planning/issues/
+// m1-07-chore-platform-idp-owner-setup.md; docs/planning/06-supabase-schema.md
+// section 5.4, sequence step S3). Falls back to the TEST_USER_A fixture when
+// TOOLBELT_OWNER_TOKEN is unset, which is what keeps this suite green today,
+// before the owner user exists: under current (pre-re-pin) policies the
+// fixture is just another authenticated caller, so the fallback is
+// behaviorally identical to the pre-m1-07 suite. That fallback stops being
+// sufficient the moment the m1-08 re-pin lands (fixtures lose core/idea/prompt
+// access entirely), which is deliberate: CI going red on this suite at that
+// point is the signal that TOOLBELT_OWNER_TOKEN still needs to be supplied,
+// not a bug to work around.
+export async function primaryToken() {
+  const owner = process.env[OWNER_TOKEN_ENV];
+  if (owner) return owner;
+  return login(TEST_USER_A);
+}
+
 export async function rest(schema, path, { token, method = "GET", body } = {}) {
   const headers = { apikey: SUPABASE_ANON_KEY, "Accept-Profile": schema, "Content-Profile": schema };
   headers.Authorization = `Bearer ${token || SUPABASE_ANON_KEY}`;

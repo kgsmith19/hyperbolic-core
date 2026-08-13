@@ -1,0 +1,12 @@
+{
+  "name": "hyperbolic-core",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/shell",
+    "apps/toolbelt"
+  ],
+  "scripts": {
+    "tool:new": "node packages/toolbelt-cli/bin/tool.mjs"
+  }
+}

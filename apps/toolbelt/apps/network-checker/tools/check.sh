@@ -31,7 +31,7 @@ run "code simplification (tests)" python3 tools/code_simplification.py tests -i 
 run "security review (high)" python3 tools/security_review.py . -i high
 run "documentation check (medium)" python3 tools/documentation_check.py . -i medium
 
-for script in tools/fix_*.sh tools/run_fixes.sh; do
+for script in tools/fix_*.sh; do
     [ -f "$script" ] && run "shell syntax: $script" bash -n "$script"
 done
 

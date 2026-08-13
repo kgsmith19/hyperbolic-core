@@ -1,0 +1,30 @@
+-- Independent security review, Finding 35 (re-verified against current
+-- HEAD): intake.idea's `source` column can be set at creation
+-- (20260813002605_intake_create_schema.sql's INSERT grant already includes
+-- it: "grant insert (parent_idea_id, title, problem, outcome, notes,
+-- confidence, source, target_repo) on intake.idea to authenticated") but
+-- can never be edited afterward -- that same migration's UPDATE grant
+-- ("grant update (title, problem, outcome, notes, confidence, status,
+-- target_repo, github_issue_number, github_issue_url, submitted_at,
+-- updated_at) on intake.idea to authenticated") omits `source`, unlike
+-- every one of its sibling free-text fields (title, problem, outcome,
+-- notes), which are all both insertable and updatable. Nothing in
+-- docs/planning/05-h-idea-intake.md section 3.2's own grant rationale
+-- singles `source` out as an exception, and no guard trigger or CHECK
+-- constraint treats it specially either -- this reads as an oversight in
+-- the original column list, not a deliberate immutability decision (unlike
+-- id, idempotency_key, parent_idea_id, user_id, created_at, which that
+-- same section's comment explicitly documents as "not updatable by any API
+-- caller, ever").
+--
+-- Fix: add `source` to the UPDATE grant. Harmless beyond draft/idea state:
+-- `intake.guard_idea_update` (20260813002605_intake_create_schema.sql)
+-- already raises "II-3: submitted ideas are immutable" for ANY update
+-- attempt once status = 'submitted_to_github', regardless of which columns
+-- the statement touches -- so this grant only ever has an effect while an
+-- idea is still a draft or in the 'idea' state, exactly where editing
+-- `source` (e.g. correcting where an idea actually came from, before it is
+-- promoted) is a legitimate, expected action. No RLS change: intake.idea's
+-- existing owner_rw policy already scopes every UPDATE to the row's own
+-- owner.
+grant update (source) on intake.idea to authenticated;

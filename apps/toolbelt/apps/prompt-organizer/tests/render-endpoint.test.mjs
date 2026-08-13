@@ -1,9 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { login, rest, USER_A, USER_B, SUPABASE_URL, ANON_KEY } from "./helpers.mjs";
+import { login, rest, primaryToken, USER_B, SUPABASE_URL, ANON_KEY } from "./helpers.mjs";
 
 // SPEC-0012 (SL-009): render endpoint. A Postgres RPC exposed by PostgREST
 // (SR-02: no application server), not a new service.
+//
+// Owner-credential threading (toolbelt-ci.yml P1 finding): T-A-007,
+// T-I-021, and T-I-022 are single-identity, so they authenticate via
+// primaryToken() (owner token when supplied, fixture-A fallback
+// otherwise). T-I-023 is about a *non-owner* being denied, so its
+// intruding session (tokenB) stays login(USER_B); only its resource-owning
+// setup session (tokenA) needs real write access.
 
 async function seedPrompt(token, title, body) {
   const created = await rest("prompt", { token, method: "POST", body: { title, body } });
@@ -21,7 +28,7 @@ async function seedPrompt(token, title, body) {
 // endpoint returns JSON like every other endpoint in this app -- the text
 // is exact, just JSON-quoted, same posture as SPEC-0002 AC-001's correction.
 test("renders_via_rpc_as_json__T_A_007__AC_001", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const title = `Render Endpoint Fixture ${Date.now()}`;
   const promptId = await seedPrompt(token, title, "Repo is {{REPO}}.");
   const saved = await rest("configuration", {
@@ -42,7 +49,7 @@ test("renders_via_rpc_as_json__T_A_007__AC_001", async () => {
 
 // T-I-021 -> AC-002 -> FR-013
 test("unknown_prompt_name_returns_404__T_I_021__AC_002", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
 
   const res = await rest(`rpc/render_prompt?p_name=${encodeURIComponent(`does-not-exist ${Date.now()}`)}`, { token });
 
@@ -51,7 +58,7 @@ test("unknown_prompt_name_returns_404__T_I_021__AC_002", async () => {
 
 // T-I-022 -> AC-003 -> FR-013, FR-010
 test("unfilled_variable_is_blocked_not_leaked__T_I_022__AC_003", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const title = `Render Missing Var Fixture ${Date.now()}`;
   await seedPrompt(token, title, "Repo is {{REPO}}.");
 
@@ -63,7 +70,7 @@ test("unfilled_variable_is_blocked_not_leaked__T_I_022__AC_003", async () => {
 
 // T-I-023 -> AC-004 -> FR-013, NFR-003
 test("cross_user_cannot_render_another_users_prompt__T_I_023__AC_004", async () => {
-  const tokenA = await login(USER_A);
+  const tokenA = await primaryToken();
   const tokenB = await login(USER_B);
   const title = `Render RLS Fixture ${Date.now()}`;
   await seedPrompt(tokenA, title, "no variables here");

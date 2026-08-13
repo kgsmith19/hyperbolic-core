@@ -27,11 +27,38 @@ choices and product safeguards remain local to this directory.
   push leaves rows available for retry.
 - Device credentials are sent only after every resolved destination address is
   confirmed private.
-- Automated device configuration writes are outside the product's scope.
+- Every write requires a recorded dry run and an explicit interactive
+  approval, and the only automatic write permitted is the pre-recorded
+  rollback of a change that just failed verification.
+
+## Network egress
+
+`tool.json`'s `permissions.networkEgress` enumerates every STATIC host this
+app contacts: `ipapi.co` (geoip.py), `api.ipify.org` and
+`status.anthropic.com` (remote.py), `api.anthropic.com` (environ.py's
+`TARGET` default and probes.py's `sample()` default target), and `1.1.1.1`
+(probes.py's `PUBLIC_DNS` control probe, route.py's `first_hop` default).
+
+Two egress destinations are genuinely dynamic and cannot be expressed as a
+fixed hostname in that array (`tool.schema.json`'s `networkEgress` items are
+plain hostname strings, with no placeholder/wildcard/note convention for
+"not a fixed value" -- and neither `tool.json` nor `tool.schema.json` has
+room for a free-text field elsewhere; both are `additionalProperties:
+false` on every object each already fully declares):
+
+- the local router/modem, discovered at runtime as the current default
+  gateway (SNMP scalar reads, DOCSIS status) -- a different address on
+  every network this tool runs on, never a fixed hostname;
+- the optional Supabase mirror (`store.mirror`, `SUPABASE_URL`/`SUPABASE_KEY`
+  read from the environment) -- configurable per deployment, not a value
+  this manifest can pin.
+
+This is a deliberate, documented gap in the manifest's static enumeration,
+not an oversight (independent security review, Finding 65).
 
 ## Commands
 
-Run from `apps/network-checker/`.
+Run from `apps/toolbelt/apps/network-checker/`.
 
 ```bash
 python -m unittest discover -s tests -t .
@@ -57,15 +84,23 @@ and shell syntax checks.
 | `netcheck/dualstack.py` | Separate IPv4 and IPv6 reachability |
 | `netcheck/route.py` | Default gateway and first ISP hop |
 | `netcheck/wlan_probes.py` | Windows and macOS Wi-Fi output parsers |
+| `netcheck/linux_adapter_probes.py` | Linux `iw`/`ethtool` adapter-state probes: live tx-power vs. this radio's own ceiling, and power_save/Wake-on-LAN together -- the property-specific verify probes the `wifi_mode`/`adapter_power` change templates use (05-f section 4.5, Finding 18) |
 | `netcheck/docsis.py` | DOCSIS status parsing |
 | `netcheck/ssdp.py` | SSDP/UPnP gateway discovery |
 | `netcheck/snmp.py` | Scoped SNMPv2c scalar reads |
+| `netcheck/topology.py` | LAN device map: the address-resolution table (`arp -a`/`ip neigh`) parsed into IP/MAC pairs, with the SSDP-identified gateway named |
+| `netcheck/exposure.py` | Deep-tier, detection-only LAN exposure checks: open management ports and default-credential acceptance, read requests only |
 | `netcheck/environ.py` | Local system and network snapshot |
 | `netcheck/remote.py` | Modem, router, WAN, and provider status |
+| `netcheck/geoip.py` | Coarse WAN geolocation enriching the `wan` section; every failure degrades to `unavailable`, never `fail` |
 | `netcheck/llmlog.py` | Transcript error extraction and classification |
 | `netcheck/watch.py` | Continuous sampling loop |
 | `netcheck/store.py` | SQLite persistence and optional mirror |
+| `netcheck/inventory.py` | Device, interface, and configuration-item rows mapped from a collected scan payload, plus their queries |
+| `netcheck/change.py`, `netcheck/change_cli.py`, `netcheck/change_templates.py` | Consent-gated change lifecycle: the propose/test/approve/apply/verify/rollback engine, its CLI presentation and argparse wiring, and the seeded fix-script templates |
 | `netcheck/diagnose.py`, `netcheck/rank.py` | Evidence correlation and ranked causes |
+| `netcheck/experiment.py` | Two labeled probe runs compared: per-layer median latency and state mix |
+| `netcheck/bundle.py` | Redacted evidence bundle assembled from stored data for export |
 | `netcheck/server.py` | Loopback dashboard server: JSON API, SSE push, static files |
 | `frontend/` | Dashboard UI — HTML/CSS/JS, no backend logic, no dependencies |
 

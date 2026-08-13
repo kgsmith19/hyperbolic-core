@@ -18,6 +18,7 @@ Project references:
 | `LIFEOS_SUPABASE_URL` | `https://<ref>.supabase.co` — issuer/JWKS derive from it. |
 | `LIFEOS_OWNER_USER_ID` | UUID of the single allowed Supabase Auth user. |
 | `LIFEOS_AUTH_AUDIENCE` | Optional, defaults to `authenticated`. |
+| `LIFEOS_ROOT_PATH` | Optional (m2-08). Set to `/life/api` when this API is reached through the one-origin `tailscale serve` mount (`docs/ops/tailscale-serve-apply.sh`'s `/life/api/` route), which forwards the full path rather than stripping it. Unset in the standalone-repo deploy shape, where the API is the origin's whole path space. See "Auth re-point to the platform IdP (m2-08)" below. |
 | `LIFEOS_SUPABASE_PUBLISHABLE_KEY` | Only for `scripts/get_token.py`. |
 | `LIFEOS_ICS_URLS` | Comma-separated ICS feed URLs for the ingestion job (ADR 012). |
 | `LIFEOS_BRIEFING_TZ` | Optional IANA zone deciding the briefing's "today"; defaults to UTC. |
@@ -306,6 +307,109 @@ age-keygen -o lifeos-backup.key     # prints the public key
 Put the **public** key in the `AGE_PUBLIC_KEY` variable. Keep
 `lifeos-backup.key` (the private key) in your password manager — it is the
 only way to read backups and must never enter the repo or CI.
+
+## Auth re-point to the platform IdP (m2-08)
+
+`docs/planning/issues/m2-08-feat-lifeos-shell-integration.md` /
+`docs/planning/05-e-lifeos.md` section 4 / ADR-03 (`hyperbolic-core`'s
+`docs/planning/04-adrs.md`): LifeOS stops being its own login surface and
+starts reading the session the `hyperbolic-core` Shell establishes. The
+prod project referenced throughout this file (`vhbzblllaohuljtareza`) is
+retired as the **auth** source — it keeps owning the LifeOS `Postgres`
+database (ADR-04: "Postgres (Supabase lifeos project) | LifeOS | per-app |
+... | unchanged; LifeOS keeps its own database"), only its Auth/JWKS stops
+being what `api.auth.settings()` verifies against.
+
+**This is an env re-point, not a code change** — `api/auth.py`'s
+`settings()` already builds the issuer/JWKS URL from `LIFEOS_SUPABASE_URL`
+and checks `sub` against `LIFEOS_OWNER_USER_ID`, both environment variables,
+which is exactly what makes the migration below a value change rather than a
+deploy of new verification logic [confirmed by re-running the full backend
+test suite, including a new `tests/api/test_auth.py` migration-scenario
+section, against this file completely unmodified]. Do not "helpfully"
+rewrite `authenticate()` for this migration; the whole point of routing
+identity through two env vars from the start (ADR 008) was so this day
+needs no code.
+
+Step sequence (05-e section 4; execute 2-6 as one deploy train — step 2
+before step 4 leaves a window where the OLD frontend cannot authenticate at
+all, since its session was reading the OLD project's Auth):
+
+1. **Create the owner user in the platform project's Auth**
+   (`hyperbolic-core`'s toolbelt Supabase project, `woltgcggxaehtuypkxqk` —
+   see `apps/toolbelt/docs/notes/2026-08-12-platform-idp-owner-setup.md` for
+   the sibling procedure that already did this for the toolbelt's own
+   owner-pinned RLS), sign-ups disabled, mirroring "One-time setup" step 1
+   above. Record the new owner UUID — it is a **different** UUID from
+   whatever `LIFEOS_OWNER_USER_ID` holds today, because it is a user in a
+   different Supabase project's Auth.
+2. **Backend re-point** (this repo's deploy env, Infisical `prod`): set
+   `LIFEOS_SUPABASE_URL` to the platform project's URL and
+   `LIFEOS_OWNER_USER_ID` to the UUID from step 1. Redeploy.
+3. **Frontend re-point**: `VITE_SUPABASE_URL` /
+   `VITE_SUPABASE_PUBLISHABLE_KEY` (`frontend/.env.example`) move to the
+   platform project's public values — the same ones
+   `apps/shell/src/lib/session.ts` already hardcodes as its default in the
+   `hyperbolic-core` tree, since both zones read the one platform session
+   (ADR-03; `docs/planning/05-a-hyperbolic-core.md` section 6).
+4. **Session source swap**: the frontend stops calling `signInWithPassword`
+   itself and reads the session `@hyperbolic/platform-client` already holds
+   (same-origin `localStorage`, ADR-02) — see this issue's frontend
+   changes: `frontend/src/lib/session.ts`, `frontend/src/App.tsx`.
+5. **Delete the Login page** (`Login.tsx` + `Login.test.tsx`) and its
+   route — done as part of this same change; an unauthenticated `/life/*`
+   visit now does a full-document redirect to the Shell's `/login`.
+6. **Re-mint agent/MCP tokens** (`mcp_server/tokens.py`'s self-issued agent
+   token pattern) so their verification chain matches the platform project's
+   JWKS rather than the retired one. **Not performed here** — see "What
+   this sandbox could not do" below.
+7. **Break-glass, already implemented, documented rather than built**:
+   `LIFEOS_AUTH_MODE=disabled` — see the "Environment variables" table
+   above. `api.auth.authenticate()` grants `AccessContext.all()` to any
+   request without checking the network interface it arrived on; the actual
+   "localhost only" guarantee this issue's LO-2e requires is NOT a property
+   of this Python process, which cannot see which interface accepted the
+   TCP connection — it comes from the deploy topology one layer down: the
+   API container binds `127.0.0.1:8000` only (`docker-compose`, `EXPOSE
+   8000` in `Dockerfile` is documentation, not a bind), and
+   `docs/ops/tailscale-serve-apply.sh`'s `/life/api/` route is the only
+   thing in front of it that can reach a non-loopback network at all. An
+   operator who sets `LIFEOS_AUTH_MODE=disabled` on a box where something
+   ELSE (a stray `--host 0.0.0.0`, a compose port mapping) exposes 8000
+   beyond loopback has broken the deploy topology's own invariant, which
+   this environment variable cannot detect or repair from inside the
+   process — this file's "3. VPS" section and `docs/ops/runbook.md`'s `ss
+   -tlnp` verification step are what an operator checks to confirm the
+   topology actually holds. `disabled` is a local-dev/emergency-bypass
+   value, never set in `prod`'s Infisical environment; `test_disabled_mode_allows_all`
+   in `tests/api/test_auth.py` (unchanged by this issue) is what proves the
+   Python-level half of this contract.
+
+### What this sandbox could not do
+
+No coding session here holds a real Supabase project-admin credential for
+either the retiring `vhbzblllaohuljtareza` project or the platform
+`woltgcggxaehtuypkxqk` project, and none of the four env vars above can be
+set to a real value without one — the same category of limitation
+`apps/toolbelt/docs/notes/2026-08-12-platform-idp-owner-setup.md` (m1-07)
+documented for the platform project's own owner setup. Steps 1, 2, 3 and 6
+above are recorded here as exact operator actions, not performed. What
+**was** verified for real, in this sandbox, without needing those
+credentials:
+
+- The claim that this is an env re-point and not a code change:
+  `tests/api/test_auth.py`'s existing suite (27 cases, unmodified by this
+  issue) plus five new cases naming the migration scenario explicitly
+  (`test_lo2c_stale_issuer_token_from_the_old_project_is_rejected` and
+  siblings) — all against `api/auth.py` exactly as it read before this
+  issue touched this repo.
+- `LIFEOS_ROOT_PATH` / base-path mechanics: `tests/api/test_root_path.py`,
+  a genuine before/after (a request carrying the `/life/api` prefix 404s
+  with the variable unset, 200s once it is set — the one piece of THIS
+  issue that is new backend behavior).
+- The frontend no longer contains a local sign-in call:
+  `grep -rn signInWithPassword frontend/src --include='*.ts*'` (LO-2b) —
+  see the frontend section of this issue's report for the exact output.
 
 ## Deploys
 Merge to `main` → `ci.yml`: checks (ruff, mypy, pytest against ephemeral

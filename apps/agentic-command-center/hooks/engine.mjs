@@ -52,6 +52,30 @@ const readJson = (p, fallback) => (existsSync(p) ? JSON.parse(readFileSync(p, "u
 const writeJson = (p, j) => writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
 const vault = () => readJson(VAULT(), {});
 
+// ADR-05 (secrets): vault.json is operator-machine convenience storage with
+// filesystem-only protection -- not a place provider API keys may live
+// going forward. Infisical is now the only destination for those. Exact
+// names cover every provider ACC has ever talked to or plausibly could; the
+// _API_KEY suffix catches the general shape without over-reaching into
+// TOKEN/SECRET names, which stay legitimate vault material (e.g. a personal
+// GitHub PAT) per ADR-05. Matched case-insensitively so a differently-cased
+// import can't slip the same key past this on a technicality.
+const DENIED_VAULT_KEYS = new Set([
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GOOGLE_API_KEY",
+  "GEMINI_API_KEY",
+  "OPENROUTER_API_KEY",
+]);
+// Exported for direct unit testing: every current DENIED_VAULT_KEYS member
+// happens to also end in "_API_KEY", so the two OR branches are redundant
+// for all of them today and a CLI-level test alone cannot prove the Set
+// lookup's own case-insensitivity (only the regex's). Exporting lets a test
+// exercise this function directly, independent of that coincidence, so the
+// Set-lookup path stays provably correct if a future provider name is ever
+// added that does not end in "_API_KEY".
+export const isDeniedVaultKey = (k) => DENIED_VAULT_KEYS.has(String(k).toUpperCase()) || /_API_KEY$/i.test(String(k));
+
 // Thrown by fail() to unwind out of whatever command handler raised it. Never
 // escapes main() uncaught -- it is always the CLI's own "print this and exit
 // 1" signal, not a bug. Kept distinct from a plain Error so main()'s catch
@@ -331,20 +355,31 @@ export async function main({ argv = process.argv.slice(2), io = PROCESS_IO } = {
         return 0;
       }
       case "vault-import": { // KEY=VALUE lines on stdin; blank lines and # comments skipped
-        const v = vault();
-        const names = [];
+        const pairs = [];
         for (const line of (await stdinText()).split(/\r?\n/)) {
           const t = line.trim();
           if (!t || t.startsWith("#")) continue;
           const i = t.indexOf("=");
           if (i < 1) continue;
           const k = t.slice(0, i).trim();
-          v[k] = t.slice(i + 1).trim();
-          names.push(k);
+          pairs.push([k, t.slice(i + 1).trim()]);
         }
-        if (!names.length) fail("no KEY=VALUE lines found on stdin");
+        if (!pairs.length) fail("no KEY=VALUE lines found on stdin");
+        // ADR-05: a denylisted name fails the WHOLE import, matching the
+        // existing all-or-nothing semantics of a bad pair (see gui/README.md's
+        // vault-import row) -- skipping just the bad key would still teach
+        // the operator "the vault takes keys," and nothing may be written.
+        const denied = pairs.map(([k]) => k).filter(isDeniedVaultKey);
+        if (denied.length) {
+          fail(
+            `refusing vault-import: ${denied.join(", ")} look like provider API key(s). ` +
+              "The vault no longer accepts these (ADR-05) -- store them in Infisical instead. Nothing was imported."
+          );
+        }
+        const v = vault();
+        for (const [k, val] of pairs) v[k] = val;
         writeJson(VAULT(), v);
-        say(io, `stored: ${names.join(", ")}`);
+        say(io, `stored: ${pairs.map(([k]) => k).join(", ")}`);
         return 0;
       }
       case "vault-rm": {

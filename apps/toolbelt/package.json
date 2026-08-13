@@ -1,0 +1,15 @@
+{
+  "name": "toolbelt",
+  "private": true,
+  "description": "Toolbelt monorepo root: tool.json manifest contract and its validator (m3-01).",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "manifests:check": "node scripts/validate-manifests.mjs"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
+  }
+}

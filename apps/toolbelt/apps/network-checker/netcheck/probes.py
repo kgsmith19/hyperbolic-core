@@ -180,6 +180,20 @@ def _held(result, t0):
             "result": result, "held_s": round(time.monotonic() - t0, 1)}
 
 
+def _device_state_fields():
+    """`wifi_txpower_state` / `adapter_power_state` for `sample()`'s row.
+
+    Split out purely to keep `sample()` itself under the repo's 40-line
+    ceiling -- 05-f section 4.5's Finding 18: see linux_adapter_probes.py's
+    module docstring for why these two fields exist and what they measure.
+    Local import for the same reason the `datetime` import in `sample()` is
+    local: keep this module importable with nothing but the stdlib loaded.
+    """
+    from . import linux_adapter_probes as lap
+    return {"wifi_txpower_state": lap.wifi_txpower()["state"],
+            "adapter_power_state": lap.adapter_power()["state"]}
+
+
 def sample(target="api.anthropic.com", gw=None, hop=None, wifi=None):
     """One tick: every layer measured close together, flattened into one row.
 
@@ -216,4 +230,6 @@ def sample(target="api.anthropic.com", gw=None, hop=None, wifi=None):
         row.update(wifi_signal=w.get("rssi_dbm"), wifi_channel=w.get("channel"),
                    wifi_band=w.get("band"), wifi_rx_mbps=w.get("rx_mbps"),
                    wifi_tx_mbps=w.get("tx_mbps"), wifi_bssid=w.get("bssid"))
+
+    row.update(_device_state_fields())
     return row

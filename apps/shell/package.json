@@ -1,0 +1,41 @@
+{
+  "name": "shell",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "hyperbolic-core Shell: the unified web front end composing every zone (docs/planning/05-a-hyperbolic-core.md).",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "size-check": "node test/size-check.mjs",
+    "healthz-check": "node test/healthz-check.mjs"
+  },
+  "dependencies": {
+    "@hyperbolic/platform-client": "*",
+    "@hyperbolic/ui": "*",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router": "^8.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "jsdom": "^30.0.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
+  }
+}

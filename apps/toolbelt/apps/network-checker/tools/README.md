@@ -41,29 +41,47 @@ python tools/documentation_check.py . -i high -f json
 
 ## The fix scripts
 
+The scripts below are executors now, not entry points. Run them only through
+the change lifecycle (`netcheck/change.py`, docs/planning/05-f-network-checker.md
+section 4): every device write needs a recorded dry run and an explicit,
+interactive approval, and a failed post-apply verification triggers an
+automatic rollback to the pre-approved inverse. There is no more unattended
+`run_fixes.sh` wrapper — its dry-run and ordering roles are subsumed by
+`change test` and per-change records.
+
 ```bash
-sudo bash tools/run_fixes.sh --dry-run    # print what would change, change nothing
-sudo bash tools/run_fixes.sh              # apply all three
-sudo bash tools/run_fixes.sh --dns-only   # or --wifi-only, --adapter-only
-sudo bash tools/run_fixes.sh -v           # verbose; also VERBOSE=1
+python -m netcheck change propose --title <t> --cmd <script> --inverse <inverse> --verify <probe-expr>
+python -m netcheck change test <id>       # dry-run: measures verify_probe, never mutates
+python -m netcheck change show <id>       # review the exact commands and dry-run evidence
+python -m netcheck change approve <id>    # interactive only; refuses if stdin is not a TTY
+python -m netcheck change apply <id> --token <token>
 ```
 
-`--dry-run` is the only mode that does not need root. `FIX_WIFI`, `FIX_DNS`,
-and `FIX_ADAPTER` (`0`/`1`) select fixes from the environment instead of flags.
+`netcheck/change_templates.py` seeds three ready-to-propose templates, one
+per script below; `rank._fix()` recommends the matching template's exact
+`change propose` invocation whenever a ranked cause has one.
 
-Each script detects first, applies only if it found the problem, then
-re-checks — so running them on a healthy machine changes nothing.
+| Script | Problem | Detects with | Applies | Inverse |
+|---|---|---|---|---|
+| `fix_dns.sh` | The local resolver (usually the router) is failing | `nslookup`, `/etc/resolv.conf` | Public resolvers `1.1.1.1`, `8.8.8.8`, via systemd-resolved, `/etc/resolv.conf`, or `netsh` | `--restore`: `/etc/resolv.conf.bak` if that mechanism was used; else the drop-in's real captured pre-change content (or its genuine absence) |
+| `fix_wifi_mode.sh` | Adapter pinned below its capability | `iw dev`, `iw phy` | Raises the mode where the driver allows it | `--restore`: the real captured pre-change tx-power, re-pinned via `iw ... set txpower fixed <mBm>`; `auto` only if nothing was ever captured |
+| `fix_adapter_power.sh` | Power saving drops the link | `ethtool` wake-on-LAN, `iw ... get power_save` | Turns power saving off, enables WoL | `--restore`: the real captured pre-change `power_save` state and Wake-on-LAN flags, both restored independently |
 
-| Script | Problem | Detects with | Applies |
-|---|---|---|---|
-| `fix_dns.sh` | The local resolver (usually the router) is failing | `nslookup`, `/etc/resolv.conf` | Public resolvers `1.1.1.1`, `8.8.8.8`, via systemd-resolved, `/etc/resolv.conf`, or `netsh` |
-| `fix_wifi_mode.sh` | Adapter pinned below its capability | `iw dev`, `iw phy` | Raises the mode where the driver allows it |
-| `fix_adapter_power.sh` | Power saving drops the link | `ethtool` wake-on-LAN, `iw ... get power_save` | Turns power saving off, enables WoL |
+Each script's own `capture_state`/`--capture-state` records the concrete
+pre-change value the first time its forward path runs on a host (kept
+until explicitly re-captured with `--force`, since `change apply` only
+ever calls it once per approved change); `restore_state`/`--restore` is
+what `netcheck/change_templates.py`'s `inverse_cmd` now invokes. 05-f
+section 4.5's Finding 18 has the full accounting of what this closed and
+what it didn't -- specifically that `change test`'s dry-run still has no
+way to surface the captured value as evidence before approval, a `change.py`
+change out of this script-level fix's scope.
 
-**Rollback is DNS only.** `fix_dns.sh` copies `/etc/resolv.conf` to
-`/etc/resolv.conf.bak` before writing and restores it if resolution still
-fails afterwards. `fix_wifi_mode.sh` and `fix_adapter_power.sh` do not back up
-or restore anything — verify with `--dry-run` first.
+Post-apply verification for `wifi_mode` and `adapter_power` no longer
+reuses a bare gateway ping: `netcheck/linux_adapter_probes.py` measures the
+actual property each change claims to modify (tx power vs. this radio's own
+ceiling; `power_save`/WoL together) and change_templates.py's `verify_probe`
+reads that measurement directly.
 
 An unreachable gateway has no automated fix. It is a hardware, cabling, or ISP
 problem, and no config write from this machine addresses it.

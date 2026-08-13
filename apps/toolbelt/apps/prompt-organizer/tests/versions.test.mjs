@@ -1,9 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { login, rest, USER_A } from "./helpers.mjs";
+import { rest, primaryToken } from "./helpers.mjs";
 
 // SPEC-0002 (SL-004): versions on every body change, unique titles.
 // All four tests are single-identity; isolation already owned by T-I-003.
+//
+// Owner-credential threading (toolbelt-ci.yml P1 finding): every test below
+// authenticates via primaryToken() (owner token when supplied, fixture-A
+// fallback otherwise), since they need real write access to prove anything
+// once prompt.* RLS is pinned to the owner.
 
 // Re-runnable fixture (spec 7.3 pattern): POST; on 409, PATCH by title.
 // `patch` must differ from the stored body when a fresh version row is needed.
@@ -17,7 +22,7 @@ async function ensureByTitle(token, title, body) {
 
 // T-I-004 -> AC-001, PROP-001 -> FR-002
 test("rejects_case_folded_duplicate_title_with_23505__T_I_004__AC_001", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const seeded = await ensureByTitle(token, "Version Fixture", "canonical casing row");
   assert.ok([200, 201].includes(seeded.status), JSON.stringify(seeded.json));
 
@@ -38,7 +43,7 @@ test("rejects_case_folded_duplicate_title_with_23505__T_I_004__AC_001", async ()
 
 // T-I-005 -> AC-002, PROP-004 -> FR-003
 test("insert_records_exactly_one_version__T_I_005__AC_002", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const body = "fresh insert body";
   const created = await rest("prompt", {
     token, method: "POST", body: { title: `Fresh Version Fixture ${Date.now()}`, body },
@@ -53,7 +58,7 @@ test("insert_records_exactly_one_version__T_I_005__AC_002", async () => {
 
 // T-A-003 -> AC-003, PROP-002, PROP-003 -> FR-003
 test("edit_appends_version_2_and_preserves_version_1__T_A_003__AC_003", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const created = await rest("prompt", {
     token, method: "POST", body: { title: `Version Trail Fixture ${Date.now()}`, body: "original body" },
   });
@@ -80,7 +85,7 @@ test("edit_appends_version_2_and_preserves_version_1__T_A_003__AC_003", async ()
 // this file exercises a same-value update, so a removed guard survived the
 // full suite green (mutation-verified below).
 test("no_op_body_update_creates_no_spurious_version__T_I_007__PROP_003", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const created = await rest("prompt", {
     token, method: "POST", body: { title: `No-Op Update Fixture ${Date.now()}`, body: "steady body" },
   });
@@ -97,7 +102,7 @@ test("no_op_body_update_creates_no_spurious_version__T_I_007__PROP_003", async (
 
 // T-I-006 -> AC-004, PROP-002 -> NFR-005
 test("version_rows_reject_update_and_delete_with_42501__T_I_006__AC_004", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   // A distinct body every run guarantees the trigger writes a version row even
   // when the fixture prompt predates the trigger (red-phase runs insert it).
   const seeded = await ensureByTitle(token, "Immutable Fixture", `immutable probe ${Date.now()}`);

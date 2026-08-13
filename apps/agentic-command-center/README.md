@@ -30,7 +30,6 @@ node gui/server.mjs --ui-dist ui/dist   # serve the built UI same-origin
 npm test
 npm run covgate
 npm run test:windows
-npm run e2e:gui
 cd ui && npm run build
 cd ui && ACC_DIR=.. npm run e2e
 ```
@@ -46,10 +45,6 @@ proof commands are manual and are documented with their subsystems.
 - `ui/` — React control panel and the real-server contract suite
 - `kernel/README.md` — bounded task-runner contract
 - `runner/README.md` — directive-runner contract
-- `docs/SYSTEM-REQUIREMENTS.md` — implemented system requirements
-- `docs/DATA-FLOW-DIAGRAM.md` — data flows and trust boundaries
-- `docs/adr/` — product architecture decisions
-- `specs/TEST-LEDGER.md` — historical test rationale
 
 New work is tracked in GitHub Issues. Pull requests are verified by the
 repository's `PR Gate` workflow.

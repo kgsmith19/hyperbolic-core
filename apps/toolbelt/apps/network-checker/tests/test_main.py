@@ -41,16 +41,20 @@ class ScanTierCliTest(unittest.TestCase):
     def test_standard_tier_calls_environ_scan_with_deep_false(self):
         with patch.object(cli, "connect", return_value=(None, "h")), \
              patch.object(cli.store, "add_scan"), \
+             patch.object(cli.inventory, "record_inventory") as mock_inventory, \
              patch.object(cli.environ, "scan", return_value={"ts": "x"}) as mock_scan:
             cli._cmd_scan_worker(argparse.Namespace(tier="standard", target="t"))
         mock_scan.assert_called_once_with(deep=False)
+        mock_inventory.assert_called_once_with(None, "h", {"ts": "x"}, "x")
 
     def test_deep_tier_calls_environ_scan_with_deep_true(self):
         with patch.object(cli, "connect", return_value=(None, "h")), \
              patch.object(cli.store, "add_scan"), \
+             patch.object(cli.inventory, "record_inventory") as mock_inventory, \
              patch.object(cli.environ, "scan", return_value={"ts": "x"}) as mock_scan:
             cli._cmd_scan_worker(argparse.Namespace(tier="deep", target="t"))
         mock_scan.assert_called_once_with(deep=True)
+        mock_inventory.assert_called_once_with(None, "h", {"ts": "x"}, "x")
 
     def test_an_unrecognized_tier_exits_before_any_probe_runs(self):
         with patch.object(cli, "connect") as mock_connect:
@@ -159,6 +163,46 @@ class ScanBudgetBoundaryTest(unittest.TestCase):
             for case_name, (duration, expect_timeout) in cases.items():
                 with self.subTest(tier=tier, case=case_name, duration=duration):
                     self._assert_case(tier, budget, duration, expect_timeout)
+
+
+class WatchTimingValidationTest(unittest.TestCase):
+    """Finding 64 (independent security review): --interval/--idle-every
+    must be rejected at argument-parsing time when <= 0, before watch.run()
+    (and its ZeroDivisionError-prone `tick % args.idle_every`) ever starts."""
+
+    def _assert_rejected_before_connect(self, argv):
+        with patch.object(cli, "connect") as mock_connect, \
+             contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main(argv)
+        self.assertNotEqual(cm.exception.code, 0)
+        mock_connect.assert_not_called()
+
+    def test_idle_every_zero_is_rejected(self):
+        self._assert_rejected_before_connect(["watch", "--idle-every", "0"])
+
+    def test_idle_every_negative_is_rejected(self):
+        self._assert_rejected_before_connect(["watch", "--idle-every", "-1"])
+
+    def test_interval_zero_is_rejected(self):
+        self._assert_rejected_before_connect(["watch", "--interval", "0"])
+
+    def test_interval_negative_is_rejected(self):
+        self._assert_rejected_before_connect(["watch", "--interval", "-5"])
+
+    def test_a_positive_interval_and_idle_every_are_accepted(self):
+        """Positive control: the validator itself, not just argparse
+        wiring, is what's under test -- a legitimate value must still
+        parse (as a real int, not swallowed by an over-eager mock) and
+        reach cmd_watch. Only `watch.run` is patched -- `watch._positive_int`
+        itself must stay real, since argparse calls it while building the
+        parser inside `cli.main()`."""
+        with patch.object(cli, "connect", return_value=(None, "h")), \
+             patch.object(cli.watch, "run", return_value=0) as run:
+            rc = cli.main(["watch", "--interval", "5", "--idle-every", "2"])
+        self.assertEqual(rc, 0)
+        args = run.call_args.args[1]
+        self.assertEqual((args.interval, args.idle_every), (5, 2))
 
 
 class ExportCliTest(unittest.TestCase):

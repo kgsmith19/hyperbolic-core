@@ -176,3 +176,102 @@ def test_principal_rejects_an_unbounded_subject(subject: Any) -> None:
     request.state.claims = {"sub": subject}
     with pytest.raises(auth.AuthError, match="usable principal"):
         auth.principal(request)
+
+
+# --- m2-08: platform-issuer fixtures (LO-2c, LO-2d) --------------------------
+#
+# docs/planning/05-e-lifeos.md section 4 / ADR-03: the auth migration this
+# issue performs is an ENV RE-POINT, not a code change -- `settings()` above
+# already builds the issuer/JWKS URL and owner check from
+# LIFEOS_SUPABASE_URL/LIFEOS_OWNER_USER_ID, whichever project those name.
+# `supabase_mode` (this file's own autouse fixture) already configures those
+# two vars to a stand-in "platform project" for every test in this module,
+# which is exactly what a real re-point does in production.
+#
+# What was NOT already covered before this issue: a scenario that names both
+# sides of the migration explicitly -- a token signed by the OLD (pre-
+# migration) project's key, presented against settings already re-pointed at
+# the NEW (platform) project -- rather than the single generic
+# "_OTHER_KEY"/"_PUBLIC_KEY" pair every test above already exercises for the
+# same underlying property. These fixtures exist to make that specific claim
+# checkable by name, matching the issue's own EARS criteria (05-e section 4):
+#
+#   LO-2c: a JWT signed by the OLD project's keys is rejected with 401.
+#   LO-2d: a platform JWT whose subject is not the owner UUID is rejected
+#          with 401.
+_OLD_PROJECT_URL = "https://vhbzblllaohuljtareza.supabase.co"  # pre-migration LifeOS project
+_OLD_ISSUER = f"{_OLD_PROJECT_URL}/auth/v1"
+_OLD_PRIVATE_KEY = ec.generate_private_key(ec.SECP256R1())
+
+_PLATFORM_OWNER = OWNER  # this module's `supabase_mode` fixture re-points to this owner
+
+
+def _old_project_token(**overrides: Any) -> str:
+    """A token that would have verified fine against the pre-migration
+    LifeOS project: correct-shaped claims, signed with a DIFFERENT key under
+    a DIFFERENT issuer than the platform project `supabase_mode` re-points
+    `settings()` at."""
+    now = int(time.time())
+    claims: dict[str, Any] = {
+        "sub": _PLATFORM_OWNER,
+        "aud": "authenticated",
+        "iss": _OLD_ISSUER,
+        "iat": now,
+        "exp": now + 300,
+    }
+    claims.update(overrides)
+    return jwt.encode(
+        claims, _OLD_PRIVATE_KEY, algorithm="ES256", headers={"kid": "old-project-key"}
+    )
+
+
+def test_lo2c_stale_issuer_token_from_the_old_project_is_rejected() -> None:
+    """LO-2c. `supabase_mode` has already re-pointed `settings()` at the
+    platform project (SUPABASE_URL/ISSUER at the top of this file); this
+    token is signed by a project that migration retired. The JWKS client
+    stub always hands back the PLATFORM project's public key (`_PUBLIC_KEY`)
+    regardless of the token it's asked about, so this failure is the
+    signature check catching a genuine cross-project mismatch, not a stub
+    artifact -- the same failure mode as a real JWKS lookup against the
+    platform project rejecting a signature it never produced."""
+    with pytest.raises(auth.AuthError, match="invalid token"):
+        auth.authenticate(request_with(_old_project_token()))
+
+
+def test_lo2c_route_rejects_the_stale_issuer_token_with_401() -> None:
+    """Route-level restatement of LO-2c, matching the issue's own
+    verification command shape (`curl ... /life/api/types` -> 401) as
+    closely as a TestClient call can from inside this process."""
+    client = TestClient(app)
+    response = client.get("/types", headers={"Authorization": f"Bearer {_old_project_token()}"})
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_lo2d_platform_token_with_the_wrong_subject_is_rejected() -> None:
+    """LO-2d. Correctly signed by the PLATFORM project's own key (unlike the
+    LO-2c case above), but the subject is not the owner UUID
+    `LIFEOS_OWNER_USER_ID` re-points to -- a second principal, or a stray
+    token minted for some other purpose, must not pass."""
+    not_the_owner = "99999999-9999-9999-9999-999999999999"
+    token = make_token(sub=not_the_owner)
+    with pytest.raises(auth.AuthError, match="unknown subject"):
+        auth.authenticate(request_with(token))
+
+
+def test_lo2d_route_rejects_the_wrong_subject_token_with_401() -> None:
+    not_the_owner = "99999999-9999-9999-9999-999999999999"
+    client = TestClient(app)
+    response = client.get(
+        "/types", headers={"Authorization": f"Bearer {make_token(sub=not_the_owner)}"}
+    )
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_lo2_valid_platform_owner_token_still_succeeds() -> None:
+    """Contrast case: the migration narrows what is ACCEPTED (LO-2c/LO-2d),
+    it must not also reject the one identity it exists to keep working."""
+    client = TestClient(app)
+    response = client.get("/types", headers={"Authorization": f"Bearer {make_token()}"})
+    assert response.status_code == 200

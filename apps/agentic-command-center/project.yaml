@@ -22,8 +22,11 @@ commands:
   dev: npm run gui
 
 ci:
-  workflow: .github/workflows/ci.yml
-  required_check: "PR Gate"
+  # Repo-root path (not relative to apps/agentic-command-center/ like other
+  # paths here): CI now lives outside this component's own root because this
+  # app was migrated into a shared monorepo.
+  workflow: .github/workflows/acc-ci.yml
+  required_check: "ACC PR Gate"
   triggers: [pull_request, merge_group]
 
 work_tracking:

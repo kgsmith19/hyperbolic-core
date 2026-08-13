@@ -22,6 +22,23 @@ _MAC_RE = re.compile(r"\b([0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5})\b")
 _BROADCAST_MAC = "ff:ff:ff:ff:ff:ff"
 
 
+def _normalize_mac(mac):
+    """Canonical MAC form: lowercase, colon-separated -- the convention
+    this codebase already uses everywhere else a MAC/BSSID is compared or
+    stored (wlan_probes.py's own `bssid.lower()`; this module's prior
+    broadcast-address comparison, below, before Finding 63).
+
+    Finding 63 (independent security review): applied at the point a row
+    is BUILT, not only at the one place (the broadcast check) that used to
+    normalize a copy for comparison and then discard it. Before this, the
+    same physical device reported once as "AA-BB-CC-DD-EE-FF" (arp -a) and
+    once as "aa:bb:cc:dd:ee:ff" (ip neigh, or a differently-cased arp
+    dump) stored two different MAC strings -- and _upsert_device() matches
+    strictly on (host_id, mac, ip), so that created two device rows for
+    one physical device instead of upserting the same one."""
+    return mac.replace("-", ":").lower()
+
+
 def parse_neighbor_table(text):
     """IP/MAC pairs from arp -a (Windows/macOS) or ip neigh (Linux) output.
 
@@ -31,7 +48,9 @@ def parse_neighbor_table(text):
     lladdr, macOS's (incomplete) -- still becomes a device with mac=None,
     because FR-017 requires that a device that cannot be further identified
     is never dropped. Broadcast and multicast rows, which every real table
-    also carries, are not devices and are dropped.
+    also carries, are not devices and are dropped. A found MAC is stored in
+    its canonical, normalized form (_normalize_mac, Finding 63), not
+    verbatim off the wire.
     """
     devices = []
     for line in text.splitlines():
@@ -44,8 +63,8 @@ def parse_neighbor_table(text):
         if ipaddress.ip_address(ip).is_multicast:
             continue
         mac_match = _MAC_RE.search(line)
-        mac = mac_match.group(1) if mac_match else None
-        if mac and mac.replace("-", ":").lower() == _BROADCAST_MAC:
+        mac = _normalize_mac(mac_match.group(1)) if mac_match else None
+        if mac == _BROADCAST_MAC:
             continue
         devices.append({"ip": ip, "mac": mac})
     return devices

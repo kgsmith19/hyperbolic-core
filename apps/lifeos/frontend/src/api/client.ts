@@ -1,5 +1,10 @@
 // The one place the app talks HTTP. Components never call fetch directly.
-import { supabase } from "../auth/supabase";
+//
+// m2-08: the bearer token now comes from `platformClient` (src/lib/session.ts,
+// @hyperbolic/platform-client) instead of this module's own `supabase`
+// client -- LO-2b's "no local sign-in call" is about more than deleting
+// Login.tsx; this was the other place a LifeOS-owned Supabase client lived.
+import { platformClient } from "../lib/session";
 import type { components } from "./types.gen";
 
 export type TypeDefinition = components["schemas"]["TypeDefinition"];
@@ -22,22 +27,32 @@ export class ApiError extends Error {
 }
 
 async function authHeader(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const session = await platformClient.auth.getSession();
+  return session ? { Authorization: `Bearer ${session.accessToken}` } : {};
 }
 
-// A 401 means the session is gone; every request path hands the user back to
-// login the same way.
+// A 401 means the session is gone; every request path hands the operator
+// back to the Shell's login the same way -- "/login" is root-relative
+// (the Shell owns "/", this zone is mounted at "/life", ADR-02's one
+// origin), not a route inside this bundle, so this is a real browser
+// navigation, never a client-side one.
 async function signOutOn401(response: Response): Promise<void> {
   if (response.status !== 401) return;
-  await supabase.auth.signOut();
+  await platformClient.auth.signOut();
   window.location.assign("/login");
   throw new ApiError(401, "signed out");
 }
 
+// 05-a section 4 / 10-cicd-deployment.md section 4: the one-origin route
+// table proxies "/life/api/*" to this API on the SAME origin the frontend
+// is served from, so the correct default is a same-origin relative path,
+// not an absolute URL. VITE_API_URL still overrides it (frontend/.env.example)
+// for local dev against a backend that isn't reachable at that path (e.g.
+// `vite dev`'s own server has no "/life/api" proxy of its own).
+const API_BASE = import.meta.env.VITE_API_URL || "/life/api";
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${import.meta.env.VITE_API_URL}${path}`, {
+  const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
@@ -155,7 +170,7 @@ export async function streamChat(
   messages: { role: "user" | "assistant"; content: string }[],
   onFrame: (frame: ChatFrame) => void,
 ): Promise<void> {
-  const response = await fetch(`${import.meta.env.VITE_API_URL}/chat`, {
+  const response = await fetch(`${API_BASE}/chat`, {
     method: "POST",
     body: JSON.stringify({ messages }),
     headers: {

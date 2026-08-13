@@ -1,0 +1,33 @@
+{
+  "id": "network-checker",
+  "name": "Network Checker",
+  "kind": "cli",
+  "version": "0.1.0",
+  "description": "Local-first network diagnostics that identify which layer failed: Wi-Fi, router, modem, ISP, target service, or a specific device. SQLite is the source of truth; Supabase is an optional, separate mirror project for cross-machine history.",
+  "ownership": {
+    "owner": "kylegsmith19@gmail.com",
+    "path": "apps/toolbelt/apps/network-checker"
+  },
+  "entry": {
+    "cli": {
+      "command": "python3 -m netcheck"
+    }
+  },
+  "schemas": [],
+  "permissions": {
+    "db": {
+      "read": [],
+      "write": []
+    },
+    "networkEgress": ["ipapi.co", "api.ipify.org", "status.anthropic.com",
+                      "api.anthropic.com", "1.1.1.1"],
+    "llmHandler": {
+      "access": false
+    }
+  },
+  "lifecycle": {
+    "migrate": "supabase db push",
+    "health": "bash tools/check.sh",
+    "register": "20260812250000_register_network-checker.sql"
+  }
+}

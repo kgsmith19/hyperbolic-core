@@ -9,6 +9,20 @@ const dir = process.env.ACC_UI_E2E_DIR!;
 const routeDir = path.join(dir, "code", "guards-target");
 const dirsDir = path.join(dir, "runner", "directives");
 const policyFile = path.join(dir, "policy.json");
+
+// ACC-5: every /api/* call now needs the session credential. The real
+// bootstrap path is the one-time `#acc-token=<value>` URL fragment
+// src/api.ts reads on first load and stashes in sessionStorage (see that
+// file's own comment) — playwright.config.ts's webServer starts the real
+// gui/server.mjs against this same `dir` as ACC_ROOT, so the token it
+// mints on startup lands at exactly this path. Each test below gets a
+// fresh browser context (a fresh, empty sessionStorage), so the FIRST
+// page.goto() in every test must carry the fragment — same rule the real
+// UI operates under, not an e2e-only shortcut.
+function withToken(route: string): string {
+  const token = fs.readFileSync(path.join(dir, "gui-token"), "utf8").split(/\r?\n/, 1)[0].trim();
+  return `${route}#acc-token=${encodeURIComponent(token)}`;
+}
 const runnerCalls = () => {
   try {
     return fs.readFileSync(path.join(dir, "runner-calls.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -42,7 +56,7 @@ test.beforeEach(() => {
 });
 
 test("Start work: suggest fills the folder, GO creates + launches, Mark finished archives", async ({ page }) => {
-  await page.goto("/");
+  await page.goto(withToken("/"));
   await page.locator("#task").fill("tighten the guards hook checks");
   await page.locator("#task").blur();
   await expect(page.locator("#cwd")).toHaveValue(routeDir);
@@ -65,7 +79,7 @@ test("Start work: suggest fills the folder, GO creates + launches, Mark finished
 });
 
 test("Start work: Guide appends a note to the log without touching status or restarting", async ({ page }) => {
-  await page.goto("/");
+  await page.goto(withToken("/"));
   await page.locator("#task").fill("tighten the guards hook checks");
   await page.locator("#task").blur();
   await expect(page.locator("#cwd")).toHaveValue(routeDir);
@@ -84,7 +98,7 @@ test("Start work: Guide appends a note to the log without touching status or res
 });
 
 test("Guards: toggle round-trips through the real server into the engine's state", async ({ page }) => {
-  await page.goto("/guards");
+  await page.goto(withToken("/guards"));
   await expect(page.getByText("ENABLED", { exact: true })).toBeVisible();
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Turn off" }).click();
@@ -93,7 +107,7 @@ test("Guards: toggle round-trips through the real server into the engine's state
 });
 
 test("Spending: tier renders; a dials save lands on disk and preserves unowned policy blocks", async ({ page }) => {
-  await page.goto("/spending");
+  await page.goto(withToken("/spending"));
   await expect(page.getByTestId("tier")).toContainText("Getting expensive"); // fake usage says amber
   await expect(page.locator("#softK")).toHaveValue("400");
   const before = JSON.parse(fs.readFileSync(policyFile, "utf8"));
@@ -107,7 +121,7 @@ test("Spending: tier renders; a dials save lands on disk and preserves unowned p
 });
 
 test("Kernel: policy renders and a save lands on disk", async ({ page }) => {
-  await page.goto("/kernel");
+  await page.goto(withToken("/kernel"));
   await expect(page.locator("#toolCalls")).toHaveValue("200");
   await page.locator("#toolCalls").fill("150");
   await page.getByRole("button", { name: "Save" }).click();
@@ -120,7 +134,11 @@ test("API unreachable: every page shows the error banner instead of blank UI", a
   await page.route("/api/**", (r) => r.abort("failed"));
 
   for (const route of ["/", "/guards", "/spending", "/kernel"]) {
-    await page.goto(route);
+    // The token itself isn't load-bearing for this test (every /api/* call
+    // is intercepted above before it would ever reach the server's auth
+    // check), but every other test's first navigation carries it, so this
+    // one does too rather than being the one silent exception.
+    await page.goto(withToken(route));
     await expect(page.getByTestId("api-error")).toBeVisible();
   }
 });

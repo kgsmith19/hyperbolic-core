@@ -13,31 +13,138 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   pr-gate:
     name: Toolbelt PR Gate
     runs-on: ubuntu-latest
+    # Independent security review, Finding 39 (re-verified against current
+    # HEAD): this job never ran apps/toolbelt/apps/idea-intake's own test
+    # suite at all (confirmed: no "idea-intake" path appeared anywhere in
+    # this file before this service block and the step below), and provisioned
+    # no PostgreSQL service -- so idea-intake's real-Postgres suites (guard
+    # triggers, RLS, the mark_submitted_to_github RPC, registration,
+    # migrate-forgepad, and this batch's own new Finding 35/36/49 suites)
+    # have never run in CI at all, only ever locally by hand. A postgres:
+    # service container gives the "Run Idea Intake tests" step below a real
+    # engine to connect to -- idea-intake's tests already detect a reachable
+    # `psql` first (tests/*.test.mjs's own detectRunner(), tried before the
+    # `sudo -n -u postgres psql` fallback this sandbox's own local dev
+    # environment uses), so pointing plain `psql` at this service container
+    # via PGHOST/PGPORT/PGUSER/PGPASSWORD on that one step is sufficient --
+    # no `sudo`/OS-role setup needed (unlike apps/shell's own tools.spec.ts,
+    # flagged as a known follow-up in shell-ci.yml's own comment for exactly
+    # that heavier setup). Version 16 matches what this session's own sandbox
+    # validated these suites against (`postgres --version` -> PostgreSQL
+    # 16.13).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Secret scan
+        if: github.event_name == 'pull_request'
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_COMMENTS: false
       - name: Prepare Prompt Organizer test sessions
         run: node tests/export-test-sessions.mjs
         working-directory: apps/toolbelt/apps/prompt-organizer
+      - name: Install Toolbelt dependencies
+        run: npm ci
+        working-directory: apps/toolbelt
+      - name: Check Toolbelt manifests
+        run: npm run manifests:check
+        working-directory: apps/toolbelt
       - name: Run Toolbelt tests
         run: node --test "tests/*.test.mjs"
         working-directory: apps/toolbelt
+        env:
+          # Positive-path suites read this when set (docs/planning/issues/
+          # m1-07-chore-platform-idp-owner-setup.md); unset today, so they
+          # fall back to the fixture-A login, which is fine under current
+          # (pre-re-pin) policies. Empty when the secret does not exist yet,
+          # which GitHub Actions resolves to an empty string, not an error.
+          TOOLBELT_OWNER_TOKEN: ${{ secrets.TOOLBELT_OWNER_TOKEN }}
       - name: Run Guards tests
         run: node --test "*.test.mjs"
         working-directory: apps/toolbelt/guards
       - name: Run Prompt Organizer tests
         run: node --test "tests/*.test.mjs"
         working-directory: apps/toolbelt/apps/prompt-organizer
+        env:
+          # Same TOOLBELT_OWNER_TOKEN this job's "Run Toolbelt tests" step
+          # already receives above -- threaded here too because step-level
+          # `env:` does not inherit between steps, only $GITHUB_ENV writes do
+          # (which is how the fixture A/B tokens from "Prepare Prompt
+          # Organizer test sessions" reach this step). Without this, Prompt
+          # Organizer's positive-path suites kept authenticating as fixture
+          # A even after prompt.* RLS was pinned to the real owner
+          # (20260812180000_prompt_owner_pin.sql), so every RLS-gated
+          # CRUD assertion was silently denied instead of exercising real
+          # owner behavior -- this job's confirmed P1 finding. Empty when
+          # the secret does not exist yet, which GitHub Actions resolves to
+          # an empty string, not an error; tests/helpers.mjs's primaryToken()
+          # falls back to the fixture-A login in that case, same as today.
+          TOOLBELT_OWNER_TOKEN: ${{ secrets.TOOLBELT_OWNER_TOKEN }}
+      - name: Run Idea Intake tests
+        # Finding 39: idea-intake's own real-Postgres suites (guard triggers,
+        # RLS, mark_submitted_to_github, registration, migrate-forgepad, and
+        # this batch's own Finding 35/36/49 additions) now run for real
+        # against the postgres: service container declared on this job,
+        # instead of only ever having run locally by hand. PG* env vars point
+        # plain `psql` (tried first by every suite's own detectRunner()) at
+        # the service container -- see this job's own `services:` comment.
+        #
+        # The trailing skip-count check is deliberately part of this SAME
+        # step, not a separate one that would re-run the whole suite a
+        # second time: the suites above self-skip cleanly (via node:test's
+        # own skip mechanism, never a silent omission) when no local
+        # Postgres is reachable -- exactly the behavior that let this entire
+        # gap go unnoticed for so long, since a passing job with every
+        # real-Postgres assertion quietly skipped looks identical to a
+        # passing job that actually ran them, from the job's own green/red
+        # status alone. With the service container above genuinely
+        # reachable, node:test's own "# skipped N" TAP summary line must be
+        # exactly zero; a regression that silently breaks the PG*
+        # connection (a bad env var, the service container failing its
+        # health check, a future edit to detectRunner()) must fail this job
+        # loudly instead of quietly reverting to "ran zero real assertions,
+        # reported green."
+        run: |
+          set -euo pipefail
+          node --test "tests/*.test.mjs" | tee /tmp/idea-intake-test-output.log
+          skipped=$(grep -E '^# skipped [0-9]+' /tmp/idea-intake-test-output.log | grep -oE '[0-9]+' || echo 0)
+          if [ "$skipped" -ne 0 ]; then
+            echo "::error::Idea Intake reported $skipped skipped test(s) with the postgres: service container present -- a real-Postgres suite silently skipped instead of running for real. Check PGHOST/PGPORT/PGUSER/PGPASSWORD and the service container's health." >&2
+            exit 1
+          fi
+        working-directory: apps/toolbelt/apps/idea-intake
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
       - name: Install Prompt Organizer browser test
         run: |
           npm install --no-save --no-package-lock @playwright/test@1.52.0
@@ -63,6 +170,16 @@ jobs:
         working-directory: apps/toolbelt/apps/prompt-organizer
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:8812
+          # Same rationale and same secret as the "Run Prompt Organizer
+          # tests" step above (this job's confirmed P1 finding): without
+          # this, the browser journey's positive save/render/copy flow would
+          # silently exercise a non-owner fixture's (denied) access instead
+          # of the owner's once prompt.* RLS is pinned. tests/e2e/critical-
+          # flow.test.mjs intercepts the sign-in request and substitutes
+          # this token when set, because the app's sign-in form is
+          # password-based and no owner password is ever held in CI --
+          # see that file's header comment.
+          TOOLBELT_OWNER_TOKEN: ${{ secrets.TOOLBELT_OWNER_TOKEN }}
       - name: Upload Prompt Organizer browser evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -76,3 +193,39 @@ jobs:
       - name: Run Network Checker tests and deterministic scanners
         run: bash tools/check.sh
         working-directory: apps/toolbelt/apps/network-checker
+      - name: Install Network Checker browser test
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.52.0
+          npx playwright install --with-deps chromium
+        working-directory: apps/toolbelt/apps/network-checker
+      - name: Seed Network Checker dashboard fixture
+        run: python3 tests/e2e/seed_dashboard_fixture.py
+        working-directory: apps/toolbelt/apps/network-checker
+      - name: Start Network Checker dashboard
+        run: NETCHECK_DB=tests/e2e/dashboard-fixture.db python3 -m netcheck serve >/tmp/network-checker-dashboard.log 2>&1 &
+        working-directory: apps/toolbelt/apps/network-checker
+      - name: Wait for Network Checker dashboard
+        shell: bash
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:8787 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/network-checker-dashboard.log
+          echo "Network Checker dashboard did not become ready." >&2
+          exit 1
+      - name: Run Network Checker dashboard smoke (D-04)
+        run: npx playwright test --config playwright.config.mjs
+        working-directory: apps/toolbelt/apps/network-checker
+      - name: Upload Network Checker browser evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: network-checker-e2e-evidence
+          path: |
+            apps/toolbelt/apps/network-checker/playwright-report/
+            apps/toolbelt/apps/network-checker/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

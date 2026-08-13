@@ -4,9 +4,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import http from "node:http";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const BASE = fs.mkdtempSync(path.join(os.tmpdir(), "acc-gui-srv-"));
 process.env.ACC_POLICY = path.join(BASE, "policy.json");
@@ -30,10 +32,31 @@ const KERNEL = {
 const resetPolicy = () => fs.writeFileSync(process.env.ACC_POLICY, JSON.stringify({ kernel: { ...KERNEL, _note: "fixture" } }, null, 2));
 
 const { startServer, handler, cli } = await import("./server.mjs");
-let srv, base;
-before(async () => { const s = await startServer({ port: 0 }); srv = s.server; base = `http://127.0.0.1:${s.port}`; });
+let srv, base, TOKEN;
+// ACC-5: every /api/* request now needs X-ACC-Token. This suite has ~60
+// request call sites (bare `fetch(...)` plus the jpost/gpost/ppost/lpost
+// helpers below, which are all just aliases of jpost) — rather than touch
+// each one, the shared sandbox server's token is attached here, once, to any
+// request this file sends to ITS OWN `base`. `fetch` is looked up by every
+// call site at call time (plain global reference, not imported), so
+// patching it here before any test body runs is enough; `after` restores it.
+// The token-specific negative cases (missing / wrong header) below each spin
+// up their own dedicated server instead of reusing this one, so they are
+// never shadowed by this default.
+const REAL_FETCH = globalThis.fetch;
+before(async () => {
+  const s = await startServer({ port: 0 });
+  srv = s.server; base = `http://127.0.0.1:${s.port}`; TOKEN = s.token;
+  globalThis.fetch = (input, init) => {
+    const url = typeof input === "string" ? input : input.url;
+    const authed = url.startsWith(base) && url.includes("/api/")
+      ? { ...init, headers: { ...(init && init.headers), "X-ACC-Token": TOKEN } }
+      : init;
+    return REAL_FETCH(input, authed);
+  };
+});
 beforeEach(resetPolicy);
-after(() => { srv.close(); fs.rmSync(BASE, { recursive: true, force: true }); });
+after(() => { globalThis.fetch = REAL_FETCH; srv.close(); fs.rmSync(BASE, { recursive: true, force: true }); });
 
 const good = () => ({ ...KERNEL, budget: { ...KERNEL.budget, toolCalls: 150 } });
 // One JSON-POST helper for every group; each group aliases it for readability.
@@ -140,7 +163,8 @@ test("cli(): starts a server and logs LISTENING <port>; --port is optional (defa
     withoutPort = await cli(["node", "server.mjs"]);
     assert.match(logs.join("\n"), /^LISTENING \d+$/m);
     assert.ok(withPort.port > 0 && withoutPort.port > 0);
-    const r = await fetch(`http://127.0.0.1:${withPort.port}/api/kernel-policy`);
+    assert.match(logs.join("\n"), /^http:\/\/127\.0\.0\.1:\d+\/#acc-token=.+$/m, "the one-time bootstrap fragment URL must be printed too");
+    const r = await fetch(`http://127.0.0.1:${withPort.port}/api/kernel-policy`, { headers: { "X-ACC-Token": withPort.token } });
     assert.equal(r.status, 200);
   } finally {
     console.log = orig;
@@ -157,7 +181,12 @@ test("CLI: prints LISTENING <port> and serves on it", async () => {
   const line = await new Promise((res) => child.stdout.once("data", (d) => res(String(d))));
   const m = line.match(/^LISTENING (\d+)/);
   assert.ok(m, `expected LISTENING banner, got: ${line}`);
-  const r = await fetch(`http://127.0.0.1:${m[1]}/api/kernel-policy`);
+  // The subprocess inherits this process's ACC_ROOT (unchanged so far), so it
+  // reads the same token file the shared sandbox server above already
+  // created — read it straight from disk rather than racing stdout buffering
+  // for a second line.
+  const token = fs.readFileSync(path.join(process.env.ACC_ROOT, "gui-token"), "utf8").split(/\r?\n/, 1)[0];
+  const r = await fetch(`http://127.0.0.1:${m[1]}/api/kernel-policy`, { headers: { "X-ACC-Token": token } });
   assert.equal(r.status, 200);
   child.kill();
 });
@@ -685,9 +714,38 @@ fs.writeFileSync(ROUTING_MD, "# routes\n```json\n" + JSON.stringify({
   ],
 }) + "\n```\n");
 
+// Windows-only, transient: antivirus/indexer file-handle scanning can hold
+// a just-closed file/directory handle open for a few milliseconds after the
+// owning process exits, so an immediate rmSync can observe EBUSY/EPERM even
+// though nothing in this test suite still holds the path open. Reproduced
+// in real CI (Windows integration job, three consecutive AC-11x failures,
+// all "EBUSY: resource busy or locked, rmdir ... \\launch") -- not a real
+// resource leak, since a retry a few ms later always succeeds. Node itself
+// documents this exact class of flake for fs.rm/rmSync on Windows. Retry
+// only these two specific transient codes; anything else re-throws
+// immediately rather than masking a real bug.
+function rmSyncRetryingTransientWindowsLocks(target, options) {
+  const attempts = 5;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      fs.rmSync(target, options);
+      return;
+    } catch (err) {
+      const transient = err && (err.code === "EBUSY" || err.code === "EPERM");
+      if (!transient || attempt === attempts) throw err;
+      // Synchronous sleep: resetLaunch() and its many synchronous callers
+      // throughout this file are not async, so an await-based delay would
+      // require threading a Promise through every call site for a fix
+      // scoped to this one Windows-only flake. Atomics.wait on a private
+      // SharedArrayBuffer is Node's standard blocking-sleep primitive.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25 * attempt);
+    }
+  }
+}
+
 function resetLaunch() {
-  fs.rmSync(LAUNCH_DIR, { recursive: true, force: true });
-  fs.rmSync(RUNNER_LOG, { force: true });
+  rmSyncRetryingTransientWindowsLocks(LAUNCH_DIR, { recursive: true, force: true });
+  rmSyncRetryingTransientWindowsLocks(RUNNER_LOG, { force: true });
   fs.mkdirSync(LAUNCH_DIR, { recursive: true });
   process.env.ACC_ROOT = LAUNCH_DIR;
   process.env.ACC_ROUTING_MD = ROUTING_MD;
@@ -1035,3 +1093,428 @@ test("AC-113: every launch mutation demands X-ACC and local Origin", async () =>
   assert.deepEqual(await (await fetch(`${base}/api/directives`)).json(), []);
   assert.equal(runnerCalls().length, 0);
 });
+
+// ------------------------------------------------------------- session credential (ACC-5, SEC-04 closure, m2-09)
+// X-ACC-Token is the actual auth boundary, additive on top of the CSRF-
+// hygiene checks proven all through this file already (loopback bind, local
+// Host, local Origin, X-ACC on POST) — none of them move or weaken. Every
+// case below gets its OWN fresh ACC_ROOT via mkdtempSync and calls
+// REAL_FETCH directly: the shared sandbox server's token (TOKEN, attached
+// automatically to `base` requests above) was already created long before
+// any test body in this file runs, so it is the wrong server to observe
+// "no token file yet" on, and the wrong token to send when a test's whole
+// point is a missing/wrong one.
+function withTempAccRoot(run) {
+  const root = fs.mkdtempSync(path.join(BASE, "token-"));
+  const savedRoot = process.env.ACC_ROOT, savedPolicy = process.env.ACC_POLICY;
+  process.env.ACC_ROOT = root;
+  process.env.ACC_POLICY = path.join(root, "policy.json");
+  fs.writeFileSync(process.env.ACC_POLICY, JSON.stringify({ kernel: KERNEL }, null, 2));
+  return Promise.resolve().then(() => run(root)).finally(() => {
+    process.env.ACC_ROOT = savedRoot; process.env.ACC_POLICY = savedPolicy;
+  });
+}
+
+test("ACC-5: the token file is created with owner-only permissions on first start, absent before", () =>
+  withTempAccRoot(async (root) => {
+    const tokenPath = path.join(root, "gui-token");
+    assert.equal(fs.existsSync(tokenPath), false, "precondition: no token file yet");
+    const s = await startServer({ port: 0 });
+    try {
+      assert.ok(fs.existsSync(tokenPath), "starting the server must create the token file");
+      assert.equal(typeof s.token, "string");
+      assert.equal(s.token.length, 43, "32 random bytes as unpadded base64url is 43 characters");
+      assert.match(s.token, /^[A-Za-z0-9_-]+$/, "base64url alphabet only");
+      assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), s.token, "the file must hold exactly the token the server is using");
+      if (process.platform !== "win32") {
+        assert.equal(fs.statSync(tokenPath).mode & 0o777, 0o600, "token file must be owner-only (0600)");
+      }
+    } finally { s.server.close(); }
+  })
+);
+
+test("ACC-5: an existing token file is loaded verbatim, never regenerated", () =>
+  withTempAccRoot(async (root) => {
+    const tokenPath = path.join(root, "gui-token");
+    fs.writeFileSync(tokenPath, "fixture-preexisting-token-value\n", { mode: 0o600 });
+    const s = await startServer({ port: 0 });
+    try {
+      assert.equal(s.token, "fixture-preexisting-token-value");
+      assert.equal(fs.readFileSync(tokenPath, "utf8"), "fixture-preexisting-token-value\n", "an existing file must not be rewritten — restart reuses it, only deleting it rotates (gui/README.md)");
+    } finally { s.server.close(); }
+  })
+);
+
+test("ACC-5: an existing but empty/whitespace-only token file is treated as absent — a fresh token is minted, never an empty credential", () =>
+  withTempAccRoot(async (root) => {
+    const tokenPath = path.join(root, "gui-token");
+    fs.writeFileSync(tokenPath, "   \n", { mode: 0o600 }); // corrupt/truncated write, e.g. a crash mid-create
+    const s = await startServer({ port: 0 });
+    const b = `http://127.0.0.1:${s.port}`;
+    try {
+      assert.ok(s.token.length > 0, "must never operate with an empty in-memory token");
+      assert.notEqual(s.token.trim(), "");
+      // If the empty fixture had become the live credential, a request with
+      // NO header at all (presented "" via tokenMatches' own fallback) would
+      // wrongly match an empty stored token. It must not.
+      assert.equal((await REAL_FETCH(`${b}/api/kernel-policy`)).status, 401);
+      assert.equal((await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": s.token } })).status, 200);
+    } finally { s.server.close(); }
+  })
+);
+
+test("ACC-5: ACC_GUI_TOKEN_FILE redirects the token path, mirroring the ACC_ROOT/ACC_POLICY seam style", () =>
+  withTempAccRoot(async (root) => {
+    const customPath = path.join(BASE, "custom-gui-token");
+    fs.rmSync(customPath, { force: true });
+    process.env.ACC_GUI_TOKEN_FILE = customPath;
+    try {
+      const s = await startServer({ port: 0 });
+      try {
+        assert.ok(fs.existsSync(customPath), "token must be created at ACC_GUI_TOKEN_FILE when set");
+        assert.equal(fs.existsSync(path.join(root, "gui-token")), false, "the default <ACC_ROOT>/gui-token path must be untouched once redirected");
+        assert.equal(fs.readFileSync(customPath, "utf8").trim(), s.token);
+      } finally { s.server.close(); }
+    } finally { delete process.env.ACC_GUI_TOKEN_FILE; }
+  })
+);
+
+test("ACC-5: /api/* rejects a missing token, a wrong token (same length, different length, and empty), and accepts the correct one", () =>
+  withTempAccRoot(async () => {
+    const s = await startServer({ port: 0 });
+    const b = `http://127.0.0.1:${s.port}`;
+    try {
+      const noHeader = await REAL_FETCH(`${b}/api/kernel-policy`);
+      assert.equal(noHeader.status, 401);
+      assert.deepEqual(await noHeader.json(), { error: "unauthorized" }, "must match gui/README.md's error envelope exactly");
+
+      // Same length as the real token: exercises the fixed-length hash-then-
+      // compare path rather than any length-mismatch shortcut.
+      const wrongSameLength = s.token.slice(0, -1) + (s.token.at(-1) === "A" ? "B" : "A");
+      assert.equal(wrongSameLength.length, s.token.length);
+      assert.notEqual(wrongSameLength, s.token);
+      const wrongResp = await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": wrongSameLength } });
+      assert.equal(wrongResp.status, 401);
+
+      assert.equal((await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": "short" } })).status, 401);
+      assert.equal((await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": "" } })).status, 401);
+
+      const ok = await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": s.token } });
+      assert.equal(ok.status, 200);
+    } finally { s.server.close(); }
+  })
+);
+
+// Mutation-testing note (honest limitation, not a gap this suite can close):
+// a hand-designed mutant that replaces tokenMatches' hash-then-compare with
+// the naive "if (presented.length !== token.length) return false; then
+// timingSafeEqual on the raw bytes" pattern survives this entire file
+// unchanged -- every functional assertion above (right token, wrong token at
+// every length, empty, missing) still produces the identical status code,
+// because a timing side-channel is by definition invisible to a pass/fail
+// functional assertion. That naive pattern is the textbook-wrong version:
+// it leaks the real token's length through response latency (an early
+// return on mismatch is fast; a full compare is not), which is exactly what
+// hashing both sides to a fixed 32-byte digest before comparing (see
+// tokenMatches in server.mjs) exists to eliminate. The current
+// implementation is correct by code review and by the SHA-256 hash
+// construction itself, not by anything this functional suite can
+// independently prove -- deliberately not "fixed" with a real-timing
+// measurement test, since a threshold that's reliable across this
+// environment's noise would itself be a source of flakiness, which is worse
+// than an honestly-documented gap.
+test("ACC-5: the check is additive (a correct token never bypasses Origin/Host) and leaves no route-existence oracle for an unauthenticated caller", () =>
+  withTempAccRoot(async () => {
+    const s = await startServer({ port: 0 });
+    const b = `http://127.0.0.1:${s.port}`;
+    try {
+      assert.equal((await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": s.token } })).status, 200, "sanity: the correct token alone succeeds");
+      assert.equal(
+        (await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": s.token, origin: "https://evil.example" } })).status,
+        403,
+        "a foreign Origin must still be refused even with a correct token — additive, not a replacement"
+      );
+      const knownRoute = await REAL_FETCH(`${b}/api/kernel-policy`, { headers: { "X-ACC-Token": "wrong" } });
+      const unknownRoute = await REAL_FETCH(`${b}/api/this-route-does-not-exist`, { headers: { "X-ACC-Token": "wrong" } });
+      assert.equal(knownRoute.status, 401);
+      assert.equal(unknownRoute.status, 401);
+      assert.deepEqual(await knownRoute.json(), await unknownRoute.json(), "a known vs unknown route must be indistinguishable before auth");
+    } finally { s.server.close(); }
+  })
+);
+
+// --- Finding 31: the default token file must actually be git-ignored ------
+// Regression for a real leak, not a hypothetical: a default-configured ACC
+// (ACC_ROOT/ACC_GUI_TOKEN_FILE both unset) writes its bearer credential to
+// "<app root>/gui-token" — see tokenFile() in server.mjs. If that path is
+// not covered by apps/agentic-command-center/.gitignore, one `git add -A`/
+// `git add .` in that state commits a live credential to history. This test
+// asks the REAL `git check-ignore` about the REAL .gitignore file (never a
+// hand-rolled matcher, per the review that filed this finding) so it can
+// never drift from what git itself would actually do at commit time. It
+// deliberately does NOT write a real file into the live repo tree (AGENTS.md
+// "do not run hooks manually against live state") — check-ignore's pattern
+// matching does not require the target path to exist.
+test("Finding 31: the default gui-token path is matched by .gitignore (git check-ignore, not a hand-rolled matcher)", () => {
+  const appRoot = path.join(HERE, ".."); // gui/server.test.mjs lives beside gui/server.mjs; ".." is the same app root tokenFile() defaults to
+  const defaultTokenPath = path.join(appRoot, "gui-token");
+  const r = spawnSync("git", ["-C", appRoot, "check-ignore", "--quiet", defaultTokenPath]);
+  assert.equal(r.status, 0, `expected \`git check-ignore\` to match ${defaultTokenPath} against the real .gitignore; got exit ${r.status} (stderr: ${r.stderr})`);
+});
+
+// --- Finding 30: 0600 is a same-OS-user boundary, not a same-process one --
+// (see the "Honest threat model" comment above loadOrCreateToken() in
+// server.mjs). What IS enforceable and was previously missing: an existing
+// token file must still actually be 0600 before it's trusted, or a same-user
+// process that pre-created a looser-permission file before the server's
+// first start would have its (attacker-known) content silently adopted as
+// the live credential. Permission bits are meaningless on win32 (Node fakes
+// them there), matching the existing platform guard a few tests up, so this
+// whole scenario is skipped there — nothing for the code under test to do.
+test(
+  "Finding 30: a pre-existing token file with looser-than-owner-only permissions is not trusted verbatim — a fresh token is minted and the file is re-tightened to 0600",
+  { skip: process.platform === "win32" ? "POSIX permission bits are not meaningful on win32" : false },
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      const plantedValue = "attacker-planted-token-value";
+      fs.writeFileSync(tokenPath, plantedValue + "\n", { mode: 0o644 }); // world-readable: what a same-user process pre-creating the file before first start would look like
+      assert.equal(fs.statSync(tokenPath).mode & 0o777, 0o644, "precondition: the planted file really is looser than owner-only");
+      const s = await startServer({ port: 0 });
+      try {
+        assert.notEqual(s.token, plantedValue, "a non-0600 pre-existing file must never become the live credential");
+        assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), s.token, "the file on disk must hold the freshly minted token, not the planted one");
+        assert.equal(fs.statSync(tokenPath).mode & 0o777, 0o600, "the file must be re-tightened to owner-only, not left at its planted permissions");
+      } finally { s.server.close(); }
+    })
+);
+
+test(
+  "Finding 30: an existing token file that is already 0600 keeps loading verbatim (no regression from the new permission check)",
+  { skip: process.platform === "win32" ? "POSIX permission bits are not meaningful on win32" : false },
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      fs.writeFileSync(tokenPath, "fixture-owner-only-token\n", { mode: 0o600 });
+      const s = await startServer({ port: 0 });
+      try {
+        assert.equal(s.token, "fixture-owner-only-token", "a properly-permissioned existing file must still be loaded verbatim, exactly as before this fix");
+      } finally { s.server.close(); }
+    })
+);
+
+// --- Finding #66 (P2): loadOrCreateToken() was racy, symlink-following, and
+// permission-incomplete ------------------------------------------------------
+// Independent security review of PR #8, re-verified against current HEAD:
+// the old implementation checked permissions with `fs.statSync` (follows a
+// symlink) and minted a fresh token with the default `"w"` flag (no
+// exclusive-create guard). loadOrCreateToken()'s own header comment in
+// server.mjs (Finding #66 paragraph) has the full mechanism; these tests
+// prove the two concrete failure modes it names.
+//
+// Real two-process race, mirroring this repo's own established pattern for
+// proving a cross-process race for real rather than simulating it in-process
+// (packages/toolbelt-cli/tests/cli.integration.test.mjs, "two REAL
+// concurrent child processes racing for the SAME id"): `spawn`, never
+// `spawnSync` (which would serialize the two invocations by construction and
+// prove nothing about concurrency), two real server.mjs child processes
+// against the SAME fresh ACC_ROOT with no gui-token file yet, so both
+// independently race to mint the first one. Before the fix, both could mint
+// and persist their own random value with the last write silently winning —
+// two live processes genuinely disagreeing about which token is "real" with
+// no signal that it happened. After the fix, exactly one write can ever
+// land; the loser reads that value back instead of overwriting it, so every
+// racing process must converge on the same value.
+//
+// Honest limitation (mutation-tested, not assumed): unlike toolbelt-cli's
+// scaffold race — whose critical section is a whole multi-file generation,
+// wide enough that two real processes reliably interleave inside it —
+// loadOrCreateToken()'s entire critical section is a handful of syscalls
+// that complete in well under a millisecond, dwarfed by ordinary Node
+// process-startup jitter between two independently `spawn`ed children. In
+// this environment the two children's own critical sections did not
+// actually overlap often enough for this test alone to go red against a
+// deliberately reverted (`{flag:"wx"}` removed) build — it stayed green by
+// luck of scheduling, not by the fix. It is kept as a real end-to-end
+// sanity check (two real processes really do come up and really do agree
+// whenever their timing DOES overlap, and nothing here crashes or hangs),
+// but the test directly below this one — which forces the exact
+// interleaving deterministically rather than hoping OS scheduling produces
+// it — is the one that actually failed red on the reverted build and is
+// what this repo's mutation-testing convention treats as the real
+// regression guard for this finding.
+test("Finding 66: two REAL concurrent child processes racing to mint the FIRST token never disagree about its value", async () => {
+  const root = fs.mkdtempSync(path.join(BASE, "token-race-"));
+  fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({ kernel: KERNEL }, null, 2));
+  const tokenPath = path.join(root, "gui-token");
+  assert.equal(fs.existsSync(tokenPath), false, "precondition: no token file yet, so both children race to mint it");
+  const serverPath = fileURLToPath(new URL("./server.mjs", import.meta.url));
+  // Resolves once THIS child's own stdout names the token it ended up using
+  // (the one-time bootstrap fragment line cli() prints — see server.mjs) —
+  // event-driven on real stdout data, not a fixed timer, so it can never
+  // under- or over-wait relative to how long this particular process
+  // actually took to start.
+  const spawnOne = () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [serverPath, "--port", "0"], {
+      env: { ...process.env, ACC_ROOT: root },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    child.on("error", reject);
+    child.stdout.on("data", (d) => {
+      stdout += d;
+      const m = stdout.match(/^http:\/\/127\.0\.0\.1:\d+\/#acc-token=(.+)$/m);
+      if (m) resolve({ child, token: m[1] });
+    });
+  });
+  const [a, b] = await Promise.all([spawnOne(), spawnOne()]);
+  try {
+    assert.equal(a.token, b.token, `both processes must agree on the one token; got ${a.token} vs ${b.token}`);
+    assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), a.token, "the file on disk must hold exactly the agreed-upon value, not a third value from a lost overwrite");
+  } finally {
+    a.child.kill();
+    b.child.kill();
+  }
+});
+
+// Deterministic companion to the real two-process test above: forces the
+// exact interleaving directly instead of hoping two spawned processes'
+// razor-thin critical sections happen to overlap. Monkey-patches
+// `fs.writeFileSync` for the DURATION of this in-process `loadOrCreateToken()`
+// call only, so that the very first time it is invoked with the shape
+// loadOrCreateToken()'s own exclusive-create attempt uses
+// (`{flag:"wx", mode:0o600}`) at the token path, a "competing writer" lands
+// its own value at that same path FIRST, via the real fs.writeFileSync and
+// the exact same exclusive-create semantics — simulating precisely the
+// moment a second real process would win the race in between this process's
+// own `lstat` (finding nothing) and its own `writeFileSync` call. The real
+// call then proceeds and must observe EEXIST from the file the "competitor"
+// just created, exactly as it would from a second real process.
+test("Finding 66: loadOrCreateToken() never silently overwrites a value another writer already landed at the exact moment it attempts its own exclusive create", () =>
+  withTempAccRoot(async (root) => {
+    const tokenPath = path.join(root, "gui-token");
+    const realWriteFileSync = fs.writeFileSync;
+    let injected = false;
+    fs.writeFileSync = (file, data, opts) => {
+      if (!injected && file === tokenPath && opts && opts.flag === "wx") {
+        injected = true;
+        // "Someone else" wins the race first, landing their own value with
+        // the exact same exclusive-create call this function itself uses —
+        // calls the REAL writeFileSync directly (not this patched one) so
+        // it cannot recurse into itself.
+        realWriteFileSync(tokenPath, "concurrent-winner-token\n", { flag: "wx", mode: 0o600 });
+      }
+      return realWriteFileSync(file, data, opts);
+    };
+    try {
+      const s = await startServer({ port: 0 });
+      try {
+        assert.equal(injected, true, "precondition: the exclusive-create attempt must actually have been observed and raced");
+        assert.equal(s.token, "concurrent-winner-token", "the loser must adopt the value the other writer actually landed, never silently overwrite it with its own");
+        assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), "concurrent-winner-token", "the file on disk must hold the winner's value, not a later silent overwrite");
+      } finally { s.server.close(); }
+    } finally {
+      fs.writeFileSync = realWriteFileSync;
+    }
+  })
+);
+
+test(
+  "Finding 66: a pre-planted symlink at the token path is never followed (read or write) — a fresh regular file replaces it and the symlink's target is untouched",
+  { skip: process.platform === "win32" ? "symlink creation/semantics differ on win32; POSIX permission bits are not meaningful there either" : false },
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      const decoyPath = path.join(root, "decoy-target");
+      // 0600 on the decoy itself is deliberate: it proves rejection turns on
+      // lstat seeing a SYMLINK at the token path, not on the target's own
+      // permission bits (the old `fs.statSync`-based check would have
+      // followed the link and seen this exact 0600 mode, and trusted it).
+      fs.writeFileSync(decoyPath, "attacker-controlled-content\n", { mode: 0o600 });
+      fs.symlinkSync(decoyPath, tokenPath);
+      const s = await startServer({ port: 0 });
+      try {
+        assert.notEqual(s.token, "attacker-controlled-content", "a symlinked-to file's content must never be trusted as the live credential");
+        assert.equal(fs.lstatSync(tokenPath).isSymbolicLink(), false, "the symlink must be replaced by a real file, never left in place");
+        assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), s.token, "the file on disk must hold the freshly minted token");
+        assert.equal(fs.statSync(tokenPath).mode & 0o777, 0o600, "the replacement file must be owner-only");
+        assert.equal(fs.readFileSync(decoyPath, "utf8"), "attacker-controlled-content\n", "the symlink's former target must never be written through");
+      } finally { s.server.close(); }
+    })
+);
+
+test(
+  "Finding 66: a dangling symlink at the token path (pointing at nothing) is cleared, never followed into creating its target",
+  { skip: process.platform === "win32" ? "symlink creation semantics differ on win32" : false },
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      const missingTarget = path.join(root, "does-not-exist");
+      fs.symlinkSync(missingTarget, tokenPath);
+      const s = await startServer({ port: 0 });
+      try {
+        assert.equal(fs.lstatSync(tokenPath).isSymbolicLink(), false, "the dangling symlink must be replaced by a real file");
+        assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), s.token);
+        assert.equal(fs.existsSync(missingTarget), false, "the old symlink's target must never be created by following the link on write");
+      } finally { s.server.close(); }
+    })
+);
+
+// Two error-path tests for loadOrCreateToken()'s exclusive-create retry loop
+// itself (not exercised by any test above, which only ever race a REAL
+// competing writer or a symlink -- both resolve via the normal EEXIST-then-
+// retry path). These monkey-patch fs.writeFileSync the same way the real
+// two-process race's deterministic companion test above does.
+test(
+  "Finding 66: a non-EEXIST error from the exclusive-create write propagates immediately, never silently retried",
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      const realWriteFileSync = fs.writeFileSync;
+      let calls = 0;
+      fs.writeFileSync = (file, data, opts) => {
+        if (file === tokenPath && opts && opts.flag === "wx") {
+          calls++;
+          const err = new Error("EACCES: permission denied, open");
+          err.code = "EACCES";
+          throw err;
+        }
+        return realWriteFileSync(file, data, opts);
+      };
+      try {
+        assert.throws(() => startServer({ port: 0 }), /EACCES/, "a non-EEXIST error must propagate, not be swallowed into a retry");
+        assert.equal(calls, 1, "must not retry after a non-EEXIST failure -- only EEXIST means 'lost the race, try again'");
+      } finally {
+        fs.writeFileSync = realWriteFileSync;
+      }
+    })
+);
+
+test(
+  "Finding 66: exhausting all 5 exclusive-create attempts (persistent EEXIST) fails loud with a named error, never hangs or loops forever",
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      const realWriteFileSync = fs.writeFileSync;
+      let calls = 0;
+      fs.writeFileSync = (file, data, opts) => {
+        if (file === tokenPath && opts && opts.flag === "wx") {
+          calls++;
+          const err = new Error("EEXIST: file already exists, open");
+          err.code = "EEXIST";
+          throw err;
+        }
+        return realWriteFileSync(file, data, opts);
+      };
+      try {
+        assert.throws(
+          () => startServer({ port: 0 }),
+          /could not establish a trustworthy token file.*after 5 attempts/,
+          "must fail loud, naming the path and attempt count, once every attempt loses the race"
+        );
+        assert.equal(calls, 5, "must make exactly 5 exclusive-create attempts, matching the bounded retry loop's own limit");
+      } finally {
+        fs.writeFileSync = realWriteFileSync;
+      }
+    })
+);
