@@ -33,5 +33,38 @@ grep -rn signInWithPassword apps/toolbelt/apps/prompt-organizer/web returns zero
 ## Estimated LOC delta
 Added: 310  Deleted: 50  Net: +260
 
+## Actual outcome (as implemented, combined with m5-02)
+
+Delivered together with m5-02 in one slice (~3650 lines added across both,
+dominated by the Shell React port and its tests -- the ADR-01/ADR-02
+"the Shell absorbs... the Toolbelt tool UIs" decision, not a scope
+expansion of this issue's own contract/deletion work):
+
+- `tests/contract.test.mjs` (new, 22 tests): one real-Postgres case per
+  05-d section 1.2 endpoint row, proving PO-1a's grant/RLS contract and
+  PO-1b's fail-closed non-owner boundary (RLS-refused writes, not silent
+  no-ops) on every `prompt.*` table. Deep branch coverage already owned by
+  `render-endpoint.test.mjs`/`get-prompt.test.mjs` is deliberately not
+  re-proven here (see the file's own header comment).
+- `web/index.html`'s password-grant sign-in form is gone; the page now
+  boots from an access token primed into `sessionStorage` (its own
+  manual-check convenience -- see the file's own comment). D-12's per-run
+  namespacing was already in place before this issue (RUN_ID-titled
+  fixture rows, locator assertions scoped to that title); `retries: 0`
+  unchanged.
+- `/prompts` in the Shell is now the real production UI (list + expandable
+  cards), not a placeholder -- `apps/shell/src/lib/prompts.ts`,
+  `apps/shell/src/pages/prompts/*`. This was originally scoped to m5-02,
+  but the two issues share one Shell surface and were implemented as one
+  slice; see m5-02's own "Actual outcome" for the UI-side detail.
+- One real bug caught and fixed along the way, unrelated to either issue's
+  stated scope: importing `{ render, extractVariables, extractSections }`
+  from `@hyperbolic/llm`'s barrel pulled in that package's provider SDK
+  dependencies (Anthropic/Gemini/OpenAI clients) transitively, blowing
+  `apps/shell`'s 250 KB gzipped bundle budget (09 section 6) by ~33 KB.
+  Fixed by giving `apps/shell` its own narrow copy of the pure render
+  model (`src/lib/prompt-render.ts`, parity-tested against
+  `web/render.mjs` directly) instead of importing the package.
+
 ## Risk
 Low; deletions remove an auth flow; the suite is additive protection.
