@@ -338,6 +338,39 @@ function send(res, code, body, type = "application/json") {
 // the mode assertion in gui/server.test.mjs), so there is nothing meaningful
 // to check or enforce, and 0600 mode requests are Windows no-ops regardless.
 //
+// Finding #66 (P2, independent security review): the paragraph above only
+// ever checked permissions with `fs.statSync`, which FOLLOWS a symlink, and
+// the mint-fresh path wrote with the default `"w"` flag (no exclusivity
+// guard). Two gaps, both closed together below:
+//   - Symlink-following, both directions. A same-user process could plant a
+//     symlink at the token path — pointing at an attacker-controlled file
+//     (this code would then silently TRUST that file's content as the live
+//     credential) or at a path this process has no business writing
+//     (mint-fresh would then silently WRITE a fresh random token THROUGH the
+//     symlink to that target, clobbering it). `fs.lstatSync` — which reports
+//     the symlink itself, never its target — replaces `fs.statSync` for the
+//     trust check, and every mint-fresh write below uses the exclusive-
+//     create flag described next, which POSIX open(2) never opens or
+//     creates through an existing symlink at the final path component
+//     (verified: EEXIST on both a dangling symlink and one pointing at a
+//     real file, never a silent write-through). Symlink rejection applies on
+//     EVERY platform, unlike the 0600 mode comparison: `isSymbolicLink()` is
+//     meaningful even where POSIX mode bits are not.
+//   - No atomicity guard on the mint-fresh write. Two servers racing to
+//     mint a token on first start could each independently observe "absent,
+//     mint fresh" and each `writeFileSync` their own random value with the
+//     default flag — whichever write lands last silently wins, so the two
+//     processes could end up disagreeing about which token is "real" with
+//     no signal that it happened. `{ flag: "wx" }` (`O_WRONLY|O_CREAT|
+//     O_EXCL`) makes the create atomic and exclusive: it fails with EEXIST
+//     if literally anything already occupies the path (another process's
+//     just-written file, or a pre-planted symlink) rather than overwriting
+//     it. loadOrCreateToken() below turns that EEXIST into "retry from the
+//     top" — the loser reads back whatever the winner (or, for a cleared
+//     symlink, this same process's own next attempt) actually left there,
+//     so every racing caller converges on one agreed-upon value instead of
+//     each silently believing its own.
+//
 // Read/created exactly once, at the moment a server actually starts
 // (startServer(), below) — NOT re-resolved per request. A real deployment
 // starts one server per process and ACC_ROOT never moves under it, so this
@@ -351,29 +384,72 @@ function send(res, code, body, type = "application/json") {
 // file — a cache that silently re-derived on that would rotate the running
 // server's credential out from under it.)
 const tokenFile = () => process.env.ACC_GUI_TOKEN_FILE || path.join(repoRoot(), "gui-token");
-// Mode bits are meaningless on win32 (see the header comment above) — treat
-// every existing file there as trusted, same as before this fix.
-const ownerOnly = (file) => process.platform === "win32" || (fs.statSync(file).mode & 0o777) === 0o600;
+// Takes an already-`lstat`'d Stats object rather than a path: every caller
+// below needs that same Stats object anyway (first to decide whether
+// anything occupies the path at all, then whether it's trustworthy), so
+// this avoids a second stat syscall per attempt. A symlink is NEVER owner-
+// only, on any platform — see the Finding #66 comment above for why lstat,
+// not stat, is what makes that true instead of transparently following the
+// link. The 0600 mode comparison remains win32-exempt exactly as before
+// this fix (meaningless bits there — every non-symlink file is trusted).
+const ownerOnly = (st) => !st.isSymbolicLink() && (process.platform === "win32" || (st.mode & 0o777) === 0o600);
 
 function loadOrCreateToken() {
   const file = tokenFile();
-  try {
-    if (!ownerOnly(file)) throw new Error("gui-token has looser-than-owner-only permissions; refusing to trust it");
-    const line = fs.readFileSync(file, "utf8").split(/\r?\n/, 1)[0].trim();
-    if (line) return line;
-  } catch {} // absent, unreadable, wrong permissions, or empty -> mint a fresh one below
-  const fresh = randomBytes(32).toString("base64url");
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, fresh + "\n", { mode: 0o600 });
-  // Belt-and-braces: writeFileSync's `mode` option only applies to a file it
-  // creates fresh (POSIX open(2) semantics ignore the mode argument for a
-  // file that already exists). The case this whole function exists to
-  // correct is exactly an existing file with stale/looser permissions, so an
-  // explicit chmod after the write is what actually re-tightens it — leaving
-  // out this line would silently keep serving a loosely-permissioned file
-  // forever, having only rotated the value inside it.
-  if (process.platform !== "win32") fs.chmodSync(file, 0o600);
-  return fresh;
+  // Bounded retry, not a single attempt: the loser of a real race (see the
+  // Finding #66 comment above) must loop back and READ the winner's file
+  // rather than either overwriting it or giving up. 5 is generous headroom
+  // over the two-process case this repo actually exercises end-to-end (the
+  // concurrency test in server.test.mjs) — it exists only so a pathological
+  // run of losses fails loudly instead of spinning forever.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    let existing = null;
+    try { existing = fs.lstatSync(file); } catch {} // ENOENT (or similar) -> nothing occupies this path yet
+
+    if (existing && ownerOnly(existing)) {
+      try {
+        const line = fs.readFileSync(file, "utf8").split(/\r?\n/, 1)[0].trim();
+        if (line) return line;
+      } catch {} // unreadable despite passing lstat (e.g. removed mid-check) -> fall through to mint
+    }
+    // Nothing trustworthy at this path: absent, a symlink, wrong
+    // permissions, unreadable, or present-but-empty (a crash mid-create can
+    // leave a valid-mode, zero-content file). Whatever IS there — including
+    // a symlink — must be cleared before the exclusive create below can
+    // claim the path outright. Best-effort: another process may be doing
+    // the exact same cleanup concurrently, and a lost unlink race here just
+    // falls through to the create attempt, which then settles things via
+    // EEXIST like every other race this loop handles.
+    if (existing) { try { fs.unlinkSync(file); } catch {} }
+
+    const fresh = randomBytes(32).toString("base64url");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    try {
+      // "wx" = O_WRONLY|O_CREAT|O_EXCL: fails EEXIST if anything already
+      // occupies this path — a regular file (another process just won this
+      // same race) or a symlink (pre-planted, dangling or pointing at a
+      // real file; open(2) with O_EXCL never opens or creates through an
+      // existing symlink at the final path component). That is what
+      // actually closes both Finding #66 gaps: no two racing processes can
+      // each believe their own mint "won" (only one write can ever land
+      // here), and a pre-planted symlink can never be written through,
+      // unlike the old default `"w"` flag, which followed it in both
+      // directions.
+      fs.writeFileSync(file, fresh + "\n", { flag: "wx", mode: 0o600 });
+      // Belt-and-braces: "wx" guarantees this call always creates the file
+      // fresh, so the `mode` option above IS honored (unlike the old
+      // existing-file case) — but open(2) still ANDs the requested mode
+      // against the process umask, so an unusually restrictive umask could
+      // leave the file weaker than 0600 despite the option. The explicit
+      // chmod re-asserts owner-only regardless of umask.
+      if (process.platform !== "win32") fs.chmodSync(file, 0o600);
+      return fresh;
+    } catch (e) {
+      if (e && e.code === "EEXIST") continue; // lost the race -- loop back and read whoever won
+      throw e;
+    }
+  }
+  throw new Error(`gui-token: could not establish a trustworthy token file at ${file} after 5 attempts`);
 }
 
 // Constant-time compare that never branches on length first: both sides are

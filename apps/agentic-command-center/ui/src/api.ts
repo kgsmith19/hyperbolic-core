@@ -13,15 +13,42 @@
 // then carries it as `X-ACC-Token`.
 const TOKEN_STORAGE_KEY = "acc-gui-token";
 
+// Finding #67 (P2, independent security review): the token this app trusts
+// must have the exact shape gui/server.mjs's loadOrCreateToken() actually
+// generates — 32 random bytes as base64url is always exactly 43 characters
+// from the [A-Za-z0-9_-] alphabet (see that function and gui/README.md's
+// "Token file" section). Anchored on both ends so nothing shorter, longer,
+// or containing any other character — including a decoded CR/LF, which
+// would otherwise later corrupt an `X-ACC-Token` request header — can ever
+// pass. A value that fails this check is dropped rather than stored: never
+// silently accepted as some other, unvalidated shape of "credential".
+const TOKEN_SHAPE_RE = /^[A-Za-z0-9_-]{43}$/;
+
 function bootstrapTokenFromFragment(): void {
   if (typeof window === "undefined") return; // non-browser eval (tests, SSR-ish tooling)
   const m = /(?:^#|[#&])acc-token=([^&]+)/.exec(window.location.hash);
   if (!m) return;
   try {
-    window.sessionStorage.setItem(TOKEN_STORAGE_KEY, decodeURIComponent(m[1]));
+    // decodeURIComponent throws URIError on malformed percent-encoding
+    // (e.g. a stray "%", as in "#acc-token=%") — this function runs at
+    // MODULE LOAD TIME, before React ever mounts and before any error
+    // boundary could catch it (this UI has none), so an uncaught throw here
+    // would crash the entire page on nothing worse than a mistyped or
+    // truncated URL. Any failure here — a throw, or a decoded value that
+    // doesn't match TOKEN_SHAPE_RE — drops the fragment's token silently
+    // and the app proceeds unauthenticated (every subsequent /api/* call
+    // then 401s normally) rather than crashing OR storing an unvalidated
+    // value that a later request would carry verbatim into a header.
+    const decoded = decodeURIComponent(m[1]);
+    if (TOKEN_SHAPE_RE.test(decoded)) {
+      window.sessionStorage.setItem(TOKEN_STORAGE_KEY, decoded);
+    }
+  } catch {
+    // Malformed percent-encoding: nothing to store, fall through to the
+    // fragment-stripping `finally` below.
   } finally {
-    // Strip the fragment even if storage somehow failed: it must never
-    // linger in history either way.
+    // Strip the fragment even if parsing/storage somehow failed: it must
+    // never linger in history either way.
     const url = new URL(window.location.href);
     url.hash = "";
     window.history.replaceState(null, "", url.toString());

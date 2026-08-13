@@ -1302,3 +1302,160 @@ test(
       } finally { s.server.close(); }
     })
 );
+
+// --- Finding #66 (P2): loadOrCreateToken() was racy, symlink-following, and
+// permission-incomplete ------------------------------------------------------
+// Independent security review of PR #8, re-verified against current HEAD:
+// the old implementation checked permissions with `fs.statSync` (follows a
+// symlink) and minted a fresh token with the default `"w"` flag (no
+// exclusive-create guard). loadOrCreateToken()'s own header comment in
+// server.mjs (Finding #66 paragraph) has the full mechanism; these tests
+// prove the two concrete failure modes it names.
+//
+// Real two-process race, mirroring this repo's own established pattern for
+// proving a cross-process race for real rather than simulating it in-process
+// (packages/toolbelt-cli/tests/cli.integration.test.mjs, "two REAL
+// concurrent child processes racing for the SAME id"): `spawn`, never
+// `spawnSync` (which would serialize the two invocations by construction and
+// prove nothing about concurrency), two real server.mjs child processes
+// against the SAME fresh ACC_ROOT with no gui-token file yet, so both
+// independently race to mint the first one. Before the fix, both could mint
+// and persist their own random value with the last write silently winning —
+// two live processes genuinely disagreeing about which token is "real" with
+// no signal that it happened. After the fix, exactly one write can ever
+// land; the loser reads that value back instead of overwriting it, so every
+// racing process must converge on the same value.
+//
+// Honest limitation (mutation-tested, not assumed): unlike toolbelt-cli's
+// scaffold race — whose critical section is a whole multi-file generation,
+// wide enough that two real processes reliably interleave inside it —
+// loadOrCreateToken()'s entire critical section is a handful of syscalls
+// that complete in well under a millisecond, dwarfed by ordinary Node
+// process-startup jitter between two independently `spawn`ed children. In
+// this environment the two children's own critical sections did not
+// actually overlap often enough for this test alone to go red against a
+// deliberately reverted (`{flag:"wx"}` removed) build — it stayed green by
+// luck of scheduling, not by the fix. It is kept as a real end-to-end
+// sanity check (two real processes really do come up and really do agree
+// whenever their timing DOES overlap, and nothing here crashes or hangs),
+// but the test directly below this one — which forces the exact
+// interleaving deterministically rather than hoping OS scheduling produces
+// it — is the one that actually failed red on the reverted build and is
+// what this repo's mutation-testing convention treats as the real
+// regression guard for this finding.
+test("Finding 66: two REAL concurrent child processes racing to mint the FIRST token never disagree about its value", async () => {
+  const root = fs.mkdtempSync(path.join(BASE, "token-race-"));
+  fs.writeFileSync(path.join(root, "policy.json"), JSON.stringify({ kernel: KERNEL }, null, 2));
+  const tokenPath = path.join(root, "gui-token");
+  assert.equal(fs.existsSync(tokenPath), false, "precondition: no token file yet, so both children race to mint it");
+  const serverPath = fileURLToPath(new URL("./server.mjs", import.meta.url));
+  // Resolves once THIS child's own stdout names the token it ended up using
+  // (the one-time bootstrap fragment line cli() prints — see server.mjs) —
+  // event-driven on real stdout data, not a fixed timer, so it can never
+  // under- or over-wait relative to how long this particular process
+  // actually took to start.
+  const spawnOne = () => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [serverPath, "--port", "0"], {
+      env: { ...process.env, ACC_ROOT: root },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    child.on("error", reject);
+    child.stdout.on("data", (d) => {
+      stdout += d;
+      const m = stdout.match(/^http:\/\/127\.0\.0\.1:\d+\/#acc-token=(.+)$/m);
+      if (m) resolve({ child, token: m[1] });
+    });
+  });
+  const [a, b] = await Promise.all([spawnOne(), spawnOne()]);
+  try {
+    assert.equal(a.token, b.token, `both processes must agree on the one token; got ${a.token} vs ${b.token}`);
+    assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), a.token, "the file on disk must hold exactly the agreed-upon value, not a third value from a lost overwrite");
+  } finally {
+    a.child.kill();
+    b.child.kill();
+  }
+});
+
+// Deterministic companion to the real two-process test above: forces the
+// exact interleaving directly instead of hoping two spawned processes'
+// razor-thin critical sections happen to overlap. Monkey-patches
+// `fs.writeFileSync` for the DURATION of this in-process `loadOrCreateToken()`
+// call only, so that the very first time it is invoked with the shape
+// loadOrCreateToken()'s own exclusive-create attempt uses
+// (`{flag:"wx", mode:0o600}`) at the token path, a "competing writer" lands
+// its own value at that same path FIRST, via the real fs.writeFileSync and
+// the exact same exclusive-create semantics — simulating precisely the
+// moment a second real process would win the race in between this process's
+// own `lstat` (finding nothing) and its own `writeFileSync` call. The real
+// call then proceeds and must observe EEXIST from the file the "competitor"
+// just created, exactly as it would from a second real process.
+test("Finding 66: loadOrCreateToken() never silently overwrites a value another writer already landed at the exact moment it attempts its own exclusive create", () =>
+  withTempAccRoot(async (root) => {
+    const tokenPath = path.join(root, "gui-token");
+    const realWriteFileSync = fs.writeFileSync;
+    let injected = false;
+    fs.writeFileSync = (file, data, opts) => {
+      if (!injected && file === tokenPath && opts && opts.flag === "wx") {
+        injected = true;
+        // "Someone else" wins the race first, landing their own value with
+        // the exact same exclusive-create call this function itself uses —
+        // calls the REAL writeFileSync directly (not this patched one) so
+        // it cannot recurse into itself.
+        realWriteFileSync(tokenPath, "concurrent-winner-token\n", { flag: "wx", mode: 0o600 });
+      }
+      return realWriteFileSync(file, data, opts);
+    };
+    try {
+      const s = await startServer({ port: 0 });
+      try {
+        assert.equal(injected, true, "precondition: the exclusive-create attempt must actually have been observed and raced");
+        assert.equal(s.token, "concurrent-winner-token", "the loser must adopt the value the other writer actually landed, never silently overwrite it with its own");
+        assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), "concurrent-winner-token", "the file on disk must hold the winner's value, not a later silent overwrite");
+      } finally { s.server.close(); }
+    } finally {
+      fs.writeFileSync = realWriteFileSync;
+    }
+  })
+);
+
+test(
+  "Finding 66: a pre-planted symlink at the token path is never followed (read or write) — a fresh regular file replaces it and the symlink's target is untouched",
+  { skip: process.platform === "win32" ? "symlink creation/semantics differ on win32; POSIX permission bits are not meaningful there either" : false },
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      const decoyPath = path.join(root, "decoy-target");
+      // 0600 on the decoy itself is deliberate: it proves rejection turns on
+      // lstat seeing a SYMLINK at the token path, not on the target's own
+      // permission bits (the old `fs.statSync`-based check would have
+      // followed the link and seen this exact 0600 mode, and trusted it).
+      fs.writeFileSync(decoyPath, "attacker-controlled-content\n", { mode: 0o600 });
+      fs.symlinkSync(decoyPath, tokenPath);
+      const s = await startServer({ port: 0 });
+      try {
+        assert.notEqual(s.token, "attacker-controlled-content", "a symlinked-to file's content must never be trusted as the live credential");
+        assert.equal(fs.lstatSync(tokenPath).isSymbolicLink(), false, "the symlink must be replaced by a real file, never left in place");
+        assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), s.token, "the file on disk must hold the freshly minted token");
+        assert.equal(fs.statSync(tokenPath).mode & 0o777, 0o600, "the replacement file must be owner-only");
+        assert.equal(fs.readFileSync(decoyPath, "utf8"), "attacker-controlled-content\n", "the symlink's former target must never be written through");
+      } finally { s.server.close(); }
+    })
+);
+
+test(
+  "Finding 66: a dangling symlink at the token path (pointing at nothing) is cleared, never followed into creating its target",
+  { skip: process.platform === "win32" ? "symlink creation semantics differ on win32" : false },
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      const missingTarget = path.join(root, "does-not-exist");
+      fs.symlinkSync(missingTarget, tokenPath);
+      const s = await startServer({ port: 0 });
+      try {
+        assert.equal(fs.lstatSync(tokenPath).isSymbolicLink(), false, "the dangling symlink must be replaced by a real file");
+        assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), s.token);
+        assert.equal(fs.existsSync(missingTarget), false, "the old symlink's target must never be created by following the link on write");
+      } finally { s.server.close(); }
+    })
+);
