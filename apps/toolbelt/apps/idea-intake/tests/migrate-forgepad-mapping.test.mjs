@@ -222,27 +222,120 @@ test("validateForgepadIdea accumulates multiple independent problems in one pass
   assert.equal(problems.length, 3);
 });
 
+// --- Finding 14: a non-null githubIssue must never silently vanish -------
+
+test("validateForgepadIdea accepts a null githubIssue (the only shape this repo's history has ever produced)", () => {
+  assert.deepEqual(validateForgepadIdea(baseIdea({ githubIssue: null })), []);
+});
+
+test("validateForgepadIdea accepts an entirely absent githubIssue field", () => {
+  const idea = baseIdea();
+  delete idea.githubIssue;
+  assert.deepEqual(validateForgepadIdea(idea), []);
+});
+
+test(
+  "validateForgepadIdea flags a non-null githubIssue instead of silently dropping it (RED before the fix: mapForgepadIdea never copies this field anywhere)",
+  () => {
+    const problems = validateForgepadIdea(baseIdea({ githubIssue: "42" }));
+    assert.ok(
+      problems.some((p) => p.includes("githubIssue") && p.includes("not null")),
+      `expected a githubIssue problem, got: ${JSON.stringify(problems)}`,
+    );
+  },
+);
+
+test("a rejected non-null-githubIssue file never reaches mapForgepadIdea: loadForgepadFiles reports it as an error, not a loaded file", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "migrate-forgepad-ghissue-"));
+  try {
+    fs.writeFileSync(path.join(dir, "f-44444444.json"), JSON.stringify(baseIdea({ id: "f-44444444", githubIssue: "99" })));
+    const { files, errors } = loadForgepadFiles(dir);
+    assert.equal(files.length, 0);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /githubIssue/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // === partitionNewRows (idempotency decision, DB-free) ======================
 
 test("partitionNewRows separates rows whose source is already present from genuinely new ones", () => {
-  const rows = [{ source: "forgepad:f-a" }, { source: "forgepad:f-b" }, { source: "forgepad:f-c" }];
-  const { newRows, alreadyPresent } = partitionNewRows(rows, new Set(["forgepad:f-b"]));
+  const rows = [{ id: "f-a", source: "forgepad:f-a" }, { id: "f-b", source: "forgepad:f-b" }, { id: "f-c", source: "forgepad:f-c" }];
+  const { newRows, alreadyPresent, duplicateInBatch } = partitionNewRows(rows, new Set(["forgepad:f-b"]));
   assert.deepEqual(newRows.map((r) => r.source), ["forgepad:f-a", "forgepad:f-c"]);
   assert.equal(alreadyPresent, 1);
+  assert.equal(duplicateInBatch, 0);
 });
 
 test("partitionNewRows with an empty existing set treats every row as new", () => {
-  const rows = [{ source: "forgepad:f-a" }, { source: "forgepad:f-b" }];
+  const rows = [{ id: "f-a", source: "forgepad:f-a" }, { id: "f-b", source: "forgepad:f-b" }];
   const { newRows, alreadyPresent } = partitionNewRows(rows, new Set());
   assert.equal(newRows.length, 2);
   assert.equal(alreadyPresent, 0);
 });
 
 test("partitionNewRows with every source already present yields zero new rows (second-run idempotency shape)", () => {
-  const rows = [{ source: "forgepad:f-a" }, { source: "forgepad:f-b" }];
+  const rows = [{ id: "f-a", source: "forgepad:f-a" }, { id: "f-b", source: "forgepad:f-b" }];
   const { newRows, alreadyPresent } = partitionNewRows(rows, new Set(["forgepad:f-a", "forgepad:f-b"]));
   assert.equal(newRows.length, 0);
   assert.equal(alreadyPresent, 2);
+});
+
+// --- Finding 11: within-batch dedupe keyed on the immutable forgepad id ---
+
+test(
+  "partitionNewRows dedupes two rows sharing one forgepad id WITHIN a single batch, keeping only the first (RED before the fix: both used to reach newRows)",
+  () => {
+    // Two distinct source files can independently map to the same forgepad
+    // idea id (a duplicated/malformed fixture, an operator copy-paste) --
+    // loadForgepadFiles/validateForgepadIdea impose no cross-file
+    // uniqueness, only mapForgepadIdea's per-row shape. Before Finding 11's
+    // fix, partitionNewRows only checked `existingSources` (rows already in
+    // the DB from a PRIOR run) and let both rows straight through to
+    // insertRows in the SAME run.
+    const rows = [
+      { id: "f-dupe0001", source: "forgepad:f-dupe0001" },
+      { id: "f-dupe0001", source: "forgepad:f-dupe0001; a different original source text" },
+      { id: "f-unique02", source: "forgepad:f-unique02" },
+    ];
+    const { newRows, alreadyPresent, duplicateInBatch } = partitionNewRows(rows, new Set());
+    assert.deepEqual(
+      newRows.map((r) => r.id),
+      ["f-dupe0001", "f-unique02"],
+      "only the FIRST occurrence of the duplicated id survives into newRows",
+    );
+    assert.equal(alreadyPresent, 0);
+    assert.equal(duplicateInBatch, 1, "the second f-dupe0001 row must be counted as an in-batch duplicate, not silently dropped or inserted");
+  },
+);
+
+test("partitionNewRows dedupe keys on the immutable id, not the mutable full source string", () => {
+  // Two rows for the same forgepad id whose `source` strings genuinely
+  // differ (different original-source suffix) must still collapse to one --
+  // proving the fix keys on `row.id`, not `row.source` (a source-keyed
+  // dedupe would treat these as two distinct, unrelated rows).
+  const rows = [
+    { id: "f-sameid01", source: "forgepad:f-sameid01; first pass" },
+    { id: "f-sameid01", source: "forgepad:f-sameid01; second pass, edited" },
+  ];
+  const { newRows, duplicateInBatch } = partitionNewRows(rows, new Set());
+  assert.equal(newRows.length, 1);
+  assert.equal(newRows[0].source, "forgepad:f-sameid01; first pass");
+  assert.equal(duplicateInBatch, 1);
+});
+
+test("partitionNewRows in-batch dedupe composes correctly with the existing-sources check (three-way split)", () => {
+  const rows = [
+    { id: "f-already1", source: "forgepad:f-already1" }, // already migrated in a prior run
+    { id: "f-dupe0002", source: "forgepad:f-dupe0002" }, // first of an in-batch duplicate pair
+    { id: "f-dupe0002", source: "forgepad:f-dupe0002" }, // second of the pair
+    { id: "f-brandnew", source: "forgepad:f-brandnew" }, // genuinely new
+  ];
+  const { newRows, alreadyPresent, duplicateInBatch } = partitionNewRows(rows, new Set(["forgepad:f-already1"]));
+  assert.deepEqual(newRows.map((r) => r.id), ["f-dupe0002", "f-brandnew"]);
+  assert.equal(alreadyPresent, 1);
+  assert.equal(duplicateInBatch, 1);
 });
 
 // === summarizeCounts =========================================================
@@ -320,4 +413,21 @@ test("parseArgs reads --acc-root and --dry-run in either order", () => {
 
 test("parseArgs rejects an unrecognized flag", () => {
   assert.throws(() => parseArgs(["--bogus"]), /unrecognized argument/);
+});
+
+// --- Finding 12: --acc-root must not silently swallow a following flag ---
+
+test(
+  "parseArgs rejects --acc-root immediately followed by another flag instead of silently treating the flag as the path (RED before the fix: this used to parse as accRoot='--dry-run', dryRun=false)",
+  () => {
+    assert.throws(() => parseArgs(["--acc-root", "--dry-run"]), /--acc-root requires a value/);
+  },
+);
+
+test("parseArgs rejects a trailing --acc-root with nothing after it at all", () => {
+  assert.throws(() => parseArgs(["--acc-root"]), /--acc-root requires a value/);
+});
+
+test("parseArgs still accepts a real path that simply starts with a hyphen-free directory name adjacent to --dry-run (control: the fix doesn't over-reject legitimate input)", () => {
+  assert.deepEqual(parseArgs(["--acc-root", "/x/y-z", "--dry-run"]), { accRoot: "/x/y-z", dryRun: true, help: false });
 });

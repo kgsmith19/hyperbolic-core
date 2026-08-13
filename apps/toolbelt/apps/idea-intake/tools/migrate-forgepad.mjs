@@ -92,6 +92,23 @@ export function validateForgepadIdea(idea) {
   if (typeof idea.updated !== "string" || Number.isNaN(Date.parse(idea.updated))) {
     problems.push("updated must be a parseable date string");
   }
+  // Finding 14 (independent review): mapForgepadIdea never copies
+  // githubIssue anywhere in the intake.idea row (05-h section 10's mapping
+  // table marks it "ignored" — reserved and never populated in forgepad's
+  // own history, store.mjs's createIdea always initialized it null and no
+  // promote-to-GitHub route was ever built). That is fine for the null case
+  // this repo's entire git history actually contains, but a non-null value
+  // would otherwise vanish through this importer with zero trace — the
+  // exact "silently dropped" failure mode this file's own contract
+  // (loadForgepadFiles's doc comment: "the CLI's contract is exits non-zero
+  // on any unparseable file without partial silence") already refuses for
+  // every other unexpected shape. Fail closed the same way: a non-null
+  // githubIssue is a validation problem, not a silent pass-through.
+  if (idea.githubIssue !== undefined && idea.githubIssue !== null) {
+    problems.push(
+      `githubIssue is ${JSON.stringify(idea.githubIssue)}, not null — this migration never carries it forward and must not silently drop it; resolve manually before migrating`,
+    );
+  }
   return problems;
 }
 
@@ -172,14 +189,41 @@ export function mapForgepadIdea(idea) {
 // inserting versus rows already migrated. Pure and DB-free on purpose so
 // the idempotency decision itself is unit-testable without a live database
 // (the live-database proof is the second-run-inserts-zero e2e test).
+//
+// Finding 11 (independent review): the ORIGINAL version of this function
+// only deduped against `existingSources` (rows already committed from a
+// PRIOR run) — it never deduped WITHIN one batch. Two forgepad files in the
+// SAME run mapping to the same forgepad id (a malformed/duplicated fixture,
+// or an operator copy-paste) would both sail past that check and both get
+// handed to insertRows, landing as two rows for one idea. The dedupe key is
+// `row.id` — the raw, immutable `f-<hex8>` forgepad id every mapped row
+// carries (mapForgepadIdea copies `idea.id` straight through) — deliberately
+// NOT `row.source`: `source` also embeds the idea's own optional, mutable
+// original-source text, so two rows for the true same forgepad idea could
+// still present different `source` strings and slip past a source-keyed
+// check. First occurrence wins (stable, deterministic — same rule a real
+// insert would apply by file-processing order); every later duplicate is
+// counted in `duplicateInBatch` and never reaches insertRows at all.
 export function partitionNewRows(rows, existingSources) {
+  const seenIds = new Set();
+  const deduped = [];
+  let duplicateInBatch = 0;
+  for (const row of rows) {
+    if (seenIds.has(row.id)) {
+      duplicateInBatch++;
+      continue;
+    }
+    seenIds.add(row.id);
+    deduped.push(row);
+  }
+
   const newRows = [];
   let alreadyPresent = 0;
-  for (const row of rows) {
+  for (const row of deduped) {
     if (existingSources.has(row.source)) alreadyPresent++;
     else newRows.push(row);
   }
-  return { newRows, alreadyPresent };
+  return { newRows, alreadyPresent, duplicateInBatch };
 }
 
 // === File loading (validate/parse ALL files before any DB touch) ==========
@@ -292,6 +336,13 @@ function fetchExistingSources(databaseUrl, sources) {
   );
 }
 
+// The exact conflict target of intake_idea_forgepad_source_ref
+// (20260814050000_intake_forgepad_source_dedup.sql) — byte-identical to the
+// index's own expression and partial predicate, which Postgres requires for
+// ON CONFLICT to recognize it as the arbiter index at all.
+const FORGEPAD_SOURCE_CONFLICT_TARGET =
+  "(substring(source from '^forgepad:f-[0-9a-f]{8}')) where source like 'forgepad:f-________%'";
+
 // INSERT always lands as 'draft' (the only status guard_idea_insert
 // accepts, see the file header). Rows mapped to status='idea' promote with
 // a SEPARATE top-level UPDATE statement, not a data-modifying WITH CTE
@@ -309,6 +360,27 @@ function fetchExistingSources(databaseUrl, sources) {
 // The WHERE clause matches on `source`, which is unique within one
 // migration batch by construction (each value embeds the file's own
 // f-<hex8> id).
+//
+// Finding 11 (independent review): `ON CONFLICT ... DO NOTHING RETURNING
+// source` closes the TOCTOU window fetchExistingSources's pre-check alone
+// left open (two concurrent CLI runs could both pass that pre-check for the
+// same forgepad idea, since it happens in its own psql invocation BEFORE
+// this transaction opens). The arbiter is intake_idea_forgepad_source_ref
+// (the migration above) — a real database uniqueness guarantee, not just an
+// application-level check — so even if two runs' transactions race here,
+// at most one INSERT actually lands; the loser's DO NOTHING makes that a
+// silent, successful no-op instead of an aborted transaction. `RETURNING
+// source` is how insertRows (below) tells a genuine insert apart from a
+// conflict that resolved to nothing, so the reported "inserted" count stays
+// accurate even under a real race, not just optimistic based on the
+// pre-check.
+//
+// The promotion UPDATE's `where source = ... and status = 'draft'` stays
+// correct even when this row's own INSERT lost the race: if some other
+// process already inserted (and possibly already promoted) the same
+// forgepad idea, this UPDATE either finds nothing to do (status is already
+// 'idea', not 'draft') or redundantly re-applies an idempotent transition —
+// never a wrong state.
 //
 // user_id is set to platform.owner() explicitly (never left to its
 // auth.uid() default, which is null outside a PostgREST request) so the
@@ -328,7 +400,9 @@ function buildRowSql(row) {
     `${sqlString(row.createdAt)}::timestamptz`,
     `${sqlString(row.updatedAt)}::timestamptz`,
   ];
-  const insertSql = `insert into intake.idea (${cols.join(", ")}) values (${values.join(", ")});`;
+  const insertSql =
+    `insert into intake.idea (${cols.join(", ")}) values (${values.join(", ")}) ` +
+    `on conflict ${FORGEPAD_SOURCE_CONFLICT_TARGET} do nothing returning source;`;
   if (row.status === "idea") {
     return `${insertSql}\nupdate intake.idea set status = 'idea' where source = ${sqlString(row.source)} and status = 'draft';`;
   }
@@ -338,30 +412,63 @@ function buildRowSql(row) {
 // Runs the whole batch of new rows in a single transaction: either every
 // remaining row lands, or (ON_ERROR_STOP=1 stops the script before COMMIT,
 // and Postgres rolls back the still-open transaction on disconnect) none
-// do. Returns how many were actually inserted versus already present from a
-// prior run.
+// do. Returns how many were actually inserted versus already present —
+// counting BOTH rows the pre-check already knew about (`alreadyPresent`
+// from partitionNewRows) and any row that lost a genuine TOCTOU race inside
+// this very transaction (Finding 11: detected via the RETURNING clause
+// buildRowSql adds to every INSERT, since ON CONFLICT DO NOTHING makes a
+// raced row silently absent from the script's output instead of erroring).
 export function insertRows(databaseUrl, rows) {
-  if (!rows.length) return { inserted: 0, alreadyPresent: 0 };
+  if (!rows.length) return { inserted: 0, alreadyPresent: 0, duplicateInBatch: 0 };
   const existing = fetchExistingSources(databaseUrl, rows.map((r) => r.source));
-  const { newRows, alreadyPresent } = partitionNewRows(rows, existing);
-  if (!newRows.length) return { inserted: 0, alreadyPresent };
+  const { newRows, alreadyPresent, duplicateInBatch } = partitionNewRows(rows, existing);
+  if (!newRows.length) return { inserted: 0, alreadyPresent, duplicateInBatch };
 
   const script = ["begin;", ...newRows.map(buildRowSql), "commit;"].join("\n");
   const result = runPsql(databaseUrl, script);
   if (result.status !== 0) {
     throw new Error(`migrate-forgepad: insert transaction failed, rolled back: ${(result.stderr || result.stdout).trim()}`);
   }
-  return { inserted: newRows.length, alreadyPresent };
+  const returnedSources = new Set(
+    result.stdout
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  const actuallyInserted = newRows.filter((r) => returnedSources.has(r.source)).length;
+  const racedAway = newRows.length - actuallyInserted;
+  return { inserted: actuallyInserted, alreadyPresent: alreadyPresent + racedAway, duplicateInBatch };
 }
 
 // === CLI =====================================================================
+
+// Finding 12 (independent review): the ORIGINAL `--acc-root` branch below
+// blindly consumed the next argv token with no check that it wasn't itself
+// a flag. `--acc-root --dry-run` therefore silently set accRoot to the
+// literal string "--dry-run" and left dryRun FALSE — a plausible operator
+// typo (a forgotten path argument) that produced no parse error at all and
+// went on to fail later in a confusing, indirect way (a bogus path passed
+// to loadForgepadFiles). Any token starting with "--" is unambiguously not
+// a path this tool would ever be given (a real ACC root is never named
+// literally "--something"), so rejecting it here — the same "fail loud,
+// name the problem" posture this file already uses everywhere else — turns
+// a silent wrong-value bug into an immediate, actionable parse error.
+function readFlagValue(argv, i, flagName) {
+  const value = argv[i + 1];
+  if (value === undefined || value.startsWith("--")) {
+    throw new Error(`${flagName} requires a value, got ${JSON.stringify(value ?? "")}`);
+  }
+  return value;
+}
 
 export function parseArgs(argv) {
   const args = { accRoot: null, dryRun: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--acc-root") args.accRoot = argv[++i];
-    else if (a.startsWith("--acc-root=")) args.accRoot = a.slice("--acc-root=".length);
+    if (a === "--acc-root") {
+      args.accRoot = readFlagValue(argv, i, "--acc-root");
+      i++;
+    } else if (a.startsWith("--acc-root=")) args.accRoot = a.slice("--acc-root=".length);
     else if (a === "--dry-run") args.dryRun = true;
     else if (a === "--help" || a === "-h") args.help = true;
     else throw new Error(`unrecognized argument: ${a}`);
@@ -404,7 +511,26 @@ export function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
-  const ideasDir = path.join(path.resolve(args.accRoot), "forgepad", "ideas");
+  // Finding 12 (independent review): the ORIGINAL code built ideasDir
+  // straight from `args.accRoot` with no check that accRoot itself exists,
+  // so a genuinely nonexistent/mistyped absolute root (e.g. an operator
+  // typo) and a legitimately-empty-but-real ACC checkout's forgepad/ideas/
+  // both fell into the exact same `!files.length` branch below and printed
+  // the identical clean "0 forgepad idea file(s) found ... nothing to
+  // migrate" exit-0 message. That is the correct, harmless outcome for a
+  // real fresh ACC root with no ideas yet — but for a typo'd path it is a
+  // silent false "zero rows, all good" that could wrongly reassure an
+  // operator deciding whether the Finding-10 Forgepad-deletion follow-up is
+  // safe to run. Checking the root itself first turns the typo case into an
+  // immediate, unambiguous, nonzero-exit error, while leaving the
+  // real-empty-root case exactly as clean-exit-0 as before.
+  const resolvedAccRoot = path.resolve(args.accRoot);
+  if (!fs.existsSync(resolvedAccRoot) || !fs.statSync(resolvedAccRoot).isDirectory()) {
+    console.error(`migrate-forgepad: FAIL — --acc-root does not exist or is not a directory: ${resolvedAccRoot}`);
+    return 1;
+  }
+
+  const ideasDir = path.join(resolvedAccRoot, "forgepad", "ideas");
   const { files, errors } = loadForgepadFiles(ideasDir);
 
   if (errors.length) {
@@ -442,7 +568,8 @@ export function main(argv = process.argv.slice(2)) {
     return 1;
   }
   console.log(
-    `migrate-forgepad: inserted ${result.inserted}, already migrated (skipped) ${result.alreadyPresent}, rejected (not migrated) ${counts.rejected}`,
+    `migrate-forgepad: inserted ${result.inserted}, already migrated (skipped) ${result.alreadyPresent}, ` +
+      `rejected (not migrated) ${counts.rejected}, duplicate forgepad id within this run (skipped) ${result.duplicateInBatch}`,
   );
   return 0;
 }

@@ -34,6 +34,16 @@ const CLI_PATH = join(TOOL_DIR, "tools", "migrate-forgepad.mjs");
 
 const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
 const INTAKE_UP = join(INTAKE_MIGRATIONS_DIR, "20260813002605_intake_create_schema.sql");
+// Finding 11 (independent review): the CLI's INSERT now names this index as
+// its ON CONFLICT arbiter (buildRowSql's FORGEPAD_SOURCE_CONFLICT_TARGET,
+// tools/migrate-forgepad.mjs) -- without applying this migration too, that
+// ON CONFLICT clause has no matching index to resolve against, and Postgres
+// raises "no unique or exclusion constraint matching the ON CONFLICT
+// specification" on the very first insert.
+const FORGEPAD_SOURCE_DEDUP_UP = join(
+  INTAKE_MIGRATIONS_DIR,
+  "20260814050000_intake_forgepad_source_dedup.sql",
+);
 
 const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
 
@@ -146,6 +156,7 @@ function withMigratedDb(fn) {
     psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
     psqlOk(db, OWNER_BOOTSTRAP_SQL);
     applyMigrationWithRetry(db, readFileSync(INTAKE_UP, "utf8"));
+    psqlOk(db, readFileSync(FORGEPAD_SOURCE_DEDUP_UP, "utf8"));
     return fn(db);
   } finally {
     psqlOk("postgres", `drop database if exists ${db};`);
