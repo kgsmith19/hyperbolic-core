@@ -1,0 +1,30 @@
+# Production runtime on the VPS (docs/ops/runbook.md). Shipped by
+# deploy.yml's deploy-llm-handler job to deploy@host:llm-handler/compose.yaml
+# -- mirrors apps/lifeos/backend/compose.yaml's shape exactly (same
+# loopback-only + tailscale-serve-fronts-it posture, same image-tag-from-env
+# convention, same healthcheck-then-log-rotation pattern).
+services:
+  llm-handler:
+    # Every deploy records LLM_HANDLER_IMAGE (a sha tag) in the project
+    # directory's .env; no fallback tag, since the box only ever loads
+    # sha-tagged images over SSH (no registry credentials on the VPS).
+    image: ${LLM_HANDLER_IMAGE:?recorded in ./.env by every deploy (deploy.yml's deploy-llm-handler job)}
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8200:8200"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8200/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
