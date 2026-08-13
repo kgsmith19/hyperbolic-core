@@ -4,5 +4,8 @@
   "workspaces": [
     "packages/*",
     "apps/shell"
-  ]
+  ],
+  "scripts": {
+    "tool:new": "node packages/toolbelt-cli/bin/tool.mjs"
+  }
 }

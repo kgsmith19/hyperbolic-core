@@ -1,0 +1,357 @@
+// Content generators for every file `tool:new` writes. Kept separate from
+// scaffold.mjs's orchestration so each template can be unit-tested (and
+// schema-validated) in isolation.
+import { manifestHash } from "./manifests-shared.mjs";
+
+function sqlQuote(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function sqlLiteralOrNull(value) {
+  return value === null || value === undefined ? "null" : sqlQuote(value);
+}
+
+// --- tool.json ------------------------------------------------------------
+
+const CLI_COMMAND_TODO_PREFIX = "TODO: document";
+
+function buildEntry({ kind, route, id }) {
+  const cli = { command: `${CLI_COMMAND_TODO_PREFIX} apps/toolbelt/apps/${id}'s CLI invocation` };
+  const headless = { command: `${CLI_COMMAND_TODO_PREFIX} apps/toolbelt/apps/${id}'s headless entry point` };
+  switch (kind) {
+    case "ui":
+      return { ui: { route } };
+    case "cli":
+      return { cli };
+    case "headless":
+      return { headless };
+    case "hybrid":
+      return { ui: { route }, cli };
+    default:
+      throw new Error(`buildEntry: unknown kind "${kind}"`);
+  }
+}
+
+// registerBasename: filename (no directory) of the generated registration
+// migration, already computed by the caller (needs the registration
+// timestamp, which templates.mjs does not itself decide).
+//
+// Field order matches tool.schema.json's own `properties` declaration order
+// (id, name, kind, version, ownership, entry, schemas, permissions,
+// lifecycle -- description is optional and omitted here, never emitted as
+// null, since no --description flag exists in the 5.1 usage spec). This
+// object is the SINGLE source for both the pretty tool.json file on disk and
+// the compact `manifest` jsonb literal embedded in the registration
+// migration (buildRegistrationUpSql below), so the two can never drift the
+// way two independently hand-maintained copies could.
+export function buildManifest({ id, name, kind, route, hasSchema, schema, llm, registerBasename }) {
+  return {
+    id,
+    name,
+    kind,
+    version: "0.1.0",
+    ownership: { owner: "kylegsmith19@gmail.com", path: `apps/toolbelt/apps/${id}` },
+    entry: buildEntry({ kind, route, id }),
+    schemas: hasSchema ? [schema] : [],
+    permissions: {
+      db: {
+        // Precedent split, judgment call (flagged in the m3-03 implementation
+        // report): a schema-owning tool defaults to write:[schema,"core"],
+        // mirroring apps/toolbelt/apps/prompt-organizer/tool.json (the one
+        // real schema-owning UI manifest, which writes core.run rows via
+        // core.log_run per 05-c-toolbelt.md section 3.3's observability
+        // requirement). A --no-schema tool defaults to read:[]/write:[],
+        // mirroring apps/toolbelt/apps/network-checker/tool.json (the one
+        // real no-schema manifest). Either default is schema-valid either
+        // way; review (05-c section 3.2) is what actually enforces it.
+        read: hasSchema ? [schema] : [],
+        write: hasSchema ? [schema, "core"] : [],
+      },
+      networkEgress: [],
+      llmHandler: { access: llm === true },
+    },
+    lifecycle: {
+      // "none" for a schema-less tool (tool.schema.json's own description
+      // for lifecycle.migrate); otherwise "supabase db push", matching
+      // apps/toolbelt/apps/network-checker/tool.json's precedent -- NOT
+      // "gh workflow run platform-migrations.yml" (Prompt Organizer's value),
+      // because that workflow's directory list is hardcoded to exactly three
+      // directories (root, prompt-organizer, idea-intake;
+      // .github/workflows/platform-migrations.yml) and does not include a
+      // freshly scaffolded tool's own apps/toolbelt/apps/<id>/supabase/migrations
+      // until a human adds it there and to validate-migrations.mjs's
+      // MIGRATION_DIRS -- out of scope for this issue ("Out of scope:
+      // Applying migrations ... rides the existing platform-migrations.yml
+      // workflow") and left as a documented next step in the generated
+      // AGENTS.md instead of silently assumed.
+      migrate: hasSchema ? "supabase db push" : "none",
+      health: 'node --test "tests/*.test.mjs"',
+      register: registerBasename,
+    },
+  };
+}
+
+export function manifestToPrettyJSON(manifest) {
+  return `${JSON.stringify(manifest, null, 2)}\n`;
+}
+
+export function manifestToCompactJSON(manifest) {
+  return JSON.stringify(manifest);
+}
+
+// --- AGENTS.md --------------------------------------------------------
+
+export function buildAgentsMd({ id, name, hasSchema, schema }) {
+  const schemaLine = hasSchema
+    ? `- Owns the \`${schema}\` schema in the shared toolbelt Supabase project. Write only within that schema (plus \`core\`, for \`core.log_run\` if this tool logs runs). Cross-schema writes belong to the repository that owns the target schema.`
+    : `- Owns no database schema (scaffolded with --no-schema). If that changes, re-run \`tool:new\`'s reasoning by hand: add a schema-creation migration pair and update \`tool.json\`'s \`schemas\`/\`permissions.db\` fields and \`lifecycle.migrate\`.`;
+
+  return `# AGENTS.md
+
+## Application purpose
+
+TODO: describe what ${name} (\`${id}\`) does. This file was generated by
+\`packages/toolbelt-cli\`'s \`tool:new\` (docs/planning/05-c-toolbelt.md section
+5.1); it is a boundary stub, not a finished product doc -- replace this
+paragraph once the tool has a real purpose.
+
+## Product boundaries
+
+${schemaLine}
+- Treat row-level security as the authorization boundary; do not weaken RLS or grants to make a test pass.
+- Keep every migration paired with a down migration that reverses the same change (existing toolbelt convention).
+- \`ownership.owner\` in \`tool.json\` is fixed to \`kylegsmith19@gmail.com\` by \`tool.schema.json\`; do not change it.
+
+## Commands
+
+\`\`\`bash
+node --test "tests/*.test.mjs"
+\`\`\`
+
+## Next steps (delete this section once done)
+
+- Replace the \`${CLI_COMMAND_TODO_PREFIX}\` placeholder(s) in \`tool.json\`'s \`entry\` block with the real invocation once this tool has one.
+- Give this tool a real \`description\` in \`tool.json\` (optional field, currently omitted -- no \`--description\` flag exists in the scaffold CLI).
+- If this tool's migrations should ride the automated \`platform-migrations.yml\` push (like Prompt Organizer's do), add \`apps/toolbelt/apps/${id}/supabase/migrations\` to that workflow and to \`apps/toolbelt/scripts/validate-migrations.mjs\`'s \`MIGRATION_DIRS\`. This scaffold deliberately does not do that for you (out of scope, m3-03) -- \`supabase db push\` must be run manually from this directory in the meantime, matching the Network Checker precedent.
+- Run \`npm run manifests:check\` from \`apps/toolbelt/\` after any \`tool.json\` edit.
+`;
+}
+
+// --- web/index.html (kind ui|hybrid only) ------------------------------
+
+export function buildWebIndexHtml({ id, name }) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>${name}</title>
+  </head>
+  <body>
+    <!--
+      Empty page shell placeholder generated by packages/toolbelt-cli's
+      tool:new (docs/planning/05-c-toolbelt.md section 5.1 generated layout:
+      "web/ (empty page shell consuming packages/ui)"). This tool's real UI
+      is expected to consume packages/ui (design tokens + components, ADR-02)
+      once the Shell absorbs this route; replace this placeholder before
+      entry.ui.route in tool.json is considered live.
+    -->
+    <h1>${name}</h1>
+    <p>Placeholder page for apps/toolbelt/apps/${id}. Not yet implemented.</p>
+  </body>
+</html>
+`;
+}
+
+// --- apps/toolbelt/apps/<id>/supabase/migrations/<ts>_<schema>_create_schema.sql --
+
+export function buildSchemaCreateSql({ id, schema }) {
+  return `-- Schema skeleton generated by packages/toolbelt-cli's tool:new for
+-- apps/toolbelt/apps/${id}/tool.json (docs/planning/05-c-toolbelt.md section
+-- 5.1 generated layout: "schema skeleton: create schema, grants, RLS
+-- enable+force, owner policy per ADR-03"). RLS is enabled per TABLE, not per
+-- schema, and this scaffold creates no domain tables (it has no model to
+-- generate), so there is nothing to enable RLS on yet. Add each real table in
+-- its own migration and copy the owner-policy pattern below onto it -- the
+-- live pattern this mirrors is
+-- apps/toolbelt/supabase/migrations/20260812160000_core_idea_owner_pin.sql's
+-- Pattern B (single-owner table with no user_id column):
+--
+--   alter table ${schema}.<table> enable row level security;
+--   alter table ${schema}.<table> force row level security;
+--   create policy owner_rw on ${schema}.<table>
+--     for all to authenticated
+--     using ((select auth.uid()) = (select platform.owner()))
+--     with check ((select auth.uid()) = (select platform.owner()));
+--
+-- (Pattern A, for a table with its own user_id column, is the same
+-- migration's core.run policy -- see that file.)
+--
+-- This migration does NOT expose ${schema} over PostgREST
+-- (alter role authenticator set pgrst.db_schemas = ...): that line is not
+-- part of 5.1's "schema skeleton" list above, and computing the current
+-- authoritative schema list safely belongs with the migration that adds the
+-- first real table, following
+-- apps/toolbelt/apps/prompt-organizer/supabase/migrations/20260807020000_prompt_create_prompt.sql
+-- as the concrete template (and remember to record the prior value in that
+-- migration's own down file, same as that one does).
+create schema ${schema};
+
+-- Base Postgres grants; RLS (per-table, added later) is the actual
+-- row-level boundary. Without these, PostgREST gets "permission denied for
+-- schema ${schema}" even with correct RLS policies on a later table, since
+-- GRANT and RLS are independent layers (mirrors
+-- apps/toolbelt/supabase/migrations/20260806190100_idea_create_schema.sql).
+grant usage on schema ${schema} to anon, authenticated, service_role;
+alter default privileges in schema ${schema} grant all on tables to anon, authenticated, service_role;
+alter default privileges in schema ${schema} grant all on sequences to anon, authenticated, service_role;
+`;
+}
+
+export function buildSchemaCreateDownSql({ id, schema }) {
+  return `-- Reverts the schema-creation migration generated for
+-- apps/toolbelt/apps/${id}/tool.json. No tables exist yet at scaffold time
+-- (the up migration creates none), so this only drops the schema itself.
+drop schema if exists ${schema} cascade;
+`;
+}
+
+// --- apps/toolbelt/apps/<id>/tests/registration.test.mjs -----------------
+
+export function buildRegistrationTestMjs({ registerBasename }) {
+  return `// Generated by packages/toolbelt-cli's tool:new (docs/planning/05-c-toolbelt.md
+// section 5.1 generated layout: "tests/registration.test.mjs (asserts
+// manifest validity and registry row parity)"). Mirrors
+// apps/toolbelt/tests/registry-manifest-hash.test.mjs's proof, scoped to just
+// this one tool: (1) this tool's own tool.json is schema-valid, and (2) the
+// registration migration's literal manifest_hash equals manifestHash()
+// recomputed fresh from that same tool.json, so the two can never silently
+// drift apart (TB-1b parity).
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { checkManifestShape, manifestHash } from "../../../scripts/validate-manifests.mjs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const TOOL_DIR = join(__dirname, "..");
+const MANIFEST_PATH = join(TOOL_DIR, "tool.json");
+const MIGRATION_PATH = join(TOOL_DIR, "..", "..", "supabase", "migrations", "${registerBasename}");
+
+// The hash sits on its own line as a bare single-quoted 64-hex-char literal,
+// same anchoring rationale as registry-manifest-hash.test.mjs: the whole
+// trimmed line must be exactly this, so it cannot match a substring inside
+// the much longer minified-JSON manifest literal on the preceding line.
+const HASH_LINE_RE = /^\\s*'([0-9a-f]{64})',\\s*$/m;
+
+test("tool.json conforms to tool.schema.json", () => {
+  const failures = checkManifestShape([MANIFEST_PATH]);
+  assert.deepEqual(failures, []);
+});
+
+test("the registration migration's literal manifest_hash equals manifestHash() over the real tool.json on disk", () => {
+  const sql = readFileSync(MIGRATION_PATH, "utf8");
+  const match = HASH_LINE_RE.exec(sql);
+  assert.ok(match, "expected exactly one bare 64-hex-char single-quoted literal line in the migration");
+
+  const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
+  assert.equal(
+    match[1],
+    manifestHash(manifest),
+    "manifest_hash in the registration migration no longer matches tool.json -- regenerate the registration migration",
+  );
+});
+`;
+}
+
+// --- apps/toolbelt/supabase/migrations/<ts>_register_<id>.sql -------------
+
+// manifest: the exact object buildManifest returned (guarantees the `manifest`
+// jsonb literal, the tool.json file on disk, and manifestHash() all derive
+// from one in-memory source of truth -- see buildManifest's own comment).
+export function buildRegistrationUpSql({ manifest, id, name, schema, kind, route }) {
+  const compact = manifestToCompactJSON(manifest);
+  const hash = manifestHash(manifest);
+  return `-- Generated registration migration (docs/planning/05-c-toolbelt.md
+-- section 4.2) for apps/toolbelt/apps/${id}/tool.json, produced by
+-- packages/toolbelt-cli's tool:new (m3-03). The shape follows section 4.2's
+-- contract exactly: one idempotent upsert of the core.app row from tool.json
+-- fields, matching m3-02's hand-written precedent
+-- (apps/toolbelt/supabase/migrations/20260812240000_register_prompt-organizer.sql).
+--
+-- This is a brand-new row: the scaffold CLI's collision check (id taken on
+-- disk, id already claimed by a manifest, or id already claimed by an
+-- existing *_register_<id>.sql on disk) refuses to generate this migration
+-- at all if '${id}' were already registered, so the ON CONFLICT branch below
+-- exists only to make a re-run of this same migration safe, never to avoid
+-- clobbering someone else's insert (same posture as
+-- 20260812250000_register_network-checker.sql). \`status\` is deliberately
+-- absent from the UPDATE SET list: re-running registration must never
+-- clobber a status a separate, dedicated status-transition migration set
+-- (e.g. a future promotion to 'live', or retirement to 'retired').
+--
+-- manifest_hash is the sha256 hex digest of the canonicalized manifest
+-- (RFC-8785-style key-sorted JSON, no insignificant whitespace), computed by
+-- apps/toolbelt/scripts/validate-manifests.mjs's canonicalJSON/manifestHash
+-- functions -- imported and called directly by the generator that wrote this
+-- file, never reimplemented. apps/toolbelt/apps/${id}/tests/registration.test.mjs
+-- asserts this literal string equals manifestHash() computed fresh over the
+-- real manifest file on disk, so the two can never silently drift apart
+-- (TB-1b parity, docs/planning/05-c-toolbelt.md section 11).
+insert into core.app (
+  id, name, schema_name, status, kind, route, version, description,
+  manifest, manifest_hash, registered_at
+)
+values (
+  ${sqlQuote(id)},
+  ${sqlQuote(name)},
+  ${sqlQuote(schema)},
+  'building',
+  ${sqlQuote(kind)},
+  ${sqlLiteralOrNull(route)},
+  ${sqlQuote(manifest.version)},
+  null,
+  ${sqlQuote(compact)}::jsonb,
+  ${sqlQuote(hash)},
+  now()
+)
+on conflict (id) do update set
+  name          = excluded.name,
+  schema_name   = excluded.schema_name,
+  kind          = excluded.kind,
+  route         = excluded.route,
+  version       = excluded.version,
+  description   = excluded.description,
+  manifest      = excluded.manifest,
+  manifest_hash = excluded.manifest_hash,
+  registered_at = excluded.registered_at;
+`;
+}
+
+export function buildRegistrationDownSql({ id }) {
+  return `-- Reverts the registration migration generated for
+-- apps/toolbelt/apps/${id}/tool.json. Does not delete the row even though
+-- the up migration is what created it: m3-02's acceptance criteria require
+-- that no migration ever delete a core.app row (docs/planning/05-c-toolbelt.md
+-- section 4.2: "retirement is a generated migration setting status =
+-- 'retired', never a delete" -- core.run, core.outcome, core.metric_value,
+-- and core.assumption all carry a foreign key to core.app.id, and by the
+-- time this down migration is ever actually run, real rows may already
+-- reference '${id}'). Instead this reverts every column the up migration set
+-- back to the bare defaults 20260812230000_core_app_registry_extension.sql
+-- established, landing the row in the same "not really registered" shape a
+-- fresh pre-manifest insert would have had (same posture as
+-- 20260812250000_register_network-checker_down.sql, the precedent for a
+-- brand-new row rather than a pre-existing one).
+update core.app
+set status        = 'idea',
+    kind          = 'ui',
+    route         = null,
+    version       = '0.0.0',
+    description   = null,
+    manifest      = null,
+    manifest_hash = null,
+    registered_at = null
+where id = ${sqlQuote(id)};
+`;
+}

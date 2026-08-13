@@ -1,0 +1,17 @@
+{
+  "name": "@hyperbolic/toolbelt-cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Scaffold CLI for the Toolbelt 3-step new-tool lifecycle (TB-3, docs/planning/05-c-toolbelt.md section 5.1). Dependency-free: reuses apps/toolbelt/scripts/validate-manifests.mjs by relative import instead of vendoring its own copy of ajv.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "tool": "./bin/tool.mjs"
+  },
+  "scripts": {
+    "tool:new": "node ./bin/tool.mjs",
+    "test": "node --test \"tests/*.test.mjs\""
+  }
+}
