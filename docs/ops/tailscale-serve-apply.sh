@@ -31,7 +31,7 @@ case "$mode" in
     ;;
 esac
 
-mounts=("/" "/life/" "/life/api/")
+mounts=("/" "/life/" "/life/api/" "/api/")
 deploy_root="/home/deploy"
 if [[ -n "${NODE_TEST_CONTEXT:-}" && -n "${TAILSCALE_SERVE_TEST_ROOT:-}" ]]; then
   deploy_root="$TAILSCALE_SERVE_TEST_ROOT"
@@ -40,6 +40,7 @@ targets=(
   "${deploy_root}/shell/current"
   "${deploy_root}/lifeos-ui/dist"
   "http://127.0.0.1:8000"
+  "http://127.0.0.1:8200"
 )
 
 preflight() {
@@ -65,6 +66,10 @@ preflight() {
   }
   curl -fsS --max-time 5 "${targets[2]}/healthz" >/dev/null || {
     echo "error: LifeOS API health check failed: ${targets[2]}/healthz" >&2
+    return 1
+  }
+  curl -fsS --max-time 5 "${targets[3]}/healthz" >/dev/null || {
+    echo "error: Handler A health check failed: ${targets[3]}/healthz" >&2
     return 1
   }
   tailscale serve status >/dev/null
