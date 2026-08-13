@@ -1,0 +1,27 @@
+-- PR #8 security review, Finding 2 (P1, merge-blocking), part A:
+-- core.purge_old_events() -- a destructive, unconditional bulk DELETE over
+-- core.event (20260808120000_core_event_retention.sql) -- remains
+-- executable through PUBLIC.
+--
+-- 20260812160000_core_idea_owner_pin.sql revoked EXECUTE from
+-- `authenticated` ("cron-only from here on") but never revoked PUBLIC.
+-- Postgres grants EXECUTE to PUBLIC by default at CREATE FUNCTION time and
+-- 20260808120000 never revoked it either; core schema grants USAGE to
+-- `anon` (20260806190000_core_create_schema.sql), so an anonymous
+-- PostgREST `POST /rest/v1/rpc/purge_old_events` call reaches and executes
+-- this function today, deleting every core.event row older than 90 days on
+-- demand.
+--
+-- The actual intended caller: the pg_cron job 'core-purge-old-events'
+-- (20260808120000_core_event_retention.sql), scheduled by
+-- `select cron.schedule(...)`, which pg_cron runs as the role that called
+-- cron.schedule -- the migration-applying role (the project's
+-- superuser/`postgres` connection), never any PostgREST API role. That role
+-- is unaffected by any REVOKE against `public`/`anon`/`authenticated`
+-- (superusers bypass ACL checks entirely), so revoking every API-reachable
+-- grant leaves the real cron job fully intact while closing the anonymous
+-- path. No replacement grant to any API role is added: nothing in this
+-- repo is meant to call this function over PostgREST at all, matching
+-- 20260812160000's original "cron-only" intent -- this migration just
+-- finishes what that one started.
+revoke execute on function core.purge_old_events() from public, anon, authenticated;

@@ -1,0 +1,24 @@
+-- PR #8 security review, Finding 2 (P1, merge-blocking), part B:
+-- prompt.purge_old_usage() -- a destructive, unconditional bulk DELETE over
+-- prompt.usage (20260812210000_prompt_usage_retention.sql) -- is executable
+-- through PUBLIC.
+--
+-- 20260812210000 created this function SECURITY DEFINER with no GRANT or
+-- REVOKE statement at all, and its own comment ("cron-only... no EXECUTE
+-- grant to API roles") is factually wrong: Postgres grants EXECUTE to
+-- PUBLIC by default at CREATE FUNCTION time, and that default was never
+-- revoked. prompt schema grants USAGE to `anon`
+-- (20260807020000_prompt_create_prompt.sql), so an anonymous PostgREST
+-- `POST /rest/v1/rpc/purge_old_usage` call reaches and executes this
+-- function today, deleting every prompt.usage row older than 365 days on
+-- demand.
+--
+-- Same caller analysis and same fix shape as
+-- apps/toolbelt/supabase/migrations/20260814020000_core_purge_old_events_revoke_public.sql:
+-- the actual intended caller is the pg_cron job 'prompt-purge-old-usage'
+-- (20260812210000), which pg_cron runs as the role that called
+-- cron.schedule -- the migration-applying superuser connection, never a
+-- PostgREST API role, and therefore unaffected by revoking every
+-- API-reachable grant. No replacement grant to any API role is added:
+-- nothing in this repo is meant to call this function over PostgREST.
+revoke execute on function prompt.purge_old_usage() from public, anon, authenticated;
