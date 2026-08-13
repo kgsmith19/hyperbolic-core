@@ -11,10 +11,13 @@
 // packages/platform-client/tests/index.js.
 import "./retry.test.ts";
 import "./taxonomy.test.ts";
+import "./abort.test.ts";
 import "./anthropic-driver.test.ts";
 import "./openai-driver.test.ts";
 import "./gemini-driver.test.ts";
 import "./fallback.test.ts";
+import "./message-parts.test.ts";
+import "./retry-after.test.ts";
 import "./real-driver-fallback.test.ts";
 import "./prompt-render-parity.test.mjs";
 import "./prompt-client.test.ts";

@@ -5,10 +5,11 @@
 // <Navigate> to /login while signed out, gated content once signed in.
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import ProtectedLayout from "./protected-layout";
 import type { PlatformSession } from "@hyperbolic/platform-client";
-import type { AuthState, SessionStatus } from "../lib/session";
+import type { SessionStatus, ShellSessionState } from "../lib/session";
 
 const FIXTURE_SESSION: PlatformSession = {
   accessToken: "fixture-token",
@@ -16,25 +17,16 @@ const FIXTURE_SESSION: PlatformSession = {
   userId: "00000000-0000-4000-8000-000000000001",
 };
 
-// Finding #77 (PR #8 security review): builds a well-typed `AuthState` from
-// the same (status, session) pair every existing call site here already
-// passed -- for "signed-in" this asserts session is non-null (a test-fixture
-// convenience only; the real hook can never construct the other
-// combination, which is the whole point of the union).
-function authStateFor(status: SessionStatus, session: PlatformSession | null): AuthState {
-  if (status === "signed-in") {
-    if (!session) throw new Error("test fixture: signed-in requires a non-null session");
-    return { status: "signed-in", session };
-  }
-  return { status, session: null };
-}
-
 function renderAt(path: string, status: SessionStatus, session: PlatformSession | null = null) {
+  const auth: ShellSessionState =
+    status === "signed-in"
+      ? { status, session: session ?? FIXTURE_SESSION }
+      : { status, session: null };
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/login" element={<div data-testid="login-stub">login</div>} />
-        <Route element={<ProtectedLayout auth={authStateFor(status, session)} onSignOut={vi.fn()} />}>
+        <Route element={<ProtectedLayout auth={auth} onSignOut={vi.fn()} />}>
           {/* No data-app-data on these dummy page elements themselves --
               ProtectedLayout's own wrapper (see protected-layout.tsx) is
               the one node under test here; a real page adds none of its
@@ -84,5 +76,15 @@ describe("ProtectedLayout: signed-in", () => {
   it("passes the real session through to Chrome (session menu shows the user id)", () => {
     renderAt("/", "signed-in", FIXTURE_SESSION);
     expect(screen.getByText(FIXTURE_SESSION.userId)).toBeInTheDocument();
+  });
+
+  it("uses client-side routing for links owned by the Shell", async () => {
+    const user = userEvent.setup();
+    renderAt("/", "signed-in", FIXTURE_SESSION);
+
+    await user.click(screen.getByRole("link", { name: "Tools" }));
+
+    expect(screen.getByText("tools data")).toBeInTheDocument();
+    expect(screen.getByTestId("platform-nav")).toBeInTheDocument();
   });
 });

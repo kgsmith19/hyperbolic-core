@@ -2,7 +2,7 @@
   "id": "network-checker",
   "name": "Network Checker",
   "kind": "cli",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Local-first network diagnostics that identify which layer failed: Wi-Fi, router, modem, ISP, target service, or a specific device. SQLite is the source of truth; Supabase is an optional, separate mirror project for cross-machine history.",
   "ownership": {
     "owner": "kylegsmith19@gmail.com",
@@ -19,8 +19,16 @@
       "read": [],
       "write": []
     },
-    "networkEgress": ["ipapi.co", "api.ipify.org", "status.anthropic.com",
-                      "api.anthropic.com", "1.1.1.1"],
+    "networkEgress": [
+      "1.1.1.1",
+      "192.168.50.1",
+      "192.168.100.1",
+      "239.255.255.250",
+      "api.anthropic.com",
+      "api.ipify.org",
+      "ipapi.co",
+      "status.anthropic.com"
+    ],
     "llmHandler": {
       "access": false
     }
@@ -28,6 +36,6 @@
   "lifecycle": {
     "migrate": "supabase db push",
     "health": "bash tools/check.sh",
-    "register": "20260812250000_register_network-checker.sql"
+    "register": "20260813173000_register_network-checker-v1.sql"
   }
 }

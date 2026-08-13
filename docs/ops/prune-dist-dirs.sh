@@ -58,6 +58,11 @@ if [ ! -d "$base_dir" ]; then
   echo "error: $base_dir is not a directory" >&2
   exit 1
 fi
+base_dir="$(realpath -e -- "$base_dir")"
+if [ "$base_dir" = "/" ]; then
+  echo "error: refusing to prune the filesystem root" >&2
+  exit 1
+fi
 
 case "$keep" in
   '' | *[!0-9]*)
@@ -78,11 +83,19 @@ cd "$base_dir"
 # entirely rather than accepting the known footgun. When nothing matches,
 # find's output is simply empty (not an error), so no `|| true` is needed
 # here the way the `ls` form required one.
-mapfile -t dirs < <(find . -maxdepth 1 -mindepth 1 -type d -name 'dist-*' -printf '%T@ %f\n' | sort -rn | cut -d' ' -f2-)
+mapfile -d '' -t dirs < <(
+  find . -maxdepth 1 -mindepth 1 -type d -name 'dist-*' -printf '%T@ %f\0' \
+    | sort -zrn \
+    | cut -z -d' ' -f2-
+)
 
 current_target=""
 if [ -L current ]; then
   current_target="$(basename "$(readlink current)")"
+  case "$current_target" in
+    dist-*) ;;
+    *) current_target="" ;;
+  esac
 fi
 
 # Directories to keep: the newest <keep> by mtime, plus (if not already

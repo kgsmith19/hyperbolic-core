@@ -16,15 +16,18 @@ on:
     paths:
       - "apps/shell/**"
       - "packages/**"
+      - "docs/ops/**"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/shell-ci.yml"
   merge_group:
+    types: [checks_requested]
 
 concurrency:
-  group: shell-pr-gate-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
   pr-gate:
@@ -33,6 +36,8 @@ jobs:
     timeout-minutes: 16 # ~2x the 8-minute budget (10-cicd-deployment.md section 10.3)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -43,51 +48,17 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci
 
-      - name: Smoke-test packages/toolbelt-cli's import chain (clean-root, P1 25)
-        # packages/toolbelt-cli/src/manifests-shared.mjs reuses
-        # apps/toolbelt/scripts/validate-manifests.mjs by relative import
-        # (deliberately, per that package's own package.json description --
-        # "dependency-free: reuses ... instead of vendoring its own copy of
-        # ajv") rather than declaring ajv/ajv-formats itself. That reuse only
-        # actually resolves if apps/toolbelt's OWN declared dependencies get
-        # installed somewhere the CLI's module graph can see -- which, before
-        # this workflow line existed, only happened if a developer separately
-        # ran `npm ci`/`npm install` inside apps/toolbelt/ by hand (as
-        # toolbelt-ci.yml's own, unrelated job does for its own reasons). A
-        # root-only `npm ci` never did that on its own, because apps/toolbelt
-        # was not a root npm workspace member. Confirmed by direct repro: with
-        # apps/toolbelt/node_modules/ moved aside and only a root `npm ci`
-        # run, `node packages/toolbelt-cli/bin/tool.mjs` crashed with
-        # `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'ajv' imported
-        # from .../apps/toolbelt/scripts/validate-manifests.mjs` -- a crash
-        # this repo's toolbelt-cli unit tests never caught, because they run
-        # against whatever node_modules already happens to be on disk in this
-        # sandbox, never against a genuinely clean root install.
-        #
-        # The fix (this job's root package.json now lists "apps/toolbelt" as
-        # a workspace member, so root `npm ci` installs ajv/ajv-formats into
-        # the shared root node_modules/ via ordinary npm hoisting) is proven
-        # by THIS step, not by the unit-test step below: this step runs
-        # immediately after "Install workspace dependencies" and before any
-        # other step has a chance to create apps/toolbelt/node_modules/ some
-        # other way, so a regression that silently reintroduces the missing
-        # dependency chain fails here, at the cheapest possible point, instead
-        # of surfacing later as a confusing failure inside a real scaffold.
-        #
-        # --dry-run is essential, not incidental: it exercises the CLI's full
-        # module graph -- including runScaffold's collision checks, which
-        # call all the way through to the ajv-backed checkManifestShape --
-        # while writing nothing to disk, so this step is safe to run
-        # unconditionally on every PR without any cleanup step afterward. The
-        # synthetic --id is deliberately never registered for real (dry-run
-        # never writes), so there is no id to collide with on a re-run.
-        run: npm run tool:new -- --id shell-ci-smoke-test --name "Shell CI smoke test" --kind cli --dry-run
-
       # No lint step: neither apps/shell nor any packages/* workspace
       # declares a "lint" script, and no ESLint/Biome config exists anywhere
       # in the repo today (confirmed by search). Adding one is out of scope
       # for this CI chore; noted honestly here rather than inventing a script
       # that doesn't exist.
+
+      - name: Build packages/ui dependency
+        run: npm run build --workspace=packages/ui
+
+      - name: Type-check apps/shell
+        run: npx tsc -b apps/shell
 
       - name: Type-check packages/platform-client
         run: npm run typecheck --workspace=packages/platform-client
@@ -95,46 +66,13 @@ jobs:
       - name: Type-check packages/llm
         run: npm run typecheck --workspace=packages/llm
 
-      - name: Build packages/ui
-        # A real build (`vite build && tsc --emitDeclarationOnly`), not just
-        # a declaration-only type-check -- and it MUST run before both
-        # apps/shell's type-check and its unit tests, not just before them
-        # informally. packages/ui is the one workspace member whose
-        # package.json "main"/"types" point at BUILT dist/ output
-        # (dist/index.cjs and dist/index.d.ts; platform-client and llm both
-        # point straight at their own src/*.ts, so they need no build step
-        # at all). apps/shell resolves "@hyperbolic/ui" through that dist/
-        # via plain node module resolution, not a TS path mapping.
-        #
-        # This step went through two real, sequential CI failures before
-        # landing, and both are worth keeping the history of rather than
-        # only the final fix: first, running only `tsc -b packages/ui`
-        # (declaration-only, no vite build) placed AFTER apps/shell's own
-        # type-check produced "Cannot find module '@hyperbolic/ui'" in that
-        # earlier step, since dist/ did not exist yet on a fresh checkout.
-        # Moving that same declaration-only step earlier fixed the
-        # type-check, but the vitest step still failed with "Failed to
-        # resolve import '@hyperbolic/ui'. Does the file exist?", because
-        # `tsc --emitDeclarationOnly` writes ONLY dist/*.d.ts -- Vite (which
-        # the vitest run and apps/shell's own dev/preview server both go
-        # through) needs the real dist/index.cjs the type-only command never
-        # produces. The actual fix is the real build script, run before
-        # both consumers.
-        #
-        # Neither failure reproduced locally during development, in this
-        # sandbox or the next: a stale packages/ui/dist/ (built once, early
-        # in this session, for an unrelated gzip size-check) sat on disk and
-        # silently satisfied both the type-checker and Vite every time this
-        # workflow was verified by hand, regardless of step order. Confirmed
-        # this time by deleting dist/ and every *.tsbuildinfo in the repo
-        # before re-running the full sequence from a genuinely clean state.
-        run: npm run build --workspace=packages/ui
-
-      - name: Type-check apps/shell
-        run: npx tsc -b apps/shell
+      - name: Type-check packages/ui
+        # The dependency build above already emitted the clean-checkout
+        # declarations Shell consumes; this re-runs the compiler explicitly.
+        run: npx tsc -b packages/ui
 
       - name: "Unit tests: apps/shell (vitest)"
-        run: npm test --workspace=apps/shell
+        run: npm run test:unit --workspace=apps/shell
 
       - name: "Unit tests: packages/platform-client (node --test)"
         run: npm test --workspace=packages/platform-client
@@ -145,21 +83,8 @@ jobs:
       - name: "Unit tests: packages/llm (node --test)"
         run: npm test --workspace=packages/llm
 
-      - name: "Unit tests: packages/toolbelt-cli (node --test)"
-        # The one gap left by this job's original packages/ui, apps/shell,
-        # packages/llm, and packages/platform-client coverage (P1 23):
-        # packages/toolbelt-cli declares its own real `npm test` (`node
-        # --test "tests/*.test.mjs"`, 6 files) but was never invoked from any
-        # workflow -- confirmed by `grep -rn "toolbelt-cli" .github/
-        # workflows/` turning up nothing before this line existed. It already
-        # falls under this job's own `packages/**` path filter above, and the
-        # "Install workspace dependencies" step above already installs it (it
-        # is a plain `packages/*` workspace member), so this is a one-line
-        # addition to an already-correctly-triggered job, not new CI
-        # infrastructure. Placed after the other three "Unit tests:
-        # packages/*" steps rather than reordering them, so this diff reads
-        # as a pure addition.
-        run: npm test --workspace=packages/toolbelt-cli
+      - name: Test deployment operator tooling
+        run: node --test docs/ops/*.test.mjs
 
       - name: Cache Playwright Chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -171,52 +96,26 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: apps/shell
 
-      - name: Run Shell e2e suites
-        # The 05-a suites named in 10-cicd-deployment.md section 1.2:
-        # chrome, auth-gate, single-session, idp-down. Each spawns a REAL
-        # production build + `vite preview` via playwright.config.ts's
-        # webServer, so this step also stands in as an e2e-level build
-        # proof. e2e/tools.spec.ts (m3-04) is deliberately NOT run here: it
-        # stands up a real disposable PostgreSQL database via
-        # `sudo -n -u postgres` (createdb/dropdb/psql -f real migrations)
-        # against this sandbox's pre-existing local cluster -- a fixture
-        # shape that depends on passwordless sudo to an already-running
-        # `postgres` OS user, not just a `postgres:` service container.
-        # Neither section 1.2 nor this issue's acceptance criteria (which
-        # names only chrome/auth-gate/single-session/idp-down) lists
-        # tools.spec.ts, and reproducing its exact sudo/role/service
-        # bootstrapping reliably on a GitHub-hosted runner is materially
-        # more than this ~95-line CI chore's scope. Flagged as a follow-up:
-        # either give shell-ci.yml a `postgres:` service container plus the
-        # OS-role setup tools.spec.ts's fixture assumes, or move that setup
-        # into the fixture itself so it degrades to a plain TCP connection.
-        #
-        # idp-down.spec.ts is deliberately EXCLUDED from this list (Finding
-        # #80, PR #8 security review): its two specs each wait out
-        # @supabase/auth-js's REAL, deliberately un-faked exponential
-        # backoff (~30s, test.setTimeout(75_000) each) -- a real cost paid
-        # on every Shell/packages PR for a scenario that changes rarely.
-        # Relocated to .github/workflows/shell-idp-down.yml, a manual
-        # workflow_dispatch run (see that file's own header comment). The
-        # FAST, deterministic half of the same UI contract this spec
-        # proves -- fail-closed getSession() redirects to /login, no
-        # chrome, no data nodes, no real or fake-timer wait needed -- still
-        # runs on every PR as part of the "Unit tests: apps/shell (vitest)"
-        # step below: src/idp-down-contract.test.tsx.
-        run: npx playwright test e2e/chrome.spec.ts e2e/auth-gate.spec.ts e2e/single-session.spec.ts
+      - name: Start PostgreSQL for the registry-backed browser journey
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -n -u postgres psql -v ON_ERROR_STOP=1 -tAc "select 1"
+
+      - name: Run every Shell e2e suite
+        run: npx playwright test
         working-directory: apps/shell
 
       - name: Production build
-        run: npm run build --workspace=apps/shell
+        run: npm run build:app --workspace=apps/shell
 
-      - name: Healthz static-asset check (SH-5, m2-04)
-        # Proves dist/healthz is a real static file returning 200 with the
-        # right content when served the same way `vite preview` (and, by
-        # the m2-04 route table, `tailscale serve`) would -- see
-        # apps/shell/test/healthz-check.mjs's own header comment for why a
-        # bare "curl returns 200" is not by itself sufficient proof for an
-        # SPA.
+      - name: Verify the static health endpoint
         run: npm run healthz-check --workspace=apps/shell
+
+      - name: Enforce UI size budget
+        run: node packages/ui/test/size-check.mjs
+
+      - name: Enforce Shell size budget
+        run: npm run size-check --workspace=apps/shell
 
       - name: Upload Playwright failure evidence
         if: failure()

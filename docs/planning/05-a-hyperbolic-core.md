@@ -103,7 +103,7 @@ export interface PlatformAuth {
 }
 
 // Attaches Authorization: Bearer <accessToken>; rejects (never sends) when no session.
-export type AuthedFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
+export type AuthedFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export interface PlatformClient {
   auth: PlatformAuth;

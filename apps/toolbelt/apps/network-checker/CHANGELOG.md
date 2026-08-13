@@ -1,8 +1,8 @@
 # Changelog
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Versioning is [SemVer](https://semver.org/): `MAJOR.MINOR.PATCH`, bumped
-with `python tools/release.py bump {major,minor,patch}` (see
+Versioning is [SemVer](https://semver.org/): `MAJOR.MINOR.PATCH`. Future bumps
+are fail-closed until a forward/down registry-migration generator exists (see
 `docs/notes/2026-08-07-deploying-and-releasing-netcheck.md` for the full release process). Draft entries for a new
 release with `python tools/release.py changelog`, which lists commit
 subjects since the last tag — the entry itself still gets a human editorial
@@ -11,6 +11,15 @@ pass, not full automation.
 ## [Unreleased]
 
 ### Changed
+- Change approvals now print a raw one-use HMAC capability once while SQLite
+  stores only its SHA-256 digest. Length-framed material binds the row id, host
+  id, device id, cause, title, exact command and inverse, verification probe,
+  SHA-256 of dry-run evidence, approval time, and verifier. Apply reads it without
+  echo from a TTY and atomically claims the approval; an interrupted apply is
+  fail-closed and cannot be replayed automatically.
+- Inventory writes are scan-atomic, normalize MAC identity across DHCP address
+  changes, reset mirror state on changes, and mirror device/configuration rows
+  with stable remote natural keys.
 - The dashboard UI moved out of `netcheck/` into a top-level `frontend/`
   directory, cleanly separating the Python backend from the browser
   frontend. The single 431-line `ui.html` was split into modular HTML/CSS/JS
@@ -50,6 +59,10 @@ pass, not full automation.
   No production behavior changed.
 
 ### Security
+- The unsafe DNS, Wi-Fi-mode, and adapter-power writers are hard-disabled, and
+  no write template is currently enabled. The executor accepts only explicit
+  allow-listed argv from a fixed working directory, never a shell, and kills
+  the process tree at its deadline; verification shares one monotonic budget.
 - Device credentials are no longer sent off the local network (#30, FR-014).
   Modem and router logins travel as HTTP Basic and as a plaintext login
   header over `http://`, which is all these devices speak and an accepted
@@ -62,15 +75,8 @@ pass, not full automation.
   `fail`: nothing about the device was measured.
 
 ### Added
-- Ranked causes now name the script that fixes them, where one exists (#31).
-  `tools/fix_dns.sh` and its siblings have been in the repo the whole time,
-  fixing three of the causes `diagnose` already names, and nothing connected
-  the two -- the user read "set the adapter's DNS to 1.1.1.1" and did it by
-  hand. The invocation is generated from a table checked against the
-  filesystem in both directions, so a renamed or deleted script cannot leave
-  a fix quietly recommending it. `run_fixes.sh --dry-run` is offered first;
-  the individual `fix_*.sh` do not take that flag, which is why the wrapper
-  is what gets named.
+- Ranked causes provide manual remedies only. The three legacy fix scripts are
+  disabled stubs and the cause-to-template mapping is empty.
 - `scripts/delete-merged-branches.ps1` -- deletes the remote branches whose
   work is already in `main`, verifying each against `ls-remote` before and
   after so a partial run is safe to repeat. Supports `-WhatIf`.
@@ -157,7 +163,7 @@ pass, not full automation.
   breaking the walk. The suite now reports zero skips.
 - `tools/fixer.py`, `tests/test_fixer.py`, and
   `.github/workflows/fixer-validation.yml`. `fixer.py` was a second, broken
-  implementation of the three fixes `tools/fix_*.sh` already perform: every
+  implementation of the three fixes the legacy `tools/fix_*.sh` attempted: every
   command in it was a shell string (`"cat /etc/resolv.conf"`, `"ip route |
   grep default"`) passed to `subprocess.run(shell=False)`, so any real
   invocation died with `FileNotFoundError` before doing anything. Both gates
@@ -166,8 +172,8 @@ pass, not full automation.
   shipped a `rollback_all()` that logged "Restoring ..." and restored
   nothing, and a Linux Wi-Fi "fix" that ran `iw phy phy0 set netns ...` --
   moving the adapter into another network namespace, which is not a mode
-  change and would break networking if it had ever run. FR-012 is delivered
-  by the shell scripts, which work and have a real `--dry-run`.
+  change and would break networking if it had ever run. Those scripts were the
+  FR-012 path at the time; they are now disabled stubs.
 - `netcheck/docs/` (seven files, 1,075 lines). A second documentation tree
   restating README, AGENTS.md, and `docs/`, which `rules/04-DOCS.md` forbids
   ("a fact lives in exactly one document; duplicated facts diverge, always").
@@ -189,8 +195,8 @@ pass, not full automation.
   Enhancements" list (`rules/04-DOCS.md`: docs describe what is true now), a
   JSON output example no shell script emits, and a "Backup & Rollback -
   original state saved, all changes reversible" claim true only of
-  `fix_dns.sh`. The rewrite says rollback is DNS-only, which is what the
-  scripts do.
+  `fix_dns.sh`. That rollback claim was later removed when all three scripts
+  were disabled.
 - `environ._asus_set()` and its tests. A write path to router NVRAM that no
   command reached, whose own docstring said "UNVERIFIED against a live device
   from this codebase". PRD OOS-001 puts automated device writes out of scope

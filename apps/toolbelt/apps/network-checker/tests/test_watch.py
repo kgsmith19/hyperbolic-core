@@ -115,6 +115,21 @@ class RunLoopTest(unittest.TestCase):
         scan.assert_called_once()
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM env_scans").fetchone()[0], 1)
 
+    def test_startup_resolves_the_gateway_only_once(self):
+        row = _healthy_row("2026-08-12T00:00:00+00:00")
+        with patch.object(watch.route_mod, "gateway", return_value="10.0.0.1") as gateway, \
+             patch.object(watch.route_mod, "first_hop", return_value="203.0.113.1"), \
+             patch.object(watch.probes, "sample", return_value=row), \
+             patch.object(watch.environ, "wifi", return_value={"state": "unavailable"}), \
+             patch.object(watch.environ, "scan", return_value={"ts": row["ts"]}), \
+             patch.object(watch.llmlog, "ingest", return_value=0), \
+             patch.object(watch.store, "mirror", return_value={"state": "unavailable"}), \
+             patch.object(watch.time, "sleep", side_effect=KeyboardInterrupt), \
+             contextlib.redirect_stdout(io.StringIO()):
+            watch.run((self.conn, self.host), _args(), Path("/tmp/unused.db"))
+        # One startup lookup plus the first tick's deliberate re-resolution.
+        self.assertEqual(gateway.call_count, 2)
+
 
 class RouteReResolutionTest(unittest.TestCase):
     """CHANGELOG.md's DHCP-renewal regression: `watch` used to resolve the

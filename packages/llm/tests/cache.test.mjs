@@ -4,9 +4,8 @@
 // issues/m4-04-feat-llm-prompt-client.md's own verification command names:
 // `node --test packages/llm/tests/cache.test.mjs`.
 //
-// The fake PostgREST server below answers exactly the endpoints
-// packages/llm/src/prompt-client.ts calls (rpc/get_prompt POST, and GET on
-// `prompt` / `prompt_version`) against an in-memory "world" of prompts and
+// The fake PostgREST server below answers the two RPC endpoints
+// packages/llm/src/prompt-client.ts calls against an in-memory "world" of prompts and
 // their versions, using the SAME render() this package ships (packages/llm/
 // src/prompt-render.ts) to compute what the real SQL RPC would return -- so
 // a bug in the client's own merge/substitution logic would show up here too,
@@ -26,7 +25,7 @@ function makeWorld() {
 }
 
 function seed(world, name, id, bodiesByVersion) {
-  world.set(name, { id, versions: new Map(Object.entries(bodiesByVersion).map(([k, v]) => [Number(k), v])) });
+  world.set(name, { id, active: true, versions: new Map(Object.entries(bodiesByVersion).map(([k, v]) => [Number(k), v])) });
 }
 
 function maxVersion(entry) {
@@ -41,7 +40,9 @@ function stripPrefix(raw, prefix) {
   return raw && raw.startsWith(prefix) ? raw.slice(prefix.length) : undefined;
 }
 
-// Answers the three query shapes prompt-client.ts issues, backed by `world`.
+// Answers the published rendering RPC, the cache-source RPC, and the old raw
+// table shapes used only by regression tests that prove the client no longer
+// depends on table grants.
 async function fakePostgrest(world, callLog, input, init) {
   const url = new URL(String(input));
   callLog.push(url.pathname + url.search);
@@ -52,6 +53,7 @@ async function fakePostgrest(world, callLog, input, init) {
     const entry = world.get(body.p_name);
     if (!entry) return jsonResponse({ code: "PT404", message: "prompt not found" }, 404);
 
+    if (body.p_version === null && !entry.active) return jsonResponse({ code: "PT404", message: "prompt not found" }, 404);
     const versionNo = body.p_version ?? maxVersion(entry);
     const rawBody = entry.versions.get(versionNo);
     if (rawBody === undefined) return jsonResponse({ code: "PT404", message: "prompt version not found" }, 404);
@@ -60,6 +62,21 @@ async function fakePostgrest(world, callLog, input, init) {
     if (!result.ok) return jsonResponse({ code: "PT422", message: `missing variables: ${result.missing.join(", ")}` }, 422);
 
     return jsonResponse({ text: result.text, version_no: versionNo, rendered_at: new Date().toISOString() });
+  }
+
+  if (method === "POST" && url.pathname === "/rest/v1/rpc/get_prompt_source") {
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    const entry = world.get(body.p_name);
+    if (!entry) return jsonResponse({ code: "PT404", message: "prompt not found" }, 404);
+    if (body.p_version === null && !entry.active) return jsonResponse({ code: "PT404", message: "prompt not found" }, 404);
+
+    const versionNo = body.p_version ?? maxVersion(entry);
+    const rawBody = entry.versions.get(versionNo);
+    if (rawBody === undefined) return jsonResponse({ code: "PT404", message: "prompt version not found" }, 404);
+    if (body.p_if_version === versionNo) {
+      return jsonResponse({ body: null, version_no: versionNo, not_modified: true });
+    }
+    return jsonResponse({ body: rawBody, version_no: versionNo, not_modified: false });
   }
 
   if (method === "GET" && url.pathname === "/rest/v1/prompt") {
@@ -78,7 +95,8 @@ async function fakePostgrest(world, callLog, input, init) {
       const body = entry.versions.get(Number(versionFilter));
       return jsonResponse(body !== undefined ? [{ body }] : []);
     }
-    // The cheapest-probe shape: select=version_no&order=version_no.desc&limit=1
+    // Legacy version-probe shape, retained only so the RPC-only regression
+    // test can demonstrate exactly what an old client would try to call.
     return jsonResponse([{ version_no: maxVersion(entry) }]);
   }
 
@@ -159,7 +177,8 @@ test("pinned entries: capacity-bounded LRU actually evicts (a 129th distinct pin
 });
 
 // ---------------------------------------------------------------------------
-// name@latest: 60s-class TTL, revalidated by the cheapest version_no probe.
+// name@latest: 60s-class TTL, revalidated atomically by the conditional
+// cache-source RPC.
 // ---------------------------------------------------------------------------
 
 test("name@latest: TTL expiry with an unchanged version_no reuses the cached body with zero body re-fetch", async () => {
@@ -179,11 +198,7 @@ test("name@latest: TTL expiry with an unchanged version_no reuses the cached bod
     assert.equal(second.text, "Sys prompt v1 z");
 
     const revalidationCalls = callLog.slice(callsAfterFirst);
-    assert.equal(revalidationCalls.length, 1, "only the cheap probe query should fire; the body must not be re-fetched");
-    assert.ok(revalidationCalls[0].startsWith("/rest/v1/prompt_version"), "must be the prompt_version probe");
-    assert.ok(revalidationCalls[0].includes("select=version_no"), "must select only version_no, not body");
-    assert.ok(revalidationCalls[0].includes("order=version_no.desc"));
-    assert.ok(revalidationCalls[0].includes("limit=1"));
+    assert.deepEqual(revalidationCalls, ["/rest/v1/rpc/get_prompt_source"], "one conditional RPC should validate the entry with zero body transfer");
 
     // The refreshed TTL means an immediate follow-up call is a pure hit too.
     const callsAfterSecond = callLog.length;
@@ -212,14 +227,176 @@ test("name@latest: TTL expiry with a changed version_no triggers one full re-fet
     assert.equal(second.text, "v2 body z");
 
     const revalidationCalls = callLog.slice(callsAfterFirst);
-    assert.ok(revalidationCalls[0].startsWith("/rest/v1/prompt_version") && revalidationCalls[0].includes("select=version_no"), "must probe first");
-    assert.ok(revalidationCalls.length >= 2, "expected the probe plus at least one full re-fetch call (RPC + template read)");
+    assert.deepEqual(revalidationCalls, ["/rest/v1/rpc/get_prompt_source"], "one conditional RPC must return the changed version and body atomically");
 
     const callsAfterSecond = callLog.length;
     const third = await client.getPrompt("intake/optimize/idea", { variables: { X: "w" } });
     assert.equal(third.text, "v2 body w");
     assert.equal(callLog.length, callsAfterSecond, "the replaced cache entry must itself serve the next call with zero network");
   });
+});
+
+test("cacheable misses and revalidations use RPC endpoints only, never prompt table REST reads", async () => {
+  const world = makeWorld();
+  seed(world, "rpc-only/prompt", "id-rpc-only", { 1: "v1 {{X}}" });
+
+  await withFakePostgrest(world, async (callLog) => {
+    const client = createPromptClient(BASE_URL, async () => TOKEN, { latestTtlMs: 5 });
+    await client.getPrompt("rpc-only/prompt", { version: 1, variables: { X: "pinned" } });
+    await client.getPrompt("rpc-only/prompt", { variables: { X: "latest" } });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await client.getPrompt("rpc-only/prompt", { variables: { X: "revalidated" } });
+
+    assert.ok(callLog.length > 0);
+    assert.ok(
+      callLog.every((path) => path.startsWith("/rest/v1/rpc/")),
+      `cache transport must be RPC-only, got: ${callLog.join(", ")}`,
+    );
+  });
+});
+
+test("name@latest: TTL revalidation refuses an archived prompt even when its version_no is unchanged", async () => {
+  const world = makeWorld();
+  seed(world, "lifeos/chat/archive-me", "id-archived", { 1: "still {{X}}" });
+
+  await withFakePostgrest(world, async (callLog) => {
+    const client = createPromptClient(BASE_URL, async () => TOKEN, { latestTtlMs: 5 });
+    await client.getPrompt("lifeos/chat/archive-me", { variables: { X: "active" } });
+    const callsAfterWarm = callLog.length;
+
+    world.get("lifeos/chat/archive-me").active = false;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    await assert.rejects(
+      () => client.getPrompt("lifeos/chat/archive-me", { variables: { X: "stale" } }),
+      PromptNotFoundError,
+    );
+    assert.deepEqual(callLog.slice(callsAfterWarm), ["/rest/v1/rpc/get_prompt_source"]);
+  });
+});
+
+test("name@latest: an update between requests cannot pair one RPC version with another body", async () => {
+  let currentVersion = 1;
+  const callLog = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    callLog.push(url.pathname);
+
+    if (url.pathname === "/rest/v1/rpc/get_prompt_source") {
+      const snapshotVersion = currentVersion;
+      const response = jsonResponse({
+        body: `v${snapshotVersion} body {{X}}`,
+        version_no: snapshotVersion,
+        not_modified: false,
+      });
+      currentVersion = 2;
+      return response;
+    }
+    if (url.pathname === "/rest/v1/rpc/get_prompt") {
+      const snapshotVersion = currentVersion;
+      const request = JSON.parse(String(init?.body ?? "{}"));
+      const response = jsonResponse({
+        text: `v${snapshotVersion} body ${request.p_values.X}`,
+        version_no: snapshotVersion,
+        rendered_at: new Date().toISOString(),
+      });
+      currentVersion = 2;
+      return response;
+    }
+    if (url.pathname === "/rest/v1/prompt") {
+      return jsonResponse([{ id: "id-race", body: `v${currentVersion} body {{X}}` }]);
+    }
+    if (url.pathname === "/rest/v1/prompt_version") {
+      return jsonResponse([{ version_no: currentVersion }]);
+    }
+    return jsonResponse({ message: "unexpected route" }, 404);
+  };
+
+  try {
+    const client = createPromptClient(BASE_URL, async () => TOKEN);
+    const first = await client.getPrompt("race/latest", { variables: { X: "a" } });
+    const second = await client.getPrompt("race/latest", { variables: { X: "b" } });
+
+    assert.deepEqual({ text: first.text, version: first.version }, { text: "v1 body a", version: 1 });
+    assert.deepEqual({ text: second.text, version: second.version }, { text: "v1 body b", version: 1 });
+    assert.deepEqual(callLog, ["/rest/v1/rpc/get_prompt_source"], "the atomic source response must be the only network call");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("name@latest: concurrent expired reads share one revalidation so completion order cannot regress the cache", async () => {
+  let conditionalCalls = 0;
+  const pending = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    assert.equal(url.pathname, "/rest/v1/rpc/get_prompt_source");
+    const request = JSON.parse(String(init?.body ?? "{}"));
+    if (request.p_if_version === null) {
+      return jsonResponse({ body: "v1 {{X}}", version_no: 1, not_modified: false });
+    }
+    conditionalCalls += 1;
+    return new Promise((resolve) => pending.push(resolve));
+  };
+
+  try {
+    const client = createPromptClient(BASE_URL, async () => TOKEN, { latestTtlMs: 5 });
+    await client.getPrompt("race/concurrent-latest", { variables: { X: "warm" } });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const first = client.getPrompt("race/concurrent-latest", { variables: { X: "first" } });
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = client.getPrompt("race/concurrent-latest", { variables: { X: "second" } });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(conditionalCalls, 1, "same-name revalidations must be single-flight");
+    pending[0](jsonResponse({ body: "v2 {{X}}", version_no: 2, not_modified: false }));
+
+    assert.deepEqual(
+      await Promise.all([first, second]).then((results) => results.map(({ text, version }) => ({ text, version }))),
+      [
+        { text: "v2 first", version: 2 },
+        { text: "v2 second", version: 2 },
+      ],
+    );
+
+    const cached = await client.getPrompt("race/concurrent-latest", { variables: { X: "cached" } });
+    assert.deepEqual({ text: cached.text, version: cached.version }, { text: "v2 cached", version: 2 });
+    assert.equal(conditionalCalls, 1);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("cache-source malformed 2xx payloads are rejected and never cached", async () => {
+  for (const malformed of [
+    null,
+    {},
+    { body: "x", version_no: "1", not_modified: false },
+    { body: "x", version_no: 0, not_modified: false },
+    { body: null, version_no: 1, not_modified: false },
+    { body: "x", version_no: 1, not_modified: true },
+    { body: "wrong version", version_no: 2, not_modified: false },
+  ]) {
+    let calls = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return calls === 1
+        ? jsonResponse(malformed)
+        : jsonResponse({ body: "valid", version_no: 1, not_modified: false });
+    };
+    try {
+      const client = createPromptClient(BASE_URL, async () => TOKEN);
+      await assert.rejects(() => client.getPrompt("malformed/source", { version: 1 }), /invalid get_prompt_source response/);
+      assert.equal((await client.getPrompt("malformed/source", { version: 1 })).text, "valid");
+      assert.equal(calls, 2, "a malformed response must not populate the pinned cache");
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -355,15 +532,9 @@ test("getAccessToken rejecting (no session) reaches zero network calls, fail-clo
 // ---------------------------------------------------------------------------
 
 test("pinned entries: the cached body comes from prompt_version, NOT the live prompt.body, so a pin survives a later edit", async () => {
-  // Mutation finding (the most serious of the sweep): changing the pinned
-  // miss-path to cache `row.body` (the LIVE prompt.body returned by the
-  // by-title fetch) instead of calling fetchPinnedBody() against
-  // prompt_version survived every existing test. That mutant breaks the one
-  // property that makes pinning worth having -- 05-d sections 1.2/7: "a
-  // consumer requests name@version ... for reproducible behavior", and the
-  // pin must keep resolving the version's own body after the live row moves
-  // on. The existing pinned tests all seeded a single version, so live body
-  // and pinned body were identical and the distinction was invisible.
+  // The source RPC receives p_version and must return that historical body,
+  // not the latest live body. This protects the property that makes pinning
+  // useful: later edits cannot alter a cached name@version result.
   const world = makeWorld();
   seed(world, "brain/task-contract", "id-pin", { 1: "v1 body {{X}}.", 2: "v2 body {{X}}." });
 
@@ -374,9 +545,8 @@ test("pinned entries: the cached body comes from prompt_version, NOT the live pr
     assert.equal(pinned.text, "v1 body a.", "the pinned call must render version 1's body");
     const afterMiss = callLog.length;
 
-    // Second pinned call is a pure cache hit (zero network), so its text can
-    // only come from whatever the miss path cached. If that were the live
-    // body (version 2), this would read "v2 body b." instead.
+    // Second pinned call is a pure cache hit, so its text can only come from
+    // the atomic source response cached on the miss.
     const again = await client.getPrompt("brain/task-contract", { version: 1, variables: { X: "b" } });
     assert.equal(callLog.length, afterMiss, "must be a pure cache hit");
     assert.equal(again.text, "v1 body b.", "the cached pinned body must be version 1's, never the live version 2 body");
@@ -433,14 +603,14 @@ test("a call naming a saved config is never served from cache: config values res
     await client.getPrompt("planning/spec/issue-outcome", { version: 1, variables: { TOPIC: "a" } });
     const afterPinnedWarm = callLog.length;
     await client.getPrompt("planning/spec/issue-outcome", { version: 1, config: "some-config", variables: { TOPIC: "b" } });
-    const pinnedRpc = callLog.slice(afterPinnedWarm).filter((u) => u.startsWith("/rest/v1/rpc/get_prompt"));
+    const pinnedRpc = callLog.slice(afterPinnedWarm).filter((u) => u === "/rest/v1/rpc/get_prompt");
     assert.equal(pinnedRpc.length, 1, "a config-bearing PINNED call must reach rpc/get_prompt, not be served locally");
 
     // --- latest tier (no `version`) ---
     await client.getPrompt("planning/spec/issue-outcome", { variables: { TOPIC: "c" } });
     const afterLatestWarm = callLog.length;
     await client.getPrompt("planning/spec/issue-outcome", { config: "some-config", variables: { TOPIC: "d" } });
-    const latestRpc = callLog.slice(afterLatestWarm).filter((u) => u.startsWith("/rest/v1/rpc/get_prompt"));
+    const latestRpc = callLog.slice(afterLatestWarm).filter((u) => u === "/rest/v1/rpc/get_prompt");
     assert.equal(latestRpc.length, 1, "a config-bearing LATEST call must reach rpc/get_prompt, not be served locally");
   });
 });

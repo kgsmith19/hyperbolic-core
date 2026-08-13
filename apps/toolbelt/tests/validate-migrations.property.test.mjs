@@ -100,9 +100,9 @@ test("property: checkDownPairing flags exactly the up files with no down compani
 });
 
 // Property 2: checkVersionCollisions flags a version key if and only if
-// that version is claimed by 2+ DISTINCT stems (an up/down pair of the SAME
-// stem sharing a version must never be flagged).
-test("property: checkVersionCollisions flags a version iff 2+ distinct stems share it", () => {
+// that version is claimed by 2+ forward files (a paired down file never
+// counts as another global-ledger source).
+test("property: checkVersionCollisions flags a version iff 2+ forward files share it", () => {
   const rng = makeRng(SEED + 1);
   for (let trial = 0; trial < TRIALS; trial += 1) {
     const versionCount = randInt(rng, 1, 4);

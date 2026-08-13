@@ -31,6 +31,9 @@ test("main() exits 0 and creates the full layout for a valid ui invocation", () 
     assert.equal(code, 0);
     assert.ok(existsSync(join(root, "apps", "scratch-tool", "tool.json")));
     assert.match(cap.outText(), /generated apps\/toolbelt\/apps\/scratch-tool\//);
+    assert.match(cap.outText(), /migrations:check/);
+    assert.match(cap.outText(), /unified forward-only ledger/);
+    assert.doesNotMatch(cap.outText(), /supabase db push/);
   });
 });
 

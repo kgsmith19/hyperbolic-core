@@ -14,7 +14,7 @@
  * credential the SDK might otherwise resolve on its own.
  */
 import Anthropic from "@anthropic-ai/sdk";
-import { createLlmError } from "../errors.ts";
+import { createLlmError, isLlmError } from "../errors.ts";
 import { createStallWatchdog, STREAM_STALL_MS } from "../retry.ts";
 import { createAttemptController } from "./abort.ts";
 import { parseRetryAfterMs } from "./retry-after.ts";
@@ -153,6 +153,9 @@ function mapStopReason(stopReason: Anthropic.StopReason | null): StopReason {
 }
 
 function fromAnthropicMessage(message: Anthropic.Message, latencyMs: number): LlmResponse {
+  if (!Array.isArray(message.content) || !message.usage || typeof message.model !== "string") {
+    throw createLlmError("provider_bug", "anthropic driver: malformed successful response", { cause: message });
+  }
   const textBlocks = message.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
   const toolCalls: ToolCall[] = message.content
     .filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
@@ -217,6 +220,9 @@ function classifyByStatus(status: number | undefined): LlmErrorClass {
  * therefore never produces class "content_policy".
  */
 function classifyAnthropicError(err: unknown, wasAborted: boolean): LlmError {
+  if (isLlmError(err)) {
+    return err;
+  }
   if (wasAborted) {
     // Same controller now also fires on a caller-supplied LlmRequest.signal
     // (finding #87, see createAttemptController) as well as the pre-existing
@@ -265,7 +271,7 @@ function buildClient(credentials: Credentials): Anthropic {
 async function completeImpl(request: LlmRequest, credentials: Credentials): Promise<LlmResponse> {
   const client = buildClient(credentials);
   const params = buildParams(request);
-  const { controller, hardTimer } = createAttemptController(request);
+  const { controller, hardTimer, cleanup } = createAttemptController(request);
   const startedAt = Date.now();
   try {
     const message = await client.messages.create({ ...params, stream: false }, { signal: controller.signal });
@@ -274,6 +280,7 @@ async function completeImpl(request: LlmRequest, credentials: Credentials): Prom
     throw classifyAnthropicError(err, controller.signal.aborted);
   } finally {
     clearTimeout(hardTimer);
+    cleanup();
   }
 }
 
@@ -285,7 +292,7 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
   const client = buildClient(credentials);
   const params = buildParams(request);
   const startedAt = Date.now();
-  const { controller, hardTimer } = createAttemptController(request);
+  const { controller, hardTimer, cleanup } = createAttemptController(request);
   // Correctness fix (see 08-llm-handlers.md's stall-detection requirement):
   // the watchdog must reset only on an actual LlmDelta yield, never on raw
   // SSE transport activity. It used to reset unconditionally once per event
@@ -354,6 +361,7 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
     throw classifyAnthropicError(err, controller.signal.aborted);
   } finally {
     clearTimeout(hardTimer);
+    cleanup();
     watchdog.clear();
   }
 }

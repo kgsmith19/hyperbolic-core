@@ -222,7 +222,7 @@ function isFunctionToolCall(tc: OpenAI.ChatCompletionMessageToolCall): tc is Ope
 
 function fromOpenAIChatCompletion(completion: OpenAI.ChatCompletion, latencyMs: number): LlmResponse {
   const choice = completion.choices[0];
-  if (!choice) {
+  if (!choice?.message || typeof completion.model !== "string") {
     // A genuinely malformed 2xx (finding #84): OpenAI's own documented
     // refusal/moderation signals (message.refusal, finish_reason
     // "content_filter") both require a real choice with a message to exist
@@ -232,7 +232,7 @@ function fromOpenAIChatCompletion(completion: OpenAI.ChatCompletion, latencyMs: 
     // classified LlmError (rather than a bare Error left to fall through
     // classifyOpenAIError's own catch-all) so it stays provider_bug
     // regardless of that catch-all's own default ever changing independently.
-    throw createLlmError("provider_bug", "openai driver: response has no choices -- cannot be interpreted as a valid completion", { cause: completion });
+    throw createLlmError("provider_bug", "openai driver: malformed successful response (missing choice message or model)", { cause: completion });
   }
   const message = choice.message;
   const toolCalls: ToolCall[] = (message?.tool_calls ?? []).filter(isFunctionToolCall).map((tc, index) => ({
@@ -384,7 +384,7 @@ function buildClient(credentials: Credentials): OpenAI {
 async function completeImpl(request: LlmRequest, credentials: Credentials): Promise<LlmResponse> {
   const client = buildClient(credentials);
   const params = buildParams(request);
-  const { controller, hardTimer } = createAttemptController(request);
+  const { controller, hardTimer, cleanup } = createAttemptController(request);
   const startedAt = Date.now();
   try {
     const completion = await client.chat.completions.create({ ...params, stream: false }, { signal: controller.signal });
@@ -393,6 +393,7 @@ async function completeImpl(request: LlmRequest, credentials: Credentials): Prom
     throw classifyOpenAIError(err, controller.signal.aborted);
   } finally {
     clearTimeout(hardTimer);
+    cleanup();
   }
 }
 
@@ -404,7 +405,7 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
   const client = buildClient(credentials);
   const params = buildParams(request);
   const startedAt = Date.now();
-  const { controller, hardTimer } = createAttemptController(request);
+  const { controller, hardTimer, cleanup } = createAttemptController(request);
   // Correctness fix (see 08-llm-handlers.md's stall-detection requirement):
   // the watchdog must reset only on an actual LlmDelta yield, never on raw
   // transport activity. It used to reset unconditionally once per chunk at
@@ -469,6 +470,7 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
     throw classifyOpenAIError(err, controller.signal.aborted);
   } finally {
     clearTimeout(hardTimer);
+    cleanup();
     watchdog.clear();
   }
 }

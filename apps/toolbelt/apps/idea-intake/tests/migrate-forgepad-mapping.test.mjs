@@ -13,16 +13,26 @@ import os from "node:os";
 import path from "node:path";
 import {
   OWNER_REPO_RE,
+  buildImportSql,
+  buildPsqlInvocation,
   buildSource,
+  forgepadIdempotencyKey,
   mapForgepadIdea,
   validateForgepadIdea,
   loadForgepadFiles,
   summarizeCounts,
   partitionNewRows,
   parseArgs,
-  describePsqlFailure,
-  mappedRowContentEquals,
 } from "../tools/migrate-forgepad.mjs";
+
+test("psql receives the database credential through child-only env, never argv or inherited DATABASE_URL", () => {
+  const secret = "postgres://owner:super-secret@example.invalid/postgres";
+  const invocation = buildPsqlInvocation(secret, { PATH: "/usr/bin", DATABASE_URL: "stale-secret" });
+  assert.ok(invocation.args.every((arg) => !arg.includes("secret") && arg !== secret));
+  assert.equal(invocation.env.PGDATABASE, secret);
+  assert.equal(invocation.env.DATABASE_URL, undefined);
+  assert.equal(invocation.env.PATH, "/usr/bin");
+});
 
 function baseIdea(overrides = {}) {
   return {
@@ -78,6 +88,15 @@ test("buildSource appends the original source after '; ' when present", () => {
 
 test("buildSource trims whitespace-only original source down to nothing (treated as absent)", () => {
   assert.equal(buildSource(baseIdea({ id: "f-deadbeef", source: "   " })), "forgepad:f-deadbeef");
+});
+
+test("Forgepad idempotency is a stable UUID keyed only by the provenance id", () => {
+  const first = forgepadIdempotencyKey("f-deadbeef");
+  const same = forgepadIdempotencyKey("f-deadbeef");
+  const other = forgepadIdempotencyKey("f-cafebabe");
+  assert.match(first, /^[0-9a-f]{8}-[0-9a-f]{4}-3[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(first, same);
+  assert.notEqual(first, other);
 });
 
 // === mapForgepadIdea: state -> status ======================================
@@ -180,6 +199,7 @@ test("title/problem/outcome/confidence/created/updated pass through unchanged", 
   assert.equal(row.confidence, "high");
   assert.equal(row.createdAt, "2026-03-04T05:06:07.000Z");
   assert.equal(row.updatedAt, "2026-03-05T05:06:07.000Z");
+  assert.equal(row.idempotencyKey, forgepadIdempotencyKey("f-1a2b3c4d"));
 });
 
 test("a missing confidence value defaults to medium", () => {
@@ -219,63 +239,16 @@ test("validateForgepadIdea flags unparseable created/updated timestamps", () => 
   assert.ok(validateForgepadIdea(baseIdea({ updated: "not-a-date" })).some((p) => p.includes("updated must be")));
 });
 
-// --- Finding 54: canonical-shape + round-trip timestamp validation --------
-// (replaces bare Date.parse, which is more permissive than Postgres's own
-// ::timestamptz cast -- see the CANONICAL_TIMESTAMP_RE comment in the tool.)
-
-test("validateForgepadIdea accepts the exact canonical shape forgepad's store.mjs always writes (new Date().toISOString())", () => {
-  assert.deepEqual(validateForgepadIdea(baseIdea({ created: "2026-03-04T05:06:07.123Z", updated: "2026-03-04T05:06:07.999Z" })), []);
+test("validateForgepadIdea rejects dates Date.parse normalizes but PostgreSQL may interpret differently", () => {
+  assert.ok(validateForgepadIdea(baseIdea({ created: "2026-02-30T00:00:00.000Z" })).some((p) => p.includes("canonical ISO")));
+  assert.ok(validateForgepadIdea(baseIdea({ updated: "0" })).some((p) => p.includes("canonical ISO")));
 });
 
-test(
-  "validateForgepadIdea rejects a Feb-30 timestamp that Date.parse silently rolls forward to March (RED before the fix: bare Date.parse accepted this)",
-  () => {
-    const problems = validateForgepadIdea(baseIdea({ created: "2026-02-30T00:00:00Z" }));
-    assert.ok(
-      problems.some((p) => p.includes("created must be a canonical ISO-8601")),
-      `expected a clear canonical-timestamp problem, got: ${JSON.stringify(problems)}`,
-    );
-  },
-);
-
-test(
-  "validateForgepadIdea rejects a canonical-SHAPED but calendar-invalid Feb-30 timestamp with milliseconds (proves the round-trip check, not just the shape regex, is doing real work)",
-  () => {
-    // "2026-02-30T00:00:00.000Z" matches CANONICAL_TIMESTAMP_RE's shape
-    // exactly -- only `new Date(s).toISOString() === s` catches that
-    // Postgres/JS both roll Feb 30 forward to March 2, so this specific
-    // fixture is a mutation guard for the round-trip half of the check, not
-    // just the regex half.
-    const problems = validateForgepadIdea(baseIdea({ created: "2026-02-30T00:00:00.000Z" }));
-    assert.ok(
-      problems.some((p) => p.includes("created must be a canonical ISO-8601")),
-      `expected a clear canonical-timestamp problem, got: ${JSON.stringify(problems)}`,
-    );
-  },
-);
-
-test(
-  'validateForgepadIdea rejects "0" (RED before the fix: bare Date.parse silently interpreted this as the year 2000)',
-  () => {
-    const problems = validateForgepadIdea(baseIdea({ updated: "0" }));
-    assert.ok(problems.some((p) => p.includes("updated must be a canonical ISO-8601")));
-  },
-);
-
-test("validateForgepadIdea rejects a handful of other non-canonical-but-Date.parse-parseable timestamp shapes", () => {
-  for (const notCanonical of [
-    "2026-01-01",
-    "2026-01-01T00:00:00Z",
-    "January 1, 2026",
-    "2026/01/01 00:00:00",
-    "2026-01-01T00:00:00.000+00:00",
-  ]) {
-    const problems = validateForgepadIdea(baseIdea({ created: notCanonical }));
-    assert.ok(
-      problems.some((p) => p.includes("created must be a canonical ISO-8601")),
-      `expected ${JSON.stringify(notCanonical)} to be rejected, got: ${JSON.stringify(problems)}`,
-    );
+test("validateForgepadIdea rejects non-string optional content and non-null githubIssue", () => {
+  for (const field of ["target", "source", "problem", "outcome", "notes"]) {
+    assert.ok(validateForgepadIdea(baseIdea({ [field]: 42 })).some((p) => p.includes(`${field} must be a string`)));
   }
+  assert.ok(validateForgepadIdea(baseIdea({ githubIssue: "https://github.com/o/r/issues/1" })).some((p) => p.includes("githubIssue")));
 });
 
 test("validateForgepadIdea accumulates multiple independent problems in one pass", () => {
@@ -283,197 +256,38 @@ test("validateForgepadIdea accumulates multiple independent problems in one pass
   assert.equal(problems.length, 3);
 });
 
-// --- Finding 14: a non-null githubIssue must never silently vanish -------
-
-test("validateForgepadIdea accepts a null githubIssue (the only shape this repo's history has ever produced)", () => {
-  assert.deepEqual(validateForgepadIdea(baseIdea({ githubIssue: null })), []);
-});
-
-test("validateForgepadIdea accepts an entirely absent githubIssue field", () => {
-  const idea = baseIdea();
-  delete idea.githubIssue;
-  assert.deepEqual(validateForgepadIdea(idea), []);
-});
-
-test(
-  "validateForgepadIdea flags a non-null githubIssue instead of silently dropping it (RED before the fix: mapForgepadIdea never copies this field anywhere)",
-  () => {
-    const problems = validateForgepadIdea(baseIdea({ githubIssue: "42" }));
-    assert.ok(
-      problems.some((p) => p.includes("githubIssue") && p.includes("not null")),
-      `expected a githubIssue problem, got: ${JSON.stringify(problems)}`,
-    );
-  },
-);
-
-test("a rejected non-null-githubIssue file never reaches mapForgepadIdea: loadForgepadFiles reports it as an error, not a loaded file", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "migrate-forgepad-ghissue-"));
-  try {
-    fs.writeFileSync(path.join(dir, "f-44444444.json"), JSON.stringify(baseIdea({ id: "f-44444444", githubIssue: "99" })));
-    const { files, errors } = loadForgepadFiles(dir);
-    assert.equal(files.length, 0);
-    assert.equal(errors.length, 1);
-    assert.match(errors[0], /githubIssue/);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 // === partitionNewRows (idempotency decision, DB-free) ======================
 
-test("partitionNewRows separates rows whose source is already present from genuinely new ones", () => {
-  const rows = [{ id: "f-a", source: "forgepad:f-a" }, { id: "f-b", source: "forgepad:f-b" }, { id: "f-c", source: "forgepad:f-c" }];
-  const { newRows, alreadyPresent, duplicateInBatch } = partitionNewRows(rows, new Set(["forgepad:f-b"]));
-  assert.deepEqual(newRows.map((r) => r.source), ["forgepad:f-a", "forgepad:f-c"]);
+test("partitionNewRows keys on stable idempotency keys rather than mutable source text", () => {
+  const rows = [
+    { idempotencyKey: "key-a", source: "forgepad:f-a; edited" },
+    { idempotencyKey: "key-b", source: "forgepad:f-b" },
+    { idempotencyKey: "key-c", source: "forgepad:f-c" },
+  ];
+  const { newRows, alreadyPresent } = partitionNewRows(rows, new Set(["key-b"]));
+  assert.deepEqual(newRows.map((r) => r.idempotencyKey), ["key-a", "key-c"]);
   assert.equal(alreadyPresent, 1);
-  assert.equal(duplicateInBatch, 0);
 });
 
 test("partitionNewRows with an empty existing set treats every row as new", () => {
-  const rows = [{ id: "f-a", source: "forgepad:f-a" }, { id: "f-b", source: "forgepad:f-b" }];
+  const rows = [{ idempotencyKey: "key-a" }, { idempotencyKey: "key-b" }];
   const { newRows, alreadyPresent } = partitionNewRows(rows, new Set());
   assert.equal(newRows.length, 2);
   assert.equal(alreadyPresent, 0);
 });
 
 test("partitionNewRows with every source already present yields zero new rows (second-run idempotency shape)", () => {
-  const rows = [{ id: "f-a", source: "forgepad:f-a" }, { id: "f-b", source: "forgepad:f-b" }];
-  const { newRows, alreadyPresent } = partitionNewRows(rows, new Set(["forgepad:f-a", "forgepad:f-b"]));
+  const rows = [{ idempotencyKey: "key-a" }, { idempotencyKey: "key-b" }];
+  const { newRows, alreadyPresent } = partitionNewRows(rows, new Set(["key-a", "key-b"]));
   assert.equal(newRows.length, 0);
   assert.equal(alreadyPresent, 2);
 });
 
-// --- Finding 11: within-batch dedupe keyed on the immutable forgepad id ---
-
-test(
-  "partitionNewRows dedupes two rows sharing one forgepad id WITHIN a single batch, keeping only the first (RED before the fix: both used to reach newRows)",
-  () => {
-    // Two distinct source files can independently map to the same forgepad
-    // idea id (a duplicated/malformed fixture, an operator copy-paste) --
-    // loadForgepadFiles/validateForgepadIdea impose no cross-file
-    // uniqueness, only mapForgepadIdea's per-row shape. Before Finding 11's
-    // fix, partitionNewRows only checked `existingSources` (rows already in
-    // the DB from a PRIOR run) and let both rows straight through to
-    // insertRows in the SAME run.
-    const rows = [
-      { id: "f-dupe0001", source: "forgepad:f-dupe0001" },
-      { id: "f-dupe0001", source: "forgepad:f-dupe0001; a different original source text" },
-      { id: "f-unique02", source: "forgepad:f-unique02" },
-    ];
-    const { newRows, alreadyPresent, duplicateInBatch } = partitionNewRows(rows, new Set());
-    assert.deepEqual(
-      newRows.map((r) => r.id),
-      ["f-dupe0001", "f-unique02"],
-      "only the FIRST occurrence of the duplicated id survives into newRows",
-    );
-    assert.equal(alreadyPresent, 0);
-    assert.equal(duplicateInBatch, 1, "the second f-dupe0001 row must be counted as an in-batch duplicate, not silently dropped or inserted");
-  },
-);
-
-test("partitionNewRows dedupe keys on the immutable id, not the mutable full source string", () => {
-  // Two rows for the same forgepad id whose `source` strings genuinely
-  // differ (different original-source suffix) must still collapse to one --
-  // proving the fix keys on `row.id`, not `row.source` (a source-keyed
-  // dedupe would treat these as two distinct, unrelated rows).
-  const rows = [
-    { id: "f-sameid01", source: "forgepad:f-sameid01; first pass" },
-    { id: "f-sameid01", source: "forgepad:f-sameid01; second pass, edited" },
-  ];
-  const { newRows, duplicateInBatch } = partitionNewRows(rows, new Set());
-  assert.equal(newRows.length, 1);
-  assert.equal(newRows[0].source, "forgepad:f-sameid01; first pass");
-  assert.equal(duplicateInBatch, 1);
-});
-
-test("partitionNewRows in-batch dedupe composes correctly with the existing-sources check (three-way split)", () => {
-  const rows = [
-    { id: "f-already1", source: "forgepad:f-already1" }, // already migrated in a prior run
-    { id: "f-dupe0002", source: "forgepad:f-dupe0002" }, // first of an in-batch duplicate pair
-    { id: "f-dupe0002", source: "forgepad:f-dupe0002" }, // second of the pair
-    { id: "f-brandnew", source: "forgepad:f-brandnew" }, // genuinely new
-  ];
-  const { newRows, alreadyPresent, duplicateInBatch } = partitionNewRows(rows, new Set(["forgepad:f-already1"]));
-  assert.deepEqual(newRows.map((r) => r.id), ["f-dupe0002", "f-brandnew"]);
-  assert.equal(alreadyPresent, 1);
-  assert.equal(duplicateInBatch, 1);
-});
-
-// --- Finding 53: partitionNewRows also exposes the matched row objects ----
-// (not just a count), so insertRows can diff each one's content against the
-// database and decide whether it needs a content UPDATE.
-
-test("partitionNewRows returns the actual already-present row objects, not just a count", () => {
-  const rowA = { id: "f-a", source: "forgepad:f-a" };
-  const rowB = { id: "f-b", source: "forgepad:f-b" };
-  const { alreadyPresentRows } = partitionNewRows([rowA, rowB], new Set(["forgepad:f-b"]));
-  assert.deepEqual(alreadyPresentRows, [rowB]);
-});
-
-// === mappedRowContentEquals (Finding 53's DB-free content diff) ===========
-
-test("mappedRowContentEquals is true when every mapped field matches the stored row", () => {
-  const row = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "high", targetRepo: "o/r" };
-  const dbRow = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "high", target_repo: "o/r", status: "idea" };
-  assert.equal(mappedRowContentEquals(row, dbRow), true);
-});
-
-test("mappedRowContentEquals treats a null targetRepo and a null target_repo as equal (not '' vs null mismatches)", () => {
-  const row = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "medium", targetRepo: null };
-  const dbRow = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "medium", target_repo: null, status: "draft" };
-  assert.equal(mappedRowContentEquals(row, dbRow), true);
-});
-
-test("mappedRowContentEquals is false when exactly one mapped field (e.g. title) has been edited", () => {
-  const row = { title: "Revised title", problem: "P", outcome: "O", notes: "N", confidence: "medium", targetRepo: null };
-  const dbRow = { title: "Original title", problem: "P", outcome: "O", notes: "N", confidence: "medium", target_repo: null, status: "draft" };
-  assert.equal(mappedRowContentEquals(row, dbRow), false);
-});
-
-test("mappedRowContentEquals ignores status entirely -- a status difference alone must never register as a content diff", () => {
-  const row = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "medium", targetRepo: "o/r" };
-  const dbRow = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "medium", target_repo: "o/r", status: "draft" };
-  assert.equal(mappedRowContentEquals(row, dbRow), true, "status is handled by the separate promotion UPDATE, not this content diff");
-});
-
-// === describePsqlFailure (Finding 51) ======================================
-// Each fixture below is exactly the shape Node's own spawnSync documentation
-// describes for that outcome -- constructed directly rather than mocking
-// child_process.spawnSync, since describePsqlFailure takes the already-
-// returned result object as its only input and every branch is reachable
-// this way without spawning a real process.
-
-test(
-  "describePsqlFailure reports a clear 'psql not found on PATH' message for an ENOENT spawn error, not a raw TypeError (RED before the fix: (result.stderr || result.stdout).trim() threw on undefined)",
-  () => {
-    const result = { status: null, signal: null, stdout: undefined, stderr: undefined, error: { code: "ENOENT", message: "spawnSync psql ENOENT" } };
-    assert.equal(describePsqlFailure(result), "psql not found on PATH");
-  },
-);
-
-test("describePsqlFailure reports a clear message for a non-ENOENT spawn error too (e.g. EACCES)", () => {
-  const result = { status: null, signal: null, stdout: undefined, stderr: undefined, error: { code: "EACCES", message: "spawnSync psql EACCES" } };
-  assert.match(describePsqlFailure(result), /failed to spawn psql.*EACCES/);
-});
-
-test(
-  "describePsqlFailure names a timeout explicitly, including the signal (RED before the fix: (result.stderr || result.stdout).trim() silently produced an EMPTY string, indistinguishable from any other failure)",
-  () => {
-    const result = { status: null, signal: "SIGTERM", stdout: "", stderr: "", error: undefined };
-    const message = describePsqlFailure(result);
-    assert.match(message, /timed out|killed/);
-    assert.match(message, /SIGTERM/);
-  },
-);
-
-test("describePsqlFailure falls through to real stderr text for a genuine SQL failure (non-zero status)", () => {
-  const result = { status: 1, signal: null, stdout: "", stderr: "ERROR:  syntax error at or near \"garbage\"\n", error: undefined };
-  assert.equal(describePsqlFailure(result), 'ERROR:  syntax error at or near "garbage"');
-});
-
-test("describePsqlFailure falls back to stdout when stderr is empty for a genuine SQL failure", () => {
-  const result = { status: 3, signal: null, stdout: "some diagnostic on stdout\n", stderr: "", error: undefined };
-  assert.equal(describePsqlFailure(result), "some diagnostic on stdout");
+test("partitionNewRows rejects duplicate provenance ids in one batch", () => {
+  assert.throws(
+    () => partitionNewRows([{ idempotencyKey: "same" }, { idempotencyKey: "same" }], new Set()),
+    /duplicate Forgepad idempotency key/,
+  );
 });
 
 // === summarizeCounts =========================================================
@@ -498,9 +312,11 @@ test("summarizeCounts buckets every state correctly, including the definite spli
 
 // === loadForgepadFiles (real filesystem, still DB-free) ====================
 
-test("loadForgepadFiles returns empty with no errors when the ideas directory does not exist", () => {
+test("loadForgepadFiles fails closed when the ideas directory does not exist", () => {
   const missing = path.join(os.tmpdir(), "migrate-forgepad-does-not-exist-" + Date.now());
-  assert.deepEqual(loadForgepadFiles(missing), { files: [], errors: [] });
+  const result = loadForgepadFiles(missing);
+  assert.equal(result.files.length, 0);
+  assert.match(result.errors[0], /ideas directory does not exist/);
 });
 
 test("loadForgepadFiles loads valid f-*.json files and ignores non-matching filenames", () => {
@@ -516,6 +332,18 @@ test("loadForgepadFiles loads valid f-*.json files and ignores non-matching file
       files.map((f) => f.name),
       ["f-11111111.json", "f-22222222.json"],
     );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadForgepadFiles rejects a filename whose provenance id disagrees with its JSON", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "migrate-forgepad-name-"));
+  try {
+    fs.writeFileSync(path.join(dir, "f-11111111.json"), JSON.stringify(baseIdea({ id: "f-22222222" })));
+    const { files, errors } = loadForgepadFiles(dir);
+    assert.equal(files.length, 0);
+    assert.match(errors[0], /filename id f-11111111 does not match content id f-22222222/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -553,19 +381,27 @@ test("parseArgs rejects an unrecognized flag", () => {
   assert.throws(() => parseArgs(["--bogus"]), /unrecognized argument/);
 });
 
-// --- Finding 12: --acc-root must not silently swallow a following flag ---
-
-test(
-  "parseArgs rejects --acc-root immediately followed by another flag instead of silently treating the flag as the path (RED before the fix: this used to parse as accRoot='--dry-run', dryRun=false)",
-  () => {
-    assert.throws(() => parseArgs(["--acc-root", "--dry-run"]), /--acc-root requires a value/);
-  },
-);
-
-test("parseArgs rejects a trailing --acc-root with nothing after it at all", () => {
-  assert.throws(() => parseArgs(["--acc-root"]), /--acc-root requires a value/);
+test("parseArgs rejects a missing or flag-shaped --acc-root value", () => {
+  assert.throws(() => parseArgs(["--acc-root"]), /--acc-root requires a path/);
+  assert.throws(() => parseArgs(["--acc-root", "--dry-run"]), /--acc-root requires a path/);
 });
 
-test("parseArgs still accepts a real path that simply starts with a hyphen-free directory name adjacent to --dry-run (control: the fix doesn't over-reject legitimate input)", () => {
-  assert.deepEqual(parseArgs(["--acc-root", "/x/y-z", "--dry-run"]), { accRoot: "/x/y-z", dryRun: true, help: false });
+test("buildImportSql transports hostile content as encoded JSON and enforces atomic idempotency", () => {
+  const row = mapForgepadIdea(
+    baseIdea({
+      title: "Robert'); drop table intake.idea; --\n雪",
+      notes: "backslash \\ and CRLF\r\n",
+      state: "definite",
+      target: "kgsmith19/hyperbolic-core",
+    }),
+  );
+  const sql = buildImportSql([row]);
+
+  assert.doesNotMatch(sql, /Robert|drop table|CRLF|雪/);
+  assert.match(sql, /jsonb_to_recordset\(convert_from\(decode\('[A-Za-z0-9+/=]+'\s*,\s*'base64'\)/);
+  assert.match(sql, /pg_advisory_xact_lock/);
+  assert.match(sql, /rolsuper or rolbypassrls/);
+  assert.match(sql, /on conflict \(idempotency_key\) do nothing/);
+  assert.match(sql, /existing Forgepad row differs from the frozen import payload/);
+  assert.match(sql, /commit;[\s\S]*json_build_object/i);
 });

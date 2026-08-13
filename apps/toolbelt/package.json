@@ -6,7 +6,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "manifests:check": "node scripts/validate-manifests.mjs"
+    "manifests:check": "node scripts/validate-manifests.mjs",
+    "migrations:check": "node scripts/validate-migrations.mjs",
+    "migrations:stage": "node scripts/stage-migrations.mjs"
   },
   "dependencies": {
     "ajv": "^8.20.0",

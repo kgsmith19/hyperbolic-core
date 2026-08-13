@@ -1,5 +1,4 @@
-"""Tests for `change approve` (NC-4.2, 05-f section 4.3): the TTY-only
-approval gate and the interactive confirmation flow. Split out of
+"""Tests for the TTY-only approval and capability-input gates. Split out of
 test_change.py for the same file-length-budget reason watch.py was split
 from __main__.py.
 
@@ -10,9 +9,11 @@ exactly the claim being made. Everything else here stays in-process and
 hermetic: a real in-memory-equivalent temp SQLite db, `patch.object` for
 `sys.stdin.isatty` and `builtins.input`.
 """
+import argparse
 import contextlib
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from netcheck import change, store
+from netcheck import change, change_cli, store
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -118,17 +119,24 @@ class ApproveConfirmationFlowTest(unittest.TestCase):
 
     def test_typing_the_correct_id_approves_and_mints_a_token(self):
         cid = self._propose_and_test()
+        out = io.StringIO()
         with patch.object(sys.stdin, "isatty", return_value=True), \
              patch("builtins.input", return_value=str(cid)), \
-             contextlib.redirect_stdout(io.StringIO()):
+             contextlib.redirect_stdout(out):
             rc = change.approve(self.conn, _Args(cid))
         self.assertEqual(rc, 0)
         row = change._get(self.conn, cid)
+        token = re.search(r"([0-9a-f]{64})", out.getvalue()).group(1)
         self.assertEqual(row["status"], "approved")
         self.assertIsNotNone(row["approval_token"])
         self.assertEqual(row["approved_by"], change._current_user())
-        self.assertEqual(row["approval_token"],
+        self.assertEqual(token,
                          change._token(row, row["approved_at"], row["approved_by"]))
+        self.assertNotEqual(row["approval_token"], token)
+        self.assertEqual(row["approval_token"], change._token_digest(token))
+        self.assertEqual(out.getvalue().count(token), 1)
+        self.assertIn(f"change apply {cid}", out.getvalue())
+        self.assertNotIn("--token", out.getvalue())
 
     def test_typing_the_wrong_id_aborts_without_approving(self):
         cid = self._propose_and_test()
@@ -153,6 +161,38 @@ class ApproveConfirmationFlowTest(unittest.TestCase):
              contextlib.redirect_stderr(io.StringIO()):
             rc = change.approve(self.conn, _Args(cid))
         self.assertNotEqual(rc, 0)
+
+
+class ApplyCapabilityInputTest(unittest.TestCase):
+    @staticmethod
+    def _parser():
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers(dest="cmd", required=True)
+        change_cli.add_subparser(sub)
+        return parser
+
+    def test_apply_parser_rejects_a_capability_in_process_arguments(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self._parser().parse_args(["change", "apply", "1", "--token", "secret"])
+
+    def test_noninteractive_apply_refuses_before_the_lifecycle(self):
+        args = self._parser().parse_args(["change", "apply", "1"])
+        with contextlib.redirect_stderr(io.StringIO()), \
+             patch.object(change_cli.sys.stdin, "isatty", return_value=False), \
+             patch.object(change_cli.getpass, "getpass") as prompt, \
+             patch.object(change, "apply") as apply:
+            self.assertNotEqual(change_cli.cli(None, 1, args), 0)
+        prompt.assert_not_called()
+        apply.assert_not_called()
+
+    def test_interactive_apply_reads_without_echo_then_calls_the_lifecycle(self):
+        args = self._parser().parse_args(["change", "apply", "7"])
+        with patch.object(change_cli.sys.stdin, "isatty", return_value=True), \
+             patch.object(change_cli.getpass, "getpass", return_value="cap") as prompt, \
+             patch.object(change, "apply", return_value=0) as apply:
+            self.assertEqual(change_cli.cli("conn", 3, args), 0)
+        prompt.assert_called_once()
+        apply.assert_called_once_with("conn", 3, args, "cap")
 
 
 class _Args:

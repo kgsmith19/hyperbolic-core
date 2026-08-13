@@ -79,7 +79,7 @@ export interface PlatformAuth {
  * without issuing any network request when there is no active session
  * (fail closed, ADR-03).
  */
-export type AuthedFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
+export type AuthedFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export interface PlatformClient {
   auth: PlatformAuth;

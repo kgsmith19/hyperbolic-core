@@ -31,20 +31,21 @@ One additional server-side surface exists that the web client does not call: `PO
 
 ### 1.2 V1 API surface
 
-Decision: keep PostgREST as the API. The table grants ARE the request contract; RLS is the authorization boundary [VERIFIED: apps/toolbelt/AGENTS.md product boundaries]. V1 adds exactly one new RPC (`get_prompt`, the injection path) and re-pins RLS per ADR-03. No bespoke service is built; the complexity budget's zero-new-database and deployable-unit ceilings are untouched.
+Decision: keep PostgREST as the API. The table grants ARE the browser request contract; RLS remains the table authorization boundary [VERIFIED: apps/toolbelt/AGENTS.md product boundaries]. V1 adds `get_prompt` for rendered injection and the narrow `get_prompt_source` cache protocol used by `packages/llm`, then re-pins RLS per ADR-03. No bespoke service is built; the complexity budget's zero-new-database and deployable-unit ceilings are untouched.
 
 | Endpoint | Method(s) | Request contract (grants) | Response contract | Auth (ADR-03) | Latency budget (warm, p50/p95) |
 | --- | --- | --- | --- | --- | --- |
-| `/rest/v1/prompt` | GET, POST, PATCH | select: any column; insert: `title` (1..200, unique lower), `body` (1..100000); update: columns `title,body,is_active` only [VERIFIED: migrations 20260807020000:10-18, 20260807040000:24, 20260808000000:4] | rows of `prompt.prompt`; PostgREST error JSON otherwise | owner JWT; RLS pinned to owner UUID (section 2) | 50 ms / 120 ms |
+| `/rest/v1/prompt` | GET, POST, PATCH | select: any column; insert: `title` (1..200, unique by `user_id + lower(title)`), `body` (1..100000); update: columns `title,body,is_active` only [VERIFIED: migrations 20260807020000:10-18, 20260807041000:24, 20260808000000:4, 20260813151000] | rows of `prompt.prompt`; PostgREST error JSON otherwise | owner JWT; RLS pinned to owner UUID (section 2) | 50 ms / 120 ms |
 | `/rest/v1/prompt_version` | GET, POST | select + insert only; no UPDATE or DELETE grant exists, which is the immutability mechanism [VERIFIED: migration 20260807040000:37; AGENTS.md append-only rule] | rows keyed `(prompt_id, version_no)` | owner JWT | 50 ms / 120 ms |
 | `/rest/v1/tag` | GET, POST | add-and-filter only [VERIFIED: toolbelt inventory, migration 20260807050000] | rows `(prompt_id, tag)` | owner JWT | 50 ms / 120 ms |
 | `/rest/v1/usage` | GET, POST | append-only, composite FK to version [VERIFIED: migration 20260807070000] | usage rows | owner JWT | 50 ms / 120 ms (fire-and-forget on the copy path, never blocking [VERIFIED: panel.mjs:110-112 comment]) |
 | `/rest/v1/configuration` | GET, POST | PK `(prompt_id, name)`, `values` jsonb, `sections` text[] [VERIFIED: migration 20260808100000] | configuration rows | owner JWT | 50 ms / 120 ms |
 | `/rest/v1/rpc/render_prompt` | POST | `{p_name, p_config?}`; EXECUTE granted to `authenticated` only [VERIFIED: migration 20260808120000:62-63] | rendered text; `PT404` / `PT422` errors | owner JWT (security invoker, caller's RLS) | 60 ms / 150 ms (PO-2) |
 | `/rest/v1/rpc/get_prompt` (NEW, section 6) | POST | `{p_name, p_version?, p_config?, p_values?, p_sections?}` | jsonb `{text, version_no, rendered_at}`; `PT404` / `PT422` | owner JWT or scoped agent token (ADR-03) | 60 ms / 150 ms (PO-2) |
+| `/rest/v1/rpc/get_prompt_source` (NEW, section 4) | POST | `{p_name, p_version?, p_if_version?}`; EXECUTE only, no caller table grants | jsonb `{body, version_no, not_modified}`; unchanged condition returns `body: null`; archived latest and missing rows return `PT404` | owner JWT or scoped agent token (ADR-03) | 60 ms / 150 ms (PO-2) |
 | `/auth/v1/token?grant_type=password` | POST | Supabase Auth | session | RETIRED for the UI (section 2); remains for CI token minting against the fenced test schema only | n/a |
 
-Contract fragments for the two non-trivial endpoints (OpenAPI-style, planning contract only):
+Contract fragments for the three non-trivial endpoints (OpenAPI-style, planning contract only):
 
 ```yaml
 /rest/v1/rpc/render_prompt:
@@ -91,9 +92,34 @@ Contract fragments for the two non-trivial endpoints (OpenAPI-style, planning co
                 rendered_at: { type: string, format: date-time }
       "404-class": { description: "PT404: name or pinned version not found" }
       "422-class": { description: "PT422: missing variables after merge" }
+
+/rest/v1/rpc/get_prompt_source:   # NEW internal cache protocol
+  post:
+    summary: Resolve one atomic raw template/version snapshot, conditionally omitting an unchanged body.
+    requestBody:
+      application/json:
+        schema:
+          type: object
+          required: [p_name]
+          properties:
+            p_name:       { type: string }
+            p_version:    { type: integer, nullable: true, description: "null resolves active latest; a pin survives archival" }
+            p_if_version: { type: integer, nullable: true, description: "cached version used as the no-body conditional" }
+    responses:
+      "200":
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body, version_no, not_modified]
+              properties:
+                body:         { type: string, nullable: true }
+                version_no:   { type: integer }
+                not_modified: { type: boolean }
+      "404-class": { description: "PT404: name or pinned version missing, or latest is archived" }
 ```
 
-`render_prompt` stays untouched for backward compatibility with its four existing endpoint tests [VERIFIED: tests/render-endpoint.test.mjs]; `get_prompt` supersedes it for all new consumers and adds the three things injection needs that `render_prompt` lacks: version pinning, ad-hoc values, and provenance in the response [VERIFIED: migration 20260808120000 signature takes only `p_name, p_config` and returns bare text].
+`render_prompt` stays untouched for backward compatibility with its four existing endpoint tests [VERIFIED: tests/render-endpoint.test.mjs]. `get_prompt` supersedes it for direct rendered consumers and adds version pinning, ad-hoc values, and provenance. `get_prompt_source` is not a second public rendering model; it is the least-privilege conditional transport that lets `packages/llm` cache raw templates without direct table reads.
 
 ## 2. Auth (ADR-03 integration)
 
@@ -105,7 +131,7 @@ V1 changes, in ADR-03's exact terms:
 2. UI session comes from the Shell. The password-grant sign-in form retires; the client obtains its session from `packages/platform-client` (ADR-03 session propagation). The anon key itself remains in the client as the PostgREST `apikey` header, which is public by design [VERIFIED: config.mjs safe-to-commit comment]; only the sign-in form and its token fetch are deleted.
 3. Fixture users are fenced to a dedicated test schema per the Phase 6 consolidation plan; CI keeps pre-minting tokens via `export-test-sessions.mjs` [VERIFIED: tests/export-test-sessions.mjs] but those tokens can no longer touch owner data. This retires SEC-03 as scheduled by ADR-03.
 
-Agent access (the Brain, Idea Intake) presents a scoped token per ADR-03's service-to-service rule and may EXECUTE `get_prompt` only; no table grants are extended to agent principals.
+Agent access (the Brain, Idea Intake) presents a scoped token per ADR-03's service-to-service rule and may EXECUTE `get_prompt` and `get_prompt_source` only; no table grants are extended to agent principals.
 
 ## 3. Category taxonomy and starter prompts (PO-4)
 
@@ -124,7 +150,7 @@ The taxonomy is derived from the actual consumers this system has or is building
 
 Rejected candidates: a separate `writing/` category folds into `research/` until a real consumer exists (no component in the inventory consumes writing prompts); per-app categories for Network Checker and Guards are premature because neither makes LLM calls today [VERIFIED: 01-inventory.md: LifeOS backend is the only LLM API consumer; netcheck synthesis is an unwired stub].
 
-Seed mechanism (migration spec, not code): one migration pair `2026xxxxxx_prompt_seed_starters.sql` inserting, as the owner UUID, at least one active prompt per category above, `on conflict (lower(title)) do nothing` so re-runs and pre-existing personal prompts are safe; the down migration deletes exactly the seeded titles. Seed bodies use the existing `{{VAR}}` and `<!--OPTIONAL:id-->` model (section 8). PO-4 verification query: group count of active prompts by namespace prefix, minimum 1 per category.
+Seed mechanism: one migration pair `20260813160000_prompt_seed_starters.sql` inserts, as the owner UUID, at least one active prompt per category above. Every migration-owned row has a stable UUID and uses `on conflict (user_id, lower(title)) do nothing`, so re-runs and pre-existing owner prompts are safe; an inaccessible legacy fixture row cannot squat an owner name. The down migration deletes only those stable UUIDs, never a personal row that happens to share a title. Seed bodies use the existing `{{VAR}}` and `<!--OPTIONAL:id-->` model (section 8). PO-4 verification query: group count of active prompts by namespace prefix, minimum 1 per category.
 
 ## 4. Speed: read-path budgets and caching
 
@@ -132,16 +158,16 @@ Prompts inject on hot paths (every Brain dispatch, every LifeOS chat turn), so t
 
 | Path | p50 | p95 | Enforced by |
 | --- | --- | --- | --- |
-| `rpc/render_prompt` and `rpc/get_prompt` (warm client, network included) | 60 ms | 150 ms | PO-2 suite: p95 over 50 calls [VERIFIED: 03-v1-definition.md PO-2] |
-| Raw fetch (`GET /rest/v1/prompt` single row by title) | 50 ms | 120 ms | same suite, raw-fetch case |
+| `rpc/render_prompt` and `rpc/get_prompt` (warm database) | 60 ms | 150 ms | PO-2 suite: p95 over 50 calls [VERIFIED: 03-v1-definition.md PO-2] |
+| `rpc/get_prompt_source` (warm database target) | 60 ms | 150 ms | real-Postgres contract coverage now; timing must be added to the post-deploy PO-2 run |
 | Client-side pure render at max body size | n/a | 100 ms | existing `performance.test.mjs` stays green |
 | Cache hit in `packages/llm` | under 1 ms | 5 ms | injection client unit test |
 
 Caching strategy, specified exactly (lives in `packages/llm`, ADR-01 target tree):
 
 - Cache key: `name@version_no`. A pinned-version entry is immutable forever because `prompt_version` has no UPDATE or DELETE grant [VERIFIED: migration 20260807040000:37]; it is cached for process lifetime, capacity-bounded LRU (default 128 entries).
-- `name@latest` resolution is the only mutable lookup. It is cached with a 60-second TTL. On TTL expiry the client revalidates with the cheapest possible query, `GET /rest/v1/prompt_version?prompt_id=eq.<id>&select=version_no&order=version_no.desc&limit=1`; `version_no` serves as the ETag equivalent (PostgREST offers no native ETag [INFERRED: PostgREST response headers carry none for these queries]). Unchanged `version_no` means the cached template body is reused with zero body transfer; changed means one full fetch and cache replace.
-- Rendering happens client-side from the cached template (the pure `render()` model, section 8) whenever `variables`/`sections` are supplied per-call, so a cache hit never touches the network; `rpc/get_prompt` is the fallback for consumers without the client package (PO-5's schema-free path).
+- `name@latest` resolution is the only mutable lookup. It is cached with a 60-second TTL. On TTL expiry the client calls `rpc/get_prompt_source` with the cached `version_no` as `p_if_version`. The SECURITY DEFINER function authorizes before reading and resolves activity, body, and version in one statement snapshot. An unchanged active version returns `{body: null, not_modified: true}`; a changed version returns the new body and version in that same response; an archived latest raises `PT404`, which clears the stale entry. Concurrent reads for the same expired name share one in-flight revalidation, and `invalidate(name)` advances a generation so an older in-flight result cannot repopulate the cache. Thus execute-only agents need no table grant, body/version cannot race across requests, completion order cannot regress the cache, and archival is observable even though it does not create a version.
+- Cacheable calls render client-side from the source template with the pure `render()` model (section 8), so a hit never touches the network. Calls naming a saved `config` go through `rpc/get_prompt` because configuration merge semantics remain server-side. Direct consumers without the client package also use `rpc/get_prompt` (PO-5's schema-free path).
 - Invalidation rules: (1) pinned entries never invalidate; (2) `@latest` entries invalidate on TTL expiry or on an explicit `invalidate(name)` call after the consumer itself writes a new version; (3) process restart clears everything; no cross-process cache bus is built (single operator, complexity budget).
 
 ## 5. Storing ALL prompts: naming, collisions, pinning, and the dissent flag
@@ -149,7 +175,7 @@ Caching strategy, specified exactly (lives in `packages/llm`, ADR-01 target tree
 Design consequences of making this the system-wide store:
 
 - Naming convention: system prompts use namespace paths in `title`, grammar `^[a-z0-9-]+(/[a-z0-9-]+){1,2}$` (examples: `brain/task-contract`, `lifeos/chat/system`). The existing `title` column carries this unchanged (CHECK 1..200 holds [VERIFIED: migration 20260807020000:10]); legacy personal titles remain valid and simply live outside the namespace grammar. The convention is enforced by the seed migration and a lint check in the contract suite, not by a new CHECK constraint (avoids breaking existing personal rows).
-- Collision rule: already enforced by the database, `unique index on lower(title)` [VERIFIED: migration 20260807040000:17]. Case-insensitive uniqueness is the collision contract; namespaces make accidental collisions structurally unlikely.
+- Collision rule: enforced by `prompt_title_unique` on `(user_id, lower(title))` [VERIFIED: migration 20260813151000]. Case-insensitive uniqueness holds within each principal; explicit owner filters on SECURITY DEFINER reads ensure a retired fixture row cannot hide or impersonate an owner prompt. Namespaces make accidental owner collisions structurally unlikely.
 - Rename rule: a namespaced prompt's name is its API. Renaming a prompt that consumers pin breaks them silently, so the UI refuses title edits on namespaced prompts (section 10); create-new-and-archive-old is the rename path.
 - Version-pinning contract for consumers: a consumer requests `name@version` (integer `version_no`) for reproducible behavior, or `name@latest` for tracking. The Brain pins versions in its task contracts (a run's prompt provenance is part of its record, BR-5 adjacency); interactive surfaces (LifeOS chat) track `@latest`.
 - Counterargument, flagged to `13-dissent.md`: repo-adjacent prompts (harness system prompts, review-pass prompts) arguably belong in git next to the code they steer, where they version with the code, diff in PRs, and need no network on the hot path. V1 keeps them in the store for one-place discoverability and runtime updatability, but the dissent register must carry the opposing position and its trigger: if prompt changes start requiring lockstep code changes more often than not, move those categories to git and keep the store as the registry of record.
@@ -177,7 +203,7 @@ export function getPrompt(name: string, opts?: GetPromptOptions): Promise<Render
 // Throws PromptNotFoundError (PT404) | MissingVariablesError (PT422, .missing: string[])
 ```
 
-Transport: server-side consumers (the Brain, LifeOS backend, Idea Intake) call PostgREST `rpc/get_prompt` directly with their scoped token; TypeScript consumers use the `packages/llm` client, which wraps the same RPC plus the section 4 cache and client-side rendering. No consumer ever holds `prompt` schema knowledge; the RPC name and this type signature are the entire published contract, which is exactly PO-5's requirement. Caching and invalidation are as specified in section 4; failure mode is fail-fast with the typed errors above, and consumers on hot interactive paths (LifeOS chat) are expected to pin a fallback prompt constant for IdP or store outage [INFERRED: ADR-03 fail-closed posture applied to this path].
+Transport: server-side consumers (the Brain, LifeOS backend, Idea Intake) may call PostgREST `rpc/get_prompt` directly with their scoped token; TypeScript consumers use the `packages/llm` client, which uses only `rpc/get_prompt_source` for cacheable calls and `rpc/get_prompt` for saved configurations. No consumer holds `prompt` table knowledge. Caching and invalidation are as specified in section 4; failure mode is fail-fast with the typed errors above, and consumers on hot interactive paths (LifeOS chat) are expected to pin a fallback prompt constant for IdP or store outage [INFERRED: ADR-03 fail-closed posture applied to this path].
 
 ## 7. Versioning: mostly exists
 
@@ -187,7 +213,7 @@ The existing model already satisfies immutability and rollback:
 - Every body write records a version: trigger `record_version` fires AFTER INSERT OR UPDATE OF body, skipping no-ops [VERIFIED: toolbelt inventory migration 2 description].
 - Rollback: restore PATCHes the prior body onto `prompt.prompt`, which the trigger records as a NEW version; history is never rewritten [VERIFIED: web/index.html:98; tests/restore.test.mjs].
 
-Verdict: no draft/published state machine is added in V1. Every stored version is "published" in the only sense that matters for a single operator; a draft layer would add a state column, policy changes, and UI for a workflow with no second principal to protect. The one small delta that remains: `get_prompt` must resolve pinned versions from `prompt_version.body` rather than `prompt.body` (section 6), and PO-3's suite gains one rollback-visibility assertion (restore produces a new max `version_no`).
+Verdict: no draft/published state machine is added in V1. Every stored version is "published" in the only sense that matters for a single operator; a draft layer would add a state column, policy changes, and UI for a workflow with no second principal to protect. The implemented delta makes `get_prompt` resolve pinned versions from `prompt_version.body` rather than `prompt.body` (section 6), and PO-3's suite includes a rollback-visibility assertion (restore produces a new max `version_no`).
 
 ## 8. Variable and template model
 
@@ -240,6 +266,7 @@ V1 additions are exactly ranks 1 and 2. This is deliberately conservative: the s
 | --- | --- |
 | Migration pair: RLS owner-UUID re-pin (5 tables) | +90 SQL |
 | Migration pair: `get_prompt` RPC | +110 SQL |
+| Migration pair: `get_prompt_source` conditional cache RPC | +100 SQL |
 | Migration pair: starter seed (8 categories) | +160 SQL |
 | `packages/llm` prompt client (getPrompt, cache, errors) + tests | +280 TS |
 | Contract suite + seed suite + PO-2 extension | +220 JS |
@@ -247,7 +274,7 @@ V1 additions are exactly ranks 1 and 2. This is deliberately conservative: the s
 | Usage count badge + token estimate | +90 JS |
 | E2E per-run namespacing | +40 JS |
 | Deletions (below) | -70 |
-| Net | ~ +1,040 |
+| Net | ~ +1,140 |
 
 Deletion list:
 

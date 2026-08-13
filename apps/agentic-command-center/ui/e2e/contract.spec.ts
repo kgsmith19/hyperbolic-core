@@ -20,7 +20,7 @@ const policyFile = path.join(dir, "policy.json");
 // page.goto() in every test must carry the fragment — same rule the real
 // UI operates under, not an e2e-only shortcut.
 function withToken(route: string): string {
-  const token = fs.readFileSync(path.join(dir, "gui-token"), "utf8").split(/\r?\n/, 1)[0].trim();
+  const token = fs.readFileSync(path.join(dir, ".acc", "gui-token"), "utf8").split(/\r?\n/, 1)[0].trim();
   return `${route}#acc-token=${encodeURIComponent(token)}`;
 }
 const runnerCalls = () => {
@@ -141,4 +141,19 @@ test("API unreachable: every page shows the error banner instead of blank UI", a
     await page.goto(withToken(route));
     await expect(page.getByTestId("api-error")).toBeVisible();
   }
+});
+
+test("malformed bootstrap fragments are stripped and fail closed without crashing the UI", async ({ page }) => {
+  await page.goto(withToken("/"));
+  await expect(page.getByTestId("api-error")).not.toBeVisible();
+
+  await page.goto("/guards#acc-token=%E0%A4%A"); // new document; invalid percent-encoded UTF-8
+  await expect(page).not.toHaveURL(/acc-token=/);
+  await expect(page.getByTestId("api-error")).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("acc-gui-token"))).toBeNull();
+
+  await page.goto("/guards#other=1&acc-token=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+  await expect(page).not.toHaveURL(/acc-token=/);
+  await expect(page.getByTestId("api-error")).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("acc-gui-token"))).toBeNull();
 });

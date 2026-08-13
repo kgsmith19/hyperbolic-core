@@ -129,9 +129,36 @@ preference: a cloud database cannot record an outage *while the outage is
 happening*, which is precisely the data you need.
 
 Supabase is an optional mirror for cross-machine history. Pushes are
-idempotent, keyed on `(host, ts)`, so a sync interrupted by the very outage it
-is reporting simply retries. A failed push leaves rows unsynced — never marked
-done.
+idempotent on each table's natural key, so a sync interrupted by the very
+outage it is reporting simply retries. A failed push leaves rows unsynced —
+never marked done.
+
+## Safe changes
+
+Configuration writes are fail-closed. The three legacy fix scripts and all
+automated templates are disabled because they did not capture enough pre-state
+to guarantee an exact rollback. The scripts are disabled stubs,
+`change_templates.TEMPLATES` is empty, and diagnostics print manual remedies
+only.
+
+The lifecycle remains in place for a future reversible template. Its executor
+runs explicit allow-listed argv from a fixed working directory without a shell;
+the current allowlist contains only the non-mutating
+`python -m netcheck --version` operation. The lifecycle records read-only dry-run
+evidence, requires
+interactive approval, atomically consumes it once, checks command return codes,
+and verifies within one monotonic 90-second deadline. A crashed `applying` row
+cannot be replayed automatically and requires manual reconciliation.
+
+Approval prints a raw one-use HMAC-SHA256 capability once and SQLite stores only
+its SHA-256 digest. Length-framed material binds the row id, host id, device id,
+cause, title, exact command, exact inverse, verification probe, SHA-256 of the
+dry-run evidence, approval time, and verifier. The HMAC key is a separate
+owner-only file (`NETCHECK_CHANGE_KEY_FILE` overrides its location). Apply reads
+the capability without echo from a real TTY; it is never accepted through argv
+or the environment. This protects against an actor who can alter only the
+database. Compromise of the operator's OS account or terminal is outside that
+boundary.
 
 ## Tests
 
@@ -139,8 +166,10 @@ done.
 python -m unittest discover -s tests -t .
 ```
 
-Hermetic — no network, no real API calls. Parsers are tested against
-real command output captured from a live machine, in `tests/fixtures/`.
+Most tests are hermetic and make no real API calls. Parser tests use captured
+command output from `tests/fixtures/`; a small integration slice opens a local
+dashboard socket or exercises the host network stack and therefore runs only
+on CI or an unrestricted host. The exact split is recorded in `TEST_LEDGER.md`.
 
 The adversarial cases in `test_llmlog.py` are the ones worth knowing about:
 grepping transcripts for `529` or `ECONNRESET` matches token counts, request

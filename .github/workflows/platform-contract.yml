@@ -1,0 +1,62 @@
+name: "Deployed Platform Contract"
+
+on:
+  workflow_call: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployed-platform-contract
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify live Supabase contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Install Toolbelt dependencies
+        run: npm ci
+        working-directory: apps/toolbelt
+      - name: Exchange and verify the owner session
+        run: node tests/export-test-sessions.mjs
+        working-directory: apps/toolbelt/apps/prompt-organizer
+        env:
+          TOOLBELT_OWNER_REFRESH_TOKEN: ${{ secrets.TOOLBELT_OWNER_REFRESH_TOKEN }}
+          TOOLBELT_OWNER_TOKEN: ${{ secrets.TOOLBELT_OWNER_TOKEN }}
+      - name: Verify the deployed root platform contract
+        run: |
+          node --test \
+            tests/constraints.test.mjs \
+            tests/dependencies.test.mjs \
+            tests/log_run.test.mjs \
+            tests/log_run_owner_null_guard.test.mjs \
+            tests/owner-repin.test.mjs \
+            tests/platform-fence.test.mjs \
+            tests/purge_old_events_revoke_public.test.mjs \
+            tests/retention.test.mjs \
+            tests/rls.test.mjs \
+            tests/scores.test.mjs \
+            tests/seed.test.mjs
+        working-directory: apps/toolbelt
+      - name: Verify the deployed Prompt Organizer contract
+        run: |
+          node --test --test-concurrency=1 \
+            tests/archive.test.mjs \
+            tests/configuration.test.mjs \
+            tests/purge_old_usage_revoke_public.test.mjs \
+            tests/render-endpoint.test.mjs \
+            tests/restore.test.mjs \
+            tests/skeleton.test.mjs \
+            tests/tags.test.mjs \
+            tests/usage.test.mjs \
+            tests/versions.test.mjs
+        working-directory: apps/toolbelt/apps/prompt-organizer

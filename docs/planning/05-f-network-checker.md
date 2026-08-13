@@ -119,7 +119,11 @@ python -m netcheck inventory --diff <ts>     # config_item changes since <ts>
 
 ## 4. Change lifecycle (realizes NC-4)
 
-Design goal: no configuration write without concrete testing and explicit operator sign-off; every applied change is verifiable and reversible. Flow:
+Design goal: no configuration write without concrete testing and explicit
+operator sign-off; no writer is enabled until its exact pre-state, inverse,
+forward proof, and restoration proof are all implementable and tested. The
+lifecycle is present, but the production template registry is intentionally
+empty. Current/future flow:
 
 ```mermaid
 stateDiagram-v2
@@ -127,11 +131,16 @@ stateDiagram-v2
     proposed --> tested : change test (dry run recorded)
     tested --> approved : change approve (interactive sign-off)
     tested --> rejected : change reject
-    approved --> applied : change apply (token required)
-    applied --> verified : verify probe passes
-    applied --> rolled_back : verify probe fails, inverse applied
+    approved --> applying : change apply (TTY capability + atomic claim)
+    applying --> verified : command succeeds; forward probe passes
+    applying --> apply_failed : command exits nonzero
+    applying --> rolled_back : forward probe fails; inverse and restoration prove success
+    applying --> rollback_failed : inverse or restoration proof fails
+    applying --> [*] : interrupted; manual reconciliation required
     verified --> [*]
     rolled_back --> [*]
+    apply_failed --> [*]
+    rollback_failed --> [*]
 ```
 
 ### 4.1 change_request record (SQLite DDL)
@@ -140,6 +149,7 @@ stateDiagram-v2
 CREATE TABLE IF NOT EXISTS change_request (
   id             INTEGER PRIMARY KEY,
   created_at     TEXT NOT NULL,
+  host_id        INTEGER REFERENCES hosts(id),
   device_id      INTEGER REFERENCES device(id),  -- NULL means this host itself
   cause          TEXT,                -- rank cause that motivated it, if any
   title          TEXT NOT NULL,
@@ -148,24 +158,38 @@ CREATE TABLE IF NOT EXISTS change_request (
   verify_probe   TEXT NOT NULL,       -- netcheck probe expression that must pass post-apply
   dry_run_output TEXT,                -- captured evidence from change test
   dry_run_at     TEXT,
-  approval_token TEXT,                -- sha256 hex over (id, change_cmd, inverse_cmd, sha256(dry_run_output), approved_at)
+  approval_token TEXT,                -- SHA-256 digest of the raw HMAC capability
   approved_at    TEXT,
+  approved_by    TEXT,
   applied_at     TEXT,
   apply_output   TEXT,
   verified_at    TEXT,
   rolled_back_at TEXT,
   status         TEXT NOT NULL DEFAULT 'proposed'
-    CHECK (status IN ('proposed','tested','approved','applied','verified','rolled_back','rejected')),
+    CHECK (status IN ('proposed','tested','approved','applying','applied',
+                      'verified','rolled_back','apply_failed',
+                      'rollback_failed','rejected')),
   synced         INTEGER NOT NULL DEFAULT 0
 );
 ```
 
 Invariants enforced by the implementation (and by tests):
 
-1. A row cannot reach `approved` without non-null `dry_run_output` (no sign-off on untested changes).
-2. A row cannot reach `applied` without a valid `approval_token` (NC-4's exact requirement).
-3. `inverse_cmd` and `verify_probe` are NOT NULL at creation: a change with no rollback and no verification is not proposable.
-4. Any mutation of `change_cmd` or `inverse_cmd` after approval invalidates the token by construction (the token hashes them), forcing re-approval.
+1. Production proposals are host-scoped and must exactly match an enabled,
+   import-time-frozen template. The registry is empty, so no production write
+   is currently proposable.
+2. A row cannot reach `approved` without non-null read-only dry-run evidence.
+3. Approval emits one raw HMAC capability; SQLite stores only its SHA-256
+   digest. Length-framed material binds row, host, device, cause, title,
+   command, inverse, verifier, evidence digest, approval time, and approver.
+4. Apply validates both the HMAC and stored digest, then atomically claims
+   `approved -> applying`. Concurrent or interrupted applies cannot replay it.
+5. The executor is shell-free, fixed-directory, and argv-allow-listed. Its
+   current allowlist contains only `python -m netcheck --version`, a
+   non-mutating operation.
+6. Terminal status reports the real outcome: `verified`, `apply_failed`,
+   `rolled_back`, or `rollback_failed`; an interrupted `applying` row requires
+   manual reconciliation.
 
 ### 4.2 CLI flow (usage spec)
 
@@ -175,35 +199,57 @@ python -m netcheck change propose --title <t> --cause <cause> \
 python -m netcheck change test <id>       # runs the dry-run form, records output + timestamp
 python -m netcheck change show <id>       # full record: commands, dry-run evidence, status
 python -m netcheck change approve <id>    # INTERACTIVE ONLY, see 4.3
-python -m netcheck change apply <id> --token <token>
+python -m netcheck change apply <id>      # reads the capability from a TTY without echo
 python -m netcheck change verify <id>     # re-runs verify_probe on demand
 python -m netcheck change list [--status <s>]
 ```
 
-`change test` executes the change's detection/dry-run path only (for script-backed changes, the script's detection functions or `run_fixes.sh --dry-run` semantics [VERIFIED: rank.py:86-88 comment; tools/run_fixes.sh DRY_RUN branch]) and captures stdout/stderr into `dry_run_output`. It never mutates configuration.
+`change test` measures the supported `verify_probe` once, records the current
+state and the exact forward/inverse commands as read-only evidence, and never
+runs either command. It cannot invoke any legacy fix script.
 
 ### 4.3 Sign-off token mechanism
 
 - `change approve` refuses to run when stdin is not a TTY (exit non-zero). Approval is never scriptable, never automatic, never granted by an agent. This is the explicit-consent boundary and it is deliberately inconvenient.
 - The command prints: title, cause, exact `change_cmd`, exact `inverse_cmd`, `verify_probe`, and the full dry-run evidence, then requires the operator to type the change id back to confirm.
-- On confirmation it records `approved_at` (UTC timestamp) and computes `approval_token = sha256(id || change_cmd || inverse_cmd || sha256(dry_run_output) || approved_at)`, printed once for use with `apply`. The hash binds the approval to the exact change text and the exact evidence the operator saw.
-- `change apply` requires `--token` equal to the stored token, recomputed at apply time from the stored fields; any drift refuses with exit 2 and no write.
+- On confirmation it records `approved_at` and `approved_by`, creates a keyed
+  HMAC-SHA256 capability over length-framed typed fields, prints the raw
+  capability once, and stores only its SHA-256 digest. The HMAC key is a
+  separate owner-only file, not the SQLite database.
+- `change apply` also requires a TTY and reads the raw capability without echo;
+  argv and environment input are not accepted. Any bound-field drift, wrong
+  capability, or concurrent claim refuses before execution.
 
 ### 4.4 Rollback contract
 
-Every change carries its inverse and its verification probe from birth (invariant 3). `change apply` runs, in order: `change_cmd`, then `verify_probe` (a bounded probe expression, e.g. `dns_public:ok` or `probe --target <t> --expect tls:ok`), retried up to 3 times over at most 90 seconds. If verification fails, `inverse_cmd` runs automatically, `verify_probe` runs once more to confirm restoration, and the row lands in `rolled_back` with all outputs captured. Auto-rollback is the single sanctioned automatic configuration write, bounded to the pre-approved inverse of a change applied seconds earlier. A `config_item` row with `source = 'change_apply'` is appended for the affected key on both apply and rollback, so the inventory history and the change ledger agree.
+Every row carries an inverse and verification expression from birth. A nonzero
+forward exit lands `apply_failed` and does not run the inverse. A successful
+forward command gets at most three verification attempts within one monotonic
+90-second budget. Only a failed forward proof after a zero exit may run the
+approved inverse; a failed inverse or failed restoration check lands
+`rollback_failed`, never a false `rolled_back`. Separate `config_item` audit
+rows preserve forward and rollback outcomes.
 
-### 4.5 Migration of the three existing fix scripts
+No production template is enabled today, so this automatic-write branch is not
+reachable from a host-scoped proposal. Before enabling one, the template model
+must be extended to carry and prove exact captured pre-state and a distinct
+restoration condition; the current single forward expression is not sufficient
+evidence for a real device writer.
 
-The scripts stay as executors; the lifecycle becomes the only sanctioned entry point. Ships as three seeded change templates:
+### 4.5 Legacy fix scripts stay disabled
 
-| Script | change_cmd | inverse_cmd | verify_probe |
-| --- | --- | --- | --- |
-| `tools/fix_dns.sh` (public resolvers when router DNS fails; backs up resolv.conf today [VERIFIED: tools/fix_dns.sh backup_dns]) | run fix_dns.sh | restore the recorded backup (resolv.conf.bak path or `netsh` DHCP-DNS reset on Windows) | router and public DNS probes both `ok` |
-| `tools/fix_wifi_mode.sh` (set 802.11ax when capable [VERIFIED: header]) | run fix_wifi_mode.sh | restore the prior mode captured by `change test` detection | wlan scan reports the target mode and gateway probe `ok` |
-| `tools/fix_adapter_power.sh` (disable power save [VERIFIED: header]) | run fix_adapter_power.sh | re-enable the recorded prior power-save flags | gateway probe `ok`; no `radio_off` events in the next scan |
+`tools/fix_dns.sh`, `tools/fix_wifi_mode.sh`, and
+`tools/fix_adapter_power.sh` are retained only as hard-disabled historical
+stubs. They did not capture enough exact pre-state to guarantee restoration
+across supported platforms, so none is an executor and no seeded change
+template ships. `change_templates.TEMPLATES` and `rank._TEMPLATES` are empty;
+ranked findings retain actionable manual remedies without advertising an
+automated proposal.
 
-`rank._fix()` text changes from recommending raw `sudo bash tools/run_fixes.sh ...` invocations [VERIFIED: rank.py:106-107] to recommending `python -m netcheck change propose/test/show` for the matching template, keeping `test_rank.py`'s both-directions filesystem check intact against the new pointers. `run_fixes.sh` (the unattended-orchestration wrapper) is deleted once the lifecycle lands; its dry-run and ordering roles are subsumed by `change test` and per-change records.
+The unattended `tools/run_fixes.sh` wrapper is deleted and has no replacement.
+Any future writer must introduce a new reviewed template with typed argv,
+pre-state capture, exact inverse, distinct forward/restoration proofs, and
+platform fixtures before the registry can become non-empty.
 
 ## 5. Defect fixes from Phase 2
 
@@ -252,7 +298,7 @@ Candidate pool, each scored value / cost / ROI for a single operator whose histo
 
 | # | Candidate | Value | Cost | ROI rank |
 | --- | --- | --- | --- | --- |
-| a | Change lifecycle (section 4) | Realizes the brief's consent philosophy and NC-4; converts three ad-hoc scripts into audited, reversible changes; prerequisite trust layer for any future remediation | ~680 LOC (module ~250, schema ~30, CLI ~40, tests ~300, templates ~60) | 1 (mandated and highest leverage) |
+| a | Change lifecycle (section 4) | Realizes the brief's consent philosophy and NC-4; establishes the audited trust layer while refusing the three legacy writers that cannot prove exact restoration | ~620 LOC (engine, schema, CLI, and adversarial tests; no enabled templates) | 1 (mandated and highest leverage) |
 | b | Device/config inventory (section 3) | Realizes "know every property"; makes config drift diagnosable ("what changed since it last worked"); feeds the lifecycle's device targeting; data already collected, only persistence is new | ~455 LOC (mapper ~150, schema ~40, store ~40, CLI ~25, tests ~200) | 2 (mandated foundation) |
 | c | Scheduled watch + alerting on culprit transitions | Notification when the culprit changes state, instead of reading the dashboard after the fact | ~200 LOC + a notification channel decision (new external dependency or OS toast); watch loop currently has zero tests, so alerting builds on the least-tested module until D-03 closes | 3 |
 | d | ISP outage correlation vs historical baseline | Strengthens the ISP-ticket evidence story; samples data already exists [VERIFIED: schema.sql samples] | ~180 LOC (baseline aggregation + report section + tests); value is incremental over the existing recurrence counting in `rank._sample_causes` [VERIFIED: rank.py:194-209] | 4 |
@@ -268,8 +314,8 @@ Forced decision 11: the V1 slice is (b) device/config inventory plus (a) change 
 | --- | --- | --- |
 | Inventory persistence during scan | inside existing tier budgets: quick 10 s, standard 60 s, deep 120 s [VERIFIED: __main__.py:28]; `record_inventory` itself is a pure mapping over an already-collected payload, budget 1 s | no new collection, only writes |
 | `netcheck inventory` render | < 500 ms against a year of scans (indexed reads) | local SQLite, indexed by (device_id, key) |
-| `change test` | 60 s hard cap per dry run, matching the standard tier discipline | bounded child-process pattern already exists [VERIFIED: __main__.py:94-104] |
-| `change apply` + verification | apply 60 s cap; verify probe retried up to 3 times within 90 s; auto-rollback + confirm within a further 90 s | bounded worst case ~4 minutes, all local |
+| `change test` | one read-only probe, capped at 30 s | `change_verify.run()` owns the deadline; it executes no change command |
+| `change apply` + verification | forward command 90 s; forward proof up to 90 s; if needed, inverse 90 s plus restoration check 30 s | theoretical ceiling ~5 minutes; no production template currently reaches it |
 | Watch tick overhead from inventory/lifecycle | 0 (neither runs in the tick path) | tick path unchanged [VERIFIED: watch.py:24-55 touches neither] |
 
 ## 9. Acceptance criteria (EARS) realizing NC-1..NC-4
@@ -283,11 +329,11 @@ All commands run from `apps/toolbelt/apps/network-checker/` unless stated.
 | NC-3.1 | When a standard or deep scan completes, the system shall persist one `device` row per neighbor-table entry and `config_item` rows for every measured property, within the tier budget. | `python3 -m unittest tests.test_inventory` exits 0 (fixture payload in, row counts asserted equal to fixture device/property counts) |
 | NC-3.2 | The operator shall be able to list devices and each device's current configuration from the store. | `python -m netcheck inventory` exits 0 and prints one row per fixture device when run against a seeded test database (`NETCHECK_DB` pointed at the fixture) |
 | NC-3.3 | When the same property is observed with a new value, the system shall append a new `config_item` row and `config_current` shall return only the newest value. | `python3 -m unittest tests.test_inventory` (history + view case) |
-| NC-4.1 | If `change apply` is invoked for a request without a recorded dry run and a valid approval token, then the system shall exit non-zero and shall record no device write. | `python3 -m unittest tests.test_change` includes this case; manual proof: `python -m netcheck change propose --title t --cmd true --inverse true --verify 'dns_public:ok' && python -m netcheck change apply 1 --token bogus; test $? -ne 0` then `sqlite3 "$NETCHECK_DB" "SELECT applied_at FROM change_request WHERE id=1;"` prints empty |
-| NC-4.2 | While stdin is not a TTY, `change approve` shall refuse and exit non-zero. | `echo 1 \| python -m netcheck change approve 1; test $? -ne 0` |
-| NC-4.3 | When `change_cmd` or `inverse_cmd` changes after approval, the system shall reject the previously issued token at apply time. | `python3 -m unittest tests.test_change` (token-binding case) |
-| NC-4.4 | When post-apply verification fails, the system shall run the inverse command automatically and record status `rolled_back` with captured outputs. | `python3 -m unittest tests.test_change` (rollback case, fake executor whose verify fails) |
-| NC-4.5 | The three fix templates (dns, wifi mode, adapter power) shall exist as proposable changes and `rank` fix text shall reference the lifecycle, not raw script invocations. | `python3 -m unittest tests.test_rank tests.test_change` exits 0; `grep -n "run_fixes.sh" netcheck/rank.py` returns zero hits |
+| NC-4.1 | While no exact reversible template is enabled, every host-scoped proposal shall fail before recording a change. | `python3 -m unittest tests.test_change_host_scope tests.test_change_propose` exits 0 |
+| NC-4.2 | While stdin is not a TTY, both approval and capability entry for apply shall refuse and exit non-zero. | `python3 -m unittest tests.test_change_approve tests.test_change_security` exits 0 |
+| NC-4.3 | When any approval-bound field, evidence, approver, or capability changes, apply shall reject it before execution; concurrent applies shall permit one atomic claim only. | `python3 -m unittest tests.test_change_key tests.test_change_concurrency` exits 0 |
+| NC-4.4 | A nonzero forward command shall record `apply_failed` without inverse; a failed inverse or restoration proof shall record `rollback_failed`, never `rolled_back`. | `python3 -m unittest tests.test_change_outcomes tests.test_change_execute` exits 0 |
+| NC-4.5 | DNS, Wi-Fi-mode, and adapter-power writers shall remain disabled; template mappings shall be empty and ranked findings shall retain manual remedies only. | `python3 -m unittest tests.test_fix_scripts tests.test_rank tests.test_change_host_scope` exits 0 |
 | D-04 | The dashboard shall render seeded data and one SSE update under a hermetic Playwright smoke. | `npx playwright test` per the CI step added to `toolbelt-ci.yml` (serve on 127.0.0.1:8787 against the fixture DB) exits 0 |
 | D-10 | No file in the app shall reference the defunct standalone repositories. | `grep -rn "kgsmith19/network-checker\|kgsmith19/toolbelt" apps/toolbelt/apps/network-checker/` (from repo root) returns zero hits |
 
@@ -303,20 +349,20 @@ LOC deltas per slice (production + tests):
 | D-04 Playwright smoke + CI | ~35 (fixture + CI lines) | ~80 | +115 |
 | D-10 label edits | 0 | 0 | 0 |
 | synthesis deletion | -28 | -51 | -79 |
-| run_fixes.sh deletion + rank pointer edits | ~-90 | ~0 (test_rank edits net 0) | -90 |
+| unattended runner deletion + manual-only rank mapping | ~-90 | small fail-closed contract tests | ~-70 |
 | AGENTS.md refresh | +8 docs | n/a | +8 |
 | Total | | | approximately +1,209 |
 
 Deletion list:
 
 1. `netcheck/synthesis.py` and `tests/test_synthesis.py` (section 6 decision; closes issue #93 by rejection).
-2. `tools/run_fixes.sh` after the three change templates land (section 4.5); `tools/fix_dns.sh`, `tools/fix_wifi_mode.sh`, `tools/fix_adapter_power.sh` are retained as lifecycle executors.
+2. `tools/run_fixes.sh`; `tools/fix_dns.sh`, `tools/fix_wifi_mode.sh`, and `tools/fix_adapter_power.sh` remain only as disabled stubs, not executors.
 3. Stale repository references in `Dockerfile:13` and `README.md:11-12` (edits, not file deletions).
 4. The blanket "automated device configuration writes are outside the product's scope" invariant line in AGENTS.md, replaced by the consent-gated lifecycle invariant (section 4 preamble).
 
 ## Gate questions (batched, non-blocking)
 
-1. The change lifecycle amends a committed product invariant (AGENTS.md configuration-writes exclusion). The replacement keeps unattended writes forbidden and adds the approval token; confirm the operator endorses the amended wording before the Phase 11 issue is cut.
+1. Enabling any future writer changes the current fail-closed product invariant and requires a separate review of exact pre-state capture, typed argv, inverse, forward proof, restoration proof, and platform fixtures. No such enablement is part of V1.
 2. `change approve` is TTY-only by design, which means approval cannot flow through the Shell or the Brain in V1. If the operator wants a browser approval surface later, it needs its own consent design (session + re-authentication), flagged for the roadmap, not V1.
 3. The inventory mirror adds four tables to the optional netcheck mirror project, whose existence is [UNKNOWN] (01-inventory gate question 3). The mirror remains optional and unconfigured-safe; no action needed unless the operator wants the mirror live.
 

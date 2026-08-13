@@ -2,7 +2,7 @@
   "id": "toolbelt",
   "name": "Toolbelt Root Spine",
   "kind": "headless",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared root spine of the Toolbelt monorepo: owns the core schema (runs, costs, outcomes, metrics, events) that every tool writes through via core.log_run, plus the idea schema for the curated portfolio backlog. Not itself a UI or CLI surface.",
   "ownership": {
     "owner": "kylegsmith19@gmail.com",
@@ -28,6 +28,6 @@
   "lifecycle": {
     "migrate": "gh workflow run platform-migrations.yml",
     "health": "node --test \"tests/*.test.mjs\"",
-    "register": "20260814110000_register_toolbelt.sql"
+    "register": "20260814130000_register_toolbelt-v0.1.1.sql"
   }
 }

@@ -71,8 +71,8 @@ export function main(argv, { stdout = console.log, stderr = console.error, fsImp
   stdout("");
   printLiveRegistryCaveat(stdout);
   stdout("");
-  stdout("Next: supabase db push (step 2/3, from this tool's own directory if it owns a schema)");
-  stdout("      then supabase db push from apps/toolbelt/ to apply the registration migration (step 3/3)");
+  stdout("Next: npm run migrations:check --prefix apps/toolbelt");
+  stdout("      then apply the unified forward-only ledger through platform-migrations.yml");
   return 0;
 }
 

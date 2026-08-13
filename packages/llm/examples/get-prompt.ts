@@ -12,7 +12,8 @@
  * system shall serve it without that component holding schema knowledge").
  *
  * Real network access: this script needs a real Supabase project with
- * `prompt.get_prompt` deployed (m4-03's migration, applied by CI on merge --
+ * `prompt.get_prompt` and `prompt.get_prompt_source` deployed (their
+ * migrations are applied by CI on merge --
  * not yet live on the shared project as of this writing, see
  * packages/llm/tests/real-pg.test.ts's header comment) plus a real prompt
  * seeded with the given name. Set PROMPT_ORGANIZER_URL, PROMPT_NAME, and
@@ -60,11 +61,12 @@ async function main(): Promise<void> {
 function installFakeTransport(name: string): void {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
-    if (url.pathname === "/rest/v1/rpc/get_prompt") {
-      const body = JSON.parse(String(init?.body ?? "{}")) as { p_name: string; p_values?: Record<string, string> };
-      const example = body.p_values?.EXAMPLE ?? "world";
-      const text = body.p_name === name ? `Hello from ${example}.` : "";
-      return new Response(JSON.stringify({ text, version_no: 1, rendered_at: new Date().toISOString() }), {
+    if (url.pathname === "/rest/v1/rpc/get_prompt_source") {
+      const request = JSON.parse(String(init?.body ?? "{}")) as { p_name?: string };
+      if (request.p_name !== name) {
+        return new Response(JSON.stringify({ code: "PT404", message: "prompt not found" }), { status: 404 });
+      }
+      return new Response(JSON.stringify({ body: "Hello from {{EXAMPLE}}.", version_no: 1, not_modified: false }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });

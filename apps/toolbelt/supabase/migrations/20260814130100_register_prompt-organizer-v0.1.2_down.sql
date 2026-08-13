@@ -1,0 +1,13 @@
+-- Restore the exact registration represented by the prior historical
+-- Prompt Organizer migration; preserve independent lifecycle status.
+update core.app
+set name          = 'Prompt Organizer',
+    schema_name   = 'prompt',
+    kind          = 'ui',
+    route         = '/prompts',
+    version       = '0.1.0',
+    description   = 'Stores reusable AI prompts, substitutes variables, and copies rendered text. Owns the prompt schema in the shared toolbelt Supabase project.',
+    manifest      = '{"id":"prompt-organizer","name":"Prompt Organizer","kind":"ui","version":"0.1.0","description":"Stores reusable AI prompts, substitutes variables, and copies rendered text. Owns the prompt schema in the shared toolbelt Supabase project.","ownership":{"owner":"kylegsmith19@gmail.com","path":"apps/toolbelt/apps/prompt-organizer"},"entry":{"ui":{"route":"/prompts"}},"schemas":["prompt"],"permissions":{"db":{"read":["prompt"],"write":["prompt","core"]},"networkEgress":[],"llmHandler":{"access":false}},"lifecycle":{"migrate":"gh workflow run platform-migrations.yml","health":"node --test \"tests/*.test.mjs\"","register":"20260812240000_register_prompt-organizer.sql"}}'::jsonb,
+    manifest_hash = 'c73037838b686f7b98e6e81da6dfc4af1137ff6adf82f8abc7311c42f75b527e',
+    registered_at = now()
+where id = 'prompt-organizer';

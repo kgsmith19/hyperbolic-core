@@ -20,7 +20,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, symlinkSync, readdirSync, rmSync, utimesSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -149,4 +149,20 @@ test("rejects a non-numeric keep-count instead of silently misbehaving", () => {
 
 test("rejects a missing base directory instead of silently no-op'ing", () => {
   assert.throws(() => run("/definitely/does/not/exist-" + Date.now()));
+});
+
+test("newline-bearing dist names cannot make pruning delete an unrelated directory", () => {
+  withTempDir((dir) => {
+    mkdirSync(path.join(dir, "unrelated"));
+    mkdirSync(path.join(dir, "dist-adversarial\nunrelated"));
+    run(dir, 0);
+    assert.ok(existsSync(path.join(dir, "unrelated")));
+    assert.ok(!existsSync(path.join(dir, "dist-adversarial\nunrelated")));
+  });
+});
+
+test("refuses the filesystem root before enumerating prune targets", () => {
+  const result = spawnSync("bash", [scriptPath, "/"], { encoding: "utf8" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /refusing to prune the filesystem root/);
 });

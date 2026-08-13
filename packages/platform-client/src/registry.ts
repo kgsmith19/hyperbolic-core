@@ -81,22 +81,11 @@ const SELECT_COLUMNS =
   "id,name,schema_name,status,kind,route,version,description,manifest_hash,registered_at";
 
 /**
- * `core.app`'s anon key (public by design: RLS is the real boundary, not
- * secrecy of this value -- same posture as apps/shell/src/lib/session.ts's
- * DEFAULT_SUPABASE_PUBLISHABLE_KEY and apps/toolbelt/config.mjs's
- * SUPABASE_ANON_KEY, both of which hold this exact byte-identical string
- * today). `createRegistryClient`'s signature (05-c section 4.3) is frozen at
- * exactly two parameters -- supabaseUrl and getAccessToken, no third apikey
- * parameter -- so there is no call-site slot to thread a project-specific
- * anon key through even though every existing PostgREST caller in this repo
- * (apps/toolbelt/tests/helpers.mjs's `rest()`, the Prompt Organizer web
- * client) always sends one alongside the session's Authorization bearer
- * token; Supabase's gateway rejects a request with no `apikey` header at all
- * ("No API key found in request") regardless of how valid the bearer token
- * is. Hardcoding the same public default here -- exactly mirroring how
- * session.ts already hardcodes its own default publishable key -- is the
- * documented judgment call that resolves that gap without widening the
- * frozen signature. Flagged here rather than silently assumed.
+ * Default project publishable key. RLS remains the authorization boundary,
+ * but Supabase's gateway still requires this public `apikey` header. The
+ * optional third factory argument lets a documented URL/key override remain
+ * one coherent project configuration while preserving the original two-arg
+ * API for default-project callers.
  */
 const DEFAULT_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
@@ -131,9 +120,11 @@ export function buildListToolsParams(filter?: RegistryFilter): URLSearchParams {
 
 export function createRegistryClient(
   supabaseUrl: string,
-  getAccessToken: () => Promise<string>
+  getAccessToken: () => Promise<string>,
+  publishableKey: string = DEFAULT_ANON_KEY,
 ): RegistryClient {
   const base = supabaseUrl.replace(/\/+$/, "");
+  if (!publishableKey.trim()) throw new Error("registry-client: publishable key is required");
 
   async function request(params: URLSearchParams): Promise<RegisteredTool[]> {
     // Fail closed before issuing any network request, matching
@@ -144,7 +135,7 @@ export function createRegistryClient(
     const token = await getAccessToken();
     const res = await fetch(`${base}/rest/v1/app?${params.toString()}`, {
       headers: {
-        apikey: DEFAULT_ANON_KEY,
+        apikey: publishableKey,
         Authorization: `Bearer ${token}`,
       },
     });

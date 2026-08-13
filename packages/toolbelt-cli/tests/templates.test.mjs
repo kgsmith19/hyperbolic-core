@@ -61,7 +61,10 @@ for (const { label, opts } of CASES) {
     assert.deepEqual(manifest.schemas, opts.hasSchema ? [opts.schema] : []);
     assert.equal(manifest.permissions.llmHandler.access, opts.llm);
     assert.equal(manifest.lifecycle.register, opts.registerBasename);
-    assert.equal(manifest.lifecycle.migrate, opts.hasSchema ? "supabase db push" : "none");
+    assert.equal(
+      manifest.lifecycle.migrate,
+      opts.hasSchema ? "gh workflow run platform-migrations.yml" : "none",
+    );
     assert.ok(!("description" in manifest), "description must be omitted, never emitted as null");
   });
 }
@@ -89,10 +92,10 @@ test("buildManifest(headless) sets entry.headless.command", () => {
   assert.match(manifest.entry.headless.command, /^TODO: document/);
 });
 
-test("a schema-owning tool defaults to write:[schema,'core'], read:[schema]", () => {
+test("a schema-owning tool defaults to least-privilege read/write for its owned schema only", () => {
   const manifest = buildManifest(CASES[0].opts);
   assert.deepEqual(manifest.permissions.db.read, ["scratch_ui"]);
-  assert.deepEqual(manifest.permissions.db.write, ["scratch_ui", "core"]);
+  assert.deepEqual(manifest.permissions.db.write, ["scratch_ui"]);
 });
 
 test("a --no-schema tool defaults to empty read/write (mirrors network-checker)", () => {
@@ -123,18 +126,41 @@ test("buildRegistrationUpSql embeds the exact compact JSON manifestToCompactJSON
   assert.ok(sql.includes(`'${compact}'::jsonb`));
 });
 
-test("buildRegistrationUpSql is an ON CONFLICT (id) DO UPDATE upsert, status omitted from the SET list", () => {
+test("buildRegistrationUpSql accepts an exact retry but fails closed on a different DB manifest at the same id", () => {
   const manifest = buildManifest(CASES[1].opts);
   const sql = buildRegistrationUpSql({ manifest, id: manifest.id, name: manifest.name, schema: "scratch_cli", kind: manifest.kind, route: null }).toLowerCase();
   assert.match(sql, /insert\s+into\s+core\.app/);
-  assert.match(sql, /on\s+conflict\s*\(\s*id\s*\)\s+do\s+update\s+set/);
-  assert.doesNotMatch(sql, /status\s*=\s*excluded\.status/);
+  assert.match(sql, /on\s+conflict\s*\(\s*id\s*\)\s+do\s+nothing/);
+  assert.match(sql, /manifest_hash\s*=\s*'[0-9a-f]{64}'/);
+  assert.match(sql, /raise\s+exception\s+'core\.app id collision/);
+  assert.match(sql, /errcode\s*=\s*'23505'/);
+  assert.doesNotMatch(sql, /do\s+update/);
 });
 
 test("buildRegistrationUpSql sets route to a SQL NULL literal for a cli tool (no route)", () => {
   const manifest = buildManifest(CASES[1].opts);
   const sql = buildRegistrationUpSql({ manifest, id: manifest.id, name: manifest.name, schema: "scratch_cli", kind: manifest.kind, route: null });
   assert.match(sql, /'scratch-cli',\s*\n\s*'Scratch CLI',\s*\n\s*'scratch_cli',\s*\n\s*'building',\s*\n\s*'cli',\s*\n\s*null,/);
+});
+
+test("buildRegistrationUpSql emits SQL NULL, not the string 'null', for a no-schema tool", () => {
+  const manifest = buildManifest(CASES[2].opts);
+  const sql = buildRegistrationUpSql({ manifest, id: manifest.id, name: manifest.name, schema: null, kind: manifest.kind, route: null });
+  assert.match(sql, /'scratch-noschema',\s*\n\s*'Scratch No Schema',\s*\n\s*null,\s*\n\s*'building'/);
+  assert.doesNotMatch(sql, /\n\s*'null',\s*\n\s*'building'/);
+});
+
+test("buildRegistrationUpSql for a SCHEMA-OWNING tool is unaffected: schema_name is still the tool's real schema, not derived from id", () => {
+  const manifest = buildManifest(CASES[0].opts);
+  const sql = buildRegistrationUpSql({
+    manifest,
+    id: manifest.id,
+    name: manifest.name,
+    schema: "scratch_ui",
+    kind: manifest.kind,
+    route: "/scratch-ui",
+  });
+  assert.match(sql, /'scratch-ui',\s*\n\s*'Scratch UI',\s*\n\s*'scratch_ui',/);
 });
 
 test("buildRegistrationUpSql escapes an embedded single quote in --name safely", () => {
@@ -150,76 +176,6 @@ test("buildRegistrationUpSql never deletes a core.app row (m3-02 invariant)", ()
   const manifest = buildManifest(CASES[0].opts);
   const sql = buildRegistrationUpSql({ manifest, id: manifest.id, name: manifest.name, schema: "scratch_ui", kind: manifest.kind, route: "/scratch-ui" }).toLowerCase();
   assert.doesNotMatch(sql, /delete\s+from\s+core\.app/);
-});
-
-// Finding 88 (P2, independent security review of this repo, re-verified
-// against current HEAD): resolveSchema returns { hasSchema: false, schema:
-// null } for --no-schema, and buildRegistrationUpSql used to insert that
-// via sqlQuote(schema), which stringifies ANY value (including JS null) via
-// String(value) before quoting -- so schema_name landed as the four-character
-// STRING literal 'null', not a genuine SQL NULL, in a column declared `text
-// not null`. The fix derives a nominal registry-key identifier from the
-// tool's own id instead, matching this repo's own network-checker precedent
-// (schema_name = 'netcheck' for a schema-less tool).
-test("buildRegistrationUpSql for a --no-schema tool writes a nominal schema_name derived from id, never the literal string 'null'", () => {
-  const manifest = buildManifest(CASES[2].opts); // "cli without schema", id: scratch-noschema, hasSchema: false, schema: null
-  const sql = buildRegistrationUpSql({
-    manifest,
-    id: manifest.id,
-    name: manifest.name,
-    schema: null,
-    kind: manifest.kind,
-    route: null,
-  });
-
-  // The bogus string literal must never appear.
-  assert.ok(!sql.includes("'null'"), "expected no literal string 'null' anywhere in the generated SQL");
-
-  // Nor a bare (unquoted) `null` in the schema_name column position -- that
-  // would violate `core.app.schema_name`'s NOT NULL constraint outright.
-  // schema_name is the third column in the values() tuple, immediately
-  // after id and name.
-  assert.match(
-    sql,
-    /'scratch-noschema',\s*\n\s*'Scratch No Schema',\s*\n\s*'scratch_noschema',/,
-    "expected the nominal identifier 'scratch_noschema' (derived from id via the same dash->underscore transform args.mjs's defaultSchemaName uses), quoted as a real string literal, in the schema_name column position",
-  );
-});
-
-test("buildRegistrationUpSql for a --no-schema tool with a dashed id derives the nominal schema_name via the same dash->underscore transform as the real default schema name", () => {
-  const manifest = buildManifest({
-    id: "multi-word-tool",
-    name: "Multi Word Tool",
-    kind: "headless",
-    route: undefined,
-    hasSchema: false,
-    schema: null,
-    llm: false,
-    registerBasename: "20260101000000_register_multi-word-tool.sql",
-  });
-  const sql = buildRegistrationUpSql({
-    manifest,
-    id: manifest.id,
-    name: manifest.name,
-    schema: null,
-    kind: manifest.kind,
-    route: null,
-  });
-  assert.ok(sql.includes("'multi_word_tool'"), "expected dashes in id replaced with underscores in the nominal schema_name");
-  assert.ok(!sql.includes("'null'"));
-});
-
-test("buildRegistrationUpSql for a SCHEMA-OWNING tool is unaffected: schema_name is still the tool's real schema, not derived from id", () => {
-  const manifest = buildManifest(CASES[0].opts); // "ui with schema", schema: scratch_ui
-  const sql = buildRegistrationUpSql({
-    manifest,
-    id: manifest.id,
-    name: manifest.name,
-    schema: "scratch_ui",
-    kind: manifest.kind,
-    route: "/scratch-ui",
-  });
-  assert.match(sql, /'scratch-ui',\s*\n\s*'Scratch UI',\s*\n\s*'scratch_ui',/);
 });
 
 test("buildRegistrationDownSql never deletes a core.app row and resets to the registry-extension bare defaults", () => {
@@ -254,7 +210,9 @@ test("buildAgentsMd's Next Steps never tells the operator to manually edit MIGRA
   const md = buildAgentsMd({ id: "scratch-ui", name: "Scratch UI", hasSchema: true, schema: "scratch_ui" });
   assert.doesNotMatch(md, /MIGRATION_DIRS/);
   assert.doesNotMatch(md, /add .* to that workflow/);
+  assert.doesNotMatch(md, /Run `supabase db push` from this tool/i);
   assert.match(md, /picked up automatically/);
+  assert.match(md, /paired down files never enter the Supabase CLI ledger/);
 });
 
 test("buildAgentsMd's Next Steps omits the schema-discovery note entirely for a --no-schema tool (it has no migrations directory to be discovered)", () => {

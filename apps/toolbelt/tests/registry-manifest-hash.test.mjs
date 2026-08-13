@@ -25,24 +25,20 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { manifestHash } from "../scripts/validate-manifests.mjs";
+import { findManifestPaths, manifestHash } from "../scripts/validate-manifests.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOLBELT_ROOT = join(__dirname, "..");
 const MIGRATIONS_DIR = join(TOOLBELT_ROOT, "supabase", "migrations");
 
-const REGISTRATIONS = [
-  {
-    toolId: "prompt-organizer",
-    manifestPath: join(TOOLBELT_ROOT, "apps", "prompt-organizer", "tool.json"),
-    migrationPath: join(MIGRATIONS_DIR, "20260812240000_register_prompt-organizer.sql"),
-  },
-  {
-    toolId: "network-checker",
-    manifestPath: join(TOOLBELT_ROOT, "apps", "network-checker", "tool.json"),
-    migrationPath: join(MIGRATIONS_DIR, "20260812250000_register_network-checker.sql"),
-  },
-];
+const REGISTRATIONS = findManifestPaths(TOOLBELT_ROOT).map((manifestPath) => {
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  return {
+    toolId: manifest.id,
+    manifestPath,
+    migrationPath: join(MIGRATIONS_DIR, manifest.lifecycle.register),
+  };
+});
 
 // The hash is written on its own line as a bare single-quoted 64-hex-char
 // literal (see either registration migration: `'<64 hex chars>',` sitting
@@ -89,17 +85,18 @@ for (const { toolId, manifestPath, migrationPath } of REGISTRATIONS) {
 
 import { readdirSync } from "node:fs";
 
-const M3_02_MIGRATION_BASENAMES = [
-  "20260812230000_core_app_registry_extension.sql",
-  "20260812230000_core_app_registry_extension_down.sql",
-  "20260812240000_register_prompt-organizer.sql",
-  "20260812240000_register_prompt-organizer_down.sql",
-  "20260812250000_register_network-checker.sql",
-  "20260812250000_register_network-checker_down.sql",
-];
+const REGISTRY_EXTENSION_VERSION = "20260812230000";
+const REGISTRY_MIGRATION_BASENAMES = readdirSync(MIGRATIONS_DIR)
+  .filter((name) => {
+    const version = /^(\d{14})_/.exec(name)?.[1];
+    if (!version || version < REGISTRY_EXTENSION_VERSION || !name.endsWith(".sql")) return false;
+    return /\bcore\.app\b/i.test(readFileSync(join(MIGRATIONS_DIR, name), "utf8"));
+  })
+  .sort();
 
-test("none of the m3-02 migrations (up or down) ever delete a core.app row", () => {
-  for (const name of M3_02_MIGRATION_BASENAMES) {
+test("no on-disk registry-era migration that touches core.app ever deletes a row", () => {
+  assert.ok(REGISTRY_MIGRATION_BASENAMES.length > 0, "expected to discover registry-era core.app migrations on disk");
+  for (const name of REGISTRY_MIGRATION_BASENAMES) {
     const sql = readFileSync(join(MIGRATIONS_DIR, name), "utf8");
     assert.doesNotMatch(
       sql.toLowerCase(),

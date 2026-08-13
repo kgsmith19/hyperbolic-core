@@ -86,9 +86,73 @@ const ALLOWED_PART_TYPES_BY_ROLE: Record<"user" | "assistant" | "tool", Readonly
   tool: new Set(["tool_result"]),
 };
 
+function isJsonValue(value: unknown, ancestors = new Set<object>()): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (typeof value !== "object" || ancestors.has(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    return false;
+  }
+  ancestors.add(value);
+  const valid = (Array.isArray(value) ? value : Object.values(value as Record<string, unknown>)).every((item) => isJsonValue(item, ancestors));
+  ancestors.delete(value);
+  return valid;
+}
+
+function hasValidPartPayload(part: Record<string, unknown>): boolean {
+  if (part.type === "text") {
+    return typeof part.text === "string";
+  }
+  if (part.type === "tool_use") {
+    return typeof part.id === "string" && typeof part.name === "string" && isJsonValue(part.input);
+  }
+  if (part.type === "tool_result") {
+    const validContent =
+      typeof part.content === "string" ||
+      (Array.isArray(part.content) &&
+        part.content.every(
+          (nested) =>
+            !!nested &&
+            typeof nested === "object" &&
+            (nested as { type?: unknown }).type === "text" &&
+            typeof (nested as { text?: unknown }).text === "string",
+        ));
+    return typeof part.toolUseId === "string" && validContent && (part.isError === undefined || typeof part.isError === "boolean");
+  }
+  return false;
+}
+
 function assertValidMessageParts(request: LlmRequest): void {
+  if (!Array.isArray(request.messages)) {
+    throw createLlmError("invalid_request", "messages: expected an array");
+  }
   for (const [messageIndex, message] of request.messages.entries()) {
-    if (message.role === "system" || typeof message.content === "string") {
+    const rawMessage = message as unknown;
+    if (!rawMessage || typeof rawMessage !== "object") {
+      throw createLlmError("invalid_request", `messages[${messageIndex}]: expected a message object`);
+    }
+    const role = (rawMessage as { role?: unknown }).role;
+    const content = (rawMessage as { content?: unknown }).content;
+    if (role !== "system" && role !== "user" && role !== "assistant" && role !== "tool") {
+      throw createLlmError("invalid_request", `messages[${messageIndex}].role: unsupported role "${String(role)}"`);
+    }
+    if (role === "system") {
+      if (typeof content !== "string") {
+        throw createLlmError("invalid_request", `messages[${messageIndex}].content: a system message must contain a string`);
+      }
+      continue;
+    }
+    if (typeof content === "string") {
+      if (role === "tool") {
+        throw createLlmError("invalid_request", `messages[${messageIndex}].content: a tool message must contain an array of tool_result parts`);
+      }
       continue;
     }
     // Defensive against genuinely untyped/JSON-built input (the exact
@@ -96,23 +160,37 @@ function assertValidMessageParts(request: LlmRequest): void {
     // string nor an array at all must fail as a clean invalid_request here,
     // not as a bare "x.entries is not a function" TypeError a few lines
     // below.
-    if (!Array.isArray(message.content)) {
+    if (!Array.isArray(content)) {
       throw createLlmError(
         "invalid_request",
-        `messages[${messageIndex}].content: expected a string or an array of parts for a "${message.role}" message, got ${message.content === null ? "null" : typeof message.content}`,
+        `messages[${messageIndex}].content: expected a string or an array of parts for a "${role}" message, got ${content === null ? "null" : typeof content}`,
       );
     }
-    const allowed = ALLOWED_PART_TYPES_BY_ROLE[message.role];
-    for (const [partIndex, part] of message.content.entries()) {
-      if (!part || typeof part !== "object" || typeof (part as { type?: unknown }).type !== "string" || !allowed.has((part as MessagePart).type)) {
+    const allowed = ALLOWED_PART_TYPES_BY_ROLE[role];
+    for (const [partIndex, part] of content.entries()) {
+      if (
+        !part ||
+        typeof part !== "object" ||
+        typeof (part as { type?: unknown }).type !== "string" ||
+        !allowed.has((part as MessagePart).type) ||
+        !hasValidPartPayload(part as Record<string, unknown>)
+      ) {
         const gotType = part && typeof part === "object" && typeof (part as { type?: unknown }).type === "string" ? (part as MessagePart).type : typeof part;
         throw createLlmError(
           "invalid_request",
-          `messages[${messageIndex}].content[${partIndex}]: a "${gotType}" part is not valid on a "${message.role}" message ` +
+          `messages[${messageIndex}].content[${partIndex}]: a "${gotType}" part is not valid on a "${role}" message ` +
             `(user: text only; assistant: text/tool_use; tool: tool_result only -- see types.ts's UserContentPart/AssistantContentPart/ToolMessage)`,
         );
       }
     }
+  }
+}
+
+function assertValidRequest(request: LlmRequest): void {
+  assertNoFallbackWithTools(request);
+  assertValidMessageParts(request);
+  if (request.signal?.aborted) {
+    throw request.signal.reason ?? createLlmError("transport", "request aborted before driver dispatch");
   }
 }
 
@@ -141,8 +219,7 @@ function requestForHop(request: LlmRequest, hop: Hop): LlmRequest {
 // ---------------------------------------------------------------------------
 
 export async function complete(request: LlmRequest, credentials: CredentialsByProvider, options: OrchestrationOptions = {}): Promise<LlmResponse> {
-  assertNoFallbackWithTools(request);
-  assertValidMessageParts(request);
+  assertValidRequest(request);
   const drivers = options.drivers ?? DEFAULT_DRIVERS;
   const hops = hopsFor(request);
   let lastError: unknown;
@@ -194,8 +271,7 @@ export async function complete(request: LlmRequest, credentials: CredentialsByPr
  * complete(). A failure after the first delta is thrown immediately.
  */
 export async function* stream(request: LlmRequest, credentials: CredentialsByProvider, options: OrchestrationOptions = {}): AsyncGenerator<LlmDelta, void, unknown> {
-  assertNoFallbackWithTools(request);
-  assertValidMessageParts(request);
+  assertValidRequest(request);
   const drivers = options.drivers ?? DEFAULT_DRIVERS;
   const hops = hopsFor(request);
   let sawFirstDelta = false;

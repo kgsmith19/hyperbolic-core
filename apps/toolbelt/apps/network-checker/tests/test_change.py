@@ -29,7 +29,7 @@ class ChangeTestCase(unittest.TestCase):
 
     def propose(self, **overrides):
         with contextlib.redirect_stdout(io.StringIO()):
-            change.propose(self.conn, self.host, _args(**overrides))
+            change.propose(self.conn, _args(**overrides))
         return self.conn.execute(
             "SELECT id FROM change_request ORDER BY id DESC LIMIT 1").fetchone()["id"]
 
@@ -110,7 +110,7 @@ class TokenBindingTest(ChangeTestCase):
         token = change._token(row, approved_at, "tester")
         self.conn.execute(
             "UPDATE change_request SET approved_at=?, approved_by=?, approval_token=?, status='approved' WHERE id=?",
-            (approved_at, "tester", token, cid))
+            (approved_at, "tester", change._token_digest(token), cid))
         return token
 
     def test_unmodified_token_applies_cleanly(self):
@@ -174,7 +174,7 @@ class RollbackTest(ChangeTestCase):
         token = change._token(row, approved_at, "tester")
         self.conn.execute(
             "UPDATE change_request SET approved_at=?, approved_by=?, approval_token=?, status='approved' WHERE id=?",
-            (approved_at, "tester", token, cid))
+            (approved_at, "tester", change._token_digest(token), cid))
         return cid, token
 
     def test_failed_verify_runs_inverse_and_lands_rolled_back(self):

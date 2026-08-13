@@ -6,20 +6,21 @@
 //
 // Ethos answer (OI-022's recorded tension): binds 127.0.0.1 only. The
 // web-borne risk — CSRF against a localhost mutator — is closed by
-// construction: mutating routes demand the custom X-ACC header (unsettable
-// cross-origin without a CORS grant this server never issues), Origin/Host
-// must be local, and no CORS header ever leaves. That left one gap SEC-04
-// named explicitly: X-ACC is CSRF hygiene, not auth, so any OTHER local
-// process could already drive this API just by knowing the port. ACC-5
-// closes that additively for a DIFFERENT OS USER — every /api/* request now
-// also demands the X-ACC-Token session credential (see the "session
-// credential" block below for the precise boundary this delivers, and why
-// it stops there) — without moving or weakening anything above.
+// construction: mutating routes demand the custom X-ACC header, Host must be
+// local, and Origin must be local or the ONE exact ACC_ALLOWED_ORIGIN parsed
+// at startup. That optional Shell bridge still requires the session token and
+// emits narrowly-scoped CORS/PNA headers; no wildcard grant exists. That left
+// one gap SEC-04
+// named explicitly: X-ACC is CSRF hygiene, not auth. ACC-5 adds a session
+// credential on every /api/* request without moving or weakening anything
+// above. It blocks browsers and callers running as other OS users when file
+// permissions hold; it cannot sandbox arbitrary processes already running as
+// the same user (see the session-credential threat model below).
 import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomBytes, timingSafeEqual, createHash } from "node:crypto";
 import { loadKernelPolicy, saveKernelPolicy } from "../kernel/policy.mjs";
@@ -284,6 +285,69 @@ function readBody(req, res, cb) {
 const localHost = (h) => /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(String(h || ""));
 const localOrigin = (o) => o === undefined || /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(String(o));
 
+function parseAllowedOrigin(raw = process.env.ACC_ALLOWED_ORIGIN) {
+  if (raw === undefined || raw === "") return null;
+  if (raw !== raw.trim()) throw new Error("ACC_ALLOWED_ORIGIN must be one exact origin without surrounding whitespace");
+  let parsed;
+  try { parsed = new URL(raw); }
+  catch { throw new Error("ACC_ALLOWED_ORIGIN must be one valid http(s) origin"); }
+  if (
+    (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+    parsed.username || parsed.password || parsed.pathname !== "/" ||
+    parsed.search || parsed.hash || parsed.origin !== raw
+  ) {
+    throw new Error("ACC_ALLOWED_ORIGIN must be one exact origin with no path, query, fragment, or credentials");
+  }
+  if (parsed.protocol !== "https:" && !/^(127\.0\.0\.1|localhost|\[::1\])$/i.test(parsed.hostname)) {
+    throw new Error("ACC_ALLOWED_ORIGIN must use https unless it is loopback development");
+  }
+  return parsed.origin;
+}
+
+const CORS_VARY = "Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Access-Control-Request-Private-Network";
+const CORS_HEADERS = "X-ACC-Token, X-ACC, Content-Type";
+const PREFLIGHT_HEADERS = new Set(["x-acc-token", "x-acc", "content-type"]);
+
+function configuredCorsRequest(req, allowedOrigin) {
+  return Boolean(allowedOrigin && req.headers.origin === allowedOrigin);
+}
+
+function setCorsResponseHeaders(req, res, allowedOrigin) {
+  if (!configuredCorsRequest(req, allowedOrigin)) return;
+  res.setHeader("access-control-allow-origin", allowedOrigin);
+  res.setHeader("vary", CORS_VARY);
+}
+
+function handlePreflight(req, res, allowedOrigin) {
+  if (req.method !== "OPTIONS") return false;
+  if (!req.url.split("?")[0].startsWith("/api/") || !configuredCorsRequest(req, allowedOrigin)) {
+    send(res, 403, { error: "cross-origin preflight denied" });
+    return true;
+  }
+  const method = String(req.headers["access-control-request-method"] || "").toUpperCase();
+  const privateNetwork = req.headers["access-control-request-private-network"];
+  const headers = String(req.headers["access-control-request-headers"] || "")
+    .split(",").map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (
+    (method !== "GET" && method !== "POST") ||
+    headers.some((header) => !PREFLIGHT_HEADERS.has(header)) ||
+    (privateNetwork !== undefined && privateNetwork !== "true")
+  ) {
+    send(res, 403, { error: "cross-origin preflight denied" });
+    return true;
+  }
+  setCorsResponseHeaders(req, res, allowedOrigin);
+  res.setHeader("access-control-allow-methods", "GET, POST");
+  res.setHeader("access-control-allow-headers", CORS_HEADERS);
+  res.setHeader("access-control-max-age", "600");
+  if (privateNetwork === "true") {
+    res.setHeader("access-control-allow-private-network", "true");
+  }
+  res.writeHead(204, { "cache-control": "no-store" });
+  res.end();
+  return true;
+}
+
 function send(res, code, body, type = "application/json") {
   res.writeHead(code, { "content-type": type, "cache-control": "no-store" });
   res.end(type === "application/json" ? JSON.stringify(body) : body);
@@ -292,84 +356,22 @@ function send(res, code, body, type = "application/json") {
 // --- session credential (ACC-5 / SEC-04 closure, issue m2-09) --------------
 // The loopback bind + Host/Origin + X-ACC checks above are CSRF hygiene
 // (SEC-04): they stop a web page from driving this API, but any OTHER local
-// process on the machine could already speak to the port with no privilege
-// check at all. X-ACC-Token is the auth boundary that closes that FOR A
-// DIFFERENT OS USER — additive to every check above; none of them move or
-// weaken. A shared secret, not platform-JWT verification: ACC makes zero
-// network calls today and must keep working fully offline on a
-// single-operator machine, so JWKS fetching (or any other network
-// dependency) is the wrong shape for a loopback socket like this one.
-//
-// Honest threat model (read this before assuming more than 0600 delivers):
-// POSIX file permissions are per-UID, not per-process. Mode 0600 keeps a
-// DIFFERENT OS ACCOUNT from reading the token file; it does NOT keep out
-// another process running as the SAME OS account (a stray npm postinstall
-// script, another local dev tool, a compromised editor extension) — that
-// process can read the file exactly as freely as this server does, and then
-// present the token like any legitimate caller. This is the boundary
-// `docs/planning/05-b-acc.md` §4 actually specifies (ACC-5c: "created with
-// owner-only permissions") and it is a deliberate scope, not an oversight:
-// that same section's mechanism-choice table weighs and rejects OS-level
-// socket permissions (unix socket / named pipe — the mechanism that WOULD
-// additionally isolate same-user processes from each other) as
-// "platform-divergent..., larger change than the threat warrants" for what
-// ACC is: a local single-operator dev tool, not a multi-tenant service.
-// Earlier drafts of the comments in this file described the closed gap as
-// "same-user local process" — that phrasing overclaimed what 0600 delivers
-// and has been corrected here and at the top of this file.
+// process on the machine could already speak to the port. X-ACC-Token adds a
+// credential boundary for browsers and other OS users, but it cannot isolate
+// ACC from arbitrary processes already running as the same OS user: those
+// processes can inspect that user's files or browser state. It is additive
+// to every check above; none of them move or weaken. A shared secret, not
+// platform-JWT verification: ACC makes zero network calls today and must
+// keep working fully offline on a single-operator machine, so JWKS fetching
+// (or any other network dependency) is the wrong shape for a loopback socket
+// like this one.
 //
 // Token file: one line, 32 random bytes base64url, mode 0600, created on
 // first use if absent. ACC_GUI_TOKEN_FILE redirects the path (same seam
-// style as ACC_ROOT/ACC_POLICY above); the default is "<ACC_ROOT>/gui-token".
+// style as ACC_ROOT/ACC_POLICY above); the default is the ignored private
+// state path "<ACC_ROOT>/.acc/gui-token", never a repository-tracked path.
 // Rotation has no dedicated mechanism: delete the file and restart, and a
 // fresh one is minted (gui/README.md documents this for the operator).
-//
-// An EXISTING file is trusted only if its permission bits are still exactly
-// 0600 (loadOrCreateToken(), below) — otherwise it is treated the same as
-// absent and a fresh one is minted and rewritten with the right mode. Without
-// this check, a same-user process could pre-create a world- or group-
-// readable "gui-token" file before the server's first start and have its
-// (attacker-known) content silently trusted as the live credential — the
-// exact same-UID-but-different-process actor the paragraph above already
-// says this design does not try to keep out, so trusting an unverified file
-// would give that actor MORE than the documented boundary promises, for
-// free. The permission check is skipped on win32: Node's fs mode bits there
-// don't carry POSIX owner/group/other semantics (see the platform guard on
-// the mode assertion in gui/server.test.mjs), so there is nothing meaningful
-// to check or enforce, and 0600 mode requests are Windows no-ops regardless.
-//
-// Finding #66 (P2, independent security review): the paragraph above only
-// ever checked permissions with `fs.statSync`, which FOLLOWS a symlink, and
-// the mint-fresh path wrote with the default `"w"` flag (no exclusivity
-// guard). Two gaps, both closed together below:
-//   - Symlink-following, both directions. A same-user process could plant a
-//     symlink at the token path — pointing at an attacker-controlled file
-//     (this code would then silently TRUST that file's content as the live
-//     credential) or at a path this process has no business writing
-//     (mint-fresh would then silently WRITE a fresh random token THROUGH the
-//     symlink to that target, clobbering it). `fs.lstatSync` — which reports
-//     the symlink itself, never its target — replaces `fs.statSync` for the
-//     trust check, and every mint-fresh write below uses the exclusive-
-//     create flag described next, which POSIX open(2) never opens or
-//     creates through an existing symlink at the final path component
-//     (verified: EEXIST on both a dangling symlink and one pointing at a
-//     real file, never a silent write-through). Symlink rejection applies on
-//     EVERY platform, unlike the 0600 mode comparison: `isSymbolicLink()` is
-//     meaningful even where POSIX mode bits are not.
-//   - No atomicity guard on the mint-fresh write. Two servers racing to
-//     mint a token on first start could each independently observe "absent,
-//     mint fresh" and each `writeFileSync` their own random value with the
-//     default flag — whichever write lands last silently wins, so the two
-//     processes could end up disagreeing about which token is "real" with
-//     no signal that it happened. `{ flag: "wx" }` (`O_WRONLY|O_CREAT|
-//     O_EXCL`) makes the create atomic and exclusive: it fails with EEXIST
-//     if literally anything already occupies the path (another process's
-//     just-written file, or a pre-planted symlink) rather than overwriting
-//     it. loadOrCreateToken() below turns that EEXIST into "retry from the
-//     top" — the loser reads back whatever the winner (or, for a cleared
-//     symlink, this same process's own next attempt) actually left there,
-//     so every racing caller converges on one agreed-upon value instead of
-//     each silently believing its own.
 //
 // Read/created exactly once, at the moment a server actually starts
 // (startServer(), below) — NOT re-resolved per request. A real deployment
@@ -383,83 +385,108 @@ function send(res, code, body, type = "application/json") {
 // sandboxes for unrelated fixtures, same as every other env seam in this
 // file — a cache that silently re-derived on that would rotate the running
 // server's credential out from under it.)
-const tokenFile = () => process.env.ACC_GUI_TOKEN_FILE || path.join(repoRoot(), "gui-token");
-// Takes an already-`lstat`'d Stats object rather than a path: every caller
-// below needs that same Stats object anyway (first to decide whether
-// anything occupies the path at all, then whether it's trustworthy), so
-// this avoids a second stat syscall per attempt. A symlink is NEVER owner-
-// only, on any platform — see the Finding #66 comment above for why lstat,
-// not stat, is what makes that true instead of transparently following the
-// link. The 0600 mode comparison remains win32-exempt exactly as before
-// this fix (meaningless bits there — every non-symlink file is trusted).
-const ownerOnly = (st) => !st.isSymbolicLink() && (process.platform === "win32" || (st.mode & 0o777) === 0o600);
+const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+const tokenFile = () => process.env.ACC_GUI_TOKEN_FILE || path.join(repoRoot(), ".acc", "gui-token");
+const noFollow = process.platform === "win32" ? 0 : (fs.constants.O_NOFOLLOW || 0);
+
+function validToken(raw) {
+  const token = raw.endsWith("\n") ? raw.slice(0, -1) : raw;
+  if (!TOKEN_RE.test(token) || raw !== token && raw !== `${token}\n`) return null;
+  try {
+    return Buffer.from(token, "base64url").toString("base64url") === token ? token : null;
+  } catch { return null; }
+}
+
+function applyWindowsOwnerAcl(target, directory = false) {
+  if (process.platform !== "win32") return;
+  const username = process.env.USERNAME;
+  if (!username) throw new Error("cannot secure ACC GUI token: USERNAME is unset");
+  const grant = directory ? `${username}:(OI)(CI)F` : `${username}:F`;
+  execFileSync("icacls", [target, "/inheritance:r", "/grant:r", grant], { stdio: "ignore", windowsHide: true });
+}
+
+function secureTokenDirectory(file) {
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const stat = fs.lstatSync(dir);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`ACC GUI token directory must be a real directory: ${dir}`);
+  if (process.platform !== "win32") {
+    if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
+      throw new Error(`ACC GUI token directory is not owned by the current user: ${dir}`);
+    }
+    fs.chmodSync(dir, 0o700);
+  } else {
+    applyWindowsOwnerAcl(dir, true);
+  }
+}
+
+function readToken(file) {
+  let linkStat;
+  try { linkStat = fs.lstatSync(file); }
+  catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+  if (!linkStat.isFile() || linkStat.isSymbolicLink()) {
+    throw new Error(`ACC GUI token must be a regular file, not a link or special file: ${file}`);
+  }
+
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) throw new Error(`ACC GUI token must be a regular file: ${file}`);
+    if (process.platform !== "win32") {
+      if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
+        throw new Error(`ACC GUI token is not owned by the current user: ${file}`);
+      }
+      if ((stat.mode & 0o077) !== 0) {
+        throw new Error(`ACC GUI token must have owner-only permissions (0600): ${file}`);
+      }
+    } else {
+      applyWindowsOwnerAcl(file);
+    }
+    const token = validToken(fs.readFileSync(fd, "utf8"));
+    if (!token) throw new Error(`invalid ACC GUI token file: ${file}`);
+    return token;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
 
 function loadOrCreateToken() {
   const file = tokenFile();
-  // Bounded retry, not a single attempt: the loser of a real race (see the
-  // Finding #66 comment above) must loop back and READ the winner's file
-  // rather than either overwriting it or giving up. 5 is generous headroom
-  // over the two-process case this repo actually exercises end-to-end (the
-  // concurrency test in server.test.mjs) — it exists only so a pathological
-  // run of losses fails loudly instead of spinning forever.
-  for (let attempt = 0; attempt < 5; attempt++) {
-    let existing = null;
-    try { existing = fs.lstatSync(file); } catch {} // ENOENT (or similar) -> nothing occupies this path yet
+  secureTokenDirectory(file);
+  const existing = readToken(file);
+  if (existing) return existing;
 
-    if (existing && ownerOnly(existing)) {
-      try {
-        const line = fs.readFileSync(file, "utf8").split(/\r?\n/, 1)[0].trim();
-        if (line) return line;
-      } catch {} // unreadable despite passing lstat (e.g. removed mid-check) -> fall through to mint
-    }
-    // Nothing trustworthy at this path: absent, a symlink, wrong
-    // permissions, unreadable, or present-but-empty (a crash mid-create can
-    // leave a valid-mode, zero-content file). Whatever IS there — including
-    // a symlink — must be cleared before the exclusive create below can
-    // claim the path outright. Best-effort: another process may be doing
-    // the exact same cleanup concurrently, and a lost unlink race here just
-    // falls through to the create attempt, which then settles things via
-    // EEXIST like every other race this loop handles.
-    if (existing) { try { fs.unlinkSync(file); } catch {} }
-
-    const fresh = randomBytes(32).toString("base64url");
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    try {
-      // "wx" = O_WRONLY|O_CREAT|O_EXCL: fails EEXIST if anything already
-      // occupies this path — a regular file (another process just won this
-      // same race) or a symlink (pre-planted, dangling or pointing at a
-      // real file; open(2) with O_EXCL never opens or creates through an
-      // existing symlink at the final path component). That is what
-      // actually closes both Finding #66 gaps: no two racing processes can
-      // each believe their own mint "won" (only one write can ever land
-      // here), and a pre-planted symlink can never be written through,
-      // unlike the old default `"w"` flag, which followed it in both
-      // directions.
-      fs.writeFileSync(file, fresh + "\n", { flag: "wx", mode: 0o600 });
-      // Belt-and-braces: "wx" guarantees this call always creates the file
-      // fresh, so the `mode` option above IS honored (unlike the old
-      // existing-file case) — but open(2) still ANDs the requested mode
-      // against the process umask, so an unusually restrictive umask could
-      // leave the file weaker than 0600 despite the option. The explicit
-      // chmod re-asserts owner-only regardless of umask.
-      if (process.platform !== "win32") fs.chmodSync(file, 0o600);
-      return fresh;
-    } catch (e) {
-      if (e && e.code === "EEXIST") continue; // lost the race -- loop back and read whoever won
-      throw e;
-    }
+  const fresh = randomBytes(32).toString("base64url");
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | noFollow, 0o600);
+  } catch (error) {
+    // Another concurrently starting ACC process won the exclusive create.
+    if (error?.code === "EEXIST") return readToken(file);
+    throw error;
   }
-  throw new Error(`gui-token: could not establish a trustworthy token file at ${file} after 5 attempts`);
+  try {
+    fs.writeFileSync(fd, `${fresh}\n`, "utf8");
+    fs.fsyncSync(fd);
+    if (process.platform !== "win32") fs.fchmodSync(fd, 0o600);
+  } finally {
+    fs.closeSync(fd);
+  }
+  applyWindowsOwnerAcl(file);
+  return fresh;
 }
 
-// Constant-time compare that never branches on length first: both sides are
-// hashed to a fixed 32-byte SHA-256 digest before crypto.timingSafeEqual, so
-// it always compares equal-length buffers — a length mismatch (the common
-// shape of a guess) can neither throw nor short-circuit the comparison
-// before it starts.
+// The token's shape (43 base64url characters) is public, so malformed inputs
+// may be rejected early. Valid candidates are hashed to equal-length digests
+// and compared with timingSafeEqual. This avoids raw-secret comparison but
+// does not claim constant end-to-end HTTP response timing.
 function tokenMatches(presented, token) {
+  if (typeof presented !== "string" || !TOKEN_RE.test(presented)) return false;
   const want = createHash("sha256").update(token).digest();
-  const got = createHash("sha256").update(typeof presented === "string" ? presented : "").digest();
+  const got = createHash("sha256").update(presented).digest();
   return timingSafeEqual(want, got);
 }
 
@@ -469,9 +496,13 @@ function tokenMatches(presented, token) {
 // token per server instance and passes it explicitly (a closure, not this
 // default), so independent server instances in the same process can never
 // cross-contaminate each other's credential.
-export function handler(req, res, token = loadOrCreateToken()) {
+export function handler(req, res, token = loadOrCreateToken(), allowedOrigin = parseAllowedOrigin()) {
   if (!localHost(req.headers.host)) return send(res, 403, { error: "non-local Host" });
-  if (!localOrigin(req.headers.origin)) return send(res, 403, { error: "non-local Origin" });
+  if (!localOrigin(req.headers.origin) && !configuredCorsRequest(req, allowedOrigin)) {
+    return send(res, 403, { error: "non-local Origin" });
+  }
+  if (handlePreflight(req, res, allowedOrigin)) return;
+  setCorsResponseHeaders(req, res, allowedOrigin);
   // Every mutating route demands the custom header (unsettable cross-origin
   // without a CORS grant this server never issues) — enforced ONCE here so a
   // future route cannot forget it. Non-POST methods carry no mutation.
@@ -766,10 +797,11 @@ export function handler(req, res, token = loadOrCreateToken()) {
 }
 
 export function startServer({ port = 0 } = {}) {
+  const allowedOrigin = parseAllowedOrigin(); // validate and pin once; env changes cannot widen a live server
   const token = loadOrCreateToken(); // once, before the socket can accept a single request
-  const server = http.createServer((req, res) => handler(req, res, token));
+  const server = http.createServer((req, res) => handler(req, res, token, allowedOrigin));
   return new Promise((resolve) => {
-    server.listen(port, "127.0.0.1", () => resolve({ server, port: server.address().port, token }));
+    server.listen(port, "127.0.0.1", () => resolve({ server, port: server.address().port, token, allowedOrigin }));
   });
 }
 
@@ -788,6 +820,11 @@ export async function cli(argv = process.argv) {
   // reach this server, or any server, which is the whole point. The token
   // value is never printed or logged anywhere else.
   console.log(`http://127.0.0.1:${s.port}/#acc-token=${s.token}`);
+  if (s.allowedOrigin) {
+    const shell = new URL("/acc", s.allowedOrigin);
+    shell.hash = `acc-token=${s.token}`;
+    console.log(shell.toString());
+  }
   return s;
 }
 

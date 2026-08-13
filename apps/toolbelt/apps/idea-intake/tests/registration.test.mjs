@@ -16,7 +16,14 @@ import { checkManifestShape, manifestHash } from "../../../scripts/validate-mani
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOL_DIR = join(__dirname, "..");
 const MANIFEST_PATH = join(TOOL_DIR, "tool.json");
-const MIGRATION_PATH = join(TOOL_DIR, "..", "..", "supabase", "migrations", "20260813003000_register_idea-intake.sql");
+const MIGRATION_PATH = join(
+  TOOL_DIR,
+  "..",
+  "..",
+  "supabase",
+  "migrations",
+  "20260814130200_register_idea-intake-v0.1.1.sql",
+);
 
 // The hash sits on its own line as a bare single-quoted 64-hex-char literal,
 // same anchoring rationale as registry-manifest-hash.test.mjs: the whole

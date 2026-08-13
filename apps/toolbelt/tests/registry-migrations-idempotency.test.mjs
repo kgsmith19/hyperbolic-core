@@ -26,6 +26,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { manifestHash } from "../scripts/validate-manifests.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = join(__dirname, "..", "supabase", "migrations");
@@ -36,6 +37,33 @@ const PO_UP = join(MIGRATIONS_DIR, "20260812240000_register_prompt-organizer.sql
 const PO_DOWN = join(MIGRATIONS_DIR, "20260812240000_register_prompt-organizer_down.sql");
 const NC_UP = join(MIGRATIONS_DIR, "20260812250000_register_network-checker.sql");
 const NC_DOWN = join(MIGRATIONS_DIR, "20260812250000_register_network-checker_down.sql");
+const IDEA_UP = join(MIGRATIONS_DIR, "20260813003000_register_idea-intake.sql");
+const IDEA_DOWN = join(MIGRATIONS_DIR, "20260813003000_register_idea-intake_down.sql");
+const NC_V1_UP = join(MIGRATIONS_DIR, "20260813173000_register_network-checker-v1.sql");
+const NC_V1_DOWN = join(MIGRATIONS_DIR, "20260813173000_register_network-checker-v1_down.sql");
+const ROOT_BASE_UP = join(MIGRATIONS_DIR, "20260814110000_register_toolbelt.sql");
+const ROOT_BASE_DOWN = join(MIGRATIONS_DIR, "20260814110000_register_toolbelt_down.sql");
+const ROOT_UP = join(MIGRATIONS_DIR, "20260814130000_register_toolbelt-v0.1.1.sql");
+const ROOT_DOWN = join(MIGRATIONS_DIR, "20260814130000_register_toolbelt-v0.1.1_down.sql");
+const PO_V1_UP = join(MIGRATIONS_DIR, "20260814130100_register_prompt-organizer-v0.1.2.sql");
+const PO_V1_DOWN = join(MIGRATIONS_DIR, "20260814130100_register_prompt-organizer-v0.1.2_down.sql");
+const IDEA_V1_UP = join(MIGRATIONS_DIR, "20260814130200_register_idea-intake-v0.1.1.sql");
+const IDEA_V1_DOWN = join(MIGRATIONS_DIR, "20260814130200_register_idea-intake-v0.1.1_down.sql");
+
+const REGISTRATION_UPS = [PO_UP, NC_UP, IDEA_UP, NC_V1_UP, ROOT_BASE_UP, ROOT_UP, PO_V1_UP, IDEA_V1_UP];
+const MANIFEST_PATHS = [
+  join(__dirname, "..", "tool.json"),
+  join(__dirname, "..", "apps", "idea-intake", "tool.json"),
+  join(__dirname, "..", "apps", "network-checker", "tool.json"),
+  join(__dirname, "..", "apps", "prompt-organizer", "tool.json"),
+];
+
+const EXPECTED_HASHES = Object.fromEntries(
+  MANIFEST_PATHS.map((path) => {
+    const manifest = JSON.parse(readFileSync(path, "utf8"));
+    return [manifest.id, manifestHash(manifest)];
+  }),
+);
 
 // Minimal, faithful reproduction of the pre-m3-02 state these migrations
 // assume: core.app's shape copied verbatim from
@@ -82,6 +110,9 @@ function detectRunner() {
 }
 
 const RUNNER = detectRunner();
+if (process.env.TOOLBELT_REQUIRE_POSTGRES === "1" && !RUNNER) {
+  throw new Error("TOOLBELT_REQUIRE_POSTGRES=1 but no local PostgreSQL server is reachable");
+}
 const SKIP_REASON = RUNNER
   ? false
   : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); " +
@@ -103,12 +134,16 @@ function psqlOk(dbName, sqlText) {
   return result.stdout;
 }
 
+function applyFiles(dbName, paths) {
+  for (const path of paths) psqlOk(dbName, readFileSync(path, "utf8"));
+}
+
 function freshDbName() {
   return `m3_02_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
 }
 
 test(
-  "real Postgres: full up-cascade registers both tools with the correct, non-default columns",
+  "real Postgres: full up-cascade registers all current manifests with the correct, non-default columns",
   { skip: SKIP_REASON },
   () => {
     const db = freshDbName();
@@ -116,11 +151,10 @@ test(
     try {
       psqlOk(db, PRE_STATE_SQL);
       psqlOk(db, readFileSync(EXTENSION_UP, "utf8"));
-      psqlOk(db, readFileSync(PO_UP, "utf8"));
-      psqlOk(db, readFileSync(NC_UP, "utf8"));
+      applyFiles(db, REGISTRATION_UPS);
 
       const count = psqlOk(db, "select count(*) from core.app;").trim();
-      assert.equal(count, "2", "expected exactly 2 core.app rows after registering 2 tools");
+      assert.equal(count, "4", "expected exactly 4 core.app rows after registering 4 manifests");
 
       const rows = psqlOk(
         db,
@@ -129,8 +163,10 @@ test(
       assert.equal(
         rows,
         [
-          "network-checker|cli|<null>|building|146e208e509e124d6ca4a74cb0e6f7139acd2fd94c1516078e28c55e5fad2a87",
-          "prompt-organizer|ui|/prompts|building|c73037838b686f7b98e6e81da6dfc4af1137ff6adf82f8abc7311c42f75b527e",
+          `idea-intake|ui|/ideas|building|${EXPECTED_HASHES["idea-intake"]}`,
+          `network-checker|cli|<null>|building|${EXPECTED_HASHES["network-checker"]}`,
+          `prompt-organizer|ui|/prompts|building|${EXPECTED_HASHES["prompt-organizer"]}`,
+          `toolbelt|headless|<null>|building|${EXPECTED_HASHES.toolbelt}`,
         ].join("\n"),
       );
     } finally {
@@ -140,7 +176,7 @@ test(
 );
 
 test(
-  "real Postgres: re-applying both registration migrations is a true no-op (row count AND row content unchanged)",
+  "real Postgres: re-applying all registration migrations is a true no-op (row count AND row content unchanged)",
   { skip: SKIP_REASON },
   () => {
     const db = freshDbName();
@@ -148,8 +184,7 @@ test(
     try {
       psqlOk(db, PRE_STATE_SQL);
       psqlOk(db, readFileSync(EXTENSION_UP, "utf8"));
-      psqlOk(db, readFileSync(PO_UP, "utf8"));
-      psqlOk(db, readFileSync(NC_UP, "utf8"));
+      applyFiles(db, REGISTRATION_UPS);
 
       const fingerprintQuery =
         "select id, md5(row(name,schema_name,status,kind,route,version,description,manifest,manifest_hash)::text) " +
@@ -157,13 +192,12 @@ test(
       const before = psqlOk(db, fingerprintQuery);
       const countBefore = psqlOk(db, "select count(*) from core.app;").trim();
 
-      // Re-apply both registration migrations a second time.
-      psqlOk(db, readFileSync(PO_UP, "utf8"));
-      psqlOk(db, readFileSync(NC_UP, "utf8"));
+      // Re-apply every registration migration a second time.
+      applyFiles(db, REGISTRATION_UPS);
 
       const countAfter = psqlOk(db, "select count(*) from core.app;").trim();
       assert.equal(countAfter, countBefore, "row count changed after re-applying registration migrations");
-      assert.equal(countAfter, "2");
+      assert.equal(countAfter, "4");
 
       const after = psqlOk(db, fingerprintQuery);
       assert.equal(after, before, "row content drifted after re-applying registration migrations (not a true no-op upsert)");
@@ -182,11 +216,10 @@ test(
     try {
       psqlOk(db, PRE_STATE_SQL);
       psqlOk(db, readFileSync(EXTENSION_UP, "utf8"));
-      psqlOk(db, readFileSync(PO_UP, "utf8"));
-      psqlOk(db, readFileSync(NC_UP, "utf8"));
+      applyFiles(db, REGISTRATION_UPS);
 
       const count = psqlOk(db, "select count(*) from core.app where status <> 'idea';").trim();
-      assert.equal(count, "2", "docs/planning/05-c-toolbelt.md section 11 TB-1b verification query");
+      assert.equal(count, "4", "docs/planning/05-c-toolbelt.md section 11 TB-1b verification query");
     } finally {
       psqlOk("postgres", `drop database if exists ${db};`);
     }
@@ -202,22 +235,42 @@ test(
     try {
       psqlOk(db, PRE_STATE_SQL);
       psqlOk(db, readFileSync(EXTENSION_UP, "utf8"));
-      psqlOk(db, readFileSync(PO_UP, "utf8"));
-      psqlOk(db, readFileSync(NC_UP, "utf8"));
-      assert.equal(psqlOk(db, "select count(*) from core.app;").trim(), "2");
+      applyFiles(db, REGISTRATION_UPS);
+      assert.equal(psqlOk(db, "select count(*) from core.app;").trim(), "4");
 
       // Down-cascade in reverse chronological order.
+      psqlOk(db, readFileSync(IDEA_V1_DOWN, "utf8"));
+      psqlOk(db, readFileSync(PO_V1_DOWN, "utf8"));
+      psqlOk(db, readFileSync(ROOT_DOWN, "utf8"));
+      psqlOk(db, readFileSync(ROOT_BASE_DOWN, "utf8"));
+      psqlOk(db, readFileSync(NC_V1_DOWN, "utf8"));
+      const restoredNc = psqlOk(
+        db,
+        "select version, manifest_hash from core.app where id = 'network-checker';",
+      ).trim();
+      assert.equal(
+        restoredNc,
+        "0.1.0|146e208e509e124d6ca4a74cb0e6f7139acd2fd94c1516078e28c55e5fad2a87",
+        "network-checker v1 down did not restore the immediately preceding registration",
+      );
+      psqlOk(db, readFileSync(IDEA_DOWN, "utf8"));
+      assert.equal(
+        psqlOk(db, "select count(*) from core.app;").trim(),
+        "4",
+        "idea-intake's down migration deleted its row",
+      );
+
       psqlOk(db, readFileSync(NC_DOWN, "utf8"));
       assert.equal(
         psqlOk(db, "select count(*) from core.app;").trim(),
-        "2",
+        "4",
         "network-checker's down migration deleted its row",
       );
 
       psqlOk(db, readFileSync(PO_DOWN, "utf8"));
       assert.equal(
         psqlOk(db, "select count(*) from core.app;").trim(),
-        "2",
+        "4",
         "prompt-organizer's down migration deleted its row",
       );
       // 20260812210000_register_prompt-organizer_down.sql must not touch
@@ -226,7 +279,7 @@ test(
       assert.equal(poRow, "ui|/prompts|building", "prompt-organizer down migration touched kind/route or status, which it must not own");
 
       psqlOk(db, readFileSync(EXTENSION_DOWN, "utf8"));
-      assert.equal(psqlOk(db, "select count(*) from core.app;").trim(), "2", "the extension down migration deleted a row");
+      assert.equal(psqlOk(db, "select count(*) from core.app;").trim(), "4", "the extension down migration deleted a row");
 
       const cols = psqlOk(
         db,

@@ -86,6 +86,10 @@ function defaultCreateId(): string {
 }
 
 function defaultCreateChannel(): NotificationChannel | null {
+  // Node exposes BroadcastChannel too, but there is no browser document to
+  // own it during SSR. Opening one there would create a process-wide
+  // transport and let separate requests exchange session-ephemeral state.
+  if (typeof window === "undefined" || typeof document === "undefined") return null;
   if (typeof BroadcastChannel === "undefined") return null; // an old runtime
   try {
     const channel = new BroadcastChannel(NOTIFICATION_CHANNEL);
@@ -105,21 +109,69 @@ function defaultCreateChannel(): NotificationChannel | null {
 const LEVELS = new Set(["info", "success", "warning", "error"]);
 const SOURCES = new Set(["shell", "lifeos", "acc", "toolbelt", "brain"]);
 
-function isPlatformNotification(value: unknown): value is PlatformNotification {
-  if (typeof value !== "object" || value === null) return false;
-  const n = value as Record<string, unknown>;
-  return (
-    typeof n.id === "string" &&
-    n.id.length > 0 &&
-    typeof n.level === "string" &&
-    LEVELS.has(n.level) &&
-    typeof n.title === "string" &&
-    typeof n.source === "string" &&
-    SOURCES.has(n.source) &&
-    typeof n.createdAt === "string" &&
-    (n.body === undefined || typeof n.body === "string") &&
-    (n.href === undefined || typeof n.href === "string")
-  );
+function isValidId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 200;
+}
+
+function isCanonicalIsoInstant(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+}
+
+function isSameOriginPath(value: unknown): value is string {
+  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) return false;
+  try {
+    const parsed = new URL(value, "https://platform.invalid");
+    return parsed.origin === "https://platform.invalid" && parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function normalizePublishableNotification(value: unknown): PublishableNotification | null {
+  try {
+    if (typeof value !== "object" || value === null) return null;
+    const n = value as Record<string, unknown>;
+    if (
+      typeof n.level !== "string" ||
+      !LEVELS.has(n.level) ||
+      typeof n.title !== "string" ||
+      n.title.length === 0 ||
+      n.title.length > 200 ||
+      typeof n.source !== "string" ||
+      !SOURCES.has(n.source) ||
+      (n.body !== undefined && (typeof n.body !== "string" || n.body.length > 10_000)) ||
+      (n.href !== undefined && !isSameOriginPath(n.href))
+    ) {
+      return null;
+    }
+    return {
+      level: n.level as PublishableNotification["level"],
+      title: n.title,
+      ...(n.body === undefined ? {} : { body: n.body as string }),
+      source: n.source as PublishableNotification["source"],
+      ...(n.href === undefined ? {} : { href: n.href as string }),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizePlatformNotification(value: unknown): PlatformNotification | null {
+  try {
+    if (typeof value !== "object" || value === null) return null;
+    const n = value as Record<string, unknown>;
+    const publishable = normalizePublishableNotification(n);
+    if (!publishable || !isValidId(n.id) || !isCanonicalIsoInstant(n.createdAt)) return null;
+    return {
+      id: n.id,
+      ...publishable,
+      createdAt: n.createdAt,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -150,6 +202,9 @@ export function createNotificationSurface(
   const createId = options.createId ?? defaultCreateId;
   const now = options.now ?? Date.now;
   const maxEntries = options.maxEntries ?? 100;
+  if (!Number.isSafeInteger(maxEntries) || maxEntries < 1 || maxEntries > 10_000) {
+    throw new RangeError("notification maxEntries must be an integer between 1 and 10000");
+  }
   const channel = (options.createChannel ?? defaultCreateChannel)();
 
   let entries: PlatformNotification[] = [];
@@ -181,7 +236,13 @@ export function createNotificationSurface(
     // splices the value it was handed must not be able to corrupt the
     // surface's own state, or another subscriber's view of it.
     for (const handler of [...handlers]) {
-      handler(entries.slice());
+      try {
+        handler(entries.slice());
+      } catch {
+        // A zone owns its subscriber, not the platform bus. Isolate a bad
+        // consumer so it cannot block later subscribers or cross-zone
+        // delivery of a notification that was already accepted.
+      }
     }
   }
 
@@ -207,13 +268,15 @@ export function createNotificationSurface(
     channel.onmessage = (event: { data: unknown }) => {
       const message = event.data as ChannelMessage | undefined;
       if (typeof message !== "object" || message === null) return;
-      if (message.kind === "publish" && isPlatformNotification(message.notification)) {
+      if (message.kind === "publish") {
+        const notification = normalizePlatformNotification(message.notification);
+        if (!notification) return;
         // No re-broadcast: applying a remote message locally must not post
         // it back out, or two documents would ping-pong one notification
         // forever. (A browser BroadcastChannel never echoes to the sender,
         // so the loop would be A -> B -> A -> B ..., not a self-loop.)
-        if (insert(message.notification)) emit();
-      } else if (message.kind === "dismiss" && typeof message.id === "string") {
+        if (insert(notification)) emit();
+      } else if (message.kind === "dismiss" && isValidId(message.id)) {
         if (remove(message.id)) emit();
       }
     };
@@ -232,18 +295,27 @@ export function createNotificationSurface(
 
   const surface: NotificationSurfaceHandle = {
     publish(n: PublishableNotification): string {
+      const publishable = normalizePublishableNotification(n);
+      if (!publishable) {
+        throw new TypeError("invalid platform notification");
+      }
+      const id = createId();
+      if (!isValidId(id)) {
+        throw new TypeError("notification id must be a non-empty string no longer than 200 characters");
+      }
       const notification: PlatformNotification = {
-        ...n,
-        id: createId(),
+        id,
+        ...publishable,
         createdAt: nextCreatedAt(),
       };
-      insert(notification);
+      if (!insert(notification)) throw new Error(`duplicate notification id: ${id}`);
       emit();
       post({ kind: "publish", notification });
       return notification.id;
     },
 
     dismiss(id: string): void {
+      if (typeof id !== "string" || id.length === 0 || id.length > 200) return;
       // Broadcast unconditionally, even when this document holds no such
       // entry: the notification may only exist in the other zone's copy
       // (e.g. this document was opened after it was published).
@@ -285,6 +357,11 @@ let documentSurface: NotificationSurfaceHandle | null = null;
  * where there is no BroadcastChannel to open.
  */
 export function getNotificationSurface(): NotificationSurface {
+  // There is no document-scoped owner during SSR. A module singleton here
+  // would leak one request's ephemeral notification state into another.
+  if (typeof document === "undefined") {
+    return createNotificationSurface({ createChannel: () => null });
+  }
   if (!documentSurface) documentSurface = createNotificationSurface();
   return documentSurface;
 }

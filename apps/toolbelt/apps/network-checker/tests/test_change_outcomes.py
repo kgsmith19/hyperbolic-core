@@ -1,8 +1,7 @@
-"""Finding 17 regression tests: real rc/rrc wiring through _run_change()/
-_rollback()/_persist_apply(). change.execute() itself is NOT mocked here --
-only _verify_with_retry (no real network probe available in this sandbox).
-`true`/`false` are real, hermetic subprocess calls, proving the wiring
-end-to-end rather than just the branch logic in isolation. Split out of
+"""Return-code wiring through _run_change()/_rollback()/_persist_apply().
+
+The argv allowlist is tested at the real process seam in test_change_execute;
+these state-machine tests inject explicit executor outcomes. Split out of
 test_change.py/test_change_approve.py for the same file-length-budget
 reason those two are already split from each other."""
 import contextlib
@@ -24,30 +23,30 @@ class ChangeOutcomeTestCase(unittest.TestCase):
 
 
 class CommandFailureTest(ChangeOutcomeTestCase):
-    def test_a_real_nonzero_change_cmd_lands_apply_failed_without_touching_inverse(self):
+    def test_nonzero_change_cmd_lands_apply_failed_without_touching_inverse(self):
         cid, token = _propose_tested_approved(
-            self.conn, self.host, cmd="false", inverse="echo should-never-run")
-        with patch.object(change, "execute", wraps=change.execute) as spy, \
+            self.conn, cmd="forward", inverse="inverse")
+        with patch.object(change, "execute", return_value=(7, "", "failed")) as spy, \
              contextlib.redirect_stdout(io.StringIO()), \
              contextlib.redirect_stderr(io.StringIO()):
             rc = change.apply(self.conn, self.host, _args(action="apply", id=cid, token=token))
         self.assertEqual(rc, 4)
-        spy.assert_called_once_with("false")  # the inverse command never ran
+        spy.assert_called_once_with("forward")  # the inverse command never ran
         row = change._get(self.conn, cid)
         self.assertEqual(row["status"], "apply_failed")
         self.assertIsNone(row["rolled_back_at"])
         output = json.loads(row["apply_output"])
-        self.assertEqual(output["apply"]["returncode"], 1)
+        self.assertEqual(output["apply"]["returncode"], 7)
         self.assertNotIn("rollback", output)
         items = self.conn.execute(
             "SELECT value FROM config_item WHERE key=?", (f"change.{cid}",)).fetchall()
         self.assertEqual([i["value"] for i in items], ["apply_failed"])
 
-    def test_a_real_zero_change_cmd_with_a_passing_probe_still_lands_verified(self):
+    def test_zero_change_cmd_with_a_passing_probe_still_lands_verified(self):
         """Sanity/contrast: proves the rc branch in _run_change() does not
         also break the true-success path."""
-        cid, token = _propose_tested_approved(self.conn, self.host, cmd="true", inverse="true")
-        with patch.object(change, "execute", wraps=change.execute), \
+        cid, token = _propose_tested_approved(self.conn, cmd="forward", inverse="inverse")
+        with patch.object(change, "execute", return_value=(0, "ok", "")), \
              patch.object(change, "_verify_with_retry", return_value=(True, [])), \
              contextlib.redirect_stdout(io.StringIO()):
             rc = change.apply(self.conn, self.host, _args(action="apply", id=cid, token=token))
@@ -56,9 +55,10 @@ class CommandFailureTest(ChangeOutcomeTestCase):
 
 
 class RollbackFailureTest(ChangeOutcomeTestCase):
-    def test_a_real_failing_inverse_lands_rollback_failed_not_rolled_back(self):
-        cid, token = _propose_tested_approved(self.conn, self.host, cmd="true", inverse="false")
-        with patch.object(change, "execute", wraps=change.execute), \
+    def test_failing_inverse_lands_rollback_failed_not_rolled_back(self):
+        cid, token = _propose_tested_approved(self.conn, cmd="forward", inverse="inverse")
+        results = [(0, "forward", ""), (9, "", "inverse failed")]
+        with patch.object(change, "execute", side_effect=results), \
              patch.object(change, "_verify_with_retry", return_value=(False, [])), \
              contextlib.redirect_stdout(io.StringIO()), \
              contextlib.redirect_stderr(io.StringIO()):
@@ -69,20 +69,17 @@ class RollbackFailureTest(ChangeOutcomeTestCase):
         self.assertIsNone(row["rolled_back_at"],
                           "must not claim a restore time for a rollback that failed")
         output = json.loads(row["apply_output"])
-        self.assertEqual(output["rollback"]["returncode"], 1)
-        # Finding 60: two distinct audit rows, not one -- the forward
-        # attempt's own outcome (verify_failed) must survive as its own
-        # event, not just be overwritten by the rollback's outcome.
+        self.assertEqual(output["rollback"]["returncode"], 9)
         rows = {r["key"]: r["value"] for r in self.conn.execute(
             "SELECT key, value FROM config_item WHERE key LIKE ?", (f"change.{cid}.%",))}
         self.assertEqual(rows, {f"change.{cid}.apply": "verify_failed",
                                 f"change.{cid}.rollback": "rollback_failed"})
 
-    def test_a_real_succeeding_inverse_with_a_failing_post_verify_also_fails(self):
+    def test_succeeding_inverse_with_a_failing_post_verify_also_fails(self):
         """rrc==0 alone is not enough -- the post-restore probe result
         still has to pass, or the row is not actually restored."""
-        cid, token = _propose_tested_approved(self.conn, self.host, cmd="true", inverse="true")
-        with patch.object(change, "execute", wraps=change.execute), \
+        cid, token = _propose_tested_approved(self.conn, cmd="forward", inverse="inverse")
+        with patch.object(change, "execute", return_value=(0, "", "")), \
              patch.object(change, "_verify_with_retry", return_value=(False, [])), \
              contextlib.redirect_stdout(io.StringIO()), \
              contextlib.redirect_stderr(io.StringIO()):

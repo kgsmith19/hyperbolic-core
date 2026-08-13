@@ -1,14 +1,14 @@
 // m4-04: real-Postgres proof that packages/llm/src/prompt-client.ts is
-// correctly wired to the real, already-committed `prompt.get_prompt` RPC
-// (m4-03) and speaks real PostgREST wire semantics for the cache's
-// revalidation query -- not just a hand-rolled fetch mock that could
+// correctly wired to the real `prompt.get_prompt` and
+// `prompt.get_prompt_source` RPCs and speaks the cache's conditional wire
+// protocol -- not just a hand-rolled fetch mock that could
 // silently diverge from what PostgREST actually returns.
 //
 // This session's own testing bar asked for exactly this: apply the real
 // committed prompt-organizer migrations to a local PostgreSQL 16 instance
 // and either point a real PostgREST process at it or build a lightweight
-// local HTTP shim answering PostgREST's querystring convention for the two
-// endpoints this client calls, backed by real SQL. No `postgrest` binary is
+// local HTTP shim answering the two RPC endpoints this client calls, backed
+// by real SQL. No `postgrest` binary is
 // installed in this sandbox (confirmed: `which postgrest` finds nothing), so
 // this file takes the shim route, following
 // apps/shell/e2e/support/registry-fixture.ts's (m3-04) established pattern:
@@ -23,7 +23,7 @@
 // because that file is the authoritative source for "how to stand up this
 // schema on a bare Postgres 16." What's new here is the HTTP shim layer and
 // wiring the REAL packages/llm client (not hand-called SQL) against it, plus
-// mapping the RPC's raised PT404/PT422 SQLSTATEs to HTTP status codes the
+// mapping the RPCs' raised PT404/PT422 SQLSTATEs to HTTP status codes the
 // way PostgREST itself does (a raised exception with SQLSTATE `PTnnn` maps
 // directly to HTTP status `nnn` -- confirmed against the render_prompt
 // endpoint over live Supabase in render-endpoint.test.mjs's own PT404/PT422
@@ -63,7 +63,16 @@ const PO_MIGRATIONS_IN_ORDER = [
   "20260812180000_prompt_owner_pin.sql",
   "20260812200000_prompt_observed_query_indexes.sql",
   "20260813120000_prompt_create_get_prompt_function.sql",
+  "20260813140000_prompt_security_hardening.sql",
+  "20260813150000_prompt_create_get_prompt_source_function.sql",
 ];
+
+test("real Postgres fixture applies prompt security hardening immediately before the cache-source RPC", () => {
+  const hardeningIndex = PO_MIGRATIONS_IN_ORDER.indexOf("20260813140000_prompt_security_hardening.sql");
+  const sourceIndex = PO_MIGRATIONS_IN_ORDER.indexOf("20260813150000_prompt_create_get_prompt_source_function.sql");
+  assert.ok(hardeningIndex >= 0, "the source RPC requires the prompt_get_agent role created by the security-hardening migration");
+  assert.equal(sourceIndex, hardeningIndex + 1);
+});
 
 const OWNER_UUID = "9a50a35a-8a1e-4f0c-8495-7f26777982d8";
 const STRANGER_UUID = "b2222222-2222-4222-8222-222222222222";
@@ -190,23 +199,16 @@ function pgNullableTextArray(value: unknown): string {
   const arr = value as string[];
   return `array[${arr.map((v) => pgLit(v)).join(",")}]::text[]`;
 }
-function eqFilter(raw: string | null): string | undefined {
-  if (raw === null) return undefined;
-  const m = /^eq\.(.*)$/.exec(raw);
-  return m ? m[1] : undefined;
-}
-
 // ---------------------------------------------------------------------------
-// The shim: a real node:http server answering exactly the three request
-// shapes prompt-client.ts issues (rpc/get_prompt POST; prompt and
-// prompt_version GET), each turned into a real SQL statement run with `psql`
+// The shim: a real node:http server answering exactly the two RPC request
+// shapes prompt-client.ts issues, each turned into a real SQL statement run with `psql`
 // against the real migrated database, as the `authenticated` role with
 // auth.uid() pinned from the request's own Bearer token (mirroring what
 // PostgREST + GoTrue do per-request). The Bearer token IS the uuid string in
 // this harness -- there is no real GoTrue here, and prompt-client.ts never
 // interprets the token itself, it only forwards it as an Authorization
-// header, so a plain uuid-as-token is sufficient to prove real RLS
-// enforcement end to end.
+// header, so a plain uuid-as-token is sufficient to prove the RPC's real
+// owner authorization end to end.
 // ---------------------------------------------------------------------------
 
 interface RpcResult {
@@ -223,6 +225,16 @@ function runGetPromptRpc(dbName: string, uid: string, args: Record<string, unkno
     pgNullableTextArray(args.p_sections),
   ].join(", ");
   const result = psql(dbName, asAuthenticated(uid, `select prompt.get_prompt(${argsSql});`));
+  return mapSqlRpcResult(result);
+}
+
+function runGetPromptSourceRpc(dbName: string, uid: string, args: Record<string, unknown>): RpcResult {
+  const argsSql = [pgNullableText(args.p_name), pgNullableInt(args.p_version), pgNullableInt(args.p_if_version)].join(", ");
+  const result = psql(dbName, asAuthenticated(uid, `select prompt.get_prompt_source(${argsSql});`));
+  return mapSqlRpcResult(result);
+}
+
+function mapSqlRpcResult(result: ReturnType<typeof psql>): RpcResult {
   if (result.status === 0) {
     return { status: 200, body: JSON.parse(result.stdout.trim()) };
   }
@@ -234,51 +246,6 @@ function runGetPromptRpc(dbName: string, uid: string, args: Record<string, unkno
     return { status, body: { code: codeMatch[1], message: (messageMatch ? messageMatch[1] : stderr).trim() } };
   }
   return { status: 400, body: { code: "42000", message: stderr.trim() || "unknown error" } };
-}
-
-function runPromptSelect(dbName: string, uid: string, url: URL): RpcResult {
-  const select = (url.searchParams.get("select") ?? "id,title,body,is_active")
-    .split(",")
-    .map((c) => c.trim())
-    .join(",");
-  const title = eqFilter(url.searchParams.get("title"));
-  const limit = url.searchParams.get("limit");
-  const where = title !== undefined ? `where lower(title) = lower(${pgLit(title)})` : "";
-  const limitSql = limit ? `limit ${Number(limit)}` : "";
-  const sql = `select coalesce(json_agg(row_to_json(t)), '[]'::json)::text from
-    (select ${select} from prompt.prompt ${where} ${limitSql}) t;`;
-  const result = psql(dbName, asAuthenticated(uid, sql));
-  if (result.status !== 0) return { status: 500, body: { message: result.stderr } };
-  return { status: 200, body: JSON.parse(result.stdout.trim() || "[]") };
-}
-
-function runPromptVersionSelect(dbName: string, uid: string, url: URL): RpcResult {
-  const select = (url.searchParams.get("select") ?? "prompt_id,version_no,body,created_at")
-    .split(",")
-    .map((c) => c.trim())
-    .join(",");
-  const promptId = eqFilter(url.searchParams.get("prompt_id"));
-  const versionNo = eqFilter(url.searchParams.get("version_no"));
-  const order = url.searchParams.get("order");
-  const limit = url.searchParams.get("limit");
-
-  const where: string[] = [];
-  if (promptId !== undefined) where.push(`prompt_id = ${pgLit(promptId)}::uuid`);
-  if (versionNo !== undefined) where.push(`version_no = ${Number(versionNo)}`);
-  const whereSql = where.length > 0 ? `where ${where.join(" and ")}` : "";
-
-  let orderSql = "";
-  if (order) {
-    const [col, dir] = order.split(".");
-    orderSql = `order by ${col} ${dir === "desc" ? "desc" : "asc"}`;
-  }
-  const limitSql = limit ? `limit ${Number(limit)}` : "";
-
-  const sql = `select coalesce(json_agg(row_to_json(t)), '[]'::json)::text from
-    (select ${select} from prompt.prompt_version ${whereSql} ${orderSql} ${limitSql}) t;`;
-  const result = psql(dbName, asAuthenticated(uid, sql));
-  if (result.status !== 0) return { status: 500, body: { message: result.stderr } };
-  return { status: 200, body: JSON.parse(result.stdout.trim() || "[]") };
 }
 
 interface Shim {
@@ -301,15 +268,13 @@ async function startShim(dbName: string): Promise<Shim> {
 
       try {
         let result: RpcResult;
-        if (req.method === "POST" && url.pathname === "/rest/v1/rpc/get_prompt") {
+        if (req.method === "POST" && (url.pathname === "/rest/v1/rpc/get_prompt" || url.pathname === "/rest/v1/rpc/get_prompt_source")) {
           const chunks: Buffer[] = [];
           for await (const chunk of req) chunks.push(chunk as Buffer);
           const args = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-          result = runGetPromptRpc(dbName, uid, args);
-        } else if (req.method === "GET" && url.pathname === "/rest/v1/prompt") {
-          result = runPromptSelect(dbName, uid, url);
-        } else if (req.method === "GET" && url.pathname === "/rest/v1/prompt_version") {
-          result = runPromptVersionSelect(dbName, uid, url);
+          result = url.pathname === "/rest/v1/rpc/get_prompt"
+            ? runGetPromptRpc(dbName, uid, args)
+            : runGetPromptSourceRpc(dbName, uid, args);
         } else {
           result = { status: 404, body: { message: `unhandled shim route: ${req.method} ${url.pathname}` } };
         }
@@ -368,6 +333,10 @@ function updatePromptBody(dbName: string, title: string, body: string): void {
   psqlOk(dbName, asAuthenticated(OWNER_UUID, `update prompt.prompt set body = ${pgLit(body)} where title = ${pgLit(title)};`));
 }
 
+function archivePrompt(dbName: string, title: string): void {
+  psqlOk(dbName, asAuthenticated(OWNER_UUID, `update prompt.prompt set is_active = false where title = ${pgLit(title)};`));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -383,7 +352,8 @@ test(
       assert.equal(first.text, "Hello A, repo is toolbelt.");
       assert.equal(first.version, 1);
       const requestsAfterFirst = shim.requestCount;
-      assert.ok(requestsAfterFirst > 0, "the miss must have reached the shim at least once");
+      assert.equal(requestsAfterFirst, 1, "the miss must use one atomic cache-source RPC");
+      assert.deepEqual(shim.requestLog, ["POST /rest/v1/rpc/get_prompt_source"]);
 
       const second = await asOwner.getPrompt("m4-04/pinned-fixture", { version: 1, variables: { NAME: "B", REPO: "toolbelt" } });
       assert.equal(second.text, "Hello B, repo is toolbelt.", "must reflect the NEW variables via a real local render, not stale text");
@@ -399,7 +369,7 @@ test("real Postgres + shim: an unknown prompt name maps the real PT404 raise to 
 });
 
 test(
-  "real Postgres + shim: a missing template variable maps the real PT422 raise to MissingVariablesError, naming the real missing variable",
+  "real Postgres + shim: a missing variable in the real source body maps to MissingVariablesError locally",
   { skip: SKIP_REASON },
   async () => {
     await withRealBackedClient(async ({ dbName, asOwner }) => {
@@ -416,16 +386,17 @@ test(
   },
 );
 
-test("real Postgres + shim: a different authenticated user gets PromptNotFoundError, never another owner's row (RLS, no leak)", { skip: SKIP_REASON }, async () => {
+test("real Postgres + shim: a different authenticated user is denied before source data can leak", { skip: SKIP_REASON }, async () => {
   await withRealBackedClient(async ({ dbName, shim }) => {
     insertPrompt(dbName, "m4-04/owner-only", "no vars here");
     const asStranger = createPromptClient(shim.baseUrl, async () => STRANGER_UUID);
-    await assert.rejects(() => asStranger.getPrompt("m4-04/owner-only"), PromptNotFoundError);
+    await assert.rejects(() => asStranger.getPrompt("m4-04/owner-only"), /400/);
+    assert.deepEqual(shim.requestLog, ["POST /rest/v1/rpc/get_prompt_source"]);
   });
 });
 
 test(
-  "real Postgres + shim: name@latest TTL revalidation against a REAL version bump (real UPDATE, real trigger, real probe query)",
+  "real Postgres + shim: one conditional source RPC revalidates name@latest against a REAL version bump",
   { skip: SKIP_REASON },
   async () => {
     await withRealBackedClient(async ({ dbName, shim }) => {
@@ -446,11 +417,7 @@ test(
       assert.equal(second.text, "v2 body z");
 
       const revalidationLog = shim.requestLog.slice(requestsAfterFirst);
-      assert.ok(
-        revalidationLog[0]!.includes("/rest/v1/prompt_version") && revalidationLog[0]!.includes("select=version_no"),
-        `expected the cheap probe first, got: ${revalidationLog[0]}`,
-      );
-      assert.ok(revalidationLog.length >= 2, "expected the probe plus a full re-fetch (RPC + template read) once it found a real change");
+      assert.deepEqual(revalidationLog, ["POST /rest/v1/rpc/get_prompt_source"]);
 
       const requestsAfterSecond = shim.requestCount;
       const third = await client.getPrompt("m4-04/latest-fixture", { variables: { X: "w" } });
@@ -461,7 +428,29 @@ test(
 );
 
 test(
-  "real Postgres + shim: a pinned version stays immutable against a REAL later body update (pin survives, per get_prompt's own prompt_version resolution)",
+  "real Postgres + shim: conditional latest revalidation observes archival without a version bump",
+  { skip: SKIP_REASON },
+  async () => {
+    await withRealBackedClient(async ({ dbName, shim }) => {
+      insertPrompt(dbName, "m4-04/archive-latest", "active {{X}}");
+      const client = createPromptClient(shim.baseUrl, async () => OWNER_UUID, { latestTtlMs: 5 });
+      await client.getPrompt("m4-04/archive-latest", { variables: { X: "once" } });
+      const requestsAfterFirst = shim.requestCount;
+
+      archivePrompt(dbName, "m4-04/archive-latest");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      await assert.rejects(
+        () => client.getPrompt("m4-04/archive-latest", { variables: { X: "stale" } }),
+        PromptNotFoundError,
+      );
+      assert.deepEqual(shim.requestLog.slice(requestsAfterFirst), ["POST /rest/v1/rpc/get_prompt_source"]);
+    });
+  },
+);
+
+test(
+  "real Postgres + shim: a pinned version stays immutable against a REAL later body update through get_prompt_source",
   { skip: SKIP_REASON },
   async () => {
     await withRealBackedClient(async ({ dbName, asOwner }) => {

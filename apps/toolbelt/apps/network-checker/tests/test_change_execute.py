@@ -1,120 +1,105 @@
-"""Finding 19 regression tests: execute()'s cwd resolution and its
-process-group timeout cleanup. Real subprocesses throughout -- this finding
-is entirely about what the OS actually does, so there is nothing to mock.
-Split out of test_change.py/test_change_approve.py for the same
-file-length-budget reason those two are already split from each other."""
+"""Active change executor and verification deadline security tests."""
+import argparse
 import os
-import signal
 import subprocess
 import sys
-import tempfile
-import time
 import unittest
-from pathlib import Path
+from unittest.mock import patch
 
-from netcheck import change
-
-
-def _is_effectively_dead(pid):
-    """True once `pid` is gone or a zombie. SIGKILL takes effect
-    immediately, but an orphaned process can sit as a zombie for an
-    indeterminate, container-dependent interval before whatever inherits it
-    (init, a container subreaper) calls wait() and reaps it -- confirmed
-    empirically in this sandbox (`ps` showed `Z <defunct>` for roughly a
-    second after SIGKILL landed). `kill(pid, 0)` alone cannot tell a
-    zombie apart from a genuinely still-running process (both succeed --
-    the PID slot isn't freed until reaped), so this reads
-    /proc/<pid>/stat's state field instead; Linux-only, matching
-    execute()'s own POSIX-only os.killpg/start_new_session use."""
-    try:
-        stat_line = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
-        return True
-    # Field 2 (comm) is parenthesized and may itself contain spaces/parens;
-    # splitting on the LAST ")" is what makes field 3 (state) safe to reach.
-    return stat_line.rsplit(")", 1)[1].split()[0] == "Z"
+from netcheck import change, change_exec, change_verify
 
 
-@unittest.skipUnless(sys.platform.startswith("linux"), "relies on /proc and POSIX process groups")
+class _Process:
+    def __init__(self, completed=None, timeout=False, timeout_output=None):
+        self.returncode = completed.returncode if completed else 0
+        self.out = completed.stdout if completed else ""
+        self.err = completed.stderr if completed else ""
+        self.timeout = timeout
+        self.timeout_output = timeout_output
+        self.pid = 4321
+        self.communicate_calls = 0
+
+    def communicate(self, timeout=None):
+        self.communicate_calls += 1
+        if self.timeout and self.communicate_calls == 1:
+            stdout, stderr = self.timeout_output or (None, None)
+            raise subprocess.TimeoutExpired(["python"], timeout, output=stdout, stderr=stderr)
+        return self.out, self.err
+
+    def kill(self):
+        pass
+
+
 class ExecuteHardeningTest(unittest.TestCase):
-    def test_execute_runs_in_the_app_root_regardless_of_process_cwd(self):
-        original_cwd = os.getcwd()
-        with tempfile.TemporaryDirectory() as tmp:
-            os.chdir(tmp)
-            try:
-                rc, out, _err = change.execute("pwd")
-            finally:
-                os.chdir(original_cwd)
-        self.assertEqual(rc, 0)
-        self.assertEqual(Path(out.strip()).resolve(), change._APP_ROOT)
-        self.assertNotEqual(Path(out.strip()).resolve(), Path(tmp).resolve())
+    def test_allowed_argv_runs_without_a_shell_from_the_application_root(self):
+        completed = argparse.Namespace(returncode=0, stdout="ok", stderr="")
+        with patch.object(change_exec.subprocess, "Popen",
+                          return_value=_Process(completed)) as popen:
+            self.assertEqual(change.execute(["python", "-m", "netcheck", "--version"]),
+                             (0, "ok", ""))
+        argv = popen.call_args.args[0]
+        self.assertEqual(argv[0], sys.executable)
+        self.assertEqual(argv[1:], ["-m", "netcheck", "--version"])
+        self.assertEqual(popen.call_args.kwargs["cwd"], change._APP_ROOT)
+        self.assertNotIn("shell", popen.call_args.kwargs)
 
-    def test_a_relative_script_path_resolves_against_the_app_root(self):
-        """The concrete case this matters for: change_templates.py's
-        change_cmd values are script-relative ("tools/fix_dns.sh")."""
-        rc, out, _err = change.execute("test -f tools/check.sh && echo present")
-        self.assertEqual(rc, 0)
-        self.assertEqual(out.strip(), "present")
+    def test_shell_interpreters_and_arbitrary_binaries_are_refused(self):
+        with patch.object(change_exec.subprocess, "Popen", return_value=_Process()) as popen:
+            for command in (["bash", "-c", "echo unsafe"], ["rm", "-rf", "/"],
+                            "test -f tools/check.sh",
+                            "python -m netcheck --version; rm -rf /"):
+                with self.subTest(command=command), self.assertRaises(ValueError):
+                    change.execute(command)
+        popen.assert_not_called()
 
-    def test_killing_only_the_direct_pid_would_have_left_the_descendant_running(self):
-        """Negative control, so the test below is a real contrast:
-        reproduces the OLD code's exact cleanup
-        (`subprocess.run(..., timeout=...)`, which on timeout only ever
-        kills the single pid it started) against the identical
-        background-child command, and shows the descendant is STILL
-        RUNNING afterward -- the concrete bug Finding 19 fixes."""
-        with tempfile.TemporaryDirectory() as tmp:
-            pidfile = Path(tmp) / "child.pid"
-            cmd = f"(sleep 5 & echo $! > {pidfile}); sleep 5"
-            try:
-                subprocess.run(["/bin/sh", "-c", cmd], capture_output=True,
-                               text=True, timeout=1)
-                self.fail("expected TimeoutExpired")
-            except subprocess.TimeoutExpired:
-                pass  # subprocess.run() already killed the direct /bin/sh pid here
+    @unittest.skipIf(os.name == "nt", "POSIX process-group assertion")
+    def test_timeout_kills_the_process_group_and_waits(self):
+        proc = _Process(timeout=True)
+        with patch.object(change_exec.subprocess, "Popen", return_value=proc), \
+             patch.object(change_exec.os, "killpg") as killpg:
+            rc, _out, err = change.execute(
+                ["python", "-m", "netcheck", "--version"], timeout=0.01)
+        self.assertEqual(rc, 124)
+        self.assertIn("timed out", err)
+        killpg.assert_called_once_with(proc.pid, change_exec.signal.SIGKILL)
+        self.assertEqual(proc.communicate_calls, 2)
 
-            deadline = time.monotonic() + 2
-            while not pidfile.exists() and time.monotonic() < deadline:
-                time.sleep(0.05)
-            child_pid = int(pidfile.read_text().strip())
-            self.assertFalse(
-                _is_effectively_dead(child_pid),
-                "the old single-pid kill left the backgrounded descendant "
-                "running -- this is exactly what Finding 19's process-group "
-                "kill fixes")
-            os.kill(child_pid, signal.SIGKILL)  # clean up after the negative control
+    @unittest.skipIf(os.name == "nt", "POSIX process-group assertion")
+    def test_timeout_tolerates_a_process_group_that_already_exited(self):
+        proc = _Process(timeout=True)
+        with patch.object(change_exec.subprocess, "Popen", return_value=proc), \
+             patch.object(change_exec.os, "killpg", side_effect=ProcessLookupError):
+            rc, _out, err = change.execute(
+                ["python", "-m", "netcheck", "--version"], timeout=0.01)
+        self.assertEqual(rc, 124)
+        self.assertIn("timed out", err)
+        self.assertEqual(proc.communicate_calls, 2)
 
-    def test_timeout_kills_the_whole_process_group_not_just_the_shell(self):
-        """Proves the concrete Finding 19 guarantee: a backgrounded
-        descendant of the timed-out /bin/sh does not outlive the timeout.
-        Uses execute()'s test-only `timeout` override to exercise this in
-        about a second instead of the real 90s budget."""
-        with tempfile.TemporaryDirectory() as tmp:
-            pidfile = Path(tmp) / "child.pid"
-            cmd = f"(sleep 5 & echo $! > {pidfile}); sleep 5"
-            start = time.monotonic()
-            rc, _out, err = change.execute(cmd, timeout=1)
-            elapsed = time.monotonic() - start
-            self.assertEqual(rc, 124)
-            self.assertIn("timed out", err)
-            self.assertLess(elapsed, 5,
-                            "execute() must return promptly, not wait out the "
-                            "backgrounded child's own sleep")
+    def test_timeout_normalizes_partial_byte_output_after_reaping(self):
+        proc = _Process(timeout=True, timeout_output=(b"partial-out", b"partial-err"))
+        with patch.object(change_exec.subprocess, "Popen", return_value=proc), \
+             patch.object(change_exec, "_stop_tree"):
+            rc, out, err = change.execute(
+                ["python", "-m", "netcheck", "--version"], timeout=0.01)
+        self.assertEqual((rc, out), (124, "partial-out"))
+        self.assertIn("partial-err", err)
+        self.assertIn("timed out", err)
+        self.assertIsInstance(out, str)
+        self.assertIsInstance(err, str)
 
-            deadline = time.monotonic() + 2
-            while not pidfile.exists() and time.monotonic() < deadline:
-                time.sleep(0.05)
-            self.assertTrue(pidfile.exists(), "the backgrounded child never even started")
-            child_pid = int(pidfile.read_text().strip())
 
-            dead_deadline = time.monotonic() + 3
-            while not _is_effectively_dead(child_pid) and time.monotonic() < dead_deadline:
-                time.sleep(0.1)
-            self.assertTrue(
-                _is_effectively_dead(child_pid),
-                "the backgrounded descendant of the timed-out /bin/sh must not "
-                "still be running -- proves killpg reached it, not just the "
-                "/bin/sh -c pid itself")
+class VerificationDeadlineTest(unittest.TestCase):
+    def test_probe_runtime_shares_one_ninety_second_budget(self):
+        elapsed = [0.0]
+
+        def bounded_probe(_expr, timeout):
+            elapsed[0] += min(timeout, 20)
+            return False, {"field": "dns_public", "want": "ok", "got": "fail"}
+
+        with patch.object(change_verify, "run", side_effect=bounded_probe), \
+             patch.object(change_verify.time, "monotonic", side_effect=lambda: elapsed[0]):
+            change._verify_with_retry("dns_public:ok", attempts=5, budget_s=90)
+        self.assertLessEqual(elapsed[0], 90)
 
 
 if __name__ == "__main__":

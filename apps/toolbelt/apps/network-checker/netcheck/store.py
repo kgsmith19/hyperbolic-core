@@ -4,7 +4,6 @@ Column names live in schema.sql alone and are read back via PRAGMA, so adding a
 probe means editing one file, and a typo'd probe key raises instead of silently
 writing nothing.
 """
-import contextlib
 import json
 import sqlite3
 import urllib.error
@@ -12,7 +11,17 @@ import urllib.request
 from pathlib import Path
 
 SCHEMA = Path(__file__).with_name("schema.sql")
-SYNCED_TABLES = ("samples", "events", "llm_errors", "env_scans")
+SYNCED_TABLES = ("samples", "events", "llm_errors", "env_scans",
+                 "device", "interface", "config_item")
+_CONFLICT_TARGETS = {
+    "samples": "host,ts",
+    "events": "host,ts,kind",
+    "llm_errors": "host,ts,detail",
+    "env_scans": "host,ts",
+    "device": "host,identity",
+    "interface": "host,device_mac,device_ip,name,observed_at",
+    "config_item": "host,device_mac,device_ip,key,observed_at",
+}
 
 
 def open_db(path):
@@ -26,26 +35,6 @@ def open_db(path):
     conn.executescript(SCHEMA.read_text())
     _migrate(conn)
     return conn
-
-
-@contextlib.contextmanager
-def transaction(conn):
-    """Explicit BEGIN/COMMIT/ROLLBACK for one multi-statement write
-    (Finding 63, independent security review; first caller:
-    inventory.record_inventory()). open_db() above uses
-    isolation_level=None -- real SQLite autocommit, one statement is one
-    commit on its own -- so a caller making several related writes gets no
-    all-or-nothing guarantee for free. On a clean exit this COMMITs; on
-    any exception it ROLLBACKs everything written since BEGIN and
-    re-raises, so the caller's partial writes never persist."""
-    conn.execute("BEGIN")
-    try:
-        yield conn
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
-    else:
-        conn.execute("COMMIT")
 
 
 def _migrate(conn):
@@ -186,7 +175,8 @@ def mirror(conn, url=None, key=None, host_name=None):
         pending = unsynced(conn, table)
         if not pending:
             continue
-        err = _push((url, key), table, pending, host_name)
+        remote = [for_remote(conn, table, row, host_name) for row in pending]
+        err = _push((url, key), table, remote)
         if err:
             # `report` spreads first so it cannot overwrite the failure state.
             return {**report, "state": "fail", "reason": err}
@@ -195,7 +185,11 @@ def mirror(conn, url=None, key=None, host_name=None):
     return report
 
 
-def _push(supabase, table, rows, host_name):
+def _conflict_policy(table):
+    return "merge-duplicates" if table == "device" else "ignore-duplicates"
+
+
+def _push(supabase, table, rows):
     """POST one table's pending rows. Returns an error string, or None.
 
     A link that is down is expected, not exceptional: the caller leaves the
@@ -203,12 +197,14 @@ def _push(supabase, table, rows, host_name):
     an error rather than raising.
     """
     url, key = supabase
-    body = json.dumps([_for_remote(r, host_name) for r in rows]).encode()
+    body = json.dumps(rows).encode()
+    endpoint = (f"{url.rstrip('/')}/rest/v1/{table}"
+                f"?on_conflict={_CONFLICT_TARGETS[table]}")
     req = urllib.request.Request(
-        f"{url.rstrip('/')}/rest/v1/{table}", data=body, method="POST",
+        endpoint, data=body, method="POST",
         headers={"apikey": key, "Authorization": f"Bearer {key}",
                  "Content-Type": "application/json",
-                 "Prefer": "resolution=ignore-duplicates,return=minimal"})
+                 "Prefer": f"resolution={_conflict_policy(table)},return=minimal"})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             return f"HTTP {r.status}" if r.status >= 300 else None
@@ -227,4 +223,24 @@ def _for_remote(row, host_name):
             out["payload"] = json.loads(out["payload"])
         except ValueError:
             pass
+    return out
+
+
+def for_remote(conn, table, row, host_name):
+    """Map local surrogate device ids to the remote natural-key contract."""
+    out = _for_remote(row, host_name)
+    if table == "device":
+        key, value = ("mac", out.get("mac")) if out.get("mac") else ("ip", out.get("ip"))
+        if value is None:
+            raise ValueError("device mirror identity requires a MAC or IP")
+        out["identity"] = f"{key}:{value.lower() if key == 'mac' else value}"
+        return out
+    if table not in ("interface", "config_item"):
+        return out
+    device = conn.execute(
+        "SELECT mac, ip FROM device WHERE id=?", (row["device_id"],)).fetchone()
+    if device is None:
+        raise ValueError(f"missing device {row['device_id']} for {table} row")
+    out.pop("device_id", None)
+    out["device_mac"], out["device_ip"] = device["mac"], device["ip"]
     return out

@@ -25,8 +25,9 @@ const TOOLBELT_ROOT = join(__dirname, "..");
 const MIGRATIONS_DIR = join(TOOLBELT_ROOT, "supabase", "migrations");
 const MANIFEST_PATH = join(TOOLBELT_ROOT, "tool.json");
 const EXTENSION_UP = join(MIGRATIONS_DIR, "20260812230000_core_app_registry_extension.sql");
-const REGISTER_UP = join(MIGRATIONS_DIR, "20260814110000_register_toolbelt.sql");
-const REGISTER_DOWN = join(MIGRATIONS_DIR, "20260814110000_register_toolbelt_down.sql");
+const BASE_REGISTER_UP = join(MIGRATIONS_DIR, "20260814110000_register_toolbelt.sql");
+const REGISTER_UP = join(MIGRATIONS_DIR, "20260814130000_register_toolbelt-v0.1.1.sql");
+const REGISTER_DOWN = join(MIGRATIONS_DIR, "20260814130000_register_toolbelt-v0.1.1_down.sql");
 
 const HASH_LINE_RE = /^\s*'([0-9a-f]{64})',\s*$/m;
 
@@ -34,7 +35,7 @@ const HASH_LINE_RE = /^\s*'([0-9a-f]{64})',\s*$/m;
 
 test("tool.json's register field names the real registration migration file, not the scaffold placeholder", () => {
   const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
-  assert.equal(manifest.lifecycle.register, "20260814110000_register_toolbelt.sql");
+  assert.equal(manifest.lifecycle.register, "20260814130000_register_toolbelt-v0.1.1.sql");
   assert.notEqual(manifest.lifecycle.register, "pending-m3-02");
 });
 
@@ -70,8 +71,8 @@ test("the registration migration is an upsert keyed on core.app.id, and its ON C
 
 test("apps/toolbelt/supabase/migrations/ contains the toolbelt registration migration pair", () => {
   const onDisk = new Set(readdirSync(MIGRATIONS_DIR));
-  assert.ok(onDisk.has("20260814110000_register_toolbelt.sql"));
-  assert.ok(onDisk.has("20260814110000_register_toolbelt_down.sql"));
+  assert.ok(onDisk.has("20260814130000_register_toolbelt-v0.1.1.sql"));
+  assert.ok(onDisk.has("20260814130000_register_toolbelt-v0.1.1_down.sql"));
 });
 
 // --- Real-Postgres proof: upsert idempotency, down-migration safety ---
@@ -104,6 +105,9 @@ function detectRunner() {
 }
 
 const RUNNER = detectRunner();
+if (process.env.TOOLBELT_REQUIRE_POSTGRES === "1" && !RUNNER) {
+  throw new Error("TOOLBELT_REQUIRE_POSTGRES=1 but no local PostgreSQL server is reachable");
+}
 const SKIP_REASON = RUNNER
   ? false
   : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); see the m3-02/m3-05 " +
@@ -136,13 +140,14 @@ test(
     try {
       psqlOk(db, PRE_STATE_SQL);
       psqlOk(db, readFileSync(EXTENSION_UP, "utf8"));
+      psqlOk(db, readFileSync(BASE_REGISTER_UP, "utf8"));
       psqlOk(db, readFileSync(REGISTER_UP, "utf8"));
 
       const row = psqlOk(
         db,
         "select id, kind, schema_name, coalesce(route,'<null>'), status, manifest_hash from core.app where id = 'toolbelt';",
       ).trim();
-      assert.equal(row, "toolbelt|headless|core|<null>|building|9047af64aa7e5db516e2291f9b0bb4777cf4d9f56c2ad7b3f80749fa9f190828");
+      assert.equal(row, "toolbelt|headless|core|<null>|building|236bcd27eb6241c869db600b462449306f4e3fb2109a2ff738369333d295a865");
     } finally {
       psqlOk("postgres", `drop database if exists ${db};`);
     }
@@ -158,6 +163,7 @@ test(
     try {
       psqlOk(db, PRE_STATE_SQL);
       psqlOk(db, readFileSync(EXTENSION_UP, "utf8"));
+      psqlOk(db, readFileSync(BASE_REGISTER_UP, "utf8"));
       psqlOk(db, readFileSync(REGISTER_UP, "utf8"));
 
       const fingerprintQuery =
@@ -180,7 +186,7 @@ test(
 );
 
 test(
-  "real Postgres: the down migration never deletes the toolbelt row, only resets it to pre-registration defaults",
+  "real Postgres: the down migration never deletes the toolbelt row and restores the preceding v0.1.0 registration",
   { skip: SKIP_REASON },
   () => {
     const db = freshDbName();
@@ -188,6 +194,7 @@ test(
     try {
       psqlOk(db, PRE_STATE_SQL);
       psqlOk(db, readFileSync(EXTENSION_UP, "utf8"));
+      psqlOk(db, readFileSync(BASE_REGISTER_UP, "utf8"));
       psqlOk(db, readFileSync(REGISTER_UP, "utf8"));
       assert.equal(psqlOk(db, "select count(*) from core.app;").trim(), "1");
 
@@ -198,9 +205,10 @@ test(
         db,
         "select status, kind, coalesce(route,'<null>'), version, coalesce(manifest_hash,'<null>') from core.app where id = 'toolbelt';",
       ).trim();
-      assert.equal(row, "idea|ui|<null>|0.0.0|<null>");
+      assert.equal(row, "building|headless|<null>|0.1.0|9047af64aa7e5db516e2291f9b0bb4777cf4d9f56c2ad7b3f80749fa9f190828");
     } finally {
       psqlOk("postgres", `drop database if exists ${db};`);
     }
   },
 );
+

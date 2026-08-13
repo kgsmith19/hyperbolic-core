@@ -43,7 +43,7 @@ export { ThemeSwitch } from "./chrome/theme-switch";
 // this package's public entry; Settings (05-a section 8, "Theme
 // (light/dark/system), persisted locally") is that consumer. Purely
 // additive -- no existing export's shape changes.
-export { useThemeChoice } from "./chrome/theme";
+export { applyThemeChoice, useThemeChoice } from "./chrome/theme";
 export type { ThemeChoice } from "./chrome/theme";
 export { paletteMatch } from "./chrome/palette-match";
 

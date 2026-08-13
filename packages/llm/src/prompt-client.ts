@@ -35,7 +35,7 @@
  * tests already use (see tests/cache.test.mjs).
  *
  * Anon-key gap: same posture as registry.ts's own documented judgment call.
- * `rpc/get_prompt` needs a PostgREST `apikey` header alongside the caller's
+ * Prompt RPCs need a PostgREST `apikey` header alongside the caller's
  * bearer token regardless of how valid that token is (Supabase's gateway
  * rejects a request with no `apikey` header at all), and section 6 has no
  * slot for a project-specific key either. This hardcodes the exact same
@@ -158,17 +158,11 @@ class Lru<K, V> {
 // ---------------------------------------------------------------------------
 // Cache entries.
 //
-// A pinned entry stores the RAW template body (not a rendered string) plus
-// its version_no; it is immutable for process lifetime once written (no TTL
-// field at all -- there is nothing to expire). A latest entry additionally
-// carries `promptId`, the one piece of information the TTL revalidation
-// probe needs and the get_prompt RPC's own response never includes (its
-// shape is exactly `{text, version_no, rendered_at}`, section 1.2's OpenAPI
-// fragment) -- learned via one supplementary raw `prompt` fetch the first
-// time a name@latest entry is populated (section 4's own latency table
-// budgets exactly this path: "Raw fetch (GET /rest/v1/prompt single row by
-// title)"), and reused for every revalidation after that without needing to
-// look it up again.
+// A pinned entry stores the raw template body (not a rendered string) plus
+// its version_no; it is immutable for process lifetime once written. A
+// latest entry adds only its expiry. Both are populated atomically by
+// rpc/get_prompt_source, so the client never needs prompt table privileges
+// and never combines a rendered RPC response with a later table read.
 // ---------------------------------------------------------------------------
 
 interface PinnedEntry {
@@ -176,10 +170,7 @@ interface PinnedEntry {
   versionNo: number;
 }
 
-interface LatestEntry {
-  promptId: string;
-  body: string;
-  versionNo: number;
+interface LatestEntry extends PinnedEntry {
   expiresAt: number; // epoch ms
 }
 
@@ -189,14 +180,22 @@ interface GetPromptRpcResponse {
   rendered_at: string;
 }
 
+interface GetPromptSourceRpcResponse {
+  body: string | null;
+  version_no: number;
+  not_modified: boolean;
+}
+
 interface PostgrestErrorBody {
   code?: string;
   message?: string;
 }
 
+const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 function schemaHeaders(apiKey: string, token: string): HeadersInit {
-  // Both Accept-Profile and Content-Profile are sent on every call,
-  // regardless of verb -- the same convention apps/toolbelt/tests/
+  // Both Accept-Profile and Content-Profile are sent on every RPC call --
+  // the same convention apps/toolbelt/tests/
   // helpers.mjs's shared rest() helper already uses for every non-public
   // schema request in this monorepo.
   return {
@@ -228,69 +227,76 @@ async function callGetPrompt(base: string, apiKey: string, token: string, name: 
     }),
   });
 
-  if (res.status === 404 || res.status === 422) {
-    const body = (await res.json().catch(() => ({}))) as PostgrestErrorBody;
-    const message = body.message ?? `prompt-client: rpc/get_prompt failed with ${res.status}`;
-    if (res.status === 404) throw new PromptNotFoundError(message);
-    throw new MissingVariablesError(parseMissingVariables(message), message);
+  return parseGetPromptResponse(await readRpcResponse<unknown>(res, "get_prompt"), opts.version ?? null);
+}
+
+async function callGetPromptSource(
+  base: string,
+  apiKey: string,
+  token: string,
+  name: string,
+  version: number | null,
+  ifVersion: number | null,
+): Promise<GetPromptSourceRpcResponse> {
+  const res = await fetch(`${base}/rest/v1/rpc/get_prompt_source`, {
+    method: "POST",
+    headers: { ...schemaHeaders(apiKey, token), "Content-Type": "application/json" },
+    body: JSON.stringify({ p_name: name, p_version: version, p_if_version: ifVersion }),
+  });
+  return parseGetPromptSourceResponse(await readRpcResponse<unknown>(res, "get_prompt_source"), version);
+}
+
+function parseGetPromptSourceResponse(value: unknown, expectedVersion: number | null): GetPromptSourceRpcResponse {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("prompt-client: invalid get_prompt_source response");
   }
+  const source = value as Record<string, unknown>;
+  const validVersion = Number.isSafeInteger(source.version_no) && (source.version_no as number) > 0;
+  const validBody = source.not_modified === true ? source.body === null : source.not_modified === false && typeof source.body === "string";
+  const matchesRequestedVersion = expectedVersion === null || source.version_no === expectedVersion;
+  if (!validVersion || !validBody || !matchesRequestedVersion) {
+    throw new Error("prompt-client: invalid get_prompt_source response");
+  }
+  return source as unknown as GetPromptSourceRpcResponse;
+}
+
+function parseGetPromptResponse(value: unknown, expectedVersion: number | null): GetPromptRpcResponse {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("prompt-client: invalid get_prompt response");
+  }
+  const rendered = value as Record<string, unknown>;
+  const validVersion = Number.isSafeInteger(rendered.version_no) && (rendered.version_no as number) > 0;
+  const validRenderedAt =
+    typeof rendered.rendered_at === "string" &&
+    ISO_TIMESTAMP_RE.test(rendered.rendered_at) &&
+    Number.isFinite(Date.parse(rendered.rendered_at));
+  const matchesRequestedVersion = expectedVersion === null || rendered.version_no === expectedVersion;
+  if (typeof rendered.text !== "string" || !validVersion || !validRenderedAt || !matchesRequestedVersion) {
+    throw new Error("prompt-client: invalid get_prompt response");
+  }
+  return rendered as unknown as GetPromptRpcResponse;
+}
+
+async function readRpcResponse<T>(res: Response, rpcName: string): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`prompt-client: rpc/get_prompt failed with ${res.status}${text ? `: ${text}` : ""}`);
+    let body: PostgrestErrorBody = {};
+    try {
+      body = JSON.parse(text) as PostgrestErrorBody;
+    } catch {
+      // Preserve the raw response in the generic error below.
+    }
+    const message = body.message ?? `prompt-client: rpc/${rpcName} failed with ${res.status}`;
+    if (res.status === 404 && body.code === "PT404") {
+      throw new PromptNotFoundError(message);
+    }
+    const missing = parseMissingVariables(message);
+    if (res.status === 422 && body.code === "PT422" && missing.length > 0) {
+      throw new MissingVariablesError(missing, message);
+    }
+    throw new Error(`prompt-client: rpc/${rpcName} failed with ${res.status}${text ? `: ${text}` : ""}`);
   }
-  return (await res.json()) as GetPromptRpcResponse;
-}
-
-// Raw, un-rendered single-row fetch by title -- section 4's budgeted "Raw
-// fetch" path, used only to learn `id` (and, for the latest tier, the raw
-// template body) so future calls can render locally.
-async function fetchPromptByTitle(base: string, apiKey: string, token: string, name: string): Promise<{ id: string; body: string } | undefined> {
-  const url = `${base}/rest/v1/prompt?title=eq.${encodeURIComponent(name)}&select=id,body&limit=1`;
-  const res = await fetch(url, { headers: schemaHeaders(apiKey, token) });
-  if (!res.ok) return undefined;
-  const rows = (await res.json()) as Array<{ id: string; body: string }>;
-  return rows[0];
-}
-
-// A pinned version's raw body lives on prompt_version, not the live
-// prompt.body (section 1.2/7: a pin survives later edits to the live row).
-async function fetchPinnedBody(base: string, apiKey: string, token: string, promptId: string, version: number): Promise<string | undefined> {
-  const url = `${base}/rest/v1/prompt_version?prompt_id=eq.${encodeURIComponent(promptId)}&version_no=eq.${version}&select=body&limit=1`;
-  const res = await fetch(url, { headers: schemaHeaders(apiKey, token) });
-  if (!res.ok) return undefined;
-  const rows = (await res.json()) as Array<{ body: string }>;
-  return rows[0]?.body;
-}
-
-// The cheapest possible revalidation query, section 4's exact shape:
-// `GET /rest/v1/prompt_version?prompt_id=eq.<id>&select=version_no&order=
-// version_no.desc&limit=1`. version_no stands in for an ETag PostgREST does
-// not send on these responses.
-//
-// KNOWN LIMITATION, found during review of this issue and deliberately NOT
-// silently patched here, because closing it changes a protocol 05-d section 4
-// pins exactly: this probe cannot observe ARCHIVAL. `prompt.record_version`
-// fires `after insert or update of body` (migration 20260807041000), so
-// flipping `is_active` to false creates no new version -- the probe keeps
-// reporting an unchanged version_no, the TTL is extended, and a `@latest`
-// entry for an archived prompt is served for the rest of the process
-// lifetime. The server disagrees: get_prompt's latest branch raises PT404
-// for an archived prompt (migration 20260813120000), so a cache-warm client
-// and a cold one answer the same call differently, permanently.
-//
-// This matters because archiving is the operator's only deprecation
-// mechanism (05-d section 5: "create-new-and-archive-old is the rename
-// path") and section 5 puts interactive surfaces on `@latest` -- exactly the
-// affected tier. Pinned consumers (the Brain) are unaffected by
-// construction. Closing it is a spec decision, not a client one: either
-// widen revalidation to read `is_active` (a second cheap query, or a
-// `prompt`-side probe), or make archival bump a version.
-async function probeVersionNo(base: string, apiKey: string, token: string, promptId: string): Promise<number | undefined> {
-  const url = `${base}/rest/v1/prompt_version?prompt_id=eq.${encodeURIComponent(promptId)}&select=version_no&order=version_no.desc&limit=1`;
-  const res = await fetch(url, { headers: schemaHeaders(apiKey, token) });
-  if (!res.ok) return undefined;
-  const rows = (await res.json()) as Array<{ version_no: number }>;
-  return rows[0]?.version_no;
+  return (await res.json()) as T;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,10 +306,20 @@ async function probeVersionNo(base: string, apiKey: string, token: string, promp
 export function createPromptClient(supabaseUrl: string, getAccessToken: () => Promise<string>, options: PromptClientOptions = {}): PromptClient {
   const base = supabaseUrl.replace(/\/+$/, "");
   const apiKey = options.anonKey ?? DEFAULT_ANON_KEY;
+  const maxPinnedEntries = options.maxPinnedEntries ?? DEFAULT_MAX_PINNED_ENTRIES;
   const latestTtlMs = options.latestTtlMs ?? DEFAULT_LATEST_TTL_MS;
 
-  const pinnedCache = new Lru<string, PinnedEntry>(options.maxPinnedEntries ?? DEFAULT_MAX_PINNED_ENTRIES);
+  if (!Number.isSafeInteger(maxPinnedEntries) || maxPinnedEntries <= 0) {
+    throw new RangeError("prompt-client: maxPinnedEntries must be a positive integer");
+  }
+  if (!Number.isSafeInteger(latestTtlMs) || latestTtlMs <= 0) {
+    throw new RangeError("prompt-client: latestTtlMs must be a positive integer");
+  }
+
+  const pinnedCache = new Lru<string, PinnedEntry>(maxPinnedEntries);
   const latestCache = new Map<string, LatestEntry>();
+  const latestFlights = new Map<string, Promise<LatestEntry>>();
+  const latestGenerations = new Map<string, number>();
 
   function toRendered(rpc: GetPromptRpcResponse): RenderedPrompt {
     return { text: rpc.text, version: rpc.version_no, renderedAt: rpc.rendered_at };
@@ -319,6 +335,13 @@ export function createPromptClient(supabaseUrl: string, getAccessToken: () => Pr
     return { text: result.text, version: versionNo, renderedAt: new Date().toISOString() };
   }
 
+  function sourceEntry(source: GetPromptSourceRpcResponse): PinnedEntry {
+    if (source.not_modified || source.body === null) {
+      throw new Error("prompt-client: rpc/get_prompt_source returned no body for an unconditional read");
+    }
+    return { body: source.body, versionNo: source.version_no };
+  }
+
   // A per-call saved `config` name is resolved server-side (get_prompt
   // merges its values/sections before rendering); this client does not
   // cache configuration rows, so a call naming one always goes to the
@@ -327,61 +350,72 @@ export function createPromptClient(supabaseUrl: string, getAccessToken: () => Pr
   // oversight: it keeps the cache exactly the two tiers section 4 specifies.
   async function getPinned(name: string, opts: GetPromptOptions, version: number): Promise<RenderedPrompt> {
     const key = `${name}@${version}`;
-    const cached = pinnedCache.get(key);
-    if (cached && opts.config === undefined) {
+    const cached = opts.config === undefined ? pinnedCache.get(key) : undefined;
+    if (cached) {
       return renderFromCache(cached.body, cached.versionNo, opts);
     }
 
     const token = await getAccessToken();
-    const rpc = await callGetPrompt(base, apiKey, token, name, opts);
-
-    if (!cached) {
-      // Best-effort cache population: failure here never fails the call
-      // that's already been satisfied by the RPC above, it just leaves this
-      // pinned version uncached (a future call re-tries the same miss path).
-      const row = await fetchPromptByTitle(base, apiKey, token, name).catch(() => undefined);
-      const body = row ? await fetchPinnedBody(base, apiKey, token, row.id, version).catch(() => undefined) : undefined;
-      if (body !== undefined) pinnedCache.set(key, { body, versionNo: rpc.version_no });
+    if (opts.config !== undefined) {
+      return toRendered(await callGetPrompt(base, apiKey, token, name, opts));
     }
-    return toRendered(rpc);
+
+    const entry = sourceEntry(await callGetPromptSource(base, apiKey, token, name, version, null));
+    pinnedCache.set(key, entry);
+    return renderFromCache(entry.body, entry.versionNo, opts);
+  }
+
+  async function loadLatest(name: string, cached: LatestEntry | undefined, generation: number): Promise<LatestEntry> {
+    const token = await getAccessToken();
+    let source: GetPromptSourceRpcResponse;
+    try {
+      source = await callGetPromptSource(base, apiKey, token, name, null, cached?.versionNo ?? null);
+    } catch (error) {
+      // A failed conditional must never make stale data eligible again. In
+      // particular, PT404 is how archival invalidates a warm latest entry.
+      if ((latestGenerations.get(name) ?? 0) === generation) latestCache.delete(name);
+      throw error;
+    }
+
+    if (cached && source.not_modified) {
+      if (source.body !== null || source.version_no !== cached.versionNo) {
+        if ((latestGenerations.get(name) ?? 0) === generation) latestCache.delete(name);
+        throw new Error("prompt-client: rpc/get_prompt_source returned an invalid not-modified response");
+      }
+      if ((latestGenerations.get(name) ?? 0) === generation) cached.expiresAt = Date.now() + latestTtlMs;
+      return cached;
+    }
+
+    const entry = sourceEntry(source);
+    const latest = { ...entry, expiresAt: Date.now() + latestTtlMs };
+    if ((latestGenerations.get(name) ?? 0) === generation) latestCache.set(name, latest);
+    return latest;
   }
 
   async function getLatest(name: string, opts: GetPromptOptions): Promise<RenderedPrompt> {
-    const now = Date.now();
-    let cached = latestCache.get(name);
-    let token: string | undefined;
-
-    if (cached && now >= cached.expiresAt) {
-      token = await getAccessToken();
-      const probed = await probeVersionNo(base, apiKey, token, cached.promptId).catch(() => undefined);
-      if (probed !== undefined && probed === cached.versionNo) {
-        // Unchanged version_no: reuse the cached template body verbatim,
-        // zero body re-fetch -- only the probe query above touched the
-        // network. Extend the TTL so the next call within the window is a
-        // pure hit again.
-        cached.expiresAt = Date.now() + latestTtlMs;
-      } else {
-        // Changed version_no (or the probe itself failed): the entry is
-        // stale. Falling through re-fetches in full and replaces it.
-        latestCache.delete(name);
-        cached = undefined;
-      }
+    if (opts.config !== undefined) {
+      const token = await getAccessToken();
+      return toRendered(await callGetPrompt(base, apiKey, token, name, opts));
     }
 
-    if (cached && opts.config === undefined) {
+    const cached = latestCache.get(name);
+    if (cached && Date.now() < cached.expiresAt) {
       return renderFromCache(cached.body, cached.versionNo, opts);
     }
 
-    token = token ?? (await getAccessToken());
-    const rpc = await callGetPrompt(base, apiKey, token, name, opts);
-
-    if (!cached) {
-      const row = await fetchPromptByTitle(base, apiKey, token, name).catch(() => undefined);
-      if (row) {
-        latestCache.set(name, { promptId: row.id, body: row.body, versionNo: rpc.version_no, expiresAt: Date.now() + latestTtlMs });
-      }
+    let flight = latestFlights.get(name);
+    if (!flight) {
+      const generation = latestGenerations.get(name) ?? 0;
+      let tracked: Promise<LatestEntry>;
+      tracked = loadLatest(name, cached, generation).finally(() => {
+        if (latestFlights.get(name) === tracked) latestFlights.delete(name);
+      });
+      latestFlights.set(name, tracked);
+      flight = tracked;
     }
-    return toRendered(rpc);
+
+    const latest = await flight;
+    return renderFromCache(latest.body, latest.versionNo, opts);
   }
 
   return {
@@ -389,7 +423,9 @@ export function createPromptClient(supabaseUrl: string, getAccessToken: () => Pr
       return opts.version !== undefined ? getPinned(name, opts, opts.version) : getLatest(name, opts);
     },
     invalidate(name: string): void {
+      latestGenerations.set(name, (latestGenerations.get(name) ?? 0) + 1);
       latestCache.delete(name);
+      latestFlights.delete(name);
     },
   };
 }

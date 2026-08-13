@@ -10,7 +10,7 @@
 // with neutral (not danger-red) styling, because "ACC unreachable" from off
 // the operator machine is an EXPECTED state (05-b section 5), not an error.
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Spinner } from "@hyperbolic/ui";
-import { ACC_BASE_URL, useAccStatus } from "../lib/acc";
+import { ACC_BASE_URL, authenticatedAccUiUrl, useAccStatus } from "../lib/acc";
 
 const TIER_LABEL: Record<"green" | "amber" | "red", string> = {
   green: "Spending is fine",
@@ -47,7 +47,8 @@ function AccStatusCard() {
               No response from the operator-machine loopback API at{" "}
               <code className="font-mono">{ACC_BASE_URL}</code>. This is expected unless you are
               browsing from the machine running <code className="font-mono">npm run gui</code> in
-              the ACC repo (docs/planning/05-b-acc.md section 5).
+              the ACC repo. If the browser asks, allow local network access and then Retry
+              (docs/planning/05-b-acc.md section 5).
             </p>
             <Button type="button" variant="outline" size="sm" onClick={retry} className="self-start">
               Retry
@@ -75,6 +76,13 @@ function AccStatusCard() {
           href={ACC_BASE_URL}
           target="_blank"
           rel="noreferrer"
+          onClick={(event) => {
+            const url = authenticatedAccUiUrl();
+            if (url !== ACC_BASE_URL) {
+              event.preventDefault();
+              window.open(url, "_blank", "noopener,noreferrer");
+            }
+          }}
           className="text-sm font-medium text-accent hover:underline"
         >
           Open ACC UI ↗

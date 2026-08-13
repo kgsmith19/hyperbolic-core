@@ -1,114 +1,118 @@
-// Shape-level tests for docs/ops/tailscale-serve-apply.sh
-// (docs/planning/issues/m2-04-feat-shell-serve-routes.md).
-//
-// What this file CAN prove, in this sandbox, without a real tailnet or a
-// `tailscale` binary: the script's --dry-run plan is a deterministic,
-// syntactically valid set of `tailscale serve` invocations matching the
-// m2-04 route table, and that dry-run mode never shells out to `tailscale`
-// at all (so it's safe to preview even on a machine without the CLI
-// installed). What this file CANNOT prove, and does not pretend to: that
-// running --apply against a real VPS actually converges tailscaled's
-// config to this plan. That is an operator task, recorded honestly as such
-// in docs/ops/runbook.md -- there is no live tailnet anywhere this test
-// suite runs, and faking one (e.g. a stub `tailscale` binary that always
-// "succeeds") would only prove the stub works, not the real command shape,
-// which is exactly the kind of hollow gate the project's quality bar rules
-// out.
-//
-// Run with: node --test docs/ops/tailscale-serve-apply.test.mjs
-
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const scriptPath = path.join(here, "tailscale-serve-apply.sh");
+const script = path.join(path.dirname(fileURLToPath(import.meta.url)), "tailscale-serve-apply.sh");
+const temporaryDirectories = [];
 
-// A conservative shape check for a `tailscale serve` invocation: the
-// literal subcommand, a --bg flag, an --https=<port> flag, a
-// --set-path=<path> flag whose path starts with "/", and a non-empty
-// target (either an absolute local path or an http:// URL), in that order
-// -- matching exactly what the script emits and what Tailscale's own docs
-// (tailscale.com/kb/1242) show for the --set-path mount-point form.
-const VALID_SERVE_LINE =
-  /^tailscale serve --bg --https=\d+ --set-path=\/\S* (\/\S+|https?:\/\/\S+)$/;
+after(() => {
+  for (const directory of temporaryDirectories) rmSync(directory, { recursive: true, force: true });
+});
 
-function runDryRun(env = process.env) {
-  return execFileSync(scriptPath, ["--dry-run"], { encoding: "utf8", env }).trim();
+function run(...args) {
+  return execFileSync(script, args, { encoding: "utf8" }).trim();
 }
 
-test("dry-run plan is non-empty and every line is a syntactically valid `tailscale serve` invocation", () => {
-  const output = runDryRun();
-  const lines = output.split("\n").filter((l) => l.length > 0);
-  assert.ok(lines.length > 0, "expected at least one planned command");
-  for (const line of lines) {
-    assert.match(line, VALID_SERVE_LINE, `not a valid tailscale serve invocation: ${line}`);
+function applyFixture(lifeIndex) {
+  const root = mkdtempSync(path.join(os.tmpdir(), "tailscale-serve-apply-"));
+  temporaryDirectories.push(root);
+  const bin = path.join(root, "bin");
+  const deploy = path.join(root, "deploy");
+  const log = path.join(root, "tailscale.log");
+  mkdirSync(path.join(deploy, "shell", "current"), { recursive: true });
+  mkdirSync(path.join(deploy, "lifeos-ui", "dist"), { recursive: true });
+  mkdirSync(bin);
+  writeFileSync(path.join(deploy, "shell", "current", "healthz"), '{"status":"ok"}\n');
+  writeFileSync(path.join(deploy, "lifeos-ui", "dist", "index.html"), lifeIndex);
+  writeFileSync(path.join(bin, "tailscale"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TAILSCALE_TEST_LOG"\n');
+  writeFileSync(path.join(bin, "curl"), "#!/bin/sh\nexit 0\n");
+  chmodSync(path.join(bin, "tailscale"), 0o755);
+  chmodSync(path.join(bin, "curl"), 0o755);
+  const result = spawnSync(script, ["--apply"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_TEST_CONTEXT: "child-v8",
+      PATH: `${bin}:/usr/bin:/bin`,
+      TAILSCALE_SERVE_TEST_ROOT: deploy,
+      TAILSCALE_TEST_LOG: log,
+    },
+  });
+  let calls = [];
+  try {
+    calls = readFileSync(log, "utf8").trim().split("\n").filter(Boolean);
+  } catch {
+    // A preflight failure before the first tailscale call intentionally leaves no log.
+  }
+  return { calls, result };
+}
+
+test("dry run emits the exact three fixed, private-origin routes", () => {
+  assert.deepEqual(run("--dry-run").split("\n"), [
+    "tailscale serve --bg --yes --https=443 --set-path=/ /home/deploy/shell/current",
+    "tailscale serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/dist",
+    "tailscale serve --bg --yes --https=443 --set-path=/life/api/ http://127.0.0.1:8000",
+  ]);
+});
+
+test("dry run is the default and is deterministic", () => {
+  assert.equal(run(), run("--dry-run"));
+  assert.equal(run(), run());
+});
+
+test("the reserved Brain route has no placeholder target", () => {
+  assert.doesNotMatch(run(), /brain/i);
+});
+
+test("unknown and conflicting options fail closed", () => {
+  for (const args of [["--unknown"], ["--apply", "--dry-run"]]) {
+    const result = spawnSync(script, args, { encoding: "utf8" });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /usage:/);
   }
 });
 
-test("dry-run plan covers exactly the m2-04 route table: /, /life/, /life/api/", () => {
-  const output = runDryRun();
-  assert.match(output, /--set-path=\/ \/home\/deploy\/shell\/current/, "missing / -> Shell dist route");
-  assert.match(
-    output,
-    /--set-path=\/life\/ \/home\/deploy\/lifeos-ui\/dist/,
-    "missing /life/ -> LifeOS frontend dist route"
-  );
-  assert.match(
-    output,
-    /--set-path=\/life\/api\/ http:\/\/127\.0\.0\.1:8000/,
-    "missing /life/api/ -> loopback LifeOS API proxy route"
-  );
-});
-
-test("dry-run plan never configures a target for /brain/stream (reserved, not yet built per m4-21)", () => {
-  const output = runDryRun();
-  assert.doesNotMatch(
-    output,
-    /brain/i,
-    "the script must not invent a target for /brain/stream; it is reserved in docs/ops/runbook.md only"
-  );
-});
-
-test("dry-run output is deterministic across repeated invocations (idempotency precondition)", () => {
-  const first = runDryRun();
-  const second = runDryRun();
-  assert.equal(first, second, "the same route table must always produce the same plan, byte for byte");
-});
-
-// A minimal, real PATH containing bash/coreutils but (confirmed by hand:
-// `which tailscale` exits 1 in this sandbox) no `tailscale` binary
-// anywhere on it -- used below to prove dry-run needs no external tool
-// beyond bash itself, while still letting bash's own shebang resolve.
-const PATH_WITHOUT_TAILSCALE = "/usr/bin:/bin";
-
-test("dry-run mode never shells out to `tailscale` (works even with a PATH that has no tailscale on it)", () => {
-  const output = runDryRun({ PATH: PATH_WITHOUT_TAILSCALE });
-  const lines = output.split("\n").filter((l) => l.length > 0);
-  assert.ok(lines.length === 3, `expected the 3-route plan even without tailscale on PATH, got: ${output}`);
-});
-
-test("--apply with no `tailscale` binary on PATH fails loudly instead of silently no-opping", () => {
-  // The inverse control of the previous test: --apply MUST try to actually
-  // invoke tailscale, so with tailscale absent from PATH it should fail
-  // fast with a clear error, not exit 0. This is what proves --dry-run and
-  // --apply are genuinely different code paths, not the same no-op dressed
-  // up two ways.
-  assert.throws(
-    () => execFileSync(scriptPath, ["--apply"], { encoding: "utf8", env: { PATH: PATH_WITHOUT_TAILSCALE } }),
-    (err) => {
-      assert.notEqual(err.status, 0, "expected a non-zero exit code");
-      assert.match(err.stderr ?? "", /tailscale/i, "expected an error mentioning the missing tailscale CLI");
-      return true;
-    }
-  );
-});
-
-test("an unrecognized flag is rejected rather than silently ignored", () => {
-  assert.throws(() => execFileSync(scriptPath, ["--nonsense"], { encoding: "utf8" }), (err) => {
-    assert.notEqual(err.status, 0);
-    return true;
+test("apply fails before mutation when tailscale is unavailable", () => {
+  const bin = mkdtempSync(path.join(os.tmpdir(), "tailscale-serve-test-"));
+  temporaryDirectories.push(bin);
+  symlinkSync("/bin/bash", path.join(bin, "bash"));
+  const result = spawnSync(script, ["--apply"], {
+    encoding: "utf8",
+    env: { PATH: bin },
   });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /tailscale is not installed/);
+  assert.doesNotMatch(result.stdout, /^\+ /m);
+});
+
+test("apply rejects a LifeOS bundle that was not built for /life/ before mutation", () => {
+  const { calls, result } = applyFixture('<script src="/assets/app.js"></script>');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not built for the \/life\/ base path/);
+  assert.deepEqual(calls, []);
+  assert.doesNotMatch(result.stdout, /^\+ /m);
+});
+
+test("apply preflights, applies exactly three routes, and reports final status", () => {
+  const { calls, result } = applyFixture('<script src="/life/assets/app.js"></script>');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(calls.map((call) => call.replace(/\/tmp\/tailscale-serve-apply-[^/]+\/deploy/g, "/home/deploy")), [
+    "serve status",
+    "serve --bg --yes --https=443 --set-path=/ /home/deploy/shell/current",
+    "serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/dist",
+    "serve --bg --yes --https=443 --set-path=/life/api/ http://127.0.0.1:8000",
+    "serve status",
+  ]);
 });

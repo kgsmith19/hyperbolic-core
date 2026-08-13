@@ -9,9 +9,11 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build:app": "tsc -b && vite build",
+    "build": "npm run build --workspace=@hyperbolic/ui && npm run build:app",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test": "npm run build --workspace=@hyperbolic/ui && npm run test:unit",
     "e2e": "playwright test",
     "size-check": "node test/size-check.mjs",
     "healthz-check": "node test/healthz-check.mjs"

@@ -372,11 +372,27 @@ export function runScaffold(options, { toolbeltRoot, dryRun = false, fsImpl, now
   }
 
   try {
-    const plan = buildPlan(options, { toolbeltRoot, now });
-    const collisions = detectCollisions({ toolbeltRoot, id: options.id, candidateManifest: plan.manifest });
+    // Reject ordinary id/schema collisions before migration discovery. A
+    // colliding on-disk manifest may itself be incomplete or legacy-shaped;
+    // it must still produce the documented exit-2 collision instead of
+    // turning a harmless read-only preflight into an unexpected exception.
+    const { hasSchema, schema } = resolveSchema(options);
+    const candidateManifest = buildManifest({
+      id: options.id,
+      name: options.name,
+      kind: options.kind,
+      route: options.route,
+      hasSchema,
+      schema,
+      llm: options.llm,
+      registerBasename: "pending_registration.sql",
+    });
+    const collisions = detectCollisions({ toolbeltRoot, id: options.id, candidateManifest });
     if (collisions.length > 0) {
-      return { ok: false, exitCode: 2, reasons: collisions, plan };
+      return { ok: false, exitCode: 2, reasons: collisions };
     }
+
+    const plan = buildPlan(options, { toolbeltRoot, now });
 
     if (dryRun) {
       return { ok: true, exitCode: 0, dryRun: true, plan };
@@ -390,3 +406,4 @@ export function runScaffold(options, { toolbeltRoot, dryRun = false, fsImpl, now
 }
 
 export { isInside };
+

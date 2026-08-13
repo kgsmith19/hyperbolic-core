@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { anthropicDriver } from "../src/drivers/anthropic.ts";
 import { complete } from "../src/complete.ts";
+import { isLlmError } from "../src/errors.ts";
 import { MAX_RETRIES } from "../src/retry.ts";
 import type { LlmDelta, LlmErrorClass, LlmRequest } from "../src/types.ts";
 
@@ -237,6 +238,23 @@ test("anthropicDriver.complete: a refusal is a normal response naming stopReason
   );
   assert.equal(response.stopReason, "refusal");
   assert.equal(response.text, null);
+});
+
+test("anthropicDriver.complete: a malformed successful response is a non-retryable provider_bug", async () => {
+  await withPatchedFetch(
+    async () => jsonResponse(fixtureMessage({ model: undefined })),
+    async () => {
+      await assert.rejects(
+        () => anthropicDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+        (error: unknown) => {
+          assert.ok(isLlmError(error));
+          assert.equal(error.class, "provider_bug");
+          assert.equal(error.retryable, false);
+          return true;
+        },
+      );
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
