@@ -1,16 +1,25 @@
+// m2-08 (docs/planning/issues/m2-08-feat-lifeos-shell-integration.md):
+// Chrome adoption from packages/ui (contract C-3) and session from
+// packages/platform-client, replacing this file's own `Shell` header/nav
+// and `useSession`/`supabase` login gate. Mirrors
+// apps/shell/src/components/protected-layout.tsx's pattern -- see
+// src/lib/session.ts and src/lib/auth-gate.ts's own comments for the two
+// real differences (no `signIn`, and a full-document redirect instead of a
+// client-side one) forced by LifeOS being a separate zone bundle rather
+// than a route inside the Shell's own router.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { lazy, Suspense, type ReactNode } from "react";
-import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router";
+import { lazy, Suspense, useEffect } from "react";
+import { BrowserRouter, Route, Routes, useLocation } from "react-router";
+import { Chrome } from "@hyperbolic/ui";
 
-import { supabase } from "./auth/supabase";
-import { useSession } from "./auth/useSession";
-import HealthDot from "./components/HealthDot";
+import { computeGateDecision } from "./lib/auth-gate";
+import { useLifeOsSession } from "./lib/session";
 import { Loading } from "./components/QueryStatus";
-import Login from "./pages/Login";
 
-// Login is the only page on the first-paint path, so it stays eager and the
-// authenticated pages split into their own chunks — the initial bundle no
-// longer grows with every page added to the app.
+// Route chunks stay lazy exactly as before this issue -- the initial bundle
+// still shouldn't grow with every page added to the zone. There is no
+// eager Login chunk anymore (SH-2/LO-2: the Shell owns the one login
+// surface; this zone's route table starts directly at its real pages).
 const Approvals = lazy(() => import("./pages/Approvals"));
 const Browse = lazy(() => import("./pages/Browse"));
 const Capture = lazy(() => import("./pages/Capture"));
@@ -22,114 +31,71 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1 } },
 });
 
-function Shell({ children }: { children: ReactNode }) {
-  return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900">
-      <header className="flex items-center gap-4 border-b border-zinc-200 bg-white px-4 py-2">
-        <Link to="/" className="font-semibold">
-          lifeos
-        </Link>
-        <nav className="flex gap-3 text-sm">
-          <Link to="/" className="hover:underline">
-            Browse
-          </Link>
-          <Link to="/capture" className="hover:underline">
-            Capture
-          </Link>
-          <Link to="/chat" className="hover:underline">
-            Chat
-          </Link>
-          <Link to="/tomorrow" className="hover:underline">
-            Tomorrow
-          </Link>
-          <Link to="/approvals" className="hover:underline">
-            Approvals
-          </Link>
-        </nav>
-        <div className="ml-auto flex items-center gap-3">
-          <HealthDot />
-          <button
-            onClick={() => void supabase.auth.signOut()}
-            className="text-sm text-zinc-500 hover:underline"
-          >
-            Sign out
-          </button>
-        </div>
-      </header>
-      <main className="mx-auto max-w-3xl p-4">{children}</main>
-    </div>
-  );
-}
+function Gate() {
+  const { status, session, signOut } = useLifeOsSession();
+  // react-router's own `useLocation()` returns the path with the router's
+  // `basename` ("/life") already stripped off -- exactly what the ROUTES
+  // below need to match against, but NOT what a redirect out to the
+  // Shell's login should carry as `?return=` (see lib/auth-gate.ts's own
+  // comment on this). `window.location` is the real, unstripped browser
+  // path, read fresh on every render since this component re-renders on
+  // every navigation.
+  const routerLocation = useLocation();
+  const decision = computeGateDecision(status, window.location.pathname, window.location.search);
 
-function RequireAuth({ children }: { children: ReactNode }) {
-  const { session, loading } = useSession();
-  if (loading) return null;
-  if (!session) return <Navigate to="/login" replace />;
-  // The shell stays put while a route chunk arrives — the nav never blinks.
+  useEffect(() => {
+    if (decision.kind === "redirect-to-shell-login") {
+      window.location.assign(decision.href);
+    }
+    // `routerLocation` is intentionally in the dependency list even though
+    // this effect reads `window.location` directly: it is what changes on
+    // an in-zone navigation, and without it this effect would only ever
+    // re-run when `status` itself changes, missing a same-status
+    // (still-signed-out) navigation to a new path that should carry a
+    // freshly-encoded `?return=`.
+  }, [decision, routerLocation]);
+
+  if (decision.kind !== "render") {
+    // Renders neither the zone's content nor a login form for either
+    // "loading" or "redirect-to-shell-login" -- the same "no flash of
+    // gated content before redirect" property
+    // apps/shell/src/components/protected-layout.tsx documents for its own
+    // identical two non-"render" branches.
+    return <div className="min-h-dvh bg-bg" data-testid="auth-checking" />;
+  }
+
   return (
-    <Shell>
-      <Suspense fallback={<Loading />}>
-        {children}
-      </Suspense>
-    </Shell>
+    <Chrome activeZone="life" session={session} onSignOut={signOut}>
+      {/* Mirrors apps/shell/src/components/protected-layout.tsx's own
+          `[data-app-data]` marker: this whole subtree does not exist in the
+          DOM for any status other than "signed-in" (see the branch above),
+          so its mere presence is what an e2e assertion checks for "gated
+          content actually rendered, not a false-positive Chrome shell". */}
+      <div data-app-data="lifeos-zone">
+        <Suspense fallback={<Loading />}>
+          <Routes>
+            <Route path="/" element={<Browse />} />
+            <Route path="/capture" element={<Capture />} />
+            <Route path="/chat" element={<Chat />} />
+            <Route path="/tomorrow" element={<Tomorrow />} />
+            <Route path="/entities/:id" element={<EntityDetail />} />
+            <Route path="/approvals" element={<Approvals />} />
+          </Routes>
+        </Suspense>
+      </div>
+    </Chrome>
   );
 }
 
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route
-            path="/"
-            element={
-              <RequireAuth>
-                <Browse />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/capture"
-            element={
-              <RequireAuth>
-                <Capture />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/chat"
-            element={
-              <RequireAuth>
-                <Chat />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/tomorrow"
-            element={
-              <RequireAuth>
-                <Tomorrow />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/entities/:id"
-            element={
-              <RequireAuth>
-                <EntityDetail />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/approvals"
-            element={
-              <RequireAuth>
-                <Approvals />
-              </RequireAuth>
-            }
-          />
-        </Routes>
+      {/* 05-a section 4: Vite `base: '/life/'` (vite.config.ts) and this
+          router `basename` must agree -- both name the same mount point the
+          one-origin route table (docs/ops/tailscale-serve-apply.sh) serves
+          this bundle from. */}
+      <BrowserRouter basename="/life">
+        <Gate />
       </BrowserRouter>
     </QueryClientProvider>
   );
