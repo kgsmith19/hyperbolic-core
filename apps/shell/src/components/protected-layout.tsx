@@ -10,7 +10,6 @@ import { computeGateDecision } from "../lib/auth-gate";
 import { activeZoneForPath } from "../lib/active-zone";
 import type { ShellSessionState } from "../lib/session";
 import { splitByRoute, useRegisteredTools } from "../lib/registry";
-import { isShellRoute } from "../lib/navigation";
 import { notificationSurface } from "../lib/notifications";
 
 interface ProtectedLayoutProps {
@@ -23,13 +22,7 @@ function ProtectedLayout({ auth, onSignOut }: ProtectedLayoutProps) {
   const location = useLocation();
   const routerNavigate = useNavigate();
   const decision = computeGateDecision(status, location.pathname, location.search);
-  const navigate = useCallback(
-    (href: string) => {
-      if (isShellRoute(href)) routerNavigate(href);
-      else window.location.assign(href);
-    },
-    [routerNavigate]
-  );
+  const navigate = useCallback((href: string) => routerNavigate(href), [routerNavigate]);
 
   // m3-04 (05-a section 5): the command palette's tool entries, fetched here
   // (not inside Chrome/CommandPalette, which own no registry client -- see
