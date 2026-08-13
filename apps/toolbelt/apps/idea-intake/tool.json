@@ -1,0 +1,41 @@
+{
+  "id": "idea-intake",
+  "name": "Idea Intake",
+  "kind": "ui",
+  "version": "0.1.0",
+  "description": "Captures rough ideas as drafts, optionally optimizes them with LLM help, promotes the good ones, and converts each promoted idea into exactly one GitHub Issue that the app can never touch again. Owns the intake schema in the shared toolbelt Supabase project. Supersedes ACC's Forgepad.",
+  "ownership": {
+    "owner": "kylegsmith19@gmail.com",
+    "path": "apps/toolbelt/apps/idea-intake"
+  },
+  "entry": {
+    "ui": {
+      "route": "/ideas"
+    }
+  },
+  "schemas": [
+    "intake"
+  ],
+  "permissions": {
+    "db": {
+      "read": [
+        "intake"
+      ],
+      "write": [
+        "intake",
+        "core"
+      ]
+    },
+    "networkEgress": [
+      "api.github.com"
+    ],
+    "llmHandler": {
+      "access": true
+    }
+  },
+  "lifecycle": {
+    "migrate": "supabase db push",
+    "health": "node --test \"tests/*.test.mjs\"",
+    "register": "20260813002605_register_idea-intake.sql"
+  }
+}
