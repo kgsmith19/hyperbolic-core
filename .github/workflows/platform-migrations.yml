@@ -1,21 +1,93 @@
 name: Platform Migrations
 
 # Applies the platform project's (Supabase woltgcggxaehtuypkxqk) migrations.
-# Not a PR check: invoked by deploy.yml (workflow_call, added in a later
-# milestone) or manually (workflow_dispatch, used for the one-time ledger
-# baseline). PR-side validation of these same migration directories runs as
-# a step inside toolbelt-ci.yml instead, via scripts/validate-migrations.mjs.
+# Not a PR check: invoked by deploy.yml's migrate-platform job (workflow_call,
+# on every push to main touching migration paths, deliberately NOT gated by
+# DEPLOY_ENABLED -- see that job's own comment in deploy.yml for why) or
+# manually (workflow_dispatch). PR-side validation of these same migration
+# directories runs as a step inside toolbelt-ci.yml instead, via
+# scripts/validate-migrations.mjs.
 #
 # Directory order matches dependency order (docs/planning/06-supabase-schema.md
 # section 7.2): toolbelt root owns core/idea/platform/test, then Prompt
-# Organizer, then Idea Intake (its directory does not exist until a later
-# milestone; the step no-ops until then). All three pushes share one ledger
-# (one physical database), which is why scripts/validate-migrations.mjs also
-# checks for version-key collisions across directories, not just within one.
+# Organizer, then Idea Intake. All three directories share ONE ledger (one
+# physical database) -- apps/toolbelt/scripts/stage-migrations.mjs collects
+# every up file from every directory into one staged tree, in the one global
+# version-sorted order every filename already declares, so each
+# `supabase db push` below sees the whole platform migration history as a
+# single sequence rather than three separately-ordered per-directory passes
+# (closes Finding 3, independent security review of this repo, re-verified
+# against current HEAD -- see that script's own header comment for the
+# three-separate-pushes bug this replaces, and for --stop-before-owner-dependency
+# / --subset-file, the two extra staging modes Findings 4 and 5 below use).
+#
+# Two `mode`s (Finding 4 -- "no live-parity/ledger-baseline step exists"):
+#   apply (default) -- the normal, ongoing path. Runs on every qualifying
+#     push to main (via deploy.yml) and on a plain manual dispatch. Refuses
+#     to run unless it is main's own exact current commit
+#     (docs/planning/issues/m1-05-chore-ci-platform-migrations-workflow.md:
+#     "must refuse to run against anything other than the main branch's
+#     exact current SHA, not an arbitrary feature ref"), then refuses to
+#     push anything NEW if the live project has drifted from what the CLI
+#     ledger already claims is applied (a live-parity `supabase db diff`
+#     against exactly the ledger-applied subset, so a genuinely new pending
+#     migration is never itself misreported as "drift").
+#   baseline -- the one-time, explicitly operator-dispatched repair for
+#     migrations that were applied by hand via the Supabase API before this
+#     workflow (and before the CLI's own ledger table) existed (m1-05's
+#     Problem statement). The operator names the exact version keys being
+#     adopted (baseline_versions); this job diffs the live project against
+#     exactly that named subset and, ONLY if that diff is empty, repairs the
+#     CLI ledger (`supabase migration repair --status applied`) to mark
+#     those versions applied -- it never executes their SQL a second time.
+#     If the diff is non-empty, the job fails and uploads the diff as an
+#     artifact rather than guessing at a fix.
+#
+# Owner-repin-tier migrations additionally require a live preflight (Finding
+# 5 -- "owner re-pin can run before its required preflight"): platform.config
+# must hold its one row, and that row's owner_uuid must resolve to a
+# confirmed, unbanned auth.users row, before this workflow will push anything
+# from the owner-repin tier onward. See stage-migrations.mjs's
+# splitAtOwnerDependency() and
+# apps/toolbelt/docs/notes/2026-08-12-platform-idp-owner-setup.md, the
+# operator runbook this preflight enforces live rather than assumes was
+# followed.
+#
+# Every piece of actual pass/fail branching logic below (ref pinning, diff
+# emptiness, zero-pending, owner preflight) lives in
+# apps/toolbelt/scripts/platform-migration-guards.mjs, unit-tested in
+# apps/toolbelt/tests/platform-migration-guards.test.mjs -- `run:` steps in
+# this file stay thin, single-purpose data collection (one psql query, one
+# `git rev-parse`, one `supabase db diff`) piped straight into that script.
 
 on:
-  workflow_call: {}
-  workflow_dispatch: {}
+  workflow_call:
+    inputs:
+      mode:
+        description: "apply (default) or baseline. deploy.yml's migrate-platform job never sets this -- it always resolves to apply for that path."
+        type: string
+        default: apply
+        required: false
+      baseline_versions:
+        description: "baseline mode only. Unused by deploy.yml's push-triggered call; declared here only so the shared `inputs.*` context is symmetric with workflow_dispatch below."
+        type: string
+        default: ""
+        required: false
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "apply: normal push, refuses anything but main's current commit. baseline: one-time ledger repair for pre-CI hand-applied migrations, requires baseline_versions."
+        type: choice
+        options:
+          - apply
+          - baseline
+        default: apply
+        required: false
+      baseline_versions:
+        description: "baseline mode only: the exact <14-digit-version> keys being adopted as already-applied (comma- or newline-separated), e.g. the migrations hand-applied via the Supabase API before this workflow existed."
+        type: string
+        default: ""
+        required: false
 
 concurrency:
   group: toolbelt-db
@@ -29,7 +101,13 @@ jobs:
   migrate:
     name: Apply platform migrations
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    # Was 6 minutes when this job was three plain `db push` calls. `supabase
+    # db diff` now runs twice on the apply path (and once on the baseline
+    # path): each spins up a temporary shadow Postgres via Docker (preinstalled
+    # on GitHub-hosted ubuntu-latest runners) to replay the staged migrations
+    # into before diffing against the live project -- a genuinely slower
+    # operation than a bare push, not padding.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -39,6 +117,28 @@ jobs:
 
       - name: Validate migration directories
         run: node apps/toolbelt/scripts/validate-migrations.mjs
+
+      # Finding 4's ref-pinning rule. baseline dispatches skip this (they are
+      # the explicitly-named one-time repair, not restricted to main's exact
+      # tip the way ongoing apply dispatches are) -- checkApplyRef() itself
+      # encodes that distinction, this step just supplies the inputs.
+      - name: Refuse an apply dispatch against anything but main's current commit
+        if: inputs.mode == 'apply'
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin main
+          MAIN_SHA=$(git rev-parse origin/main)
+          node apps/toolbelt/scripts/platform-migration-guards.mjs check-apply-ref \
+            --mode "${{ inputs.mode }}" \
+            --ref "${{ github.ref }}" \
+            --sha "${{ github.sha }}" \
+            --main-sha "$MAIN_SHA"
+
+      - name: Require baseline_versions for a baseline dispatch
+        if: inputs.mode == 'baseline' && inputs.baseline_versions == ''
+        run: |
+          echo "::error::mode=baseline requires baseline_versions (the exact version keys being adopted as already-applied). Refusing to guess which migrations were hand-applied." >&2
+          exit 1
 
       - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
@@ -53,19 +153,147 @@ jobs:
         with:
           version: latest
 
-      - name: Apply toolbelt root migrations (core, idea, platform, test)
-        working-directory: apps/toolbelt
-        run: supabase db push --db-url "$SUPABASE_DB_URL" --include-all --yes
+      # `psql` itself is not installed by any step above: GitHub-hosted
+      # ubuntu-latest runner images ship PostgreSQL client tools preinstalled
+      # (actions/runner-images). If that ever stops being true, every psql
+      # invocation below fails loudly with "command not found" -- exactly
+      # the fail-loud behavior Finding 5 requires, not a silent skip -- so no
+      # separate existence-check step is added here.
 
-      - name: Apply Prompt Organizer migrations
-        working-directory: apps/toolbelt/apps/prompt-organizer
-        run: supabase db push --db-url "$SUPABASE_DB_URL" --include-all --yes
+      # ------------------------------------------------------------------
+      # BASELINE MODE: one-time ledger repair for pre-CI hand-applied
+      # migrations. Diffs the operator-named subset against live, and only
+      # repairs the ledger (never re-executes SQL) if that diff is empty.
+      # Does not push anything -- a later apply dispatch does that.
+      # ------------------------------------------------------------------
 
-      - name: Apply Idea Intake migrations
-        working-directory: apps/toolbelt/apps/idea-intake
+      - name: "Baseline: stage the operator-named already-applied subset"
+        if: inputs.mode == 'baseline'
         run: |
-          if [ -d supabase/migrations ]; then
-            supabase db push --db-url "$SUPABASE_DB_URL" --include-all --yes
-          else
-            echo "apps/toolbelt/apps/idea-intake/supabase/migrations does not exist yet; skipping."
-          fi
+          set -euo pipefail
+          printf '%s\n' "${{ inputs.baseline_versions }}" | tr ',' '\n' | sed '/^[[:space:]]*$/d' > /tmp/baseline-versions.txt
+          echo "Baselining $(wc -l < /tmp/baseline-versions.txt) version(s):"
+          cat /tmp/baseline-versions.txt
+          node apps/toolbelt/scripts/stage-migrations.mjs /tmp/staged-baseline --subset-file /tmp/baseline-versions.txt
+
+      - name: "Baseline: live-parity diff against exactly the named subset"
+        if: inputs.mode == 'baseline'
+        working-directory: /tmp/staged-baseline
+        run: supabase db diff --db-url "$SUPABASE_DB_URL" -s core,idea,intake,platform,prompt,test > /tmp/baseline-diff.sql
+
+      - name: "Baseline: fail if the named subset does not genuinely match the live project"
+        if: inputs.mode == 'baseline'
+        run: node apps/toolbelt/scripts/platform-migration-guards.mjs check-diff-empty /tmp/baseline-diff.sql
+
+      - name: "Baseline: upload the diff for operator review"
+        if: inputs.mode == 'baseline' && failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-migrations-baseline-diff-${{ github.run_id }}
+          path: /tmp/baseline-diff.sql
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: "Baseline: repair the CLI ledger (mark applied, never re-execute)"
+        if: inputs.mode == 'baseline'
+        run: |
+          set -euo pipefail
+          # SC2046 (word splitting) is the point: each line of
+          # baseline-versions.txt is meant to become its own positional arg.
+          # shellcheck disable=SC2046
+          supabase migration repair $(tr '\n' ' ' < /tmp/baseline-versions.txt) --status applied --db-url "$SUPABASE_DB_URL" --yes
+
+      # ------------------------------------------------------------------
+      # APPLY MODE: the normal, ongoing path.
+      # ------------------------------------------------------------------
+
+      - name: "Apply: stage every pre-owner-repin migration"
+        if: inputs.mode == 'apply'
+        run: node apps/toolbelt/scripts/stage-migrations.mjs /tmp/staged --stop-before-owner-dependency
+
+      - name: "Apply: read the ledger's already-applied version set"
+        if: inputs.mode == 'apply'
+        run: psql "$SUPABASE_DB_URL" -Atc "select version from supabase_migrations.schema_migrations order by version;" > /tmp/ledger-versions.txt
+
+      - name: "Apply: stage exactly the ledger-applied subset for the drift check"
+        # A reduced staged set built from --subset-file, not the pre-owner
+        # set above: the drift check must cover the WHOLE schema the ledger
+        # claims is live (including any already-applied owner-repin-tier
+        # migrations from a prior successful run), not just the pre-owner
+        # slice this particular run is about to push first.
+        if: inputs.mode == 'apply'
+        run: node apps/toolbelt/scripts/stage-migrations.mjs /tmp/staged-ledger --subset-file /tmp/ledger-versions.txt
+
+      - name: "Apply: live-parity diff -- has anything drifted outside migration control?"
+        if: inputs.mode == 'apply'
+        working-directory: /tmp/staged-ledger
+        run: supabase db diff --db-url "$SUPABASE_DB_URL" -s core,idea,intake,platform,prompt,test > /tmp/apply-diff.sql
+
+      - name: "Apply: fail loudly (with the diff attached) if live has drifted from the ledger"
+        if: inputs.mode == 'apply'
+        run: node apps/toolbelt/scripts/platform-migration-guards.mjs check-diff-empty /tmp/apply-diff.sql
+
+      - name: "Apply: upload the drift diff for investigation"
+        if: inputs.mode == 'apply' && failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-migrations-drift-diff-${{ github.run_id }}
+          path: /tmp/apply-diff.sql
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: "Apply: push every pre-owner-repin migration"
+        # --include-all skips anything already on the remote history table
+        # (including a prior successful run's phase-1 push, or a baseline
+        # repair), so this is a safe no-op re-run, not a re-apply.
+        if: inputs.mode == 'apply'
+        working-directory: /tmp/staged
+        run: supabase db push --db-url "$SUPABASE_DB_URL" --include-all --yes
+
+      - name: "Owner preflight: does a live, confirmed owner credential genuinely exist? (Finding 5)"
+        if: inputs.mode == 'apply'
+        run: |
+          set -euo pipefail
+          psql "$SUPABASE_DB_URL" -Atc "
+            select
+              (select count(*) from platform.config)                                 as config_rows,
+              (select owner_uuid::text from platform.config limit 1)                 as owner_uuid,
+              (select u.id::text from platform.config c
+                 join auth.users u on u.id = c.owner_uuid limit 1)                   as user_id,
+              (select u.email from platform.config c
+                 join auth.users u on u.id = c.owner_uuid limit 1)                   as email,
+              (select u.confirmed_at::text from platform.config c
+                 join auth.users u on u.id = c.owner_uuid limit 1)                   as confirmed_at,
+              (select u.banned_until::text from platform.config c
+                 join auth.users u on u.id = c.owner_uuid limit 1)                   as banned_until;
+          " > /tmp/owner-preflight-row.txt
+          node apps/toolbelt/scripts/platform-migration-guards.mjs check-owner-preflight /tmp/owner-preflight-row.txt
+
+      - name: "Apply: stage the full migration set (adds the owner-repin tier on top)"
+        # Same destination as the pre-owner-only stage above: writeStagedDir
+        # only copies files in, it never deletes, so this adds the
+        # owner-tier-and-later files alongside what phase 1 already staged
+        # and pushed rather than starting over.
+        if: inputs.mode == 'apply'
+        run: node apps/toolbelt/scripts/stage-migrations.mjs /tmp/staged
+
+      - name: "Apply: push the full staged set (owner-repin tier and later)"
+        if: inputs.mode == 'apply'
+        working-directory: /tmp/staged
+        run: supabase db push --db-url "$SUPABASE_DB_URL" --include-all --yes
+
+      - name: "Apply: verify zero pending after the push (Finding 3 / m1-05 acceptance criteria)"
+        if: inputs.mode == 'apply'
+        run: |
+          set -euo pipefail
+          # SC2012: `ls | sed` over `find` is fine here -- every staged filename
+          # is this repo's own controlled <digits>_name.sql convention
+          # (validate-migrations.mjs's VERSION_RE), never operator-supplied or
+          # containing whitespace/glob-hostile characters. Matches m1-05's own
+          # Verification section, verbatim: "ls apps/toolbelt/**/supabase/migrations | sed 's/_.*//' | sort | uniq -d".
+          # shellcheck disable=SC2012
+          ls /tmp/staged/supabase/migrations | sed -E 's/^([0-9]+)_.*/\1/' | sort -u > /tmp/staged-versions.txt
+          psql "$SUPABASE_DB_URL" -Atc "select version from supabase_migrations.schema_migrations order by version;" > /tmp/ledger-versions-after.txt
+          node apps/toolbelt/scripts/platform-migration-guards.mjs check-zero-pending \
+            --staged /tmp/staged-versions.txt \
+            --ledger /tmp/ledger-versions-after.txt
