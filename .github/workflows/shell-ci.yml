@@ -49,9 +49,6 @@ jobs:
       # for this CI chore; noted honestly here rather than inventing a script
       # that doesn't exist.
 
-      - name: Type-check apps/shell
-        run: npx tsc -b apps/shell
-
       - name: Type-check packages/platform-client
         run: npm run typecheck --workspace=packages/platform-client
 
@@ -62,8 +59,26 @@ jobs:
         # packages/ui has no "typecheck" script of its own (only "build",
         # which also runs a vite build); tsc -b against its tsconfig.json
         # directly runs the same noEmit-equivalent check (emitDeclarationOnly)
-        # without paying for the vite build here.
+        # without paying for the vite build here. MUST run before apps/shell's
+        # own type-check, not just before its own unit tests: packages/ui is
+        # the one workspace member whose package.json "types"/"main" point at
+        # a BUILT dist/ output (platform-client and llm both point straight at
+        # their own src/*.ts, so they need no such step) -- apps/shell resolves
+        # "@hyperbolic/ui" through that dist/index.d.ts via plain node module
+        # resolution, not a TS path mapping, so on a fresh checkout with no
+        # dist/ yet, tsc -b apps/shell fails with "Cannot find module
+        # '@hyperbolic/ui'" (plus a cascade of spurious implicit-any errors on
+        # every callback prop typed through it) until this step has actually
+        # run once and emitted dist/*.d.ts as this tsc -b invocation's side
+        # effect. Caught by a real CI run (not local: this sandbox already had
+        # a stale dist/ from earlier packages/ui size-checks, which silently
+        # papered over the ordering bug every time this workflow was verified
+        # locally) -- reproduced and confirmed fixed by deleting dist/ and
+        # re-running both steps in this order before landing the reorder.
         run: npx tsc -b packages/ui
+
+      - name: Type-check apps/shell
+        run: npx tsc -b apps/shell
 
       - name: "Unit tests: apps/shell (vitest)"
         run: npm test --workspace=apps/shell
