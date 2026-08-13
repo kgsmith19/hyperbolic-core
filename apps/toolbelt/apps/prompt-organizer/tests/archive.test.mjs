@@ -1,12 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { login, rest, USER_A, USER_B } from "./helpers.mjs";
+import { login, rest, primaryToken, USER_B } from "./helpers.mjs";
 
 // SPEC-0010 (SL-011): archive a prompt via is_active, the delete half of CRUD.
+//
+// Owner-credential threading (toolbelt-ci.yml P1 finding): every
+// single-identity test below needs real write access to prove anything once
+// prompt.* RLS is pinned to the owner, so it authenticates via
+// primaryToken() (owner token when supplied, fixture-A fallback otherwise).
+// T-I-018 is the exception -- it is specifically about a *non-owner*
+// being denied, so its intruding session (tokenB) stays login(USER_B).
 
 // T-A-006 -> AC-001 -> FR-014
 test("archives_then_reactivates_a_prompt_without_losing_data__T_A_006__AC_001", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const title = `Archive Fixture ${Date.now()}`;
   const created = await rest("prompt", { token, method: "POST", body: { title, body: "archive me" } });
   assert.equal(created.status, 201, JSON.stringify(created.json));
@@ -35,7 +42,7 @@ test("archives_then_reactivates_a_prompt_without_losing_data__T_A_006__AC_001", 
 
 // T-I-017 -> AC-002 -> FR-014, FR-002
 test("archived_prompt_title_still_blocks_a_duplicate_title__T_I_017__AC_002", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const title = `Archived Title Fixture ${Date.now()}`;
   const created = await rest("prompt", { token, method: "POST", body: { title, body: "will be archived" } });
   assert.equal(created.status, 201, JSON.stringify(created.json));
@@ -51,7 +58,7 @@ test("archived_prompt_title_still_blocks_a_duplicate_title__T_I_017__AC_002", as
 
 // T-I-018 -> AC-003 -> FR-014, NFR-003
 test("cross_user_cannot_archive_another_users_prompt__T_I_018__AC_003", async () => {
-  const tokenA = await login(USER_A);
+  const tokenA = await primaryToken();
   const tokenB = await login(USER_B);
   const title = `Cross User Archive Fixture ${Date.now()}`;
   const created = await rest("prompt", { token: tokenA, method: "POST", body: { title, body: "owned by A" } });

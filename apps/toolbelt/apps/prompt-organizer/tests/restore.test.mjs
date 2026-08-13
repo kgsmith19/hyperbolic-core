@@ -1,17 +1,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { isCurrentVersion } from "../web/restore.mjs";
-import { login, rest, USER_A, USER_B } from "./helpers.mjs";
+import { login, rest, primaryToken, USER_B } from "./helpers.mjs";
 
 // SPEC-0005 (SL-008): restore a prior version as the new current version.
 // T-I-015 is the only two-identity test in this file; isolation's general
 // case is already SL-000's T-I-003.
+//
+// Owner-credential threading (toolbelt-ci.yml P1 finding): every
+// single-identity test below authenticates via primaryToken() (owner token
+// when supplied, fixture-A fallback otherwise) since they need real write
+// access to prove anything once prompt.* RLS is pinned to the owner. T-I-015
+// is about a *non-owner* being denied, so its intruding session (tokenB)
+// stays login(USER_B); only its resource-owning setup session (tokenA)
+// needs real write access.
 
 // T-I-012 -> AC-001 -> FR-009. Fresh fixture (Date.now()-suffixed title, per
 // tests/versions.test.mjs's T-A-003/T-I-005 pattern): insert plus two PATCHes
 // with distinct bodies gives 3 real trigger-written version rows to list.
 test("lists_three_versions_newest_first_with_distinct_timestamps__T_I_012__AC_001", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const title = `Restore History Fixture ${Date.now()}`;
   const created = await rest("prompt", { token, method: "POST", body: { title, body: "body one" } });
   assert.equal(created.status, 201, JSON.stringify(created.json));
@@ -46,7 +54,7 @@ test("lists_three_versions_newest_first_with_distinct_timestamps__T_I_012__AC_00
 // restoring version 1 must append version 4 holding version 1's body,
 // version 1 itself must stay byte-identical, and max(version_no) becomes 4.
 test("restoring_an_old_version_appends_a_new_version_holding_its_body__T_A_004__AC_002", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const title = `Restore Apply Fixture ${Date.now()}`;
   const created = await rest("prompt", { token, method: "POST", body: { title, body: "original body" } });
   assert.equal(created.status, 201, JSON.stringify(created.json));
@@ -95,7 +103,7 @@ test("restoring_an_old_version_appends_a_new_version_holding_its_body__T_A_004__
 // current row (already bodyA), which SL-004's guard makes a no-op: no new
 // version, and the version count does not increase.
 test("restoring_a_version_matching_the_current_body_creates_no_new_version__T_I_013__AC_003", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const title = `Restore Boundary Fixture ${Date.now()}`;
   const bodyA = "restore boundary body A";
   const bodyB = "restore boundary body B";
@@ -137,7 +145,7 @@ test("isCurrentVersion_true_only_when_bodies_match__T_U_015__AC_004", () => {
 // error -- the same shape any UPDATE matching zero rows produces. No new
 // version is written and user A's version count stays unchanged.
 test("cross_user_restore_affects_zero_rows_under_rls__T_I_015__AC_005", async () => {
-  const tokenA = await login(USER_A);
+  const tokenA = await primaryToken();
   const tokenB = await login(USER_B);
   const title = `Restore RLS Fixture ${Date.now()}`;
   const created = await rest("prompt", { token: tokenA, method: "POST", body: { title, body: "owner body v1" } });

@@ -1,15 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { login, rest, USER_A } from "./helpers.mjs";
+import { rest, primaryToken } from "./helpers.mjs";
 
 // SPEC-0008 (SL-007): usage tracking on copy.
+//
+// Owner-credential threading (toolbelt-ci.yml P1 finding): both tests below
+// are single-identity, so they authenticate via primaryToken() (owner token
+// when supplied, fixture-A fallback otherwise), since they need real write
+// access to prove anything once prompt.* RLS is pinned to the owner.
 
 // T-A-005 -> AC-001, PROP-011 -> FR-011. Fresh throwaway prompt (Date.now()
 // suffix, matching tests/tags.test.mjs's fixture pattern), copied twice --
 // two usage rows, distinct timestamps, both naming version 1 (the only
 // version a fresh insert has).
 test("copying_twice_writes_two_usage_rows_with_distinct_timestamps__T_A_005__AC_001", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const created = await rest("prompt", {
     token, method: "POST",
     body: { title: `Usage Fixture ${Date.now()}`, body: "usage fixture body" },
@@ -35,7 +40,7 @@ test("copying_twice_writes_two_usage_rows_with_distinct_timestamps__T_A_005__AC_
 // reject this, proving usage rows can never name a version that never
 // happened.
 test("rejects_usage_row_naming_a_version_that_was_never_created__T_I_016__AC_002", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const created = await rest("prompt", {
     token, method: "POST",
     body: { title: `Usage FK Fixture ${Date.now()}`, body: "usage fk fixture body" },

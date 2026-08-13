@@ -1,6 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { login, rest, USER_A, USER_B } from "./helpers.mjs";
+import { login, rest, primaryToken, USER_B } from "./helpers.mjs";
+
+// Owner-credential threading (toolbelt-ci.yml P1 finding): T-A-001 and
+// T-I-001 authenticate via primaryToken() (owner token when supplied,
+// fixture-A fallback otherwise) -- T-I-001 in particular must reach the
+// title/body CHECK constraint (23514) rather than being turned away earlier
+// by the owner-pinned RLS WITH CHECK, which only a real owner clears. T-I-003
+// is about a *non-owner* being denied, so its intruding session (tokenB)
+// stays login(USER_B); only its resource-owning setup session (tokenA) needs
+// real write access. T-I-002 is unauthenticated (anon key only) and is
+// unaffected by owner-pinning either way.
 
 // The 500-character fixture (SPEC-0000 section 8): exercises a variable
 // token, an optional-section fence, a newline, and a non-ASCII character,
@@ -14,7 +24,7 @@ const BODY_500 =
 // T-A-001 -> AC-001, PROP-002 -> FR-001
 test("saves_and_reads_back_500_char_body_verbatim__T_A_001__AC_001", async () => {
   assert.equal(BODY_500.length, 500, "fixture must be exactly 500 characters");
-  const token = await login(USER_A);
+  const token = await primaryToken();
 
   // SPEC-0002 7.3 amendment: under the unique title index a re-run's POST
   // collides; on 409, PATCH the body by title instead. Same read-back
@@ -46,7 +56,7 @@ test("saves_and_reads_back_500_char_body_verbatim__T_A_001__AC_001", async () =>
 // out-of-bounds prompt is stored. Three boundary probes of the same CHECK
 // mechanism, consolidated under the Phase 0 test cap (ledger row T-I-001).
 test("rejects_title_and_body_outside_fr001_bounds__T_I_001__AC_002_AC_003", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
 
   const emptyTitle = await rest("prompt", {
     token, method: "POST", body: { title: "", body: "b" },
@@ -78,7 +88,7 @@ test("anon_read_returns_empty_array__T_I_002__AC_004", async () => {
 // T-I-003 -> AC-005 -> NFR-003: owner-scoped RLS. A sees her own row
 // (positive control, prevents a vacuous pass); B sees nothing.
 test("user_b_cannot_read_user_a_prompt__T_I_003__AC_005", async () => {
-  const tokenA = await login(USER_A);
+  const tokenA = await primaryToken();
   const tokenB = await login(USER_B);
 
   // SPEC-0002 7.3 amendment: POST; on 409, PATCH the body by title instead.

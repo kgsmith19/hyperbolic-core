@@ -1,10 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { toggleTagFilter } from "../web/search.mjs";
-import { login, rest, USER_A } from "./helpers.mjs";
+import { rest, primaryToken } from "./helpers.mjs";
 
 // SPEC-0004 (SL-006): tags on prompts, filter and search.
 // All tests are single-identity; isolation already owned by T-I-003.
+//
+// Owner-credential threading (toolbelt-ci.yml P1 finding): every REST test
+// below authenticates via primaryToken() (owner token when supplied,
+// fixture-A fallback otherwise), since they need real write access to prove
+// anything once prompt.* RLS is pinned to the owner.
 
 // T-I-008 -> AC-001, PROP-002, PROP-005 -> FR-012. Fixture: a fresh prompt
 // (Date.now()-suffixed title -- this test creates its own prompt to tag, no
@@ -15,7 +20,7 @@ import { login, rest, USER_A } from "./helpers.mjs";
 // enforcement (SPEC-0004 7.1), so this proves the storage round trip for the
 // transform's output: exactly two rows, lowercased, no case duplicate.
 test("saves_tags_lowercased_and_deduplicated__T_I_008__AC_001", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const created = await rest("prompt", {
     token, method: "POST",
     body: { title: `Tag Dedup Fixture ${Date.now()}`, body: "tag dedup body" },
@@ -39,7 +44,7 @@ test("saves_tags_lowercased_and_deduplicated__T_I_008__AC_001", async () => {
 // embed and client-side filter both depend on) rather than replaying the
 // client's filter logic, per spec 8's "real query against real rows".
 test("filters_to_only_prompts_carrying_the_tag__T_I_009__AC_002", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const sdd = await rest("prompt", {
     token, method: "POST",
     body: { title: `Tag Filter SDD ${Date.now()}`, body: "sdd fixture body" },
@@ -84,7 +89,7 @@ test("second_click_on_same_tag_clears_the_filter__T_I_010__AC_005", () => {
 // T-I-014 -> AC-006, PROP-001 -> FR-012. The failure case: a 101-char tag is
 // rejected by the CHECK constraint, and no row is created.
 test("rejects_tag_over_100_chars_with_23514__T_I_014__AC_006", async () => {
-  const token = await login(USER_A);
+  const token = await primaryToken();
   const created = await rest("prompt", {
     token, method: "POST",
     body: { title: `Tag Length Fixture ${Date.now()}`, body: "tag length body" },
