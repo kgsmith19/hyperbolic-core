@@ -9,8 +9,7 @@ execution, live verification, and the keyed approval-token machinery)
 live in change_security.py; persisting an already-computed outcome (plus
 the config_item audit trail) lives in change_outcomes.py -- all three
 split out to keep this file's own line budget under the repo's
-medium-profile ceiling, the same reason watch.py was split out of
-__main__.py.
+medium-profile ceiling (the same reason watch.py split from __main__.py).
 
 `execute` (from change_security) is the one seam touching a real
 subprocess -- change_cmd and inverse_cmd both pass through it and only it,
@@ -28,20 +27,21 @@ change_outcomes.py's own functions never call execute()/`_verify_with_retry`
 themselves, only persist the (reason, final_status) this module already
 computed.
 
-Findings 15/16/17/19 from an independent security review, fixed together
-since they touch the same state machine: (15) `_token()` (change_security.py)
-is a keyed HMAC that also binds `approved_by`, not the old unkeyed sha256;
-(16) `apply()` claims its row atomically before `execute()` runs, and
-`test()`/`approve()`/change_cli's `reject()` all refuse a `_LOCKED_STATUSES`
-row; (17) `_run_change()`/`_rollback()` branch on the real rc/rrc instead
-of trusting the verify probe alone (see `_persist_apply()`'s four
-outcomes); (19) `execute()` (change_security.py) runs with an explicit
-`cwd` and its own process group, killed whole on timeout.
+Findings 15/16/17/19/61 from an independent security review, fixed
+together since they touch the same state machine: (15) `_token()`
+(change_security.py) is a keyed HMAC that also binds `approved_by`, not
+the old unkeyed sha256; (16) `apply()` claims its row atomically before
+`execute()` runs, and `test()`/`approve()`/change_cli's `reject()` all
+refuse a `_LOCKED_STATUSES` row; (17) `_run_change()`/`_rollback()` branch
+on the real rc/rrc instead of trusting the verify probe alone (see
+`_persist_apply()`'s four outcomes); (19) `execute()` (change_security.py)
+runs with its own process group, killed whole on timeout; (61) `propose()`
+validates inputs (see its own docstring, and change_outcomes.py's).
 """
 import hmac
 import sys
 
-from .change_outcomes import _persist_apply
+from .change_outcomes import _persist_apply, _propose_error
 from .change_security import (
     _APP_ROOT, _current_user, _key_file, _load_or_create_key, _now, _run_verify,
     _token, _verify_with_retry, execute,
@@ -69,7 +69,11 @@ def _missing(change_id):
     return 1
 
 
-def propose(conn, args):
+def propose(conn, host_id, args):
+    """Finding 61: validated by _propose_error() (change_outcomes.py) before the INSERT runs."""
+    if (error := _propose_error(conn, host_id, args)):
+        print(error, file=sys.stderr)
+        return 1
     cur = conn.execute(
         "INSERT INTO change_request (created_at, device_id, cause, title, change_cmd,"
         " inverse_cmd, verify_probe, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed')",

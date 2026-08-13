@@ -19,7 +19,8 @@
       "read": [],
       "write": []
     },
-    "networkEgress": ["ipapi.co"],
+    "networkEgress": ["ipapi.co", "api.ipify.org", "status.anthropic.com",
+                      "api.anthropic.com", "1.1.1.1"],
     "llmHandler": {
       "access": false
     }

@@ -29,7 +29,7 @@ class ChangeTestCase(unittest.TestCase):
 
     def propose(self, **overrides):
         with contextlib.redirect_stdout(io.StringIO()):
-            change.propose(self.conn, _args(**overrides))
+            change.propose(self.conn, self.host, _args(**overrides))
         return self.conn.execute(
             "SELECT id FROM change_request ORDER BY id DESC LIMIT 1").fetchone()["id"]
 
@@ -162,8 +162,7 @@ class TokenBindingTest(ChangeTestCase):
 
 
 class RollbackTest(ChangeTestCase):
-    """NC-4.4: a rigged-to-fail verify step must trigger the real inverse
-    command, land status 'rolled_back', and capture apply/verify/rollback outputs."""
+    """NC-4.4: a rigged-to-fail verify step triggers the real inverse command, lands 'rolled_back'."""
 
     def _approved(self):
         cid = self.propose(cmd="apply-cmd", inverse="inverse-cmd")
@@ -204,7 +203,9 @@ class RollbackTest(ChangeTestCase):
         self.assertIn("verify_attempts", output)
         self.assertIn("rollback_verify", output)
 
-    def test_rollback_appends_a_config_item_row_with_source_change_apply(self):
+    def test_rollback_appends_two_config_item_rows_forward_and_rollback(self):
+        """Finding 60: the forward attempt's own outcome (verify_failed)
+        must survive as its own audit row, distinct from the rollback's."""
         cid, token = self._approved()
         verify_results = [(False, []), (True, [])]  # Finding 17: distinct per-call results
         with patch.object(change, "execute", return_value=(0, "", "")), \
@@ -212,11 +213,10 @@ class RollbackTest(ChangeTestCase):
              contextlib.redirect_stdout(io.StringIO()), \
              contextlib.redirect_stderr(io.StringIO()):
             change.apply(self.conn, self.host, _args(action="apply", id=cid, token=token))
-        items = self.conn.execute(
-            "SELECT key, value, source FROM config_item WHERE key=?", (f"change.{cid}",)).fetchall()
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["value"], "rolled_back")
-        self.assertEqual(items[0]["source"], "change_apply")
+        items = {r["key"]: (r["value"], r["source"]) for r in self.conn.execute(
+            "SELECT key, value, source FROM config_item WHERE key LIKE ?", (f"change.{cid}.%",))}
+        self.assertEqual(items, {f"change.{cid}.apply": ("verify_failed", "change_apply"),
+                                 f"change.{cid}.rollback": ("rolled_back", "change_apply")})
 
     def test_successful_verify_lands_verified_with_no_rollback_call(self):
         cid, token = self._approved()

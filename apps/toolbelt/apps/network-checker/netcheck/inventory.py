@@ -53,8 +53,8 @@ def _section_items(source, prefix, section, keys):
 
 def _upsert_device(conn, host_id, fact):
     """Insert or update one device row, matched by (mac, ip) with `IS` so a
-    NULL mac/ip still finds its own earlier row across scans. `kind` is only
-    ever promoted away from 'unknown', never back to it. Returns the id."""
+    NULL mac/ip still finds its own earlier row across scans. `kind` only
+    promotes away from 'unknown'; Finding 62: UPDATE also resets synced=0."""
     mac, ip = fact["mac"], fact["ip"]
     row = conn.execute(
         "SELECT id FROM device WHERE host_id=? AND mac IS ? AND ip IS ?",
@@ -63,7 +63,7 @@ def _upsert_device(conn, host_id, fact):
         conn.execute(
             "UPDATE device SET last_seen=?,"
             " kind=CASE WHEN ?<>'unknown' THEN ? ELSE kind END,"
-            " name=COALESCE(?, name), vendor=COALESCE(?, vendor) WHERE id=?",
+            " name=COALESCE(?, name), vendor=COALESCE(?, vendor), synced=0 WHERE id=?",
             (fact["ts"], fact["kind"], fact["kind"], fact.get("name"),
              fact.get("vendor"), row["id"]))
         return row["id"]
@@ -185,31 +185,32 @@ def _map_router(conn, host_id, router, ts):
 
 def record_inventory(conn, host_id, scan_payload, ts):
     """Map an environ.scan()/topology/exposure payload into device,
-    interface, and config_item rows. Returns counts per table. Pure
-    mapping over an already-collected payload; no network calls."""
-    topo_ids, n_cfg = _map_topology(conn, host_id, scan_payload.get("topology"), ts)
-    device_ids = set(topo_ids)
+    interface, and config_item rows (Finding 63: inside one
+    store.transaction()). Returns counts per table; pure mapping, no network calls."""
+    with store.transaction(conn):
+        topo_ids, n_cfg = _map_topology(conn, host_id, scan_payload.get("topology"), ts)
+        device_ids = set(topo_ids)
 
-    gw_id, cfg = _map_gateway(conn, host_id, scan_payload.get("gateway_id"), ts)
-    n_cfg += cfg
-    if gw_id is not None:
-        device_ids.add(gw_id)
+        gw_id, cfg = _map_gateway(conn, host_id, scan_payload.get("gateway_id"), ts)
+        n_cfg += cfg
+        if gw_id is not None:
+            device_ids.add(gw_id)
 
-    self_id, n_iface, cfg = _map_self(conn, host_id, scan_payload, ts)
-    device_ids.add(self_id)
-    n_cfg += cfg
+        self_id, n_iface, cfg = _map_self(conn, host_id, scan_payload, ts)
+        device_ids.add(self_id)
+        n_cfg += cfg
 
-    modem_id, cfg = _map_modem(conn, host_id, scan_payload, ts)
-    n_cfg += cfg
-    if modem_id is not None:
-        device_ids.add(modem_id)
+        modem_id, cfg = _map_modem(conn, host_id, scan_payload, ts)
+        n_cfg += cfg
+        if modem_id is not None:
+            device_ids.add(modem_id)
 
-    router_id, cfg = _map_router(conn, host_id, scan_payload.get("router"), ts)
-    n_cfg += cfg
-    if router_id is not None:
-        device_ids.add(router_id)
+        router_id, cfg = _map_router(conn, host_id, scan_payload.get("router"), ts)
+        n_cfg += cfg
+        if router_id is not None:
+            device_ids.add(router_id)
 
-    return {"device": len(device_ids), "interface": n_iface, "config_item": n_cfg}
+        return {"device": len(device_ids), "interface": n_iface, "config_item": n_cfg}
 
 
 def devices(conn, limit=1000):

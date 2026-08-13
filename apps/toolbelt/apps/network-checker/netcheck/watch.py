@@ -5,6 +5,7 @@ Split out of __main__.py to keep that file under the length budget as CLI
 surface grows (FR-018's --tier flag, FR-021's experiment subcommand) --
 this loop's pieces are only ever used together and by nothing else.
 """
+import argparse
 import json
 import os
 import socket
@@ -13,6 +14,20 @@ import time
 from . import diagnose, environ, llmlog, probes
 from . import route as route_mod
 from . import store
+
+
+def _positive_int(value):
+    """argparse `type=` for __main__.py's --interval/--idle-every (Finding
+    64, independent security review): both were plain `type=int` with no
+    minimum, so `--idle-every 0` (or negative) reached `_tick`'s `tick %
+    args.idle_every` below as a real ZeroDivisionError instead of a clean
+    CLI error at parse time. Lives here, not __main__.py, since these two
+    args exist only for this loop and __main__.py's own line budget has no
+    room to spare."""
+    n = int(value)
+    if n <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {value!r}")
+    return n
 
 
 def _ms(value):
@@ -56,8 +71,15 @@ def _tick(db, args, route, tick):
 
 
 def run(db, args, db_path):
-    """netcheck watch: leave running, one sample per interval."""
-    route = (route_mod.gateway(), route_mod.first_hop(gateway_ip=route_mod.gateway()))
+    """netcheck watch: leave running, one sample per interval.
+
+    Finding 64 (independent security review): the initial gateway lookup
+    is cached in `gw` and reused for `first_hop`'s own gateway_ip, rather
+    than calling route_mod.gateway() a second time for the same value one
+    expression later -- a pure refactor, no behavior change (route_mod.
+    gateway() is a repeatable read, not a mutation)."""
+    gw = route_mod.gateway()
+    route = (gw, route_mod.first_hop(gateway_ip=gw))
     print(f"[netcheck] watching {args.target} every {args.interval}s "
           f"(gateway {route[0]}, isp hop {route[1]}). Ctrl+C to stop.")
     snapshot = environ.scan()

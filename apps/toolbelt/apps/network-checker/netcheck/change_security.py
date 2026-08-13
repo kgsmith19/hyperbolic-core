@@ -101,15 +101,35 @@ def _run_verify(expr):
 
 
 def _verify_with_retry(expr, attempts=3, budget_s=90):
-    """05-f section 4.4: up to 3 attempts over at most 90 seconds."""
+    """05-f section 4.4: up to 3 attempts over at most `budget_s` seconds --
+    a real wall-clock deadline (Finding 59, independent security review).
+
+    The old formula slept a fixed `budget_s/attempts` between every
+    attempt with no accounting for how long each probe itself took, so
+    total wall time was `attempts*probe_duration + (attempts-1)*(budget_s/
+    attempts)` -- uncapped by anything, and routinely well past the
+    90-second budget this function promises its caller (change.py's
+    apply()/_rollback(), which themselves have no outer timeout of their
+    own). Fixed: `deadline` is computed once at entry from the real clock,
+    and every sleep is `min(remaining_time, budget_s/attempts)` -- never
+    more than the even per-attempt share, but shorter once a slow probe has
+    already eaten into the budget. Once the deadline has passed, this stops
+    retrying and returns the last result even with attempts left unused,
+    rather than sleeping (or probing) further past what was promised."""
     log = []
+    deadline = time.monotonic() + budget_s
+    per_attempt = budget_s / attempts
     for i in range(attempts):
         ok, detail = _run_verify(expr)
         log.append({"attempt": i + 1, "ok": ok, **detail})
         if ok:
             return True, log
-        if i < attempts - 1:
-            time.sleep(budget_s / attempts)
+        if i >= attempts - 1:
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(remaining, per_attempt))
     return False, log
 
 

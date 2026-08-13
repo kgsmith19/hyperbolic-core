@@ -165,6 +165,46 @@ class ScanBudgetBoundaryTest(unittest.TestCase):
                     self._assert_case(tier, budget, duration, expect_timeout)
 
 
+class WatchTimingValidationTest(unittest.TestCase):
+    """Finding 64 (independent security review): --interval/--idle-every
+    must be rejected at argument-parsing time when <= 0, before watch.run()
+    (and its ZeroDivisionError-prone `tick % args.idle_every`) ever starts."""
+
+    def _assert_rejected_before_connect(self, argv):
+        with patch.object(cli, "connect") as mock_connect, \
+             contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main(argv)
+        self.assertNotEqual(cm.exception.code, 0)
+        mock_connect.assert_not_called()
+
+    def test_idle_every_zero_is_rejected(self):
+        self._assert_rejected_before_connect(["watch", "--idle-every", "0"])
+
+    def test_idle_every_negative_is_rejected(self):
+        self._assert_rejected_before_connect(["watch", "--idle-every", "-1"])
+
+    def test_interval_zero_is_rejected(self):
+        self._assert_rejected_before_connect(["watch", "--interval", "0"])
+
+    def test_interval_negative_is_rejected(self):
+        self._assert_rejected_before_connect(["watch", "--interval", "-5"])
+
+    def test_a_positive_interval_and_idle_every_are_accepted(self):
+        """Positive control: the validator itself, not just argparse
+        wiring, is what's under test -- a legitimate value must still
+        parse (as a real int, not swallowed by an over-eager mock) and
+        reach cmd_watch. Only `watch.run` is patched -- `watch._positive_int`
+        itself must stay real, since argparse calls it while building the
+        parser inside `cli.main()`."""
+        with patch.object(cli, "connect", return_value=(None, "h")), \
+             patch.object(cli.watch, "run", return_value=0) as run:
+            rc = cli.main(["watch", "--interval", "5", "--idle-every", "2"])
+        self.assertEqual(rc, 0)
+        args = run.call_args.args[1]
+        self.assertEqual((args.interval, args.idle_every), (5, 2))
+
+
 class ExportCliTest(unittest.TestCase):
     """FR-074: `netcheck export` writes one redacted artifact and never
     touches the network or mutates the store to produce it."""

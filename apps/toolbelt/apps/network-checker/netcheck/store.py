@@ -4,6 +4,7 @@ Column names live in schema.sql alone and are read back via PRAGMA, so adding a
 probe means editing one file, and a typo'd probe key raises instead of silently
 writing nothing.
 """
+import contextlib
 import json
 import sqlite3
 import urllib.error
@@ -25,6 +26,26 @@ def open_db(path):
     conn.executescript(SCHEMA.read_text())
     _migrate(conn)
     return conn
+
+
+@contextlib.contextmanager
+def transaction(conn):
+    """Explicit BEGIN/COMMIT/ROLLBACK for one multi-statement write
+    (Finding 63, independent security review; first caller:
+    inventory.record_inventory()). open_db() above uses
+    isolation_level=None -- real SQLite autocommit, one statement is one
+    commit on its own -- so a caller making several related writes gets no
+    all-or-nothing guarantee for free. On a clean exit this COMMITs; on
+    any exception it ROLLBACKs everything written since BEGIN and
+    re-raises, so the caller's partial writes never persist."""
+    conn.execute("BEGIN")
+    try:
+        yield conn
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    else:
+        conn.execute("COMMIT")
 
 
 def _migrate(conn):

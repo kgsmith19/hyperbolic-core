@@ -72,7 +72,7 @@ def reject(conn, args):
 def cli(conn, host_id, args):
     """netcheck change: propose/test/show/approve/apply/verify/list/reject."""
     if args.action == "propose":
-        return change.propose(conn, args)
+        return change.propose(conn, host_id, args)
     if args.action == "test":
         return change.test(conn, args)
     if args.action == "approve":

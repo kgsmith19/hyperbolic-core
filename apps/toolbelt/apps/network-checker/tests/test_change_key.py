@@ -18,9 +18,9 @@ from netcheck import change, store
 from tests.test_change import _args
 
 
-def _propose_tested_approved(conn, **overrides):
+def _propose_tested_approved(conn, host_id, **overrides):
     with contextlib.redirect_stdout(io.StringIO()):
-        change.propose(conn, _args(**overrides))
+        change.propose(conn, host_id, _args(**overrides))
     cid = conn.execute(
         "SELECT id FROM change_request ORDER BY id DESC LIMIT 1").fetchone()["id"]
     with patch.object(change, "_run_verify", return_value=(True, {})), \
@@ -112,7 +112,7 @@ class TokenForgeryRejectionTest(unittest.TestCase):
         return hashlib.sha256(material.encode()).hexdigest()
 
     def test_a_forged_old_style_token_is_rejected(self):
-        cid, _real_token = _propose_tested_approved(self.conn)
+        cid, _real_token = _propose_tested_approved(self.conn, self.host)
         row = change._get(self.conn, cid)
         forged = self._old_style_forged_token(row, row["approved_at"])
         # Sanity: not vacuous -- the forged value must differ from the
@@ -130,7 +130,7 @@ class TokenForgeryRejectionTest(unittest.TestCase):
 
     def test_the_legitimately_minted_token_still_applies_cleanly(self):
         """Positive case, so the rejection above is a real contrast."""
-        cid, real_token = _propose_tested_approved(self.conn)
+        cid, real_token = _propose_tested_approved(self.conn, self.host)
         with patch.object(change, "execute", return_value=(0, "ok", "")), \
              patch.object(change, "_verify_with_retry", return_value=(True, [])), \
              contextlib.redirect_stdout(io.StringIO()):
@@ -146,7 +146,7 @@ class TokenForgeryRejectionTest(unittest.TestCase):
         TokenBindingTest covers those two) -- tampering with the
         verifier-identity column directly in the row must invalidate a
         previously issued token the same way."""
-        cid, token = _propose_tested_approved(self.conn)
+        cid, token = _propose_tested_approved(self.conn, self.host)
         self.conn.execute("UPDATE change_request SET approved_by=? WHERE id=?",
                           ("someone-else", cid))
         with patch.object(change, "execute") as executor, \

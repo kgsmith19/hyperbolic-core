@@ -31,6 +31,31 @@ choices and product safeguards remain local to this directory.
   approval, and the only automatic write permitted is the pre-recorded
   rollback of a change that just failed verification.
 
+## Network egress
+
+`tool.json`'s `permissions.networkEgress` enumerates every STATIC host this
+app contacts: `ipapi.co` (geoip.py), `api.ipify.org` and
+`status.anthropic.com` (remote.py), `api.anthropic.com` (environ.py's
+`TARGET` default and probes.py's `sample()` default target), and `1.1.1.1`
+(probes.py's `PUBLIC_DNS` control probe, route.py's `first_hop` default).
+
+Two egress destinations are genuinely dynamic and cannot be expressed as a
+fixed hostname in that array (`tool.schema.json`'s `networkEgress` items are
+plain hostname strings, with no placeholder/wildcard/note convention for
+"not a fixed value" -- and neither `tool.json` nor `tool.schema.json` has
+room for a free-text field elsewhere; both are `additionalProperties:
+false` on every object each already fully declares):
+
+- the local router/modem, discovered at runtime as the current default
+  gateway (SNMP scalar reads, DOCSIS status) -- a different address on
+  every network this tool runs on, never a fixed hostname;
+- the optional Supabase mirror (`store.mirror`, `SUPABASE_URL`/`SUPABASE_KEY`
+  read from the environment) -- configurable per deployment, not a value
+  this manifest can pin.
+
+This is a deliberate, documented gap in the manifest's static enumeration,
+not an oversight (independent security review, Finding 65).
+
 ## Commands
 
 Run from `apps/toolbelt/apps/network-checker/`.

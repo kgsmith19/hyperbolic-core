@@ -24,8 +24,20 @@ class ParseNeighborTableTest(unittest.TestCase):
     def test_five_devices_are_extracted_with_their_macs(self):
         devices = topology.parse_neighbor_table(fixture("arp_windows.txt"))
         self.assertEqual(len(devices), 5)
-        self.assertIn({"ip": "192.168.1.1", "mac": "aa-bb-cc-dd-ee-ff"}, devices)
-        self.assertIn({"ip": "192.168.1.40", "mac": "44-55-66-77-88-99"}, devices)
+        # Finding 63: stored in canonical (lowercase, colon-separated) form,
+        # not verbatim off the wire -- arp_windows.txt's own text is
+        # hyphenated ("aa-bb-cc-dd-ee-ff").
+        self.assertIn({"ip": "192.168.1.1", "mac": "aa:bb:cc:dd:ee:ff"}, devices)
+        self.assertIn({"ip": "192.168.1.40", "mac": "44:55:66:77:88:99"}, devices)
+
+    def test_a_hyphenated_mac_is_normalized_to_colon_separated_lowercase(self):
+        """Finding 63 (independent security review): normalization happens
+        at the point the row is built, not only at the (now-removed) ad hoc
+        broadcast-address comparison -- proven directly against a mixed-case
+        hyphenated input, not just arp_windows.txt's already-lowercase one."""
+        text = "192.168.1.77           AA-BB-CC-11-22-33     dynamic\n"
+        self.assertEqual(topology.parse_neighbor_table(text),
+                         [{"ip": "192.168.1.77", "mac": "aa:bb:cc:11:22:33"}])
 
     def test_broadcast_and_multicast_rows_are_not_devices(self):
         ips = [d["ip"] for d in topology.parse_neighbor_table(fixture("arp_windows.txt"))]

@@ -1,9 +1,9 @@
 """record_inventory() maps an already-collected scan payload into
 device/interface/config_item rows; config_current answers "what is this
-device's value right now". The fixture uses real parsers (topology.
-parse_neighbor_table, docsis.parse_docsis_status) over the real captures
-test_topology.py/test_docsis.py use, plus real field shapes matching
-test_wlan_probes.py/test_snmp.py/test_ssdp.py (a live ASUS RT-AX88U)."""
+device's value right now". Fixture uses real parsers (topology.
+parse_neighbor_table, docsis.parse_docsis_status) plus field shapes from
+test_wlan_probes.py/test_snmp.py/test_ssdp.py. Findings 62/63 tests split
+to test_inventory_security.py (same file-budget reason)."""
 import argparse
 import contextlib
 import io
@@ -87,7 +87,7 @@ class RecordInventoryTest(InventoryTestCase):
         inventory.record_inventory(self.conn, self.host, fixture_payload(), TS)
         row = self.conn.execute("SELECT * FROM device WHERE ip='192.168.1.1'").fetchone()
         self.assertEqual(row["kind"], "gateway")
-        self.assertEqual(row["mac"], "aa-bb-cc-dd-ee-ff")  # from arp_windows.txt, not SSDP
+        self.assertEqual(row["mac"], "aa:bb:cc:dd:ee:ff")  # normalized (Finding 63)
         self.assertEqual(row["vendor"], "ASUSTeK Computer Inc.")
 
     def test_self_modem_router_are_distinct_singletons(self):
