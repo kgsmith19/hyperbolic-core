@@ -4,9 +4,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import http from "node:http";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const BASE = fs.mkdtempSync(path.join(os.tmpdir(), "acc-gui-srv-"));
 process.env.ACC_POLICY = path.join(BASE, "policy.json");
@@ -1210,4 +1212,64 @@ test("ACC-5: the check is additive (a correct token never bypasses Origin/Host) 
       assert.deepEqual(await knownRoute.json(), await unknownRoute.json(), "a known vs unknown route must be indistinguishable before auth");
     } finally { s.server.close(); }
   })
+);
+
+// --- Finding 31: the default token file must actually be git-ignored ------
+// Regression for a real leak, not a hypothetical: a default-configured ACC
+// (ACC_ROOT/ACC_GUI_TOKEN_FILE both unset) writes its bearer credential to
+// "<app root>/gui-token" — see tokenFile() in server.mjs. If that path is
+// not covered by apps/agentic-command-center/.gitignore, one `git add -A`/
+// `git add .` in that state commits a live credential to history. This test
+// asks the REAL `git check-ignore` about the REAL .gitignore file (never a
+// hand-rolled matcher, per the review that filed this finding) so it can
+// never drift from what git itself would actually do at commit time. It
+// deliberately does NOT write a real file into the live repo tree (AGENTS.md
+// "do not run hooks manually against live state") — check-ignore's pattern
+// matching does not require the target path to exist.
+test("Finding 31: the default gui-token path is matched by .gitignore (git check-ignore, not a hand-rolled matcher)", () => {
+  const appRoot = path.join(HERE, ".."); // gui/server.test.mjs lives beside gui/server.mjs; ".." is the same app root tokenFile() defaults to
+  const defaultTokenPath = path.join(appRoot, "gui-token");
+  const r = spawnSync("git", ["-C", appRoot, "check-ignore", "--quiet", defaultTokenPath]);
+  assert.equal(r.status, 0, `expected \`git check-ignore\` to match ${defaultTokenPath} against the real .gitignore; got exit ${r.status} (stderr: ${r.stderr})`);
+});
+
+// --- Finding 30: 0600 is a same-OS-user boundary, not a same-process one --
+// (see the "Honest threat model" comment above loadOrCreateToken() in
+// server.mjs). What IS enforceable and was previously missing: an existing
+// token file must still actually be 0600 before it's trusted, or a same-user
+// process that pre-created a looser-permission file before the server's
+// first start would have its (attacker-known) content silently adopted as
+// the live credential. Permission bits are meaningless on win32 (Node fakes
+// them there), matching the existing platform guard a few tests up, so this
+// whole scenario is skipped there — nothing for the code under test to do.
+test(
+  "Finding 30: a pre-existing token file with looser-than-owner-only permissions is not trusted verbatim — a fresh token is minted and the file is re-tightened to 0600",
+  { skip: process.platform === "win32" ? "POSIX permission bits are not meaningful on win32" : false },
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      const plantedValue = "attacker-planted-token-value";
+      fs.writeFileSync(tokenPath, plantedValue + "\n", { mode: 0o644 }); // world-readable: what a same-user process pre-creating the file before first start would look like
+      assert.equal(fs.statSync(tokenPath).mode & 0o777, 0o644, "precondition: the planted file really is looser than owner-only");
+      const s = await startServer({ port: 0 });
+      try {
+        assert.notEqual(s.token, plantedValue, "a non-0600 pre-existing file must never become the live credential");
+        assert.equal(fs.readFileSync(tokenPath, "utf8").trim(), s.token, "the file on disk must hold the freshly minted token, not the planted one");
+        assert.equal(fs.statSync(tokenPath).mode & 0o777, 0o600, "the file must be re-tightened to owner-only, not left at its planted permissions");
+      } finally { s.server.close(); }
+    })
+);
+
+test(
+  "Finding 30: an existing token file that is already 0600 keeps loading verbatim (no regression from the new permission check)",
+  { skip: process.platform === "win32" ? "POSIX permission bits are not meaningful on win32" : false },
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      fs.writeFileSync(tokenPath, "fixture-owner-only-token\n", { mode: 0o600 });
+      const s = await startServer({ port: 0 });
+      try {
+        assert.equal(s.token, "fixture-owner-only-token", "a properly-permissioned existing file must still be loaded verbatim, exactly as before this fix");
+      } finally { s.server.close(); }
+    })
 );

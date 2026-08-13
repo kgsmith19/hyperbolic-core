@@ -1,5 +1,6 @@
 .acc/
 vault.json
+gui-token
 runbox/
 runner/state/
 runner/logs/

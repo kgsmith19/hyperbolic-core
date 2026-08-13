@@ -9,11 +9,12 @@
 // construction: mutating routes demand the custom X-ACC header (unsettable
 // cross-origin without a CORS grant this server never issues), Origin/Host
 // must be local, and no CORS header ever leaves. That left one gap SEC-04
-// named explicitly: X-ACC is CSRF hygiene, not auth, so any OTHER same-user
-// local process could already drive this API just by knowing the port. ACC-5
-// closes it additively — every /api/* request now also demands the
-// X-ACC-Token session credential (see the "session credential" block below)
-// — without moving or weakening anything above.
+// named explicitly: X-ACC is CSRF hygiene, not auth, so any OTHER local
+// process could already drive this API just by knowing the port. ACC-5
+// closes that additively for a DIFFERENT OS USER — every /api/* request now
+// also demands the X-ACC-Token session credential (see the "session
+// credential" block below for the precise boundary this delivers, and why
+// it stops there) — without moving or weakening anything above.
 import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
@@ -292,18 +293,50 @@ function send(res, code, body, type = "application/json") {
 // The loopback bind + Host/Origin + X-ACC checks above are CSRF hygiene
 // (SEC-04): they stop a web page from driving this API, but any OTHER local
 // process on the machine could already speak to the port with no privilege
-// check at all. X-ACC-Token is the actual auth boundary — additive to every
-// check above; none of them move or weaken. A shared secret, not
-// platform-JWT verification: ACC makes zero network calls today and must
-// keep working fully offline on a single-operator machine, so JWKS fetching
-// (or any other network dependency) is the wrong shape for a loopback socket
-// like this one.
+// check at all. X-ACC-Token is the auth boundary that closes that FOR A
+// DIFFERENT OS USER — additive to every check above; none of them move or
+// weaken. A shared secret, not platform-JWT verification: ACC makes zero
+// network calls today and must keep working fully offline on a
+// single-operator machine, so JWKS fetching (or any other network
+// dependency) is the wrong shape for a loopback socket like this one.
+//
+// Honest threat model (read this before assuming more than 0600 delivers):
+// POSIX file permissions are per-UID, not per-process. Mode 0600 keeps a
+// DIFFERENT OS ACCOUNT from reading the token file; it does NOT keep out
+// another process running as the SAME OS account (a stray npm postinstall
+// script, another local dev tool, a compromised editor extension) — that
+// process can read the file exactly as freely as this server does, and then
+// present the token like any legitimate caller. This is the boundary
+// `docs/planning/05-b-acc.md` §4 actually specifies (ACC-5c: "created with
+// owner-only permissions") and it is a deliberate scope, not an oversight:
+// that same section's mechanism-choice table weighs and rejects OS-level
+// socket permissions (unix socket / named pipe — the mechanism that WOULD
+// additionally isolate same-user processes from each other) as
+// "platform-divergent..., larger change than the threat warrants" for what
+// ACC is: a local single-operator dev tool, not a multi-tenant service.
+// Earlier drafts of the comments in this file described the closed gap as
+// "same-user local process" — that phrasing overclaimed what 0600 delivers
+// and has been corrected here and at the top of this file.
 //
 // Token file: one line, 32 random bytes base64url, mode 0600, created on
 // first use if absent. ACC_GUI_TOKEN_FILE redirects the path (same seam
 // style as ACC_ROOT/ACC_POLICY above); the default is "<ACC_ROOT>/gui-token".
 // Rotation has no dedicated mechanism: delete the file and restart, and a
 // fresh one is minted (gui/README.md documents this for the operator).
+//
+// An EXISTING file is trusted only if its permission bits are still exactly
+// 0600 (loadOrCreateToken(), below) — otherwise it is treated the same as
+// absent and a fresh one is minted and rewritten with the right mode. Without
+// this check, a same-user process could pre-create a world- or group-
+// readable "gui-token" file before the server's first start and have its
+// (attacker-known) content silently trusted as the live credential — the
+// exact same-UID-but-different-process actor the paragraph above already
+// says this design does not try to keep out, so trusting an unverified file
+// would give that actor MORE than the documented boundary promises, for
+// free. The permission check is skipped on win32: Node's fs mode bits there
+// don't carry POSIX owner/group/other semantics (see the platform guard on
+// the mode assertion in gui/server.test.mjs), so there is nothing meaningful
+// to check or enforce, and 0600 mode requests are Windows no-ops regardless.
 //
 // Read/created exactly once, at the moment a server actually starts
 // (startServer(), below) — NOT re-resolved per request. A real deployment
@@ -318,16 +351,28 @@ function send(res, code, body, type = "application/json") {
 // file — a cache that silently re-derived on that would rotate the running
 // server's credential out from under it.)
 const tokenFile = () => process.env.ACC_GUI_TOKEN_FILE || path.join(repoRoot(), "gui-token");
+// Mode bits are meaningless on win32 (see the header comment above) — treat
+// every existing file there as trusted, same as before this fix.
+const ownerOnly = (file) => process.platform === "win32" || (fs.statSync(file).mode & 0o777) === 0o600;
 
 function loadOrCreateToken() {
   const file = tokenFile();
   try {
+    if (!ownerOnly(file)) throw new Error("gui-token has looser-than-owner-only permissions; refusing to trust it");
     const line = fs.readFileSync(file, "utf8").split(/\r?\n/, 1)[0].trim();
     if (line) return line;
-  } catch {} // absent, unreadable, or empty -> mint a fresh one below
+  } catch {} // absent, unreadable, wrong permissions, or empty -> mint a fresh one below
   const fresh = randomBytes(32).toString("base64url");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, fresh + "\n", { mode: 0o600 });
+  // Belt-and-braces: writeFileSync's `mode` option only applies to a file it
+  // creates fresh (POSIX open(2) semantics ignore the mode argument for a
+  // file that already exists). The case this whole function exists to
+  // correct is exactly an existing file with stale/looser permissions, so an
+  // explicit chmod after the write is what actually re-tightens it — leaving
+  // out this line would silently keep serving a loosely-permissioned file
+  // forever, having only rotated the value inside it.
+  if (process.platform !== "win32") fs.chmodSync(file, 0o600);
   return fresh;
 }
 
