@@ -59,6 +59,7 @@ and shell syntax checks.
 | `netcheck/dualstack.py` | Separate IPv4 and IPv6 reachability |
 | `netcheck/route.py` | Default gateway and first ISP hop |
 | `netcheck/wlan_probes.py` | Windows and macOS Wi-Fi output parsers |
+| `netcheck/linux_adapter_probes.py` | Linux `iw`/`ethtool` adapter-state probes: live tx-power vs. this radio's own ceiling, and power_save/Wake-on-LAN together -- the property-specific verify probes the `wifi_mode`/`adapter_power` change templates use (05-f section 4.5, Finding 18) |
 | `netcheck/docsis.py` | DOCSIS status parsing |
 | `netcheck/ssdp.py` | SSDP/UPnP gateway discovery |
 | `netcheck/snmp.py` | Scoped SNMPv2c scalar reads |

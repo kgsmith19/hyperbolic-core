@@ -27,6 +27,13 @@ CREATE TABLE IF NOT EXISTS samples (
   wifi_signal   INTEGER, wifi_channel INTEGER, wifi_band TEXT,
   wifi_rx_mbps  REAL,    wifi_tx_mbps REAL,    wifi_bssid TEXT,
 
+  -- 05-f section 4.5's Finding 18: live tx-power-vs-ceiling and power_save+WoL
+  -- state (netcheck/linux_adapter_probes.py), Linux-only, `unavailable`
+  -- elsewhere -- what change.py's verify_probe reads for the wifi_mode and
+  -- adapter_power change templates, in place of the bare `gw:ok` they used
+  -- to reuse. Existing on-disk databases pick these up via store._migrate.
+  wifi_txpower_state TEXT, adapter_power_state TEXT,
+
   culprit          TEXT,             -- lan | isp | internet | router_dns | app
   label            TEXT,             -- experiment condition tag (FR-021); NULL for ordinary probe/watch runs
   synced           INTEGER NOT NULL DEFAULT 0,

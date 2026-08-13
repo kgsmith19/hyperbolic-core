@@ -5,6 +5,15 @@
 set -e
 
 VERBOSE=${VERBOSE:-0}
+# 05-f section 4.5's Finding 18: disable_power_management touches two
+# independent settings (iw power_save, ethtool Wake-on-LAN), but until this
+# change the inverse in change_templates.py only ever turned power_save
+# back on -- WoL stayed enabled forever, even after a "rollback". capture_state
+# below records both real prior values; restore_state puts both back.
+# NETCHECK_STATE_DIR is overridable so tests can exercise the real
+# branching logic without a real adapter -- see tests/test_fix_scripts.py.
+STATE_DIR="${NETCHECK_STATE_DIR:-$HOME/.netcheck/change_state}"
+STATE_FILE="$STATE_DIR/adapter_power.state"
 
 log() {
     if [ "$VERBOSE" -eq 1 ]; then
@@ -50,11 +59,61 @@ is_power_management_enabled() {
     return 1  # Disabled
 }
 
+# Capture the pre-change power_save and Wake-on-LAN state so restore_state
+# can put both back, not just power_save. Capture-once-keep, same reasoning
+# as fix_dns.sh's capture_state: change.py's apply() only ever calls
+# change_cmd once per approved row, so only the first capture of a run is
+# the true baseline.
+capture_state() {
+    if [ -f "$STATE_FILE" ] && [ "${2:-}" != "--force" ]; then
+        log "state already captured at $STATE_FILE; leaving it"
+        return 0
+    fi
+    local adapter=$1
+    local power_save wol
+    power_save=$(iw dev "$adapter" get power_save 2>/dev/null \
+        | grep -oP 'Power save:\s*\K(on|off)')
+    wol=$(ethtool "$adapter" 2>/dev/null | grep -oP 'Wake-on:\s*\K\S+')
+    mkdir -p "$STATE_DIR"
+    {
+        echo "ADAPTER=$adapter"
+        echo "POWER_SAVE=${power_save:-unknown}"
+        echo "WOL=${wol:-unknown}"
+    } > "$STATE_FILE"
+    log "captured $adapter's pre-change state (power_save=${power_save:-unknown}," \
+        "wol=${wol:-unknown}) to $STATE_FILE"
+}
+
+# Restore both captured values -- power_save and Wake-on-LAN together, the
+# same pair disable_power_management sets, so a rollback undoes both halves
+# of the change instead of leaving WoL armed forever.
+restore_state() {
+    if [ ! -f "$STATE_FILE" ]; then
+        echo "error: no captured adapter-power state at $STATE_FILE;" \
+             "cannot restore precisely" >&2
+        return 1
+    fi
+    local adapter power_save wol
+    adapter=$(grep '^ADAPTER=' "$STATE_FILE" | cut -d= -f2)
+    power_save=$(grep '^POWER_SAVE=' "$STATE_FILE" | cut -d= -f2)
+    wol=$(grep '^WOL=' "$STATE_FILE" | cut -d= -f2)
+    if [ "$power_save" != "unknown" ] && [ -n "$power_save" ]; then
+        sudo iw dev "$adapter" set power_save "$power_save" &>/dev/null || true
+        log "restored $adapter power_save to $power_save"
+    fi
+    if [ "$wol" != "unknown" ] && [ -n "$wol" ]; then
+        sudo ethtool -s "$adapter" wol "$wol" &>/dev/null || true
+        log "restored $adapter Wake-on-LAN flags to $wol"
+    fi
+}
+
 # Disable power management
 disable_power_management() {
     local adapter=$1
 
     log "Disabling power management on $adapter..."
+
+    capture_state "$adapter"
 
     # Disable iw power save
     if iw dev "$adapter" set power_save off &>/dev/null; then
@@ -84,9 +143,18 @@ verify_disabled() {
 
 # Main
 main() {
+    local adapter
+    case "${1:-}" in
+        --capture-state)
+            adapter=$(find_adapter) || { echo "error: Could not find network adapter" >&2; return 1; }
+            capture_state "$adapter" "${2:-}"
+            return $?
+            ;;
+        --restore) restore_state; return $? ;;
+    esac
+
     log "Starting adapter power management fix..."
 
-    local adapter
     adapter=$(find_adapter) || {
         echo "error: Could not find network adapter"
         return 1
