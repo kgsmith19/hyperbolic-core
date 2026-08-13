@@ -1,0 +1,124 @@
+name: "Shell PR Gate"
+
+# docs/planning/10-cicd-deployment.md section 1.2. packages/** is in the path
+# filter because a shared-package change must re-verify the Shell that
+# consumes it (packages/platform-client, packages/ui, packages/llm all ship
+# through apps/shell). This is an npm workspaces monorepo (root package.json
+# "workspaces": ["packages/*", "apps/shell"]), so one root `npm ci` installs
+# every workspace member; there is no apps/shell/package-lock.json of its
+# own to key the npm cache on, so the cache below keys on the root lockfile
+# instead (a deliberate correction of section 1.2's literal wording to match
+# the repo's actual single-lockfile structure).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "apps/shell/**"
+      - "packages/**"
+  merge_group:
+
+concurrency:
+  group: shell-pr-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr-gate:
+    name: Shell PR Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 16 # ~2x the 8-minute budget (10-cicd-deployment.md section 10.3)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      # No lint step: neither apps/shell nor any packages/* workspace
+      # declares a "lint" script, and no ESLint/Biome config exists anywhere
+      # in the repo today (confirmed by search). Adding one is out of scope
+      # for this CI chore; noted honestly here rather than inventing a script
+      # that doesn't exist.
+
+      - name: Type-check apps/shell
+        run: npx tsc -b apps/shell
+
+      - name: Type-check packages/platform-client
+        run: npm run typecheck --workspace=packages/platform-client
+
+      - name: Type-check packages/llm
+        run: npm run typecheck --workspace=packages/llm
+
+      - name: Type-check packages/ui
+        # packages/ui has no "typecheck" script of its own (only "build",
+        # which also runs a vite build); tsc -b against its tsconfig.json
+        # directly runs the same noEmit-equivalent check (emitDeclarationOnly)
+        # without paying for the vite build here.
+        run: npx tsc -b packages/ui
+
+      - name: "Unit tests: apps/shell (vitest)"
+        run: npm test --workspace=apps/shell
+
+      - name: "Unit tests: packages/platform-client (node --test)"
+        run: npm test --workspace=packages/platform-client
+
+      - name: "Unit tests: packages/ui (node --test)"
+        run: npm test --workspace=packages/ui
+
+      - name: "Unit tests: packages/llm (node --test)"
+        run: npm test --workspace=packages/llm
+
+      - name: Cache Playwright Chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: shell-playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/shell
+
+      - name: Run Shell e2e suites
+        # The 05-a suites named in 10-cicd-deployment.md section 1.2:
+        # chrome, auth-gate, single-session, idp-down. Each spawns a REAL
+        # production build + `vite preview` via playwright.config.ts's
+        # webServer, so this step also stands in as an e2e-level build
+        # proof. e2e/tools.spec.ts (m3-04) is deliberately NOT run here: it
+        # stands up a real disposable PostgreSQL database via
+        # `sudo -n -u postgres` (createdb/dropdb/psql -f real migrations)
+        # against this sandbox's pre-existing local cluster -- a fixture
+        # shape that depends on passwordless sudo to an already-running
+        # `postgres` OS user, not just a `postgres:` service container.
+        # Neither section 1.2 nor this issue's acceptance criteria (which
+        # names only chrome/auth-gate/single-session/idp-down) lists
+        # tools.spec.ts, and reproducing its exact sudo/role/service
+        # bootstrapping reliably on a GitHub-hosted runner is materially
+        # more than this ~95-line CI chore's scope. Flagged as a follow-up:
+        # either give shell-ci.yml a `postgres:` service container plus the
+        # OS-role setup tools.spec.ts's fixture assumes, or move that setup
+        # into the fixture itself so it degrades to a plain TCP connection.
+        run: npx playwright test e2e/chrome.spec.ts e2e/auth-gate.spec.ts e2e/single-session.spec.ts e2e/idp-down.spec.ts
+        working-directory: apps/shell
+
+      - name: Production build
+        run: npm run build --workspace=apps/shell
+
+      - name: Upload Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shell-e2e-evidence
+          path: |
+            apps/shell/playwright-report/
+            apps/shell/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
