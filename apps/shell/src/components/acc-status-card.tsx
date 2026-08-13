@@ -1,8 +1,9 @@
 // The /acc status card (docs/planning/05-b-acc.md section 5): reads
 // GET /api/process/status and degrades to "ACC unreachable" with no error
-// toast. There is no toast surface yet at all (m2-05, out of scope per this
-// issue's own text), so that half of the acceptance criterion is
-// structurally true -- nothing here is capable of raising one. What this
+// toast. A real toast surface exists as of m2-05 (packages/ui's
+// NotificationSurface, rendered by Chrome), so "no error toast" is now a
+// live constraint rather than a structural certainty: this component simply
+// never publishes to it. What this
 // component still has to get right on its own: the unreachable branch must
 // not render as an alarming, floating, or auto-dismissing surface that
 // could be mistaken for one. It renders inline, in the page's normal flow,

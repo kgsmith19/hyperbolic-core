@@ -11,6 +11,7 @@ import { computeGateDecision } from "../lib/auth-gate";
 import { activeZoneForPath } from "../lib/active-zone";
 import type { SessionStatus } from "../lib/session";
 import { splitByRoute, useRegisteredTools } from "../lib/registry";
+import { notificationSurface } from "../lib/notifications";
 
 interface ProtectedLayoutProps {
   status: SessionStatus;
@@ -67,7 +68,18 @@ function ProtectedLayout({ status, session, onSignOut }: ProtectedLayoutProps) {
   const activeZone = activeZoneForPath(location.pathname);
 
   return (
-    <Chrome activeZone={activeZone} session={session} onSignOut={onSignOut} tools={toolEntries}>
+    // m2-05: Chrome would fall back to the same per-document singleton on
+    // its own, but the Shell passes it explicitly -- this component is
+    // where the platform's one notification surface is mounted, and that
+    // should be readable here rather than implied by a default two packages
+    // away.
+    <Chrome
+      activeZone={activeZone}
+      session={session}
+      onSignOut={onSignOut}
+      tools={toolEntries}
+      notifications={notificationSurface}
+    >
       {/* SH-2a's e2e assertion (05-a section 12) checks for the LITERAL
           absence of [data-app-data] while gated. One coarse wrapper here
           (rather than annotating every individual page's data-bearing

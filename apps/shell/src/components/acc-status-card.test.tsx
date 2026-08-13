@@ -37,8 +37,11 @@ describe("AccStatusCard: unreachable degrade (mocked fetch failure)", () => {
     });
     expect(screen.getByText("ACC unreachable")).toBeInTheDocument();
 
-    // No toast surface exists at all yet (m2-05 is out of scope) -- this
-    // asserts that structurally, not just by absence of a specific bug.
+    // A toast surface DOES exist as of m2-05, which makes this assertion
+    // stronger than when it was written, not weaker: the card is rendered
+    // here without any chrome around it, so anything toast-shaped in this
+    // DOM could only have come from the card itself. It renders inline
+    // instead, per 09 section 4.4's "Error, inline" row.
     expect(document.querySelector('[data-slot*="toast"]')).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
   });

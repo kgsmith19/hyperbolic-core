@@ -101,7 +101,7 @@ test.describe("Settings page: one health row per deployable unit", () => {
 });
 
 test.describe("/acc status card: real degrade against no live ACC server", () => {
-  test('renders "ACC unreachable" and never throws, with no toast surface present anywhere on the page', async ({
+  test('renders "ACC unreachable" and never throws, without firing a toast', async ({
     page,
   }) => {
     // Nothing in this sandboxed run is listening on ACC's loopback port, so
@@ -115,10 +115,17 @@ test.describe("/acc status card: real degrade against no live ACC server", () =>
     await expect(page.getByTestId("acc-status-unreachable")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText("ACC unreachable", { exact: true })).toBeVisible();
 
-    // No toast surface exists at all yet (m2-05, out of scope) -- assert
-    // that structurally: nothing on the page carries a toast-shaped slot,
-    // and the degrade did not throw a page-level error.
-    await expect(page.locator('[data-slot*="toast"]')).toHaveCount(0);
+    // Updated by m2-05, which built the toast surface this test previously
+    // asserted did not exist yet. The claim worth keeping is the one about
+    // THIS degrade path, and it is now sharper than "nothing toast-shaped
+    // is on the page": the toast region exists (empty), and an unreachable
+    // ACC does not fire a toast at all -- it renders inline, per 09 section
+    // 4.4 ("Error, inline" for a failure tied to a visible surface; a toast
+    // is for background work with no surface of its own). Toast behaviour
+    // itself is proven in e2e/notifications.spec.ts.
+    await expect(page.locator('[data-slot="toast-region"]')).toBeAttached();
+    await expect(page.locator('[data-slot="toast"]')).toHaveCount(0);
+    await expect(page.getByTestId("notification-bell")).toHaveAttribute("data-unread-count", "0");
     await expect(page.locator('[role="status"][aria-live]')).toHaveCount(0);
     expect(pageErrors).toEqual([]);
   });

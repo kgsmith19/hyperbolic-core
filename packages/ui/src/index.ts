@@ -47,6 +47,24 @@ export { useThemeChoice } from "./chrome/theme";
 export type { ThemeChoice } from "./chrome/theme";
 export { paletteMatch } from "./chrome/palette-match";
 
+// m2-05, the notification surface (05-a section 7 / contract C-4, presented
+// per 09 section 4.5). Chrome renders the toast stack and the bell inbox
+// itself, so a zone normally needs exactly ONE of these: the
+// `getNotificationSurface()` singleton to publish through. The types are
+// the 05-a section 7 contract verbatim.
+export { getNotificationSurface, createNotificationSurface, NOTIFICATION_CHANNEL } from "./notifications/surface";
+export type {
+  NotificationSurfaceOptions,
+  NotificationSurfaceHandle,
+} from "./notifications/surface";
+export type {
+  NotificationLevel,
+  PlatformNotification,
+  NotificationSurface,
+  PublishableNotification,
+  Unsubscribe,
+} from "./notifications/types";
+
 export { EmptyState } from "./feedback/empty-state";
 export { Skeleton, useDelayedVisible } from "./feedback/skeleton";
 export { Spinner } from "./feedback/spinner";
