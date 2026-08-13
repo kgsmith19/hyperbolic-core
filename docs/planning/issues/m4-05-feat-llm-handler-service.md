@@ -8,13 +8,16 @@ Blocks: m4-06-feat-intake-optimize.md, m4-21-chore-ci-deploy-services.md, m6-02-
 ## Problem
 General-purpose consumers need LLM access without holding provider keys, and one shared handler process holding the Brain key is forbidden by ADR-05; Handler A is the general-keys deployment of the shared library (08-llm-handlers.md section 3, forced decisions 5 and 7).
 
+**Note (pulled-forward skeleton):** `services/llm-handler` already exists -- m3-06 built its deployable-unit skeleton early (Dockerfile, compose.yaml, deploy.yml's build-llm-handler/deploy-llm-handler jobs, the INFISICAL_LLM_HANDLER_DEPLOY_IDENTITY_ID identity and /platform/llm-handler/ path, `src/server.ts`'s raw node:http router, ADR-03 auth via `core.is_platform_owner()`) to give Idea Intake's submit API a real place to run once Shell turned out to be static-only. See `docs/planning/issues/m3-06-feat-intake-submit-api.md`'s architecture-gap section and `08-llm-handlers.md`'s gate question 1 resolution for the full writeup. This issue's remaining scope is additive to that existing service, not a from-scratch build.
+
 ## Scope
 In scope:
-- services/llm-handler with the route surface of 08 section 5 (/v1/complete, /v1/stream, /v1/count, /healthz), ADR-03 auth, per-caller concurrency cap
+- Add the route surface of 08 section 5 (/v1/complete, /v1/stream, /v1/count) to the existing services/llm-handler, per-caller concurrency cap (/healthz and ADR-03 auth already exist, built by m3-06 -- reuse, do not duplicate)
 - core.llm_call migration pair plus its 180-day retention per 08 section 6
-- Headless tool.json manifest and generated registration so the Shell discovers and health-checks it (08 forced decision 7)
+- Headless tool.json manifest and generated registration so the Shell discovers and health-checks it (08 forced decision 7) -- not yet built; m3-06 deliberately deferred this since intake submit needed no discovery entry
 Out of scope:
-- Deploy jobs (m4-21); the Brain's in-process use of the library (m4-08 onward); LifeOS migration onto the handler (deferred, 08 section 8)
+- The deploy jobs, Infisical identity, and tailscale route (m4-21's original scope) -- already delivered by m3-06; nothing left to do here
+- The Brain's in-process use of the library (m4-08 onward); LifeOS migration onto the handler (deferred, 08 section 8)
 
 ## Acceptance criteria
 If a request reaches /v1/* without a valid operator session JWT or scoped agent token, then the service shall respond 401.

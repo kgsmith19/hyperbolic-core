@@ -63,7 +63,7 @@ Every 05-artifact verification command must be runnable by exactly one gate:
 | --- | --- |
 | Toolbelt root, Guards, Prompt Organizer, Network Checker, Idea Intake suites (05-c, 05-d, 05-f, 05-g, 05-h) | Toolbelt PR Gate |
 | ACC suites, covgate, contract e2e (05-b, 05-g GU-2.x ACC-side) | ACC PR Gate |
-| Shell Playwright suites, packages tests (05-a, 05-d PO-5b cache test in `packages/llm`) | Shell PR Gate |
+| Shell Playwright suites, packages tests, services/llm-handler tests (05-a, 05-d PO-5b cache test in `packages/llm`, 05-h section 6 intake submit tests in `services/llm-handler` -- m3-06 added this row when it pulled Handler A's skeleton forward) | Shell PR Gate |
 | Brain suites (07, 03 BR criteria) | Brain PR Gate |
 | LifeOS pytest/vitest/Playwright (05-e) | standalone repo `PR Gate`, out of scope here |
 | Deployed-system criteria (SH-4 latency, BR-4 reconnect against prod) | smoke suite, section 7, never a merge gate |

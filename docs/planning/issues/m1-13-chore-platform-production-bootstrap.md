@@ -21,12 +21,13 @@ None of this is disputed or blocked on a design decision -- every piece is alrea
 
 In scope:
 - Stand up an Infisical org + project for this repo (distinct from the standalone `kgsmith19/lifeos` repo's own separate Infisical project).
-- Create environment `prod`, paths `/platform/shell-deploy/` (`TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `SHELL_DEPLOY_SSH_KEY`) and `/toolbelt/` (`SUPABASE_DB_URL`, a table-owner Postgres connection string).
-- Create two GitHub-OIDC machine identities, one per pipeline (ADR-05's one-identity-per-pipeline rule): `shell-deploy` and `platform-migrations`.
-- Provision one VPS: join it to the tailnet as an approved device; create the `deploy` OS user; install the public half of the deploy key pair into its `authorized_keys`; create the initial `shell/` and `lifeos-ui/` directories it owns.
-- Set GitHub repository variables: `DEPLOY_ENABLED`, `DEPLOY_HOST`, `INFISICAL_PROJECT_SLUG`, `INFISICAL_SHELL_DEPLOY_IDENTITY_ID`, `INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID`.
+- Create environment `prod`, paths `/platform/shell-deploy/` (`TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `SHELL_DEPLOY_SSH_KEY`), `/platform/llm-handler/` (`TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `LLM_HANDLER_SSH_KEY`, `TOOLBELT_GITHUB_INTAKE_PAT`, `SUPABASE_SERVICE_ROLE_KEY` -- added by m3-06, see `docs/ops/runbook.md`'s "Handler A deployment" section), and `/toolbelt/` (`SUPABASE_DB_URL`, a table-owner Postgres connection string).
+- Create three GitHub-OIDC machine identities, one per pipeline (ADR-05's one-identity-per-pipeline rule): `shell-deploy`, `llm-handler-deploy` (added by m3-06), and `platform-migrations`.
+- Provision one VPS: join it to the tailnet as an approved device; create the `deploy` OS user; install the public half of BOTH deploy key pairs (Shell's and Handler A's -- distinct keys per ADR-05, same OS user, `authorized_keys` accepts multiple) into `authorized_keys`; create the initial `shell/`, `lifeos-ui/`, and `llm-handler/` directories it owns.
+- Set GitHub repository variables: `DEPLOY_ENABLED`, `DEPLOY_HOST`, `INFISICAL_PROJECT_SLUG`, `INFISICAL_SHELL_DEPLOY_IDENTITY_ID`, `INFISICAL_LLM_HANDLER_DEPLOY_IDENTITY_ID` (added by m3-06), `INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID`.
 - Configure branch protection on `main`: require `Toolbelt PR Gate`, `ACC PR Gate`, `Shell PR Gate` (add `Brain PR Gate` when m4-08 lands its own workflow; not yet, per this issue's own scope boundary).
 - Update `docs/ops/runbook.md` with the platform-migrations identity variable and a short VPS-bootstrap section, so a future rebuild of the box has a real starting point instead of assuming one exists.
+- Set the `TOOLBELT_OWNER_TOKEN` repository secret once m1-07's owner setup produces a real owner access token (found during m3-06's review pass: `toolbelt-ci.yml` never references it today, so Prompt Organizer's own E2E acceptance test has been silently RLS-denied since the owner re-pin landed -- see `12-risk-register.md` section 5's Out-of-Brief Register for the full writeup).
 
 Out of scope:
 - Applying the platform migrations themselves (that is `platform-migrations.yml`'s own normal-mode dispatch, already implemented; this issue only makes the dispatch capable of authenticating, per `docs/ops/runbook.md`'s existing "One-time platform migration adoption" section).

@@ -451,6 +451,7 @@ Deletion list: `apps/agentic-command-center/forgepad/store.mjs`, `forgepad/store
 ## Gate questions (batched, non-blocking)
 
 1. Section 6.1 places the submit endpoint in the Shell serving unit's platform API. The alternative is co-locating with `services/llm-handler` if 08 decides to build Handler A. Default stands unless the operator prefers the co-location; say so before Phase 11 issues are cut.
+   **Resolved during m3-06's implementation:** the default (Shell serving unit) turned out not to exist -- `10-cicd-deployment.md` (written after this document) built Shell as static files only, with the deployable-unit budget already full. Operator chose the co-location alternative this question named: `services/llm-handler` (Handler A) pulled forward from M4, intake submit as its first tenant. See `docs/planning/issues/m3-06-feat-intake-submit-api.md`'s "Architecture gap found and resolved during implementation" section for the full writeup.
 2. Rejected forgepad ideas are deliberately not migrated (Section 10). Confirm drop-with-printed-audit is acceptable, or name a preservation target (e.g. import as drafts with a `[rejected in forgepad]` note prefix).
 3. The type label set is `FEAT|BUG|CHORE` (Section 7). Confirm casing and completeness against the operator's existing label conventions across target repos, which are [UNKNOWN] from this tree.
 4. `intake.optimization` is append-only telemetry. If the operator wants optimize history visible in the UI in V1, it adds one read view (~80 LOC) to Section 8; default is table-only until then.
