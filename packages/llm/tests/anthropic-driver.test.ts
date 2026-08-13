@@ -439,3 +439,174 @@ test("anthropicDriver.stream: aborts as transport when no delta arrives for 60 s
   assert.equal(error.class, "transport");
   assert.equal(error.retryable, true);
 });
+
+// ---------------------------------------------------------------------------
+// Watchdog-reset-source regression: the stall clock must reset only on an
+// actual LlmDelta yield, never on raw SSE transport activity. Unlike
+// sseResponse (which enqueues every event synchronously at stream start,
+// collapsing "reset on any event" and "reset on LlmDelta" into the same
+// instant), pacedSseResponse schedules events at specific fake-clock offsets
+// via setTimeout so the two behaviors are actually distinguishable.
+// ---------------------------------------------------------------------------
+
+/** Like sseResponse, but events are enqueued at scheduled fake-clock offsets
+ * (via global setTimeout, driven by t.mock.timers) instead of all at once at
+ * stream start. */
+function pacedSseResponse(scheduled: Array<{ atMs: number; event: string; data: unknown }>, opts: { signal?: AbortSignal | null; closeAfterMs?: number } = {}): Response {
+  const encoder = new TextEncoder();
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const item of scheduled) {
+        timers.push(
+          setTimeout(() => {
+            try {
+              controller.enqueue(encoder.encode(sseEvent(item.event, item.data)));
+            } catch {
+              // stream already closed/errored -- nothing left to enqueue into.
+            }
+          }, item.atMs),
+        );
+      }
+      if (opts.closeAfterMs !== undefined) {
+        timers.push(
+          setTimeout(() => {
+            try {
+              controller.close();
+            } catch {
+              // already closed/errored
+            }
+          }, opts.closeAfterMs),
+        );
+      }
+      const signal = opts.signal;
+      if (!signal) {
+        return; // no close scheduled and no signal: held open until the test ends
+      }
+      const errorStream = () => {
+        try {
+          controller.error(new DOMException("The operation was aborted.", "AbortError"));
+        } catch {
+          // already closed/errored -- fine, nothing left to signal.
+        }
+      };
+      if (signal.aborted) {
+        errorStream();
+      } else {
+        signal.addEventListener("abort", errorStream);
+      }
+    },
+    cancel() {
+      for (const timer of timers) {
+        clearTimeout(timer);
+      }
+    },
+  });
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+test("anthropicDriver.stream: keepalive-only transport activity (message_start + periodic no-op content_block_start events, no real content) does not prevent the 60s stall abort", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  // message_start yields no LlmDelta (only sets local usage bookkeeping).
+  // For the periodic "keepalive" events, a *text*-typed content_block_start
+  // is used rather than Anthropic's own "ping" SSE event: reading the
+  // installed SDK's core/streaming.ts confirms `ping` is filtered out by the
+  // SDK's own raw SSE decoder (`if (sse.event === 'ping') continue;`) before
+  // it ever reaches this driver's `for await` loop, so it can't distinguish
+  // "resets on any transport event" from "resets on LlmDelta" -- both would
+  // pass identically since neither driver ever even sees a ping. A
+  // content_block_start for a plain text block *does* reach the loop (it is
+  // accumulated into the SDK's message snapshot) but produces no `yield` in
+  // this driver's switch (only a tool_use content_block_start does), so it
+  // is genuine raw transport activity with zero LlmDelta -- exactly the
+  // repro shape for this bug.
+  const scheduled = [
+    { atMs: 0, event: "message_start", data: { type: "message_start", message: fixtureMessage({ content: [] }) } },
+    { atMs: 20_000, event: "content_block_start", data: { type: "content_block_start", index: 1, content_block: { type: "text", text: "", citations: null } } },
+    { atMs: 40_000, event: "content_block_start", data: { type: "content_block_start", index: 2, content_block: { type: "text", text: "", citations: null } } },
+    { atMs: 60_000, event: "content_block_start", data: { type: "content_block_start", index: 3, content_block: { type: "text", text: "", citations: null } } },
+  ];
+
+  const outcome = await withPatchedFetch(
+    async (_input, init) => pacedSseResponse(scheduled, { signal: init?.signal ?? undefined }),
+    async () => {
+      const gen = anthropicDriver.stream({ ...BASE_REQUEST, stream: true, timeoutMs: 120_000 }, { apiKey: "fixture-key" });
+      const drain = (async () => {
+        try {
+          for await (const _delta of gen) {
+            // draining only; no real content is ever yielded in this fixture.
+          }
+          return { ok: true as const };
+        } catch (error) {
+          return { ok: false as const, error };
+        }
+      })();
+
+      let settled: Awaited<typeof drain> | undefined;
+      drain.then((value) => (settled = value));
+
+      // 75s comfortably clears the true 60s stall threshold but stays well
+      // short of 120s -- the point at which a driver that (buggily) resets
+      // on every raw event would next fire, since its last reset landed on
+      // the t=60s content_block_start.
+      for (let i = 0; i < 75 && !settled; i++) {
+        t.mock.timers.tick(1000);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return settled;
+    },
+  );
+
+  assert.ok(outcome, "the stream must abort by ~60s despite periodic no-op content_block_start events every 20s -- they carry no LlmDelta and must not reset the stall watchdog");
+  assert.equal(outcome?.ok, false);
+  const error = (outcome as { ok: false; error: { class: string; retryable: boolean } }).error;
+  assert.equal(error.class, "transport");
+  assert.equal(error.retryable, true);
+});
+
+test("anthropicDriver.stream: real text deltas spaced within the 60s budget, with keepalive no-op content_block_start events interleaved, complete normally without spurious abort", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const scheduled = [
+    { atMs: 0, event: "message_start", data: { type: "message_start", message: fixtureMessage({ content: [] }) } },
+    { atMs: 5_000, event: "content_block_start", data: { type: "content_block_start", index: 98, content_block: { type: "text", text: "", citations: null } } },
+    { atMs: 10_000, event: "content_block_start", data: { type: "content_block_start", index: 0, content_block: { type: "text", text: "", citations: null } } },
+    { atMs: 15_000, event: "content_block_delta", data: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello " } } },
+    { atMs: 20_000, event: "content_block_start", data: { type: "content_block_start", index: 97, content_block: { type: "text", text: "", citations: null } } },
+    { atMs: 30_000, event: "content_block_delta", data: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "world" } } },
+    { atMs: 35_000, event: "content_block_start", data: { type: "content_block_start", index: 96, content_block: { type: "text", text: "", citations: null } } },
+    { atMs: 40_000, event: "content_block_stop", data: { type: "content_block_stop", index: 0 } },
+    {
+      atMs: 45_000,
+      event: "message_delta",
+      data: {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null, container: null, stop_details: null },
+        usage: { input_tokens: 10, output_tokens: 2, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens_details: null, server_tool_use: null },
+      },
+    },
+    { atMs: 45_500, event: "message_stop", data: { type: "message_stop" } },
+  ];
+
+  const deltas = await withPatchedFetch(
+    async () => pacedSseResponse(scheduled, { closeAfterMs: 46_000 }),
+    async () => {
+      const gen = anthropicDriver.stream({ ...BASE_REQUEST, stream: true, timeoutMs: 120_000 }, { apiKey: "fixture-key" });
+      const collectPromise = collectStream(gen);
+      let result: LlmDelta[] | undefined;
+      collectPromise.then((value) => (result = value));
+      for (let i = 0; i < 50 && !result; i++) {
+        t.mock.timers.tick(1000);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      assert.ok(result, "stream should complete normally, not stall, despite keepalive no-op content_block_start events interleaved");
+      return result;
+    },
+  );
+
+  const textDeltas = deltas.filter((d): d is Extract<LlmDelta, { kind: "text" }> => d.kind === "text");
+  assert.deepEqual(
+    textDeltas.map((d) => d.text),
+    ["Hello ", "world"],
+  );
+  assert.equal(deltas.at(-1)?.kind, "done");
+});

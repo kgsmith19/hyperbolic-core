@@ -394,6 +394,18 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
   const controller = new AbortController();
   const startedAt = Date.now();
   const hardTimer = setTimeout(() => controller.abort(), request.timeoutMs);
+  // Correctness fix (see 08-llm-handlers.md's stall-detection requirement):
+  // the watchdog must reset only on an actual LlmDelta yield, never on raw
+  // transport activity. It used to reset unconditionally once per chunk at
+  // the top of the `for await` loop below, before `delta?.content` was even
+  // checked -- so a provider emitting a steady stream of empty/role-only
+  // chunks (a real, documented OpenAI shape: `delta: {role: "assistant",
+  // content: ""}` or `delta: {}` with no `tool_calls`/`usage` either) could
+  // hold the watchdog open forever without ever producing real output,
+  // defeating the "no LlmDelta for 60s -> abort" contract entirely.
+  // `watchdog.reset()` now sits immediately before each of the three actual
+  // `yield` sites (text delta, tool-call delta, usage delta) and before the
+  // terminal `done` yield, so only genuine content resets the clock.
   const watchdog = createStallWatchdog(STREAM_STALL_MS, () => controller.abort());
 
   try {
@@ -411,13 +423,14 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
     // stall test below, not just by reading the source.
     const stream = client.chat.completions.stream({ ...params, stream_options: { include_usage: true } }, { signal: controller.signal });
     for await (const chunk of stream) {
-      watchdog.reset();
       const choice = chunk.choices[0];
       const delta = choice?.delta;
       if (delta?.content) {
+        watchdog.reset();
         yield { kind: "text", text: delta.content };
       }
       for (const toolCallDelta of delta?.tool_calls ?? []) {
+        watchdog.reset();
         yield {
           kind: "tool_call",
           partial: {
@@ -434,10 +447,12 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
           outputTokens: chunk.usage.completion_tokens,
           cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens ?? 0,
         };
+        watchdog.reset();
         yield { kind: "usage", usage };
       }
     }
     const final = await stream.finalChatCompletion();
+    watchdog.reset();
     yield { kind: "done", response: fromOpenAIChatCompletion(final, Date.now() - startedAt) };
   } catch (err) {
     throw classifyOpenAIError(err, controller.signal.aborted);

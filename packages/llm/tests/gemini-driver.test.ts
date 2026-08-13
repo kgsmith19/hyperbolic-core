@@ -463,3 +463,163 @@ test("geminiDriver.stream: aborts as transport when no delta arrives for 60 seco
   assert.equal((error as { class: string }).class, "transport");
   assert.equal((error as { retryable: boolean }).retryable, true);
 });
+
+// ---------------------------------------------------------------------------
+// Watchdog-reset-source regression: the stall clock must reset only on an
+// actual LlmDelta yield, never on raw chunk transport activity. Unlike
+// sseResponse (which enqueues every chunk synchronously at stream start,
+// collapsing "reset on any chunk" and "reset on LlmDelta" into the same
+// instant), pacedSseResponse schedules chunks at specific fake-clock offsets
+// via setTimeout so the two behaviors are actually distinguishable.
+// ---------------------------------------------------------------------------
+
+/** Like sseResponse, but chunks are enqueued at scheduled fake-clock offsets
+ * (via global setTimeout, driven by t.mock.timers) instead of all at once at
+ * stream start. */
+function pacedSseResponse(scheduled: Array<{ atMs: number; data: unknown }>, opts: { signal?: AbortSignal | null; closeAfterMs?: number } = {}): Response {
+  const encoder = new TextEncoder();
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const item of scheduled) {
+        timers.push(
+          setTimeout(() => {
+            try {
+              controller.enqueue(encoder.encode(sseLine(item.data)));
+            } catch {
+              // stream already closed/errored -- nothing left to enqueue into.
+            }
+          }, item.atMs),
+        );
+      }
+      if (opts.closeAfterMs !== undefined) {
+        timers.push(
+          setTimeout(() => {
+            try {
+              controller.close();
+            } catch {
+              // already closed/errored
+            }
+          }, opts.closeAfterMs),
+        );
+      }
+      const signal = opts.signal;
+      if (!signal) {
+        return; // no close scheduled and no signal: held open until the test ends
+      }
+      const errorStream = () => {
+        try {
+          controller.error(new DOMException("The operation was aborted.", "AbortError"));
+        } catch {
+          // already closed/errored -- fine, nothing left to signal.
+        }
+      };
+      if (signal.aborted) {
+        errorStream();
+      } else {
+        signal.addEventListener("abort", errorStream);
+      }
+    },
+    cancel() {
+      for (const timer of timers) {
+        clearTimeout(timer);
+      }
+    },
+  });
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+/** A chunk carrying only a modelVersion heartbeat -- no candidates, no
+ * usageMetadata -- a real, documented Gemini streaming shape. Nothing in
+ * this driver's loop body yields for it: `chunk.usageMetadata` is absent,
+ * `chunk.candidates?.[0]` is undefined so the loop `continue`s immediately. */
+function keepaliveChunk(): unknown {
+  return { modelVersion: "gemini-fixture-resolved" };
+}
+
+test("geminiDriver.stream: keepalive-only chunks (modelVersion heartbeat, no candidates or usageMetadata) do not prevent the 60s stall abort", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  // The opening chunk carries a candidate with an empty parts array -- also
+  // a real shape (metadata-only candidate) that never enters the functionCall
+  // / text branches, so it never yields either.
+  const openingChunk = { candidates: [{ content: { role: "model", parts: [] }, index: 0 }], modelVersion: "gemini-fixture-resolved" };
+  const scheduled = [
+    { atMs: 0, data: openingChunk },
+    { atMs: 20_000, data: keepaliveChunk() },
+    { atMs: 40_000, data: keepaliveChunk() },
+    { atMs: 60_000, data: keepaliveChunk() },
+  ];
+
+  const outcome = await withPatchedFetch(
+    async (_input, init) => pacedSseResponse(scheduled, { signal: init?.signal ?? undefined }),
+    async () => {
+      const gen = geminiDriver.stream({ ...BASE_REQUEST, stream: true, timeoutMs: 120_000 }, { apiKey: "fixture-key" });
+      const drain = (async () => {
+        try {
+          for await (const _delta of gen) {
+            // draining only; no real content is ever yielded in this fixture.
+          }
+          return { ok: true as const };
+        } catch (error) {
+          return { ok: false as const, error };
+        }
+      })();
+
+      let settled: Awaited<typeof drain> | undefined;
+      drain.then((value) => (settled = value));
+
+      // 75s comfortably clears the true 60s stall threshold but stays well
+      // short of 120s -- the point at which a driver that (buggily) resets
+      // on every raw chunk would next fire, since its last reset landed on
+      // the t=60s keepalive chunk.
+      for (let i = 0; i < 75 && !settled; i++) {
+        t.mock.timers.tick(1000);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return settled;
+    },
+  );
+
+  assert.ok(outcome, "the stream must abort by ~60s despite periodic modelVersion-only chunks every 20s -- they carry no LlmDelta and must not reset the stall watchdog");
+  assert.equal(outcome?.ok, false);
+  const error = (outcome as { ok: false; error: unknown }).error;
+  assert.ok(isLlmError(error));
+  assert.equal((error as { class: string }).class, "transport");
+  assert.equal((error as { retryable: boolean }).retryable, true);
+});
+
+test("geminiDriver.stream: real text deltas spaced within the 60s budget, with keepalive chunks interleaved, complete normally without spurious abort", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const scheduled = [
+    { atMs: 0, data: keepaliveChunk() },
+    { atMs: 5_000, data: keepaliveChunk() },
+    { atMs: 15_000, data: { candidates: [{ content: { role: "model", parts: [{ text: "Hello " }] }, index: 0 }], modelVersion: "gemini-fixture-resolved" } },
+    { atMs: 20_000, data: keepaliveChunk() },
+    { atMs: 30_000, data: { candidates: [{ content: { role: "model", parts: [{ text: "world" }] }, index: 0 }], modelVersion: "gemini-fixture-resolved" } },
+    { atMs: 35_000, data: keepaliveChunk() },
+    { atMs: 40_000, data: { usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 8, cachedContentTokenCount: 4 }, modelVersion: "gemini-fixture-resolved" } },
+  ];
+
+  const deltas = await withPatchedFetch(
+    async () => pacedSseResponse(scheduled, { closeAfterMs: 41_000 }),
+    async () => {
+      const gen = geminiDriver.stream({ ...BASE_REQUEST, stream: true, timeoutMs: 120_000 }, { apiKey: "fixture-key" });
+      const collectPromise = collectStream(gen);
+      let result: LlmDelta[] | undefined;
+      collectPromise.then((value) => (result = value));
+      for (let i = 0; i < 50 && !result; i++) {
+        t.mock.timers.tick(1000);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      assert.ok(result, "stream should complete normally, not stall, despite keepalive chunks interleaved");
+      return result;
+    },
+  );
+
+  const textDeltas = deltas.filter((d): d is Extract<LlmDelta, { kind: "text" }> => d.kind === "text");
+  assert.deepEqual(
+    textDeltas.map((d) => d.text),
+    ["Hello ", "world"],
+  );
+  assert.equal(deltas.at(-1)?.kind, "done");
+});

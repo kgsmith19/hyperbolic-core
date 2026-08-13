@@ -414,6 +414,18 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
   const controller = new AbortController();
   const startedAt = Date.now();
   const hardTimer = setTimeout(() => controller.abort(), request.timeoutMs);
+  // Correctness fix (see 08-llm-handlers.md's stall-detection requirement):
+  // the watchdog must reset only on an actual LlmDelta yield, never on raw
+  // transport activity. It used to reset unconditionally once per chunk at
+  // the top of the `for await` loop below, before `candidate.content?.parts`
+  // was even iterated -- so a provider emitting a steady stream of
+  // metadata-only chunks (a real, documented Gemini shape: a bare
+  // `{modelVersion}` heartbeat, or a candidate whose `content.parts` is
+  // empty) could hold the watchdog open forever without ever producing real
+  // output, defeating the "no LlmDelta for 60s -> abort" contract entirely.
+  // `watchdog.reset()` now sits immediately before each of the three actual
+  // `yield` sites (usage delta, tool-call delta, text delta) and before the
+  // terminal `done` yield, so only genuine content resets the clock.
   const watchdog = createStallWatchdog(STREAM_STALL_MS, () => controller.abort());
 
   let text = "";
@@ -431,12 +443,12 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
       config: buildConfig(request, controller.signal),
     });
     for await (const chunk of stream) {
-      watchdog.reset();
       if (chunk.modelVersion) {
         modelVersion = chunk.modelVersion;
       }
       if (chunk.usageMetadata) {
         usage = usageFromMetadata(chunk.usageMetadata);
+        watchdog.reset();
         yield { kind: "usage", usage };
       }
       if (chunk.promptFeedback?.blockReason) {
@@ -453,10 +465,12 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
         if (part.functionCall) {
           const call = toToolCall(part.functionCall, toolCallIndex);
           toolCalls.push(call);
+          watchdog.reset();
           yield { kind: "tool_call", partial: { index: toolCallIndex, id: call.id, name: call.name, inputJsonDelta: JSON.stringify(call.input) } };
           toolCallIndex++;
         } else if (part.text !== undefined && !part.thought) {
           text += part.text;
+          watchdog.reset();
           yield { kind: "text", text: part.text };
         }
       }
@@ -470,6 +484,7 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
       model: modelVersion ?? request.model,
       latencyMs: Date.now() - startedAt,
     };
+    watchdog.reset();
     yield { kind: "done", response };
   } catch (err) {
     throw classifyGeminiError(err, controller.signal.aborted);

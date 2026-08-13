@@ -292,9 +292,19 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
   const controller = new AbortController();
   const startedAt = Date.now();
   const hardTimer = setTimeout(() => controller.abort(), request.timeoutMs);
-  // Any sign of life from the stream resets the stall clock; total silence
-  // for STREAM_STALL_MS aborts the same controller the hard timeout uses,
-  // so both paths converge on the same abort-handling below.
+  // Correctness fix (see 08-llm-handlers.md's stall-detection requirement):
+  // the watchdog must reset only on an actual LlmDelta yield, never on raw
+  // SSE transport activity. It used to reset unconditionally once per event
+  // at the top of the `for await` loop below, before the switch that
+  // determines whether the event produces a delta at all -- so a provider
+  // emitting a steady stream of `message_start`/`content_block_stop`/`ping`
+  // events (all of which are real Anthropic wire events with no `yield` in
+  // any branch that handles them) could hold the watchdog open forever
+  // without ever producing real output, defeating the "no LlmDelta for 60s
+  // -> abort" contract entirely. `watchdog.reset()` now sits immediately
+  // before each of the four actual `yield` sites (tool_call start, text
+  // delta, tool_call input delta, usage delta) and before the terminal
+  // `done` yield, so only genuine content resets the clock.
   const watchdog = createStallWatchdog(STREAM_STALL_MS, () => controller.abort());
 
   let inputTokens = 0;
@@ -304,7 +314,6 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
   try {
     const anthropicStream = client.messages.stream({ ...params, stream: true }, { signal: controller.signal });
     for await (const event of anthropicStream) {
-      watchdog.reset();
       switch (event.type) {
         case "message_start": {
           inputTokens = event.message.usage.input_tokens;
@@ -314,6 +323,7 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
         }
         case "content_block_start": {
           if (event.content_block.type === "tool_use") {
+            watchdog.reset();
             yield {
               kind: "tool_call",
               partial: { index: event.index, id: event.content_block.id, name: event.content_block.name },
@@ -323,8 +333,10 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
         }
         case "content_block_delta": {
           if (event.delta.type === "text_delta") {
+            watchdog.reset();
             yield { kind: "text", text: event.delta.text };
           } else if (event.delta.type === "input_json_delta") {
+            watchdog.reset();
             yield { kind: "tool_call", partial: { index: event.index, inputJsonDelta: event.delta.partial_json } };
           }
           break;
@@ -333,6 +345,7 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
           inputTokens = event.usage.input_tokens ?? inputTokens;
           outputTokens = event.usage.output_tokens;
           cacheReadTokens = event.usage.cache_read_input_tokens ?? cacheReadTokens;
+          watchdog.reset();
           yield { kind: "usage", usage: { inputTokens, outputTokens, cacheReadTokens } };
           break;
         }
@@ -341,6 +354,7 @@ async function* streamImpl(request: LlmRequest, credentials: Credentials): Async
       }
     }
     const finalMessage = await anthropicStream.finalMessage();
+    watchdog.reset();
     yield { kind: "done", response: fromAnthropicMessage(finalMessage, Date.now() - startedAt) };
   } catch (err) {
     throw classifyAnthropicError(err, controller.signal.aborted);
