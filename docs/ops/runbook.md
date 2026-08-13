@@ -7,6 +7,29 @@ updated: 2026-08-13
 
 # Platform Operations Runbook
 
+## VPS bootstrap (from nothing)
+
+Every section below assumes a `deploy@$DEPLOY_HOST` that already exists, is
+joined to the tailnet, and already trusts the deploy key. This section is
+that starting point, run once per VPS (see
+`docs/planning/issues/m1-13-chore-platform-production-bootstrap.md`).
+
+1. Provision one VPS and join it to the tailnet as an approved device
+   (`tailscale up`, approve in the admin console if the ACL requires manual
+   approval for non-`tag:ci` devices).
+2. Create the `deploy` OS user: `useradd -m -s /bin/bash deploy`.
+3. Generate the deploy key pair (`ssh-keygen -t ed25519 -C deploy@hyperbolic-core -f deploy_key`,
+   no passphrase -- it must be usable non-interactively from CI). Install the
+   **public** half into `~deploy/.ssh/authorized_keys` (mode 600, directory
+   mode 700, owned by `deploy`). Store the **private** half in Infisical at
+   `/platform/shell-deploy/SHELL_DEPLOY_SSH_KEY` -- never in this repository,
+   never on a workstation disk longer than the copy takes.
+4. Create the directories `deploy.yml` expects to own: `mkdir -p ~deploy/shell ~deploy/lifeos-ui`.
+5. Confirm `ssh -o BatchMode=yes deploy@<tailnet-name> true` succeeds from a
+   tailnet client before the first real CI dispatch; `deploy.yml`'s own
+   `ssh_options` use `BatchMode=yes`, so a passphrase-protected or
+   not-yet-trusted key fails the job immediately rather than hanging.
+
 ## Single-origin Tailscale Serve routes
 
 The VPS exposes one tailnet-only HTTPS origin. Tailscale provides the network boundary; applications still enforce authentication and authorization.
@@ -81,6 +104,8 @@ Configure these repository variables before enabling deployment:
 
 `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_ACC_API`, and `VITE_LIFEOS_API` are optional public overrides; the Shell has documented production defaults.
 
+The `shell-deploy` OIDC identity's `/platform/shell-deploy/` secret path must contain three values: `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_SECRET` (the tailnet join, shared shape with every other CI-joining workflow) and `SHELL_DEPLOY_SSH_KEY` (the deploy user's private key, PEM/OpenSSH text; `deploy.yml` writes it to the runner's default SSH identity path before the first `ssh`/`scp` call -- see "VPS bootstrap" above for how the matching public half gets installed).
+
 The deploy job uploads into a run-specific staging directory, atomically switches `shell/current`, and verifies both `/healthz` and the built JavaScript asset through the real tailnet origin. A failed activation or health proof restores the previous symlink automatically. Only after health succeeds does `prune-dist-dirs.sh` retain the newest three releases.
 
 A manual `Platform Deploy` dispatch defaults to deploying Shell without touching the database. Set `apply_migrations: true` only when the pending migration set has been reviewed and the owner/ledger preflights are expected to pass; this remains main-only and runs before Shell activation. `deploy_shell` can be disabled for an explicit migration-only dispatch.
@@ -95,6 +120,8 @@ test "$(curl -fsS https://<origin>/healthz)" = '{"status":"ok"}'
 Record the workflow URL, deployed commit, health output, and rollback rehearsal. Live SSH, Infisical, tailnet ACL, and host behavior cannot be proven by repository tests.
 
 ## One-time platform migration adoption
+
+`platform-migrations.yml` authenticates to Infisical the same way `deploy.yml` does, via a dedicated OIDC identity: set repository variables `INFISICAL_PROJECT_SLUG` (shared with the Shell deploy pipeline) and `INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID` (its own identity, scoped to `/toolbelt/` only, per ADR-05's one-identity-per-pipeline rule -- never the same identity `shell-deploy` uses). Its `/toolbelt/` secret path must contain `SUPABASE_DB_URL`, a table-owner-privileged Postgres connection string for the platform project; this is the single most powerful credential in either pipeline, since it bypasses RLS entirely. Without these two variables set, every dispatch fails immediately at the Infisical step, before touching the database at all.
 
 The platform project predates the Supabase CLI ledger. Run the explicit `baseline_legacy_ledger: true` dispatch from `main`. It accepts only an empty ledger or an exact ordered prefix of the 18 reviewed legacy versions plus the two S1 versions, and it requires an empty schema diff plus explicit legacy seed/grant/extension/job checks before repairing any missing metadata. It then resumes the additive `platform` owner bootstrap and `test` fence (S1) and stops. If a run is interrupted after ledger repair or during S1, rerun the same baseline mode; a divergent/non-prefix ledger remains a hard stop.
 

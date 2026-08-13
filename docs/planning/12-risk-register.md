@@ -72,9 +72,9 @@ Reading: V1 is a net-additive foundation dominated by one component (the Brain p
 | `/life/*` base-path configuration (Vite base, router basename, FastAPI root_path) + smoke URL updates | standalone lifeos | ~20 lines config | required by ADR-02 one-origin routing (OD-03 confirms direction first) |
 | Auth re-point deploy train execution (Infisical values + one redeploy) | standalone lifeos pipeline + Infisical | config only | LO-2; must run as one train (R-04) |
 | Verify/instate Guards + ACC hook registration | operator machine ~/.claude | minutes | 01-inventory gate 2; GU posture assumption |
-| Branch-protection required checks for the four PR Gates | GitHub settings | minutes | 10 gate 1 |
-| Infisical paths and machine identities per ADR-05 | Infisical | config | prerequisite for M1 |
-| VPS capacity check (RAM/CPU headroom for 3 new services) | VPS | minutes | R-03 input, before M2 deploys |
+| Branch-protection required checks for the four PR Gates | GitHub settings | minutes | 10 gate 1; owned by `m1-13-chore-platform-production-bootstrap.md` for the first three checks (Toolbelt/ACC/Shell); the fourth (Brain) is added when m4-08 lands |
+| Infisical paths and machine identities per ADR-05 | Infisical | config | prerequisite for M1; owned by `m1-13-chore-platform-production-bootstrap.md` |
+| VPS capacity check (RAM/CPU headroom for 3 new services) | VPS | minutes | R-03 input, before M2 deploys; VPS provisioning itself is now owned by `m1-13-chore-platform-production-bootstrap.md`; the capacity re-check before Brain/Handler A join the box remains a separate, later confirmation |
 | GitHub label conventions audit for Idea Intake's scheme | GitHub repos | minutes | 05-h gate 3 |
 | Propose agent-engineering-standard exception for bounded planning engagements | agent-engineering-standard AGENTS.md §Forbidden artifacts | two sentences added to the exception list | permits temporary docs/planning/ when repository's CLAUDE.md mandates them for a bounded engagement; requires freeze after implementation starts (Issues remain durable source); resolves the C1 contradiction (13-dissent.md) |
 
