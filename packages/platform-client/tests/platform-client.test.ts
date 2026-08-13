@@ -61,6 +61,63 @@ async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Prom
   }
 }
 
+/**
+ * Stubs `globalThis.location` for the duration of `run`, restoring whatever
+ * was there before (nothing, in this plain `node:test` environment) after.
+ * This is the seam `authedFetch`'s origin check (src/index.ts,
+ * `resolveRequestOrigin` / `isOriginAllowed`) reads to resolve same-origin
+ * relative paths and protocol-relative URLs exactly the way a real browser
+ * tab would -- a `URL` instance supplies the same `.href`/`.origin` shape
+ * `authedFetch` actually reads off `Location`, so it stands in for one
+ * without needing a DOM.
+ */
+async function withStubbedLocation<T>(href: string, run: () => Promise<T>): Promise<T> {
+  const hadLocation = "location" in globalThis;
+  const original = (globalThis as { location?: unknown }).location;
+  Object.defineProperty(globalThis, "location", {
+    value: new URL(href),
+    configurable: true,
+    writable: true,
+  });
+  try {
+    return await run();
+  } finally {
+    if (hadLocation) {
+      Object.defineProperty(globalThis, "location", {
+        value: original,
+        configurable: true,
+        writable: true,
+      });
+    } else {
+      delete (globalThis as { location?: unknown }).location;
+    }
+  }
+}
+
+/**
+ * A `globalThis.fetch` stand-in for the authedFetch-origin-allowlist tests
+ * below: routes Supabase's own `/auth/v1/token?grant_type=password` sign-in
+ * call to a fixture session response (so `client.auth.signInWithPassword`
+ * keeps working exactly as in the tests above), and records every OTHER
+ * call's URL and headers into `captured` -- this is the seam the "never
+ * attaches/sends the Authorization header" assertions read, since asserting
+ * only that a promise rejected would miss a bug that rejects AFTER already
+ * calling `fetch` with the token attached.
+ */
+function makeAuthAndCaptureSpy(
+  expiresAt: number,
+  captured: Array<{ url: string; headers: Headers }>
+): FetchImpl {
+  return async (input, init) => {
+    const url = String(input);
+    if (url.includes("grant_type=password")) {
+      return jsonResponse(fixtureSignInBody(expiresAt));
+    }
+    captured.push({ url, headers: new Headers(init?.headers) });
+    return jsonResponse({ ok: true });
+  };
+}
+
 test("signInWithPassword against a mocked IdP resolves a session for the fixture owner", async (t) => {
   const spy = t.mock.fn(async (input: RequestInfo | URL) => {
     assert.match(String(input), /grant_type=password/);
@@ -139,4 +196,100 @@ test(
       assert.match(String(call.arguments[0]), /\/auth\/v1\/token\?grant_type=/);
     }
   },
+);
+
+// --- authedFetch origin allowlist (P1 fix, src/index.ts authedFetch) -------
+//
+// Every test below signs in for real first (through the same mocked
+// `/auth/v1/token` path the tests above use) so `authedFetch` has a live
+// session to attach -- these tests are about WHICH requests get that
+// session's token attached, not about the no-session fail-closed path
+// already covered above.
+
+test("authedFetch: a same-origin relative URL proceeds and gets the Authorization header attached (positive case)", async (t) => {
+  const captured: Array<{ url: string; headers: Headers }> = [];
+  const spy = t.mock.fn(makeAuthAndCaptureSpy(nowSeconds() + 3600, captured));
+
+  await withStubbedLocation("https://shell.example.invalid/tools", async () => {
+    await withPatchedFetch(spy, async () => {
+      const client = createPlatformClient(FIXTURE_CONFIG);
+      await client.auth.signInWithPassword(FIXTURE_EMAIL, FIXTURE_PASSWORD);
+      const res = await client.fetch("/life/api/entities");
+      assert.equal(res.status, 200);
+    });
+  });
+
+  assert.equal(captured.length, 1);
+  // authedFetch passes `input` through to globalThis.fetch UNCHANGED (still
+  // the original relative string) -- only the origin-allowlist CHECK
+  // resolves it against the stubbed page origin, exactly like a real
+  // browser's own fetch() would resolve this same relative path itself.
+  // Rewriting `input` before the pass-through isn't this fix's job and
+  // would be an unrelated behavior change.
+  assert.equal(captured[0]?.url, "/life/api/entities");
+  assert.equal(captured[0]?.headers.get("authorization"), "Bearer fixture.access.token");
+});
+
+test("authedFetch: an absolute URL on the configured Supabase origin proceeds and gets the Authorization header attached (positive case)", async (t) => {
+  const captured: Array<{ url: string; headers: Headers }> = [];
+  const spy = t.mock.fn(makeAuthAndCaptureSpy(nowSeconds() + 3600, captured));
+
+  await withPatchedFetch(spy, async () => {
+    const client = createPlatformClient(FIXTURE_CONFIG);
+    await client.auth.signInWithPassword(FIXTURE_EMAIL, FIXTURE_PASSWORD);
+    const res = await client.fetch(`${FIXTURE_CONFIG.supabaseUrl}/rest/v1/app?select=id`);
+    assert.equal(res.status, 200);
+  });
+
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0]?.headers.get("authorization"), "Bearer fixture.access.token");
+});
+
+test(
+  "authedFetch: an absolute URL to a different, non-allowlisted origin is rejected and the " +
+    "Authorization header is NEVER attached or sent (the actual point of the fix)",
+  async (t) => {
+    const captured: Array<{ url: string; headers: Headers }> = [];
+    const spy = t.mock.fn(makeAuthAndCaptureSpy(nowSeconds() + 3600, captured));
+
+    await withPatchedFetch(spy, async () => {
+      const client = createPlatformClient(FIXTURE_CONFIG);
+      await client.auth.signInWithPassword(FIXTURE_EMAIL, FIXTURE_PASSWORD);
+      await assert.rejects(
+        () => client.fetch("https://evil.invalid/steal"),
+        /refusing to attach the platform session token/
+      );
+    });
+
+    // The point of this test: not merely that the call rejected, but that
+    // globalThis.fetch was never invoked for it at all -- so there is no
+    // world in which the token reached evil.invalid before the rejection.
+    assert.equal(captured.length, 0);
+  }
+);
+
+test(
+  "authedFetch: a protocol-relative URL (//evil.invalid/...) pointed at a non-allowlisted host is rejected, " +
+    "token never attached or sent",
+  async (t) => {
+    const captured: Array<{ url: string; headers: Headers }> = [];
+    const spy = t.mock.fn(makeAuthAndCaptureSpy(nowSeconds() + 3600, captured));
+
+    await withStubbedLocation("https://shell.example.invalid/tools", async () => {
+      await withPatchedFetch(spy, async () => {
+        const client = createPlatformClient(FIXTURE_CONFIG);
+        await client.auth.signInWithPassword(FIXTURE_EMAIL, FIXTURE_PASSWORD);
+        // "//evil.invalid/steal" resolved against the stubbed page origin
+        // becomes the absolute URL https://evil.invalid/steal -- the classic
+        // protocol-relative escalation an attacker would try against code
+        // that only origin-checks strings starting with "http".
+        await assert.rejects(
+          () => client.fetch("//evil.invalid/steal"),
+          /refusing to attach the platform session token/
+        );
+      });
+    });
+
+    assert.equal(captured.length, 0);
+  }
 );

@@ -16,6 +16,18 @@ export interface PlatformClientConfig {
   supabaseUrl: string;
   /** Supabase publishable key; public by design, safe in a browser bundle. */
   publishableKey: string;
+  /**
+   * Extra absolute origins `authedFetch` (src/index.ts) is willing to attach
+   * the live bearer token to, beyond same-origin-with-the-page (always
+   * allowed) and `supabaseUrl`'s own origin (always allowed). Optional and
+   * empty by default: this is the fix for the authedFetch token-exfiltration
+   * finding closed in src/index.ts, and every real call site in this repo
+   * today (apps/shell) only ever needs those two origins, so nothing in the
+   * current repo needs to set this. Exists as the escape hatch for a future
+   * legitimate origin (e.g. a composed app that stops being same-origin)
+   * without reopening authedFetch to arbitrary hosts.
+   */
+  additionalAllowedOrigins?: string[];
 }
 
 export interface PlatformSession {
