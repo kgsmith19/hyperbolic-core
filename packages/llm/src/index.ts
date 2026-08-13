@@ -53,3 +53,15 @@ export type { OrchestrationOptions } from "./complete.ts";
 
 export { createPromptClient, MissingVariablesError, PromptNotFoundError } from "./prompt-client.ts";
 export type { GetPromptOptions, PromptClient, PromptClientOptions, RenderedPrompt } from "./prompt-client.ts";
+
+// m5-01/m5-02: the pure client-side template model (05-d section 8) was
+// previously only an internal detail of this package's own cache
+// (prompt-client.ts). apps/shell's Prompt Organizer surface renders a
+// prompt's ALREADY-FETCHED body locally (matching the original
+// apps/toolbelt/apps/prompt-organizer/web/panel.mjs behavior this port
+// replaces: the copy/render panel never round-trips through rpc/get_prompt
+// for its own preview) -- exporting these lets it reuse the same
+// fuzz-tested implementation (tests/prompt-render-parity.test.mjs) instead
+// of a third hand-copy of render.mjs's algorithm.
+export { extractSections, extractVariables, render } from "./prompt-render.ts";
+export type { RenderResult } from "./prompt-render.ts";

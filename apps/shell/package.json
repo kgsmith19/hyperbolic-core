@@ -19,6 +19,7 @@
     "healthz-check": "node test/healthz-check.mjs"
   },
   "dependencies": {
+    "@hyperbolic/llm": "*",
     "@hyperbolic/platform-client": "*",
     "@hyperbolic/ui": "*",
     "react": "^19.2.7",

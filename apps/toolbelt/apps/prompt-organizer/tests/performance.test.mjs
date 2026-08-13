@@ -330,6 +330,15 @@ test(
 
       const p95Index = Math.floor(samples.length * 0.95);
       const measured = samples[Math.min(p95Index, samples.length - 1)];
+      const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+      const max = samples[samples.length - 1];
+
+      // Same "[perf] ..." console.log convention as apps/shell/e2e/tools.spec.ts's
+      // perf tests, so a CI log always shows the real measured numbers even
+      // when the assertion passes comfortably.
+      console.log(
+        `[perf] rpc/get_prompt over 50 warm calls (engine-level): mean=${mean.toFixed(2)}ms p95=${measured.toFixed(2)}ms max=${max.toFixed(2)}ms`,
+      );
 
       assert.ok(
         measured < GET_PROMPT_BUDGET_MS,
