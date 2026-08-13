@@ -1,9 +1,11 @@
 -- Down migration for 20260813160000_prompt_seed_starters.sql. Deletes
--- exactly the migration-owned UUIDs from the up migration. The title-based
--- conflict rule may skip a pre-existing personal row; deleting by UUID means
--- rollback cannot remove that skipped row (or a later same-titled row).
--- prompt.prompt_version rows cascade via the FK's ON DELETE CASCADE
--- (20260807041000); no separate delete is needed there.
+-- exactly the migration-owned UUIDs the up migration's delete-then-insert
+-- reconciliation assigns (fixed after a DB review finding: an earlier
+-- conflict-driven insert never actually wrote these ids, making this
+-- delete a silent no-op -- see the up migration's comment for the full
+-- writeup). prompt.prompt_version/prompt_configuration/prompt_tag rows all
+-- cascade via their FKs' ON DELETE CASCADE (20260807041000, 20260807051000,
+-- 20260808100000); no separate delete is needed for any of them.
 alter table prompt.prompt no force row level security;
 alter table prompt.prompt_version no force row level security;
 

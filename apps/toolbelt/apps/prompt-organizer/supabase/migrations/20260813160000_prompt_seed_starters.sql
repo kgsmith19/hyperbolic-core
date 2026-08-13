@@ -14,10 +14,51 @@
 -- Each seed has a migration-owned stable UUID. Uniqueness is scoped to the
 -- row owner so an inaccessible legacy fixture row cannot squat an owner's
 -- prompt name (20260813151000).
--- to re-run and safe against a pre-existing personal prompt that happens to
--- share a seeded title. The stable IDs let the down migration remove only
--- rows this migration actually inserted; a skipped personal collision can
--- never be mistaken for seed provenance during rollback.
+--
+-- DB review finding (PR #9 follow-up): an earlier version of this migration
+-- tried to reconcile 20260813130000's random-id rows onto these stable ids
+-- via `insert ... on conflict (user_id, lower(title)) do nothing`. That can
+-- never work: 20260813130000 already owns every one of these titles for
+-- this owner, so the conflict always fires and the insert is always a
+-- silent 0-row no-op -- the "stable" ids were never actually written, which
+-- made both this file's down migration and 20260813130000_down.sql's
+-- delete-by-stable-id no-ops too, silently leaving all 9 rows live on a
+-- documented rollback. A straight `update ... set id = ...` cannot fix this
+-- either: prompt_version/prompt_configuration/prompt_tag's FKs to
+-- prompt.prompt(id) are `on delete cascade` but NOT `on update cascade`, so
+-- reassigning an existing row's primary key in place violates referential
+-- integrity in either statement order.
+--
+-- Fix: a temporary table holds the seed values once; a DELETE removes only
+-- a row that is BOTH owned by the platform owner AND byte-identical (title
+-- and body) to the seed content about to be reinserted; a following INSERT
+-- reintroduces exactly that content under the stable id -- a true
+-- no-semantic-loss swap for the ordinary case (an untouched prior seed
+-- row). Matching on body as well as title, not title alone, is what
+-- preserves 20260813130000's own tested guarantee: a genuinely personal
+-- prompt that merely happens to share a seeded title (proved with a
+-- deliberately different body in seed.test.mjs's "a pre-existing title
+-- collision survives both seed and rollback untouched") has a body that
+-- can never equal the seed text, so the DELETE leaves it alone and the
+-- INSERT's closing `on conflict ... do nothing` (restored here) skips
+-- re-adding that title, exactly as before.
+--
+-- DELETE and INSERT are deliberately two separate top-level statements, not
+-- one `WITH ... DELETE ... RETURNING ...) INSERT` combined statement:
+-- verified interactively that a data-modifying CTE's writes are NOT visible
+-- to that same statement's own `ON CONFLICT` check (both read the
+-- statement-start snapshot) -- an INSERT...ON CONFLICT chained onto a CTE
+-- DELETE that just freed the exact slot it needs still sees the index entry
+-- as occupied and silently skips the reinsert, which would make this
+-- migration DELETE its own seed rows and never restore them on a second
+-- (idempotent) run, strictly worse than the original no-op bug. Two plain
+-- sequential statements on the same session (this file's psql/CLI
+-- invocation is always one continuous session, autocommit or not) do not
+-- have this problem: each statement sees every earlier statement's
+-- completed effect. The temp table is session-scoped, not
+-- transaction-scoped (deliberately no `ON COMMIT DROP`), because this file
+-- is applied as plain sequential autocommitted statements, not wrapped in
+-- an explicit transaction -- also verified interactively.
 --
 -- FORCE ROW LEVEL SECURITY is lifted around the insert and restored
 -- immediately after, on both prompt.prompt and prompt.prompt_version.
@@ -34,9 +75,8 @@
 alter table prompt.prompt no force row level security;
 alter table prompt.prompt_version no force row level security;
 
-insert into prompt.prompt (id, user_id, title, body)
-select v.id::uuid, (select platform.owner()), v.title, v.body
-from (values
+create temporary table po_seed_starters as
+select * from (values
 
 ('7a6c6f00-0001-4000-8000-000000000001', 'brain/task-contract', $b1$You are the Brain's dispatcher. Produce a single task contract for a coding harness run, in the exact JSON shape below. Do not include any prose outside the JSON.
 
@@ -171,8 +211,20 @@ Produce exactly this JSON shape and nothing else (no prose outside the JSON):
 
 Confidence reflects how much of the draft came directly from the input versus how much you had to infer. A draft built almost entirely from clear input is "high"; a draft where you filled significant gaps is "low".$b9$)
 
-) as v(id, title, body)
+) as s(id, title, body);
+
+delete from prompt.prompt p
+using po_seed_starters s
+where p.user_id = (select platform.owner())
+  and lower(p.title) = lower(s.title)
+  and p.body = s.body;
+
+insert into prompt.prompt (id, user_id, title, body)
+select s.id::uuid, (select platform.owner()), s.title, s.body
+from po_seed_starters s
 on conflict (user_id, lower(title)) do nothing;
+
+drop table po_seed_starters;
 
 alter table prompt.prompt force row level security;
 alter table prompt.prompt_version force row level security;

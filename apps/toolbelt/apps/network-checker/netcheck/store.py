@@ -175,7 +175,17 @@ def mirror(conn, url=None, key=None, host_name=None):
         pending = unsynced(conn, table)
         if not pending:
             continue
-        remote = [for_remote(conn, table, row, host_name) for row in pending]
+        try:
+            remote = [for_remote(conn, table, row, host_name) for row in pending]
+        except ValueError as e:
+            # A row that fails to map to the remote natural-key contract
+            # (e.g. a device with neither MAC nor IP, or a dangling
+            # device_id) must not crash the caller -- watch.py's continuous
+            # monitoring loop calls mirror() every tick, and this function's
+            # own docstring promises "never blocks local capture." Matches
+            # _push()'s existing fail-soft shape exactly: the row stays
+            # unsynced for the next attempt, same as a network failure.
+            return {**report, "state": "fail", "reason": str(e)}
         err = _push((url, key), table, remote)
         if err:
             # `report` spreads first so it cannot overwrite the failure state.
