@@ -49,8 +49,8 @@ values (
   null,
   '0.1.0',
   'Local-first network diagnostics that identify which layer failed: Wi-Fi, router, modem, ISP, target service, or a specific device. SQLite is the source of truth; Supabase is an optional, separate mirror project for cross-machine history.',
-  '{"id":"network-checker","name":"Network Checker","kind":"cli","version":"0.1.0","description":"Local-first network diagnostics that identify which layer failed: Wi-Fi, router, modem, ISP, target service, or a specific device. SQLite is the source of truth; Supabase is an optional, separate mirror project for cross-machine history.","ownership":{"owner":"kylegsmith19@gmail.com","path":"apps/toolbelt/apps/network-checker"},"entry":{"cli":{"command":"python3 -m netcheck"}},"schemas":[],"permissions":{"db":{"read":[],"write":[]},"networkEgress":["ipapi.co"],"llmHandler":{"access":false}},"lifecycle":{"migrate":"supabase db push","health":"bash tools/check.sh","register":"20260812250000_register_network-checker.sql"}}'::jsonb,
-  '6b773bbeb427a5126a82279978e394e282232471d71f24d362a78dedaade6d52',
+  '{"id":"network-checker","name":"Network Checker","kind":"cli","version":"0.1.0","description":"Local-first network diagnostics that identify which layer failed: Wi-Fi, router, modem, ISP, target service, or a specific device. SQLite is the source of truth; Supabase is an optional, separate mirror project for cross-machine history.","ownership":{"owner":"kylegsmith19@gmail.com","path":"apps/toolbelt/apps/network-checker"},"entry":{"cli":{"command":"python3 -m netcheck"}},"schemas":[],"permissions":{"db":{"read":[],"write":[]},"networkEgress":["ipapi.co","api.ipify.org","status.anthropic.com","api.anthropic.com","1.1.1.1"],"llmHandler":{"access":false}},"lifecycle":{"migrate":"supabase db push","health":"bash tools/check.sh","register":"20260812250000_register_network-checker.sql"}}'::jsonb,
+  '146e208e509e124d6ca4a74cb0e6f7139acd2fd94c1516078e28c55e5fad2a87',
   now()
 )
 on conflict (id) do update set

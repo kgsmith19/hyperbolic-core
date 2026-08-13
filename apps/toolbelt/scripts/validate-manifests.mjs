@@ -10,10 +10,34 @@
 //
 // `--registry` additionally prints each manifest's canonical sha256 (the
 // same hash docs/planning/05-c-toolbelt.md section 4.2 calls
-// `core.app.manifest_hash`). That registry column does not exist yet -- it
-// is added by m3-02-feat-toolbelt-registry-extension.md -- so this mode
-// cannot yet fetch a row to compare against; see the printed note. It does
-// not open a database connection at all in this milestone.
+// `core.app.manifest_hash`) and, as of Finding 42 (independent security
+// review, re-verified against current HEAD), actually queries the live
+// `core.app` table over PostgREST and fails (non-zero exit) on any
+// missing/extra/route/lifecycle/hash mismatch -- `core.app.manifest_hash`
+// now exists (20260812230000_core_app_registry_extension.sql), which is
+// exactly what this mode's own prior comment said it was waiting on; the
+// old behavior (compute and print the hash, never compare, always exit 0)
+// was a successful-looking stub that verified nothing.
+//
+// One real constraint this fix has to be honest about: core.app is NOT
+// anon-key readable. 20260812160000_core_idea_owner_pin.sql re-pinned its
+// RLS policy from "any authenticated caller" to "only the configured
+// platform owner" (`for all to authenticated using ((select auth.uid()) =
+// (select platform.owner()))`) -- an anonymous PostgREST caller, or any
+// non-owner authenticated caller, gets a real 200 response with ZERO rows
+// (RLS filters, it does not error), not an access-denied signal. This
+// script therefore accepts an owner-authenticated bearer token via the
+// TOOLBELT_OWNER_TOKEN environment variable (the same variable
+// `TOOLBELT_OWNER_TOKEN` toolbelt-ci.yml's other steps already thread
+// through for the identical reason) and falls back to the anon key itself
+// as the bearer when unset -- which authenticates as `anon`, not
+// `authenticated`, and will observably return zero rows under current RLS.
+// compareRegistry() below treats a zero-row response together with a
+// non-empty local manifest set as a distinct, explicitly-labeled condition
+// ("likely RLS-filtered, not confirmed-empty") rather than silently
+// asserting every registered id is missing -- still a real failure (this
+// run could not confirm the registry matches, which is the honest thing to
+// fail loudly on either way), just not a misleading one.
 //
 // `--root <dir>` overrides which directory is treated as the toolbelt root
 // (apps/toolbelt/apps/*/tool.json are discovered beneath it). Defaults to
@@ -26,6 +50,7 @@ import { join, relative, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -182,6 +207,100 @@ export function manifestHash(manifest) {
   return createHash("sha256").update(canonicalJSON(manifest), "utf8").digest("hex");
 }
 
+// Finding 42: the real network half of --registry. A thin wrapper around
+// `fetch` -- no HTTP client dependency, matching this repo's
+// "dependency-free unless a concrete need" convention and the exact
+// raw-fetch pattern packages/platform-client/src/registry.ts and
+// apps/toolbelt/tests/helpers.mjs's own `rest()` already use against this
+// same project. `Accept-Profile: core` is required for PostgREST to select
+// the `core` schema at all (core.app is not in the `public` schema); see
+// tests/helpers.mjs's identical header. Separately exported (not inlined
+// into main()) so tests can call it directly against a fixture server, and
+// so main() can be tested with a fake implementation swapped in.
+export async function fetchRegistryRows({
+  supabaseUrl = SUPABASE_URL,
+  anonKey = SUPABASE_ANON_KEY,
+  token,
+  fetchImpl = fetch,
+} = {}) {
+  const base = supabaseUrl.replace(/\/+$/, "");
+  const url = `${base}/rest/v1/app?select=id,manifest_hash,route,kind,version,status`;
+  const res = await fetchImpl(url, {
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${token || anonKey}`,
+      "Accept-Profile": "core",
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`registry fetch failed: HTTP ${res.status} ${res.statusText} -- ${body.slice(0, 500)}`);
+  }
+  return res.json();
+}
+
+// Finding 42: the actual missing/extra/route/lifecycle/hash comparison
+// --registry's own prior comment promised once core.app.manifest_hash
+// existed. Pure (manifests + remote rows in, problem strings out) so it is
+// fully unit-testable against a mocked/fixture response, independent of
+// fetchRegistryRows's real network call -- see
+// tests/validate-manifests.test.mjs's Finding 42 cases.
+//
+// "route" is this schema's own name for what the review calls "path" (the
+// Shell route prefix a `ui`-kind tool claims, tool.schema.json's
+// `entry.ui.route`; null for cli/headless/hybrid-with-no-ui). "lifecycle"
+// is read as the two core.app columns actually derived from a manifest's
+// own top-level `kind`/`version` fields (the manifest's `lifecycle` block
+// itself -- migrate/health/register commands -- has no core.app column of
+// its own to drift against; nothing in this table stores those verbatim).
+export function compareRegistry(manifests, remoteRows) {
+  const problems = [];
+  const remoteById = new Map(remoteRows.map((row) => [row.id, row]));
+  const localIds = new Set(manifests.map((m) => m.id));
+
+  if (remoteRows.length === 0 && manifests.length > 0) {
+    problems.push(
+      "the registry query returned ZERO rows while local manifests exist -- core.app's RLS policy " +
+        "(20260812160000_core_idea_owner_pin.sql) restricts reads to the configured platform owner's own " +
+        "authenticated caller, so an anon-key-only or non-owner request returns 200 with an empty array, " +
+        "not an error. This is either a genuinely empty registry or (far more likely in CI) a missing/" +
+        "invalid TOOLBELT_OWNER_TOKEN -- treat every 'missing' entry below as INCONCLUSIVE, not confirmed, " +
+        "until that is ruled out.",
+    );
+  }
+
+  for (const manifest of manifests) {
+    const remote = remoteById.get(manifest.id);
+    if (!remote) {
+      problems.push(`${manifest.id}: registered locally (tool.json on disk) but MISSING from the live registry (core.app)`);
+      continue;
+    }
+    const expectedHash = manifestHash(manifest);
+    if (remote.manifest_hash !== expectedHash) {
+      problems.push(`${manifest.id}: manifest_hash mismatch -- local=${expectedHash} remote=${remote.manifest_hash ?? "<null>"}`);
+    }
+    const expectedRoute = manifest.entry?.ui?.route ?? null;
+    const remoteRoute = remote.route ?? null;
+    if (remoteRoute !== expectedRoute) {
+      problems.push(`${manifest.id}: route (path) mismatch -- local=${expectedRoute ?? "<null>"} remote=${remoteRoute ?? "<null>"}`);
+    }
+    if (remote.kind !== manifest.kind) {
+      problems.push(`${manifest.id}: kind (lifecycle) mismatch -- local=${manifest.kind} remote=${remote.kind}`);
+    }
+    if (remote.version !== manifest.version) {
+      problems.push(`${manifest.id}: version (lifecycle) mismatch -- local=${manifest.version} remote=${remote.version}`);
+    }
+  }
+
+  for (const remote of remoteRows) {
+    if (!localIds.has(remote.id)) {
+      problems.push(`${remote.id}: registered in the live registry (core.app) but has no corresponding tool.json manifest on disk (extra)`);
+    }
+  }
+
+  return problems;
+}
+
 function parseArgs(argv) {
   const args = { registry: false, root: TOOLBELT_ROOT };
   for (let i = 0; i < argv.length; i += 1) {
@@ -199,7 +318,7 @@ function parseArgs(argv) {
   return args;
 }
 
-function main() {
+async function main() {
   const startedAt = Date.now();
   let args;
   try {
@@ -236,20 +355,51 @@ function main() {
   if (args.registry) {
     console.log("");
     console.log("--registry: canonical sha256 per manifest (docs/planning/05-c-toolbelt.md section 4.2 manifest_hash)");
-    for (const path of paths) {
-      const manifest = loadJSON(path);
-      console.log(`  ${String(manifest.id).padEnd(24)} sha256=${manifestHash(manifest)}  ${relative(process.cwd(), path)}`);
+    const manifests = paths.map((path) => loadJSON(path));
+    for (let i = 0; i < paths.length; i += 1) {
+      const manifest = manifests[i];
+      console.log(`  ${String(manifest.id).padEnd(24)} sha256=${manifestHash(manifest)}  ${relative(process.cwd(), paths[i])}`);
+    }
+
+    console.log("");
+    console.log(`Querying the live registry: ${SUPABASE_URL}/rest/v1/app (core.app) ...`);
+    const token = process.env.TOOLBELT_OWNER_TOKEN;
+    if (!token) {
+      console.log(
+        "  note: TOOLBELT_OWNER_TOKEN is not set -- falling back to the anon key as the bearer token, " +
+          "which authenticates as `anon`, not the platform owner. core.app's RLS policy " +
+          "(20260812160000_core_idea_owner_pin.sql) restricts reads to the owner's own authenticated " +
+          "caller, so this will very likely return zero rows regardless of the live registry's real " +
+          "contents -- set TOOLBELT_OWNER_TOKEN for a meaningful comparison.",
+      );
+    }
+
+    let remoteRows;
+    try {
+      remoteRows = await fetchRegistryRows({ token });
+    } catch (err) {
+      console.error(`  registry fetch failed: ${err.message}`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`  received ${remoteRows.length} row${remoteRows.length === 1 ? "" : "s"} from core.app`);
+
+    const problems = compareRegistry(manifests, remoteRows);
+    if (problems.length > 0) {
+      console.error("");
+      console.error(`--registry comparison failed (${problems.length} problem${problems.length === 1 ? "" : "s"}):`);
+      for (const problem of problems) console.error(`  - ${problem}`);
+      process.exitCode = 1;
+      return;
     }
     console.log("");
-    console.log(
-      "Registry comparison not yet available: core.app.manifest_hash does not exist until " +
-        "m3-02-feat-toolbelt-registry-extension.md extends core.app. This mode computes and prints " +
-        "the canonical hash above but does not connect to any database in this milestone; once the " +
-        "column exists, it will fetch each registered row and fail on a mismatch against the hash above.",
-    );
+    console.log(`--registry comparison passed: every manifest's local hash/route/kind/version matches its live core.app row.`);
   }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main();
+  main().catch((err) => {
+    console.error(`manifests:check: unexpected error: ${err.stack || err.message}`);
+    process.exitCode = 1;
+  });
 }

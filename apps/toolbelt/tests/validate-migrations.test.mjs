@@ -9,6 +9,7 @@ import {
   checkOwnerCallWrapping,
   checkVersionCollisions,
   discoverMigrationDirs,
+  stripLineComments,
   validateAll,
 } from "../scripts/validate-migrations.mjs";
 
@@ -314,6 +315,152 @@ test("checkBrainSchemaReservation fails when a file creates the brain schema", (
     { "20260101000000_thing.sql": "CREATE SCHEMA IF NOT EXISTS brain;" },
     (dir) => {
       assert.equal(checkBrainSchemaReservation([dir]).length, 1);
+    },
+  );
+});
+
+// --- Finding 45 (independent security review, re-verified against current
+// HEAD): stripLineComments string-literal/block-comment awareness, and
+// BRAIN_SCHEMA_RE's double-quoted-identifier blind spot. Adversarial cases
+// the review itself names.
+
+test("checkBrainSchemaReservation (Finding 45): a double-quoted \"brain\" identifier creates the identical real, lowercase reserved schema and must be flagged", () => {
+  withFixtureDir(
+    { "20260101000000_thing.sql": 'create schema "brain";' },
+    (dir) => {
+      const failures = checkBrainSchemaReservation([dir]);
+      assert.equal(failures.length, 1);
+      assert.match(failures[0], /reserved 'brain' schema/);
+    },
+  );
+});
+
+test("checkBrainSchemaReservation (Finding 45): quoted \"brain\" combined with IF NOT EXISTS is still flagged", () => {
+  withFixtureDir(
+    { "20260101000000_thing.sql": 'create schema if not exists "brain";' },
+    (dir) => {
+      assert.equal(checkBrainSchemaReservation([dir]).length, 1);
+    },
+  );
+});
+
+// Postgres folds an UNQUOTED identifier to lowercase regardless of how it
+// was typed, but takes a QUOTED identifier verbatim, case-sensitively --
+// "Brain" and "BRAIN" name genuinely different, non-reserved schemas, not
+// the reserved lowercase brain. Normalizing every double-quoted identifier
+// indiscriminately (rather than only the exact literal "brain") would turn
+// this into a false positive.
+test("checkBrainSchemaReservation (Finding 45): a differently-cased double-quoted identifier is a genuinely different schema and must NOT be flagged", () => {
+  withFixtureDir(
+    { "20260101000000_thing.sql": 'create schema "Brain";' },
+    (dir) => {
+      assert.deepEqual(checkBrainSchemaReservation([dir]), []);
+    },
+  );
+  withFixtureDir(
+    { "20260101000000_thing.sql": 'create schema "BRAIN";' },
+    (dir) => {
+      assert.deepEqual(checkBrainSchemaReservation([dir]), []);
+    },
+  );
+});
+
+// Regression: the pre-fix implementation located "--" by naive
+// String.indexOf with no string-literal awareness at all, so a single-quoted
+// value containing the two characters "--" truncated the rest of that
+// physical line -- including any REAL, executable SQL following it, such as
+// a bare platform.owner() call this lint exists to catch. This is a lint
+// BYPASS, not just a cosmetic miss: before the fix, this exact fixture
+// produced zero failures despite containing a genuine violation.
+test("checkOwnerCallWrapping (Finding 45): a single-quoted string containing '--' does not hide a real bare call later on the same line", () => {
+  withFixtureDir(
+    { "20260101000000_policy.sql": "select 'a--b', platform.owner();" },
+    (dir) => {
+      const failures = checkOwnerCallWrapping([dir]);
+      assert.equal(failures.length, 1, "the bare call after the string literal must still be detected, not silently swallowed");
+      assert.match(failures[0], /bare platform\.owner\(\) call/);
+    },
+  );
+});
+
+// Regression: '' (doubled single quote) is the standard SQL in-string escape
+// for a literal quote character. Mishandling it (e.g. treating the first of
+// the pair as the string's real closing quote) desynchronizes the scanner's
+// notion of "inside a string" for everything that follows, which can leave
+// real code downstream misclassified as still being inside a string --
+// hiding it from every other check in this file, not just this one.
+test("checkOwnerCallWrapping (Finding 45): '' (doubled-quote) escaping inside a string does not desynchronize detection of a later bare call", () => {
+  withFixtureDir(
+    { "20260101000000_policy.sql": "select 'it''s fine', platform.owner();" },
+    (dir) => {
+      const failures = checkOwnerCallWrapping([dir]);
+      assert.equal(failures.length, 1, "incorrect '' handling would leave the scanner stuck 'inside a string', hiding the real bare call");
+    },
+  );
+});
+
+// Regression: no block-comment handling at all existed before the fix. A
+// bare call written only as commentary/example text inside /* */ must not
+// be flagged (it is not executable SQL), and -- the sharper half of this
+// property -- real code immediately after the comment closes must still be
+// seen and checked, proving the comment's own end boundary is recognized
+// correctly rather than swallowing the rest of the file.
+test("checkOwnerCallWrapping (Finding 45): block comments are stripped -- a bare call only inside /* */ is ignored, but a real call after the comment still is caught", () => {
+  withFixtureDir(
+    {
+      "20260101000000_policy.sql":
+        "/* old approach called platform.owner() directly, changed below */\ncreate policy owner_rw on core.run using (user_id = platform.owner());",
+    },
+    (dir) => {
+      const failures = checkOwnerCallWrapping([dir]);
+      assert.equal(failures.length, 1, "only the real bare call outside the comment should be flagged");
+    },
+  );
+});
+
+// Postgres nests block comments for real ("/* /* */ */" is one complete
+// comment, not a syntax error followed by stray code) -- a naive
+// first-"*/"-closes scanner would treat the INNER "*/" as ending the whole
+// comment, leaving " still outer */" misread as live code.
+test("checkOwnerCallWrapping (Finding 45): nested block comments are stripped as one unit, matching Postgres's own nesting behavior", () => {
+  withFixtureDir(
+    {
+      "20260101000000_policy.sql":
+        "/* outer /* inner platform.owner() */ still outer */\nselect platform.owner();",
+    },
+    (dir) => {
+      const failures = checkOwnerCallWrapping([dir]);
+      assert.equal(failures.length, 1, "only the real call after both comment layers close should be flagged");
+    },
+  );
+});
+
+// Direct proof on stripLineComments's own output, not just a downstream
+// failure count: a scanner that treats the FIRST "*/" as closing the whole
+// nested comment (rather than tracking depth) leaks everything from that
+// first "*/" onward -- including the literal "*/ still outer */" text --
+// into the stripped result as if it were live code. That specific leaked
+// fixture happens to still contain exactly one real platform.owner() call
+// (the trailing "select platform.owner();"), so the failure-count
+// assertion above alone cannot distinguish correct nesting from this
+// broken-but-coincidentally-same-count behavior; asserting the exact
+// stripped text closes that gap.
+test("stripLineComments (Finding 45): a nested block comment is removed in its entirety, leaving no leaked fragment of its own closing markers", () => {
+  const sql = "/* outer /* inner platform.owner() */ still outer */\nselect platform.owner();";
+  assert.equal(stripLineComments(sql), "\nselect platform.owner();");
+});
+
+// Line numbers in this lint's own failure messages must stay accurate even
+// across a stripped multi-line block comment (checkOwnerCallWrapping reports
+// "<file>:<line>: bare platform.owner() call...", and a wrong line number
+// would send a reviewer to the wrong place in a real migration).
+test("checkOwnerCallWrapping (Finding 45): line numbers stay accurate across a stripped multi-line block comment", () => {
+  withFixtureDir(
+    { "20260101000000_policy.sql": "/* line1\nline2\nline3 */\nselect platform.owner();" },
+    (dir) => {
+      const failures = checkOwnerCallWrapping([dir]);
+      assert.equal(failures.length, 1);
+      assert.match(failures[0], /:4: bare platform\.owner\(\) call/);
     },
   );
 });

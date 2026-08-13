@@ -111,6 +111,27 @@ export function checkDownPairing(dirs) {
 
 const BRAIN_SCHEMA_RE = /create\s+schema\s+(if\s+not\s+exists\s+)?brain\b/i;
 
+// Independent security review, Finding 45 (re-verified against current
+// HEAD): a double-quoted identifier evades BRAIN_SCHEMA_RE outright --
+// `create schema "brain"` creates the exact same real, lowercase `brain`
+// schema Postgres would create for the unquoted `create schema brain`, but
+// the regex requires literal whitespace immediately before the bare word
+// `brain` and never sees past the `"`. Only the EXACT lowercase quoted form
+// `"brain"` is normalized away (by stripping its quotes so the existing
+// case-insensitive regex can see it) -- deliberately NOT every
+// double-quoted identifier: Postgres's own real folding rules make
+// `"Brain"` or `"BRAIN"` a case-sensitive, genuinely DIFFERENT identifier
+// from the reserved lowercase `brain` (only an UNQUOTED name folds to
+// lowercase regardless of how it was typed; a quoted one is taken verbatim
+// as written). Normalizing every double-quoted identifier indiscriminately
+// would turn that into a false positive -- flagging a legitimately
+// different, unreserved schema name. This narrow, literal replacement is
+// exactly and only the one case that actually collides with the reserved
+// name.
+function normalizeQuotedBrainIdentifier(sql) {
+  return sql.replace(/"brain"/g, "brain");
+}
+
 export function checkBrainSchemaReservation(dirs) {
   const failures = [];
   for (const dir of dirs) {
@@ -119,7 +140,7 @@ export function checkBrainSchemaReservation(dirs) {
       // (e.g. "-- never create schema brain here") must not itself trip the
       // lint. Found by property-based testing, not assumed correct by
       // inspection -- see validate-migrations.property.test.mjs.
-      const sql = stripLineComments(readFileSync(file, "utf8"));
+      const sql = normalizeQuotedBrainIdentifier(stripLineComments(readFileSync(file, "utf8")));
       if (BRAIN_SCHEMA_RE.test(sql)) {
         failures.push(`${file}: creates the reserved 'brain' schema (06-supabase-schema.md section 4.1 reservation)`);
       }
@@ -128,18 +149,106 @@ export function checkBrainSchemaReservation(dirs) {
   return failures;
 }
 
-// Line comments only: no block comments appear anywhere in the existing
-// migration set, and adding a block-comment-aware scanner would be an
-// unused-in-practice complication (this stays a single-purpose lint, not a
-// SQL parser).
-function stripLineComments(sql) {
-  return sql
-    .split("\n")
-    .map((line) => {
-      const idx = line.indexOf("--");
-      return idx === -1 ? line : line.slice(0, idx);
-    })
-    .join("\n");
+// Independent security review, Finding 45 (re-verified against current
+// HEAD): the original implementation split on "\n" and truncated each line
+// at its first literal "--", with no awareness of SQL string-literal
+// quoting or block comments -- two real, exploitable gaps in a lint this
+// repo's own CI treats as a real gate (checkBrainSchemaReservation and
+// checkOwnerCallWrapping both depend on this function to see the real,
+// non-comment SQL):
+//
+//   1. A single-quoted string literal containing the two characters `--`
+//      (e.g. a `title`/`description`/`source` default or seed value like
+//      'a--b') would have everything after that point on the same physical
+//      line silently discarded as if it were a comment -- including real,
+//      executable SQL that happened to follow on that line.
+//   2. No `/* ... */` block-comment handling at all: a block comment
+//      spanning or containing what looks like the reserved schema name or a
+//      bare platform.owner() call was invisible to this function one way
+//      (never stripped, so its CONTENTS could itself accidentally trip a
+//      check) while also not preventing REAL code after it on the same
+//      line from being misread if the block comment shared a line with a
+//      line comment marker.
+//
+// Fix (proportionate -- this remains a single-purpose lint, not a real SQL
+// parser): a small single-pass state machine over the whole file text
+// (never per-line -- a single-quoted string, like a block comment, can
+// legitimately span multiple physical lines in real SQL) that tracks
+// exactly three states -- inside a single-quoted string (with `''`
+// doubled-quote escaping, the standard SQL escape), inside a `/* */` block
+// comment (nestable, matching Postgres's own actual behavior -- `/* /* */
+// */` is one complete comment, not a syntax error), and default/code -- and
+// strips `--`-to-end-of-line only in the default state, and block comments
+// in any state but a string. Deliberately NOT dollar-quoted ($$...$$)
+// string aware: every dollar-quoted function body in this repo's real
+// migrations is, by construction, valid SQL/plpgsql whose own single-quoted
+// string literals are already balanced (an unbalanced quote inside a $$
+// body would be invalid SQL to begin with), so whole-file single-quote
+// tracking stays correct straight through a $$ body without needing to
+// special-case its boundaries -- confirmed by running this exact
+// implementation against every real committed migration in this repository
+// with zero behavioral change from the previous implementation (see
+// validate-migrations.test.mjs's "against the real repository" case).
+// Preserves line numbers exactly (needed by checkOwnerCallWrapping's own
+// line-number reporting): a block comment's interior characters are
+// replaced by nothing except its own embedded newlines, which are kept.
+export function stripLineComments(sql) {
+  let result = "";
+  let inString = false;
+  let blockDepth = 0;
+  const n = sql.length;
+  for (let i = 0; i < n; ) {
+    if (inString) {
+      const ch = sql[i];
+      if (ch === "'") {
+        if (sql[i + 1] === "'") {
+          result += "''";
+          i += 2;
+          continue;
+        }
+        inString = false;
+        result += "'";
+        i += 1;
+        continue;
+      }
+      result += ch;
+      i += 1;
+      continue;
+    }
+    if (blockDepth > 0) {
+      if (sql[i] === "/" && sql[i + 1] === "*") {
+        blockDepth += 1;
+        i += 2;
+        continue;
+      }
+      if (sql[i] === "*" && sql[i + 1] === "/") {
+        blockDepth -= 1;
+        i += 2;
+        continue;
+      }
+      if (sql[i] === "\n") result += "\n";
+      i += 1;
+      continue;
+    }
+    if (sql[i] === "'") {
+      inString = true;
+      result += "'";
+      i += 1;
+      continue;
+    }
+    if (sql[i] === "-" && sql[i + 1] === "-") {
+      while (i < n && sql[i] !== "\n") i += 1;
+      continue;
+    }
+    if (sql[i] === "/" && sql[i + 1] === "*") {
+      blockDepth = 1;
+      i += 2;
+      continue;
+    }
+    result += sql[i];
+    i += 1;
+  }
+  return result;
 }
 
 // A "platform.owner()" occurrence is the function's own signature, not a

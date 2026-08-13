@@ -28,6 +28,6 @@
   "lifecycle": {
     "migrate": "gh workflow run platform-migrations.yml",
     "health": "node --test \"tests/*.test.mjs\"",
-    "register": "pending-m3-02"
+    "register": "20260814110000_register_toolbelt.sql"
   }
 }

@@ -101,6 +101,21 @@ jobs:
   migrate:
     name: Apply platform migrations
     runs-on: ubuntu-latest
+    # Independent security review, Finding 50 (re-verified against current
+    # HEAD): P1 work this session already added exact-SHA/main-ancestry
+    # verification (checkApplyRef(), above), a concurrency block, and
+    # pre/post `supabase db diff` parity checks with artifacts on failure --
+    # but nothing yet requires a human approval gate before this job
+    # actually pushes SQL against the real platform project. `environment:`
+    # is the code-side half of that: it makes this job a deployment targeting
+    # the named environment, which is what lets required-reviewer/protected-
+    # environment rules attach to it at all. The actual reviewer-requirement
+    # configuration itself lives in this repository's own Settings ->
+    # Environments (outside any PR's reach, by GitHub's own design -- a
+    # workflow file cannot grant itself required reviewers), so this key is
+    # necessary but not sufficient on its own; wiring it is what this fix
+    # can actually do from inside the repo.
+    environment: platform-migrations-production
     # Was 6 minutes when this job was three plain `db push` calls. `supabase
     # db diff` now runs twice on the apply path (and once on the baseline
     # path): each spins up a temporary shadow Postgres via Docker (preinstalled
@@ -149,9 +164,36 @@ jobs:
           secret-path: "/platform/"
           domain: https://app.infisical.com
 
+      # Independent security review, Finding 41 (re-verified against current
+      # HEAD): `version: latest` let a future Supabase CLI release change
+      # `db push`/`db diff` semantics underneath this pipeline unnoticed --
+      # this workflow's own live-parity `db diff` gate and staged
+      # `db push --include-all` both depend on those semantics staying
+      # exactly what this workflow was written and tested against. Pinned
+      # to 2.114.0 (the latest published release at the time of this fix,
+      # confirmed live against the real npm registry mirror the Supabase CLI
+      # itself publishes to -- `supabase` is not installed in this session's
+      # own sandbox, so `supabase --version` could not be run locally to
+      # cross-check; the version below was NOT verified against a live
+      # `supabase db push`/`db diff` run in this session). The assertion
+      # step immediately below is what actually protects against a silent
+      # future upgrade: it fails loudly if the CLI's own reported version
+      # ever stops matching this pin, rather than trusting the action's
+      # `version:` input silently.
       - uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3
         with:
-          version: latest
+          version: 2.114.0
+
+      - name: Assert the installed Supabase CLI matches the pinned version (Finding 41)
+        run: |
+          set -euo pipefail
+          actual="$(supabase --version)"
+          expected="2.114.0"
+          echo "Installed Supabase CLI version: $actual"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Supabase CLI version mismatch: expected $expected (pinned in this workflow's supabase/setup-cli step) but got $actual. A silent CLI upgrade could change db push/db diff semantics underneath this pipeline -- update the version: input above deliberately, with a fresh review, rather than letting this drift unnoticed." >&2
+            exit 1
+          fi
 
       # `psql` itself is not installed by any step above: GitHub-hosted
       # ubuntu-latest runner images ship PostgreSQL client tools preinstalled
@@ -297,3 +339,54 @@ jobs:
           node apps/toolbelt/scripts/platform-migration-guards.mjs check-zero-pending \
             --staged /tmp/staged-versions.txt \
             --ledger /tmp/ledger-versions-after.txt
+
+      # Independent security review, Finding 50 (re-verified against current
+      # HEAD): no $GITHUB_STEP_SUMMARY existed at all -- a reviewer checking
+      # what a completed run actually did had nothing but the raw step logs.
+      # Deliberately the LAST step, with no `if:` beyond the existing
+      # mode-branching (unlike the artifact-upload steps above, this is not
+      # `if: failure()` -- a step after a failed step is skipped by default,
+      # so this only ever renders for a run that reached the end for real,
+      # which is the right posture for a completion summary). Every value
+      # below is read from files/context this job's own earlier steps
+      # already produced -- never a placeholder: the staged version count
+      # comes from the same /tmp/staged-versions.txt (apply) or
+      # /tmp/baseline-versions.txt (baseline) the zero-pending/ledger-repair
+      # steps above already computed, and "diff empty" is read fresh from
+      # the same /tmp/apply-diff.sql / /tmp/baseline-diff.sql the
+      # check-diff-empty step above already gated on (approximating that
+      # script's own stripLineComments/trim logic: any non-blank,
+      # non-line-comment line counts as real content) -- not just assumed
+      # "yes" because the job would otherwise already have failed.
+      - name: Write deployment summary
+        run: |
+          set -euo pipefail
+          diff_is_empty() {
+            local file="$1"
+            [ -f "$file" ] || { echo "n/a"; return; }
+            if grep -vE '^[[:space:]]*(--.*)?$' "$file" | grep -q .; then
+              echo "no"
+            else
+              echo "yes"
+            fi
+          }
+          {
+            echo "## Platform Migrations"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Mode | \`${{ inputs.mode }}\` |"
+            echo "| Ref | \`${{ github.ref }}\` |"
+            echo "| SHA | \`${{ github.sha }}\` |"
+            if [ "${{ inputs.mode }}" = "apply" ]; then
+              staged_count="n/a"
+              [ -f /tmp/staged-versions.txt ] && staged_count=$(wc -l < /tmp/staged-versions.txt | tr -d '[:space:]')
+              echo "| Staged migration versions | $staged_count |"
+              echo "| Live-parity diff empty (pre-push) | $(diff_is_empty /tmp/apply-diff.sql) |"
+            else
+              baseline_count="n/a"
+              [ -f /tmp/baseline-versions.txt ] && baseline_count=$(wc -l < /tmp/baseline-versions.txt | tr -d '[:space:]')
+              echo "| Baselined migration versions | $baseline_count |"
+              echo "| Baseline-subset diff empty | $(diff_is_empty /tmp/baseline-diff.sql) |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -19,6 +19,37 @@ jobs:
   pr-gate:
     name: Toolbelt PR Gate
     runs-on: ubuntu-latest
+    # Independent security review, Finding 39 (re-verified against current
+    # HEAD): this job never ran apps/toolbelt/apps/idea-intake's own test
+    # suite at all (confirmed: no "idea-intake" path appeared anywhere in
+    # this file before this service block and the step below), and provisioned
+    # no PostgreSQL service -- so idea-intake's real-Postgres suites (guard
+    # triggers, RLS, the mark_submitted_to_github RPC, registration,
+    # migrate-forgepad, and this batch's own new Finding 35/36/49 suites)
+    # have never run in CI at all, only ever locally by hand. A postgres:
+    # service container gives the "Run Idea Intake tests" step below a real
+    # engine to connect to -- idea-intake's tests already detect a reachable
+    # `psql` first (tests/*.test.mjs's own detectRunner(), tried before the
+    # `sudo -n -u postgres psql` fallback this sandbox's own local dev
+    # environment uses), so pointing plain `psql` at this service container
+    # via PGHOST/PGPORT/PGUSER/PGPASSWORD on that one step is sufficient --
+    # no `sudo`/OS-role setup needed (unlike apps/shell's own tools.spec.ts,
+    # flagged as a known follow-up in shell-ci.yml's own comment for exactly
+    # that heavier setup). Version 16 matches what this session's own sandbox
+    # validated these suites against (`postgres --version` -> PostgreSQL
+    # 16.13).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,6 +107,44 @@ jobs:
           # an empty string, not an error; tests/helpers.mjs's primaryToken()
           # falls back to the fixture-A login in that case, same as today.
           TOOLBELT_OWNER_TOKEN: ${{ secrets.TOOLBELT_OWNER_TOKEN }}
+      - name: Run Idea Intake tests
+        # Finding 39: idea-intake's own real-Postgres suites (guard triggers,
+        # RLS, mark_submitted_to_github, registration, migrate-forgepad, and
+        # this batch's own Finding 35/36/49 additions) now run for real
+        # against the postgres: service container declared on this job,
+        # instead of only ever having run locally by hand. PG* env vars point
+        # plain `psql` (tried first by every suite's own detectRunner()) at
+        # the service container -- see this job's own `services:` comment.
+        #
+        # The trailing skip-count check is deliberately part of this SAME
+        # step, not a separate one that would re-run the whole suite a
+        # second time: the suites above self-skip cleanly (via node:test's
+        # own skip mechanism, never a silent omission) when no local
+        # Postgres is reachable -- exactly the behavior that let this entire
+        # gap go unnoticed for so long, since a passing job with every
+        # real-Postgres assertion quietly skipped looks identical to a
+        # passing job that actually ran them, from the job's own green/red
+        # status alone. With the service container above genuinely
+        # reachable, node:test's own "# skipped N" TAP summary line must be
+        # exactly zero; a regression that silently breaks the PG*
+        # connection (a bad env var, the service container failing its
+        # health check, a future edit to detectRunner()) must fail this job
+        # loudly instead of quietly reverting to "ran zero real assertions,
+        # reported green."
+        run: |
+          set -euo pipefail
+          node --test "tests/*.test.mjs" | tee /tmp/idea-intake-test-output.log
+          skipped=$(grep -E '^# skipped [0-9]+' /tmp/idea-intake-test-output.log | grep -oE '[0-9]+' || echo 0)
+          if [ "$skipped" -ne 0 ]; then
+            echo "::error::Idea Intake reported $skipped skipped test(s) with the postgres: service container present -- a real-Postgres suite silently skipped instead of running for real. Check PGHOST/PGPORT/PGUSER/PGPASSWORD and the service container's health." >&2
+            exit 1
+          fi
+        working-directory: apps/toolbelt/apps/idea-intake
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
       - name: Install Prompt Organizer browser test
         run: |
           npm install --no-save --no-package-lock @playwright/test@1.52.0

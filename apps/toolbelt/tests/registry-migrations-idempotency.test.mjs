@@ -129,7 +129,7 @@ test(
       assert.equal(
         rows,
         [
-          "network-checker|cli|<null>|building|6b773bbeb427a5126a82279978e394e282232471d71f24d362a78dedaade6d52",
+          "network-checker|cli|<null>|building|146e208e509e124d6ca4a74cb0e6f7139acd2fd94c1516078e28c55e5fad2a87",
           "prompt-organizer|ui|/prompts|building|c73037838b686f7b98e6e81da6dfc4af1137ff6adf82f8abc7311c42f75b527e",
         ].join("\n"),
       );
