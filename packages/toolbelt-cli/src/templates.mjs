@@ -73,17 +73,27 @@ export function buildManifest({ id, name, kind, route, hasSchema, schema, llm, r
     lifecycle: {
       // "none" for a schema-less tool (tool.schema.json's own description
       // for lifecycle.migrate); otherwise "supabase db push", matching
-      // apps/toolbelt/apps/network-checker/tool.json's precedent -- NOT
-      // "gh workflow run platform-migrations.yml" (Prompt Organizer's value),
-      // because that workflow's directory list is hardcoded to exactly three
-      // directories (root, prompt-organizer, idea-intake;
-      // .github/workflows/platform-migrations.yml) and does not include a
-      // freshly scaffolded tool's own apps/toolbelt/apps/<id>/supabase/migrations
-      // until a human adds it there and to validate-migrations.mjs's
-      // MIGRATION_DIRS -- out of scope for this issue ("Out of scope:
-      // Applying migrations ... rides the existing platform-migrations.yml
-      // workflow") and left as a documented next step in the generated
-      // AGENTS.md instead of silently assumed.
+      // apps/toolbelt/apps/network-checker/tool.json's precedent.
+      //
+      // Historical note (accurate only up to Finding 26's fix, independent
+      // security review of this repo, re-verified against current HEAD):
+      // this used to be deliberately NOT "gh workflow run
+      // platform-migrations.yml" (Prompt Organizer's value) because that
+      // workflow's underlying directory list was a hardcoded 3-entry
+      // literal (validate-migrations.mjs's old MIGRATION_DIRS) that could
+      // never include a freshly scaffolded tool's own
+      // apps/toolbelt/apps/<id>/supabase/migrations until a human edited it
+      // by hand. That is no longer true: apps/toolbelt/scripts/
+      // validate-migrations.mjs's discoverMigrationDirs() now finds this
+      // exact directory automatically the moment this tool's own tool.json
+      // (schemas non-empty) and its migrations directory both exist on
+      // disk, and platform-migrations.yml's staging step
+      // (stage-migrations.mjs's collectStagedFiles()) is driven by that
+      // same discovery, with no workflow-file edit required. "supabase db
+      // push" is kept as the default here anyway, deliberately: it remains
+      // the correct LOCAL instruction for testing this tool's schema
+      // against a live project before ever pushing, independent of how the
+      // shared CI/deploy pipeline later discovers and applies it.
       migrate: hasSchema ? "supabase db push" : "none",
       health: 'node --test "tests/*.test.mjs"',
       register: registerBasename,
@@ -131,8 +141,12 @@ node --test "tests/*.test.mjs"
 ## Next steps (delete this section once done)
 
 - Replace the \`${CLI_COMMAND_TODO_PREFIX}\` placeholder(s) in \`tool.json\`'s \`entry\` block with the real invocation once this tool has one.
-- Give this tool a real \`description\` in \`tool.json\` (optional field, currently omitted -- no \`--description\` flag exists in the scaffold CLI).
-- If this tool's migrations should ride the automated \`platform-migrations.yml\` push (like Prompt Organizer's do), add \`apps/toolbelt/apps/${id}/supabase/migrations\` to that workflow and to \`apps/toolbelt/scripts/validate-migrations.mjs\`'s \`MIGRATION_DIRS\`. This scaffold deliberately does not do that for you (out of scope, m3-03) -- \`supabase db push\` must be run manually from this directory in the meantime, matching the Network Checker precedent.
+- Give this tool a real \`description\` in \`tool.json\` (optional field, currently omitted -- no \`--description\` flag exists in the scaffold CLI).${
+    hasSchema
+      ? `
+- This tool's own \`supabase/migrations/\` is picked up automatically by both \`apps/toolbelt/scripts/validate-migrations.mjs\` and the live \`platform-migrations.yml\` deployment workflow -- no manual edit to either is needed. Run \`supabase db push\` from this tool's own directory to apply its schema locally before relying on the automated push.`
+      : ""
+  }
 - Run \`npm run manifests:check\` from \`apps/toolbelt/\` after any \`tool.json\` edit.
 `;
 }

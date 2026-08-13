@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import {
   collectStagedFiles,
   filterByVersions,
@@ -11,6 +11,7 @@ import {
   writeStagedDir,
   splitAtOwnerDependency,
 } from "../scripts/stage-migrations.mjs";
+import { discoverMigrationDirs } from "../scripts/validate-migrations.mjs";
 
 const SCRIPT = new URL("../scripts/stage-migrations.mjs", import.meta.url).pathname;
 
@@ -27,6 +28,53 @@ function withFixtureDirs(dirSpecs, fn) {
   } finally {
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// layout: { "tool.json": {...}, "apps/tool-a/tool.json": {...},
+// "apps/tool-a/supabase/migrations/x.sql": "..." } -> materializes a scratch
+// toolbelt-root tree. Mirrors tests/validate-migrations.test.mjs's own
+// helper of the same shape.
+function withFixtureToolbeltRoot(layout, fn) {
+  const dir = mkdtempSync(join(tmpdir(), "stage-toolbelt-fixture-"));
+  try {
+    for (const [relPath, contents] of Object.entries(layout)) {
+      const fullPath = join(dir, relPath);
+      mkdirSync(dirname(fullPath), { recursive: true });
+      writeFileSync(fullPath, typeof contents === "string" ? contents : `${JSON.stringify(contents, null, 2)}\n`);
+    }
+    return fn(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function rootManifest(overrides = {}) {
+  return {
+    id: "toolbelt",
+    name: "Toolbelt Root Spine",
+    kind: "headless",
+    version: "0.1.0",
+    ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt" },
+    entry: { headless: { command: "select 1;", schedule: "0 3 * * *" } },
+    schemas: ["core", "idea"],
+    permissions: { db: { read: ["core", "idea"], write: ["core", "idea"] }, networkEgress: [], llmHandler: { access: false } },
+    lifecycle: { migrate: "gh workflow run platform-migrations.yml", health: "node --test", register: "pending" },
+    ...overrides,
+  };
+}
+
+function schemaOwningManifest(id) {
+  return {
+    id,
+    name: id,
+    kind: "cli",
+    version: "0.1.0",
+    ownership: { owner: "kylegsmith19@gmail.com", path: `apps/toolbelt/apps/${id}` },
+    entry: { cli: { command: "true" } },
+    schemas: [id.replaceAll("-", "_")],
+    permissions: { db: { read: [], write: [] }, networkEgress: [], llmHandler: { access: false } },
+    lifecycle: { migrate: "supabase db push", health: "true", register: "pending" },
+  };
 }
 
 function withDestDir(fn) {
@@ -93,6 +141,53 @@ test("collectStagedFiles throws when two DIFFERENT directories stage a file with
     ],
     (dirs) => {
       assert.throws(() => collectStagedFiles(dirs), /staging collision/);
+    },
+  );
+});
+
+// --- collectStagedFiles + discoverMigrationDirs composition (Finding 26) --
+//
+// Finding 3 (independent security review of this repo, already closed by
+// this script's own header comment) is about ORDERING migrations that get
+// staged; Finding 26 is about which DIRECTORIES ever reach collectStagedFiles
+// in the first place. Before Finding 26's fix, a brand-new schema-owning
+// tool's migrations directory could never appear in the staged set at all
+// (the hardcoded MIGRATION_DIRS literal could not know about it), meaning
+// platform-migrations.yml's live `supabase db push` would silently never
+// apply that tool's schema to the real database -- confirmed directly here:
+// collectStagedFiles(dirs), driven by the SAME discoverMigrationDirs()
+// collectStagedFiles(dirs = discoverMigrationDirs()) now defaults to,
+// stages a freshly scaffolded tool's migration file with zero manual
+// framework edits.
+test("collectStagedFiles, driven by discoverMigrationDirs, stages a newly scaffolded tool's migration automatically", () => {
+  withFixtureToolbeltRoot(
+    {
+      "tool.json": rootManifest(),
+      "apps/brand-new-tool/tool.json": schemaOwningManifest("brand-new-tool"),
+      "apps/brand-new-tool/supabase/migrations/20260901000000_brand_new_tool_create_schema.sql": "create schema brand_new_tool;",
+    },
+    (root) => {
+      const dirs = discoverMigrationDirs(root);
+      const files = collectStagedFiles(dirs);
+      assert.ok(
+        files.some((f) => f.name === "20260901000000_brand_new_tool_create_schema.sql"),
+        `expected the new tool's migration to be staged, got: ${JSON.stringify(files.map((f) => f.name))}`,
+      );
+    },
+  );
+});
+
+test("collectStagedFiles, driven by discoverMigrationDirs, never stages a schema-less tool's migrations (mirrors the real network-checker exclusion)", () => {
+  withFixtureToolbeltRoot(
+    {
+      "tool.json": rootManifest(),
+      "apps/no-schema-tool/tool.json": { ...schemaOwningManifest("no-schema-tool"), schemas: [] },
+      "apps/no-schema-tool/supabase/migrations/0001_init.sql": "create table x();",
+    },
+    (root) => {
+      const dirs = discoverMigrationDirs(root);
+      const files = collectStagedFiles(dirs);
+      assert.ok(!files.some((f) => f.name === "0001_init.sql"));
     },
   );
 });

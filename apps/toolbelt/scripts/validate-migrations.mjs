@@ -10,13 +10,75 @@
 // Also asserts no two migration files across all directories share a version key
 // (the CLI's ledger is keyed by version; a collision breaks the shared ledger).
 import { readdirSync, readFileSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
+import { findManifestPaths, TOOLBELT_ROOT } from "./validate-manifests.mjs";
 
-export const MIGRATION_DIRS = [
-  "apps/toolbelt/supabase/migrations",
-  "apps/toolbelt/apps/prompt-organizer/supabase/migrations",
-  "apps/toolbelt/apps/idea-intake/supabase/migrations",
-];
+// discoverMigrationDirs replaces what used to be a hardcoded, three-entry
+// MIGRATION_DIRS literal (Finding 26, independent security review of this
+// repo, re-verified against current HEAD: "Scaffolding emits nested
+// migrations, but workflow and validator hard-code known app directories.
+// That contradicts the promised three-step/no-outside-edits path.").
+//
+// The concrete, ALREADY-EXISTING proof this was a real gap and not a
+// hypothetical: apps/toolbelt/apps/network-checker/ has had its own
+// supabase/migrations/ directory (0001_init.sql, 0002_inventory.sql) since
+// before this fix, and it was correctly never added to the old hardcoded
+// list -- but that correctness depended entirely on a human remembering the
+// documented reason (see its own registration migration's header comment,
+// 20260812250000_register_network-checker.sql: "network-checker's own
+// supabase/migrations/ is absent from both [this workflow's directory list
+// and MIGRATION_DIRS]" as a DELIBERATE fact about a separate, optional
+// mirror project, not the shared platform database). A tool scaffolded by
+// packages/toolbelt-cli's tool:new with --schema, by contrast, is SUPPOSED
+// to ride the shared platform pipeline automatically, per the CLI's own
+// promised "no manual framework edits" 3-step flow -- and nothing enforced
+// that a human ever actually performed the manual edit the old
+// MIGRATION_DIRS literal required. Both are real; the fix has to tell them
+// apart without a human doing it by hand each time.
+//
+// The discriminator is exactly what already distinguishes these two real
+// cases on disk: whether the tool's own tool.json declares a non-empty
+// `schemas` array -- i.e. whether it owns a schema in the shared toolbelt
+// Supabase project at all (Network Checker's manifest declares `"schemas":
+// []`, the one real no-schema manifest per templates.mjs's own comment; the
+// three tools this list used to hardcode -- the root spine, Prompt
+// Organizer, Idea Intake -- all declare a non-empty `schemas` array). This
+// is deliberately NOT a blind "every supabase/migrations directory found by
+// walking the tree" scan (the review's own alternative suggestion): that
+// naive version would have swept Network Checker's directory into the
+// shared platform validation/staging pipeline, which is exactly backwards --
+// its Supabase project is a genuinely separate database, and treating its
+// migrations as part of the shared platform's version-key namespace or
+// pushing them via `supabase db push` against the platform project would be
+// a real, active regression, not a fix. Schema-ownership is the one signal
+// that already means "this tool's migrations belong to the shared platform
+// database" throughout the rest of this codebase (see
+// packages/toolbelt-cli/src/templates.mjs's buildManifest: hasSchema is
+// exactly what decides whether tool:new even generates a
+// supabase/migrations/ directory for a new tool in the first place).
+//
+// findManifestPaths (imported, not reimplemented, from
+// validate-manifests.mjs -- the same function apps/toolbelt/scripts/
+// validate-manifests.mjs's own findManifestPaths walk already uses to
+// discover every real tool.json, root spine included) is the single source
+// of "which tools exist" for this scan; a manifest that fails to parse is
+// silently skipped here the same way collisions.mjs's own findManifestIds
+// does (a malformed manifest is validate-manifests.mjs's own concern to
+// report, not this discovery pass's).
+export function discoverMigrationDirs(root = TOOLBELT_ROOT) {
+  const dirs = [];
+  for (const manifestPath of findManifestPaths(root)) {
+    let manifest;
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(manifest.schemas) || manifest.schemas.length === 0) continue;
+    dirs.push(join(dirname(manifestPath), "supabase", "migrations"));
+  }
+  return dirs;
+}
 
 function listSqlFiles(dir, { existsOnly = true } = {}) {
   try {
@@ -151,7 +213,7 @@ export function checkVersionCollisions(dirs) {
   return failures;
 }
 
-export function validateAll(dirs = MIGRATION_DIRS) {
+export function validateAll(dirs = discoverMigrationDirs()) {
   return [
     ...checkDownPairing(dirs),
     ...checkBrainSchemaReservation(dirs),

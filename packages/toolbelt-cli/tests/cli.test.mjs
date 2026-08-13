@@ -131,6 +131,51 @@ test("main() --dry-run exits 0, prints the plan, and writes nothing", () => {
   });
 });
 
+// --- Finding 29: the CLI's success output must narrow its own acceptance
+// contract explicitly (collisions.mjs's DB-approximation limitation is
+// documented in source, but was never surfaced to the operator actually
+// running `tool:new` and reading its exit-0 output) ------------------------
+
+test("main() states on a successful REAL scaffold that the collision check is on-disk/manifest-only and does not query live core.app", () => {
+  withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
+    const cap = capture();
+    const code = main(
+      ["--toolbelt-root", root, "--id", "scratch-tool", "--name", "Scratch", "--kind", "ui", "--route", "/scratch"],
+      cap,
+    );
+    assert.equal(code, 0);
+    assert.match(cap.outText(), /does NOT query the live core\.app registry/);
+    assert.match(cap.outText(), /on-disk\/manifest-only/);
+  });
+});
+
+test("main() states the same live-registry caveat on a --dry-run success too", () => {
+  withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
+    const cap = capture();
+    const code = main(
+      ["--toolbelt-root", root, "--id", "scratch-tool", "--name", "Scratch", "--kind", "cli", "--dry-run"],
+      cap,
+    );
+    assert.equal(code, 0);
+    assert.match(cap.outText(), /does NOT query the live core\.app registry/);
+  });
+});
+
+test("main() does NOT print the live-registry caveat on an exit-2 collision (it is a success-path-only message)", () => {
+  withFixtureToolbeltRoot(
+    { "tool.json": rootManifest(), "apps/scratch-tool/tool.json": { id: "scratch-tool" } },
+    (root) => {
+      const cap = capture();
+      const code = main(
+        ["--toolbelt-root", root, "--id", "scratch-tool", "--name", "Scratch", "--kind", "cli"],
+        cap,
+      );
+      assert.equal(code, 2);
+      assert.doesNotMatch(cap.outText() + cap.errText(), /does NOT query the live core\.app registry/);
+    },
+  );
+});
+
 test("main() rolls back and exits 1 when the write phase itself fails unexpectedly", () => {
   // Injects a real filesystem-call failure partway through the write loop
   // via the internal fsImpl passthrough (permission-bit tricks are not a

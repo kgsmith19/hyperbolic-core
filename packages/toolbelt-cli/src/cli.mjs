@@ -59,6 +59,8 @@ export function main(argv, { stdout = console.log, stderr = console.error, fsImp
     for (const file of result.plan.files) {
       stdout(`  would create  ${toRepoRelative(toolbeltRoot, file.path)}`);
     }
+    stdout("");
+    printLiveRegistryCaveat(stdout);
     return 0;
   }
 
@@ -67,9 +69,45 @@ export function main(argv, { stdout = console.log, stderr = console.error, fsImp
     stdout(`  created  ${toRepoRelative(toolbeltRoot, path)}`);
   }
   stdout("");
+  printLiveRegistryCaveat(stdout);
+  stdout("");
   stdout("Next: supabase db push (step 2/3, from this tool's own directory if it owns a schema)");
   stdout("      then supabase db push from apps/toolbelt/ to apply the registration migration (step 3/3)");
   return 0;
+}
+
+// Finding 29 (independent security review of this repo, re-verified against
+// current HEAD): "A DB-only existing app passes filesystem checks and
+// generated upsert can overwrite it. Query an authoritative registry/signed
+// snapshot before writes or narrow the acceptance contract explicitly."
+//
+// src/collisions.mjs's own module-level comment has always documented this
+// honestly for a future maintainer reading the source: "This environment
+// has no live Supabase access, so 'id taken in core.app' is approximated
+// the only way actually checkable without a database connection... This is
+// a real, documented limitation." The gap Finding 29 identifies is narrower
+// than the underlying limitation itself: that source comment was never
+// surfaced to the actual operator running `tool:new` and reading its exit-0
+// output -- only to someone who happens to read collisions.mjs's source
+// afterward. Wiring a live Supabase connection into a local scaffolding CLI
+// would be a substantial, out-of-proportion architectural change for this
+// finding, and cuts against this repo's established local-first,
+// credentials-stay-local posture (apps/toolbelt/AGENTS.md: "Never commit a
+// service-role key"). Per the review's own explicit alternative --
+// "narrow the acceptance contract explicitly" -- this prints the same
+// honesty level the source comment already has, on every success path
+// (dry-run included: a dry-run's "no collision" plan is exactly as
+// DB-unverified as a real scaffold's), so an operator relying on the exit
+// code alone cannot miss it.
+function printLiveRegistryCaveat(stdout) {
+  stdout(
+    "Note: the collision check above is on-disk/manifest-only (id taken on disk, id claimed by an " +
+      "existing manifest, id already registered via an on-disk migration, or a schema-ownership " +
+      "conflict) -- it does NOT query the live core.app registry, since this environment has no live " +
+      "Supabase access. A DB-only existing app with no matching manifest or migration on disk would " +
+      "not be caught here. Confirm there is no live-only conflict (e.g. by checking core.app directly) " +
+      "before relying on this result.",
+  );
 }
 
 // toolbeltRoot is conventionally two directories under the repo root

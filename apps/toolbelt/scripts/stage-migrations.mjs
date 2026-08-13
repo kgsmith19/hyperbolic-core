@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-// Stages every UP migration file from every apps/toolbelt/scripts/validate-migrations.mjs
-// MIGRATION_DIRS entry into one destination directory, in one global,
-// deterministic order keyed by the shared <14-digit-timestamp>_<name>.sql
-// version scheme this repo already uses.
+// Stages every UP migration file from every directory
+// apps/toolbelt/scripts/validate-migrations.mjs's discoverMigrationDirs()
+// finds into one destination directory, in one global, deterministic order
+// keyed by the shared <14-digit-timestamp>_<name>.sql version scheme this
+// repo already uses.
 //
 // Closes Finding 3 (independent security review of this repo, re-verified
 // against current HEAD): .github/workflows/platform-migrations.yml ran
 // three SEPARATE `supabase db push --include-all --yes` calls, one per
-// MIGRATION_DIRS entry, all against the same shared ledger table
+// hardcoded directory entry, all against the same shared ledger table
 // (supabase_migrations.schema_migrations, one physical database -- see that
 // workflow's own header comment). The Supabase CLI reads migrations from a
 // single fixed `<cwd>/supabase/migrations` path per invocation; it has no
@@ -53,25 +54,22 @@
 import { readdirSync, readFileSync, mkdirSync, copyFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MIGRATION_DIRS } from "./validate-migrations.mjs";
+import { discoverMigrationDirs } from "./validate-migrations.mjs";
 
 const VERSION_RE = /^(\d+)_/;
 
-// MIGRATION_DIRS entries (validate-migrations.mjs) are repo-root-relative
-// strings ("apps/toolbelt/supabase/migrations", ...), which only resolve
-// correctly if this script happens to be invoked with the repo root as
-// process.cwd() -- true for platform-migrations.yml's own steps (no
-// `working-directory:` override), but NOT true for toolbelt-ci.yml's
-// `node --test "tests/*.test.mjs"` step, which runs with
-// `working-directory: apps/toolbelt`. Anchoring to this script's own file
-// location (stable regardless of invocation cwd) rather than to
-// process.cwd() makes every MIGRATION_DIRS-driven call correct under both
-// invocation conventions. resolve() leaves an already-absolute `dir`
-// untouched (join() would not: join(REPO_ROOT, "/already/absolute") does
-// NOT collapse to "/already/absolute" the way resolve() does), which
-// matters because every fixture directory this file's own tests pass in
-// (mkdtempSync output) is already absolute and must keep resolving to
-// itself, not to some path underneath REPO_ROOT.
+// discoverMigrationDirs() (Finding 26's fix) returns ABSOLUTE paths --
+// derived from validate-manifests.mjs's TOOLBELT_ROOT, itself resolved via
+// import.meta.url, never process.cwd() -- which is already cwd-independent
+// by construction. The resolve() call below is kept anyway as a defensive
+// second layer: it is a no-op for an already-absolute `dir` (resolve()
+// leaves it untouched; join() would not -- join(REPO_ROOT, "/already/absolute")
+// does NOT collapse to "/already/absolute" the way resolve() does), so it
+// stays correct for the default (discovered, absolute) directories AND for
+// any caller -- this file's own tests included -- that still passes a
+// relative or fixture (mkdtempSync-produced, already-absolute) directory
+// string directly into collectStagedFiles(dirs) instead of relying on the
+// default.
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 function listUpFiles(dir) {
@@ -80,10 +78,11 @@ function listUpFiles(dir) {
   try {
     names = readdirSync(resolvedDir);
   } catch (err) {
-    // Mirrors validate-migrations.mjs's own listSqlFiles: a MIGRATION_DIRS
-    // entry that does not exist yet (e.g. apps/idea-intake before its
-    // migrations directory was created) stages zero files from it rather
-    // than failing the whole run.
+    // Mirrors validate-migrations.mjs's own listSqlFiles: a discovered
+    // migration directory that does not exist yet on disk (e.g. a
+    // schema-owning tool whose tool.json exists but has not yet run its
+    // first `supabase db push` to create supabase/migrations/) stages zero
+    // files from it rather than failing the whole run.
     if (err.code === "ENOENT") return [];
     throw err;
   }
@@ -108,7 +107,7 @@ function listUpFiles(dir) {
 // filename for determinism, though the version-collision invariant above
 // means a real tie between two DISTINCT files should never occur by the
 // time this runs in CI).
-export function collectStagedFiles(dirs = MIGRATION_DIRS) {
+export function collectStagedFiles(dirs = discoverMigrationDirs()) {
   const files = dirs.flatMap(listUpFiles);
   files.sort((a, b) => {
     if (a.version !== b.version) return a.version < b.version ? -1 : 1;

@@ -173,6 +173,24 @@ test("buildAgentsMd notes no schema for a --no-schema tool", () => {
   assert.match(md, /Owns no database schema/);
 });
 
+// Finding 26 (independent security review of this repo, re-verified against
+// current HEAD): the scaffold CLI's OWN generated docs used to tell every
+// tool author to manually edit validate-migrations.mjs's MIGRATION_DIRS and
+// platform-migrations.yml -- exactly the "no outside edits" promise the
+// finding says this contradicted. Now that discovery is automatic, this
+// generated text must say so, not still ask for the manual edit.
+test("buildAgentsMd's Next Steps never tells the operator to manually edit MIGRATION_DIRS or platform-migrations.yml (Finding 26: that manual edit is no longer needed)", () => {
+  const md = buildAgentsMd({ id: "scratch-ui", name: "Scratch UI", hasSchema: true, schema: "scratch_ui" });
+  assert.doesNotMatch(md, /MIGRATION_DIRS/);
+  assert.doesNotMatch(md, /add .* to that workflow/);
+  assert.match(md, /picked up automatically/);
+});
+
+test("buildAgentsMd's Next Steps omits the schema-discovery note entirely for a --no-schema tool (it has no migrations directory to be discovered)", () => {
+  const md = buildAgentsMd({ id: "scratch-noschema", name: "Scratch No Schema", hasSchema: false, schema: null });
+  assert.doesNotMatch(md, /picked up automatically/);
+});
+
 test("buildWebIndexHtml includes the tool's name and id", () => {
   const html = buildWebIndexHtml({ id: "scratch-ui", name: "Scratch UI" });
   assert.match(html, /<title>Scratch UI<\/title>/);
