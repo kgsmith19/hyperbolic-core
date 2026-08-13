@@ -43,6 +43,46 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci
 
+      - name: Smoke-test packages/toolbelt-cli's import chain (clean-root, P1 25)
+        # packages/toolbelt-cli/src/manifests-shared.mjs reuses
+        # apps/toolbelt/scripts/validate-manifests.mjs by relative import
+        # (deliberately, per that package's own package.json description --
+        # "dependency-free: reuses ... instead of vendoring its own copy of
+        # ajv") rather than declaring ajv/ajv-formats itself. That reuse only
+        # actually resolves if apps/toolbelt's OWN declared dependencies get
+        # installed somewhere the CLI's module graph can see -- which, before
+        # this workflow line existed, only happened if a developer separately
+        # ran `npm ci`/`npm install` inside apps/toolbelt/ by hand (as
+        # toolbelt-ci.yml's own, unrelated job does for its own reasons). A
+        # root-only `npm ci` never did that on its own, because apps/toolbelt
+        # was not a root npm workspace member. Confirmed by direct repro: with
+        # apps/toolbelt/node_modules/ moved aside and only a root `npm ci`
+        # run, `node packages/toolbelt-cli/bin/tool.mjs` crashed with
+        # `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'ajv' imported
+        # from .../apps/toolbelt/scripts/validate-manifests.mjs` -- a crash
+        # this repo's toolbelt-cli unit tests never caught, because they run
+        # against whatever node_modules already happens to be on disk in this
+        # sandbox, never against a genuinely clean root install.
+        #
+        # The fix (this job's root package.json now lists "apps/toolbelt" as
+        # a workspace member, so root `npm ci` installs ajv/ajv-formats into
+        # the shared root node_modules/ via ordinary npm hoisting) is proven
+        # by THIS step, not by the unit-test step below: this step runs
+        # immediately after "Install workspace dependencies" and before any
+        # other step has a chance to create apps/toolbelt/node_modules/ some
+        # other way, so a regression that silently reintroduces the missing
+        # dependency chain fails here, at the cheapest possible point, instead
+        # of surfacing later as a confusing failure inside a real scaffold.
+        #
+        # --dry-run is essential, not incidental: it exercises the CLI's full
+        # module graph -- including runScaffold's collision checks, which
+        # call all the way through to the ajv-backed checkManifestShape --
+        # while writing nothing to disk, so this step is safe to run
+        # unconditionally on every PR without any cleanup step afterward. The
+        # synthetic --id is deliberately never registered for real (dry-run
+        # never writes), so there is no id to collide with on a re-run.
+        run: npm run tool:new -- --id shell-ci-smoke-test --name "Shell CI smoke test" --kind cli --dry-run
+
       # No lint step: neither apps/shell nor any packages/* workspace
       # declares a "lint" script, and no ESLint/Biome config exists anywhere
       # in the repo today (confirmed by search). Adding one is out of scope
@@ -104,6 +144,22 @@ jobs:
 
       - name: "Unit tests: packages/llm (node --test)"
         run: npm test --workspace=packages/llm
+
+      - name: "Unit tests: packages/toolbelt-cli (node --test)"
+        # The one gap left by this job's original packages/ui, apps/shell,
+        # packages/llm, and packages/platform-client coverage (P1 23):
+        # packages/toolbelt-cli declares its own real `npm test` (`node
+        # --test "tests/*.test.mjs"`, 6 files) but was never invoked from any
+        # workflow -- confirmed by `grep -rn "toolbelt-cli" .github/
+        # workflows/` turning up nothing before this line existed. It already
+        # falls under this job's own `packages/**` path filter above, and the
+        # "Install workspace dependencies" step above already installs it (it
+        # is a plain `packages/*` workspace member), so this is a one-line
+        # addition to an already-correctly-triggered job, not new CI
+        # infrastructure. Placed after the other three "Unit tests:
+        # packages/*" steps rather than reordering them, so this diff reads
+        # as a pure addition.
+        run: npm test --workspace=packages/toolbelt-cli
 
       - name: Cache Playwright Chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

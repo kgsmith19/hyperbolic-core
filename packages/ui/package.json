@@ -37,6 +37,7 @@
   },
   "scripts": {
     "build": "vite build && tsc --emitDeclarationOnly --outDir dist",
+    "pretest": "npm run build",
     "test": "node --test 'test/**/*.test.mjs' && node test/size-check.mjs"
   }
 }
