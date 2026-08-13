@@ -1459,3 +1459,62 @@ test(
       } finally { s.server.close(); }
     })
 );
+
+// Two error-path tests for loadOrCreateToken()'s exclusive-create retry loop
+// itself (not exercised by any test above, which only ever race a REAL
+// competing writer or a symlink -- both resolve via the normal EEXIST-then-
+// retry path). These monkey-patch fs.writeFileSync the same way the real
+// two-process race's deterministic companion test above does.
+test(
+  "Finding 66: a non-EEXIST error from the exclusive-create write propagates immediately, never silently retried",
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      const realWriteFileSync = fs.writeFileSync;
+      let calls = 0;
+      fs.writeFileSync = (file, data, opts) => {
+        if (file === tokenPath && opts && opts.flag === "wx") {
+          calls++;
+          const err = new Error("EACCES: permission denied, open");
+          err.code = "EACCES";
+          throw err;
+        }
+        return realWriteFileSync(file, data, opts);
+      };
+      try {
+        assert.throws(() => startServer({ port: 0 }), /EACCES/, "a non-EEXIST error must propagate, not be swallowed into a retry");
+        assert.equal(calls, 1, "must not retry after a non-EEXIST failure -- only EEXIST means 'lost the race, try again'");
+      } finally {
+        fs.writeFileSync = realWriteFileSync;
+      }
+    })
+);
+
+test(
+  "Finding 66: exhausting all 5 exclusive-create attempts (persistent EEXIST) fails loud with a named error, never hangs or loops forever",
+  () =>
+    withTempAccRoot(async (root) => {
+      const tokenPath = path.join(root, "gui-token");
+      const realWriteFileSync = fs.writeFileSync;
+      let calls = 0;
+      fs.writeFileSync = (file, data, opts) => {
+        if (file === tokenPath && opts && opts.flag === "wx") {
+          calls++;
+          const err = new Error("EEXIST: file already exists, open");
+          err.code = "EEXIST";
+          throw err;
+        }
+        return realWriteFileSync(file, data, opts);
+      };
+      try {
+        assert.throws(
+          () => startServer({ port: 0 }),
+          /could not establish a trustworthy token file.*after 5 attempts/,
+          "must fail loud, naming the path and attempt count, once every attempt loses the race"
+        );
+        assert.equal(calls, 5, "must make exactly 5 exclusive-create attempts, matching the bounded retry loop's own limit");
+      } finally {
+        fs.writeFileSync = realWriteFileSync;
+      }
+    })
+);
