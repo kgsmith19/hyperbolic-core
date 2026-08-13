@@ -1,0 +1,21 @@
+name: CI Smoke
+
+# TEMPORARY DIAGNOSTIC (remove once the startup_failure cause is identified).
+# Deliberately minimal: no `uses:` at all, no secrets, no paths filter, no
+# concurrency. If this workflow ALSO reports startup_failure on this branch,
+# the cause is repository-level (Actions disabled, an org/repo actions policy,
+# or an exhausted spending limit) and cannot be anything about the PR gates'
+# own file contents -- there is nothing left in this file to be wrong.
+# If instead this one runs green while the three PR gates keep failing, the
+# cause is specific to those files and this bisects it.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "workflow startup reached the runner"
