@@ -107,6 +107,34 @@ function psqlOk(dbName, sqlText) {
   return result.stdout;
 }
 
+// Applies a migration file with a bounded retry on Postgres's transient
+// "tuple concurrently updated" error -- reproduced via repeated real runs
+// once this file started running alongside
+// tests/migrate-forgepad-e2e.test.mjs (m3-08), which applies this same
+// migration in its own scratch databases. The cause: this migration's
+// `alter role authenticator set pgrst.db_schemas = ...` (like the identical
+// pattern in 20260812150000_test_create_fence.sql and Prompt Organizer's
+// own schema-exposure migration) is unscoped (no `IN DATABASE`), so it
+// writes one role-wide row in the shared pg_db_role_setting catalog --
+// every scratch database applying it contends on that same row. Wrapping
+// the script in one explicit transaction makes a retry safe and idempotent
+// (Postgres DDL is transactional, so a failure rolls back every earlier
+// statement in the same script too; the retry starts from a clean slate
+// rather than re-running non-idempotent `create schema`/`create table`
+// against partially-applied state). Test-harness fix only -- the real
+// Supabase project only ever applies this migration once.
+function applyMigrationWithRetry(dbName, sqlText, attempts = 5) {
+  const wrapped = `begin;\n${sqlText}\ncommit;\n`;
+  let lastResult;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    lastResult = psql(dbName, wrapped);
+    if (lastResult.status === 0) return lastResult.stdout;
+    if (!/tuple concurrently updated/.test(lastResult.stderr || "")) break;
+  }
+  assert.equal(lastResult.status, 0, `psql failed against ${dbName}: ${lastResult.stderr || lastResult.stdout}`);
+  return lastResult.stdout;
+}
+
 // Runs sqlText as the `authenticated` role with auth.uid() pinned to uuid
 // for the duration of this one psql invocation (mirrors what PostgREST does
 // per-request: switch role, carry the JWT-derived uid). set_config is
@@ -132,7 +160,7 @@ function withMigratedDb(fn) {
     psqlOk(db, HARNESS_SQL);
     psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
     psqlOk(db, OWNER_BOOTSTRAP_SQL);
-    psqlOk(db, readFileSync(INTAKE_UP, "utf8"));
+    applyMigrationWithRetry(db, readFileSync(INTAKE_UP, "utf8"));
     return fn(db);
   } finally {
     psqlOk("postgres", `drop database if exists ${db};`);
@@ -519,7 +547,7 @@ test(
   { skip: SKIP_REASON },
   () => {
     withMigratedDb((db) => {
-      psqlOk(db, readFileSync(INTAKE_DOWN, "utf8"));
+      applyMigrationWithRetry(db, readFileSync(INTAKE_DOWN, "utf8"));
 
       const schemaGone = psqlOk(db, "select count(*) from pg_namespace where nspname = 'intake';").trim();
       assert.equal(schemaGone, "0");
@@ -528,7 +556,7 @@ test(
       assert.equal(roleConfig, "pgrst.db_schemas=public, core, idea, prompt, test");
 
       // The pair round-trips: re-applying up on the now-reverted db succeeds cleanly.
-      psqlOk(db, readFileSync(INTAKE_UP, "utf8"));
+      applyMigrationWithRetry(db, readFileSync(INTAKE_UP, "utf8"));
       const rebuilt = psqlOk(db, "select count(*) from intake.idea;").trim();
       assert.equal(rebuilt, "0");
     });
