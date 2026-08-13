@@ -99,12 +99,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: toolbelt-playwright-chromium-${{ runner.os }}-1.52.0
-      - name: Install browser test dependency
-        run: |
-          npm install --no-save --no-package-lock @playwright/test@1.52.0
-          ./node_modules/.bin/playwright install --with-deps chromium
-        working-directory: apps/toolbelt
+          key: toolbelt-playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright Chromium
+        run: ./node_modules/.bin/playwright install --with-deps chromium
       - name: Start Prompt Organizer
         run: python3 -m http.server 8812 --directory web >/tmp/prompt-organizer.log 2>&1 &
         working-directory: apps/toolbelt/apps/prompt-organizer
@@ -121,8 +118,7 @@ jobs:
           echo "Prompt Organizer did not become ready." >&2
           exit 1
       - name: Run Prompt Organizer critical browser journey
-        run: ./node_modules/.bin/playwright test --config apps/prompt-organizer/playwright.config.mjs
-        working-directory: apps/toolbelt
+        run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/prompt-organizer/playwright.config.mjs
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:8812
           PROMPT_E2E_MOCK: "1"
@@ -160,8 +156,7 @@ jobs:
           echo "Network Checker did not become ready." >&2
           exit 1
       - name: Run Network Checker critical browser journey
-        run: ./node_modules/.bin/playwright test --config apps/network-checker/playwright.config.mjs
-        working-directory: apps/toolbelt
+        run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/network-checker/playwright.config.mjs
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:8787
       - name: Upload Network Checker browser evidence
