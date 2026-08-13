@@ -27,8 +27,11 @@ const DEFAULT_SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
 const DEFAULT_SUPABASE_PUBLISHABLE_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
 
-const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY =
+// Exported (m3-07) so other same-project PostgREST clients (src/lib/intake.ts,
+// alongside src/lib/registry.ts's own local pattern) reuse this exact
+// URL/key pair instead of re-declaring the default anon key a third time.
+export const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+export const SUPABASE_PUBLISHABLE_KEY =
   import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY || DEFAULT_SUPABASE_PUBLISHABLE_KEY;
 
 export const platformClient: PlatformClient = createPlatformClient({
