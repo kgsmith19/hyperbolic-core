@@ -16,6 +16,7 @@ import jsonschema
 from fastapi import Depends, FastAPI, File, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api.auth import AuthError, AuthUnavailableError, authenticate, principal
 from api.auth import settings as auth_settings
@@ -113,6 +114,69 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
+
+class _StripRootPathMiddleware:
+    """Base-path mechanics for the one-origin route table (m2-08;
+    docs/planning/05-a-hyperbolic-core.md section 4; 10-cicd-deployment.md
+    section 4: "LifeOS API; FastAPI `root_path` handles the prefix").
+
+    `tailscale serve --set-path=/life/api/ http://127.0.0.1:8000` forwards
+    the FULL incoming path to this upstream — it does not strip the mount
+    prefix itself (that is standard `tailscale serve` behavior for an HTTP
+    backend, not something this app controls) — so a browser request for
+    `/life/api/types` arrives here with `scope["path"] == "/life/api/types"`,
+    not `/types`. FastAPI's `root_path` constructor argument alone does NOT
+    make the router strip a prefix from the incoming path: Starlette only
+    uses it for URL generation (OpenAPI/docs links), never for route
+    matching. Actually stripping the prefix from `scope["path"]` before
+    routing — while recording it in `scope["root_path"]` so downstream URL
+    generation still reflects it — is the documented FastAPI "behind a proxy
+    that does not strip the path" recipe; this class is that recipe as a raw
+    ASGI middleware (cheaper than the `@app.middleware("http")` /
+    `BaseHTTPMiddleware` form for a check this cheap, and avoids rebuilding a
+    `Request` object just to read `scope["path"]`).
+
+    `LIFEOS_ROOT_PATH` is read PER REQUEST (via `read_env`, the same
+    env-lookup `api.auth.settings()` uses), not baked in once at import time:
+    `app` is a module-level singleton constructed at import, and baking the
+    prefix in then would make it impossible for a test to exercise both the
+    "behind /life/api" and "run standalone" shapes against the same `app`
+    object without `importlib.reload`. Unset (the default — every existing
+    deploy and every existing test before this issue), this is a no-op: the
+    request passes through with its path untouched, which is what keeps
+    `pytest`'s existing `TestClient(app)` calls against bare paths like
+    `/search` passing unchanged (LO-1).
+
+    Registered LAST among this file's middleware (after `CORSMiddleware`,
+    below `cap_upload_size`'s own registration): Starlette wraps middleware
+    added later AROUND the ones added earlier (see `cap_upload_size`'s own
+    "registered before CORS" comment for the same rule stated the other
+    direction), so this ends up outermost — the path is rewritten before
+    `cap_upload_size`'s `request.url.path == "/documents"` check, before CORS,
+    and before routing, which is the one order every one of those depends on
+    being correct behind the `/life/api` prefix.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        prefix = (read_env("LIFEOS_ROOT_PATH") or "").rstrip("/")
+        path = scope["path"]
+        prefix_matches = path.startswith(prefix) and (
+            len(path) == len(prefix) or path[len(prefix)] == "/"
+        )
+        if prefix and prefix_matches:
+            scope = dict(scope)
+            scope["root_path"] = scope.get("root_path", "") + prefix
+            scope["path"] = path[len(prefix):] or "/"
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_StripRootPathMiddleware)
 
 app.include_router(chat_router)
 
