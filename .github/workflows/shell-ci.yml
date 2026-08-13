@@ -78,7 +78,7 @@ jobs:
         run: npm test --workspace=packages/platform-client
 
       - name: "Unit tests: packages/ui (node --test)"
-        run: npm run test:unit --workspace=packages/ui
+        run: npm test --workspace=packages/ui
 
       - name: "Unit tests: packages/llm (node --test)"
         run: npm test --workspace=packages/llm

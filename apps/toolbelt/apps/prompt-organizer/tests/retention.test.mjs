@@ -15,6 +15,7 @@ const migrations = join(here, "..", "supabase", "migrations");
 const platformBootstrap = join(rootMigrations, "20260812140000_platform_owner_bootstrap.sql");
 const retentionUp = join(migrations, "20260812210000_prompt_usage_retention.sql");
 const getPromptUp = join(migrations, "20260813120000_prompt_create_get_prompt_function.sql");
+const securityHardeningUp = join(migrations, "20260813140000_prompt_security_hardening.sql");
 const revokePublicUp = join(migrations, "20260814030000_prompt_purge_old_usage_revoke_public.sql");
 const hardeningUp = join(migrations, "20260814121000_prompt_purge_old_usage_hardening.sql");
 const hardeningDown = join(migrations, "20260814121000_prompt_purge_old_usage_hardening_down.sql");
@@ -69,6 +70,7 @@ function buildDatabase(db) {
   }
   psqlOk(db, readFileSync(retentionUp, "utf8"));
   psqlOk(db, readFileSync(getPromptUp, "utf8"));
+  psqlOk(db, readFileSync(securityHardeningUp, "utf8"));
   psqlOk(db, readFileSync(revokePublicUp, "utf8"));
   psqlOk(db, readFileSync(hardeningUp, "utf8"));
 }
@@ -110,7 +112,7 @@ test("real Postgres: purge counts and aggregates only the rows it deletes", { sk
       db,
       asAuthenticated(
         OWNER_UUID,
-        `insert into prompt.prompt (title, body) values ('retention/fixture', 'body') returning id \gset
+        `insert into prompt.prompt (title, body) values ('retention/fixture', 'body') returning id \\gset
          insert into prompt.usage (prompt_id, version_no, created_at) values
            (:'id', 1, now() - interval '500 days'),
            (:'id', 1, now() - interval '400 days'),
