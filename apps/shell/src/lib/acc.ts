@@ -45,6 +45,39 @@ export type AccStatusResult =
 
 const DEFAULT_TIMEOUT_MS = 4000;
 
+const ACC_TIERS = new Set(["green", "amber", "red"]);
+
+/**
+ * Finding #76 (PR #8 security review): a 200 response's body was trusted
+ * with a blind `as AccProcessStatus` type assertion -- no runtime check --
+ * and acc-status-card.tsx renders `.tier`/`.stopped`/`.weekText` straight
+ * off it. This app has no error boundary anywhere (confirmed by grep for
+ * ErrorBoundary/componentDidCatch), so a malformed body from ACC (a bug on
+ * ACC's own side, a proxy/gateway returning something ACC never sent, or
+ * simply a future ACC response-shape change this Shell hasn't caught up
+ * with yet) would otherwise be a render crash, not a graceful degrade.
+ *
+ * A hand-written guard is deliberately enough here -- this shape is small
+ * and well-known (05-b section 5), not worth a schema-validation
+ * dependency for.
+ */
+function isAccProcessStatus(value: unknown): value is AccProcessStatus {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+
+  if (typeof candidate.weekText !== "string") return false;
+  if (typeof candidate.stopped !== "boolean") return false;
+
+  const tier = candidate.tier;
+  if (tier === null) return true;
+  if (typeof tier !== "object") return false;
+  const tierCandidate = tier as Record<string, unknown>;
+  if (typeof tierCandidate.tier !== "string" || !ACC_TIERS.has(tierCandidate.tier)) return false;
+  if (tierCandidate.pct !== undefined && typeof tierCandidate.pct !== "number") return false;
+
+  return true;
+}
+
 /**
  * Fetches ACC's process status once per mount (plus on-demand via `retry`).
  * Never throws, never rejects outward, and never logs at error level -- a
@@ -70,8 +103,16 @@ export function useAccStatus(timeoutMs: number = DEFAULT_TIMEOUT_MS): AccStatusR
           setResult({ state: "unreachable" });
           return;
         }
-        const data = (await res.json()) as AccProcessStatus;
+        const data: unknown = await res.json();
         if (cancelled) return;
+        if (!isAccProcessStatus(data)) {
+          // Same degrade as a network failure/timeout below (05-b section
+          // 5's one documented "ACC unreachable" state) -- reusing it
+          // exactly rather than inventing a second error state, per
+          // Finding #76's own fix guidance.
+          setResult({ state: "unreachable" });
+          return;
+        }
         setResult({ state: "ok", data });
       })
       .catch(() => {

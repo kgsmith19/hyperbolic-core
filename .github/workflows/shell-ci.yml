@@ -190,7 +190,20 @@ jobs:
         # either give shell-ci.yml a `postgres:` service container plus the
         # OS-role setup tools.spec.ts's fixture assumes, or move that setup
         # into the fixture itself so it degrades to a plain TCP connection.
-        run: npx playwright test e2e/chrome.spec.ts e2e/auth-gate.spec.ts e2e/single-session.spec.ts e2e/idp-down.spec.ts
+        #
+        # idp-down.spec.ts is deliberately EXCLUDED from this list (Finding
+        # #80, PR #8 security review): its two specs each wait out
+        # @supabase/auth-js's REAL, deliberately un-faked exponential
+        # backoff (~30s, test.setTimeout(75_000) each) -- a real cost paid
+        # on every Shell/packages PR for a scenario that changes rarely.
+        # Relocated to .github/workflows/shell-idp-down.yml, a manual
+        # workflow_dispatch run (see that file's own header comment). The
+        # FAST, deterministic half of the same UI contract this spec
+        # proves -- fail-closed getSession() redirects to /login, no
+        # chrome, no data nodes, no real or fake-timer wait needed -- still
+        # runs on every PR as part of the "Unit tests: apps/shell (vitest)"
+        # step below: src/idp-down-contract.test.tsx.
+        run: npx playwright test e2e/chrome.spec.ts e2e/auth-gate.spec.ts e2e/single-session.spec.ts
         working-directory: apps/shell
 
       - name: Production build

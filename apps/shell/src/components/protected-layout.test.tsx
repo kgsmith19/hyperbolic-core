@@ -8,7 +8,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import ProtectedLayout from "./protected-layout";
 import type { PlatformSession } from "@hyperbolic/platform-client";
-import type { SessionStatus } from "../lib/session";
+import type { AuthState, SessionStatus } from "../lib/session";
 
 const FIXTURE_SESSION: PlatformSession = {
   accessToken: "fixture-token",
@@ -16,12 +16,25 @@ const FIXTURE_SESSION: PlatformSession = {
   userId: "00000000-0000-4000-8000-000000000001",
 };
 
+// Finding #77 (PR #8 security review): builds a well-typed `AuthState` from
+// the same (status, session) pair every existing call site here already
+// passed -- for "signed-in" this asserts session is non-null (a test-fixture
+// convenience only; the real hook can never construct the other
+// combination, which is the whole point of the union).
+function authStateFor(status: SessionStatus, session: PlatformSession | null): AuthState {
+  if (status === "signed-in") {
+    if (!session) throw new Error("test fixture: signed-in requires a non-null session");
+    return { status: "signed-in", session };
+  }
+  return { status, session: null };
+}
+
 function renderAt(path: string, status: SessionStatus, session: PlatformSession | null = null) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/login" element={<div data-testid="login-stub">login</div>} />
-        <Route element={<ProtectedLayout status={status} session={session} onSignOut={vi.fn()} />}>
+        <Route element={<ProtectedLayout auth={authStateFor(status, session)} onSignOut={vi.fn()} />}>
           {/* No data-app-data on these dummy page elements themselves --
               ProtectedLayout's own wrapper (see protected-layout.tsx) is
               the one node under test here; a real page adds none of its

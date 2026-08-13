@@ -72,6 +72,76 @@ export function applyThemeChoice(choice: ThemeChoice): void {
 const useIsomorphicLayoutEffect =
   typeof window === "undefined" ? React.useEffect : React.useLayoutEffect;
 
+// ---------------------------------------------------------------------
+// Finding #73 (PR #8 security review): shared cross-instance store.
+//
+// Previously `useThemeChoice` was plain per-component `React.useState` with
+// no cross-instance channel at all -- two independently mounted consumers
+// (e.g. the topbar's ThemeSwitch and Settings' own ThemeChoiceControl, both
+// documented at the time as a known, out-of-scope gap from m2-01) could
+// show stale/disagreeing DISPLAYED selections relative to each other until
+// one of them remounted, even though the actually-applied theme (the
+// document's `data-theme` attribute + localStorage, via applyThemeChoice)
+// stayed correct and instant everywhere the instant either one changed it.
+//
+// The fix is a module-level store (module scope, one instance per loaded
+// copy of this file/document -- exactly the same scope every other
+// consumer of this module already shares) plus React's own
+// `useSyncExternalStore`, the primitive built for precisely this shape of
+// problem: an external mutable value, read by multiple components, that
+// must re-render every subscriber synchronously when any one of them
+// writes to it. This closes the SAME-TAB, same-document gap the finding
+// describes. Deliberately NOT also adding a `storage` event listener for
+// cross-TAB sync: the finding names that as an alternative ("OR"), not an
+// additional requirement, and the drift it describes ("two independently
+// mounted consumers") is a same-document scenario (both controls rendered
+// by the same running Chrome instance), not a cross-tab one.
+//
+// Exported (not just used internally) so this file's own tests can import
+// the SOURCE module directly and exercise the pub/sub mechanics without
+// needing a DOM -- see test/chrome-theme-store.test.mjs's header comment.
+// These three are deliberately NOT re-exported from packages/ui/src/index.ts:
+// only `useThemeChoice` (which uses them) and `applyThemeChoice` are public.
+
+let sharedChoice: ThemeChoice | null = null;
+const listeners = new Set<() => void>();
+
+/** The current shared choice, lazily read from storage on first access. */
+export function getThemeChoiceSnapshot(): ThemeChoice {
+  if (sharedChoice === null) sharedChoice = readStoredChoice();
+  return sharedChoice;
+}
+
+/**
+ * `useSyncExternalStore`'s server-snapshot argument: a fixed, deterministic
+ * value for SSR (matching readStoredChoice()'s own no-`window` default) so
+ * this package's SSR-based test suite (react-dom/server, no `window`) never
+ * hits useSyncExternalStore's "missing getServerSnapshot" warning/throw.
+ */
+export function getThemeChoiceServerSnapshot(): ThemeChoice {
+  return "system";
+}
+
+/** Subscribes `listener` to every future shared-choice change; returns an unsubscribe function. */
+export function subscribeThemeChoice(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/**
+ * Updates the ONE shared choice, applies it to the DOM (once, regardless of
+ * how many `useThemeChoice()` instances are mounted), and synchronously
+ * notifies every subscriber -- this is what makes two independently
+ * rendered consumers observe the same value without either remounting.
+ */
+export function setThemeChoiceSnapshot(next: ThemeChoice): void {
+  sharedChoice = next;
+  applyThemeChoice(next);
+  for (const listener of listeners) listener();
+}
+
 /**
  * Owns the persisted theme choice for the lifetime of one mounted Chrome.
  *
@@ -81,30 +151,32 @@ const useIsomorphicLayoutEffect =
  * browser tab could show before any JavaScript runs -- that requires a
  * blocking inline script in the HTML `<head>`, executed before first paint,
  * which is apps/shell's index.html (m2-02) to own once it exists. What this
- * hook does today: read the stored choice synchronously on mount (the lazy
- * useState initializer, safe under SSR) and re-apply it in a layout effect
- * -- before paint -- so mounting Chrome itself never shows one wrong frame.
+ * hook does today: read the stored choice synchronously on mount (via
+ * `useSyncExternalStore`, safe under SSR through `getThemeChoiceServerSnapshot`)
+ * and re-apply it in a layout effect -- before paint -- so mounting Chrome
+ * itself never shows one wrong frame.
  */
 export function useThemeChoice(): [ThemeChoice, () => void] {
-  const [choice, setChoice] = React.useState<ThemeChoice>(readStoredChoice);
+  const choice = React.useSyncExternalStore(
+    subscribeThemeChoice,
+    getThemeChoiceSnapshot,
+    getThemeChoiceServerSnapshot
+  );
 
-  // Mount-only (empty deps, deliberately not reactive to `choice`): this
-  // applies whatever the lazy initializer above already read, in a layout
-  // effect so it lands before the browser's first paint of this subtree.
-  // `cycle` below applies every subsequent change itself, synchronously and
-  // immediately in the click handler -- re-running this effect on every
-  // `choice` change would just repeat that same DOM write a frame later,
-  // adding a redundant paint rather than any correctness.
+  // Mount-only (empty deps, deliberately not reactive to `choice`): applies
+  // whatever the shared store currently holds, in a layout effect so it
+  // lands before the browser's first paint of THIS subtree -- harmless and
+  // idempotent to repeat across multiple simultaneously-mounted consumers
+  // (each already did this same "apply on my own mount" step independently
+  // before this fix too). `cycle` below applies every subsequent change
+  // itself, synchronously and immediately in the click handler.
   useIsomorphicLayoutEffect(() => {
-    applyThemeChoice(choice);
+    applyThemeChoice(getThemeChoiceSnapshot());
   }, []);
 
   const cycle = React.useCallback(() => {
-    setChoice((current) => {
-      const next = CYCLE[(CYCLE.indexOf(current) + 1) % CYCLE.length];
-      applyThemeChoice(next);
-      return next;
-    });
+    const next = CYCLE[(CYCLE.indexOf(getThemeChoiceSnapshot()) + 1) % CYCLE.length];
+    setThemeChoiceSnapshot(next);
   }, []);
 
   return [choice, cycle];

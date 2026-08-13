@@ -354,6 +354,38 @@ describe("Chrome: command palette scope, proven against the built bundle's own t
   });
 });
 
+describe("Chrome: command palette combobox ARIA (Finding #74, PR #8 security review)", () => {
+  // Base UI's Dialog.Portal renders nothing under react-dom/server (same
+  // limitation the palette-scope describe block above documents), so this
+  // reads the built bundle's own text, same technique as bundleHasProp
+  // above -- direct proof the shipped code carries these attributes, not
+  // just the source.
+  test('the search input carries role="combobox"', () => {
+    assert.ok(bundleHasProp("role", "combobox"), "expected role=\"combobox\" on the palette's search input");
+  });
+
+  test("aria-expanded is present on the combobox input, tied to a variable (not hardcoded true/false)", () => {
+    const match = distSrc.match(/role:[`"']combobox[`"'],"aria-expanded":([^,]+),"aria-controls":/);
+    assert.ok(match, "expected an aria-expanded attribute immediately after role=\"combobox\" in the built bundle");
+    assert.notEqual(match[1].trim(), "`true`", "aria-expanded must track the open prop, not a hardcoded true");
+    assert.notEqual(match[1].trim(), "`false`", "aria-expanded must track the open prop, not a hardcoded false");
+  });
+
+  test("aria-controls on the input references the exact same identifier as the results <ul>'s own id (never a copy that can drift)", () => {
+    const inputMatch = distSrc.match(/role:[`"']combobox[`"'],"aria-expanded":[^,]+,"aria-controls":([\w$]+)/);
+    assert.ok(inputMatch, "expected to find the combobox input's aria-controls reference in the built bundle");
+
+    const listMatch = distSrc.match(/id:([\w$]+),"data-slot":[`"']command-palette-list[`"']/);
+    assert.ok(listMatch, "expected to find the results <ul>'s id right before its data-slot=\"command-palette-list\" literal");
+
+    assert.equal(
+      inputMatch[1],
+      listMatch[1],
+      `aria-controls ("${inputMatch[1]}") must be the SAME identifier as the results list's id ("${listMatch[1]}")`
+    );
+  });
+});
+
 describe("Chrome source: no raw palette values (09 section 3.1 / adoption rule step 3)", () => {
   test("no oklch()/hex color literals in any packages/ui/src/chrome/*.ts(x) source file", () => {
     const chromeDir = path.join(here, "..", "src", "chrome");

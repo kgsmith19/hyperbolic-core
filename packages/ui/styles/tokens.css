@@ -255,6 +255,38 @@
 }
 
 /*
+ * prefers-reduced-motion (Finding #75, PR #8 security review -- the
+ * reduced-motion half only; the contrast half of that same original
+ * finding is a separate, already-bounded scope decision and is untouched
+ * here). A single, global override: every transition/animation this
+ * package (or any consumer built on its tokens) declares collapses to
+ * effectively-instant for anyone whose OS has requested reduced motion.
+ * Deliberately NOT a per-component redesign -- the
+ * `prefers-reduced-motion: reduce` media feature just needs motion
+ * suppressed, not replaced with a bespoke reduced variant per animation;
+ * `0.01ms` (not `0s`/`none`) is the standard trick that keeps
+ * transitionend/animationend events still firing for any code that awaits
+ * them, just too fast to visually register.
+ *
+ * `!important` is intentional here (used nowhere else in this file):
+ * Tailwind utility classes (e.g. nav-rail.tsx's own
+ * `transition-colors duration-base ease-standard`) set
+ * transition-duration/animation-duration directly at utility-class
+ * specificity, and this rule must win over every one of them
+ * unconditionally, not just the ones it happens to out-specificity.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
  * Contrast tuning note (WCAG 2.1 AA, computed by test/contrast.test.mjs):
  * four LIGHT-theme values above were nudged from the reference oklch
  * numbers in docs/planning/09-design-system.md section 3.2, lightness

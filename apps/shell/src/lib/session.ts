@@ -8,7 +8,7 @@
 // authenticated operator (src/components/protected-layout.tsx is the gate
 // that enforces that; this module only owns session STATE, not the
 // redirect decision -- see src/lib/auth-gate.ts for that).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createPlatformClient,
   createRegistryClient,
@@ -75,19 +75,38 @@ if (import.meta.env?.VITE_E2E_HOOKS === "1" && typeof window !== "undefined") {
 
 export type SessionStatus = "checking" | "signed-in" | "signed-out";
 
-export interface ShellSession {
-  /**
-   * "checking": the one `getSession()` call this hook owns hasn't resolved
-   * yet -- components/protected-layout.tsx renders neither gated content
-   * nor the login form while this holds (this issue's own "no flash of
-   * gated content before redirect").
-   */
-  status: SessionStatus;
-  session: PlatformSession | null;
+/**
+ * Finding #77 (PR #8 security review): previously `status: SessionStatus`
+ * and `session: PlatformSession | null` were two INDEPENDENT fields
+ * threaded separately all the way down to components/protected-layout.tsx
+ * and app.tsx's `/settings` route -- nothing in the type system ruled out
+ * the invalid combination "signed-in" with a null session, so consumers
+ * either re-derived the invariant by hand (auth-gate.ts's
+ * computeGateDecision) or asserted it with an unchecked cast
+ * (app.tsx's old `session as NonNullable<typeof session>` for SettingsPage,
+ * justified only by a comment). This discriminated union makes that
+ * combination unrepresentable: a value typed `AuthState` can only ever be
+ * `{status:"signed-in", session: PlatformSession}` or
+ * `{status:"checking"|"signed-out", session: null}` -- there is no third
+ * shape to construct, so narrowing on `.status` gives real, compiler-
+ * checked access to a non-null `.session`, not just a documented assumption.
+ */
+export type AuthState =
+  | { status: "signed-in"; session: PlatformSession }
+  | { status: "checking" | "signed-out"; session: null };
+
+const CHECKING: AuthState = { status: "checking", session: null };
+const SIGNED_OUT: AuthState = { status: "signed-out", session: null };
+
+function authStateFor(session: PlatformSession | null): AuthState {
+  return session ? { status: "signed-in", session } : SIGNED_OUT;
+}
+
+export type ShellSession = AuthState & {
   /** The Shell's one login surface (ADR-03) calls this; rethrows on failure. */
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => void;
-}
+};
 
 /**
  * Owns the Shell's session for the lifetime of the app: exactly one
@@ -96,33 +115,53 @@ export interface ShellSession {
  * only source of truth -- there is no stub/fallback session anymore.
  */
 export function useShellSession(): ShellSession {
-  const [status, setStatus] = useState<SessionStatus>("checking");
-  const [session, setSession] = useState<PlatformSession | null>(null);
+  const [auth, setAuth] = useState<AuthState>(CHECKING);
+
+  // Finding #78 (PR #8 security review): `getSession()` (the initial read)
+  // and `onAuthStateChange` (the live listener) both resolve into the same
+  // `setAuth`, with no ordering guarantee between them -- if
+  // onAuthStateChange delivers a NEWER result before the initial
+  // getSession() call resolves, the later-resolving-but-semantically-STALE
+  // getSession() result can overwrite it. changeVersionRef increments once
+  // per onAuthStateChange delivery; the initial getSession() branch
+  // captures the version at the moment it was issued and refuses to apply
+  // its own result if that counter has moved by the time it resolves --
+  // onAuthStateChange, not the stale initial read, wins.
+  const changeVersionRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    const versionAtStart = changeVersionRef.current;
 
-    function apply(next: PlatformSession | null) {
+    platformClient.auth.getSession().then((next) => {
       if (cancelled) return;
-      setSession(next);
-      // Fail closed (SH-6): ANY non-truthy result -- including the null
-      // platform-client itself already returns when the IdP is unreachable
-      // and the cached token has expired (packages/platform-client's own
-      // getSession() contract) -- collapses to "signed-out", never a status
-      // that would let components/protected-layout.tsx render gated
-      // content or let a stale token reach an authenticated call.
-      setStatus(next ? "signed-in" : "signed-out");
-    }
-
-    platformClient.auth.getSession().then(apply);
+      if (changeVersionRef.current !== versionAtStart) {
+        // onAuthStateChange already delivered at least one newer result
+        // while this initial getSession() call was still in flight -- that
+        // result is the more recent truth, so this stale resolution is
+        // dropped rather than clobbering it.
+        return;
+      }
+      setAuth(authStateFor(next));
+    });
 
     // Keeps this hook's status live for the rest of the session, not just
     // at mount: a background auto-refresh failure (e.g. the IdP going
     // unreachable while this tab stays open past the cached token's
     // expiry) surfaces through this same listener, not just through a
     // future getSession() call -- see session.test.ts's "background
-    // demotion" case.
-    const unsubscribe = platformClient.auth.onAuthStateChange(apply);
+    // demotion" case. Fail closed (SH-6): ANY non-truthy result --
+    // including the null platform-client itself already returns when the
+    // IdP is unreachable and the cached token has expired (packages/
+    // platform-client's own getSession() contract) -- collapses to
+    // "signed-out", never a status that would let
+    // components/protected-layout.tsx render gated content or let a stale
+    // token reach an authenticated call.
+    const unsubscribe = platformClient.auth.onAuthStateChange((next) => {
+      if (cancelled) return;
+      changeVersionRef.current += 1;
+      setAuth(authStateFor(next));
+    });
 
     return () => {
       cancelled = true;
@@ -137,8 +176,7 @@ export function useShellSession(): ShellSession {
     // means the caller's very next statement after `await signIn(...)`
     // (LoginPage's own post-await `navigate()`) already sees "signed-in"
     // rather than racing the listener's own async state update.
-    setSession(next);
-    setStatus("signed-in");
+    setAuth({ status: "signed-in", session: next });
   }, []);
 
   const signOut = useCallback(() => {
@@ -147,10 +185,9 @@ export function useShellSession(): ShellSession {
     // appearing authenticated for even one extra render. Best-effort on
     // the network call itself -- signOut() rejecting (e.g. already no
     // session server-side) must never crash the chrome every zone renders.
-    setSession(null);
-    setStatus("signed-out");
+    setAuth(SIGNED_OUT);
     platformClient.auth.signOut().catch(() => {});
   }, []);
 
-  return { status, session, signIn, signOut };
+  return { ...auth, signIn, signOut };
 }

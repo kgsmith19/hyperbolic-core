@@ -30,13 +30,51 @@ export interface ZoneEntry {
   label: string;
   href: string;
   icon: ComponentType<LucideProps>;
+  /**
+   * Finding #70 (PR #8 security review): marks entries that are NOT part of
+   * this SPA's own router at all -- currently just `life`, LifeOS being a
+   * wholly separate zone stitched in at the infrastructure level (see
+   * apps/shell/src/pages/home.tsx's identically-named, identically-scoped
+   * `hardNavigate` flag on its own LAUNCHERS table, added for that same
+   * P1 fix; this mirrors it exactly rather than inventing a second
+   * mechanism). Every other zone entry is a genuine Shell route and is
+   * left `undefined` (falsy) here on purpose, so it is eligible for
+   * client-side navigation whenever a consumer wires a `navigate` adapter
+   * (nav-rail.tsx / command-palette.tsx / chrome.tsx's `ChromeProps`).
+   */
+  hardNavigate?: boolean;
 }
 
 export const ZONE_ENTRIES: readonly ZoneEntry[] = [
   { zone: "home", label: "Home", href: "/", icon: Home },
-  { zone: "life", label: "LifeOS", href: "/life/", icon: HeartPulse },
+  { zone: "life", label: "LifeOS", href: "/life/", icon: HeartPulse, hardNavigate: true },
   { zone: "acc", label: "ACC", href: "/acc/", icon: Bot },
   { zone: "tools", label: "Tools", href: "/tools/", icon: Wrench },
   { zone: "prompts", label: "Prompts", href: "/prompts/", icon: NotebookText },
   { zone: "ideas", label: "Ideas", href: "/ideas/", icon: Lightbulb },
 ];
+
+/** A function that performs a client-side (SPA) navigation to `href`. */
+export type NavigateAdapter = (href: string) => void;
+
+/**
+ * Finding #70's central decision, extracted once so nav-rail.tsx and
+ * command-palette.tsx -- the two places that render a ZONE_ENTRIES item as
+ * a clickable link -- share exactly one rule instead of each hand-rolling
+ * their own copy of it.
+ *
+ * True only when a `navigate` adapter was actually supplied (packages/ui
+ * has no router of its own -- see chrome.tsx's own doc comment -- so this
+ * is opt-in, wired by whichever app mounts Chrome) AND the entry is not
+ * flagged `hardNavigate`. False falls through to the anchor's native
+ * `href` navigation: exactly today's behavior for every existing caller
+ * that doesn't wire a navigator, and permanently for `hardNavigate`
+ * entries regardless of what's wired -- `life` must always leave this
+ * SPA's own router entirely, never a client-side transition.
+ */
+export function shouldNavigateClientSide(
+  entry: Pick<ZoneEntry, "hardNavigate">,
+  navigate: NavigateAdapter | undefined
+): navigate is NavigateAdapter {
+  return typeof navigate === "function" && !entry.hardNavigate;
+}

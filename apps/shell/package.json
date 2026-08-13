@@ -1,5 +1,6 @@
 {
   "name": "shell",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "hyperbolic-core Shell: the unified web front end composing every zone (docs/planning/05-a-hyperbolic-core.md).",

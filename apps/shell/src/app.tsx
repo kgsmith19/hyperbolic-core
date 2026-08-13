@@ -19,12 +19,12 @@ import NotFoundPage from "./pages/not-found";
  * sits outside the gate.
  */
 function App() {
-  const { status, session, signIn, signOut } = useShellSession();
+  const auth = useShellSession();
 
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage status={status} onSignIn={signIn} />} />
-      <Route element={<ProtectedLayout status={status} session={session} onSignOut={signOut} />}>
+      <Route path="/login" element={<LoginPage status={auth.status} onSignIn={auth.signIn} />} />
+      <Route element={<ProtectedLayout auth={auth} onSignOut={auth.signOut} />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/acc/*" element={<AccPage />} />
         <Route path="/tools/*" element={<ToolsPage />} />
@@ -33,14 +33,25 @@ function App() {
         <Route
           path="/settings"
           element={
-            // Non-null assertion: ProtectedLayout's own gate (see
-            // computeGateDecision) never renders its <Outlet/> -- and
-            // therefore never mounts this element -- for any status other
-            // than "signed-in", at which point `session` is always a real
-            // PlatformSession, never null. React.createElement below merely
-            // builds the element descriptor; it isn't rendered unless that
-            // invariant holds.
-            <SettingsPage session={session as NonNullable<typeof session>} onSignOut={signOut} />
+            // Finding #77 (PR #8 security review): narrowing `auth.status`
+            // directly here -- on the discriminated `AuthState` union
+            // session.ts now returns -- is what lets TypeScript hand
+            // SettingsPage a real, non-null `auth.session` with no cast.
+            // The old `session as NonNullable<typeof session>` asserted
+            // this same fact was true without the compiler ever checking
+            // it. ProtectedLayout's own gate (computeGateDecision, mirrored
+            // by its own `auth.status !== "signed-in"` narrowing check)
+            // never renders this route's <Outlet/> content for any other
+            // status, so the `else` branch below is never actually shown --
+            // it exists only because <Routes> constructs every child
+            // route's `element` expression on every render of <App>,
+            // whatever the current status, so both arms of this ternary
+            // must be valid elements.
+            auth.status === "signed-in" ? (
+              <SettingsPage session={auth.session} onSignOut={auth.signOut} />
+            ) : (
+              <NotFoundPage />
+            )
           }
         />
         <Route path="*" element={<NotFoundPage />} />

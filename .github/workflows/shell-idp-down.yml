@@ -1,0 +1,72 @@
+name: "Shell IdP-Down (manual, real backoff timing)"
+
+# Finding #80 (PR #8 security review). e2e/idp-down.spec.ts's two specs each
+# wait out @supabase/auth-js's REAL exponential backoff (~30s,
+# test.setTimeout(75_000) each, deliberately un-faked -- see that file's own
+# header comment for why: faking timers inside a real Playwright-driven
+# browser page risks corrupting React's own scheduling). Running that on
+# every Shell/packages PR (as shell-ci.yml's pr-gate job previously did) is
+# a real, repeated ~75s-per-spec cost for a scenario -- SH-6, the IdP going
+# unreachable -- that changes rarely. Relocated here, a manual
+# workflow_dispatch run, mirroring
+# .github/workflows/toolbelt-network-checker-release.yml's own existing
+# manual-trigger pattern in this repo.
+#
+# This is deliberately NOT a full replacement for pr-gate coverage: the
+# FAST, deterministic half of the exact same UI contract this spec proves
+# (fail-closed getSession() redirects to /login, no chrome, no data nodes --
+# with no real or fake-timer wait needed at all, since apps/shell's own
+# useShellSession hook has no retry/backoff of its own to fake) still runs
+# on every PR via shell-ci.yml's ordinary "Unit tests: apps/shell (vitest)"
+# step: apps/shell/src/idp-down-contract.test.tsx. What ONLY this workflow
+# proves is the real backoff TIMING itself against a real browser -- run it
+# by hand after touching auth/session code, or on a schedule if that
+# coverage gap is ever felt in practice.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  idp-down:
+    name: Shell IdP-down (real ~30s backoff, real browser)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build packages/ui
+        # apps/shell resolves "@hyperbolic/ui" through its built dist/, not
+        # a TS path mapping -- see shell-ci.yml's own step-level comment for
+        # the two real CI failures this exact ordering fixed.
+        run: npm run build --workspace=packages/ui
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/shell
+
+      - name: Run idp-down.spec.ts (real, un-faked exponential backoff)
+        run: npx playwright test e2e/idp-down.spec.ts
+        working-directory: apps/shell
+
+      - name: Upload Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shell-idp-down-evidence
+          path: |
+            apps/shell/playwright-report/
+            apps/shell/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -5,7 +5,7 @@ import { Search, Wrench } from "lucide-react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 
 import { cn } from "../lib/cn";
-import { ZONE_ENTRIES, type Zone } from "./zones";
+import { ZONE_ENTRIES, shouldNavigateClientSide, type NavigateAdapter, type Zone } from "./zones";
 import { paletteMatch } from "./palette-match";
 import type { ToolPaletteEntry } from "./tool-entry";
 
@@ -20,7 +20,22 @@ interface CommandPaletteProps {
    * keeps working unchanged.
    */
   tools?: readonly ToolPaletteEntry[];
+  /**
+   * Finding #70 (PR #8 security review): optional client-side navigation
+   * adapter, identical contract to nav-rail.tsx's own `navigate` prop.
+   * Applied ONLY to "navigation"-kind results (the ZONE_ENTRIES half) --
+   * "tool"-kind results are registry-sourced hrefs this package has no way
+   * to know are even internal to the consuming app's own router (m3-04's
+   * own doc comment: packages/ui has no dependency on the registry client
+   * that produced them), so they deliberately keep today's plain-anchor
+   * behavior regardless of whether `navigate` is supplied.
+   */
+  navigate?: NavigateAdapter;
 }
+
+// Finding #74 (PR #8 security review): shared between the results <ul>'s
+// own id and the input's aria-controls, so the two can never drift apart.
+const RESULTS_LIST_ID = "command-palette-list";
 
 type PaletteResult = {
   /** Stable React key AND the itemRefs map key -- unique across BOTH kinds. */
@@ -31,6 +46,8 @@ type PaletteResult = {
   icon: React.ComponentType<{ className?: string }>;
   /** "navigation" entries only, for the "Current" badge. */
   zone?: Zone;
+  /** "navigation" entries only -- see zones.ts's ZoneEntry.hardNavigate. */
+  hardNavigate?: boolean;
 };
 
 // Static half of the combined result list (05-a section 5; 09 section 4.2):
@@ -44,6 +61,7 @@ const NAVIGATION_RESULTS: PaletteResult[] = ZONE_ENTRIES.map((entry) => ({
   href: entry.href,
   icon: entry.icon,
   zone: entry.zone,
+  hardNavigate: entry.hardNavigate,
 }));
 
 /**
@@ -71,7 +89,7 @@ const NAVIGATION_RESULTS: PaletteResult[] = ZONE_ENTRIES.map((entry) => ({
  * and surface-raised, not shadow-3, per 09 section 3.4's elevation table
  * ("--shadow-2 popover/dropdown/palette" vs "--shadow-3 modal").
  */
-function CommandPalette({ open, onOpenChange, activeZone, tools }: CommandPaletteProps) {
+function CommandPalette({ open, onOpenChange, activeZone, tools, navigate }: CommandPaletteProps) {
   const [query, setQuery] = React.useState("");
   const [highlighted, setHighlighted] = React.useState(0);
   const itemRefs = React.useRef(new Map<string, HTMLAnchorElement>());
@@ -105,6 +123,16 @@ function CommandPalette({ open, onOpenChange, activeZone, tools }: CommandPalett
   React.useEffect(() => {
     setHighlighted(0);
   }, [query]);
+
+  // Finding #74 (PR #8 security review): the query-keyed effect above only
+  // fires when the query TEXT changes. Arrow-key to a non-zero index,
+  // close WITHOUT changing the query, reopen -- the query never changed
+  // across that close/reopen, so that effect never re-fires and the stale
+  // index survives into the reopened palette. This second effect resets on
+  // every OPEN transition too, independent of query, closing that gap.
+  React.useEffect(() => {
+    if (open) setHighlighted(0);
+  }, [open]);
 
   // Clear the search between opens so re-opening the palette never shows
   // the previous session's leftover query.
@@ -147,6 +175,14 @@ function CommandPalette({ open, onOpenChange, activeZone, tools }: CommandPalett
                 spellCheck={false}
                 placeholder="Go to..."
                 aria-label="Search navigation"
+                // Finding #74 (PR #8 security review): the combobox/listbox
+                // ARIA relationship was previously incomplete -- only
+                // aria-activedescendant was present. role/aria-expanded/
+                // aria-controls complete the standard combobox pattern
+                // (https://www.w3.org/WAI/ARIA/apg/patterns/combobox/).
+                role="combobox"
+                aria-expanded={open}
+                aria-controls={RESULTS_LIST_ID}
                 aria-activedescendant={
                   highlightedEntry ? `palette-item-${highlightedEntry.key}` : undefined
                 }
@@ -157,7 +193,7 @@ function CommandPalette({ open, onOpenChange, activeZone, tools }: CommandPalett
               />
             </div>
             <ul
-              id="command-palette-list"
+              id={RESULTS_LIST_ID}
               data-slot="command-palette-list"
               role="listbox"
               aria-label="Navigation and tool results"
@@ -188,7 +224,17 @@ function CommandPalette({ open, onOpenChange, activeZone, tools }: CommandPalett
                       data-zone={entry.zone}
                       data-selected={selected}
                       onMouseEnter={() => setHighlighted(index)}
-                      onClick={() => onOpenChange(false)}
+                      onClick={(event) => {
+                        // Finding #70: only "navigation" (ZONE_ENTRIES)
+                        // results are ever eligible for client-side routing
+                        // -- see this component's own `navigate` doc
+                        // comment for why "tool" results are excluded.
+                        if (entry.kind === "navigation" && shouldNavigateClientSide(entry, navigate)) {
+                          event.preventDefault();
+                          navigate(entry.href);
+                        }
+                        onOpenChange(false);
+                      }}
                       className={cn(
                         "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-text outline-none",
                         selected && "bg-accent-muted text-text"

@@ -4,7 +4,7 @@ import * as React from "react";
 import { PanelLeftClose, PanelLeft } from "lucide-react";
 
 import { cn } from "../lib/cn";
-import { ZONE_ENTRIES, type Zone } from "./zones";
+import { ZONE_ENTRIES, shouldNavigateClientSide, type NavigateAdapter, type Zone } from "./zones";
 
 const EXPANDED_STORAGE_KEY = "hyperbolic-ui-nav-expanded";
 
@@ -29,6 +29,16 @@ function readInitialExpanded(): boolean {
 
 interface NavRailProps {
   activeZone: Zone;
+  /**
+   * Finding #70 (PR #8 security review): optional client-side navigation
+   * adapter. When supplied, clicking an internal (non-`hardNavigate`) zone
+   * entry calls this instead of following the anchor's native `href`,
+   * avoiding the full-document reload that a plain `<a>` forces on every
+   * click -- see zones.ts's `shouldNavigateClientSide` for the exact rule.
+   * Left undefined by default so every existing caller keeps today's
+   * plain-anchor behavior unchanged.
+   */
+  navigate?: NavigateAdapter;
 }
 
 /**
@@ -38,7 +48,7 @@ interface NavRailProps {
  * singular). Topbar renders a `<header>`, not a second `<nav>`, so there is
  * exactly one element in Chrome the test id can unambiguously mean.
  */
-function NavRail({ activeZone }: NavRailProps) {
+function NavRail({ activeZone, navigate }: NavRailProps) {
   const [expanded, setExpanded] = React.useState(readInitialExpanded);
 
   function toggle() {
@@ -78,6 +88,12 @@ function NavRail({ activeZone }: NavRailProps) {
                 data-zone={entry.zone}
                 aria-current={active ? "page" : undefined}
                 title={expanded ? undefined : entry.label}
+                onClick={(event) => {
+                  if (shouldNavigateClientSide(entry, navigate)) {
+                    event.preventDefault();
+                    navigate(entry.href);
+                  }
+                }}
                 className={cn(
                   "flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm font-medium text-text-secondary outline-none transition-colors hover:bg-accent-muted hover:text-text focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=page]:bg-accent-muted aria-[current=page]:text-text",
                   !expanded && "justify-center px-0"

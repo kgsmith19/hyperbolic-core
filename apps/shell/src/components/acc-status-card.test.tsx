@@ -62,6 +62,50 @@ describe("AccStatusCard: unreachable degrade (mocked fetch failure)", () => {
     });
   });
 
+  // Finding #76 (PR #8 security review): a 200 response used to be trusted
+  // with a blind `as AccProcessStatus` cast and no runtime check -- these
+  // prove a malformed 200 body degrades exactly like a network failure
+  // (the SAME unreachable-state UI, per this finding's own fix guidance),
+  // and -- just as importantly -- never crashes the render, given this app
+  // has no error boundary anywhere.
+  describe("malformed 200 response bodies (Finding #76)", () => {
+    const malformedBodies: [string, unknown][] = [
+      ["null", null],
+      ["an array instead of an object", ["not", "an", "object"]],
+      ["an empty object (missing every required field)", {}],
+      [
+        "weekText is a number instead of a string",
+        { tier: null, weekText: 12345, stopped: false },
+      ],
+      [
+        "stopped is a string instead of a boolean",
+        { tier: null, weekText: "Week: $12 of $100", stopped: "false" },
+      ],
+      [
+        "tier.tier is an unrecognized string",
+        { tier: { tier: "purple" }, weekText: "Week: $12 of $100", stopped: false },
+      ],
+      [
+        "tier.pct is a string instead of a number",
+        { tier: { tier: "green", pct: "10" }, weekText: "Week: $12 of $100", stopped: false },
+      ],
+      ["tier is a string instead of an object or null", { tier: "green", weekText: "x", stopped: false }],
+    ];
+
+    for (const [label, body] of malformedBodies) {
+      it(`${label}: renders the unreachable degrade, never throws`, async () => {
+        mockFetchResolve(200, body);
+        expect(() => render(<AccStatusCard />)).not.toThrow();
+
+        await waitFor(() => {
+          expect(screen.getByTestId("acc-status-unreachable")).toBeInTheDocument();
+        });
+        expect(screen.getByText("ACC unreachable")).toBeInTheDocument();
+        expect(screen.queryByTestId("acc-status-ok")).toBeNull();
+      });
+    }
+  });
+
   it("the Retry button re-issues the fetch", async () => {
     const spy = mockFetchReject();
     render(<AccStatusCard />);

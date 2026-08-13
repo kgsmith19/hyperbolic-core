@@ -142,6 +142,65 @@ describe("useShellSession: signOut", () => {
   });
 });
 
+describe("useShellSession: initial getSession() vs. onAuthStateChange ordering (Finding #78, PR #8 security review)", () => {
+  it("an onAuthStateChange event that fires BEFORE the initial getSession() resolves wins -- the stale getSession() result is dropped, not applied on top", async () => {
+    resetAuthMocks();
+
+    // getSession() is deliberately NEVER resolved by this test until after
+    // the assertions below -- it stands in for "still in flight" for the
+    // whole test. If session.ts's version-guard fix were absent, resolving
+    // it manually LAST (see below) would overwrite whatever
+    // onAuthStateChange already applied, which is exactly the bug this
+    // guards against.
+    let resolveGetSession!: (session: PlatformSession | null) => void;
+    auth.getSession.mockReturnValue(
+      new Promise((resolve) => {
+        resolveGetSession = resolve;
+      })
+    );
+
+    const { result } = renderHook(() => useShellSession());
+
+    // Still "checking": the initial getSession() call hasn't resolved yet,
+    // and onAuthStateChange hasn't fired yet either.
+    expect(result.current.status).toBe("checking");
+
+    // onAuthStateChange fires with a NEWER result WHILE getSession() is
+    // still in flight -- e.g. a background token refresh landing first.
+    expect(authChangeHandler).not.toBeNull();
+    act(() => {
+      authChangeHandler?.(FIXTURE_SESSION);
+    });
+
+    expect(result.current.status).toBe("signed-in");
+    expect(result.current.session).toEqual(FIXTURE_SESSION);
+
+    // NOW the slower, semantically-STALE initial getSession() call
+    // resolves -- with a DIFFERENT (null) result, so a failure to guard
+    // this would be immediately visible as a demotion back to signed-out.
+    await act(async () => {
+      resolveGetSession(null);
+      // Let the resolved promise's .then() actually run.
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The newer onAuthStateChange result must still stand: the stale
+    // getSession() resolution must be dropped, not applied on top of it.
+    expect(result.current.status).toBe("signed-in");
+    expect(result.current.session).toEqual(FIXTURE_SESSION);
+  });
+
+  it("without a race, the initial getSession() result still applies normally (guard doesn't suppress the ordinary case)", async () => {
+    resetAuthMocks();
+    auth.getSession.mockResolvedValue(FIXTURE_SESSION);
+
+    const { result } = renderHook(() => useShellSession());
+    await waitFor(() => expect(result.current.status).toBe("signed-in"));
+    expect(result.current.session).toEqual(FIXTURE_SESSION);
+  });
+});
+
 describe("useShellSession: background demotion (SH-6 regression net)", () => {
   it("an onAuthStateChange(null) event -- e.g. a background refresh failing while the IdP is unreachable -- flips an already signed-in session to signed-out with no explicit signOut() call", async () => {
     resetAuthMocks();

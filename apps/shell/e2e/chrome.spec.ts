@@ -46,6 +46,75 @@ test.describe("Chrome renders on every route group (SH-1a)", () => {
   });
 });
 
+// Finding #70 (PR #8 security review): unlike the home page's launcher
+// cards (already a real react-router <Link>), the PERSISTENT nav rail
+// rendered on every page (packages/ui's nav-rail.tsx) previously rendered
+// every ZONE_ENTRIES item as a plain native `<a href>` with no client-side
+// handling at all -- every click, for every internal zone, forced a full
+// document reload. This is the real-browser proof this finding calls out
+// as its strongest evidence ("did a full reload happen" is fundamentally a
+// browser-observable question), using the exact same
+// __e2eMarker/document-request technique the LifeOS launcher-card test
+// above established. protected-layout.tsx is what wires Chrome's
+// `navigate` prop to react-router's useNavigate() in the real app.
+test.describe("Nav rail: internal clicks stay client-side, LifeOS still hard-navigates (Finding #70)", () => {
+  test("clicking an internal zone in the nav rail (Tools) does NOT reload the document or hit the network for its HTML", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    await page.evaluate(() => {
+      (window as unknown as { __e2eMarker?: string }).__e2eMarker = "pre-click-shell-instance";
+    });
+
+    let sawDocumentRequestToTools = false;
+    const onRequest = (req: import("@playwright/test").Request) => {
+      if (req.url().includes("/tools") && req.resourceType() === "document") sawDocumentRequestToTools = true;
+    };
+    page.on("request", onRequest);
+
+    await page.locator('nav[data-testid="platform-nav"] [data-slot="nav-rail-item"][data-zone="tools"]').click();
+    await expect(page).toHaveURL(/\/tools\/?$/);
+
+    page.off("request", onRequest);
+
+    const markerAfter = await page.evaluate(
+      () => (window as unknown as { __e2eMarker?: string }).__e2eMarker
+    );
+    expect(markerAfter).toBe("pre-click-shell-instance");
+    expect(sawDocumentRequestToTools).toBe(false);
+    await expect(page.getByTestId("platform-nav")).toBeVisible();
+  });
+
+  test("clicking LifeOS in the nav rail still performs a real hard navigation, not a client-side route change", async ({
+    page,
+  }) => {
+    await page.goto("/tools");
+
+    await page.evaluate(() => {
+      (window as unknown as { __e2eMarker?: string }).__e2eMarker = "pre-click-shell-instance";
+    });
+
+    const documentRequestToLife = page.waitForRequest(
+      (req) => req.url().includes("/life/") && req.resourceType() === "document"
+    );
+
+    await page.locator('nav[data-testid="platform-nav"] [data-slot="nav-rail-item"][data-zone="life"]').click();
+
+    // Signal 1: a real, observable network request for /life/ -- impossible
+    // for a pushState-only SPA transition.
+    await documentRequestToLife;
+    await page.waitForURL((url) => url.pathname === "/life/");
+
+    // Signal 2: the marker is gone because the document was actually torn
+    // down and reloaded.
+    const markerAfter = await page.evaluate(
+      () => (window as unknown as { __e2eMarker?: string }).__e2eMarker
+    );
+    expect(markerAfter).toBeUndefined();
+  });
+});
+
 test.describe("Home page", () => {
   test("renders launcher cards linking to each zone and a health summary", async ({ page }) => {
     await page.goto("/");

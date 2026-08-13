@@ -23,6 +23,18 @@ import { mockAuth, blockIdp, fillAndSubmitLogin } from "./support/auth";
 // timers inside the actual page's JS runtime, which risks corrupting
 // React's own scheduling -- not worth the risk for one spec. See this
 // issue's report.
+//
+// MANUAL-ONLY (Finding #80, PR #8 security review): this spec is no longer
+// run by shell-ci.yml's PR-blocking pr-gate job -- each test here pays a
+// real ~30s wait (test.setTimeout(75_000) below), a repeated cost on every
+// Shell/packages PR for a scenario that changes rarely. Run it via
+// .github/workflows/shell-idp-down.yml (workflow_dispatch, manual) or
+// locally (`npx playwright test e2e/idp-down.spec.ts` from apps/shell/,
+// after `npm run build --workspace=packages/ui`). The FAST, deterministic
+// half of the exact same UI contract this file proves -- fail-closed
+// getSession() redirects to /login, no chrome, no data nodes, no real or
+// fake-timer wait needed -- still runs on every PR:
+// apps/shell/src/idp-down-contract.test.tsx (vitest).
 test.describe("Fail-closed while the IdP is unreachable (SH-6)", () => {
   test("a cached session with an expired token redirects to login instead of rendering gated content, once the IdP is unreachable", async ({
     page,

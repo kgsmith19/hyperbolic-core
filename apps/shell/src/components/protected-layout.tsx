@@ -3,25 +3,30 @@
 // map). All branching lives in lib/auth-gate.ts's computeGateDecision so it
 // is unit-testable without a router; this component only wires that
 // decision to react-router (Navigate/Outlet) and to Chrome.
-import { useMemo } from "react";
-import { Navigate, Outlet, useLocation } from "react-router";
+import { useCallback, useMemo } from "react";
+import { Navigate, Outlet, useLocation, useNavigate } from "react-router";
 import { Chrome, type ToolPaletteEntry } from "@hyperbolic/ui";
-import type { PlatformSession } from "@hyperbolic/platform-client";
 import { computeGateDecision } from "../lib/auth-gate";
 import { activeZoneForPath } from "../lib/active-zone";
-import type { SessionStatus } from "../lib/session";
+import type { AuthState } from "../lib/session";
 import { splitByRoute, useRegisteredTools } from "../lib/registry";
 import { notificationSurface } from "../lib/notifications";
 
 interface ProtectedLayoutProps {
-  status: SessionStatus;
-  session: PlatformSession | null;
+  /**
+   * Finding #77 (PR #8 security review): a single discriminated-union field
+   * instead of the previous two independent `status`/`session` props --
+   * see session.ts's `AuthState` doc comment for why. Narrowed directly on
+   * `.status` below before `.session` is ever read.
+   */
+  auth: AuthState;
   onSignOut: () => void;
 }
 
-function ProtectedLayout({ status, session, onSignOut }: ProtectedLayoutProps) {
+function ProtectedLayout({ auth, onSignOut }: ProtectedLayoutProps) {
   const location = useLocation();
-  const decision = computeGateDecision(status, location.pathname, location.search);
+  const routerNavigate = useNavigate();
+  const decision = computeGateDecision(auth.status, location.pathname, location.search);
 
   // m3-04 (05-a section 5): the command palette's tool entries, fetched here
   // (not inside Chrome/CommandPalette, which own no registry client -- see
@@ -35,7 +40,7 @@ function ProtectedLayout({ status, session, onSignOut }: ProtectedLayoutProps) {
   // render. Same `useRegisteredTools()` call src/pages/tools.tsx makes for
   // its own full catalog -- src/lib/registry.ts's in-flight dedupe collapses
   // the common case (landing on /tools) into one real network request.
-  const registryState = useRegisteredTools(undefined, { enabled: status === "signed-in" });
+  const registryState = useRegisteredTools(undefined, { enabled: auth.status === "signed-in" });
   const toolEntries = useMemo<ToolPaletteEntry[]>(
     () =>
       splitByRoute(registryState.tools).navTools.map((tool) => ({
@@ -48,6 +53,14 @@ function ProtectedLayout({ status, session, onSignOut }: ProtectedLayoutProps) {
       })),
     [registryState.tools]
   );
+
+  // Finding #70 (PR #8 security review): the client-side navigation adapter
+  // threaded into Chrome (ChromeProps.navigate) so NavRail/CommandPalette
+  // clicks on genuinely internal Shell routes route through react-router
+  // instead of forcing a full document reload. zones.ts's `hardNavigate`
+  // flag (currently just `life`) opts specific entries out of this
+  // regardless of what's wired here -- see shouldNavigateClientSide.
+  const navigate = useCallback((href: string) => routerNavigate(href), [routerNavigate]);
 
   if (decision.kind === "loading") {
     // SH-2a / this issue's own "no flash of gated content before redirect":
@@ -65,6 +78,24 @@ function ProtectedLayout({ status, session, onSignOut }: ProtectedLayoutProps) {
     return <Navigate to={decision.to} replace />;
   }
 
+  // Finding #77 (PR #8 security review): `decision.kind === "render"` (per
+  // computeGateDecision's own contract, see auth-gate.ts) implies
+  // `auth.status === "signed-in"`, but that relationship holds only because
+  // both are independently derived from the same underlying status -- the
+  // type system can't see through two separate functions to know it. This
+  // re-check, directly on `auth.status`, is what actually narrows
+  // `auth.session` to a real, non-null `PlatformSession` for the `Chrome`
+  // prop below, replacing what used to be an unenforced `as
+  // NonNullable<...>` cast at the SettingsPage call site (app.tsx). In
+  // practice this branch is unreachable (both checks agree by
+  // construction), but "unreachable only because of an invariant the
+  // compiler can't verify" is exactly the gap this finding closes -- if it
+  // is ever reached, failing closed to /login is the same fail-closed
+  // choice SH-6 makes everywhere else in this gate.
+  if (auth.status !== "signed-in") {
+    return <Navigate to="/login" replace />;
+  }
+
   const activeZone = activeZoneForPath(location.pathname);
 
   return (
@@ -75,10 +106,11 @@ function ProtectedLayout({ status, session, onSignOut }: ProtectedLayoutProps) {
     // away.
     <Chrome
       activeZone={activeZone}
-      session={session}
+      session={auth.session}
       onSignOut={onSignOut}
       tools={toolEntries}
       notifications={notificationSurface}
+      navigate={navigate}
     >
       {/* SH-2a's e2e assertion (05-a section 12) checks for the LITERAL
           absence of [data-app-data] while gated. One coarse wrapper here
