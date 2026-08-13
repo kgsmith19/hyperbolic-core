@@ -2,7 +2,7 @@
   "name": "@hyperbolic/llm",
   "version": "0.0.0",
   "private": true,
-  "description": "Provider-agnostic LLM abstraction (request/response/streaming/tool-use normalization, error taxonomy, retry/backoff). Zero key handling: callers pass credentials in per call. Anthropic driver only; OpenAI/Gemini land in m4-02.",
+  "description": "Provider-agnostic LLM abstraction (request/response/streaming/tool-use normalization, error taxonomy, retry/backoff). Zero key handling: callers pass credentials in per call. Anthropic, OpenAI, and Gemini drivers.",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -14,7 +14,9 @@
     "typecheck": "tsc -b ."
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.116.0"
+    "@anthropic-ai/sdk": "^0.116.0",
+    "@google/genai": "^2.16.0",
+    "openai": "^7.4.0"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

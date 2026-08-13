@@ -1,0 +1,465 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { geminiDriver } from "../src/drivers/gemini.ts";
+import { complete } from "../src/complete.ts";
+import { MAX_RETRIES } from "../src/retry.ts";
+import { isLlmError } from "../src/errors.ts";
+import type { LlmDelta, LlmErrorClass, LlmRequest } from "../src/types.ts";
+
+// ---------------------------------------------------------------------------
+// Fixtures and fake-transport helpers. Same idiom as anthropic-driver.test.ts
+// and openai-driver.test.ts: no real network call happens in this file --
+// every test patches globalThis.fetch and lets the real `@google/genai` SDK
+// run against that fake transport. Wire field names verified by reading
+// node_modules/@google/genai/dist/index.mjs's own Mldev (Gemini Developer
+// API) request/response mapping functions: they are plain camelCase
+// pass-throughs of the same field names the TS types use (no snake_case
+// conversion), and config's systemInstruction/tools/toolConfig land at the
+// top level of the request body (siblings of `contents`), while
+// temperature/maxOutputTokens land nested under `generationConfig`.
+// ---------------------------------------------------------------------------
+
+type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+async function tickInSteps(t: { mock: { timers: { tick(ms: number): void } } }, totalMs: number, stepMs = 250): Promise<void> {
+  for (let advanced = 0; advanced < totalMs; advanced += stepMs) {
+    t.mock.timers.tick(Math.min(stepMs, totalMs - advanced));
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Promise<T> {
+  const original = globalThis.fetch;
+  globalThis.fetch = impl as typeof fetch;
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+}
+
+/** Gemini's wire error shape: {"error": {"code", "message", "status"}}. Our
+ * classifier only reads the HTTP status (ApiError carries no type/code
+ * field at all), so the body content itself is not load-bearing here. */
+function geminiErrorResponse(status: number, message: string): Response {
+  return jsonResponse({ error: { code: status, message, status: "FIXTURE" } }, status);
+}
+
+function fixtureGenerateContentResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    candidates: [{ content: { role: "model", parts: [{ text: "hello there" }] }, finishReason: "STOP", index: 0 }],
+    modelVersion: "gemini-fixture-resolved",
+    usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 18, cachedContentTokenCount: 3 },
+    ...overrides,
+  };
+}
+
+function sseLine(data: unknown): string {
+  return `data: ${JSON.stringify(data)}\n\n`;
+}
+
+/** Builds a fake SSE Response for Gemini's `alt=sse` streaming format
+ * (`data: {...}\n\n` chunks, closed when the body naturally ends -- no
+ * `[DONE]` sentinel the way OpenAI's does). When `holdOpen` is true the
+ * stream is left open and only terminates when the caller's AbortSignal
+ * fires -- same idiom as the other two driver test files' sseResponse. */
+function sseResponse(events: unknown[], opts: { signal?: AbortSignal | null; holdOpen?: boolean } = {}): Response {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const e of events) {
+        controller.enqueue(encoder.encode(sseLine(e)));
+      }
+      if (!opts.holdOpen) {
+        controller.close();
+        return;
+      }
+      const signal = opts.signal;
+      if (!signal) {
+        return;
+      }
+      const errorStream = () => {
+        try {
+          controller.error(new DOMException("The operation was aborted.", "AbortError"));
+        } catch {
+          // already closed/errored -- fine, nothing left to signal.
+        }
+      };
+      if (signal.aborted) {
+        errorStream();
+      } else {
+        signal.addEventListener("abort", errorStream);
+      }
+    },
+  });
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+const BASE_REQUEST: LlmRequest = {
+  provider: "gemini",
+  model: "gemini-request-alias",
+  messages: [{ role: "user", content: "Hello" }],
+  maxTokens: 256,
+  metadata: { callerApp: "test-suite", purpose: "unit-test" },
+  timeoutMs: 30_000,
+};
+
+async function collectStream(gen: AsyncGenerator<LlmDelta, void, unknown>): Promise<LlmDelta[]> {
+  const collected: LlmDelta[] = [];
+  for await (const delta of gen) {
+    collected.push(delta);
+  }
+  return collected;
+}
+
+// ---------------------------------------------------------------------------
+// Zero key handling: defensive check, no network call
+// ---------------------------------------------------------------------------
+
+test("geminiDriver.complete: rejects with no API key before any network call", async () => {
+  let fetchCalls = 0;
+  await withPatchedFetch(
+    async () => {
+      fetchCalls += 1;
+      throw new Error("must not be called");
+    },
+    async () => {
+      await assert.rejects(
+        () => geminiDriver.complete(BASE_REQUEST, { apiKey: "" }),
+        (error: { class: string }) => error.class === "invalid_request",
+      );
+    },
+  );
+  assert.equal(fetchCalls, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Non-streaming: success, request mapping, response mapping
+// ---------------------------------------------------------------------------
+
+test("geminiDriver.complete: names the exact provider+model that answered (not the requested alias) and maps usage incl. cached tokens", async () => {
+  const response = await withPatchedFetch(
+    async () => jsonResponse(fixtureGenerateContentResponse()),
+    () => geminiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+  );
+  assert.equal(response.provider, "gemini");
+  assert.equal(response.model, "gemini-fixture-resolved");
+  assert.notEqual(response.model, BASE_REQUEST.model);
+  assert.equal(response.text, "hello there");
+  assert.deepEqual(response.toolCalls, []);
+  assert.equal(response.stopReason, "end");
+  assert.deepEqual(response.usage, { inputTokens: 10, outputTokens: 5, cacheReadTokens: 3 });
+  assert.equal(typeof response.latencyMs, "number");
+});
+
+test("geminiDriver.complete: maps system/user/assistant/tool messages, tools, and toolChoice onto the wire request", async () => {
+  let capturedBody: Record<string, unknown> | undefined;
+  const request: LlmRequest = {
+    ...BASE_REQUEST,
+    messages: [
+      { role: "system", content: "Be terse." },
+      { role: "user", content: "What is the weather in Paris?" },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "call_1", name: "get_weather", input: { city: "Paris" } }],
+      },
+      {
+        role: "tool",
+        content: [{ type: "tool_result", toolUseId: "call_1", content: "18C and sunny" }],
+      },
+    ],
+    tools: [{ name: "get_weather", description: "Look up current weather", inputSchema: { type: "object", properties: { city: { type: "string" } } } }],
+    toolChoice: { name: "get_weather" },
+  };
+
+  await withPatchedFetch(
+    async (_input, init) => {
+      capturedBody = JSON.parse(String(init?.body));
+      return jsonResponse(fixtureGenerateContentResponse());
+    },
+    () => geminiDriver.complete(request, { apiKey: "fixture-key" }),
+  );
+
+  assert.ok(capturedBody);
+  const systemInstruction = capturedBody?.systemInstruction as { parts: Array<{ text: string }> };
+  assert.deepEqual(systemInstruction.parts, [{ text: "Be terse." }]);
+
+  const contents = capturedBody?.contents as Array<Record<string, unknown>>;
+  assert.equal(contents.length, 3); // system extracted out, not a contents turn
+  assert.equal(contents[0]?.role, "user");
+  assert.equal(contents[1]?.role, "model"); // our "assistant" maps onto Gemini's "model" role
+  assert.deepEqual(contents[1]?.parts, [{ functionCall: { id: "call_1", name: "get_weather", args: { city: "Paris" } } }]);
+  assert.equal(contents[2]?.role, "user"); // our "tool" role rides on Gemini's "user" role, same as Anthropic
+  assert.deepEqual(contents[2]?.parts, [{ functionResponse: { id: "call_1", name: "get_weather", response: { output: "18C and sunny" } } }]);
+
+  const tools = capturedBody?.tools as Array<{ functionDeclarations: Array<Record<string, unknown>> }>;
+  assert.equal(tools.length, 1);
+  assert.deepEqual(tools[0]?.functionDeclarations, [{ name: "get_weather", description: "Look up current weather", parametersJsonSchema: { type: "object", properties: { city: { type: "string" } } } }]);
+
+  assert.deepEqual(capturedBody?.toolConfig, { functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["get_weather"] } });
+});
+
+test("geminiDriver.complete: recovers the required functionResponse.name via the toolUseId->name lookup even with multiple tool results", async () => {
+  let capturedBody: Record<string, unknown> | undefined;
+  const request: LlmRequest = {
+    ...BASE_REQUEST,
+    messages: [
+      { role: "user", content: "go" },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "call_1", name: "get_weather", input: { city: "Paris" } },
+          { type: "tool_use", id: "call_2", name: "get_time", input: { city: "Paris" } },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          { type: "tool_result", toolUseId: "call_2", content: "14:00" },
+          { type: "tool_result", toolUseId: "call_1", content: "failed", isError: true },
+        ],
+      },
+    ],
+  };
+  await withPatchedFetch(
+    async (_input, init) => {
+      capturedBody = JSON.parse(String(init?.body));
+      return jsonResponse(fixtureGenerateContentResponse());
+    },
+    () => geminiDriver.complete(request, { apiKey: "fixture-key" }),
+  );
+  const contents = capturedBody?.contents as Array<{ role: string; parts: Array<Record<string, unknown>> }>;
+  const toolResultContent = contents[2];
+  assert.deepEqual(toolResultContent?.parts, [
+    { functionResponse: { id: "call_2", name: "get_time", response: { output: "14:00" } } },
+    { functionResponse: { id: "call_1", name: "get_weather", response: { error: "failed" } } },
+  ]);
+});
+
+test("geminiDriver.complete: parses functionCall parts into toolCalls and reports stopReason tool_use even though finishReason is STOP", async () => {
+  const response = await withPatchedFetch(
+    async () =>
+      jsonResponse(
+        fixtureGenerateContentResponse({
+          candidates: [
+            {
+              content: { role: "model", parts: [{ text: "Let me check. " }, { functionCall: { id: "call_9", name: "get_weather", args: { city: "Tokyo" } } }] },
+              finishReason: "STOP",
+              index: 0,
+            },
+          ],
+        }),
+      ),
+    () => geminiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+  );
+  assert.equal(response.stopReason, "tool_use");
+  assert.deepEqual(response.toolCalls, [{ id: "call_9", name: "get_weather", input: { city: "Tokyo" } }]);
+  assert.equal(response.text, "Let me check. ");
+});
+
+test("geminiDriver.complete: a functionCall with no id is given a synthesized, non-empty id", async () => {
+  const response = await withPatchedFetch(
+    async () =>
+      jsonResponse(
+        fixtureGenerateContentResponse({
+          candidates: [{ content: { role: "model", parts: [{ functionCall: { name: "get_weather", args: {} } }] }, finishReason: "STOP", index: 0 }],
+        }),
+      ),
+    () => geminiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+  );
+  assert.equal(response.toolCalls.length, 1);
+  assert.ok(response.toolCalls[0]?.id && response.toolCalls[0].id.length > 0);
+});
+
+test("geminiDriver.complete: a blocked prompt (promptFeedback.blockReason, no candidates) is a normal response naming stopReason refusal, not a thrown error", async () => {
+  const response = await withPatchedFetch(
+    async () => jsonResponse({ promptFeedback: { blockReason: "SAFETY" }, usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 0 } }),
+    () => geminiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+  );
+  assert.equal(response.stopReason, "refusal");
+  assert.equal(response.text, null);
+  assert.deepEqual(response.toolCalls, []);
+});
+
+test("geminiDriver.complete: a safety-blocked candidate (finishReason SAFETY, no tool calls) also maps to refusal", async () => {
+  const response = await withPatchedFetch(
+    async () => jsonResponse(fixtureGenerateContentResponse({ candidates: [{ content: { role: "model", parts: [] }, finishReason: "SAFETY", index: 0 }] })),
+    () => geminiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+  );
+  assert.equal(response.stopReason, "refusal");
+});
+
+test("geminiDriver.complete: finishReason MAX_TOKENS maps to max_tokens", async () => {
+  const response = await withPatchedFetch(
+    async () => jsonResponse(fixtureGenerateContentResponse({ candidates: [{ content: { role: "model", parts: [{ text: "partial" }] }, finishReason: "MAX_TOKENS", index: 0 }] })),
+    () => geminiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+  );
+  assert.equal(response.stopReason, "max_tokens");
+});
+
+// ---------------------------------------------------------------------------
+// Error taxonomy + retry, exercised through the real driver via complete()
+// ---------------------------------------------------------------------------
+
+const CLASSIFICATION_CASES: Array<{ status: number; expectClass: LlmErrorClass; expectRetryable: boolean }> = [
+  { status: 400, expectClass: "invalid_request", expectRetryable: false },
+  { status: 401, expectClass: "auth", expectRetryable: false },
+  { status: 403, expectClass: "auth", expectRetryable: false },
+  { status: 404, expectClass: "invalid_request", expectRetryable: false },
+  // Regression test for a mutation-testing finding: this case was a real bug
+  // fixed during m4-02's own review (classifyByStatus originally had no 408
+  // branch at all, falling through to the >= 400 invalid_request bucket) but
+  // shipped with no test proving the fix -- confirmed by mutating it back out
+  // and observing the full suite stayed green. 408 is retry-worthy by HTTP
+  // semantics and the installed SDK's own DEFAULT_RETRY_HTTP_STATUS_CODES
+  // agrees (see classifyByStatus's own comment).
+  { status: 408, expectClass: "transport", expectRetryable: true },
+  { status: 429, expectClass: "rate_limit", expectRetryable: true },
+  { status: 500, expectClass: "transport", expectRetryable: true },
+  { status: 502, expectClass: "transport", expectRetryable: true },
+  { status: 503, expectClass: "transport", expectRetryable: true },
+  { status: 504, expectClass: "transport", expectRetryable: true },
+];
+
+test("complete(): classifies every documented Gemini ApiError status and retries only the retryable classes exactly MAX_RETRIES times (also proves the SDK's own internal retry is off: attempt counts match ours exactly, never more)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const testCase of CLASSIFICATION_CASES) {
+    let fetchCalls = 0;
+    const promise = withPatchedFetch(
+      async () => {
+        fetchCalls += 1;
+        return geminiErrorResponse(testCase.status, `status ${testCase.status} fixture`);
+      },
+      () => complete(BASE_REQUEST, { gemini: { apiKey: "fixture-key" } }, { drivers: { gemini: geminiDriver } }),
+    );
+    let settled: { ok: boolean; error?: { class: string; retryable: boolean } } | undefined;
+    promise.then(
+      () => (settled = { ok: true }),
+      (error) => (settled = { ok: false, error }),
+    );
+    for (let i = 0; i < 20 && !settled; i++) {
+      t.mock.timers.tick(1000);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await promise.catch(() => undefined);
+    assert.ok(settled, `case ${testCase.status} never settled`);
+    assert.equal(settled?.ok, false, `case ${testCase.status} should reject`);
+    assert.ok(isLlmError(settled?.error), `case ${testCase.status} must throw a genuinely typed LlmError`);
+    assert.equal(settled?.error?.class, testCase.expectClass, `case ${testCase.status} class`);
+    assert.equal(settled?.error?.retryable, testCase.expectRetryable, `case ${testCase.status} retryable`);
+    assert.equal(fetchCalls, testCase.expectRetryable ? MAX_RETRIES + 1 : 1, `case ${testCase.status} attempt count`);
+  }
+});
+
+test("complete(): a raw connection failure (fetch rejects, no ApiError wrapper) still classifies as transport and retries -- the SDK provides no ApiConnectionError-equivalent, so this pins down this driver's own documented default", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let fetchCalls = 0;
+  const promise = withPatchedFetch(
+    async () => {
+      fetchCalls += 1;
+      throw new TypeError("fetch failed");
+    },
+    () => complete(BASE_REQUEST, { gemini: { apiKey: "fixture-key" } }, { drivers: { gemini: geminiDriver } }),
+  );
+  let settled: { ok: boolean; error?: { class: string; retryable: boolean } } | undefined;
+  promise.then(
+    () => (settled = { ok: true }),
+    (error) => (settled = { ok: false, error }),
+  );
+  for (let i = 0; i < 20 && !settled; i++) {
+    t.mock.timers.tick(1000);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await promise.catch(() => undefined);
+  assert.equal(settled?.ok, false);
+  assert.ok(isLlmError(settled?.error));
+  assert.equal(settled?.error?.class, "transport");
+  assert.equal(settled?.error?.retryable, true);
+  assert.equal(fetchCalls, MAX_RETRIES + 1);
+});
+
+// ---------------------------------------------------------------------------
+// Streaming: success (text + tool_call deltas + usage + done), and the
+// 60-second stall-aborts-as-transport case.
+// ---------------------------------------------------------------------------
+
+test("geminiDriver.stream: yields text and tool_call deltas, a usage delta, and a done delta naming provider+model (accumulating additive per-chunk content, not cumulative snapshots)", async () => {
+  const chunks = [
+    { candidates: [{ content: { role: "model", parts: [{ text: "Hello " }] }, index: 0 }], modelVersion: "gemini-fixture-resolved" },
+    { candidates: [{ content: { role: "model", parts: [{ text: "world" }] }, index: 0 }], modelVersion: "gemini-fixture-resolved" },
+    { candidates: [{ content: { role: "model", parts: [{ functionCall: { id: "call_1", name: "get_weather", args: { city: "Paris" } } }] }, finishReason: "STOP", index: 0 }], modelVersion: "gemini-fixture-resolved" },
+    { usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 8, cachedContentTokenCount: 4 }, modelVersion: "gemini-fixture-resolved" },
+  ];
+
+  const deltas = await withPatchedFetch(
+    async () => sseResponse(chunks),
+    () => collectStream(geminiDriver.stream({ ...BASE_REQUEST, stream: true }, { apiKey: "fixture-key" })),
+  );
+
+  const textDeltas = deltas.filter((d): d is Extract<LlmDelta, { kind: "text" }> => d.kind === "text");
+  assert.deepEqual(
+    textDeltas.map((d) => d.text),
+    ["Hello ", "world"],
+  );
+
+  const toolDeltas = deltas.filter((d): d is Extract<LlmDelta, { kind: "tool_call" }> => d.kind === "tool_call");
+  assert.equal(toolDeltas.length, 1); // Gemini never streams partial function-call args
+  assert.equal(toolDeltas[0]?.partial.id, "call_1");
+  assert.equal(toolDeltas[0]?.partial.name, "get_weather");
+  assert.equal(toolDeltas[0]?.partial.inputJsonDelta, '{"city":"Paris"}');
+
+  const usageDeltas = deltas.filter((d): d is Extract<LlmDelta, { kind: "usage" }> => d.kind === "usage");
+  assert.equal(usageDeltas.length, 1);
+  assert.deepEqual(usageDeltas[0]?.usage, { inputTokens: 12, outputTokens: 8, cacheReadTokens: 4 });
+
+  const done = deltas.find((d): d is Extract<LlmDelta, { kind: "done" }> => d.kind === "done");
+  assert.ok(done);
+  assert.equal(done?.response.provider, "gemini");
+  assert.equal(done?.response.model, "gemini-fixture-resolved");
+  assert.equal(done?.response.text, "Hello world");
+  assert.equal(done?.response.stopReason, "tool_use");
+  assert.deepEqual(done?.response.toolCalls, [{ id: "call_1", name: "get_weather", input: { city: "Paris" } }]);
+  assert.equal(deltas.at(-1)?.kind, "done");
+});
+
+test("geminiDriver.stream: aborts as transport when no delta arrives for 60 seconds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const startChunk = { candidates: [{ content: { role: "model", parts: [{ text: "" }] }, index: 0 }], modelVersion: "gemini-fixture-resolved" };
+
+  const outcome = await withPatchedFetch(
+    async (_input, init) => sseResponse([startChunk], { signal: init?.signal ?? undefined, holdOpen: true }),
+    async () => {
+      const gen = geminiDriver.stream({ ...BASE_REQUEST, stream: true, timeoutMs: 120_000 }, { apiKey: "fixture-key" });
+      const drain = (async () => {
+        try {
+          for await (const _delta of gen) {
+            // draining only; the stall happens before any further delta.
+          }
+          return { ok: true as const };
+        } catch (error) {
+          return { ok: false as const, error };
+        }
+      })();
+
+      let settled: Awaited<typeof drain> | undefined;
+      drain.then((value) => (settled = value));
+
+      for (let i = 0; i < 65 && !settled; i++) {
+        t.mock.timers.tick(1000);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return settled;
+    },
+  );
+
+  assert.ok(outcome, "the stream must have aborted by 65s of fake time");
+  assert.equal(outcome?.ok, false);
+  const error = (outcome as { ok: false; error: unknown }).error;
+  assert.ok(isLlmError(error));
+  assert.equal((error as { class: string }).class, "transport");
+  assert.equal((error as { retryable: boolean }).retryable, true);
+});

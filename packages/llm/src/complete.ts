@@ -13,13 +13,23 @@
  * provider+model that answered (never the one originally requested).
  */
 import { anthropicDriver } from "./drivers/anthropic.ts";
+import { geminiDriver } from "./drivers/gemini.ts";
+import { openaiDriver } from "./drivers/openai.ts";
 import type { LlmDriver } from "./drivers/types.ts";
 import { createLlmError, isLlmError } from "./errors.ts";
 import { MAX_RETRIES, computeBackoffMs, sleep, withRetry } from "./retry.ts";
 import type { Credentials, CredentialsByProvider, LlmDelta, LlmRequest, LlmResponse, Provider } from "./types.ts";
 
+// m4-02 judgment call (flagged per that issue's own instructions, since
+// neither it nor 08-llm-handlers.md section 4 mandates this wiring
+// explicitly): all three shipped drivers are registered here so a real
+// caller's fallback chain works out of the box without also having to pass
+// a custom `drivers` registry. `OrchestrationOptions.drivers` below still
+// lets a caller (or a test) substitute a different registry entirely.
 const DEFAULT_DRIVERS: Partial<Record<Provider, LlmDriver>> = {
   anthropic: anthropicDriver,
+  gemini: geminiDriver,
+  openai: openaiDriver,
 };
 
 /** Injectable for tests (a fake multi-provider registry); real callers omit this. */

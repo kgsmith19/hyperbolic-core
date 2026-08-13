@@ -12,4 +12,7 @@
 import "./retry.test.ts";
 import "./taxonomy.test.ts";
 import "./anthropic-driver.test.ts";
+import "./openai-driver.test.ts";
+import "./gemini-driver.test.ts";
 import "./fallback.test.ts";
+import "./real-driver-fallback.test.ts";
