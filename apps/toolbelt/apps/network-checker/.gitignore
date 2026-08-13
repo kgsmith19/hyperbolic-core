@@ -9,5 +9,9 @@ __pycache__/
 .coverage
 coverage.xml
 
+# Playwright (D-04 dashboard smoke spec)
+playwright-report/
+test-results/
+
 # Local worktrees
 .worktrees/

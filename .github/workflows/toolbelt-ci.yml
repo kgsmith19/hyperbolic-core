@@ -124,3 +124,39 @@ jobs:
       - name: Run Network Checker tests and deterministic scanners
         run: bash tools/check.sh
         working-directory: apps/toolbelt/apps/network-checker
+      - name: Install Network Checker browser test
+        run: |
+          npm install --no-save --no-package-lock @playwright/test@1.52.0
+          npx playwright install --with-deps chromium
+        working-directory: apps/toolbelt/apps/network-checker
+      - name: Seed Network Checker dashboard fixture
+        run: python3 tests/e2e/seed_dashboard_fixture.py
+        working-directory: apps/toolbelt/apps/network-checker
+      - name: Start Network Checker dashboard
+        run: NETCHECK_DB=tests/e2e/dashboard-fixture.db python3 -m netcheck serve >/tmp/network-checker-dashboard.log 2>&1 &
+        working-directory: apps/toolbelt/apps/network-checker
+      - name: Wait for Network Checker dashboard
+        shell: bash
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:8787 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/network-checker-dashboard.log
+          echo "Network Checker dashboard did not become ready." >&2
+          exit 1
+      - name: Run Network Checker dashboard smoke (D-04)
+        run: npx playwright test --config playwright.config.mjs
+        working-directory: apps/toolbelt/apps/network-checker
+      - name: Upload Network Checker browser evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: network-checker-e2e-evidence
+          path: |
+            apps/toolbelt/apps/network-checker/playwright-report/
+            apps/toolbelt/apps/network-checker/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
