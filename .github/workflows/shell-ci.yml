@@ -55,27 +55,40 @@ jobs:
       - name: Type-check packages/llm
         run: npm run typecheck --workspace=packages/llm
 
-      - name: Type-check packages/ui
-        # packages/ui has no "typecheck" script of its own (only "build",
-        # which also runs a vite build); tsc -b against its tsconfig.json
-        # directly runs the same noEmit-equivalent check (emitDeclarationOnly)
-        # without paying for the vite build here. MUST run before apps/shell's
-        # own type-check, not just before its own unit tests: packages/ui is
-        # the one workspace member whose package.json "types"/"main" point at
-        # a BUILT dist/ output (platform-client and llm both point straight at
-        # their own src/*.ts, so they need no such step) -- apps/shell resolves
-        # "@hyperbolic/ui" through that dist/index.d.ts via plain node module
-        # resolution, not a TS path mapping, so on a fresh checkout with no
-        # dist/ yet, tsc -b apps/shell fails with "Cannot find module
-        # '@hyperbolic/ui'" (plus a cascade of spurious implicit-any errors on
-        # every callback prop typed through it) until this step has actually
-        # run once and emitted dist/*.d.ts as this tsc -b invocation's side
-        # effect. Caught by a real CI run (not local: this sandbox already had
-        # a stale dist/ from earlier packages/ui size-checks, which silently
-        # papered over the ordering bug every time this workflow was verified
-        # locally) -- reproduced and confirmed fixed by deleting dist/ and
-        # re-running both steps in this order before landing the reorder.
-        run: npx tsc -b packages/ui
+      - name: Build packages/ui
+        # A real build (`vite build && tsc --emitDeclarationOnly`), not just
+        # a declaration-only type-check -- and it MUST run before both
+        # apps/shell's type-check and its unit tests, not just before them
+        # informally. packages/ui is the one workspace member whose
+        # package.json "main"/"types" point at BUILT dist/ output
+        # (dist/index.cjs and dist/index.d.ts; platform-client and llm both
+        # point straight at their own src/*.ts, so they need no build step
+        # at all). apps/shell resolves "@hyperbolic/ui" through that dist/
+        # via plain node module resolution, not a TS path mapping.
+        #
+        # This step went through two real, sequential CI failures before
+        # landing, and both are worth keeping the history of rather than
+        # only the final fix: first, running only `tsc -b packages/ui`
+        # (declaration-only, no vite build) placed AFTER apps/shell's own
+        # type-check produced "Cannot find module '@hyperbolic/ui'" in that
+        # earlier step, since dist/ did not exist yet on a fresh checkout.
+        # Moving that same declaration-only step earlier fixed the
+        # type-check, but the vitest step still failed with "Failed to
+        # resolve import '@hyperbolic/ui'. Does the file exist?", because
+        # `tsc --emitDeclarationOnly` writes ONLY dist/*.d.ts -- Vite (which
+        # the vitest run and apps/shell's own dev/preview server both go
+        # through) needs the real dist/index.cjs the type-only command never
+        # produces. The actual fix is the real build script, run before
+        # both consumers.
+        #
+        # Neither failure reproduced locally during development, in this
+        # sandbox or the next: a stale packages/ui/dist/ (built once, early
+        # in this session, for an unrelated gzip size-check) sat on disk and
+        # silently satisfied both the type-checker and Vite every time this
+        # workflow was verified by hand, regardless of step order. Confirmed
+        # this time by deleting dist/ and every *.tsbuildinfo in the repo
+        # before re-running the full sequence from a genuinely clean state.
+        run: npm run build --workspace=packages/ui
 
       - name: Type-check apps/shell
         run: npx tsc -b apps/shell
