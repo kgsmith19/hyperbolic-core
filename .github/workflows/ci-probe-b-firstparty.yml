@@ -1,0 +1,18 @@
+name: Probe B first-party action
+
+# TEMPORARY DIAGNOSTIC. Identical to Probe A's shape but with exactly one
+# addition: a single first-party `actions/checkout` step, pinned to the same
+# SHA the three failing gates use. If A succeeds and B fails to start, the
+# cause is action resolution/policy, not workflow structure.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: echo "first-party action resolved and ran"

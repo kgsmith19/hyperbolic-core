@@ -1,0 +1,23 @@
+name: Probe C third-party action
+
+# TEMPORARY DIAGNOSTIC. Same shape as Probe B but the single step is a
+# THIRD-PARTY action (the gitleaks action m1-10 added to two of the three
+# failing gates). Distinguishes "all external actions blocked" (B and C both
+# fail) from "only non-GitHub actions blocked" (B passes, C fails).
+# A runtime failure here is a fine outcome -- the signal being read is
+# startup_failure versus anything that actually reaches the runner.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
