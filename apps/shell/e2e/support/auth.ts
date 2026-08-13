@@ -57,6 +57,29 @@ export async function mockAuth(page: Page, expiresInSeconds = 3600): Promise<voi
       body: JSON.stringify(fixtureSignInBody(nowSeconds() + expiresInSeconds)),
     });
   });
+  // Finding #47 (P2, PR #8 review): platform-client's enforceOwner() now
+  // calls core.is_platform_owner() via a raw fetch on every session
+  // resolution path (signInWithPassword, getSession, onAuthStateChange --
+  // see packages/platform-client/src/index.ts's isOwnerSession()). Every
+  // spec in this e2e suite exercises the happy-path "logged in as the
+  // platform owner" flow; none re-test the owner/non-owner distinction
+  // itself, which is platform-client's own unit-test responsibility
+  // (packages/platform-client/tests/platform-client.test.ts). Without this
+  // mock, that fetch targets the real Supabase host baked into
+  // src/lib/session.ts's DEFAULT_SUPABASE_URL fallback -- unreachable or
+  // unauthenticated (the fixture access token above is not a real JWT)
+  // from this sandboxed browser context either way -- and every login hangs
+  // or silently fails the owner check, never completing the post-login
+  // redirect. PostgREST returns a scalar RPC's result as a bare JSON
+  // literal (no wrapper object), matching isOwnerSession's `data === true`
+  // check.
+  await page.route("**/rest/v1/rpc/is_platform_owner**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: "true",
+    });
+  });
 }
 
 /**

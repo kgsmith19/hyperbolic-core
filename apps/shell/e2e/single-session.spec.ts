@@ -57,6 +57,18 @@ test("one login backs authenticated calls to every composed app, with no second 
     });
   });
 
+  // Finding #47 (P2, PR #8 review): platform-client's enforceOwner() calls
+  // core.is_platform_owner() via a raw fetch on every session resolution
+  // path, including this spec's real signInWithPassword() call below. This
+  // spec deliberately does not reuse support/auth.ts's mockAuth() (it needs
+  // its own signInCalls counter on the exact grant_type=password route), so
+  // it must mock this RPC itself too -- see mockAuth's own comment for why
+  // an unmocked call here targets a real, unreachable-from-this-fixture
+  // Supabase host and never resolves.
+  await page.route("**/rest/v1/rpc/is_platform_owner**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "true" });
+  });
+
   const seenAuthHeaders: Record<string, string | undefined> = {};
   for (const [name, url] of Object.entries({
     lifeos: MOCK_LIFEOS_API,
