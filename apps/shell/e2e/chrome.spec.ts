@@ -61,6 +61,107 @@ test.describe("Home page", () => {
     await expect(page).toHaveURL(/\/acc$/);
     await expect(page.getByTestId("platform-nav")).toBeVisible();
   });
+
+  // The P1 regression this spec exists to catch: LifeOS is not a Shell
+  // route (app.tsx's <Routes> has no `/life` entry -- it's a SEPARATE zone
+  // stitched in at the `tailscale serve` reverse-proxy layer, entirely
+  // outside this SPA's bundle). A plain react-router <Link> only ever calls
+  // history.pushState -- it never leaves the page, so it never issues an
+  // HTTP request the reverse proxy could route -- and the click silently
+  // lands on Shell's own catch-all NotFoundPage instead of the LifeOS zone.
+  //
+  // A unit test that only reads the anchor's `href` can't tell a fixed
+  // `<Link reloadDocument>`/plain `<a>` apart from the buggy plain `<Link>`,
+  // because react-router's `<Link>` always renders a real `<a href>`
+  // regardless of `reloadDocument` -- the DOM shape is identical either
+  // way (see src/pages/home.test.tsx's own comment for the unit-level
+  // version of this same problem). The only way to actually SEE the
+  // difference is at the network/navigation layer, which only an e2e
+  // browser can observe, so it's asserted here rather than only in a
+  // component test:
+  //
+  //  1. A real hard navigation makes the browser tear down and reload the
+  //     JS document, wiping any in-page JS state -- a plain pushState
+  //     transition never does. Stamping `window.__e2eMarker` before the
+  //     click and reading it back afterward is a direct, unfakeable probe
+  //     for "did the document actually reload", independent of whatever
+  //     `/life/` happens to resolve to in this sandbox (there is no real
+  //     LifeOS bundle or tailscale-serve proxy here -- vite preview's own
+  //     SPA fallback answers with Shell's index.html either way, so the
+  //     response CONTENT looks similar; only the navigation mechanism
+  //     differs, and that's exactly what this asserts).
+  //  2. A real navigation is also a real "document" resourceType network
+  //     request for /life/ -- a pushState transition issues none at all.
+  //     Asserted independently as a second, corroborating signal.
+  test("clicking the LifeOS launcher card performs a real hard navigation, not a client-side route change", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    await page.evaluate(() => {
+      (window as unknown as { __e2eMarker?: string }).__e2eMarker = "pre-click-shell-instance";
+    });
+
+    const documentRequestToLife = page.waitForRequest(
+      (req) => req.url().includes("/life/") && req.resourceType() === "document"
+    );
+
+    await page.locator('[data-testid="launcher-card"][data-zone="life"]').click();
+
+    // Signal 2: a real, observable network request for /life/ was issued --
+    // impossible for a pushState-only SPA transition, which never leaves
+    // the page.
+    await documentRequestToLife;
+
+    await page.waitForURL((url) => url.pathname === "/life/");
+
+    // Signal 1: the marker is gone because the document was torn down and
+    // reloaded, not merely because the SPA re-rendered -- a pushState
+    // transition to a component that doesn't touch `window.__e2eMarker`
+    // would leave it untouched.
+    const markerAfter = await page.evaluate(
+      () => (window as unknown as { __e2eMarker?: string }).__e2eMarker
+    );
+    expect(markerAfter).toBeUndefined();
+  });
+});
+
+// Contrast case for the LifeOS hard-navigation test above: proves the same
+// two signals do NOT fire for a real in-Shell route, so "the LifeOS test
+// passes" can't be explained by some sandbox quirk that makes every click
+// look like a hard navigation.
+test.describe("Home page: in-Shell cards stay client-side (contrast for the LifeOS hard-nav case)", () => {
+  test("clicking the ACC launcher card does NOT reload the document or hit the network for /acc's HTML", async ({
+    page,
+  }) => {
+    // No manual mockAuth/goto/login here -- this file's top-level
+    // `test.beforeEach` (module scope, applies to every describe block in
+    // this file, this one included) already logged the page in and landed
+    // it on "/" before this test body runs.
+    await page.evaluate(() => {
+      (window as unknown as { __e2eMarker?: string }).__e2eMarker = "pre-click-shell-instance";
+    });
+
+    let sawDocumentRequestToAcc = false;
+    const onRequest = (req: import("@playwright/test").Request) => {
+      if (req.url().includes("/acc") && req.resourceType() === "document") sawDocumentRequestToAcc = true;
+    };
+    page.on("request", onRequest);
+
+    await page.locator('[data-testid="launcher-card"][data-zone="acc"]').click();
+    await expect(page).toHaveURL(/\/acc$/);
+
+    page.off("request", onRequest);
+
+    // Same document, same JS context, the whole way through -- exactly
+    // what a pushState-based SPA transition guarantees and a hard
+    // navigation never would.
+    const markerAfter = await page.evaluate(
+      () => (window as unknown as { __e2eMarker?: string }).__e2eMarker
+    );
+    expect(markerAfter).toBe("pre-click-shell-instance");
+    expect(sawDocumentRequestToAcc).toBe(false);
+  });
 });
 
 test.describe("Settings page: one health row per deployable unit", () => {
