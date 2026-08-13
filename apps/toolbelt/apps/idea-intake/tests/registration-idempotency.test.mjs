@@ -17,8 +17,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "supabase", "migrations");
 
 const EXTENSION_UP = join(ROOT_MIGRATIONS_DIR, "20260812230000_core_app_registry_extension.sql");
-const REGISTER_UP = join(ROOT_MIGRATIONS_DIR, "20260813002605_register_idea-intake.sql");
-const REGISTER_DOWN = join(ROOT_MIGRATIONS_DIR, "20260813002605_register_idea-intake_down.sql");
+const REGISTER_UP = join(ROOT_MIGRATIONS_DIR, "20260813003000_register_idea-intake.sql");
+const REGISTER_DOWN = join(ROOT_MIGRATIONS_DIR, "20260813003000_register_idea-intake_down.sql");
 
 // Minimal, faithful reproduction of the pre-registration state this
 // migration assumes: core.app's shape copied verbatim from

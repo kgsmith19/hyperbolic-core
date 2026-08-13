@@ -37,8 +37,8 @@ values (
   '/ideas',
   '0.1.0',
   'Captures rough ideas as drafts, optionally optimizes them with LLM help, promotes the good ones, and converts each promoted idea into exactly one GitHub Issue that the app can never touch again. Owns the intake schema in the shared toolbelt Supabase project. Supersedes ACC''s Forgepad.',
-  '{"id":"idea-intake","name":"Idea Intake","kind":"ui","version":"0.1.0","description":"Captures rough ideas as drafts, optionally optimizes them with LLM help, promotes the good ones, and converts each promoted idea into exactly one GitHub Issue that the app can never touch again. Owns the intake schema in the shared toolbelt Supabase project. Supersedes ACC''s Forgepad.","ownership":{"owner":"kylegsmith19@gmail.com","path":"apps/toolbelt/apps/idea-intake"},"entry":{"ui":{"route":"/ideas"}},"schemas":["intake"],"permissions":{"db":{"read":["intake"],"write":["intake","core"]},"networkEgress":["api.github.com"],"llmHandler":{"access":true}},"lifecycle":{"migrate":"supabase db push","health":"node --test \"tests/*.test.mjs\"","register":"20260813002605_register_idea-intake.sql"}}'::jsonb,
-  '727f0708b97dc056b4a6596b0626fee216224a76bd4b6c4631ee6bdd26dd5c0e',
+  '{"id":"idea-intake","name":"Idea Intake","kind":"ui","version":"0.1.0","description":"Captures rough ideas as drafts, optionally optimizes them with LLM help, promotes the good ones, and converts each promoted idea into exactly one GitHub Issue that the app can never touch again. Owns the intake schema in the shared toolbelt Supabase project. Supersedes ACC''s Forgepad.","ownership":{"owner":"kylegsmith19@gmail.com","path":"apps/toolbelt/apps/idea-intake"},"entry":{"ui":{"route":"/ideas"}},"schemas":["intake"],"permissions":{"db":{"read":["intake"],"write":["intake","core"]},"networkEgress":["api.github.com"],"llmHandler":{"access":true}},"lifecycle":{"migrate":"supabase db push","health":"node --test \"tests/*.test.mjs\"","register":"20260813003000_register_idea-intake.sql"}}'::jsonb,
+  '8624dbf403ebcc53c8fcf689af94f81a5b10177453a55e6b03d228b1f42378c5',
   now()
 )
 on conflict (id) do update set

@@ -36,6 +36,6 @@
   "lifecycle": {
     "migrate": "supabase db push",
     "health": "node --test \"tests/*.test.mjs\"",
-    "register": "20260813002605_register_idea-intake.sql"
+    "register": "20260813003000_register_idea-intake.sql"
   }
 }
