@@ -9,3 +9,4 @@
 // (the exact command this package is verified with) still finds and runs
 // every test below, by loading them as a side effect.
 import "./platform-client.test.ts";
+import "./registry.test.ts";

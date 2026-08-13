@@ -18,9 +18,11 @@
 //     attach to -- the exact same fundamental SSR limitation
 //     focus-visible.test.mjs documents for DialogContent's close button).
 //     This file instead reads the built bundle's own text for the
-//     command-palette-item data-kind literal (a real, if indirect, proof
-//     that no non-"navigation" kind exists anywhere in the shipped code),
-//     and the interactive, timing-sensitive acceptance criteria (palette
+//     command-palette-item data-kind literals (a real, if indirect, proof
+//     that only "navigation" and "tool" kinds exist anywhere in the shipped
+//     code -- "tool" added by m3-04's registry-sourced palette entries,
+//     "action"/"chat" still absent), and the interactive, timing-sensitive
+//     acceptance criteria (palette
 //     open-to-interactive under 100ms, theme flip under 50ms with no
 //     flash, keyboard suppression while focused in a text input) are
 //     proven separately in a real Chromium browser -- see this issue's
@@ -264,6 +266,16 @@ describe("Chrome: renders without throwing across the full prop matrix", () => {
       });
     }
   }
+
+  test("tools prop (m3-04) is accepted and does not throw, with entries present or absent", () => {
+    assert.doesNotThrow(() => renderChrome({ tools: [] }));
+    assert.doesNotThrow(() =>
+      renderChrome({
+        tools: [{ id: "idea-intake", label: "Idea Intake", href: "/ideas" }],
+      })
+    );
+    assert.doesNotThrow(() => renderChrome({ tools: undefined }));
+  });
 });
 
 // Minifiers are free to choose quote style per string, and drop quotes
@@ -289,15 +301,32 @@ describe("Chrome: command palette scope, proven against the built bundle's own t
   // never appears in renderChrome()'s output regardless of props. This
   // reads the actual shipped bundle text instead, the same technique
   // focus-visible.test.mjs uses for the same underlying reason.
-  test('the only data-kind ever attached to a command-palette-item is "navigation"', () => {
+  //
+  // m3-04 (docs/planning/05-c-toolbelt.md section 4.3; 05-a section 5) adds
+  // a second, registry-sourced result kind, "tool", alongside the original
+  // "navigation" -- command-palette.tsx's PaletteResult["kind"] union is
+  // exactly these two string literals, `kind:"navigation"` (the zone-entries
+  // mapping) and `kind:"tool"` (the tools-prop mapping), which is what this
+  // test's bundleHasProp calls below actually find; the JSX `data-kind`
+  // attribute itself is now `entry.kind` (a property read, not a literal),
+  // so this is no longer literally the DOM attribute's own source text, but
+  // it is still real proof of the same thing: no THIRD kind of entry (an
+  // action, a chat message, anything else) exists anywhere in the shipped
+  // code, because entry.kind can never hold a value that was never
+  // constructed as one of these two literals in the first place.
+  test('command-palette-item entries are exactly kind "navigation" and kind "tool" -- never a third kind', () => {
     assert.ok(
-      bundleHasProp("data-kind", "navigation"),
+      bundleHasProp("kind", "navigation"),
       "expected a navigation-kind command palette item literal in the built bundle"
     );
-    for (const forbidden of ["action", "tool", "chat"]) {
+    assert.ok(
+      bundleHasProp("kind", "tool"),
+      "expected a tool-kind command palette item literal in the built bundle (m3-04 registry entries)"
+    );
+    for (const forbidden of ["action", "chat"]) {
       assert.ok(
-        !bundleHasProp("data-kind", forbidden),
-        `found a forbidden data-kind="${forbidden}" literal in the built bundle -- palette must be navigation-only`
+        !bundleHasProp("kind", forbidden) && !bundleHasProp("data-kind", forbidden),
+        `found a forbidden kind="${forbidden}" literal in the built bundle -- palette must stay navigation+tool only`
       );
     }
   });

@@ -3,12 +3,14 @@
 // map). All branching lives in lib/auth-gate.ts's computeGateDecision so it
 // is unit-testable without a router; this component only wires that
 // decision to react-router (Navigate/Outlet) and to Chrome.
+import { useMemo } from "react";
 import { Navigate, Outlet, useLocation } from "react-router";
-import { Chrome } from "@hyperbolic/ui";
+import { Chrome, type ToolPaletteEntry } from "@hyperbolic/ui";
 import type { PlatformSession } from "@hyperbolic/platform-client";
 import { computeGateDecision } from "../lib/auth-gate";
 import { activeZoneForPath } from "../lib/active-zone";
 import type { SessionStatus } from "../lib/session";
+import { splitByRoute, useRegisteredTools } from "../lib/registry";
 
 interface ProtectedLayoutProps {
   status: SessionStatus;
@@ -19,6 +21,32 @@ interface ProtectedLayoutProps {
 function ProtectedLayout({ status, session, onSignOut }: ProtectedLayoutProps) {
   const location = useLocation();
   const decision = computeGateDecision(status, location.pathname, location.search);
+
+  // m3-04 (05-a section 5): the command palette's tool entries, fetched here
+  // (not inside Chrome/CommandPalette, which own no registry client -- see
+  // packages/ui/src/chrome/chrome.tsx's own doc comment) so they're
+  // available on EVERY gated route, not just /tools. `enabled` gates the
+  // fetch itself (not just this hook call, which -- rules of hooks -- must
+  // always run) so a signed-out operator on /login never issues an
+  // authenticated registry request; registryClient's own getAccessToken
+  // would reject it anyway (fail closed, zero network calls), but skipping
+  // it here avoids the pointless loading/error churn on every unauthenticated
+  // render. Same `useRegisteredTools()` call src/pages/tools.tsx makes for
+  // its own full catalog -- src/lib/registry.ts's in-flight dedupe collapses
+  // the common case (landing on /tools) into one real network request.
+  const registryState = useRegisteredTools(undefined, { enabled: status === "signed-in" });
+  const toolEntries = useMemo<ToolPaletteEntry[]>(
+    () =>
+      splitByRoute(registryState.tools).navTools.map((tool) => ({
+        id: tool.id,
+        label: tool.name,
+        // splitByRoute only puts a row in navTools when tool.route is
+        // truthy, so this cast is safe -- narrower than TypeScript can
+        // itself infer through the array filter above.
+        href: tool.route as string,
+      })),
+    [registryState.tools]
+  );
 
   if (decision.kind === "loading") {
     // SH-2a / this issue's own "no flash of gated content before redirect":
@@ -39,7 +67,7 @@ function ProtectedLayout({ status, session, onSignOut }: ProtectedLayoutProps) {
   const activeZone = activeZoneForPath(location.pathname);
 
   return (
-    <Chrome activeZone={activeZone} session={session} onSignOut={onSignOut}>
+    <Chrome activeZone={activeZone} session={session} onSignOut={onSignOut} tools={toolEntries}>
       {/* SH-2a's e2e assertion (05-a section 12) checks for the LITERAL
           absence of [data-app-data] while gated. One coarse wrapper here
           (rather than annotating every individual page's data-bearing

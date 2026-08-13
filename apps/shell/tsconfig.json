@@ -10,6 +10,22 @@
     "noUnusedParameters": true,
     "noEmit": true,
     "skipLibCheck": true,
+    // m3-04: @hyperbolic/platform-client's package.json resolves "types" to
+    // its own src/index.ts (not a built dist/*.d.ts), and that file's own
+    // internal imports use explicit .ts extensions (required under ITS OWN
+    // tsconfig's `module`/`moduleResolution`: "nodenext", which mandates a
+    // real per-file extension on every relative specifier -- see
+    // packages/platform-client/tsconfig.json's own allowImportingTsExtensions).
+    // packages/platform-client/src/index.ts's pre-existing `export type {...}
+    // from "./types.ts"` lines are erased entirely at type-check time (type-
+    // only, never a real module resolution), so they never tripped this
+    // here; the value-level `export { createRegistryClient, ... } from
+    // "./registry.ts"` this issue's registry client adds is a real cross-
+    // file resolution and needs the same flag enabled in every OTHER
+    // tsconfig (this one included) that transitively type-checks that file
+    // -- allowed here because `noEmit` is already set (the flag's own
+    // requirement).
+    "allowImportingTsExtensions": true,
     "types": ["vite/client", "@testing-library/jest-dom"],
     "paths": { "@/*": ["./src/*"] }
   },

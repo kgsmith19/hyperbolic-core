@@ -1,36 +1,61 @@
 "use client";
 
 import * as React from "react";
-import { Search } from "lucide-react";
+import { Search, Wrench } from "lucide-react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 
 import { cn } from "../lib/cn";
 import { ZONE_ENTRIES, type Zone } from "./zones";
 import { paletteMatch } from "./palette-match";
+import type { ToolPaletteEntry } from "./tool-entry";
 
 interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   activeZone: Zone;
+  /**
+   * Registry-sourced tool entries (m3-04, 05-a section 5: "tool entries
+   * enumerated from the Toolbelt registry"). Optional and defaults to
+   * empty so every existing caller (and this file's own SSR-based tests)
+   * keeps working unchanged.
+   */
+  tools?: readonly ToolPaletteEntry[];
 }
 
+type PaletteResult = {
+  /** Stable React key AND the itemRefs map key -- unique across BOTH kinds. */
+  key: string;
+  kind: "navigation" | "tool";
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /** "navigation" entries only, for the "Current" badge. */
+  zone?: Zone;
+};
+
+// Static half of the combined result list (05-a section 5; 09 section 4.2):
+// the six zone entries, unchanged from before m3-04. Hoisted to module scope
+// -- ZONE_ENTRIES never changes -- so only the registry-sourced half needs
+// recomputing per render.
+const NAVIGATION_RESULTS: PaletteResult[] = ZONE_ENTRIES.map((entry) => ({
+  key: `zone:${entry.zone}`,
+  kind: "navigation",
+  label: entry.label,
+  href: entry.href,
+  icon: entry.icon,
+  zone: entry.zone,
+}));
+
 /**
- * Navigation-only command palette (05-a section 5; 09 section 4.2). Scope
- * is deliberately closed: the six static zone entries below, nothing else
- * -- no actions, no tool entries, no chat, per this issue's own text.
- *
- * Extension point for m3-04 (explicitly NOT built here, per the m2-01 issue
- * text: "the palette should have a clean extension point for it, but do
- * not build the registry-fetching logic itself"): `results` below is
- * computed by filtering exactly one array, ZONE_ENTRIES. A registry-backed
- * version adds a second array of the same
- * `{ zone/id, label, href, icon }`-shaped entries, concatenates it in
- * before the `.filter(paletteMatch)` call, and tags each with
- * data-kind="tool" instead of "navigation" below. No other change to this
- * file should be required. ChromeProps (05-a section 7) is not extended
- * with a new prop for this now -- its signature is a closed, binding
- * 3-field contract, and speculatively growing it ahead of m3-04 actually
- * landing would be guessing at that issue's own shape.
+ * Navigation-and-tools command palette (05-a section 5; 09 section 4.2).
+ * Through m2-01/m2-02/m2-03, scope was deliberately closed to just the six
+ * static zone entries below (no actions, no tool entries, no chat). m3-04
+ * is the extension point those issues' own comments named in advance: a
+ * second array of registry-sourced entries, concatenated in before the
+ * `.filter(paletteMatch)` call, tagged `data-kind="tool"` instead of
+ * `"navigation"`. Chat entries remain out of scope (m4-15) -- data-kind is
+ * a closed two-value union, not an open string, so that boundary stays
+ * structurally enforced, not just documented.
  *
  * Built on @base-ui/react/dialog (the same primitive dialog.tsx already
  * uses, so this costs no new module-graph weight) rather than a bespoke
@@ -46,14 +71,31 @@ interface CommandPaletteProps {
  * and surface-raised, not shadow-3, per 09 section 3.4's elevation table
  * ("--shadow-2 popover/dropdown/palette" vs "--shadow-3 modal").
  */
-function CommandPalette({ open, onOpenChange, activeZone }: CommandPaletteProps) {
+function CommandPalette({ open, onOpenChange, activeZone, tools }: CommandPaletteProps) {
   const [query, setQuery] = React.useState("");
   const [highlighted, setHighlighted] = React.useState(0);
-  const itemRefs = React.useRef(new Map<Zone, HTMLAnchorElement>());
+  const itemRefs = React.useRef(new Map<string, HTMLAnchorElement>());
+
+  const toolResults = React.useMemo<PaletteResult[]>(
+    () =>
+      (tools ?? []).map((tool) => ({
+        key: `tool:${tool.id}`,
+        kind: "tool",
+        label: tool.label,
+        href: tool.href,
+        icon: Wrench,
+      })),
+    [tools]
+  );
+
+  const allResults = React.useMemo(
+    () => [...NAVIGATION_RESULTS, ...toolResults],
+    [toolResults]
+  );
 
   const results = React.useMemo(
-    () => ZONE_ENTRIES.filter((entry) => paletteMatch(entry.label, query)),
-    [query]
+    () => allResults.filter((entry) => paletteMatch(entry.label, query)),
+    [allResults, query]
   );
   const highlightedEntry = results[highlighted] ?? results[0];
 
@@ -79,7 +121,7 @@ function CommandPalette({ open, onOpenChange, activeZone }: CommandPaletteProps)
       setHighlighted((i) => (results.length ? (i - 1 + results.length) % results.length : 0));
     } else if (event.key === "Enter") {
       event.preventDefault();
-      if (highlightedEntry) itemRefs.current.get(highlightedEntry.zone)?.click();
+      if (highlightedEntry) itemRefs.current.get(highlightedEntry.key)?.click();
     }
   }
 
@@ -106,7 +148,7 @@ function CommandPalette({ open, onOpenChange, activeZone }: CommandPaletteProps)
                 placeholder="Go to..."
                 aria-label="Search navigation"
                 aria-activedescendant={
-                  highlightedEntry ? `palette-item-${highlightedEntry.zone}` : undefined
+                  highlightedEntry ? `palette-item-${highlightedEntry.key}` : undefined
                 }
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -118,31 +160,31 @@ function CommandPalette({ open, onOpenChange, activeZone }: CommandPaletteProps)
               id="command-palette-list"
               data-slot="command-palette-list"
               role="listbox"
-              aria-label="Navigation results"
+              aria-label="Navigation and tool results"
               className="max-h-80 overflow-y-auto p-1.5"
             >
               {results.length === 0 && (
                 <li className="px-3 py-6 text-center text-sm text-text-secondary">
-                  No matching zone.
+                  No matching zone or tool.
                 </li>
               )}
               {results.map((entry, index) => {
                 const Icon = entry.icon;
                 const selected = index === highlighted;
                 return (
-                  <li key={entry.zone} role="presentation">
+                  <li key={entry.key} role="presentation">
                     <a
-                      id={`palette-item-${entry.zone}`}
+                      id={`palette-item-${entry.key}`}
                       ref={(el) => {
-                        if (el) itemRefs.current.set(entry.zone, el);
-                        else itemRefs.current.delete(entry.zone);
+                        if (el) itemRefs.current.set(entry.key, el);
+                        else itemRefs.current.delete(entry.key);
                       }}
                       href={entry.href}
                       role="option"
                       tabIndex={-1}
                       aria-selected={selected}
                       data-slot="command-palette-item"
-                      data-kind="navigation"
+                      data-kind={entry.kind}
                       data-zone={entry.zone}
                       data-selected={selected}
                       onMouseEnter={() => setHighlighted(index)}
@@ -154,7 +196,7 @@ function CommandPalette({ open, onOpenChange, activeZone }: CommandPaletteProps)
                     >
                       <Icon className="size-4 shrink-0 text-text-secondary" />
                       <span className="flex-1">{entry.label}</span>
-                      {entry.zone === activeZone && (
+                      {entry.kind === "navigation" && entry.zone === activeZone && (
                         <span className="text-xs text-text-muted">Current</span>
                       )}
                     </a>

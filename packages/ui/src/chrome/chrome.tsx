@@ -9,6 +9,7 @@ import { ShortcutsOverlay } from "./shortcuts-overlay";
 import { useGlobalKeyboardModel } from "./keyboard";
 import { ZONE_ENTRIES, type Zone } from "./zones";
 import type { PlatformSession } from "./session";
+import type { ToolPaletteEntry } from "./tool-entry";
 
 /**
  * docs/planning/05-a-hyperbolic-core.md section 7 gives this as a signature
@@ -19,11 +20,20 @@ import type { PlatformSession } from "./session";
  * internal layout"), and a layout-shell component structurally cannot host
  * that region without a children slot. Every other field matches 05-a
  * section 7 verbatim.
+ *
+ * `tools` is m3-04's addition (05-a section 5, command-palette.tsx's own
+ * pre-written extension-point comment): the command palette's registry-
+ * sourced entries, fed in by the Shell (the only zone that owns a registry
+ * client) rather than fetched by packages/ui itself -- this package has no
+ * dependency on @hyperbolic/platform-client (chrome/session.ts's own doc
+ * comment states why) and no HTTP/Supabase awareness at all. Optional and
+ * defaults to empty, so every pre-m3-04 caller keeps compiling unchanged.
  */
 export interface ChromeProps {
   activeZone: Zone;
   session: PlatformSession | null;
   onSignOut: () => void;
+  tools?: readonly ToolPaletteEntry[];
   children?: React.ReactNode;
 }
 
@@ -43,7 +53,7 @@ type OverlayState = "none" | "palette" | "shortcuts";
  * the palette and the shortcuts reference can never both be open at once --
  * that would fight over Base UI's modal focus trap and Escape handling.
  */
-function Chrome({ activeZone, session, onSignOut, children }: ChromeProps) {
+function Chrome({ activeZone, session, onSignOut, tools, children }: ChromeProps) {
   const [overlay, setOverlay] = React.useState<OverlayState>("none");
 
   const openPalette = React.useCallback(() => setOverlay("palette"), []);
@@ -93,6 +103,7 @@ function Chrome({ activeZone, session, onSignOut, children }: ChromeProps) {
         open={overlay === "palette"}
         onOpenChange={(open) => setOverlay(open ? "palette" : "none")}
         activeZone={activeZone}
+        tools={tools}
       />
       <ShortcutsOverlay
         open={overlay === "shortcuts"}

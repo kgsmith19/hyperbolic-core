@@ -36,6 +36,13 @@ let authChangeHandler: ((session: PlatformSession | null) => void) | null = null
 
 vi.mock("@hyperbolic/platform-client", () => ({
   createPlatformClient: () => ({ auth, fetch: vi.fn() }),
+  // m3-04: session.ts's module-level `createRegistryClient(...)` call
+  // (registryClient) resolves against this mock the same way
+  // createPlatformClient does above -- a trivial stub is enough here since
+  // this file only tests useShellSession, not registry behavior (that's
+  // packages/platform-client/tests/registry.test.ts and
+  // src/lib/registry.test.ts's job).
+  createRegistryClient: () => ({ listTools: vi.fn(), getTool: vi.fn() }),
 }));
 
 import { useShellSession } from "./session";

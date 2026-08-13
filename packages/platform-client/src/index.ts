@@ -16,6 +16,18 @@ export type {
   Unsubscribe,
 } from "./types.ts";
 
+export {
+  createRegistryClient,
+  buildListToolsParams,
+} from "./registry.ts";
+export type {
+  RegisteredTool,
+  RegistryClient,
+  RegistryFilter,
+  ToolKind,
+  ToolStatus,
+} from "./registry.ts";
+
 function toPlatformSession(session: Session | null): PlatformSession | null {
   if (!session) {
     return null;

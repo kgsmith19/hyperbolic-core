@@ -9,7 +9,13 @@
 // that enforces that; this module only owns session STATE, not the
 // redirect decision -- see src/lib/auth-gate.ts for that).
 import { useCallback, useEffect, useState } from "react";
-import { createPlatformClient, type PlatformClient, type PlatformSession } from "@hyperbolic/platform-client";
+import {
+  createPlatformClient,
+  createRegistryClient,
+  type PlatformClient,
+  type PlatformSession,
+  type RegistryClient,
+} from "@hyperbolic/platform-client";
 
 // ADR-03: the toolbelt Supabase project (woltgcggxaehtuypkxqk) is the
 // platform IdP. URL + publishable key are public by design (apps/toolbelt/config.mjs's
@@ -21,9 +27,28 @@ const DEFAULT_SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
 const DEFAULT_SUPABASE_PUBLISHABLE_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
 
+const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+const SUPABASE_PUBLISHABLE_KEY =
+  import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY || DEFAULT_SUPABASE_PUBLISHABLE_KEY;
+
 export const platformClient: PlatformClient = createPlatformClient({
-  supabaseUrl: import.meta.env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL,
-  publishableKey: import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY || DEFAULT_SUPABASE_PUBLISHABLE_KEY,
+  supabaseUrl: SUPABASE_URL,
+  publishableKey: SUPABASE_PUBLISHABLE_KEY,
+});
+
+// m3-04: the registry client rides the SAME session URL/token as
+// platformClient above -- not a second, ad-hoc Supabase client (this
+// module's whole reason to exist is being the one place the Shell's session
+// lives, ADR-03). getAccessToken() defers to platformClient.auth.getSession()
+// (the single source of truth every route already reads from) and rejects
+// with zero network calls when there is no session, matching AuthedFetch's
+// own fail-closed contract in packages/platform-client/src/index.ts.
+export const registryClient: RegistryClient = createRegistryClient(SUPABASE_URL, async () => {
+  const session = await platformClient.auth.getSession();
+  if (!session) {
+    throw new Error("registry-client: no active session, refusing to send request");
+  }
+  return session.accessToken;
 });
 
 declare global {
