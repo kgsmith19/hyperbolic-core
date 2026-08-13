@@ -39,6 +39,14 @@ const INTAKE_SOURCE_DEDUP_UP = join(
   INTAKE_MIGRATIONS_DIR,
   "20260814050000_intake_forgepad_source_dedup.sql",
 );
+const INTAKE_SOURCE_UPDATE_GRANT_UP = join(
+  INTAKE_MIGRATIONS_DIR,
+  "20260814090000_intake_idea_source_update_grant.sql",
+);
+const INTAKE_OPTIMIZATION_CASCADE_UP = join(
+  INTAKE_MIGRATIONS_DIR,
+  "20260814100000_intake_optimization_fk_cascade_and_indexes.sql",
+);
 const INTAKE_IDEMPOTENCY_UP = join(
   INTAKE_MIGRATIONS_DIR,
   "20260814120100_intake_forgepad_idempotency_key.sql",
@@ -165,14 +173,22 @@ function asAuthenticated(uuid, sqlText) {
   return `set role authenticated;\ndo $$ begin perform set_config('app.test_uid', '${uuid}', false); end $$;\n${sqlText}`;
 }
 
+function submitToGithub(dbName, ideaId, issueNumber) {
+  return psqlOk(
+    dbName,
+    `set role service_role;\nselect intake.mark_submitted_to_github('${ideaId}', ${issueNumber}, 'https://github.com/kgsmith19/scratch/issues/${issueNumber}');`,
+  );
+}
+
 function freshDbName() {
   return `m3_05_intake_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
 }
 
 // Applies the harness stub plus the real forward chain used by production:
 // platform bootstrap, immutable intake schema, submission RPC, legacy
-// source-key reconciliation, stable idempotency identity, and the additive
-// integrity hardening. Always drops the db afterward.
+// source-key reconciliation, source editing grant, optimization FK/index
+// repair, integrity hardening, and stable idempotency identity, in global
+// ledger order. Always drops the db afterward.
 function withMigratedDb(fn) {
   const db = freshDbName();
   psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
@@ -183,8 +199,10 @@ function withMigratedDb(fn) {
     applyMigrationWithRetry(db, readFileSync(INTAKE_UP, "utf8"));
     applyMigrationWithRetry(db, readFileSync(INTAKE_SUBMISSION_RPC_UP, "utf8"));
     applyMigrationWithRetry(db, readFileSync(INTAKE_SOURCE_DEDUP_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_IDEMPOTENCY_UP, "utf8"));
+    applyMigrationWithRetry(db, readFileSync(INTAKE_SOURCE_UPDATE_GRANT_UP, "utf8"));
+    applyMigrationWithRetry(db, readFileSync(INTAKE_OPTIMIZATION_CASCADE_UP, "utf8"));
     applyMigrationWithRetry(db, readFileSync(INTAKE_HARDENING_UP, "utf8"));
+    applyMigrationWithRetry(db, readFileSync(INTAKE_IDEMPOTENCY_UP, "utf8"));
     return fn(db);
   } finally {
     psqlOk("postgres", `drop database if exists ${db};`);
@@ -192,7 +210,7 @@ function withMigratedDb(fn) {
 }
 
 test(
-  "real Postgres: draft -> idea -> submitted_to_github succeeds, all three github fields set atomically (II-1a allowed pair)",
+  "real Postgres: draft -> idea -> service-role submission RPC succeeds, all three github fields set atomically (II-1a allowed pair)",
   { skip: SKIP_REASON },
   () => {
     withMigratedDb((db) => {
@@ -206,14 +224,7 @@ test(
         asAuthenticated(OWNER_UUID, `update intake.idea set target_repo = 'kgsmith19/scratch', status = 'idea' where id = '${id}';`),
       );
 
-      psqlOk(
-        db,
-        asAuthenticated(
-          OWNER_UUID,
-          `update intake.idea set status = 'submitted_to_github', github_issue_number = 7, ` +
-            `github_issue_url = 'https://github.com/kgsmith19/scratch/issues/7', submitted_at = now() where id = '${id}';`,
-        ),
-      );
+      submitToGithub(db, id, 7);
 
       const row = psqlOk(
         db,
@@ -255,14 +266,7 @@ test(
         ),
       ).trim();
       psqlOk(db, asAuthenticated(OWNER_UUID, `update intake.idea set status = 'idea' where id = '${submittedId}';`));
-      psqlOk(
-        db,
-        asAuthenticated(
-          OWNER_UUID,
-          `update intake.idea set status = 'submitted_to_github', github_issue_number = 1, ` +
-            `github_issue_url = 'https://x/1', submitted_at = now() where id = '${submittedId}';`,
-        ),
-      );
+      submitToGithub(db, submittedId, 1);
 
       // draft -> submitted_to_github (skip): rule 2, illegal transition.
       let r = psql(db, asAuthenticated(OWNER_UUID, `update intake.idea set status = 'submitted_to_github' where id = '${draftId}';`));
@@ -296,14 +300,7 @@ test(
         ),
       ).trim();
       psqlOk(db, asAuthenticated(OWNER_UUID, `update intake.idea set status = 'idea' where id = '${id}';`));
-      psqlOk(
-        db,
-        asAuthenticated(
-          OWNER_UUID,
-          `update intake.idea set status = 'submitted_to_github', github_issue_number = 2, ` +
-            `github_issue_url = 'https://x/2', submitted_at = now() where id = '${id}';`,
-        ),
-      );
+      submitToGithub(db, id, 2);
 
       const upd = psql(db, asAuthenticated(OWNER_UUID, `update intake.idea set title = 'x' where id = '${id}';`));
       assert.notEqual(upd.status, 0);
@@ -374,14 +371,7 @@ test(
         ),
       ).trim();
       psqlOk(db, asAuthenticated(OWNER_UUID, `update intake.idea set status = 'idea' where id = '${submittedParentId}';`));
-      psqlOk(
-        db,
-        asAuthenticated(
-          OWNER_UUID,
-          `update intake.idea set status = 'submitted_to_github', github_issue_number = 3, ` +
-            `github_issue_url = 'https://x/3', submitted_at = now() where id = '${submittedParentId}';`,
-        ),
-      );
+      submitToGithub(db, submittedParentId, 3);
 
       // Service context (table owner), the same posture as the previous
       // test's layer-2 proof: bypasses grants/RLS, isolates this assertion
@@ -451,7 +441,7 @@ test(
 
       const r = psql(
         db,
-        asAuthenticated(OWNER_UUID, `update intake.idea set status = 'submitted_to_github', github_issue_number = 5 where id = '${id}';`),
+        `update intake.idea set status = 'submitted_to_github', github_issue_number = 5 where id = '${id}';`,
       );
       assert.notEqual(r.status, 0);
       assert.match(r.stderr, /submitted_fields_all_or_none/);

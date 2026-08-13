@@ -18,10 +18,10 @@
 // ...`), which both supplies the peer-auth identity the CLI's own psql calls
 // need and exercises the CLI exactly as an operator would run it against a
 // real project (service/superuser connection bypassing PostgREST grants).
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, statSync, readdirSync } from "node:fs";
+import { copyFileSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, statSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -42,13 +42,21 @@ const INTAKE_SOURCE_DEDUP_UP = join(
   INTAKE_MIGRATIONS_DIR,
   "20260814050000_intake_forgepad_source_dedup.sql",
 );
-const INTAKE_IDEMPOTENCY_UP = join(
+const INTAKE_SOURCE_UPDATE_GRANT_UP = join(
   INTAKE_MIGRATIONS_DIR,
-  "20260814120100_intake_forgepad_idempotency_key.sql",
+  "20260814090000_intake_idea_source_update_grant.sql",
+);
+const INTAKE_OPTIMIZATION_CASCADE_UP = join(
+  INTAKE_MIGRATIONS_DIR,
+  "20260814100000_intake_optimization_fk_cascade_and_indexes.sql",
 );
 const INTAKE_HARDENING_UP = join(
   INTAKE_MIGRATIONS_DIR,
   "20260814120000_intake_submission_metadata_integrity.sql",
+);
+const INTAKE_IDEMPOTENCY_UP = join(
+  INTAKE_MIGRATIONS_DIR,
+  "20260814120100_intake_forgepad_idempotency_key.sql",
 );
 
 const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
@@ -107,6 +115,23 @@ const SKIP_REASON = RUNNER
   : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); this suite proves the real " +
     "migrate-forgepad.mjs CLI end-to-end against an actual engine and has nothing honest to assert without one -- " +
     "see the m3-08 implementation report for the interactive proof run where a local engine was available";
+
+// GitHub-hosted checkouts can live beneath an owner-only runner directory.
+// When peer auth requires the postgres OS user, Node then reports the real
+// CLI as MODULE_NOT_FOUND because that user cannot traverse the checkout's
+// parent path. Stage an exact byte-copy under /tmp (already the convention
+// for this suite's cross-user fixtures), and keep direct-runner execution on
+// the committed path. The subprocess still executes the real CLI source.
+let SUBPROCESS_CLI_PATH = CLI_PATH;
+let stagedCliDir;
+if (RUNNER?.cmd === "sudo") {
+  stagedCliDir = mkdtempSync(join(os.tmpdir(), "m3-08-forgepad-cli-"));
+  chmodSync(stagedCliDir, 0o755);
+  SUBPROCESS_CLI_PATH = join(stagedCliDir, "migrate-forgepad.mjs");
+  copyFileSync(CLI_PATH, SUBPROCESS_CLI_PATH);
+  chmodSync(SUBPROCESS_CLI_PATH, 0o644);
+  after(() => rmSync(stagedCliDir, { recursive: true, force: true }));
+}
 
 function psql(dbName, sqlText) {
   return spawnSync(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
@@ -167,8 +192,10 @@ function withMigratedDb(fn) {
     applyMigrationWithRetry(db, readFileSync(INTAKE_UP, "utf8"));
     applyMigrationWithRetry(db, readFileSync(INTAKE_SUBMISSION_RPC_UP, "utf8"));
     applyMigrationWithRetry(db, readFileSync(INTAKE_SOURCE_DEDUP_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_IDEMPOTENCY_UP, "utf8"));
+    applyMigrationWithRetry(db, readFileSync(INTAKE_SOURCE_UPDATE_GRANT_UP, "utf8"));
+    applyMigrationWithRetry(db, readFileSync(INTAKE_OPTIMIZATION_CASCADE_UP, "utf8"));
     applyMigrationWithRetry(db, readFileSync(INTAKE_HARDENING_UP, "utf8"));
+    applyMigrationWithRetry(db, readFileSync(INTAKE_IDEMPOTENCY_UP, "utf8"));
     return fn(db);
   } finally {
     psqlOk("postgres", `drop database if exists ${db};`);
@@ -195,7 +222,7 @@ function chmodOpenRecursive(p) {
 // identity.
 function runCli(dbName, args) {
   if (RUNNER.cmd === "sudo") {
-    return spawnSync("sudo", ["-n", "-u", "postgres", "env", `DATABASE_URL=${dbName}`, "node", CLI_PATH, ...args], {
+    return spawnSync("sudo", ["-n", "-u", "postgres", "env", `DATABASE_URL=${dbName}`, "node", SUBPROCESS_CLI_PATH, ...args], {
       encoding: "utf8",
       timeout: 20000,
     });
