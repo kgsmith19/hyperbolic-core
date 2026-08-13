@@ -19,8 +19,8 @@ formula: both require a build step this project deliberately doesn't have.
 Packaging here means: clone it, run it.
 
 ```bash
-git clone https://github.com/kgsmith19/toolbelt
-cd toolbelt/apps/network-checker
+git clone https://github.com/kgsmith19/hyperbolic-core
+cd hyperbolic-core/apps/toolbelt/apps/network-checker
 python -m netcheck scan
 ```
 

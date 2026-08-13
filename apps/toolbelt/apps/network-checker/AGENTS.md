@@ -33,7 +33,7 @@ choices and product safeguards remain local to this directory.
 
 ## Commands
 
-Run from `apps/network-checker/`.
+Run from `apps/toolbelt/apps/network-checker/`.
 
 ```bash
 python -m unittest discover -s tests -t .
@@ -62,12 +62,19 @@ and shell syntax checks.
 | `netcheck/docsis.py` | DOCSIS status parsing |
 | `netcheck/ssdp.py` | SSDP/UPnP gateway discovery |
 | `netcheck/snmp.py` | Scoped SNMPv2c scalar reads |
+| `netcheck/topology.py` | LAN device map: the address-resolution table (`arp -a`/`ip neigh`) parsed into IP/MAC pairs, with the SSDP-identified gateway named |
+| `netcheck/exposure.py` | Deep-tier, detection-only LAN exposure checks: open management ports and default-credential acceptance, read requests only |
 | `netcheck/environ.py` | Local system and network snapshot |
 | `netcheck/remote.py` | Modem, router, WAN, and provider status |
+| `netcheck/geoip.py` | Coarse WAN geolocation enriching the `wan` section; every failure degrades to `unavailable`, never `fail` |
 | `netcheck/llmlog.py` | Transcript error extraction and classification |
 | `netcheck/watch.py` | Continuous sampling loop |
 | `netcheck/store.py` | SQLite persistence and optional mirror |
+| `netcheck/inventory.py` | Device, interface, and configuration-item rows mapped from a collected scan payload, plus their queries |
+| `netcheck/change.py`, `netcheck/change_cli.py`, `netcheck/change_templates.py` | Consent-gated change lifecycle: the propose/test/approve/apply/verify/rollback engine, its CLI presentation and argparse wiring, and the seeded fix-script templates |
 | `netcheck/diagnose.py`, `netcheck/rank.py` | Evidence correlation and ranked causes |
+| `netcheck/experiment.py` | Two labeled probe runs compared: per-layer median latency and state mix |
+| `netcheck/bundle.py` | Redacted evidence bundle assembled from stored data for export |
 | `netcheck/server.py` | Loopback dashboard server: JSON API, SSE push, static files |
 | `frontend/` | Dashboard UI — HTML/CSS/JS, no backend logic, no dependencies |
 

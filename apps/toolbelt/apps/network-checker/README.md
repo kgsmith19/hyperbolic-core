@@ -9,8 +9,8 @@ of a hunch.
 Pure Python 3 standard library — nothing to install, no `pip`, no build step.
 
 ```bash
-git clone https://github.com/kgsmith19/toolbelt
-cd toolbelt/apps/network-checker
+git clone https://github.com/kgsmith19/hyperbolic-core
+cd hyperbolic-core/apps/toolbelt/apps/network-checker
 python -m netcheck scan        # one-shot snapshot of every environment section
 python -m netcheck probe       # one measured tick across every network layer
 ```
@@ -160,5 +160,5 @@ it documented functions that had never been written, and gave `correlate()`
 verdicts it has never returned. The docstrings are the reference.
 
 Known issues and accepted risks are tracked as
-[Toolbelt GitHub issues](https://github.com/kgsmith19/toolbelt/issues), not in
+[hyperbolic-core GitHub issues](https://github.com/kgsmith19/hyperbolic-core/issues), not in
 application documentation.

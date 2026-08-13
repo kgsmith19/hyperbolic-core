@@ -10,7 +10,7 @@
 # same as running on a wired-only machine.
 FROM python:3.12-slim
 
-LABEL org.opencontainers.image.source="https://github.com/kgsmith19/network-checker"
+LABEL org.opencontainers.image.source="https://github.com/kgsmith19/hyperbolic-core"
 LABEL org.opencontainers.image.description="netcheck: which-layer network diagnostic for LLM API connections"
 
 WORKDIR /app
