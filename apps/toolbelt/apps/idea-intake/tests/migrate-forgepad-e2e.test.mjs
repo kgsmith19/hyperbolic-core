@@ -302,7 +302,7 @@ test(
         assert.match(first.stdout, /research-needed -> draft\s+: 1/);
         assert.match(first.stdout, /rejected \(not migrated\)\s+: 1/);
         assert.match(first.stdout, /rejected ids.*f-a0000005/);
-        assert.match(first.stdout, /inserted 4, already migrated \(skipped\) 0, rejected \(not migrated\) 1/);
+        assert.match(first.stdout, /inserted 4, updated 0, already migrated \(unchanged, skipped\) 0, rejected \(not migrated\) 1/);
 
         // ACC-4b: intake row count carrying the forgepad provenance ref
         // equals source file count (5) minus rejected (1) = 4.
@@ -367,7 +367,7 @@ test(
         // --- second run: idempotent, zero inserts -------------------------
         const second = runCli(db, ["--acc-root", accRoot]);
         assert.equal(second.status, 0, `second run failed: ${second.stderr}\n${second.stdout}`);
-        assert.match(second.stdout, /inserted 0, already migrated \(skipped\) 4, rejected \(not migrated\) 1/);
+        assert.match(second.stdout, /inserted 0, updated 0, already migrated \(unchanged, skipped\) 4, rejected \(not migrated\) 1/);
 
         const rowCountAfterSecond = psqlOk(db, "select count(*) from intake.idea where source like 'forgepad:%';").trim();
         assert.equal(rowCountAfterSecond, "4", "a second invocation must insert zero additional rows");
@@ -446,6 +446,299 @@ test(
         const rowCount = psqlOk(db, "select count(*) from intake.idea;").trim();
         assert.equal(rowCount, "0");
       } finally {
+        rmSync(accRoot, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
+// === Finding 51: a real ENOENT (psql not on PATH) reports a clear message,
+// never a raw TypeError ===================================================
+
+test(
+  "real CLI subprocess: psql not on PATH produces a clear 'psql not found on PATH' failure message, not a raw TypeError (RED before the fix)",
+  { skip: SKIP_REASON },
+  () => {
+    withMigratedDb((db) => {
+      const { accRoot, ideasDir } = makeFixtureRoot();
+      try {
+        writeFixture(ideasDir, fullFixtureSet()[0]);
+        chmodOpenRecursive(accRoot);
+
+        // A PATH with no psql on it at all, reached the same way a real
+        // operator would hit this (psql genuinely missing) -- not a mock of
+        // spawnSync, a real spawn attempt that really fails to find the
+        // executable. Deliberately does not go through RUNNER/sudo (peer
+        // auth also shells out to psql, so it would hit the same PATH
+        // problem) -- this exercises the CLI's own psql invocation directly.
+        // Launches via process.execPath (an absolute path) rather than the
+        // bare string "node", so resolving the CLI's own launcher does not
+        // itself depend on the very PATH this test is deliberately breaking
+        // -- only the CLI's internal psql lookup is meant to fail.
+        const result = spawnSync(process.execPath, [CLI_PATH, "--acc-root", accRoot], {
+          encoding: "utf8",
+          timeout: 20000,
+          env: { ...process.env, DATABASE_URL: db, PATH: "/nonexistent-empty-path-for-test" },
+        });
+
+        assert.notEqual(result.status, 0, "a missing psql must fail the run, not crash it into an unhandled state");
+        const output = result.stdout + result.stderr;
+        assert.match(output, /psql not found on PATH/, `expected a clear message, got:\n${output}`);
+        assert.doesNotMatch(
+          output,
+          /Cannot read propert(y|ies) of undefined/,
+          "must never surface the raw pre-fix TypeError from calling .trim() on an undefined stdout/stderr",
+        );
+      } finally {
+        rmSync(accRoot, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
+// === Finding 53: an edited forgepad file (mapped fields changed, id/source
+// marker unchanged) propagates on rerun instead of leaving a stale row ====
+
+test(
+  "real Postgres + real CLI subprocess: editing a forgepad file's mapped fields and rerunning UPDATEs the existing row instead of silently leaving it stale (Finding 53, option (a) chosen)",
+  { skip: SKIP_REASON },
+  () => {
+    withMigratedDb((db) => {
+      const { accRoot, ideasDir } = makeFixtureRoot();
+      try {
+        const idea = fullFixtureSet()[0]; // f-a0000001, draft, no target
+        writeFixture(ideasDir, idea);
+        chmodOpenRecursive(accRoot);
+
+        const first = runCli(db, ["--acc-root", accRoot]);
+        assert.equal(first.status, 0, `first run failed: ${first.stderr}\n${first.stdout}`);
+        assert.match(first.stdout, /inserted 1, updated 0, already migrated \(unchanged, skipped\) 0, rejected \(not migrated\) 0/);
+
+        // Edit mapped fields (title/notes/confidence) while leaving id and
+        // source-affecting fields (id, source) untouched -- exactly the gap
+        // Finding 53 identifies: the marker this dedupe/index keys on does
+        // not change, so the P1 idempotency work alone would silently skip
+        // this row forever.
+        const edited = { ...idea, title: "Draft idea (revised)", notes: "no longer still forming", confidence: "high" };
+        writeFixture(ideasDir, edited);
+        chmodOpenRecursive(accRoot);
+
+        const second = runCli(db, ["--acc-root", accRoot]);
+        assert.equal(second.status, 0, `second run failed: ${second.stderr}\n${second.stdout}`);
+        assert.match(second.stdout, /inserted 0, updated 1, already migrated \(unchanged, skipped\) 0, rejected \(not migrated\) 0/);
+
+        const row = psqlOk(
+          db,
+          "select title, notes, confidence from intake.idea where source = 'forgepad:f-a0000001';",
+        ).trim();
+        assert.equal(
+          row,
+          "Draft idea (revised)|no longer still forming|high",
+          "the rerun must propagate the edited mapped fields onto the existing row, not leave it stale",
+        );
+        const rowCount = psqlOk(db, "select count(*) from intake.idea where source = 'forgepad:f-a0000001';").trim();
+        assert.equal(rowCount, "1", "the edit must UPDATE the existing row, never insert a second one for the same forgepad id");
+
+        // A third run with no further edits must be a true no-op again --
+        // proves the diff, not a blind always-UPDATE, drives this.
+        const third = runCli(db, ["--acc-root", accRoot]);
+        assert.equal(third.status, 0, `third run failed: ${third.stderr}\n${third.stdout}`);
+        assert.match(third.stdout, /inserted 0, updated 0, already migrated \(unchanged, skipped\) 1, rejected \(not migrated\) 0/);
+      } finally {
+        rmSync(accRoot, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
+// === Finding 55: adversarial SQL/data-boundary payloads round-trip as pure
+// data -- conditional on standard_conforming_strings staying "on", which
+// Finding 52 (-X) and this SET-as-first-statement defense-in-depth both
+// establish. This is NOT a claim that quote-doubling escaping alone is
+// unconditionally injection-proof; see the second test below for the
+// specific off-default case that would actually matter. ====================
+
+test(
+  "real Postgres + real CLI subprocess: adversarial payloads (quotes, semicolons, SQL-comment text, CRLF, Unicode, large string) round-trip as pure data under normal (on-by-default) conditions",
+  { skip: SKIP_REASON },
+  () => {
+    withMigratedDb((db) => {
+      const { accRoot, ideasDir } = makeFixtureRoot();
+      try {
+        const adversarial = {
+          singleQuote: "it's a test with 'quoted' text",
+          backslash: "a backslash \\ in the middle, not at the end",
+          semicolon: "statement; select 1; --",
+          sqlComment: "-- DROP TABLE intake.idea CASCADE;\n/* block comment */",
+          crlf: "line one\r\nline two\rline three\nline four",
+          unicode: "unicode: café 日本語 🎉 Ω",
+          large: "x".repeat(4900),
+        };
+        const notes = Object.values(adversarial).join(" ||SEP|| ");
+        const idea = {
+          id: "f-adde5a71",
+          title: "Adversarial payload idea",
+          problem: adversarial.sqlComment,
+          outcome: adversarial.semicolon,
+          confidence: "medium",
+          notes,
+          state: "draft",
+          target: "",
+          source: adversarial.singleQuote,
+          created: "2026-01-11T10:00:00.000Z",
+          updated: "2026-01-12T10:00:00.000Z",
+          githubIssue: null,
+        };
+        writeFixture(ideasDir, idea);
+        chmodOpenRecursive(accRoot);
+
+        const result = runCli(db, ["--acc-root", accRoot]);
+        assert.equal(result.status, 0, `run failed: ${result.stderr}\n${result.stdout}`);
+
+        // the table must still exist and hold exactly one row -- proves no
+        // fragment of the embedded "DROP TABLE"/semicolon text actually
+        // executed as a second SQL statement.
+        const tableStillExists = psqlOk(
+          db,
+          "select count(*) from information_schema.tables where table_schema='intake' and table_name='idea';",
+        ).trim();
+        assert.equal(tableStillExists, "1", "intake.idea must still exist -- an injected DROP TABLE would have removed it");
+        const totalRows = psqlOk(db, "select count(*) from intake.idea;").trim();
+        assert.equal(totalRows, "1", "an injected extra statement would show up as more (or fewer) rows than the one real INSERT produced");
+
+        const row = JSON.parse(
+          psqlOk(
+            db,
+            "select json_build_object('title', title, 'problem', problem, 'outcome', outcome, 'notes', notes, 'source', source) " +
+              "from intake.idea limit 1;",
+          ).trim(),
+        );
+        assert.equal(row.problem, adversarial.sqlComment, "SQL-comment-looking text must round-trip as pure data");
+        assert.equal(row.outcome, adversarial.semicolon, "embedded semicolon text must round-trip as pure data, never execute");
+        assert.equal(row.notes, notes, "the full adversarial notes blob (backslash, CRLF, unicode, large string) must round-trip exactly");
+        assert.match(row.source, /^forgepad:f-adde5a71; /);
+        assert.ok(row.source.endsWith(adversarial.singleQuote), "embedded single-quote text in source must round-trip");
+      } finally {
+        rmSync(accRoot, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
+test(
+  "real Postgres + real CLI subprocess: runPsql's own 'SET standard_conforming_strings = on' overrides a hostile database-level off default (Finding 55 defense-in-depth, independent of -X)",
+  { skip: SKIP_REASON },
+  () => {
+    withMigratedDb((db) => {
+      // Simulates the exact precondition Finding 55 identifies as making
+      // quote-doubling escaping insufficient: standard_conforming_strings
+      // off, here set as a database-level default (rather than via a
+      // .psqlrc, which -X/Finding 52 already closes off) so this test
+      // proves the SET-as-first-statement fix independently of -X. Under
+      // "off", a value ending in a backslash right before sqlString's
+      // closing quote is the textbook dangerous case: the backslash escapes
+      // (consumes) what should have been the closing delimiter.
+      psqlOk("postgres", `alter database ${db} set standard_conforming_strings = off;`);
+      const { accRoot, ideasDir } = makeFixtureRoot();
+      try {
+        const idea = {
+          id: "f-b0000001",
+          title: "Escaping test under a hostile database-level off default",
+          problem: "value ending in a trailing backslash\\",
+          outcome: "",
+          confidence: "medium",
+          notes: "",
+          state: "draft",
+          target: "",
+          source: "",
+          created: "2026-01-13T10:00:00.000Z",
+          updated: "2026-01-14T10:00:00.000Z",
+          githubIssue: null,
+        };
+        writeFixture(ideasDir, idea);
+        chmodOpenRecursive(accRoot);
+
+        const result = runCli(db, ["--acc-root", accRoot]);
+        assert.equal(
+          result.status,
+          0,
+          `run failed under a standard_conforming_strings=off database default -- the SET-as-first-statement fix must neutralize this: ${result.stderr}\n${result.stdout}`,
+        );
+
+        const problem = psqlOk(db, "select problem from intake.idea where source = 'forgepad:f-b0000001';").trim();
+        assert.equal(
+          problem,
+          "value ending in a trailing backslash\\",
+          "the trailing-backslash payload must round-trip exactly even when the database's own default is standard_conforming_strings=off",
+        );
+      } finally {
+        rmSync(accRoot, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
+// === Finding 56: a role without superuser/BYPASSRLS is rejected by the
+// preflight check before any write, with a clear message =================
+
+test(
+  "real Postgres + real CLI subprocess: a plain non-bypassrls table owner is rejected by the preflight role check before any write, with a clear message (Finding 56)",
+  { skip: SKIP_REASON },
+  () => {
+    withMigratedDb((db) => {
+      const { accRoot, ideasDir } = makeFixtureRoot();
+      const lowPrivRole = "m3_08_forgepad_lowpriv";
+      const lowPrivPassword = `M3-08-test-pw-${process.pid}-${Math.floor(Math.random() * 1e8)}`;
+      try {
+        // Finding 56 (independent review): intake.idea's real migration uses
+        // FORCE ROW LEVEL SECURITY, so ordinary table ownership does NOT get
+        // the usual owner-bypass -- only an actual superuser or a role
+        // carrying BYPASSRLS does. This reproduces that directly: a real,
+        // separately-authenticated role (password over TCP, not peer-auth-
+        // as-postgres) that owns intake.idea (the exact scenario the old
+        // help text wrongly called sufficient) but carries neither
+        // attribute. Membership in `authenticated` gives it the same
+        // schema-usage/function-execute/column grants a real API caller
+        // would have, so the run reaches the RLS-relevant path itself
+        // instead of failing on unrelated missing grants.
+        psqlOk(
+          db,
+          `drop role if exists ${lowPrivRole};
+           create role ${lowPrivRole} login password '${lowPrivPassword}' in role authenticated
+             nosuperuser nobypassrls noreplication nocreatedb nocreaterole;
+           grant usage on schema intake to ${lowPrivRole};
+           alter table intake.idea owner to ${lowPrivRole};`,
+        );
+
+        writeFixture(ideasDir, fullFixtureSet()[0]);
+        chmodOpenRecursive(accRoot);
+
+        const lowPrivDatabaseUrl = `postgres://${lowPrivRole}:${lowPrivPassword}@127.0.0.1:5432/${db}`;
+        const result = spawnSync("node", [CLI_PATH, "--acc-root", accRoot], {
+          encoding: "utf8",
+          timeout: 20000,
+          env: { ...process.env, DATABASE_URL: lowPrivDatabaseUrl },
+        });
+
+        assert.notEqual(result.status, 0, "a role without superuser/BYPASSRLS must be rejected before any write");
+        const output = result.stdout + result.stderr;
+        assert.match(
+          output,
+          /BYPASSRLS|superuser/i,
+          `expected a clear BYPASSRLS/superuser preflight message, got:\n${output}`,
+        );
+
+        const rowCount = psqlOk(db, "select count(*) from intake.idea;").trim();
+        assert.equal(rowCount, "0", "the preflight check must reject the role before any row is written");
+      } finally {
+        try {
+          psqlOk(db, `alter table intake.idea owner to postgres; drop role if exists ${lowPrivRole};`);
+        } catch {
+          // best-effort cleanup of the cluster-wide role; the scratch
+          // database itself is dropped regardless by withMigratedDb's own
+          // finally, but roles are cluster-wide and would otherwise leak
+          // across test runs.
+        }
         rmSync(accRoot, { recursive: true, force: true });
       }
     });

@@ -58,6 +58,33 @@ const STATES = new Set(["draft", "definite", "research-needed", "rejected"]);
 const CONFIDENCES = new Set(["low", "medium", "high"]);
 const FORGEPAD_ID_RE = /^f-[0-9a-f]{8}$/;
 
+// Finding 54 (independent review): the ORIGINAL check here was bare
+// `Date.parse`, which is far more permissive than what Postgres's own
+// `::timestamptz` cast (buildRowSql/buildUpdateRowSql both cast created/
+// updated this way) actually accepts. Two concrete gaps, both confirmed
+// empirically against a real Postgres: `Date.parse("2026-02-30T00:00:00Z")`
+// silently rolls forward to March, and `Date.parse("0")` silently
+// interprets it as the year 2000 -- Postgres's cast REJECTS both outright
+// with "date/time field value out of range". Since this script never
+// normalizes the timestamp, a bad value currently sails through this
+// preflight cleanly and only fails much later, deep inside a batch
+// transaction, with a confusing Postgres error instead of an early, clear,
+// per-file message. forgepad's own store.mjs (createIdea/updateIdea) only
+// EVER writes `new Date().toISOString()` -- the canonical
+// `YYYY-MM-DDTHH:mm:ss.sssZ` shape is the only shape this data has ever
+// actually had -- so checking that exact shape, plus a round-trip
+// (`new Date(s).toISOString() === s`) to also reject a canonical-LOOKING but
+// calendar-invalid value (e.g. "2026-02-30T00:00:00.000Z", which the regex
+// alone would still accept), stays byte-precise for every real fixture this
+// tool will ever see while closing both gaps.
+const CANONICAL_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+function isCanonicalTimestamp(value) {
+  if (typeof value !== "string" || !CANONICAL_TIMESTAMP_RE.test(value)) return false;
+  const d = new Date(value);
+  return !Number.isNaN(d.getTime()) && d.toISOString() === value;
+}
+
 // Returns an array of human-readable problems; empty means the file is a
 // well-shaped forgepad idea record. Deliberately collects every problem
 // instead of throwing on the first, so the CLI's "list every bad file"
@@ -86,11 +113,15 @@ export function validateForgepadIdea(idea) {
   if (idea.problem !== undefined && typeof idea.problem !== "string") problems.push("problem must be a string");
   if (idea.outcome !== undefined && typeof idea.outcome !== "string") problems.push("outcome must be a string");
   if (idea.notes !== undefined && typeof idea.notes !== "string") problems.push("notes must be a string");
-  if (typeof idea.created !== "string" || Number.isNaN(Date.parse(idea.created))) {
-    problems.push("created must be a parseable date string");
+  if (!isCanonicalTimestamp(idea.created)) {
+    problems.push(
+      `created must be a canonical ISO-8601 UTC timestamp (YYYY-MM-DDTHH:mm:ss.sssZ), got ${JSON.stringify(idea.created)}`,
+    );
   }
-  if (typeof idea.updated !== "string" || Number.isNaN(Date.parse(idea.updated))) {
-    problems.push("updated must be a parseable date string");
+  if (!isCanonicalTimestamp(idea.updated)) {
+    problems.push(
+      `updated must be a canonical ISO-8601 UTC timestamp (YYYY-MM-DDTHH:mm:ss.sssZ), got ${JSON.stringify(idea.updated)}`,
+    );
   }
   // Finding 14 (independent review): mapForgepadIdea never copies
   // githubIssue anywhere in the intake.idea row (05-h section 10's mapping
@@ -218,12 +249,18 @@ export function partitionNewRows(rows, existingSources) {
   }
 
   const newRows = [];
-  let alreadyPresent = 0;
+  // Finding 53 (independent review): originally just an `alreadyPresent`
+  // counter. insertRows now needs the actual matched row objects too, to
+  // diff each one's freshly mapped content against what is stored and
+  // decide whether it needs a content UPDATE -- `alreadyPresent` stays as a
+  // plain count (unchanged shape) for every existing caller/test that only
+  // reads the count; `alreadyPresentRows` is additive.
+  const alreadyPresentRows = [];
   for (const row of deduped) {
-    if (existingSources.has(row.source)) alreadyPresent++;
+    if (existingSources.has(row.source)) alreadyPresentRows.push(row);
     else newRows.push(row);
   }
-  return { newRows, alreadyPresent, duplicateInBatch };
+  return { newRows, alreadyPresentRows, alreadyPresent: alreadyPresentRows.length, duplicateInBatch };
 }
 
 // === File loading (validate/parse ALL files before any DB touch) ==========
@@ -313,26 +350,120 @@ function sqlString(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+// Finding 52 (independent review): neither spawnSync call originally passed
+// -X/--no-psqlrc, so an operator's own ~/.psqlrc (e.g. `\set
+// standard_conforming_strings off`, or an output-format override) could
+// silently change parsing/escaping semantics this script's idempotency
+// detection and sqlString escaping both depend on staying stable. -X makes
+// every invocation ignore ~/.psqlrc entirely, with zero behavior change for
+// an operator with no .psqlrc (or one that doesn't touch
+// formatting/escaping-relevant settings).
+//
+// Finding 55 (independent review, defense-in-depth): sqlString is
+// quote-doubling escaping, which is safe under Postgres's default
+// standard_conforming_strings=on (verified empirically: embedded quotes,
+// semicolons, SQL-comment text, CRLF, Unicode, and long strings all
+// round-trip as pure data) but NOT sufficient if that setting were ever off
+// (a trailing backslash immediately before the closing quote can then
+// consume it, breaking the literal). -X above already removes the one
+// concrete way an operator could flip it (a .psqlrc), so this SET is
+// belt-and-braces: it forces the setting explicitly, as the very first
+// statement of every script this tool ever sends, independent of -X, of any
+// database-level `ALTER DATABASE ... SET standard_conforming_strings`
+// default, and of any future refactor that might accidentally drop -X.
 function runPsql(databaseUrl, sqlText) {
-  return spawnSync("psql", [databaseUrl, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
+  const guarded = `SET standard_conforming_strings = on;\n${sqlText}`;
+  return spawnSync("psql", [databaseUrl, "-X", "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
     encoding: "utf8",
-    input: sqlText,
+    input: guarded,
     timeout: 30000,
   });
 }
 
-function fetchExistingSources(databaseUrl, sources) {
-  if (!sources.length) return new Set();
-  const list = sources.map(sqlString).join(", ");
-  const result = runPsql(databaseUrl, `select source from intake.idea where source in (${list});`);
-  if (result.status !== 0) {
-    throw new Error(`migrate-forgepad: failed to query existing intake.idea rows: ${(result.stderr || result.stdout).trim()}`);
+// Finding 51 (independent review): both call sites originally read
+// `(result.stderr || result.stdout).trim()` unconditionally, which only
+// covers a genuine SQL failure (non-zero status, real stderr text). Two
+// other spawnSync outcomes reach this same code path and both produced
+// confusing results before this fix:
+//   - psql not on PATH: spawnSync sets `result.error = {code: 'ENOENT', ...}`
+//     and leaves stdout/stderr `undefined` -- `.trim()` on `undefined` threw
+//     a raw "Cannot read properties of undefined (reading 'trim')" TypeError
+//     instead of ever reaching a message about psql being missing.
+//   - a timeout (30s, see runPsql above): spawnSync sets `status: null,
+//     signal: 'SIGTERM'` and stdout/stderr to `""` (not undefined) -- no
+//     TypeError, but `.trim()` on empty strings silently produced an EMPTY
+//     error message, giving the operator zero signal a timeout (vs a real
+//     SQL failure) occurred.
+// This distinguishes all three cases explicitly, in order (spawn error,
+// then timeout/signal, then a genuine SQL failure falls through to the
+// original stderr/stdout text), so the thrown message always names what
+// actually happened. `result.status !== 0` at each call site already
+// catches all three (a failed spawn and a timeout both leave status null),
+// so no caller-side branching changes -- only this shared message builder.
+export function describePsqlFailure(result) {
+  if (result.error) {
+    if (result.error.code === "ENOENT") return "psql not found on PATH";
+    return `failed to spawn psql: ${result.error.message}`;
   }
-  return new Set(
-    result.stdout
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter(Boolean),
+  if (result.status === null) {
+    return `psql timed out or was killed (signal: ${result.signal ?? "unknown"})`;
+  }
+  return (result.stderr || result.stdout || "").trim();
+}
+
+// Finding 53 (independent review): fetchExistingSources originally returned
+// only the bare `source` strings already present, which is all
+// partitionNewRows needs to decide new-vs-not -- but gave insertRows no way
+// to tell whether an already-present row's OTHER mapped fields (title,
+// notes, confidence, target_repo) still match the current forgepad file.
+// Renamed to fetchExistingRows and widened to fetch the full set of mapped
+// columns (via json_agg/json_build_object, not a naive pipe-delimited
+// select+split -- immune to embedded delimiters/newlines in title/notes,
+// unlike a raw -tA multi-column select would be) so insertRows can diff a
+// rerun's freshly mapped row against what is actually stored and issue an
+// UPDATE when they differ, closing the "stale row after an edited forgepad
+// file" gap. `status` is included too, purely so buildUpdateRowSql can avoid
+// nulling target_repo out from under an already-promoted 'idea' row (see its
+// own comment) -- it is deliberately NOT part of the content-diff comparison
+// itself (mappedRowContentEquals), since state-machine transitions are
+// handled separately by the existing promote-in-place logic, not by this
+// content UPDATE.
+function fetchExistingRows(databaseUrl, sources) {
+  if (!sources.length) return new Map();
+  const list = sources.map(sqlString).join(", ");
+  const result = runPsql(
+    databaseUrl,
+    "select coalesce(json_agg(json_build_object(" +
+      "'source', source, 'title', title, 'problem', problem, 'outcome', outcome, " +
+      "'notes', notes, 'confidence', confidence, 'target_repo', target_repo, 'status', status" +
+      `)), '[]'::json)::text from intake.idea where source in (${list});`,
+  );
+  if (result.status !== 0) {
+    throw new Error(`migrate-forgepad: failed to query existing intake.idea rows: ${describePsqlFailure(result)}`);
+  }
+  const raw = result.stdout.trim();
+  const parsed = raw ? JSON.parse(raw) : [];
+  const map = new Map();
+  for (const r of parsed) map.set(r.source, r);
+  return map;
+}
+
+// Finding 53 (independent review): pure, DB-free comparison between a
+// freshly mapped row and the row currently stored for the same `source` --
+// exactly the six mapped fields the finding calls out (title/notes/
+// confidence/target/problem/outcome; "target" here is `target_repo`).
+// Deliberately excludes `status`: a state-machine transition (draft -> idea)
+// is handled by the existing promote-in-place UPDATE, not by this
+// content-diff, so an unrelated status difference must never by itself
+// trigger (or suppress) a content update.
+export function mappedRowContentEquals(row, dbRow) {
+  return (
+    row.title === dbRow.title &&
+    row.problem === dbRow.problem &&
+    row.outcome === dbRow.outcome &&
+    row.notes === dbRow.notes &&
+    row.confidence === dbRow.confidence &&
+    (row.targetRepo ?? null) === (dbRow.target_repo ?? null)
   );
 }
 
@@ -362,7 +493,7 @@ const FORGEPAD_SOURCE_CONFLICT_TARGET =
 // f-<hex8> id).
 //
 // Finding 11 (independent review): `ON CONFLICT ... DO NOTHING RETURNING
-// source` closes the TOCTOU window fetchExistingSources's pre-check alone
+// source` closes the TOCTOU window fetchExistingRows's pre-check alone
 // left open (two concurrent CLI runs could both pass that pre-check for the
 // same forgepad idea, since it happens in its own psql invocation BEFORE
 // this transaction opens). The arbiter is intake_idea_forgepad_source_ref
@@ -409,25 +540,80 @@ function buildRowSql(row) {
   return insertSql;
 }
 
-// Runs the whole batch of new rows in a single transaction: either every
-// remaining row lands, or (ON_ERROR_STOP=1 stops the script before COMMIT,
-// and Postgres rolls back the still-open transaction on disconnect) none
-// do. Returns how many were actually inserted versus already present —
-// counting BOTH rows the pre-check already knew about (`alreadyPresent`
-// from partitionNewRows) and any row that lost a genuine TOCTOU race inside
-// this very transaction (Finding 11: detected via the RETURNING clause
-// buildRowSql adds to every INSERT, since ON CONFLICT DO NOTHING makes a
-// raced row silently absent from the script's output instead of erroring).
-export function insertRows(databaseUrl, rows) {
-  if (!rows.length) return { inserted: 0, alreadyPresent: 0, duplicateInBatch: 0 };
-  const existing = fetchExistingSources(databaseUrl, rows.map((r) => r.source));
-  const { newRows, alreadyPresent, duplicateInBatch } = partitionNewRows(rows, existing);
-  if (!newRows.length) return { inserted: 0, alreadyPresent, duplicateInBatch };
+// Finding 53 (independent review): the P1 dedupe/index work correctly makes
+// a rerun insert-idempotent by `source`, but that means the moment a row's
+// `source` marker exists, fetchExistingRows/partitionNewRows excluded it
+// from `newRows` entirely -- no INSERT, no comparison, nothing -- even if
+// the forgepad file's OTHER mapped fields (title/notes/confidence/target/
+// problem/outcome) had since been edited. Chose option (a) from the finding
+// (propagate the edit) over (b) (warn-only, strict one-shot semantics): the
+// existing dedupe/index machinery already gives insertRows the exact
+// "already present" row set for free, so diffing it against the freshly
+// mapped row and emitting a plain content UPDATE is a small, safe addition
+// that does not touch the state machine, the guard triggers, or the
+// TOCTOU/ON CONFLICT insert path at all -- it composes alongside them, never
+// replaces them. Never demotes `status` (idea -> draft is not a transition
+// guard_idea_update allows, and this migration should not attempt it); only
+// ever promotes draft -> idea via the existing, separate promotion UPDATE,
+// exactly like a fresh insert does.
+function buildUpdateRowSql(row, dbStatus) {
+  const setClauses = [
+    `title = ${sqlString(row.title)}`,
+    `problem = ${sqlString(row.problem)}`,
+    `outcome = ${sqlString(row.outcome)}`,
+    `notes = ${sqlString(row.notes)}`,
+    `confidence = ${sqlString(row.confidence)}`,
+  ];
+  // Guard against violating the DDL's repo_required_beyond_draft check
+  // (status = 'draft' or target_repo is not null): this UPDATE never lowers
+  // `status`, so if the DB row is already promoted to 'idea' and the
+  // freshly mapped target is no longer a valid repo (row.targetRepo is
+  // null), leave target_repo untouched rather than null it out from under a
+  // still-'idea' row -- which the CHECK constraint would reject outright and
+  // abort the whole batch transaction on. (row.targetRepo is only ever null
+  // when row.status is NOT 'idea' -- mapForgepadIdea only sets status='idea'
+  // when targetIsRepo is true -- so this guard can never fire for a row this
+  // same call is also about to promote.)
+  if (!(row.targetRepo === null && dbStatus === "idea")) {
+    setClauses.push(`target_repo = ${row.targetRepo === null ? "NULL" : sqlString(row.targetRepo)}`);
+  }
+  const updateSql = `update intake.idea set ${setClauses.join(", ")} where source = ${sqlString(row.source)};`;
+  if (row.status === "idea") {
+    return `${updateSql}\nupdate intake.idea set status = 'idea' where source = ${sqlString(row.source)} and status = 'draft';`;
+  }
+  return updateSql;
+}
 
-  const script = ["begin;", ...newRows.map(buildRowSql), "commit;"].join("\n");
+// Runs the whole batch in a single transaction: either every remaining
+// insert/update lands, or (ON_ERROR_STOP=1 stops the script before COMMIT,
+// and Postgres rolls back the still-open transaction on disconnect) none
+// do. Returns how many were actually inserted, how many existing rows were
+// updated to match an edited forgepad file (Finding 53), and how many were
+// left alone -- counting BOTH rows the pre-check already knew about
+// (`alreadyPresent` from partitionNewRows, minus any reclassified as
+// `updated`) and any row that lost a genuine TOCTOU race inside this very
+// transaction (Finding 11: detected via the RETURNING clause buildRowSql
+// adds to every INSERT, since ON CONFLICT DO NOTHING makes a raced row
+// silently absent from the script's output instead of erroring). A raced
+// row is counted under `alreadyPresent`, not diffed for `updated` -- it
+// arrived concurrently, after this run's own fetchExistingRows snapshot, so
+// this run never saw its content to compare against.
+export function insertRows(databaseUrl, rows) {
+  if (!rows.length) return { inserted: 0, updated: 0, alreadyPresent: 0, duplicateInBatch: 0 };
+  const existingRows = fetchExistingRows(databaseUrl, rows.map((r) => r.source));
+  const existingSources = new Set(existingRows.keys());
+  const { newRows, alreadyPresentRows, duplicateInBatch } = partitionNewRows(rows, existingSources);
+
+  const toUpdate = alreadyPresentRows.filter((row) => !mappedRowContentEquals(row, existingRows.get(row.source)));
+  const unchanged = alreadyPresentRows.length - toUpdate.length;
+
+  const statements = [...newRows.map(buildRowSql), ...toUpdate.map((row) => buildUpdateRowSql(row, existingRows.get(row.source).status))];
+  if (!statements.length) return { inserted: 0, updated: 0, alreadyPresent: unchanged, duplicateInBatch };
+
+  const script = ["begin;", ...statements, "commit;"].join("\n");
   const result = runPsql(databaseUrl, script);
   if (result.status !== 0) {
-    throw new Error(`migrate-forgepad: insert transaction failed, rolled back: ${(result.stderr || result.stdout).trim()}`);
+    throw new Error(`migrate-forgepad: insert/update transaction failed, rolled back: ${describePsqlFailure(result)}`);
   }
   const returnedSources = new Set(
     result.stdout
@@ -437,7 +623,38 @@ export function insertRows(databaseUrl, rows) {
   );
   const actuallyInserted = newRows.filter((r) => returnedSources.has(r.source)).length;
   const racedAway = newRows.length - actuallyInserted;
-  return { inserted: actuallyInserted, alreadyPresent: alreadyPresent + racedAway, duplicateInBatch };
+  return { inserted: actuallyInserted, updated: toUpdate.length, alreadyPresent: unchanged + racedAway, duplicateInBatch };
+}
+
+// Finding 56 (independent review): printUsage originally advertised "table
+// owner / superuser / service role" as interchangeably sufficient. That is
+// wrong for the actual, committed schema: intake.idea's migration
+// (20260813002605_intake_create_schema.sql) uses `force row level security`
+// with a policy scoped `to authenticated` -- under FORCE, a PLAIN table
+// owner does NOT get the ordinary owner-bypass; only an actual superuser or
+// a role carrying the BYPASSRLS attribute does (which Supabase's
+// service_role normally carries). Confirmed empirically against a real
+// Postgres: a non-superuser, non-BYPASSRLS table owner under this exact
+// FORCE + policy shape got zero rows back from a SELECT and a real
+// RLS-violation error on INSERT -- both confusing, both happening mid-batch
+// after files were already validated, not before any write was attempted.
+// This preflight runs once, before the batch transaction, and fails loud
+// with the real requirement named plainly, instead of letting an
+// under-privileged role reach a generic RLS error partway through.
+function checkRoleCapability(databaseUrl) {
+  const result = runPsql(databaseUrl, "select (rolsuper or rolbypassrls) from pg_roles where rolname = current_user;");
+  if (result.status !== 0) {
+    throw new Error(`migrate-forgepad: failed to check the connected role's privileges: ${describePsqlFailure(result)}`);
+  }
+  const capable = result.stdout.trim() === "t";
+  if (!capable) {
+    throw new Error(
+      "migrate-forgepad: FAIL — the connected role is neither a superuser nor BYPASSRLS. " +
+        "intake.idea uses FORCE ROW LEVEL SECURITY, so ordinary table ownership is NOT sufficient " +
+        "(that only bypasses RLS when FORCE is absent) -- connect as an actual superuser or a role " +
+        "carrying the BYPASSRLS attribute (e.g. Supabase's service_role) before retrying. No rows have been written.",
+    );
+  }
 }
 
 // === CLI =====================================================================
@@ -486,8 +703,10 @@ function printUsage() {
       "",
       "Without --dry-run, DATABASE_URL must be set to a libpq-recognized connection target",
       "(a bare local database name for peer/socket auth, or a postgres:// URI) reaching a",
-      "database with the intake schema migration already applied, connected as a role that",
-      "bypasses PostgREST's authenticated grants (table owner / superuser / service role).",
+      "database with the intake schema migration already applied. intake.idea uses FORCE ROW",
+      "LEVEL SECURITY, so ordinary table ownership is NOT sufficient to bypass its RLS policy --",
+      "connect as an actual superuser or a role carrying the BYPASSRLS attribute (e.g. Supabase's",
+      "service_role); this is checked before any write and the run fails loud if it is not met.",
     ].join("\n"),
   );
 }
@@ -559,6 +778,16 @@ export function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
+  // Finding 56 (independent review): checked once, up front, before any
+  // insert/update statement is built or sent -- see checkRoleCapability's
+  // own comment for why a plain table owner is not sufficient here.
+  try {
+    checkRoleCapability(databaseUrl);
+  } catch (e) {
+    console.error(e.message);
+    return 1;
+  }
+
   const toInsert = mapped.filter((row) => !row.skip);
   let result;
   try {
@@ -568,7 +797,8 @@ export function main(argv = process.argv.slice(2)) {
     return 1;
   }
   console.log(
-    `migrate-forgepad: inserted ${result.inserted}, already migrated (skipped) ${result.alreadyPresent}, ` +
+    `migrate-forgepad: inserted ${result.inserted}, updated ${result.updated}, ` +
+      `already migrated (unchanged, skipped) ${result.alreadyPresent}, ` +
       `rejected (not migrated) ${counts.rejected}, duplicate forgepad id within this run (skipped) ${result.duplicateInBatch}`,
   );
   return 0;

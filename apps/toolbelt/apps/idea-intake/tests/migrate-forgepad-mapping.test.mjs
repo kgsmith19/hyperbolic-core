@@ -20,6 +20,8 @@ import {
   summarizeCounts,
   partitionNewRows,
   parseArgs,
+  describePsqlFailure,
+  mappedRowContentEquals,
 } from "../tools/migrate-forgepad.mjs";
 
 function baseIdea(overrides = {}) {
@@ -217,6 +219,65 @@ test("validateForgepadIdea flags unparseable created/updated timestamps", () => 
   assert.ok(validateForgepadIdea(baseIdea({ updated: "not-a-date" })).some((p) => p.includes("updated must be")));
 });
 
+// --- Finding 54: canonical-shape + round-trip timestamp validation --------
+// (replaces bare Date.parse, which is more permissive than Postgres's own
+// ::timestamptz cast -- see the CANONICAL_TIMESTAMP_RE comment in the tool.)
+
+test("validateForgepadIdea accepts the exact canonical shape forgepad's store.mjs always writes (new Date().toISOString())", () => {
+  assert.deepEqual(validateForgepadIdea(baseIdea({ created: "2026-03-04T05:06:07.123Z", updated: "2026-03-04T05:06:07.999Z" })), []);
+});
+
+test(
+  "validateForgepadIdea rejects a Feb-30 timestamp that Date.parse silently rolls forward to March (RED before the fix: bare Date.parse accepted this)",
+  () => {
+    const problems = validateForgepadIdea(baseIdea({ created: "2026-02-30T00:00:00Z" }));
+    assert.ok(
+      problems.some((p) => p.includes("created must be a canonical ISO-8601")),
+      `expected a clear canonical-timestamp problem, got: ${JSON.stringify(problems)}`,
+    );
+  },
+);
+
+test(
+  "validateForgepadIdea rejects a canonical-SHAPED but calendar-invalid Feb-30 timestamp with milliseconds (proves the round-trip check, not just the shape regex, is doing real work)",
+  () => {
+    // "2026-02-30T00:00:00.000Z" matches CANONICAL_TIMESTAMP_RE's shape
+    // exactly -- only `new Date(s).toISOString() === s` catches that
+    // Postgres/JS both roll Feb 30 forward to March 2, so this specific
+    // fixture is a mutation guard for the round-trip half of the check, not
+    // just the regex half.
+    const problems = validateForgepadIdea(baseIdea({ created: "2026-02-30T00:00:00.000Z" }));
+    assert.ok(
+      problems.some((p) => p.includes("created must be a canonical ISO-8601")),
+      `expected a clear canonical-timestamp problem, got: ${JSON.stringify(problems)}`,
+    );
+  },
+);
+
+test(
+  'validateForgepadIdea rejects "0" (RED before the fix: bare Date.parse silently interpreted this as the year 2000)',
+  () => {
+    const problems = validateForgepadIdea(baseIdea({ updated: "0" }));
+    assert.ok(problems.some((p) => p.includes("updated must be a canonical ISO-8601")));
+  },
+);
+
+test("validateForgepadIdea rejects a handful of other non-canonical-but-Date.parse-parseable timestamp shapes", () => {
+  for (const notCanonical of [
+    "2026-01-01",
+    "2026-01-01T00:00:00Z",
+    "January 1, 2026",
+    "2026/01/01 00:00:00",
+    "2026-01-01T00:00:00.000+00:00",
+  ]) {
+    const problems = validateForgepadIdea(baseIdea({ created: notCanonical }));
+    assert.ok(
+      problems.some((p) => p.includes("created must be a canonical ISO-8601")),
+      `expected ${JSON.stringify(notCanonical)} to be rejected, got: ${JSON.stringify(problems)}`,
+    );
+  }
+});
+
 test("validateForgepadIdea accumulates multiple independent problems in one pass", () => {
   const problems = validateForgepadIdea(baseIdea({ title: "", state: "flying", confidence: "maybe" }));
   assert.equal(problems.length, 3);
@@ -336,6 +397,83 @@ test("partitionNewRows in-batch dedupe composes correctly with the existing-sour
   assert.deepEqual(newRows.map((r) => r.id), ["f-dupe0002", "f-brandnew"]);
   assert.equal(alreadyPresent, 1);
   assert.equal(duplicateInBatch, 1);
+});
+
+// --- Finding 53: partitionNewRows also exposes the matched row objects ----
+// (not just a count), so insertRows can diff each one's content against the
+// database and decide whether it needs a content UPDATE.
+
+test("partitionNewRows returns the actual already-present row objects, not just a count", () => {
+  const rowA = { id: "f-a", source: "forgepad:f-a" };
+  const rowB = { id: "f-b", source: "forgepad:f-b" };
+  const { alreadyPresentRows } = partitionNewRows([rowA, rowB], new Set(["forgepad:f-b"]));
+  assert.deepEqual(alreadyPresentRows, [rowB]);
+});
+
+// === mappedRowContentEquals (Finding 53's DB-free content diff) ===========
+
+test("mappedRowContentEquals is true when every mapped field matches the stored row", () => {
+  const row = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "high", targetRepo: "o/r" };
+  const dbRow = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "high", target_repo: "o/r", status: "idea" };
+  assert.equal(mappedRowContentEquals(row, dbRow), true);
+});
+
+test("mappedRowContentEquals treats a null targetRepo and a null target_repo as equal (not '' vs null mismatches)", () => {
+  const row = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "medium", targetRepo: null };
+  const dbRow = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "medium", target_repo: null, status: "draft" };
+  assert.equal(mappedRowContentEquals(row, dbRow), true);
+});
+
+test("mappedRowContentEquals is false when exactly one mapped field (e.g. title) has been edited", () => {
+  const row = { title: "Revised title", problem: "P", outcome: "O", notes: "N", confidence: "medium", targetRepo: null };
+  const dbRow = { title: "Original title", problem: "P", outcome: "O", notes: "N", confidence: "medium", target_repo: null, status: "draft" };
+  assert.equal(mappedRowContentEquals(row, dbRow), false);
+});
+
+test("mappedRowContentEquals ignores status entirely -- a status difference alone must never register as a content diff", () => {
+  const row = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "medium", targetRepo: "o/r" };
+  const dbRow = { title: "T", problem: "P", outcome: "O", notes: "N", confidence: "medium", target_repo: "o/r", status: "draft" };
+  assert.equal(mappedRowContentEquals(row, dbRow), true, "status is handled by the separate promotion UPDATE, not this content diff");
+});
+
+// === describePsqlFailure (Finding 51) ======================================
+// Each fixture below is exactly the shape Node's own spawnSync documentation
+// describes for that outcome -- constructed directly rather than mocking
+// child_process.spawnSync, since describePsqlFailure takes the already-
+// returned result object as its only input and every branch is reachable
+// this way without spawning a real process.
+
+test(
+  "describePsqlFailure reports a clear 'psql not found on PATH' message for an ENOENT spawn error, not a raw TypeError (RED before the fix: (result.stderr || result.stdout).trim() threw on undefined)",
+  () => {
+    const result = { status: null, signal: null, stdout: undefined, stderr: undefined, error: { code: "ENOENT", message: "spawnSync psql ENOENT" } };
+    assert.equal(describePsqlFailure(result), "psql not found on PATH");
+  },
+);
+
+test("describePsqlFailure reports a clear message for a non-ENOENT spawn error too (e.g. EACCES)", () => {
+  const result = { status: null, signal: null, stdout: undefined, stderr: undefined, error: { code: "EACCES", message: "spawnSync psql EACCES" } };
+  assert.match(describePsqlFailure(result), /failed to spawn psql.*EACCES/);
+});
+
+test(
+  "describePsqlFailure names a timeout explicitly, including the signal (RED before the fix: (result.stderr || result.stdout).trim() silently produced an EMPTY string, indistinguishable from any other failure)",
+  () => {
+    const result = { status: null, signal: "SIGTERM", stdout: "", stderr: "", error: undefined };
+    const message = describePsqlFailure(result);
+    assert.match(message, /timed out|killed/);
+    assert.match(message, /SIGTERM/);
+  },
+);
+
+test("describePsqlFailure falls through to real stderr text for a genuine SQL failure (non-zero status)", () => {
+  const result = { status: 1, signal: null, stdout: "", stderr: "ERROR:  syntax error at or near \"garbage\"\n", error: undefined };
+  assert.equal(describePsqlFailure(result), 'ERROR:  syntax error at or near "garbage"');
+});
+
+test("describePsqlFailure falls back to stdout when stderr is empty for a genuine SQL failure", () => {
+  const result = { status: 3, signal: null, stdout: "some diagnostic on stdout\n", stderr: "", error: undefined };
+  assert.equal(describePsqlFailure(result), "some diagnostic on stdout");
 });
 
 // === summarizeCounts =========================================================
