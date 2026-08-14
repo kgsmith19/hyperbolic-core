@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classifySession, classifyThrown, mapSessionToResult } from "../src/result-mapper.ts";
+import { classifySession, classifyThrown, mapSessionToResult, tokensFromSession } from "../src/result-mapper.ts";
 import { validateResultContract } from "../src/contracts.ts";
 import type { HarnessSession } from "../src/adapters/types.ts";
 
@@ -65,7 +65,16 @@ test("mapSessionToResult: accepted -> succeeded, verdicts derived from kernel cr
   assert.equal(result.verdicts[0]!.pass, true);
   assert.equal(result.verdicts[0]!.exit, 0);
   assert.equal(result.cost.input_tokens, 1500);
+  // BR-5: cost accounting is queryable with non-null tokens AND dollars,
+  // not just tokens with a permanently-null dollar placeholder.
+  assert.equal(result.cost.usd_estimate, 0.009);
+  assert.equal(tokensFromSession(session), 1500);
   assert.equal(validateResultContract(result).valid, true, JSON.stringify(validateResultContract(result).errors));
+});
+
+test("tokensFromSession: no tokens field in raw -> 0, never a crash", () => {
+  const session: HarnessSession = { sessionId: "s", outcome: "orphaned", raw: { error: "no stdout" } };
+  assert.equal(tokensFromSession(session), 0);
 });
 
 test("mapSessionToResult: rejected -> failed, a failing criterion's exit code parsed from its detail text", () => {

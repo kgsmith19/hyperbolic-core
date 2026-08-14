@@ -12,7 +12,9 @@ import os from "node:os";
 import path from "node:path";
 import { BrainStore } from "../src/store.ts";
 import { RunJournal } from "../src/journal.ts";
+import { BrainLogger } from "../src/log.ts";
 import { createDispatchFn } from "../src/dispatch.ts";
+import { estimateUsd } from "../src/pricing.ts";
 import type { AdapterRegistry } from "../src/router.ts";
 import type { AdapterInvocation, HarnessAdapter, HarnessId, HarnessSession, ProbeResult } from "../src/adapters/types.ts";
 import type { TaskContractV1 } from "../src/contracts.ts";
@@ -266,4 +268,110 @@ test("m4-11: a dirty (uncommitted) worktree fails the task even when every verdi
 
   const finalTask = store.getTask(task.id);
   assert.equal(finalTask?.status, "failed", "every verdict passed, but the worktree was left dirty -- condition 2 of the completed definition");
+});
+
+// m4-17: BR-5 cost accounting, run finalization, and the run_id -> task_id
+// -> invocation_id join key, exercised through the real dispatch() path
+// (not just result-mapper.ts/pricing.ts in isolation).
+
+test("m4-17: a succeeded invocation gets its own cost row (non-null tokens and dollars), and the run itself finalizes to completed", async () => {
+  const repo = initSourceRepo();
+  const store = new BrainStore(tmpDbPath());
+  const workspacesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brain-dispatch-ws-"));
+
+  const accepted = async (): Promise<HarnessSession> => ({ sessionId: "s", outcome: "accepted", raw: { criteria: [], tokens: 2000 } });
+  const claudeCode = new ScriptedAdapter("claude-code", [accepted]);
+  const adapters: AdapterRegistry = { "claude-code": claudeCode };
+
+  const contract = contractFor(repo, "task-cost", "run-cost", []);
+  const task = seedRunAndTask(store, contract);
+
+  const dispatch = createDispatchFn(store, { adapters, workspacesRoot });
+  await dispatch(task);
+
+  const [invocation] = store.listInvocationsForTask(task.id);
+  const [costRow] = store.listCostsForInvocation(invocation!.id);
+  assert.ok(costRow, "BR-5: every Brain-initiated harness invocation shall have cost accounting attributed to it");
+  assert.equal(costRow!.taskId, task.id);
+  assert.equal(costRow!.inputTokens, 2000);
+  assert.equal(costRow!.usdEstimate, estimateUsd(2000, 0, 0));
+  assert.ok(costRow!.usdEstimate! > 0, "non-null, non-zero dollars for a real token count");
+
+  const run = store.getRun(contract.run_id);
+  assert.equal(run?.status, "completed", "07 section 7.6: run/cost summaries roll up after run completion");
+});
+
+test("m4-17: two harness attempts (transport retry) each get their own distinct cost row, keyed by invocation not just task", async () => {
+  const repo = initSourceRepo();
+  const store = new BrainStore(tmpDbPath());
+  const journal = new RunJournal(fs.mkdtempSync(path.join(os.tmpdir(), "brain-dispatch-journal-")));
+  const workspacesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brain-dispatch-ws-"));
+
+  const transportFailure = async (): Promise<HarnessSession> => ({ sessionId: "s", outcome: "failed-to-start", raw: { error: "429 rate limited", tokens: 10 } });
+  const claudeCode = new ScriptedAdapter("claude-code", [transportFailure, transportFailure]);
+  const codex = new ScriptedAdapter("codex", [async () => ({ sessionId: "s2", outcome: "accepted", raw: { criteria: [], tokens: 900 } })]);
+  const adapters: AdapterRegistry = { "claude-code": claudeCode, codex };
+
+  const contract = contractFor(repo, "task-multi-cost", "run-multi-cost", ["codex"]);
+  const task = seedRunAndTask(store, contract);
+
+  const dispatch = createDispatchFn(store, { adapters, workspacesRoot, journal });
+  await dispatch(task);
+
+  const invocations = store.listInvocationsForTask(task.id);
+  assert.equal(invocations.length, 3);
+  const perInvocationCosts = invocations.map((inv) => store.listCostsForInvocation(inv.id));
+  assert.ok(perInvocationCosts.every((rows) => rows.length === 1), "every invocation, including the two failed transport attempts, gets its own cost row");
+  assert.deepEqual(
+    perInvocationCosts.map((rows) => rows[0]!.inputTokens),
+    [10, 10, 900]
+  );
+
+  const runCosts = store.listCostsForRun(contract.run_id);
+  assert.equal(runCosts.length, 3, "listCostsForRun sees every invocation's cost, not just the last one");
+});
+
+test("m4-17: run_id -> task_id -> invocation_id is one join key resolvable across the Brain journal, the store, AND the log -- a fixture-run trace-join test", async () => {
+  const repo = initSourceRepo();
+  const store = new BrainStore(tmpDbPath());
+  const journal = new RunJournal(fs.mkdtempSync(path.join(os.tmpdir(), "brain-dispatch-journal-")));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "brain-dispatch-log-"));
+  const logger = new BrainLogger(dataDir);
+  const workspacesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brain-dispatch-ws-"));
+
+  const accepted = async (): Promise<HarnessSession> => ({ sessionId: "kernel-session-1", outcome: "accepted", raw: { criteria: [], tokens: 777 } });
+  const claudeCode = new ScriptedAdapter("claude-code", [accepted]);
+  const adapters: AdapterRegistry = { "claude-code": claudeCode };
+
+  const contract = contractFor(repo, "task-join", "run-join", []);
+  const task = seedRunAndTask(store, contract);
+
+  const dispatch = createDispatchFn(store, { adapters, workspacesRoot, journal, logger });
+  await dispatch(task);
+
+  const [invocation] = store.listInvocationsForTask(task.id);
+  const invocationId = invocation!.id;
+
+  // 1. The store: cost is attributed to exactly this run/task/invocation.
+  const [costRow] = store.listCostsForInvocation(invocationId);
+  assert.equal(costRow?.taskId, task.id);
+
+  // 2. The log: an ndjson line carries the SAME invocation_id, task_id, run_id.
+  const logLines = fs
+    .readFileSync(logger.file, "utf8")
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l));
+  const costLogLine = logLines.find((l) => l.event === "invocation.cost_recorded" && l.invocation_id === invocationId);
+  assert.ok(costLogLine, "the log's own invocation_id must resolve to the same invocation the store recorded cost against");
+  assert.equal(costLogLine.run_id, contract.run_id);
+  assert.equal(costLogLine.task_id, task.id);
+
+  // 3. The journal: run.finalized carries the same run_id (and, per its
+  // additive 7.9 shape, parses with the same required fields as the log).
+  const events = journal.read(contract.run_id);
+  const finalizedEvent = events.find((e) => e.kind === "run.finalized");
+  assert.ok(finalizedEvent);
+  assert.equal(finalizedEvent?.run_id, contract.run_id);
+  assert.equal(finalizedEvent?.level, "info");
 });

@@ -45,6 +45,13 @@ export interface BrainConfig {
    * configured, not crashing the process. */
   readonly supabaseUrl?: string;
   readonly supabasePublishableKey?: string;
+  /** m4-17's core.log_run mirror (core-mirror.ts) -- optional for the same
+   * reason supabaseUrl/supabasePublishableKey are: the CLI/state-store
+   * surface has never needed Supabase, and a deploy that hasn't
+   * provisioned this yet should mirror nothing rather than fail to
+   * start. mirrorRunToCore's own job is skipping the write (not
+   * throwing) when this is undefined. */
+  readonly supabaseServiceRoleKey?: string;
   /** Scoped agent token verification (ADR-03's "scoped agent token"
    * option) -- also optional; a deploy that hasn't provisioned agent
    * tokens yet (true for V1 until m4-20 mints one from LifeOS) simply
@@ -124,6 +131,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
     repoRoot,
     supabaseUrl: env.SUPABASE_URL,
     supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY,
+    supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
     agentTokenPublicKeyPem,
     agentTokenIssuer,
     agentTokenAudience,

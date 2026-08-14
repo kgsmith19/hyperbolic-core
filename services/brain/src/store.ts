@@ -88,6 +88,7 @@ create index if not exists approval_task_idx on approval (task_id);
 create table if not exists cost (
   id text primary key,
   task_id text not null references task(id),
+  invocation_id text not null references invocation(id),
   input_tokens integer not null default 0,
   output_tokens integer not null default 0,
   cache_read_tokens integer not null default 0,
@@ -95,6 +96,7 @@ create table if not exists cost (
   recorded_at text not null
 );
 create index if not exists cost_task_idx on cost (task_id);
+create index if not exists cost_invocation_idx on cost (invocation_id);
 
 create table if not exists eval_case (
   id text primary key,
@@ -277,10 +279,17 @@ export class BrainStore {
   insertCost(cost: Cost): void {
     this.#db
       .prepare(
-        `insert into cost (id, task_id, input_tokens, output_tokens, cache_read_tokens, usd_estimate, recorded_at)
-         values (?, ?, ?, ?, ?, ?, ?)`
+        `insert into cost (id, task_id, invocation_id, input_tokens, output_tokens, cache_read_tokens, usd_estimate, recorded_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(cost.id, cost.taskId, cost.inputTokens, cost.outputTokens, cost.cacheReadTokens, cost.usdEstimate, cost.recordedAt);
+      .run(cost.id, cost.taskId, cost.invocationId, cost.inputTokens, cost.outputTokens, cost.cacheReadTokens, cost.usdEstimate, cost.recordedAt);
+  }
+
+  /** m4-17: cost attributed to one specific harness attempt (not the whole
+   * task) -- the finer-grained half of the run_id -> task_id ->
+   * invocation_id join key 07 section 7.9 requires. */
+  listCostsForInvocation(invocationId: string): Cost[] {
+    return this.#db.prepare(`select * from cost where invocation_id = ? order by recorded_at asc`).all(invocationId).map(rowToCost);
   }
 
   listCostsForRun(runId: string): Cost[] {
@@ -393,6 +402,7 @@ function rowToCost(r: Row): Cost {
   return {
     id: r.id as string,
     taskId: r.task_id as string,
+    invocationId: r.invocation_id as string,
     inputTokens: r.input_tokens as number,
     outputTokens: r.output_tokens as number,
     cacheReadTokens: r.cache_read_tokens as number,
