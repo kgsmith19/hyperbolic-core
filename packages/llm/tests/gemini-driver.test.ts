@@ -4,43 +4,24 @@ import { geminiDriver } from "../src/drivers/gemini.ts";
 import { complete } from "../src/complete.ts";
 import { MAX_RETRIES } from "../src/retry.ts";
 import { isLlmError } from "../src/errors.ts";
-import type { LlmDelta, LlmErrorClass, LlmRequest } from "../src/types.ts";
+import type { LlmDelta, LlmRequest } from "../src/types.ts";
+import {
+  collectStream,
+  jsonResponse,
+  pacedSseResponse as rawPacedSseResponse,
+  sseResponse as rawSseResponse,
+  tickInSteps,
+  withPatchedFetch,
+  type SseOptions,
+} from "./driver-harness.ts";
 
 // ---------------------------------------------------------------------------
-// Fixtures and fake-transport helpers. Same idiom as anthropic-driver.test.ts
-// and openai-driver.test.ts: no real network call happens in this file --
-// every test patches globalThis.fetch and lets the real `@google/genai` SDK
-// run against that fake transport. Wire field names verified by reading
-// node_modules/@google/genai/dist/index.mjs's own Mldev (Gemini Developer
-// API) request/response mapping functions: they are plain camelCase
-// pass-throughs of the same field names the TS types use (no snake_case
-// conversion), and config's systemInstruction/tools/toolConfig land at the
-// top level of the request body (siblings of `contents`), while
-// temperature/maxOutputTokens land nested under `generationConfig`.
+// Gemini-specific wire fixtures. The transport plumbing (fetch patching,
+// fake-clock stepping, SSE body construction) is shared -- see
+// driver-harness.ts. Provider-agnostic behavior (auth refusal, error
+// classification, connection failure) lives in driver-conformance.test.ts;
+// this file covers only what is genuinely Gemini-shaped.
 // ---------------------------------------------------------------------------
-
-type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
-async function tickInSteps(t: { mock: { timers: { tick(ms: number): void } } }, totalMs: number, stepMs = 250): Promise<void> {
-  for (let advanced = 0; advanced < totalMs; advanced += stepMs) {
-    t.mock.timers.tick(Math.min(stepMs, totalMs - advanced));
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-}
-
-async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Promise<T> {
-  const original = globalThis.fetch;
-  globalThis.fetch = impl as typeof fetch;
-  try {
-    return await run();
-  } finally {
-    globalThis.fetch = original;
-  }
-}
-
-function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
-}
 
 /** Gemini's wire error shape: {"error": {"code", "message", "status"}}. Our
  * classifier only reads the HTTP status (ApiError carries no type/code
@@ -62,41 +43,10 @@ function sseLine(data: unknown): string {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
 
-/** Builds a fake SSE Response for Gemini's `alt=sse` streaming format
- * (`data: {...}\n\n` chunks, closed when the body naturally ends -- no
- * `[DONE]` sentinel the way OpenAI's does). When `holdOpen` is true the
- * stream is left open and only terminates when the caller's AbortSignal
- * fires -- same idiom as the other two driver test files' sseResponse. */
-function sseResponse(events: unknown[], opts: { signal?: AbortSignal | null; holdOpen?: boolean } = {}): Response {
-  const encoder = new TextEncoder();
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const e of events) {
-        controller.enqueue(encoder.encode(sseLine(e)));
-      }
-      if (!opts.holdOpen) {
-        controller.close();
-        return;
-      }
-      const signal = opts.signal;
-      if (!signal) {
-        return;
-      }
-      const errorStream = () => {
-        try {
-          controller.error(new DOMException("The operation was aborted.", "AbortError"));
-        } catch {
-          // already closed/errored -- fine, nothing left to signal.
-        }
-      };
-      if (signal.aborted) {
-        errorStream();
-      } else {
-        signal.addEventListener("abort", errorStream);
-      }
-    },
-  });
-  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+/** Gemini's `alt=sse` format frames chunks as bare `data: {...}` and closes
+ * when the body naturally ends -- no `[DONE]` sentinel the way OpenAI's has. */
+function sseResponse(events: unknown[], opts: SseOptions = {}): Response {
+  return rawSseResponse(events.map(sseLine), opts);
 }
 
 const BASE_REQUEST: LlmRequest = {
@@ -108,34 +58,10 @@ const BASE_REQUEST: LlmRequest = {
   timeoutMs: 30_000,
 };
 
-async function collectStream(gen: AsyncGenerator<LlmDelta, void, unknown>): Promise<LlmDelta[]> {
-  const collected: LlmDelta[] = [];
-  for await (const delta of gen) {
-    collected.push(delta);
-  }
-  return collected;
-}
 
 // ---------------------------------------------------------------------------
 // Zero key handling: defensive check, no network call
 // ---------------------------------------------------------------------------
-
-test("geminiDriver.complete: rejects with no API key before any network call", async () => {
-  let fetchCalls = 0;
-  await withPatchedFetch(
-    async () => {
-      fetchCalls += 1;
-      throw new Error("must not be called");
-    },
-    async () => {
-      await assert.rejects(
-        () => geminiDriver.complete(BASE_REQUEST, { apiKey: "" }),
-        (error: { class: string }) => error.class === "invalid_request",
-      );
-    },
-  );
-  assert.equal(fetchCalls, 0);
-});
 
 // ---------------------------------------------------------------------------
 // Non-streaming: success, request mapping, response mapping
@@ -305,82 +231,6 @@ test("geminiDriver.complete: finishReason MAX_TOKENS maps to max_tokens", async 
 // Error taxonomy + retry, exercised through the real driver via complete()
 // ---------------------------------------------------------------------------
 
-const CLASSIFICATION_CASES: Array<{ status: number; expectClass: LlmErrorClass; expectRetryable: boolean }> = [
-  { status: 400, expectClass: "invalid_request", expectRetryable: false },
-  { status: 401, expectClass: "auth", expectRetryable: false },
-  { status: 403, expectClass: "auth", expectRetryable: false },
-  { status: 404, expectClass: "invalid_request", expectRetryable: false },
-  // Regression test for a mutation-testing finding: this case was a real bug
-  // fixed during m4-02's own review (classifyByStatus originally had no 408
-  // branch at all, falling through to the >= 400 invalid_request bucket) but
-  // shipped with no test proving the fix -- confirmed by mutating it back out
-  // and observing the full suite stayed green. 408 is retry-worthy by HTTP
-  // semantics and the installed SDK's own DEFAULT_RETRY_HTTP_STATUS_CODES
-  // agrees (see classifyByStatus's own comment).
-  { status: 408, expectClass: "transport", expectRetryable: true },
-  { status: 429, expectClass: "rate_limit", expectRetryable: true },
-  { status: 500, expectClass: "transport", expectRetryable: true },
-  { status: 502, expectClass: "transport", expectRetryable: true },
-  { status: 503, expectClass: "transport", expectRetryable: true },
-  { status: 504, expectClass: "transport", expectRetryable: true },
-];
-
-test("complete(): classifies every documented Gemini ApiError status and retries only the retryable classes exactly MAX_RETRIES times (also proves the SDK's own internal retry is off: attempt counts match ours exactly, never more)", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  for (const testCase of CLASSIFICATION_CASES) {
-    let fetchCalls = 0;
-    const promise = withPatchedFetch(
-      async () => {
-        fetchCalls += 1;
-        return geminiErrorResponse(testCase.status, `status ${testCase.status} fixture`);
-      },
-      () => complete(BASE_REQUEST, { gemini: { apiKey: "fixture-key" } }, { drivers: { gemini: geminiDriver } }),
-    );
-    let settled: { ok: boolean; error?: { class: string; retryable: boolean } } | undefined;
-    promise.then(
-      () => (settled = { ok: true }),
-      (error) => (settled = { ok: false, error }),
-    );
-    for (let i = 0; i < 20 && !settled; i++) {
-      t.mock.timers.tick(1000);
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    await promise.catch(() => undefined);
-    assert.ok(settled, `case ${testCase.status} never settled`);
-    assert.equal(settled?.ok, false, `case ${testCase.status} should reject`);
-    assert.ok(isLlmError(settled?.error), `case ${testCase.status} must throw a genuinely typed LlmError`);
-    assert.equal(settled?.error?.class, testCase.expectClass, `case ${testCase.status} class`);
-    assert.equal(settled?.error?.retryable, testCase.expectRetryable, `case ${testCase.status} retryable`);
-    assert.equal(fetchCalls, testCase.expectRetryable ? MAX_RETRIES + 1 : 1, `case ${testCase.status} attempt count`);
-  }
-});
-
-test("complete(): a raw connection failure (fetch rejects, no ApiError wrapper) still classifies as transport and retries -- the SDK provides no ApiConnectionError-equivalent, so this pins down this driver's own documented default", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  let fetchCalls = 0;
-  const promise = withPatchedFetch(
-    async () => {
-      fetchCalls += 1;
-      throw new TypeError("fetch failed");
-    },
-    () => complete(BASE_REQUEST, { gemini: { apiKey: "fixture-key" } }, { drivers: { gemini: geminiDriver } }),
-  );
-  let settled: { ok: boolean; error?: { class: string; retryable: boolean } } | undefined;
-  promise.then(
-    () => (settled = { ok: true }),
-    (error) => (settled = { ok: false, error }),
-  );
-  for (let i = 0; i < 20 && !settled; i++) {
-    t.mock.timers.tick(1000);
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  await promise.catch(() => undefined);
-  assert.equal(settled?.ok, false);
-  assert.ok(isLlmError(settled?.error));
-  assert.equal(settled?.error?.class, "transport");
-  assert.equal(settled?.error?.retryable, true);
-  assert.equal(fetchCalls, MAX_RETRIES + 1);
-});
 
 // ---------------------------------------------------------------------------
 // Finding #83: a local mapping/construction bug (a malformed message shape
@@ -481,16 +331,6 @@ test("geminiDriver.complete: a response with no candidates and no promptFeedback
       );
     },
   );
-});
-
-test("geminiDriver.complete: the documented blocked-prompt shape (no candidates, promptFeedback.blockReason set) still works unchanged -- not reclassified as provider_bug", async () => {
-  const response = await withPatchedFetch(
-    async () => jsonResponse({ promptFeedback: { blockReason: "SAFETY" }, usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 0 } }),
-    () => geminiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
-  );
-  assert.equal(response.stopReason, "refusal");
-  assert.equal(response.text, null);
-  assert.deepEqual(response.toolCalls, []);
 });
 
 // ---------------------------------------------------------------------------
@@ -610,57 +450,11 @@ test("geminiDriver.stream: aborts as transport when no delta arrives for 60 seco
 /** Like sseResponse, but chunks are enqueued at scheduled fake-clock offsets
  * (via global setTimeout, driven by t.mock.timers) instead of all at once at
  * stream start. */
-function pacedSseResponse(scheduled: Array<{ atMs: number; data: unknown }>, opts: { signal?: AbortSignal | null; closeAfterMs?: number } = {}): Response {
-  const encoder = new TextEncoder();
-  const timers: ReturnType<typeof setTimeout>[] = [];
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const item of scheduled) {
-        timers.push(
-          setTimeout(() => {
-            try {
-              controller.enqueue(encoder.encode(sseLine(item.data)));
-            } catch {
-              // stream already closed/errored -- nothing left to enqueue into.
-            }
-          }, item.atMs),
-        );
-      }
-      if (opts.closeAfterMs !== undefined) {
-        timers.push(
-          setTimeout(() => {
-            try {
-              controller.close();
-            } catch {
-              // already closed/errored
-            }
-          }, opts.closeAfterMs),
-        );
-      }
-      const signal = opts.signal;
-      if (!signal) {
-        return; // no close scheduled and no signal: held open until the test ends
-      }
-      const errorStream = () => {
-        try {
-          controller.error(new DOMException("The operation was aborted.", "AbortError"));
-        } catch {
-          // already closed/errored -- fine, nothing left to signal.
-        }
-      };
-      if (signal.aborted) {
-        errorStream();
-      } else {
-        signal.addEventListener("abort", errorStream);
-      }
-    },
-    cancel() {
-      for (const timer of timers) {
-        clearTimeout(timer);
-      }
-    },
-  });
-  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+function pacedSseResponse(scheduled: Array<{ atMs: number; data: unknown }>, opts: SseOptions & { closeAfterMs?: number } = {}): Response {
+  return rawPacedSseResponse(
+    scheduled.map((item) => ({ atMs: item.atMs, chunk: sseLine(item.data) })),
+    opts,
+  );
 }
 
 /** A chunk carrying only a modelVersion heartbeat -- no candidates, no
