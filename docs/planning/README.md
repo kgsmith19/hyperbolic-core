@@ -31,6 +31,14 @@ Planning-only engagement. These artifacts contain architecture decisions, specif
 
 The engagement is complete. The Open Decisions Register in `12-risk-register.md` section 6 lists the thirteen operator decisions (defaults adopted throughout); `11-roadmap.md` sequences all 64 issues across six milestones with the EARS coverage assertion.
 
+## Freeze notice (m6-04, 13-dissent.md C1 / Open Decision OD-05)
+
+As of M6 (Hardening), `docs/planning/` is frozen: point-in-time provenance for the V1 engagement, not living governance. Every gate question this set ever raised now carries a recorded disposition (`12-risk-register.md` section 8's disposition ledger, 60/60 answered), the Brain harness-economics decision is closed with an explicit kill criterion (`12-risk-register.md` section 7), and every accepted risk is signed off with an owner and reversal trigger (`12-risk-register.md` section 9).
+
+**The superseding-Issue rule**: this freeze means no file under `docs/planning/` is edited directly after this notice lands. A decision recorded here that needs to change gets a new GitHub Issue stating what changed and why; that Issue is the durable record of the change, the same way every other piece of V1 work already is. `docs/planning/` itself stays exactly as frozen, a snapshot of the reasoning V1 was actually built against -- not silently rewritten to look as if the final state were the plan all along.
+
+GitHub Issues remain the one durable, living source of truth for all work past this point (13-dissent.md C1's own resolution, restated here as now in force, not just recommended).
+
 ## Standing note on the committed-artifacts rule
 
 The agent-engineering-standard baseline referenced by `standard.lock` forbids committed SPEC and ADR documents. This directory exists because the operator's planning brief explicitly mandates committed planning artifacts under `docs/planning/`, and repository-specific operator instructions take precedence over the informational standard reference. The tension is treated as a first-class dissent item in `13-dissent.md`.
