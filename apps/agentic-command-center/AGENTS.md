@@ -87,7 +87,7 @@ subsystem documentation before running them.
 6. After the configured gate passes, GitHub may squash-merge the pull request
    and delete the branch.
 
-The reference in `standard.lock` is informational and non-enforcing.
+The reference in the root `standard.lock` is informational and non-enforcing.
 Repository code, product documentation, tests, and the local `PR Gate` remain
 the sources for implementation decisions.
 
