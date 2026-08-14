@@ -1,3 +1,6 @@
 dist/
 *.tsbuildinfo
 node_modules/
+# `brain eval run --json` output, written by the nightly workflow and by
+# anyone capturing a local corpus report. Never a committed artifact.
+eval-report.json

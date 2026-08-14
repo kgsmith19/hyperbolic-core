@@ -3,8 +3,9 @@
  * architecture.md section 7.8's CLI table). Pure functions over
  * store/journal/config -- bin/brain.mjs is only argv parsing and calling
  * these, so every exit-code/JSON-shape decision is unit-testable without
- * spawning a subprocess for every scenario. `brain eval` is out of this
- * issue's scope (m4-19); the HTTP API is m4-14's.
+ * spawning a subprocess for every scenario. `brain eval`'s own verbs live
+ * in eval-verbs.ts (they are the one part of the CLI that needs an adapter
+ * registry); the HTTP API is m4-14's.
  */
 import { readFileSync } from "node:fs";
 import type { BrainStore } from "../store.ts";

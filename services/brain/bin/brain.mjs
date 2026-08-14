@@ -4,8 +4,7 @@
 // parsing and dispatch -- every verb's actual logic lives in
 // src/cli/verbs.ts (pure, store/journal/config-only functions), so the
 // exit-code/JSON-shape decisions are unit-testable without spawning a
-// subprocess per scenario. `brain eval` is out of scope (m4-19); the
-// HTTP API is m4-14's.
+// subprocess per scenario. The HTTP API is m4-14's.
 //
 // Global behavior (07 section 7.8): --json makes stdout a single JSON
 // document with all human text on stderr; this file never reads stdin or
@@ -29,6 +28,8 @@ import {
   refreshContextVerb,
   configVerb,
 } from "../src/cli/verbs.ts";
+import { evalRunVerb, evalCaptureVerb } from "../src/cli/eval-verbs.ts";
+import { createEvalFixtureAdapters } from "../src/adapters/fixture.ts";
 import { emit } from "../src/cli/result.ts";
 
 const args = process.argv.slice(2);
@@ -37,7 +38,7 @@ const rest = args.slice(1);
 const jsonMode = rest.includes("--json");
 
 function usage() {
-  console.error("usage: brain <run|status|tasks|approve|reject|cancel|resume|logs|cost|refresh-context|config|status(--offline)> ...");
+  console.error("usage: brain <run|status|tasks|approve|reject|cancel|resume|logs|cost|refresh-context|config|eval|status(--offline)> ...");
   console.error('       brain run "<objective>" [--repo <url>] [--ref <ref>] [--autonomy 0..3] [--harness <id>] [--budget-tokens N] [--dry-run] [--json]');
   console.error("       brain run --contract <path> [--dry-run] [--json]");
   console.error("       brain status [run_id] [--json]");
@@ -50,6 +51,8 @@ function usage() {
   console.error("       brain cost [--since <ts>] [--run <id>] [--json]");
   console.error("       brain refresh-context [--json]");
   console.error("       brain config [get <key> | set <key> <value>] [--json]");
+  console.error("       brain eval run [--cases <dir>] [--persist] [--json]");
+  console.error("       brain eval capture <run_id> --name <case_id> [--task <id>] [--cases <dir>] [--json]");
   process.exitCode = 2;
 }
 
@@ -276,6 +279,39 @@ function configCommand(rest) {
   return result.exitCode;
 }
 
+async function evalCommand(rest) {
+  const sub = positionals(rest)[0];
+  const casesDir = flagValue(rest, "--cases");
+  const config = loadConfig();
+
+  if (sub === "run") {
+    const persist = stripFlag(rest, "--persist");
+    // The ONE place the eval-only fixture registry is constructed. The
+    // production daemon's adapter wiring lives in src/index.ts and is
+    // untouched by this: no `brain run`, and no daemon dispatch, can ever
+    // reach a scripted adapter. See src/adapters/fixture.ts.
+    const result = await evalRunVerb(config, { adapters: createEvalFixtureAdapters(), casesDir, persist });
+    emit(result, jsonMode);
+    return result.exitCode;
+  }
+
+  if (sub === "capture") {
+    const caseId = flagValue(rest, "--name");
+    const taskId = flagValue(rest, "--task");
+    const runId = positionals(rest)[1];
+    if (!runId || !caseId) {
+      usage();
+      return 2;
+    }
+    const result = withStore(config, (store) => evalCaptureVerb(store, { runId, caseId, taskId, casesDir }));
+    emit(result, jsonMode);
+    return result.exitCode;
+  }
+
+  usage();
+  return 2;
+}
+
 try {
   switch (command) {
     case "status":
@@ -310,6 +346,9 @@ try {
       break;
     case "config":
       process.exitCode = configCommand(rest);
+      break;
+    case "eval":
+      process.exitCode = await evalCommand(rest);
       break;
     default:
       usage();

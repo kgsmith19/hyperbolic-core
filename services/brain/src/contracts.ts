@@ -33,6 +33,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // them into the production image unchanged.
 const TASK_SCHEMA_PATH = join(__dirname, "schemas", "brain.task.v1.schema.json");
 const RESULT_SCHEMA_PATH = join(__dirname, "schemas", "brain.result.v1.schema.json");
+const EVAL_CASE_SCHEMA_PATH = join(__dirname, "schemas", "brain.eval-case.v1.schema.json");
 
 export interface TaskContractV1 {
   task_id: string;
@@ -90,12 +91,24 @@ function compileValidator(path: string): ValidateFunction {
   return ajv.compile(loadSchema(path));
 }
 
+/** brain.eval-case.v1 embeds a whole brain.task.v1 by `$ref`, so its Ajv
+ * instance needs both schemas registered before the eval-case one is
+ * compiled -- the single-schema compileValidator() above cannot resolve
+ * that reference on its own. */
+function compileEvalCaseValidator(): ValidateFunction {
+  const ajv = new Ajv2020({ allErrors: true, strict: true });
+  addFormatsModule.default(ajv);
+  ajv.addSchema(loadSchema(TASK_SCHEMA_PATH));
+  return ajv.compile(loadSchema(EVAL_CASE_SCHEMA_PATH));
+}
+
 // Lazily compiled and cached: every real process only ever needs one
 // compiled instance of each; tests that construct many short-lived
 // validators (one per assertion) don't pay a re-compile cost either, since
 // module state is process-wide, not per-call.
 let taskValidator: ValidateFunction | undefined;
 let resultValidator: ValidateFunction | undefined;
+let evalCaseValidator: ValidateFunction | undefined;
 
 function formatErrors(validate: ValidateFunction): string[] {
   return (validate.errors ?? []).map((e) => `${e.instancePath || "(root)"} ${e.message ?? "invalid"}`);
@@ -111,4 +124,14 @@ export function validateResultContract(result: unknown): ValidationResult {
   resultValidator ??= compileValidator(RESULT_SCHEMA_PATH);
   const valid = resultValidator(result) as boolean;
   return { valid, errors: valid ? [] : formatErrors(resultValidator) };
+}
+
+/** m4-19: every corpus case file, and every case `brain eval capture`
+ * produces, is validated against brain.eval-case.v1 before it is trusted
+ * -- a malformed case must fail the gate loudly rather than being skipped
+ * as "not a case". */
+export function validateEvalCase(evalCase: unknown): ValidationResult {
+  evalCaseValidator ??= compileEvalCaseValidator();
+  const valid = evalCaseValidator(evalCase) as boolean;
+  return { valid, errors: valid ? [] : formatErrors(evalCaseValidator) };
 }

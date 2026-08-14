@@ -1,0 +1,62 @@
+name: "Brain Eval Nightly"
+
+# 07-brain-architecture.md section 7.11's "nightly full run" (m6-01). The
+# PR gate (brain-ci.yml) runs the same corpus, but only on PRs that touch
+# services/brain/**; this catches a regression introduced from anywhere
+# else in the monorepo -- a shared dependency bump, a change to the ACC
+# kernel the Brain spawns, a workspace-level lockfile update.
+#
+# SCOPE CHOICE, recorded deliberately: this is the SAME deterministic,
+# fixture-based run as the PR gate, not a credentialed one. No provider
+# secret is provisioned for it. The corpus scripts the harness-level
+# outcome and runs everything below that boundary for real (worktree,
+# acceptance commands, verification, routing, status mapping), so what the
+# nightly catches is drift in the Brain's own pipeline, not drift in a live
+# model's behavior. A nightly that exercises real harnesses would need a
+# credential decision V1 has not made, and would trade a deterministic
+# signal for a flaky one. See services/brain/evals/cases/README.md.
+
+on:
+  schedule:
+    # 07:20 UTC daily. Off the hour on purpose: scheduled workflows queue
+    # heavily at :00, and this run has no reason to compete for a runner.
+    - cron: "20 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  eval-corpus:
+    name: Brain Eval Nightly
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Install root workspace dependencies
+        run: npm ci
+      - name: Run the full Brain eval corpus
+        working-directory: services/brain
+        run: node bin/brain.mjs eval run
+      - name: Record the corpus report as a job artifact
+        if: always()
+        working-directory: services/brain
+        # Re-run in --json mode for a machine-readable record. `|| true`
+        # because the step's purpose is capturing the report; the run above
+        # is what decides the job's outcome.
+        run: node bin/brain.mjs eval run --json > eval-report.json || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: brain-eval-report
+          path: services/brain/eval-report.json
+          retention-days: 14

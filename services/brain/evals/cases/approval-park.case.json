@@ -1,0 +1,45 @@
+{
+  "case_id": "approval-park",
+  "description": "APPROXIMATION, NOT A LITERAL APPROVAL PARK -- read this before trusting the case. 07 section 7.11 names approval-park as a seed case, but the eval harness cannot exercise a real one: runEvalCase() calls dispatch() directly, and approval parking happens in scheduler.ts/approval-gate.ts BEFORE dispatch is ever reached, so no case file can drive a task into awaiting_approval. brain.result.v1's status enum has no awaiting-approval member either, because a parked task has no terminal result to record. What this case actually pins is the nearest real behavior the pipeline does reach: a task that stops before finishing, on a budget abort, ends terminal-but-not-succeeded (timeout) with no verdicts, because a run that never completed has nothing to verify. The genuine approval gate is covered by unit tests over approval-gate.ts and autonomy.ts, not here.",
+  "contract": {
+    "task_id": "00000000-0000-4000-8000-000000000004",
+    "run_id": "00000000-0000-4000-8000-0000000000a4",
+    "title": "Halt before finishing the work [[fixture:aborted-by-budget]]",
+    "repo": { "url": "fixture://repo_files", "ref": "main" },
+    "harness": { "preferred": "claude-code", "fallback": [] },
+    "autonomy": 1,
+    "prompt": {
+      "objective": "Perform a change large enough that the task stops before it finishes.",
+      "context_refs": [],
+      "prompt_org_refs": []
+    },
+    "constraints": {
+      "allowed_paths": ["**"],
+      "denied_paths": [],
+      "vault_keys": [],
+      "max_turns": 2,
+      "wall_clock_min": 1,
+      "token_budget": 1000,
+      "network": "none"
+    },
+    "acceptance": [
+      {
+        "id": "AC-work-completed",
+        "statement": "When the task finishes, the completed marker file shall exist.",
+        "verify": { "command": "test -f DONE", "cwd": "worktree", "expect_exit": 0, "timeout_s": 30 }
+      }
+    ],
+    "deliverable": { "type": "commit", "branch": "brain/eval-approval-park", "push": false, "draft_pr": false }
+  },
+  "fixture": {
+    "kind": "repo_files",
+    "files": {
+      "README.md": "# eval fixture: approval-park (approximated as a pre-completion halt)\n"
+    }
+  },
+  "expected": {
+    "status": "timeout",
+    "verdicts": [],
+    "max_cost_usd": 0.5
+  }
+}

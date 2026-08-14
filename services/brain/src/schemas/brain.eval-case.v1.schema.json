@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hyperbolic-core.invalid/schemas/brain.eval-case.v1.schema.json",
+  "title": "brain.eval-case.v1",
+  "description": "One frozen regression case in the Brain's eval corpus (07-brain-architecture.md section 7.11, m4-19). Section 7.11's own shape is {case_id, description, contract: brain.task.v1, fixture: {repo_tar or git ref}, expected: {status, verdicts, max_cost_usd}}; this schema is that shape with the fixture union spelled out concretely. Cases live at services/brain/evals/cases/*.case.json and are produced either by hand or by `brain eval capture <run_id>`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["case_id", "description", "contract", "fixture", "expected"],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Stable identifier, unique across the corpus. Also the eval_case row's primary key, so renaming a case orphans its history rather than rewriting it."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What behavior this case pins, in prose. A case whose expectation is an approximation of the real behavior (rather than the behavior itself) must say so here."
+    },
+    "contract": {
+      "$ref": "https://hyperbolic-core.invalid/schemas/brain.task.v1.schema.json",
+      "description": "The frozen brain.task.v1 contract to re-dispatch. Its task_id/run_id are placeholders: runEvalCase() mints fresh ones per execution so repeated runs never collide in the store. `title` is passed through untouched."
+    },
+    "fixture": {
+      "description": "The repository state the case runs against. 07 section 7.11 names 'repo_tar or git ref'; repo_files is the inline form of repo_tar, preferred for the seed corpus so a case stays a single reviewable JSON file with no binary blob committed to git and no network access required.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "files"],
+          "properties": {
+            "kind": { "const": "repo_files" },
+            "files": {
+              "type": "object",
+              "minProperties": 1,
+              "description": "Relative path -> file contents. Materialized into a throwaway local git repo (one initial commit on `main`) whose path replaces contract.repo.url for the run.",
+              "additionalProperties": { "type": "string" },
+              "propertyNames": { "pattern": "^[A-Za-z0-9._][A-Za-z0-9._/-]*$" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "const": "repo_tar" },
+            "path": { "type": "string", "minLength": 1, "description": "Tar archive path, relative to the case file's own directory. Extracted, then `git init` + one commit if it carries no .git of its own." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "git_ref" },
+            "url": { "type": "string", "minLength": 1, "description": "Overrides contract.repo.url when present. Omit to use the contract's own repo as frozen." },
+            "ref": { "type": "string", "minLength": 1, "description": "Overrides contract.repo.ref when present." }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "verdicts", "max_cost_usd"],
+      "description": "What the deterministic grader compares the actual brain.result.v1 against. Every field is checked; there is no partial-credit scoring in V1.",
+      "properties": {
+        "status": {
+          "enum": ["succeeded", "failed", "timeout", "cancelled", "interrupted"],
+          "description": "brain.result.v1's own status enum. Note it has no awaiting-approval member: a parked task is not a terminal result, so an approval case can only ever be approximated here (see the corpus README)."
+        },
+        "verdicts": {
+          "type": "array",
+          "description": "Per-criterion expectations, matched by id against the actual result's verdicts. An empty array asserts the result carried no verdicts at all (the correct expectation for an outcome that never reached verification).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "pass"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "pass": { "type": "boolean" },
+              "exit": { "type": "integer", "description": "Optional. Checked only when present, since a failing command's exact exit code is often incidental to what the case is pinning." }
+            }
+          }
+        },
+        "max_cost_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Ceiling on the result's cost.usd_estimate. A null estimate (no pricing wired for the harness that ran) counts as 0 and therefore always passes; the ceiling still binds every case whose harness does report a real figure."
+        }
+      }
+    }
+  }
+}

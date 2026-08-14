@@ -44,6 +44,15 @@ jobs:
       - name: Run services/brain tests
         working-directory: services/brain
         run: npm test
+      # 07-brain-architecture.md section 7.11: the eval corpus runs on
+      # every PR touching services/brain/**, and any regression fails the
+      # gate. Deterministic and credential-free by construction -- the
+      # cases script the harness outcome only, and everything below it (the
+      # worktree, the acceptance commands, verification, status mapping)
+      # runs for real. See services/brain/evals/cases/README.md.
+      - name: Run the Brain eval corpus
+        working-directory: services/brain
+        run: node bin/brain.mjs eval run
       - name: Build the Brain image (verification only, never pushed from CI)
         run: docker build -f services/brain/Dockerfile -t brain:pr-gate .
       - name: Smoke-run the built image (brain status --offline, no live daemon required)

@@ -305,6 +305,14 @@ export class BrainStore {
     this.#db.prepare(`insert into eval_case (id, name, spec_json, created_at) values (?, ?, ?, ?)`).run(evalCase.id, evalCase.name, evalCase.specJson, evalCase.createdAt);
   }
 
+  /** m4-19: a corpus run writes the case row once and appends a result row
+   * per execution, so it needs to ask whether the case is already known
+   * rather than re-inserting it against its own primary key every time. */
+  getEvalCase(id: string): EvalCase | null {
+    const row = this.#db.prepare(`select * from eval_case where id = ?`).get(id);
+    return row ? rowToEvalCase(row) : null;
+  }
+
   insertEvalResult(result: EvalResult): void {
     this.#db
       .prepare(`insert into eval_result (id, eval_case_id, run_id, passed, output_json, recorded_at) values (?, ?, ?, ?, ?, ?)`)
