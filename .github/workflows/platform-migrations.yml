@@ -161,6 +161,19 @@ jobs:
           mapfile -t remote_versions < "${RUNNER_TEMP}/remote-platform-ledger-versions"
           if [ "${#expected_versions[@]}" -ne 20 ] || [ "${#remote_versions[@]}" -gt 20 ]; then
             echo "Expected an exact prefix of the reviewed 20-version S1 ledger." >&2
+            # Print both sides: the bare assertion above cannot distinguish "this
+            # checkout drifted from 20" from "the remote ledger carries unrelated
+            # versions" (e.g. pre-consolidation filenames), and the difference
+            # decides the fix. Reading them out of the live database by hand is
+            # the slow path this exists to avoid.
+            echo "local S1 reference: ${#expected_versions[@]} version(s)" >&2
+            if [ "${#expected_versions[@]}" -gt 0 ]; then
+              printf '  local  %s\n' "${expected_versions[@]}" >&2
+            fi
+            echo "remote ledger: ${#remote_versions[@]} version(s)" >&2
+            if [ "${#remote_versions[@]}" -gt 0 ]; then
+              printf '  remote %s\n' "${remote_versions[@]}" >&2
+            fi
             exit 1
           fi
           for index in "${!remote_versions[@]}"; do
@@ -281,7 +294,16 @@ jobs:
             if not has_table_privilege('anon', 'prompt.prompt', 'SELECT')
                or not has_table_privilege('authenticated', 'prompt.prompt', 'SELECT')
                or not has_table_privilege('authenticated', 'prompt.prompt', 'INSERT')
-               or not has_table_privilege('authenticated', 'prompt.prompt', 'UPDATE')
+               -- prompt.prompt's UPDATE grant is deliberately COLUMN-level, not
+               -- table-level: 20260807041000 grants (title, body) and
+               -- 20260808000000 grants (is_active), so no other column is
+               -- client-writable. has_table_privilege(...,'UPDATE') is false
+               -- for a column-only grant, so asserting it here could never pass
+               -- against a correctly-migrated database. Assert the three real
+               -- columns instead, which also pins the narrower grant in place.
+               or not has_column_privilege('authenticated', 'prompt.prompt', 'title', 'UPDATE')
+               or not has_column_privilege('authenticated', 'prompt.prompt', 'body', 'UPDATE')
+               or not has_column_privilege('authenticated', 'prompt.prompt', 'is_active', 'UPDATE')
                or not has_table_privilege('authenticated', 'prompt.prompt_version', 'SELECT')
                or not has_table_privilege('authenticated', 'prompt.prompt_version', 'INSERT')
                or not has_table_privilege('authenticated', 'prompt.tag', 'SELECT')
