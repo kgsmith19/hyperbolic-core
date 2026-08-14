@@ -42,6 +42,13 @@ export interface DaemonOptions {
   dataDir: string;
   liveProbe?: LiveProbeFn;
   dispatch?: DispatchFn;
+  /** m4-10: the real dispatch function (dispatch.ts's createDispatchFn)
+   * needs the daemon's own BrainStore/RunJournal instances, which don't
+   * exist until this constructor runs -- a plain `dispatch: DispatchFn`
+   * option can't express that dependency, since the caller would have to
+   * construct a SEPARATE store/journal pointed at the same paths just to
+   * build it. Takes precedence over `dispatch` when both are supplied. */
+  dispatchFactory?: (store: BrainStore, journal: RunJournal) => DispatchFn;
   maxConcurrent?: number;
   /** Grace period before killTree on shutdown (07 section 7.3: "up to
    * 120 s"). Overridable for tests; production default is 120_000. */
@@ -76,7 +83,9 @@ export class BrainDaemon {
     this.journal = new RunJournal(options.dataDir);
     this.#liveProbe = options.liveProbe ?? stubLiveProbe;
     this.#shutdownGraceMs = options.shutdownGraceMs ?? 120_000;
-    const dispatch: DispatchFn = options.dispatch ?? (async () => {});
+    const dispatch: DispatchFn = options.dispatchFactory
+      ? options.dispatchFactory(this.store, this.journal)
+      : (options.dispatch ?? (async () => {}));
     this.scheduler = new Scheduler(this.store, dispatch, options.maxConcurrent);
   }
 

@@ -5,9 +5,29 @@
 import { loadConfig } from "./config.ts";
 import { BrainDaemon } from "./daemon.ts";
 import { startServer } from "./server.ts";
+import { createDispatchFn } from "./dispatch.ts";
+import { ClaudeCodeAdapter } from "./adapters/claude-code.ts";
+import { codexAdapter, geminiAdapter } from "./adapters/stub.ts";
+import type { AdapterRegistry } from "./router.ts";
 
 const config = loadConfig();
-const daemon = new BrainDaemon({ dbPath: config.dbPath, dataDir: config.dataDir });
+
+const adapters: AdapterRegistry = {
+  "claude-code": new ClaudeCodeAdapter({
+    kernelRunPath: config.kernelRunPath,
+    accRoot: config.accRoot,
+    accPolicy: config.accPolicy,
+    accVault: config.accVault,
+  }),
+  codex: codexAdapter,
+  gemini: geminiAdapter,
+};
+
+const daemon = new BrainDaemon({
+  dbPath: config.dbPath,
+  dataDir: config.dataDir,
+  dispatchFactory: (store, journal) => createDispatchFn(store, { adapters, workspacesRoot: config.workspacesRoot, journal }),
+});
 await daemon.start();
 const server = await startServer(daemon, config.port);
 console.log(`services/brain listening on 127.0.0.1:${config.port}`);
