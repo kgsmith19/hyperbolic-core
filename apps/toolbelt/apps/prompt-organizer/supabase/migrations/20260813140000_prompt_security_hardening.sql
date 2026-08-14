@@ -10,8 +10,15 @@ exception
   when duplicate_object then null;
 end
 $$;
+-- nosuperuser is intentionally omitted: CREATE ROLE already defaults to
+-- NOSUPERUSER, and Postgres requires the *acting* role to itself hold
+-- SUPERUSER to touch that attribute on any role -- even to redundantly
+-- re-assert NOSUPERUSER. The connecting migration role (Supabase's
+-- postgres) is CREATEROLE but not SUPERUSER, so including the clause
+-- makes this statement unrunnable in this environment for no behavior
+-- change (the role is already NOSUPERUSER from CREATE ROLE above).
 alter role prompt_get_agent
-  nologin noinherit nobypassrls nosuperuser nocreatedb nocreaterole noreplication;
+  nologin noinherit nobypassrls nocreatedb nocreaterole noreplication;
 grant prompt_get_agent to authenticator;
 grant usage on schema prompt to prompt_get_agent;
 

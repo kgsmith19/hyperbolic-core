@@ -28,7 +28,11 @@
       "required": ["owner", "path"],
       "properties": {
         "owner": { "const": "kylegsmith19@gmail.com" },
-        "path": { "type": "string", "pattern": "^apps/toolbelt(/apps/[a-z0-9-]+)?$" }
+        "path": {
+          "type": "string",
+          "pattern": "^(apps/toolbelt(/apps/[a-z0-9-]+)?|services/[a-z0-9-]+)$",
+          "description": "apps/toolbelt(/apps/<id>) for a real Toolbelt tool. services/<id> is the one documented exception (08-llm-handlers.md forced decision 7): a platform service that registers in the same core.app registry as every Toolbelt tool without living inside the Toolbelt tree."
+        }
       }
     },
     "entry": {

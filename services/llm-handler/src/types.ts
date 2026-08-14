@@ -1,13 +1,20 @@
-// Shared types for the intake submit surface (05-h section 6). Handler A's
-// own /v1/* LLM route types (08-llm-handlers.md section 4) are added when
-// that scope actually lands (m4-05); this file only carries what the
-// pulled-forward intake tenant needs today.
+// Shared types for the intake submit surface (05-h section 6) and Handler
+// A's own /v1/* LLM route surface (08-llm-handlers.md section 4/5, m4-05).
+
+import type { CredentialsByProvider } from "@hyperbolic/llm";
 
 export interface HandlerConfig {
   readonly port: number;
   readonly supabaseUrl: string;
   readonly supabasePublishableKey: string;
   readonly githubIntakePat: string;
+  /** General-purpose provider keys only (08 section 7): Infisical
+   * /platform/llm/, injected only into this process. This config object has
+   * no field for the Brain key, and nothing under src/ ever reads one --
+   * the ADR-05 isolation this repo greps for in CI (m4-05 verification). */
+  readonly llmCredentials: CredentialsByProvider;
+  /** Per-caller concurrency cap (08 section 5), default 2. */
+  readonly llmMaxConcurrencyPerCaller: number;
 }
 
 /** 05-h section 6.4: the exact six error classes and their row-state/retry contract. */

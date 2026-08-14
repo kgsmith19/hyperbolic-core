@@ -30,8 +30,35 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const TOOLBELT_ROOT = join(__dirname, "..");
 export const SCHEMA_PATH = join(TOOLBELT_ROOT, "tool.schema.json");
+// services/<id>/tool.json (tool.schema.json's own documented ownership.path
+// exception, 08-llm-handlers.md forced decision 7): a sibling of apps/, not
+// nested under apps/toolbelt, so it is discovered separately from
+// findManifestPaths's own apps/toolbelt/apps/* walk below. Derived from
+// TOOLBELT_ROOT rather than a `root`-relative computation so a fixture
+// tree's own unrelated `--root <tmpdir>` (validate-manifests.test.mjs; the
+// script's own header comment: "without touching real files") never
+// accidentally pulls the real services/ directory into a fixture-scoped
+// validation run -- see findManifestPaths/checkManifestCoverage's own
+// `servicesRoot` default below, which only resolves to this constant when
+// `root` is the real TOOLBELT_ROOT.
+export const SERVICES_ROOT = join(TOOLBELT_ROOT, "..", "..", "services");
 
-export function findManifestPaths(root = TOOLBELT_ROOT) {
+function findServiceManifestPaths(servicesRoot) {
+  const paths = [];
+  if (servicesRoot && existsSync(servicesRoot)) {
+    for (const name of readdirSync(servicesRoot).sort()) {
+      const dir = join(servicesRoot, name);
+      if (!statSync(dir).isDirectory()) continue;
+      const candidate = join(dir, "tool.json");
+      if (existsSync(candidate) && statSync(candidate).isFile()) {
+        paths.push(candidate);
+      }
+    }
+  }
+  return paths;
+}
+
+export function findManifestPaths(root = TOOLBELT_ROOT, { servicesRoot = root === TOOLBELT_ROOT ? SERVICES_ROOT : undefined } = {}) {
   const paths = [];
   const rootManifest = join(root, "tool.json");
   if (existsSync(rootManifest) && statSync(rootManifest).isFile()) {
@@ -48,10 +75,11 @@ export function findManifestPaths(root = TOOLBELT_ROOT) {
       }
     }
   }
+  paths.push(...findServiceManifestPaths(servicesRoot));
   return paths;
 }
 
-export function checkManifestCoverage(root = TOOLBELT_ROOT) {
+export function checkManifestCoverage(root = TOOLBELT_ROOT, { servicesRoot = root === TOOLBELT_ROOT ? SERVICES_ROOT : undefined } = {}) {
   const failures = [];
   const rootManifest = join(root, "tool.json");
   if (!existsSync(rootManifest) || !statSync(rootManifest).isFile()) {
@@ -59,20 +87,32 @@ export function checkManifestCoverage(root = TOOLBELT_ROOT) {
   }
 
   const appsDir = join(root, "apps");
-  if (!existsSync(appsDir)) return failures;
-  if (!statSync(appsDir).isDirectory()) {
-    failures.push(`${appsDir}: expected the apps path to be a directory`);
-    return failures;
-  }
-
-  for (const name of readdirSync(appsDir).sort()) {
-    const appDir = join(appsDir, name);
-    if (!statSync(appDir).isDirectory()) continue;
-    const manifestPath = join(appDir, "tool.json");
-    if (!existsSync(manifestPath) || !statSync(manifestPath).isFile()) {
-      failures.push(`${appDir}: missing tool.json`);
+  if (existsSync(appsDir)) {
+    if (!statSync(appsDir).isDirectory()) {
+      failures.push(`${appsDir}: expected the apps path to be a directory`);
+    } else {
+      for (const name of readdirSync(appsDir).sort()) {
+        const appDir = join(appsDir, name);
+        if (!statSync(appDir).isDirectory()) continue;
+        const manifestPath = join(appDir, "tool.json");
+        if (!existsSync(manifestPath) || !statSync(manifestPath).isFile()) {
+          failures.push(`${appDir}: missing tool.json`);
+        }
+      }
     }
   }
+
+  if (servicesRoot && existsSync(servicesRoot)) {
+    for (const name of readdirSync(servicesRoot).sort()) {
+      const serviceDir = join(servicesRoot, name);
+      if (!statSync(serviceDir).isDirectory()) continue;
+      const manifestPath = join(serviceDir, "tool.json");
+      if (!existsSync(manifestPath) || !statSync(manifestPath).isFile()) {
+        failures.push(`${serviceDir}: missing tool.json`);
+      }
+    }
+  }
+
   return failures;
 }
 
