@@ -154,3 +154,53 @@ Record the workflow URL, deployed commit, health output, and rollback rehearsal,
 The platform project predates the Supabase CLI ledger. Run the explicit `baseline_legacy_ledger: true` dispatch from `main`. It accepts only an empty ledger or an exact ordered prefix of the 18 reviewed legacy versions plus the two S1 versions, and it requires an empty schema diff plus explicit legacy seed/grant/extension/job checks before repairing any missing metadata. It then resumes the additive `platform` owner bootstrap and `test` fence (S1) and stops. If a run is interrupted after ledger repair or during S1, rerun the same baseline mode; a divergent/non-prefix ledger remains a hard stop.
 
 Next, follow `apps/toolbelt/docs/notes/2026-08-12-platform-idp-owner-setup.md`: create the owner, insert the single `platform.config` row, and configure the owner CI credential (S2/S3). A normal migration dispatch then refuses to continue unless exactly one owner is present, applies the remaining forward migrations once, and runs the live platform contract. Never use baseline mode to repair a divergent or post-S1 ledger; investigate any attached schema diff instead of repairing around it.
+
+## Platform project backup and restore
+
+`platform-backup.yml` produces an age-encrypted recovery bundle of the platform Supabase project's own schemas (`core`, `prompt`, `idea`, `public`), daily on a schedule and on demand via `workflow_dispatch`. It extends the pattern already proven in the LifeOS standalone pipeline to a second target. Supabase-managed schemas (`auth`, `storage`, `realtime`) are deliberately excluded: the platform restores those itself, and a restore must not replay them.
+
+Setup, one time. Set repository variable `PLATFORM_BACKUP_ENABLED` to `true`, and `PLATFORM_AGE_PUBLIC_KEY` to an `age1...` recipient whose private identity is held offline and never stored in GitHub or Infisical. The workflow reuses `INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID` and its `/platform/` secret path for `SUPABASE_DB_URL`. CI can create a bundle and can never open one; that asymmetry is deliberate, so a compromised runner cannot read the data it just backed up. Without `PLATFORM_BACKUP_ENABLED`, the job does not run at all.
+
+The workflow verifies before it encrypts: the dump must be non-empty and must survive `pg_restore --list`, and the finished artifact's header must identify as `age-encryption.org`. A corrupt bundle fails the run rather than sitting in artifact storage looking like protection. Each bundle also carries `MIGRATION_LEDGER.txt`, the applied migration versions at snapshot time, because a restore has to know which migrations the snapshot already contains.
+
+### Restore drill
+
+Run this against a scratch database, never the platform project. Record the date, the backup run id, and the row counts in the table below on each drill.
+
+```bash
+# 1. Download the artifact from the backup run, then decrypt with the offline identity.
+age -d -i /path/to/offline-identity.txt \
+  -o platform-backup.tar platform-backup-<run_id>.tar.age
+tar -xf platform-backup.tar          # platform.dump, MIGRATION_LEDGER.txt, SHA256SUMS
+sha256sum -c SHA256SUMS
+
+# 2. Restore into a scratch database.
+createdb platform_restore_drill
+pg_restore --no-owner --no-privileges --dbname platform_restore_drill platform.dump
+
+# 3. Compare row counts against the live project, and confirm the ledger matches.
+for t in core.app core.run core.cost prompt.prompt idea.idea; do
+  echo -n "$t "
+  psql platform_restore_drill -X -At -c "select count(*) from $t"
+done
+psql platform_restore_drill -X -At \
+  -c "select version from supabase_migrations.schema_migrations order by version" \
+  | diff - MIGRATION_LEDGER.txt && echo "ledger matches"
+
+# 4. Tear down.
+dropdb platform_restore_drill
+```
+
+| Drill date | Backup run id | core.app | core.run | core.cost | prompt.prompt | idea.idea | Ledger match | Operator |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| _not yet executed_ | | | | | | | | |
+
+The drill has not been executed. It requires the offline age identity and live platform credentials, neither of which exists in a CI or agent environment by design. Executing the first drill and filling in the row above is an operator action, and it is the one acceptance criterion of m6-03 that repository changes cannot satisfy.
+
+### Destructive-migration precondition
+
+10-cicd-deployment.md sections 8.4 and 9 forbid destructive platform migrations without a backup pipeline. That pipeline now exists, so the rule takes its operational form:
+
+A pull request containing a destructive platform migration -- any `drop table`, `drop column`, `drop schema`, `truncate`, destructive `alter column type`, or any migration whose down-path cannot restore the data it removes -- must cite the run id of a `platform-backup.yml` run that completed successfully **after** the PR's base commit. The run id is printed in that run's job summary. A destructive migration PR without a fresh backup run id is refused, and the reviewer is expected to refuse it on this rule rather than on judgment.
+
+Recency matters more than existence here: a backup from before the base commit does not cover the rows the migration is about to remove. Dispatch a fresh `platform-backup.yml` run and cite that one.

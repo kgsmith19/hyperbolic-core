@@ -9,6 +9,14 @@
 //      policies rely on (06 section 5.6)
 // Also asserts no two migration files across all directories share a version key
 // (the CLI's ledger is keyed by version; a collision breaks the shared ledger).
+//
+// NOT enforced here, and deliberately so: the destructive-migration backup
+// precondition (10-cicd-deployment.md section 8.4, m6-03). A PR containing a
+// destructive migration must cite the run id of a `platform-backup.yml` run that
+// completed after the PR's base commit -- see docs/ops/runbook.md, "Platform
+// project backup and restore". That is a review rule, not a script check: this
+// validator sees migration files, never the PR body or GitHub run history, so
+// pretending to enforce it here would be a check that always passes.
 import { existsSync, realpathSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
