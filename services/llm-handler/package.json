@@ -1,0 +1,17 @@
+{
+  "name": "@hyperbolic/llm-handler",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Handler A (08-llm-handlers.md forced decisions 5/7): the general-purpose deployed service. Pulled forward ahead of M4 to give Idea Intake's submit API (m3-06) a place to run; its own /v1/* LLM routes land later with m4-05.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "node --test tests/*.test.ts",
+    "typecheck": "tsc -b ."
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.9.3"
+  }
+}

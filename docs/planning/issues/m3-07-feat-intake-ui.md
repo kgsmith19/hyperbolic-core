@@ -29,5 +29,26 @@ grep -rn "oklch(\|#[0-9a-fA-F]\{3,8\}\b" apps/shell/src/pages/ideas --include='*
 ## Estimated LOC delta
 Added: 650  Deleted: 0  Net: +650
 
+## Actual LOC delta (as implemented)
+Added: ~2850  Deleted: ~11  Net: ~+2840. The gap over the estimate is almost
+entirely test code: `e2e/ideas.spec.ts` plus its two support fixtures
+(`e2e/support/intake-fixture.ts`, `e2e/support/handler-a-fixture.ts`) stand
+up a real local Postgres 16 database with the real, unmodified `intake`
+schema migrations applied, and run the real `services/llm-handler`
+orchestration code (`createHandler`, unmodified) as a real local HTTP
+server against it -- only the genuine external third party (the real
+`api.github.com`) is a stand-in, matching services/llm-handler's own unit
+tests' mock boundary. `page.route` forwards the browser's real requests to
+these two real local servers (the same technique `e2e/tools.spec.ts`'s
+`mockRegistry` already established), so `src/lib/intake.ts` and
+`src/pages/ideas/*` run entirely unmodified end to end: create -> promote
+-> submit against the real state-machine triggers, with a real GitHub
+Issue created by the real Handler A code and a real write-back through
+`intake.mark_submitted_to_github`. Unit coverage
+(`src/lib/intake.test.ts`, `src/pages/ideas/list.test.tsx`,
+`src/pages/ideas/editor.test.tsx`) mocks `@hyperbolic/platform-client` and
+`src/lib/intake.ts` respectively, so each layer is tested once, at the
+layer that actually owns the behavior.
+
 ## Risk
 Low; one-query list and one-row editor over structurally guarded data.

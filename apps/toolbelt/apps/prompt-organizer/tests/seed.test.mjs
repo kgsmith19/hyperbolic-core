@@ -48,6 +48,8 @@ const PO_MIGRATIONS_IN_ORDER = [
 ];
 const SEED_UP = join(PO_MIGRATIONS_DIR, "20260813160000_prompt_seed_starters.sql");
 const SEED_DOWN = join(PO_MIGRATIONS_DIR, "20260813160000_prompt_seed_starters_down.sql");
+const PRIOR_SEED_UP = join(PO_MIGRATIONS_DIR, "20260813130000_prompt_seed_starters.sql");
+const PRIOR_SEED_DOWN = join(PO_MIGRATIONS_DIR, "20260813130000_prompt_seed_starters_down.sql");
 
 const OWNER_UUID = "9a50a35a-8a1e-4f0c-8495-7f26777982d8";
 
@@ -98,6 +100,30 @@ function buildBaseSchema(db) {
     if (name === "20260807020000_prompt_create_prompt.sql") applyMigrationWithRetry(db, sql);
     else psqlOk(db, sql);
   }
+}
+
+// Same prefix as buildBaseSchema, but stops BEFORE 20260813151000 (the last
+// entry) so a caller can splice 20260813130000_prompt_seed_starters.sql in
+// at its real chronological position -- 130000 < 151000 by timestamp, so
+// real deployment always applies 130000 before 151000 rescopes the unique
+// index. buildBaseSchema itself cannot be reused for this: it already
+// includes 151000, and applying 130000 afterward (out of real order) fails
+// outright, since 130000's own `on conflict (lower(title))` targets the
+// unscoped index 151000 has by then already dropped.
+const PRE_151000 = PO_MIGRATIONS_IN_ORDER.slice(0, -1);
+const SCOPE_TITLE_UNIQUENESS = PO_MIGRATIONS_IN_ORDER.at(-1);
+
+function buildSchemaThroughRealMigrationOrder(db) {
+  psqlOk(db, HARNESS_SQL);
+  psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
+  psqlOk(db, OWNER_BOOTSTRAP_SQL);
+  for (const name of PRE_151000) {
+    const sql = readFileSync(join(PO_MIGRATIONS_DIR, name), "utf8");
+    if (name === "20260807020000_prompt_create_prompt.sql") applyMigrationWithRetry(db, sql);
+    else psqlOk(db, sql);
+  }
+  psqlOk(db, readFileSync(PRIOR_SEED_UP, "utf8"));
+  psqlOk(db, readFileSync(join(PO_MIGRATIONS_DIR, SCOPE_TITLE_UNIQUENESS), "utf8"));
 }
 
 function withDb(fn) {
@@ -330,6 +356,59 @@ test("real Postgres: the down migration cascades prompt_version cleanly, leaving
 // the wrapper (as shipped), it succeeds. This test reconstructs that same
 // non-superuser-owner condition so a future edit that drops the wrapper
 // fails loudly here instead of only at the next real deploy.
+// DB review finding (PR #9 follow-up): every test above applies SEED_UP to
+// a database that has never seen 20260813130000 -- deliberately, per
+// buildBaseSchema's own comment, to isolate this migration's own
+// properties. But that isolation hid a real bug: in the ACTUAL deployment
+// order (130000 then 160000 against the SAME database, exactly as
+// platform-migrations.yml applies them), 130000 already owns every one of
+// these 9 titles by the time 160000 runs, so 160000's original
+// conflict-driven insert was always a silent 0-row no-op and neither down
+// migration ever actually deleted anything. This test is the one this repo
+// was missing: it replays the real order end to end, including both down
+// migrations in real reverse order, against one database.
+test(
+  "real Postgres: the real deployment order (130000 then 160000) reconciles onto stable ids, and both down migrations in reverse order fully clean up",
+  { skip: SKIP_REASON },
+  () => {
+    withDb((db) => {
+      buildSchemaThroughRealMigrationOrder(db);
+
+      const afterPrior = psqlOk(db, asAuthenticated(OWNER_UUID, "select count(*) from prompt.prompt;")).trim();
+      assert.equal(afterPrior, String(SEEDED_TITLES.length), "20260813130000 alone must seed exactly 9 rows");
+
+      psqlOk(db, readFileSync(SEED_UP, "utf8"));
+
+      const rows = psqlOk(
+        db,
+        asAuthenticated(OWNER_UUID, "select id, title from prompt.prompt order by title;"),
+      )
+        .trim()
+        .split("\n")
+        .map((line) => line.split("|"));
+      assert.equal(rows.length, SEEDED_TITLES.length, "reconciliation must not create duplicates or lose rows");
+      for (const [id] of rows) {
+        assert.match(id, /^7a6c6f00-000[1-9]-4000-8000-00000000000[1-9]$/, `row id ${id} must be one of the migration-owned stable ids after reconciliation`);
+      }
+
+      // Re-running the reconciled state must stay stable (the exact
+      // idempotency property the original bug's fix could not have without
+      // silently self-destructing on a second run -- see the migration's
+      // own header comment on the CTE-snapshot gotcha this fix avoids).
+      psqlOk(db, readFileSync(SEED_UP, "utf8"));
+      const afterReapply = psqlOk(db, asAuthenticated(OWNER_UUID, "select count(*) from prompt.prompt;")).trim();
+      assert.equal(afterReapply, String(SEEDED_TITLES.length));
+
+      // Real reverse-order rollback: 160000_down, then 130000_down.
+      psqlOk(db, readFileSync(SEED_DOWN, "utf8"));
+      psqlOk(db, readFileSync(PRIOR_SEED_DOWN, "utf8"));
+
+      const remaining = psqlOk(db, asAuthenticated(OWNER_UUID, "select count(*) from prompt.prompt;")).trim();
+      assert.equal(remaining, "0", "both down migrations together must remove every seeded row, not silently leave them live");
+    });
+  },
+);
+
 test(
   "real Postgres: the seed migration succeeds when run as a non-superuser table owner with no JWT session (production-realistic)",
   { skip: SKIP_REASON },

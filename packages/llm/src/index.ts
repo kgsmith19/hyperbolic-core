@@ -53,3 +53,18 @@ export type { OrchestrationOptions } from "./complete.ts";
 
 export { createPromptClient, MissingVariablesError, PromptNotFoundError } from "./prompt-client.ts";
 export type { GetPromptOptions, PromptClient, PromptClientOptions, RenderedPrompt } from "./prompt-client.ts";
+
+// m5-01/m5-02 tried exporting prompt-render.ts's pure functions here for
+// apps/shell's Prompt Organizer surface to reuse, and reverted it: this
+// package's index.ts barrel also re-exports complete/stream and the three
+// provider drivers (anthropicDriver/geminiDriver/openaiDriver), which pull
+// in @anthropic-ai/sdk, @google/genai, and openai transitively -- server-
+// side-only dependencies with zero reason to reach a browser bundle. Vite
+// could not tree-shake them back out through this barrel, and importing
+// only { render, extractVariables, extractSections } from "@hyperbolic/llm"
+// blew apps/shell's 250 KB gzipped bundle budget
+// (docs/planning/09-design-system.md section 6) by ~33 KB. apps/shell now
+// carries its own copy at src/lib/prompt-render.ts instead (the same
+// "narrow, deliberate duplication" this file's own prompt-render.ts already
+// documents for ITS relationship to web/render.mjs) -- see that file's own
+// header comment.

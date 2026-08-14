@@ -1,7 +1,7 @@
 /**
  * T-E-001 — Browser acceptance proof for the highest-value Prompt Organizer
- * user flow: sign-in → save prompt with variable → open render panel →
- * fill variable → copy rendered text → verify clipboard → cleanup.
+ * user flow: unlock with a token → save prompt with variable → open render
+ * panel → fill variable → copy rendered text → verify clipboard → cleanup.
  *
  * Traces to: AC-001 (FR-001 save), AC-001 (FR-007 render/copy), AC-001
  * (FR-010 variable fill) → Issue #18.
@@ -13,27 +13,29 @@
  * Env vars (all optional; defaults match the shared fixture accounts used by
  * the integration suite):
  *   PLAYWRIGHT_BASE_URL   — URL of the running app   (default: http://localhost:8812)
- *   USER_A_EMAIL          — sign-in e-mail           (default: fixture user A)
- *   USER_A_PASSWORD       — sign-in password         (default: fixture user A)
+ *   USER_A_EMAIL          — fallback token source     (default: fixture user A)
+ *   USER_A_PASSWORD       — fallback token source     (default: fixture user A)
  *   TOOLBELT_OWNER_TOKEN  — real owner session, see "Owner-credential
  *                           threading" below (default: unset)
  *
  * Owner-credential threading (toolbelt-ci.yml P1 finding): once prompt.* RLS
- * is pinned to the real owner (20260812180000_prompt_owner_pin.sql), signing
- * in as fixture user A gets a real Supabase session but every subsequent
+ * is pinned to the real owner (20260812180000_prompt_owner_pin.sql), a
+ * fixture-A session gets a real Supabase access token but every subsequent
  * write this flow depends on (save, tag, usage-on-copy) is RLS-denied, so
  * the "happy path" this test exists to prove would silently stop proving it.
- * Unlike the Node suite, this flow cannot just swap in primaryToken() and
- * call it via the REST harness -- the app's own sign-in form
- * (web/index.html) only ever does a live email+password grant, and no
- * coding session holds the real owner's password, only an access token
- * (docs/notes/2026-08-12-platform-idp-owner-setup.md step 3). So instead of
- * typing real owner credentials into the form, this test intercepts the
- * form's own auth request and substitutes TOOLBELT_OWNER_TOKEN for the
- * response's access_token when the env var is set -- the app never notices
- * the difference, since it only ever reads `body.access_token` from that
- * response (web/index.html's sign-in handler). Falls back to a real fixture-
- * A password login (today's behavior) when TOOLBELT_OWNER_TOKEN is unset.
+ * TOOLBELT_OWNER_TOKEN (a real owner access token, never a password --
+ * docs/notes/2026-08-12-platform-idp-owner-setup.md step 3) takes priority
+ * when set; a fixture-A password login (real Supabase Auth grant, but
+ * RLS-powerless against live owner data) is the same known-limited fallback
+ * this file already had before m5-01.
+ *
+ * m5-01 (docs/planning/05-d-prompt-organizer.md section 2): web/index.html's
+ * password-grant sign-in form is gone -- the page now boots by reading an
+ * already-issued access token from sessionStorage (its own manual-check
+ * convenience, never the Shell's real session). This test seeds that same
+ * sessionStorage key via page.addInitScript BEFORE navigating, so by the
+ * time index.html's module script runs, it finds a token already in place
+ * and unlocks automatically -- no form-filling step needed at all now.
  *
  * Evidence written by Playwright:
  *   playwright-report/   — HTML report
@@ -44,7 +46,12 @@ import { test, expect } from "@playwright/test";
 // helpers.mjs lives at tests/helpers.mjs; from tests/e2e/ the relative path
 // is one level up. It exports login, rest, USER_A (and USER_B), all of which
 // are used by every integration test in tests/*.test.mjs.
-import { login, rest, USER_A, SUPABASE_URL } from "../helpers.mjs";
+import { login, rest, USER_A } from "../helpers.mjs";
+
+// Must match web/index.html's own TOKEN_STORAGE_KEY constant exactly --
+// that file has no bundler/export surface to import this from, so both
+// sides carry the literal in a comment pointing at the other.
+const TOKEN_STORAGE_KEY = "prompt-organizer-manual-check-token";
 
 // ---------------------------------------------------------------------------
 // Fixture data — unique per run so concurrent CI runs don't collide.
@@ -58,7 +65,7 @@ const EXPECTED_RENDERED = "Deploy toolbelt to production.";
 // ---------------------------------------------------------------------------
 // T-E-001 — Critical prompt flow acceptance proof
 // ---------------------------------------------------------------------------
-test("critical_prompt_flow__sign_in_save_render_copy__T_E_001", async ({
+test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
   page,
   context,
 }) => {
@@ -73,30 +80,21 @@ test("critical_prompt_flow__sign_in_save_render_copy__T_E_001", async ({
   // headless Chromium context without user-gesture blocking.
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
 
-  // Owner-credential threading (see header comment): substitute the owner's
-  // token for the form's own auth response instead of performing a live
-  // password grant. The form fields below are still filled (the app needs
-  // *some* submit-worthy values) but their content is never actually
-  // authenticated against Supabase when this route is active.
-  if (ownerToken) {
-    await page.route(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ access_token: ownerToken, token_type: "bearer" }),
-      });
-    });
-  }
+  // Owner-credential threading (see header comment): resolve the real token
+  // ONCE, before navigating, then seed it into sessionStorage so
+  // index.html's own boot check finds it already there.
+  const token = ownerToken || (await login(user));
+  await page.addInitScript(
+    ([storageKey, value]) => {
+      sessionStorage.setItem(storageKey, value);
+    },
+    [TOKEN_STORAGE_KEY, token]
+  );
 
-  // ---- Step 1: Navigate and sign in ----------------------------------------
+  // ---- Step 1: Navigate -- the page unlocks itself from the seeded token --
   await page.goto(baseUrl);
   await expect(page.locator("h1")).toContainText("Prompt Organizer");
-
-  await page.fill("#email", user.email);
-  await page.fill("#password", user.password);
-  await page.click('button[type="submit"]');
-
-  // #app becomes visible only after a successful sign-in response.
+  await expect(page.locator("#token-form")).toBeHidden({ timeout: 15_000 });
   await expect(page.locator("#app")).toBeVisible({ timeout: 15_000 });
 
   // ---- Step 2: Save a new prompt that contains a {{REPO}} variable ---------
@@ -156,10 +154,8 @@ test("critical_prompt_flow__sign_in_save_render_copy__T_E_001", async ({
 
   // ---- Teardown: archive the test prompt via the REST API ------------------
   // Archiving (not hard-deleting) aligns with ADR-0002 soft-delete policy.
-  // No DELETE grant exists on prompt.prompt (AGENTS.md invariant). Must
-  // match whichever identity actually signed in above: the owner token when
-  // the route substitution was active, otherwise a real fixture-A login.
-  const token = ownerToken || (await login(user));
+  // No DELETE grant exists on prompt.prompt (AGENTS.md invariant). Reuse the
+  // exact same token this test unlocked with above.
   await rest(
     `prompt?title=eq.${encodeURIComponent(PROMPT_TITLE)}`,
     { token, method: "PATCH", body: { is_active: false } }

@@ -12,9 +12,9 @@ test("deploy discovery covers every manifest-owned migration directory", () => {
   assert.match(workflow, /\^apps\/toolbelt\/\(\.\*\/\)\?supabase\/migrations\//);
 });
 
-test("both Shell jobs retain the explicit production gate", () => {
+test("all four Shell and Handler A deploy jobs retain the explicit production gate", () => {
   const occurrences = workflow.match(/vars\.DEPLOY_ENABLED == 'true'/g) ?? [];
-  assert.equal(occurrences.length, 2);
+  assert.equal(occurrences.length, 4);
 });
 
 test("production migrations cannot be dispatched from a feature ref", () => {
@@ -33,9 +33,19 @@ test("manual deploy requires an explicit migration choice instead of coupling de
   assert.doesNotMatch(workflow, /workflow_dispatch[\s\S]{0,500}migrations=true/);
 });
 
-test("Shell deploy can read only its dedicated Infisical path", () => {
-  assert.match(workflow, /secret-path: "\/platform\/shell-deploy\/"/);
-  assert.doesNotMatch(workflow, /secret-path: "\/platform\/"/);
+test("Shell and Handler A deploy each read only their own dedicated Infisical path", () => {
+  const paths = [...workflow.matchAll(/secret-path: "([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(new Set(paths), new Set(["/platform/shell-deploy/", "/platform/llm-handler/"]));
+});
+
+test("Handler A's deploy job uses its own SSH key variable, never Shell's, and vice versa", () => {
+  assert.match(workflow, /INFISICAL_LLM_HANDLER_DEPLOY_IDENTITY_ID/);
+  const deployShell = workflow.slice(workflow.indexOf("  deploy-shell:"), workflow.indexOf("  build-llm-handler:"));
+  const deployLlmHandler = workflow.slice(workflow.indexOf("  deploy-llm-handler:"));
+  assert.match(deployShell, /SHELL_DEPLOY_SSH_KEY/);
+  assert.doesNotMatch(deployShell, /LLM_HANDLER_SSH_KEY/);
+  assert.match(deployLlmHandler, /LLM_HANDLER_SSH_KEY/);
+  assert.doesNotMatch(deployLlmHandler, /SHELL_DEPLOY_SSH_KEY/);
 });
 
 test("release health is proven before pruning and failures have a rollback path", () => {
@@ -66,6 +76,6 @@ test("every deploy trigger is classified into a real deploy unit", () => {
 test("checkout credentials are never persisted in deploy jobs", () => {
   const checkouts = workflow.match(/uses: actions\/checkout@[0-9a-f]{40}/g) ?? [];
   const disabled = workflow.match(/persist-credentials: false/g) ?? [];
-  assert.equal(checkouts.length, 3);
+  assert.equal(checkouts.length, 5);
   assert.equal(disabled.length, checkouts.length);
 });

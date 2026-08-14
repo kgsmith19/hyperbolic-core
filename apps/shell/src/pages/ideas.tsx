@@ -1,16 +1,19 @@
 /**
- * /ideas route group placeholder. Idea Intake page content ships in m3-07 --
- * explicitly out of scope for this issue.
+ * /ideas route group (m3-07, docs/planning/05-h-idea-intake.md section 8).
+ * Mounted at "/ideas/*" (app.tsx), so this component owns its own nested
+ * routing for the list, new-idea editor, and existing-idea editor.
  */
+import { Route, Routes } from "react-router";
+import IdeasListPage from "./ideas/list";
+import IdeaEditorPage from "./ideas/editor";
+
 function IdeasPage() {
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-3 p-6">
-      <h2 className="text-xl font-semibold text-text">Ideas</h2>
-      <p className="text-sm text-text-secondary" data-testid="placeholder-note">
-        Idea Intake content lands with m3-07. This is a placeholder page shell rendered inside the
-        shared chrome.
-      </p>
-    </div>
+    <Routes>
+      <Route index element={<IdeasListPage />} />
+      <Route path="new" element={<IdeaEditorPage mode="create" />} />
+      <Route path=":id" element={<IdeaEditorPage mode="edit" />} />
+    </Routes>
   );
 }
 

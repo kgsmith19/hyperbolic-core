@@ -63,7 +63,7 @@ Every 05-artifact verification command must be runnable by exactly one gate:
 | --- | --- |
 | Toolbelt root, Guards, Prompt Organizer, Network Checker, Idea Intake suites (05-c, 05-d, 05-f, 05-g, 05-h) | Toolbelt PR Gate |
 | ACC suites, covgate, contract e2e (05-b, 05-g GU-2.x ACC-side) | ACC PR Gate |
-| Shell Playwright suites, packages tests (05-a, 05-d PO-5b cache test in `packages/llm`) | Shell PR Gate |
+| Shell Playwright suites, packages tests, services/llm-handler tests (05-a, 05-d PO-5b cache test in `packages/llm`, 05-h section 6 intake submit tests in `services/llm-handler` -- m3-06 added this row when it pulled Handler A's skeleton forward) | Shell PR Gate |
 | Brain suites (07, 03 BR criteria) | Brain PR Gate |
 | LifeOS pytest/vitest/Playwright (05-e) | standalone repo `PR Gate`, out of scope here |
 | Deployed-system criteria (SH-4 latency, BR-4 reconnect against prod) | smoke suite, section 7, never a merge gate |
@@ -209,16 +209,21 @@ graph TD
       BR[brain container 127.0.0.1:8100 user brain]
       BS[(brain-state volume)]
     end
+    subgraph compose-llm-handler [compose project llm-handler/]
+      LH[llm-handler container 127.0.0.1:8200]
+    end
   end
   SB2[(Supabase lifeos project)]
   SB1[(Supabase platform project)]
   ANTH[Anthropic API]
   PROV[Brain provider endpoint]
+  GH[GitHub REST API]
   OP -->|HTTPS| TS
   CI -->|ssh deploy@host| VPS
   TS -->|"/"| SH
   TS -->|"/life/*"| LF
   TS -->|"/life/api/*"| API
+  TS -->|"/api/*"| LH
   TS -->|"/brain/stream"| BR
   API --> SB2
   API --> ANTH
@@ -226,6 +231,8 @@ graph TD
   BR --> BS
   BR --> PROV
   BR -->|platform JWKS + store| SB1
+  LH -->|caller JWT reads + service-role write-back| SB1
+  LH --> GH
 ```
 
 ## 4. Tailscale integration
@@ -238,6 +245,7 @@ graph TD
 | `/` | Shell dist at `/home/deploy/shell/current` | static file serving |
 | `/life/*` | LifeOS frontend dist | static; zone base path via Vite `base` [VERIFIED: 04-adrs.md ADR-07 base-path note] |
 | `/life/api/*` | `http://127.0.0.1:8000` | LifeOS API; FastAPI `root_path` handles the prefix |
+| `/api/*` | `http://127.0.0.1:8200` | Handler A (`services/llm-handler`); `/api/intake/submit` today (m3-06), `/api/v1/*` when m4-05 lands. Tailscale forwards the full path unchanged (does not strip the `/api/` mount prefix, same mechanic as `/life/api/*` above), so Handler A's own routes are defined with the prefix included -- added by m3-06, see `docs/ops/runbook.md`'s "Handler A deployment" section |
 | `/brain/stream` | `http://127.0.0.1:8100` | the Brain's UI stream endpoint [VERIFIED: 04-adrs.md ADR-07 route list] |
 
 - Serve config is applied by an idempotent operator step (the ops-workflow pattern, one dispatchable task), not hand-typed on the box; the config is documented in the runbook as the list above, keys only.

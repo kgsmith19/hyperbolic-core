@@ -59,11 +59,12 @@ function applyFixture(lifeIndex) {
   return { calls, result };
 }
 
-test("dry run emits the exact three fixed, private-origin routes", () => {
+test("dry run emits the exact four fixed, private-origin routes", () => {
   assert.deepEqual(run("--dry-run").split("\n"), [
     "tailscale serve --bg --yes --https=443 --set-path=/ /home/deploy/shell/current",
     "tailscale serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/dist",
     "tailscale serve --bg --yes --https=443 --set-path=/life/api/ http://127.0.0.1:8000",
+    "tailscale serve --bg --yes --https=443 --set-path=/api/ http://127.0.0.1:8200",
   ]);
 });
 
@@ -105,7 +106,37 @@ test("apply rejects a LifeOS bundle that was not built for /life/ before mutatio
   assert.doesNotMatch(result.stdout, /^\+ /m);
 });
 
-test("apply preflights, applies exactly three routes, and reports final status", () => {
+test("apply refuses before mutation when Handler A's healthz is unreachable", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "tailscale-serve-apply-"));
+  temporaryDirectories.push(root);
+  const bin = path.join(root, "bin");
+  const deploy = path.join(root, "deploy");
+  mkdirSync(path.join(deploy, "shell", "current"), { recursive: true });
+  mkdirSync(path.join(deploy, "lifeos-ui", "dist"), { recursive: true });
+  mkdirSync(bin);
+  writeFileSync(path.join(deploy, "shell", "current", "healthz"), '{"status":"ok"}\n');
+  writeFileSync(path.join(deploy, "lifeos-ui", "dist", "index.html"), '<script src="/life/assets/app.js"></script>');
+  writeFileSync(path.join(bin, "tailscale"), '#!/bin/sh\nexit 0\n');
+  // Every OTHER curl call (LifeOS API's own healthz) must keep succeeding;
+  // only the Handler A port (8200) fails, isolating this preflight check.
+  writeFileSync(path.join(bin, "curl"), '#!/bin/sh\ncase "$*" in *:8200/*) exit 1 ;; esac\nexit 0\n');
+  chmodSync(path.join(bin, "tailscale"), 0o755);
+  chmodSync(path.join(bin, "curl"), 0o755);
+  const result = spawnSync(script, ["--apply"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_TEST_CONTEXT: "child-v8",
+      PATH: `${bin}:/usr/bin:/bin`,
+      TAILSCALE_SERVE_TEST_ROOT: deploy,
+    },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Handler A health check failed/);
+  assert.doesNotMatch(result.stdout, /^\+ /m);
+});
+
+test("apply preflights, applies exactly four routes, and reports final status", () => {
   const { calls, result } = applyFixture('<script src="/life/assets/app.js"></script>');
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(calls.map((call) => call.replace(/\/tmp\/tailscale-serve-apply-[^/]+\/deploy/g, "/home/deploy")), [
@@ -113,6 +144,7 @@ test("apply preflights, applies exactly three routes, and reports final status",
     "serve --bg --yes --https=443 --set-path=/ /home/deploy/shell/current",
     "serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/dist",
     "serve --bg --yes --https=443 --set-path=/life/api/ http://127.0.0.1:8000",
+    "serve --bg --yes --https=443 --set-path=/api/ http://127.0.0.1:8200",
     "serve status",
   ]);
 });

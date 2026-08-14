@@ -16,6 +16,7 @@ on:
     paths:
       - "apps/shell/**"
       - "packages/**"
+      - "services/llm-handler/**"
       - "docs/ops/**"
       - ".github/workflows/deploy.yml"
       - ".github/workflows/shell-ci.yml"
@@ -66,6 +67,9 @@ jobs:
       - name: Type-check packages/llm
         run: npm run typecheck --workspace=packages/llm
 
+      - name: Type-check services/llm-handler
+        run: npm run typecheck --workspace=@hyperbolic/llm-handler
+
       - name: Type-check packages/ui
         # The dependency build above already emitted the clean-checkout
         # declarations Shell consumes; this re-runs the compiler explicitly.
@@ -82,6 +86,9 @@ jobs:
 
       - name: "Unit tests: packages/llm (node --test)"
         run: npm test --workspace=packages/llm
+
+      - name: "Unit tests: services/llm-handler (node --test)"
+        run: npm test --workspace=@hyperbolic/llm-handler
 
       - name: Test deployment operator tooling
         run: node --test docs/ops/*.test.mjs

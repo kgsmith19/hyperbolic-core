@@ -134,6 +134,7 @@ create table core.llm_call (
 ## Gate questions (batched, non-blocking)
 
 1. Handler A takes the final deployable-unit slot, displacing the ADR-07 Caddy reserve. If the operator prefers keeping that reserve, the alternative is deferring Handler A to a Supabase Edge Function for Idea Intake only (cost: a new runtime, Deno, breaching the runtime ceiling instead). The recommendation stands; flagging the displacement explicitly.
+   **Timing note (m3-06):** Handler A's deployable-unit skeleton (Dockerfile, compose.yaml, deploy.yml jobs, its own Infisical identity/path) was pulled forward and built by m3-06 rather than m4-05, to give Idea Intake's submit API (05-h) a real place to run once Shell turned out to be static-only. Unit count and this displacement are unchanged (still 4 of 4, still this same decision) -- only the calendar timing moved. m4-05's remaining scope is now exactly section 5's routes (/v1/complete, /v1/stream, /v1/count) plus core.llm_call logging, added to an already-existing service rather than one built from scratch.
 2. Exact `usd_estimate` rates: propose reusing ACC's rates-table convention seeded from list prices, updated manually; confirm no need for billing-API integration in V1.
 
 ## Self-check (Section 10)

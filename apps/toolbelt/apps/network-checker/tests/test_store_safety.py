@@ -34,6 +34,32 @@ class InventoryMirrorSafetyTest(unittest.TestCase):
         self.assertEqual(result["state"], "fail")
         self.assertEqual(len(store.unsynced(self.conn, "device")), before)
 
+    def test_mirror_fails_soft_instead_of_raising_when_a_device_lacks_mac_and_ip(self):
+        # Regression for a real bug: for_remote() raises ValueError for a
+        # device row with neither identifier (its own natural-key contract
+        # requires one), and mirror() used to call it from inside a bare
+        # list comprehension with no try/except -- watch.py's continuous
+        # monitoring loop calls mirror() every tick with no surrounding
+        # try/except either, so this used to crash the whole watch loop.
+        # No current writer produces this shape (inventory.py always sets a
+        # real address or a sentinel), so this is reached only via a
+        # hand-inserted row here, exactly as a future writer or a legacy row
+        # could produce it.
+        self.conn.execute(
+            "INSERT INTO device (host_id, kind, first_seen, last_seen, synced) "
+            "VALUES (?, 'unknown', ?, ?, 0)",
+            (self.host, TS, TS),
+        )
+        with patch.object(store, "_push") as push:
+            result = store.mirror(self.conn, "https://example.test", "key", "mirror-safety")
+        push.assert_not_called()
+        self.assertEqual(result["state"], "fail")
+        self.assertIn("MAC or IP", result["reason"])
+        # Fail-soft, not fail-open: the malformed row (and every other
+        # pending device row behind it) stays unsynced for retry, the same
+        # contract a network failure already gets from _push().
+        self.assertTrue(store.unsynced(self.conn, "device"))
+
     def test_every_mirrored_table_posts_against_its_natural_conflict_key(self):
         targets = {
             "samples": "host,ts",

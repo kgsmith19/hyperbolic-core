@@ -40,7 +40,7 @@ flowchart TD
     m3_03[m3-03 scaffold CLI]
     m3_04[m3-04 tools discovery]
     m3_05[m3-05 intake schema]
-    m3_06[m3-06 intake submit API]
+    m3_06["m3-06 intake submit API<br/>+ Handler A skeleton"]
     m3_07[m3-07 intake UI]
     m3_08[m3-08 forgepad supersession]
     m3_09[m3-09 root client deletion]
@@ -50,7 +50,7 @@ flowchart TD
     m4_02[m4-02 llm alt drivers]
     m4_03[m4-03 get_prompt + seed]
     m4_04[m4-04 prompt client]
-    m4_05[m4-05 Handler A]
+    m4_05["m4-05 Handler A<br/>/v1/* routes (skeleton in m3-06)"]
     m4_06[m4-06 intake optimize]
     m4_07[m4-07 Guards registration]
     m4_08[m4-08 daemon + state]
@@ -248,7 +248,7 @@ LOC is the estimated net delta from each issue file. Depends/Blocks list issue i
 | 24 | m3-03-feat-toolbelt-scaffold-cli.md | FEAT(toolbelt): scaffold CLI for the 3-step tool lifecycle | M3 | m3-01, m3-02, m1-01 | m3-05 | +350 |
 | 25 | m3-04-feat-shell-tools-discovery.md | FEAT(shell): registry client and registry-driven tool discovery | M3 | m3-02, m2-02, m1-02 | m3-09 | +350 |
 | 26 | m3-05-feat-intake-schema.md | FEAT(intake): intake schema with structural immutability | M3 | m3-03, m1-08 | m3-06, m3-07, m3-08 | +310 |
-| 27 | m3-06-feat-intake-submit-api.md | FEAT(intake): submit API with idempotent GitHub Issue creation | M3 | m3-05, m2-07 | m3-07, m4-06 | +500 |
+| 27 | m3-06-feat-intake-submit-api.md | FEAT(intake): submit API with idempotent GitHub Issue creation, + Handler A's deployable-unit skeleton pulled forward from m4-05 (see the issue's own architecture-gap note) | M3 | m3-05, m2-07 | m3-07, m4-06 | +900 |
 | 28 | m3-07-feat-intake-ui.md | FEAT(intake): /ideas list, editor, and submit flow in the Shell | M3 | m3-05, m3-06, m2-02 | m3-09, m4-06 | +650 |
 | 29 | m3-08-chore-acc-forgepad-supersession.md | CHORE(acc): migrate Forgepad ideas to Idea Intake and delete Forgepad | M3 | m3-05 | none | -491 |
 | 30 | m3-09-chore-toolbelt-root-client-deletion.md | CHORE(toolbelt): delete the root idea client | M3 | m3-04, m3-07 | none | -171 |
@@ -256,7 +256,7 @@ LOC is the estimated net delta from each issue file. Depends/Blocks list issue i
 | 32 | m4-02-feat-llm-alt-drivers.md | FEAT(llm): OpenAI and Gemini drivers with explicit fallback rules | M4 | m4-01 | m4-05 | +400 |
 | 33 | m4-03-feat-po-injection-rpc.md | FEAT(prompt-organizer): get_prompt injection RPC and starter seed | M4 | m1-08 | m4-04, m4-09 | +270 |
 | 34 | m4-04-feat-llm-prompt-client.md | FEAT(llm): getPrompt client with pinned-version cache | M4 | m4-01, m4-03 | m4-06, m4-09 | +280 |
-| 35 | m4-05-feat-llm-handler-service.md | FEAT(llm-handler): Handler A service with call logging | M4 | m4-01, m4-02, m3-02 | m4-06, m4-21, m6-02 | +760 |
+| 35 | m4-05-feat-llm-handler-service.md | FEAT(llm-handler): Handler A's /v1/complete, /v1/stream, /v1/count routes and call logging (skeleton already delivered by m3-06 -- see the issue's own note) | M4 | m4-01, m4-02, m3-02 | m4-06, m4-21, m6-02 | +450 |
 | 36 | m4-06-feat-intake-optimize.md | FEAT(intake): LLM optimize flow as derivative-only writes | M4 | m4-04, m4-05, m3-07 | none | +350 |
 | 37 | m4-07-feat-guards-harness-registration.md | FEAT(guards): automatic registration in every generated harness session | M4 | m1-12 | m4-10 | +60 |
 | 38 | m4-08-feat-brain-daemon-state.md | FEAT(brain): daemon, state store, scheduler, and brain-ci | M4 | m1-01, m1-11 | m4-09, m4-13, m4-14, m4-18, m4-21 | +870 |
@@ -288,7 +288,7 @@ LOC is the estimated net delta from each issue file. Depends/Blocks list issue i
 | 64 | m6-04-docs-planning-freeze.md | DOCS(planning): freeze docs/planning and record risk sign-offs | M6 | m6-01, m6-02, m6-03 | none | +80 |
 | 65 | m1-13-chore-platform-production-bootstrap.md | CHORE(platform): production bootstrap -- Infisical, VPS, branch protection | M1 | m1-05, m2-07 | none | +60 |
 
-Totals: 65 issues (M1: 13, M2: 9, M3: 9, M4: 21 of which 16 are Brain-specific FEAT slices, M5: 9, M6: 4). Estimated LOC across the set: roughly +22,260 added, -1,700 deleted, net about +20,560, dominated by the Brain (07 section 7.14) and the llm/handler stack (08 section 8); the ACC, Forgepad, root-client, and Network Checker deletions carry the negative side, consistent with the per-artifact LOC tables.
+Totals: 65 issues (M1: 13, M2: 9, M3: 9, M4: 21 of which 16 are Brain-specific FEAT slices, M5: 9, M6: 4). Estimated LOC across the set: roughly +22,350 added, -1,700 deleted, net about +20,650, dominated by the Brain (07 section 7.14) and the llm/handler stack (08 section 8); the ACC, Forgepad, root-client, and Network Checker deletions carry the negative side, consistent with the per-artifact LOC tables. (m3-06's Handler-A-skeleton pull-forward moved roughly 310 LOC from row 35 to row 27 without changing the total meaningfully -- net +90 for the small amount of deploy/ops plumbing that wasn't in either issue's original estimate.)
 
 Issue 65 (m1-13) is a late addition, discovered post-M1 by an implementation-time audit rather than during the original planning phase: `deploy.yml` and `platform-migrations.yml` both landed as real, complete pipelines (per m2-07 and m1-05) but neither had ever been allowed to run to a real outcome, and the concrete Infisical/VPS/branch-protection checklist to change that had never been consolidated into one owned, acceptance-criteria-bearing issue -- only scattered across this file's own gate question 4, `12-risk-register.md`'s Out-of-Brief Register, and (after the PR #9 stabilization pass) `docs/ops/runbook.md`. Numbered 65 rather than resequenced into the M1 block to avoid renumbering every issue after it in this table; its dependency edges in the graph above place it correctly regardless of row position.
 
