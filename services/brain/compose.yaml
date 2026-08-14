@@ -1,0 +1,59 @@
+# Production runtime on the VPS (docs/ops/runbook.md, "Brain deployment").
+# Shipped by deploy.yml's deploy-brain job to deploy@host:brain/compose.yaml
+# -- mirrors services/llm-handler/compose.yaml's shape exactly (same
+# loopback-only + tailscale-serve-fronts-it posture, same image-tag-from-env
+# convention, same healthcheck-then-log-rotation pattern), per
+# docs/planning/10-cicd-deployment.md section 3.3's keys-only skeleton.
+services:
+  brain:
+    # Every deploy records BRAIN_IMAGE (a sha tag) in the project
+    # directory's .env; no fallback tag, since the box only ever loads
+    # sha-tagged images over SSH (no registry credentials on the VPS).
+    image: ${BRAIN_IMAGE:?recorded in ./.env by every deploy (deploy.yml's deploy-brain job)}
+    restart: unless-stopped
+    env_file: .env
+    user: brain
+    ports:
+      - "127.0.0.1:8100:8100"
+    volumes:
+      - brain-state:/data
+      - brain-workspaces:/workspaces
+    # ADR-05's own key-isolation mechanism (04-adrs.md): the Brain's
+    # Anthropic key is rendered ONCE, at deploy time, to a file readable
+    # only inside this container -- never as a plain env var (which would
+    # leak into `docker inspect`/compose config dumps readable by any
+    # other identity on the host). Every other unit's container never has
+    # this secret mounted at all. Compose always mounts a secret at
+    # `/run/secrets/<target>` (never a nested subdirectory), so the
+    # rendered .env sets `BRAIN_SECRET_FILE=/run/secrets/anthropic-api-key`
+    # to match this real mount path -- isolation-check.mjs's own DEFAULT
+    # path (`/run/secrets/brain/anthropic-api-key`) is what a non-Brain CI
+    # runner checks is unreadable (brain-ci.yml's own step, deliberately
+    # not overridden there); only the deployed container's own env
+    # repoints it to where this compose file actually puts it.
+    secrets:
+      - source: brain_anthropic_api_key
+        target: anthropic-api-key
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8100/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  brain-state:
+  brain-workspaces:
+secrets:
+  brain_anthropic_api_key:
+    # Rendered next to compose.yaml by deploy-brain (Infisical `/brain/`
+    # path, ADR-05), never committed and never baked into the image.
+    file: ./anthropic-api-key

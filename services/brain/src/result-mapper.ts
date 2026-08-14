@@ -6,20 +6,23 @@
  * transport (retry, lane discipline, max 2), logic (non-zero verdicts,
  * never auto-retried), timeout, orphaned.
  *
- * Deliberately out of this issue's scope (07 section 7.4's own table,
- * "Cost accounting" row; hardened at m4-17): the kernel's own result
- * carries only a single combined `tokens` count, never split into
- * input/output/cache-read the way brain.result.v1's `cost` object
- * requires. That split needs the harness's raw stream-json usage fields
- * (07: "usage fields from stream-json result... recorded per
- * invocation"), which `kernel/run.mjs`'s own CLI output does not expose --
- * only its in-process handle.events would. Until m4-17 wires that up, the
- * kernel's combined count is folded into `cost.input_tokens` as a coarse
- * placeholder (documented, not silently mislabeled as a real split) and
- * `usd_estimate` stays null.
+ * Real, tracked limitation (07 section 7.4's own table, "Cost accounting"
+ * row): the kernel's own result carries only a single combined `tokens`
+ * count, never split into input/output/cache-read the way
+ * brain.result.v1's `cost` object requires. That split needs the
+ * harness's raw stream-json usage fields (07: "usage fields from
+ * stream-json result... recorded per invocation"), which
+ * `kernel/run.mjs`'s own CLI output does not expose -- only its
+ * in-process handle.events would, and this adapter never statically
+ * imports kernel code (ADR-05's isolation boundary). The kernel's
+ * combined count is folded into `cost.input_tokens` as a coarse
+ * placeholder (documented, not silently mislabeled as a real split);
+ * `usd_estimate` is a blended-rate approximation over that same combined
+ * count (pricing.ts's own header comment documents the same gap).
  */
 import type { ResultContractV1 } from "./contracts.ts";
 import type { HarnessSession } from "./adapters/types.ts";
+import { estimateUsd } from "./pricing.ts";
 
 export type FailureClass = "none" | "transport" | "logic" | "timeout" | "orphaned";
 
@@ -61,6 +64,15 @@ export function classifySession(session: HarnessSession): FailureClass {
  * the harness never got a chance to form an opinion at all. */
 export function classifyThrown(): FailureClass {
   return "transport";
+}
+
+/** The one place `session.raw.tokens` is read out and cast -- shared by
+ * this module's own mapSessionToResult and dispatch.ts's per-invocation
+ * cost recording (m4-17) so the "kernel reports one combined count"
+ * extraction logic exists exactly once. */
+export function tokensFromSession(session: HarnessSession): number {
+  const raw = session.raw as { tokens?: number } | undefined;
+  return raw?.tokens ?? 0;
 }
 
 interface KernelCriterion {
@@ -124,8 +136,8 @@ export interface MapResultParams {
 }
 
 export function mapSessionToResult(session: HarnessSession, params: MapResultParams): ResultContractV1 {
-  const raw = session.raw as { tokens?: number; error?: string; errors?: string[] } | undefined;
   const verdicts = params.verification ? params.verification.verdicts : extractRawVerdicts(session);
+  const tokens = tokensFromSession(session);
 
   return {
     task_id: params.taskId,
@@ -136,7 +148,7 @@ export function mapSessionToResult(session: HarnessSession, params: MapResultPar
     commits: [],
     branch: params.branch,
     pr_url: null,
-    cost: { input_tokens: raw?.tokens ?? 0, output_tokens: 0, cache_read_tokens: 0, usd_estimate: null },
+    cost: { input_tokens: tokens, output_tokens: 0, cache_read_tokens: 0, usd_estimate: estimateUsd(tokens, 0, 0) },
     duration_s: params.durationS,
     transcript_ref: params.transcriptRef,
     ledger_ref: params.ledgerRef,

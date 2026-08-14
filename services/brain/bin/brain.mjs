@@ -27,10 +27,11 @@ import {
   costVerb,
   refreshContextVerb,
   configVerb,
+  evalRunVerb,
+  evalCaptureVerb,
 } from "../src/cli/verbs.ts";
-import { evalRunVerb, evalCaptureVerb } from "../src/cli/eval-verbs.ts";
-import { createEvalFixtureAdapters } from "../src/adapters/fixture.ts";
 import { emit } from "../src/cli/result.ts";
+import { createEvalFixtureAdapters } from "../src/adapters/fixture.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -51,8 +52,8 @@ function usage() {
   console.error("       brain cost [--since <ts>] [--run <id>] [--json]");
   console.error("       brain refresh-context [--json]");
   console.error("       brain config [get <key> | set <key> <value>] [--json]");
-  console.error("       brain eval run [--cases <dir>] [--persist] [--json]");
-  console.error("       brain eval capture <run_id> --name <case_id> [--task <id>] [--cases <dir>] [--json]");
+  console.error("       brain eval run [--json]");
+  console.error("       brain eval capture <run_id> [--case-id <id>] [--description <text>] [--json]");
   process.exitCode = 2;
 }
 
@@ -264,6 +265,54 @@ function refreshContextCommand() {
   return result.exitCode;
 }
 
+// m6-01: `brain eval run`/`eval capture` re-dispatch each case through the
+// REAL dispatch pipeline (evals.ts's runEvalCase -> createDispatchFn), and
+// brain-ci.yml runs this as a PR-gate step on every push touching
+// services/brain/** -- a runner with zero production secrets
+// (10-cicd-deployment.md section 6). A real ClaudeCodeAdapter here would
+// need a live Anthropic credential this environment deliberately never
+// has, so the eval CLI path gets its own deterministic, credential-free
+// fixture adapters (src/adapters/fixture.ts) instead of the real
+// ClaudeCodeAdapter/codex/gemini wiring -- scoped to this one function
+// only; `brain run`'s own production dispatch (src/index.ts) never
+// imports fixture.ts and is unaffected by this.
+function evalAdapters() {
+  return createEvalFixtureAdapters();
+}
+
+async function evalCommand(rest) {
+  const sub = positionals(rest)[0];
+  const config = loadConfig();
+
+  if (sub === "run") {
+    const store = new BrainStore(config.dbPath);
+    const journal = new RunJournal(config.dataDir);
+    try {
+      const result = await evalRunVerb(store, journal, { adapters: evalAdapters(), workspacesRoot: config.workspacesRoot }, config.evalsCasesDir);
+      emit(result, jsonMode);
+      return result.exitCode;
+    } finally {
+      store.close();
+    }
+  }
+
+  if (sub === "capture") {
+    const runId = positionals(rest)[1];
+    const caseId = flagValue(rest, "--case-id");
+    const description = flagValue(rest, "--description");
+    if (!runId) {
+      usage();
+      return 2;
+    }
+    const result = withStore(config, (store) => evalCaptureVerb(store, config.evalsCasesDir, { runId, caseId, description }));
+    emit(result, jsonMode);
+    return result.exitCode;
+  }
+
+  usage();
+  return 2;
+}
+
 function configCommand(rest) {
   const positional = positionals(rest);
   const config = loadConfig();
@@ -277,39 +326,6 @@ function configCommand(rest) {
   }
   emit(result, jsonMode);
   return result.exitCode;
-}
-
-async function evalCommand(rest) {
-  const sub = positionals(rest)[0];
-  const casesDir = flagValue(rest, "--cases");
-  const config = loadConfig();
-
-  if (sub === "run") {
-    const persist = stripFlag(rest, "--persist");
-    // The ONE place the eval-only fixture registry is constructed. The
-    // production daemon's adapter wiring lives in src/index.ts and is
-    // untouched by this: no `brain run`, and no daemon dispatch, can ever
-    // reach a scripted adapter. See src/adapters/fixture.ts.
-    const result = await evalRunVerb(config, { adapters: createEvalFixtureAdapters(), casesDir, persist });
-    emit(result, jsonMode);
-    return result.exitCode;
-  }
-
-  if (sub === "capture") {
-    const caseId = flagValue(rest, "--name");
-    const taskId = flagValue(rest, "--task");
-    const runId = positionals(rest)[1];
-    if (!runId || !caseId) {
-      usage();
-      return 2;
-    }
-    const result = withStore(config, (store) => evalCaptureVerb(store, { runId, caseId, taskId, casesDir }));
-    emit(result, jsonMode);
-    return result.exitCode;
-  }
-
-  usage();
-  return 2;
 }
 
 try {

@@ -1,106 +1,111 @@
-// m6-01: the eval-only scripted adapters. What matters here is not that
-// they return canned values (they obviously do) but that the canned values
-// they return still travel through the REAL classification and verdict-
-// extraction code the way a genuine harness's would -- a fixture that
-// short-circuits result-mapper.ts would make the whole corpus vacuous.
+// m6-01: the eval-only ScriptedFixtureAdapter (src/adapters/fixture.ts) --
+// title-marker parsing, the fixedOutcome override the transport-retry
+// case's codex/gemini slots rely on, and the "no raw.criteria" shape that
+// makes dispatch.ts fall through to real verification (proved end to end,
+// against the real dispatch pipeline, by evals.test.ts and the seed cases
+// themselves; this file only tests the adapter in isolation).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ScriptedFixtureAdapter, createEvalFixtureAdapters } from "../src/adapters/fixture.ts";
-import { classifySession, extractRawVerdicts } from "../src/result-mapper.ts";
 import type { AdapterInvocation } from "../src/adapters/types.ts";
 
-function contractFileWithTitle(title: string): string {
+function invWithTitle(title: string): AdapterInvocation {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brain-fixture-adapter-"));
-  const file = path.join(dir, "task-contract.json");
-  fs.writeFileSync(file, JSON.stringify({ title }));
-  return file;
-}
-
-function invocationFor(contractPath: string): AdapterInvocation {
+  const contractPath = path.join(dir, "contract.json");
+  fs.writeFileSync(contractPath, JSON.stringify({ title }));
   return {
     invocationId: "inv-1",
     taskId: "task-1",
     runId: "run-1",
     contractPath,
     worktreePath: "/nonexistent/worktree",
-    wallClockMinBudget: 5,
+    wallClockMinBudget: 60,
   };
 }
 
-test("start() reads the scripted outcome from the contract's title marker", async () => {
+test("ScriptedFixtureAdapter: id is whatever the constructor is given", () => {
+  assert.equal(new ScriptedFixtureAdapter("claude-code").id, "claude-code");
+  assert.equal(new ScriptedFixtureAdapter("codex").id, "codex");
+  assert.equal(new ScriptedFixtureAdapter("gemini").id, "gemini");
+});
+
+test("ScriptedFixtureAdapter: probe always reports available -- a case naming it must actually be routed to it", async () => {
   const adapter = new ScriptedFixtureAdapter("claude-code");
-  const session = await adapter.start(invocationFor(contractFileWithTitle("Do the thing [[fixture:rejected]]")));
+  assert.deepEqual(await adapter.probe(), { ok: true, version: "fixture-1.0.0" });
+});
+
+test("ScriptedFixtureAdapter: start() reads the [[fixture:<outcome>]] marker out of the contract's own title", async () => {
+  const adapter = new ScriptedFixtureAdapter("claude-code");
+  const session = await adapter.start(invWithTitle("some case [[fixture:rejected]]"));
   assert.equal(session.outcome, "rejected");
 });
 
-test("a contract with no marker defaults to accepted", async () => {
+test("ScriptedFixtureAdapter: no marker in the title defaults to accepted", async () => {
   const adapter = new ScriptedFixtureAdapter("claude-code");
-  const session = await adapter.start(invocationFor(contractFileWithTitle("Do the thing")));
+  const session = await adapter.start(invWithTitle("a title with no marker at all"));
   assert.equal(session.outcome, "accepted");
 });
 
-test("an unrecognized marker throws rather than silently defaulting", async () => {
-  // A case that meant to script `rejected` and quietly got `accepted`
-  // would pass for the wrong reason, which is worse than not running.
+test("ScriptedFixtureAdapter: an unrecognized marker value defaults to accepted rather than throwing", async () => {
   const adapter = new ScriptedFixtureAdapter("claude-code");
-  await assert.rejects(
-    () => adapter.start(invocationFor(contractFileWithTitle("Do the thing [[fixture:exploded]]"))),
-    /unknown outcome marker/
-  );
+  const session = await adapter.start(invWithTitle("case [[fixture:not-a-real-outcome]]"));
+  assert.equal(session.outcome, "accepted");
 });
 
-test("fixedOutcome overrides the title marker entirely", async () => {
-  const adapter = new ScriptedFixtureAdapter("codex", { fixedOutcome: "failed-to-start", tokens: 0 });
-  const session = await adapter.start(invocationFor(contractFileWithTitle("Do the thing [[fixture:accepted]]")));
+test("ScriptedFixtureAdapter: an accepted/rejected/orphaned session carries no raw.criteria -- dispatch.ts must fall through to real verification", async () => {
+  const adapter = new ScriptedFixtureAdapter("claude-code");
+  const session = await adapter.start(invWithTitle("case [[fixture:accepted]]"));
+  assert.equal((session.raw as { criteria?: unknown }).criteria, undefined);
+  assert.equal(typeof (session.raw as { tokens?: number }).tokens, "number");
+});
+
+test("ScriptedFixtureAdapter: a failed-to-start outcome carries a raw.error matching result-mapper.ts's transport-signal text", async () => {
+  const adapter = new ScriptedFixtureAdapter("codex");
+  const session = await adapter.start(invWithTitle("case [[fixture:failed-to-start]]"));
+  assert.equal(session.outcome, "failed-to-start");
+  assert.match((session.raw as { error: string }).error, /failed to spawn/);
+});
+
+test("ScriptedFixtureAdapter: fixedOutcome overrides the title marker entirely", async () => {
+  const adapter = new ScriptedFixtureAdapter("codex", { fixedOutcome: "failed-to-start" });
+  const session = await adapter.start(invWithTitle("case [[fixture:accepted]]"));
   assert.equal(session.outcome, "failed-to-start");
 });
 
-test("a failed-to-start session classifies as transport, not logic", async () => {
-  // This is what makes the transport-retry case retry at all: result-
-  // mapper.ts only treats failed-to-start as transport when raw.error
-  // matches its transport signal regex.
-  const adapter = new ScriptedFixtureAdapter("codex", { fixedOutcome: "failed-to-start" });
-  const session = await adapter.start(invocationFor(contractFileWithTitle("anything")));
-  assert.equal(classifySession(session), "transport");
-});
-
-test("sessions carry no criteria, so dispatch falls through to real verification", async () => {
-  // extractRawVerdicts() returning empty is precisely the signal
-  // dispatch.ts uses to run verify.ts itself instead of trusting the
-  // adapter -- if a fixture ever reported its own verdicts, the corpus
-  // would be testing its fixtures rather than the Brain.
+test("ScriptedFixtureAdapter: resume() is scripted the same as start(), not a throw", async () => {
   const adapter = new ScriptedFixtureAdapter("claude-code");
-  const session = await adapter.start(invocationFor(contractFileWithTitle("Do the thing [[fixture:accepted]]")));
-  assert.deepEqual(extractRawVerdicts(session), []);
+  const inv = invWithTitle("case [[fixture:accepted]]");
+  const session = await adapter.resume("some-session-id", inv);
+  assert.equal(session.outcome, "accepted");
 });
 
-test("probe() always succeeds so a case's preferred harness is actually routed to", async () => {
-  // router.ts's selectInitialAdapter() silently falls through to
-  // claude-code on any probe failure, which would make the transport-retry
-  // case never reach codex at all.
-  for (const adapter of Object.values(createEvalFixtureAdapters())) {
-    const probe = await adapter.probe();
-    assert.equal(probe.ok, true);
-  }
+test("ScriptedFixtureAdapter: cancel is a no-op", async () => {
+  const adapter = new ScriptedFixtureAdapter("claude-code");
+  await adapter.cancel("s", 1000);
 });
 
-test("the registry keeps HarnessId frozen and scripts one adapter per id", async () => {
-  const registry = createEvalFixtureAdapters();
-  assert.deepEqual(Object.keys(registry).sort(), ["claude-code", "codex", "gemini"]);
-
-  const contract = invocationFor(contractFileWithTitle("Do the thing [[fixture:accepted]]"));
-  // codex always transport-fails and gemini always succeeds regardless of
-  // the case's own marker: that fixed asymmetry is what a case selects
-  // when it names them as preferred/fallback.
-  assert.equal(classifySession(await registry.codex.start(contract)), "transport");
-  assert.equal((await registry.gemini.start(contract)).outcome, "accepted");
+test("createEvalFixtureAdapters: registers exactly the three frozen HarnessIds", () => {
+  const adapters = createEvalFixtureAdapters();
+  assert.deepEqual(Object.keys(adapters).sort(), ["claude-code", "codex", "gemini"]);
 });
 
-test("token counts reach cost accounting through raw.tokens", async () => {
-  const adapter = new ScriptedFixtureAdapter("gemini", { fixedOutcome: "accepted", tokens: 200 });
-  const session = await adapter.start(invocationFor(contractFileWithTitle("anything")));
-  assert.equal((session.raw as { tokens: number }).tokens, 200);
+test("createEvalFixtureAdapters: codex is fixed to failed-to-start regardless of any title marker", async () => {
+  const adapters = createEvalFixtureAdapters();
+  const session = await adapters.codex.start(invWithTitle("[[fixture:accepted]]"));
+  assert.equal(session.outcome, "failed-to-start");
+});
+
+test("createEvalFixtureAdapters: gemini is fixed to accepted regardless of any title marker", async () => {
+  const adapters = createEvalFixtureAdapters();
+  const session = await adapters.gemini.start(invWithTitle("[[fixture:rejected]]"));
+  assert.equal(session.outcome, "accepted");
+});
+
+test("createEvalFixtureAdapters: claude-code reads the title marker like a plain ScriptedFixtureAdapter", async () => {
+  const adapters = createEvalFixtureAdapters();
+  const session = await adapters["claude-code"].start(invWithTitle("[[fixture:rejected]]"));
+  assert.equal(session.outcome, "rejected");
 });

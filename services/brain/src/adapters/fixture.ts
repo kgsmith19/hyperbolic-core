@@ -1,30 +1,31 @@
 /**
- * Deterministic, eval-only harness adapters (m6-01).
+ * Eval-only scripted harness adapter (m6-01, 07-brain-architecture.md
+ * section 7.11). PR-gate CI has zero production secrets
+ * (10-cicd-deployment.md section 6), so the seed corpus cannot
+ * re-dispatch through a real ClaudeCodeAdapter and pass deterministically
+ * -- a genuinely accepted session needs a live Anthropic credential. This
+ * adapter scripts only the HARNESS-LEVEL outcome (accepted / rejected /
+ * aborted-by-budget / failed-to-start / ...); it never sets
+ * `raw.criteria`, so dispatch.ts's own extractRawVerdicts() always falls
+ * through to running the case's REAL acceptance[].verify command against
+ * the real worktree (verify.ts) -- acceptance checking itself stays
+ * unmocked, only the "did the harness run" step is scripted.
  *
- * Why these exist: `brain eval run` re-dispatches every corpus case
- * through the REAL dispatch pipeline (dispatch.ts -> router.ts ->
- * verify.ts -> result-mapper.ts), and the PR gate that runs it has zero
- * production secrets by design (10-cicd-deployment.md section 6). A case
- * that reached a genuine `accepted` outcome through claude-code.ts would
- * need a live Anthropic credential in CI, so the corpus could never
- * contain a passing case at all. These adapters script the HARNESS-LEVEL
- * outcome only -- everything downstream of it (the worktree, the Brain's
- * own acceptance verification, the worktree-clean check, status mapping,
- * cost accounting) runs completely unmocked against the case's own real
- * verify commands.
+ * Wired ONLY into bin/brain.mjs's evalAdapters() (the `brain eval
+ * run`/`eval capture` CLI path). The real production daemon's own adapter
+ * wiring (src/index.ts) never imports this file, so `brain run` always
+ * dispatches to the real adapters regardless of this module's existence.
  *
- * Scope discipline: nothing here is ever reachable from a real `brain
- * run`. src/index.ts (the production daemon wiring) constructs
- * ClaudeCodeAdapter/codexAdapter/geminiAdapter and never imports this
- * file; the only construction site is the eval CLI path in
- * bin/brain.mjs. HarnessId (adapters/types.ts) also stays frozen at
- * exactly claude-code|codex|gemini -- these are alternate adapter OBJECTS
- * registered under those existing ids, not a fourth harness.
+ * adapters/types.ts's HarnessId is frozen in V1 ("claude-code" | "codex" |
+ * "gemini"); this module supplies alternate HarnessAdapter *objects*
+ * under those three existing ids, never a fourth id.
  */
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import type { AdapterInvocation, HarnessAdapter, HarnessId, HarnessSession, ProbeResult } from "./types.ts";
+import type { TaskContractV1 } from "../contracts.ts";
 
-export type FixtureOutcome = HarnessSession["outcome"];
+type FixtureOutcome = HarnessSession["outcome"];
 
 const VALID_OUTCOMES: ReadonlySet<string> = new Set<FixtureOutcome>([
   "accepted",
@@ -35,106 +36,90 @@ const VALID_OUTCOMES: ReadonlySet<string> = new Set<FixtureOutcome>([
   "orphaned",
 ]);
 
-/** A case selects its scripted outcome by embedding this marker in its
- * contract's own `title`. evals.ts's runEvalCase() rewrites task_id and
- * run_id at dispatch time but passes `title` through untouched, so the
- * marker is the one contract field that reliably survives into the
- * contract file this adapter reads back off disk. */
-const FIXTURE_MARKER_RE = /\[\[fixture:([a-z-]+)\]\]/;
+const MARKER_RE = /\[\[fixture:([a-z-]+)\]\]/;
 
-const DEFAULT_OUTCOME: FixtureOutcome = "accepted";
-
-/** result-mapper.ts's TRANSPORT_SIGNAL_RE matches "failed to spawn", so a
- * `failed-to-start` session carrying this message classifies as
- * `transport` (retryable, then falls back) rather than `logic` (terminal).
- * That distinction is the whole point of the transport-retry case, so the
- * wording here is load-bearing, not cosmetic. */
-const TRANSPORT_ERROR = "fixture adapter: failed to spawn (scripted transport failure, no real process was ever launched)";
-
-export interface ScriptedFixtureOptions {
-  /** Overrides the contract's title marker entirely. Used for the two
-   * dedicated registry entries (codex always transport-fails, gemini
-   * always succeeds) whose behavior must not depend on which case is
-   * being run. */
-  fixedOutcome?: FixtureOutcome;
-  /** Folded into cost.input_tokens by result-mapper.ts, exactly as the
-   * real kernel's own combined `tokens` count is. */
-  tokens?: number;
+/** Reads the case contract's own `title` for a `[[fixture:<outcome>]]`
+ * marker -- evals.ts's runEvalCase preserves `title` unchanged through
+ * its run_id/task_id rewrite, so it is the one contract field a case
+ * file's author controls that survives to inv.contractPath verbatim.
+ * Defaults to "accepted" (the harness "worked") when no marker is
+ * present, so an unmarked case still exercises real verification
+ * meaningfully instead of failing for an unrelated reason. */
+function outcomeFromTitle(contractPath: string): FixtureOutcome {
+  const contract = JSON.parse(readFileSync(contractPath, "utf8")) as TaskContractV1;
+  const candidate = contract.title.match(MARKER_RE)?.[1];
+  return candidate && VALID_OUTCOMES.has(candidate) ? (candidate as FixtureOutcome) : "accepted";
 }
 
-function outcomeFromContract(contractPath: string): FixtureOutcome {
-  const contract = JSON.parse(readFileSync(contractPath, "utf8")) as { title?: string };
-  const match = FIXTURE_MARKER_RE.exec(contract.title ?? "");
-  if (!match) return DEFAULT_OUTCOME;
-  const marker = match[1]!;
-  // A typo'd marker fails loudly rather than silently degrading to the
-  // default: a case that meant to script `rejected` and quietly got
-  // `accepted` instead would be a corpus that passes for the wrong
-  // reason, which is worse than no corpus at all.
-  if (!VALID_OUTCOMES.has(marker)) {
-    throw new Error(`fixture adapter: unknown outcome marker "[[fixture:${marker}]]" (valid: ${[...VALID_OUTCOMES].join(", ")})`);
-  }
-  return marker as FixtureOutcome;
+export interface ScriptedFixtureAdapterConfig {
+  /** When set, every start()/resume() call returns this outcome
+   * regardless of the contract's own title marker -- used for the
+   * codex/gemini fixture instances below, whose behavior is fixed by
+   * which slot they occupy (transport-retry's preferred/fallback
+   * mechanics), not by anything a case's title says. */
+  fixedOutcome?: FixtureOutcome;
+  tokens?: number;
 }
 
 export class ScriptedFixtureAdapter implements HarnessAdapter {
   readonly id: HarnessId;
-  readonly #fixedOutcome?: FixtureOutcome;
-  readonly #tokens: number;
+  #fixedOutcome: FixtureOutcome | undefined;
+  #tokens: number;
 
-  constructor(id: HarnessId, options: ScriptedFixtureOptions = {}) {
+  constructor(id: HarnessId, config: ScriptedFixtureAdapterConfig = {}) {
     this.id = id;
-    this.#fixedOutcome = options.fixedOutcome;
-    this.#tokens = options.tokens ?? 100;
+    this.#fixedOutcome = config.fixedOutcome;
+    this.#tokens = config.tokens ?? 100;
   }
 
-  /** Always available. A failing probe would make router.ts's
-   * selectInitialAdapter() silently fall through to claude-code, so a
-   * case naming `codex` as its preferred harness would never actually be
-   * routed there and the transport-retry case would test nothing. */
   async probe(): Promise<ProbeResult> {
+    // Always available: a case that names this adapter as
+    // harness.preferred (or lists it in fallback) must actually be
+    // routed to it -- router.ts's selectInitialAdapter/
+    // selectFallbackAdapter both fall through past a failing probe(),
+    // which would silently substitute a different adapter than the case
+    // intends to exercise.
     return { ok: true, version: "fixture-1.0.0" };
   }
 
   async start(inv: AdapterInvocation): Promise<HarnessSession> {
-    const outcome = this.#fixedOutcome ?? outcomeFromContract(inv.contractPath);
-
-    // Deliberately no `criteria` key on `raw`: result-mapper.ts's
-    // extractRawVerdicts() then returns empty, which is exactly what makes
-    // dispatch.ts fall through to the REAL runVerification() (verify.ts)
-    // and spawn the case's own acceptance commands against the real
-    // worktree. Scripting verdicts here instead would reduce the corpus to
-    // a test of its own fixtures.
-    const raw: { tokens: number; error?: string } = { tokens: this.#tokens };
-    if (outcome === "failed-to-start") raw.error = TRANSPORT_ERROR;
-
-    return { sessionId: `fixture-${this.id}-${inv.invocationId}`, outcome, raw };
+    const outcome = this.#fixedOutcome ?? outcomeFromTitle(inv.contractPath);
+    return this.#session(outcome);
   }
 
+  /** No seed case exercises resume() yet; scripted the same as start()
+   * rather than throwing, so a future case that does can just work. */
   async resume(_sessionId: string, inv: AdapterInvocation): Promise<HarnessSession> {
-    // V1 dispatch never resumes (dispatch.ts only ever calls start()), so
-    // this exists to satisfy the interface. Scripting it the same way
-    // start() is scripted keeps it honest if that ever changes.
     return this.start(inv);
   }
 
   async cancel(): Promise<void> {
-    // No real process was ever spawned.
+    // Nothing real was ever started; cancelling a scripted session is a no-op.
+  }
+
+  #session(outcome: FixtureOutcome): HarnessSession {
+    const sessionId = randomUUID();
+    if (outcome === "failed-to-start") {
+      // result-mapper.ts's TRANSPORT_SIGNAL_RE matches "failed to spawn",
+      // which is what makes classifySession() return "transport" here --
+      // the transport-retry case's codex slot needs exactly this.
+      return { sessionId, outcome, raw: { error: "fixture: failed to spawn (scripted transport failure)" } };
+    }
+    // Deliberately no `criteria` field: dispatch.ts's extractRawVerdicts()
+    // treats a missing/empty array as "the adapter reported nothing" and
+    // falls through to running the case's REAL acceptance[].verify
+    // command against the real worktree -- verification stays unmocked.
+    return { sessionId, outcome, raw: { tokens: this.#tokens } };
   }
 }
 
-/** The registry `brain eval run` dispatches against. The three ids carry
- * distinct scripted behavior so a case can select what it exercises purely
- * through its own contract's harness.preferred/fallback fields:
- *
- * - claude-code: reads the case's own `[[fixture:...]]` title marker, so
- *   most cases pick their outcome without touching the registry at all.
- * - codex: always a transport-class failure, so a case that prefers it
- *   drives dispatch.ts's real retry (MAX_ATTEMPTS_PER_HARNESS=2) and
- *   fallback path.
- * - gemini: always succeeds, so it is a viable fallback target for the
- *   above.
- */
+/** Constructs the three fixture adapter instances `brain eval run` wires
+ * in place of the real ClaudeCodeAdapter/codex/gemini adapters
+ * (bin/brain.mjs's evalAdapters() is the only call site -- never the real
+ * production daemon's own wiring). "claude-code" reads each case's own
+ * title marker, the general-purpose slot most cases use; "codex" and
+ * "gemini" are fixed to the two outcomes the transport-retry case needs
+ * from its preferred/fallback pair. */
 export function createEvalFixtureAdapters(): Record<HarnessId, HarnessAdapter> {
   return {
     "claude-code": new ScriptedFixtureAdapter("claude-code"),

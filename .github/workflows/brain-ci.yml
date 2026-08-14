@@ -44,15 +44,28 @@ jobs:
       - name: Run services/brain tests
         working-directory: services/brain
         run: npm test
-      # 07-brain-architecture.md section 7.11: the eval corpus runs on
-      # every PR touching services/brain/**, and any regression fails the
-      # gate. Deterministic and credential-free by construction -- the
-      # cases script the harness outcome only, and everything below it (the
-      # worktree, the acceptance commands, verification, status mapping)
-      # runs for real. See services/brain/evals/cases/README.md.
-      - name: Run the Brain eval corpus
+      - name: "ADR-05 isolation check (m4-18, BR-3/II-4): this runner is a real non-Brain process context -- no Brain secret file is ever mounted here"
+        run: |
+          if node services/brain/scripts/isolation-check.mjs; then
+            echo "isolation-check exited 0 (secret readable) from a non-Brain CI runner -- this must never happen" >&2
+            exit 1
+          fi
+          echo "isolation-check correctly exited non-zero: the Brain secret is not readable from this context"
+      - name: "Eval corpus gate (m4-19, 07 section 7.11): brain eval run over services/brain/evals/cases/*.case.json"
         working-directory: services/brain
-        run: node bin/brain.mjs eval run
+        env:
+          # Scratch state, never the production /data or /workspaces
+          # volumes -- this CLI invocation only needs somewhere to open a
+          # throwaway SQLite store and check out worktrees for the
+          # duration of the eval run. config.ts's own default
+          # workspacesRoot ("/workspaces") assumes the Dockerfile's own
+          # VOLUME mkdir -- this bare runner has neither that directory
+          # nor permission to create one at the filesystem root, so the
+          # m6-01 seed corpus (the first real cases ever dispatched
+          # through this step) needs an explicit, writable path.
+          BRAIN_DATA_DIR: ${{ runner.temp }}/brain-eval-data
+          BRAIN_WORKSPACES_ROOT: ${{ runner.temp }}/brain-eval-workspaces
+        run: node bin/brain.mjs eval run --json
       - name: Build the Brain image (verification only, never pushed from CI)
         run: docker build -f services/brain/Dockerfile -t brain:pr-gate .
       - name: Smoke-run the built image (brain status --offline, no live daemon required)

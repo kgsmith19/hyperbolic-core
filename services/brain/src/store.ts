@@ -14,6 +14,8 @@
  * transition a single durable statement.
  */
 import { DatabaseSync } from "node:sqlite";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type {
   Approval,
   ApprovalStatus,
@@ -88,6 +90,7 @@ create index if not exists approval_task_idx on approval (task_id);
 create table if not exists cost (
   id text primary key,
   task_id text not null references task(id),
+  invocation_id text not null references invocation(id),
   input_tokens integer not null default 0,
   output_tokens integer not null default 0,
   cache_read_tokens integer not null default 0,
@@ -95,6 +98,7 @@ create table if not exists cost (
   recorded_at text not null
 );
 create index if not exists cost_task_idx on cost (task_id);
+create index if not exists cost_invocation_idx on cost (invocation_id);
 
 create table if not exists eval_case (
   id text primary key,
@@ -118,6 +122,13 @@ export class BrainStore {
   #db: DatabaseSync;
 
   constructor(dbPath: string) {
+    // node:sqlite does not create the parent directory itself (unlike
+    // journal.ts's/log.ts's own mkdirSync-before-write posture) -- a
+    // caller pointing BRAIN_DATA_DIR at a path that doesn't exist yet
+    // (a fresh CI runner's scratch dir, in particular) would otherwise
+    // fail with a bare "unable to open database file", not "no such
+    // directory."
+    mkdirSync(dirname(dbPath), { recursive: true });
     this.#db = new DatabaseSync(dbPath);
     this.#db.exec("pragma journal_mode = WAL;");
     this.#db.exec("pragma foreign_keys = ON;");
@@ -277,10 +288,17 @@ export class BrainStore {
   insertCost(cost: Cost): void {
     this.#db
       .prepare(
-        `insert into cost (id, task_id, input_tokens, output_tokens, cache_read_tokens, usd_estimate, recorded_at)
-         values (?, ?, ?, ?, ?, ?, ?)`
+        `insert into cost (id, task_id, invocation_id, input_tokens, output_tokens, cache_read_tokens, usd_estimate, recorded_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(cost.id, cost.taskId, cost.inputTokens, cost.outputTokens, cost.cacheReadTokens, cost.usdEstimate, cost.recordedAt);
+      .run(cost.id, cost.taskId, cost.invocationId, cost.inputTokens, cost.outputTokens, cost.cacheReadTokens, cost.usdEstimate, cost.recordedAt);
+  }
+
+  /** m4-17: cost attributed to one specific harness attempt (not the whole
+   * task) -- the finer-grained half of the run_id -> task_id ->
+   * invocation_id join key 07 section 7.9 requires. */
+  listCostsForInvocation(invocationId: string): Cost[] {
+    return this.#db.prepare(`select * from cost where invocation_id = ? order by recorded_at asc`).all(invocationId).map(rowToCost);
   }
 
   listCostsForRun(runId: string): Cost[] {
@@ -305,12 +323,18 @@ export class BrainStore {
     this.#db.prepare(`insert into eval_case (id, name, spec_json, created_at) values (?, ?, ?, ?)`).run(evalCase.id, evalCase.name, evalCase.specJson, evalCase.createdAt);
   }
 
-  /** m4-19: a corpus run writes the case row once and appends a result row
-   * per execution, so it needs to ask whether the case is already known
-   * rather than re-inserting it against its own primary key every time. */
-  getEvalCase(id: string): EvalCase | null {
-    const row = this.#db.prepare(`select * from eval_case where id = ?`).get(id);
-    return row ? rowToEvalCase(row) : null;
+  /** m4-19's `brain eval run`: every eval_result row has a NOT NULL FK to
+   * eval_case(id), but `brain eval run` reads cases straight from
+   * evals/cases/*.case.json -- files a corpus can carry without ever
+   * having gone through `brain eval capture`'s own insertEvalCase call
+   * (a case authored by hand, or checked in from another machine). This
+   * is the write path that keeps that FK satisfiable regardless of how
+   * the case file got there, idempotent so re-running the corpus never
+   * errors on a case it already knows about. */
+  upsertEvalCase(evalCase: EvalCase): void {
+    this.#db
+      .prepare(`insert into eval_case (id, name, spec_json, created_at) values (?, ?, ?, ?) on conflict(id) do nothing`)
+      .run(evalCase.id, evalCase.name, evalCase.specJson, evalCase.createdAt);
   }
 
   insertEvalResult(result: EvalResult): void {
@@ -401,6 +425,7 @@ function rowToCost(r: Row): Cost {
   return {
     id: r.id as string,
     taskId: r.task_id as string,
+    invocationId: r.invocation_id as string,
     inputTokens: r.input_tokens as number,
     outputTokens: r.output_tokens as number,
     cacheReadTokens: r.cache_read_tokens as number,

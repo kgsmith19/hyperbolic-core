@@ -145,14 +145,17 @@ test("approval: insert, updateApprovalStatus, listPendingApprovals excludes reso
   assert.deepEqual(store.listPendingApprovals(), []);
 });
 
-test("cost: insertCost, listCostsForRun joins through task", () => {
+test("cost: insertCost, listCostsForRun joins through task, listCostsForInvocation", () => {
   const store = new BrainStore(tmpDbPath());
   store.insertRun(fixtureRun());
   store.insertTask(fixtureTask());
-  const cost: Cost = { id: "cost-1", taskId: "task-1", inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, usdEstimate: 0.05, recordedAt: "2026-01-01T00:00:00.000Z" };
+  store.insertInvocation({ id: "inv-1", taskId: "task-1", harness: "claude-code", sessionId: null, status: "completed", startedAt: "2026-01-01T00:00:00.000Z", finishedAt: null });
+  const cost: Cost = { id: "cost-1", taskId: "task-1", invocationId: "inv-1", inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, usdEstimate: 0.05, recordedAt: "2026-01-01T00:00:00.000Z" };
   store.insertCost(cost);
   assert.deepEqual(store.listCostsForRun("run-1"), [cost]);
   assert.deepEqual(store.listCostsForRun("run-nonexistent"), []);
+  assert.deepEqual(store.listCostsForInvocation("inv-1"), [cost]);
+  assert.deepEqual(store.listCostsForInvocation("inv-nonexistent"), []);
 });
 
 test("eval_case/eval_result: insert and list by case", () => {

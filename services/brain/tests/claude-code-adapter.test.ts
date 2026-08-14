@@ -85,6 +85,45 @@ test("start(): a kernel that exits with no parseable stdout produces an orphaned
   assert.match(raw.error, /no stdout to parse/);
 });
 
+test("start(): run_id/task_id/invocation_id propagate into the kernel's env and back through its own contract-carried ledger ref (07 section 7.9's join key)", async () => {
+  const inv = writeInvocation("do the thing FAKE_OUTCOME=echo-ids");
+  const session = await adapter().start(inv);
+  const raw = session.raw as {
+    _brainMetaSeen: { taskId: string; runId: string; invocationId: string };
+    envSeen: { runId: string; taskId: string; invocationId: string };
+  };
+  // _brainMeta is minted from the CONTRACT's own task_id/run_id
+  // (kernel-contract.ts reads contract.task_id/contract.run_id, not the
+  // AdapterInvocation's) -- fixtureContract()'s fixed UUIDs, not inv's
+  // "task-1"/"run-1" fixture ids (the two are always equal in real
+  // dispatch.ts usage, since the contract on disk always belongs to the
+  // same task the invocation was built from; only this test's fixture
+  // wiring keeps them literally distinct).
+  assert.deepEqual(raw._brainMetaSeen, {
+    contractVersion: "kernel.contract.v1",
+    taskId: "22222222-2222-2222-2222-222222222222",
+    runId: "11111111-1111-1111-1111-111111111111",
+    invocationId: inv.invocationId,
+  });
+  // The env vars DO come straight from the AdapterInvocation (claude-
+  // code.ts's own #spawnKernel), so these match inv's fixture ids exactly.
+  assert.deepEqual(raw.envSeen, { runId: inv.runId, taskId: inv.taskId, invocationId: inv.invocationId });
+});
+
+test("start(): m4-18 environment audit -- the kernel receives ACC_VAULT as a plain file PATH, never a resolved credential value", async () => {
+  const inv = writeInvocation("do the thing FAKE_OUTCOME=echo-ids");
+  const session = await adapter().start(inv);
+  const raw = session.raw as { accVaultSeen: string | null };
+  assert.ok(raw.accVaultSeen, "ACC_VAULT must be set for the kernel to find its own credential-name lookup");
+  assert.match(raw.accVaultSeen, /vault\.json$/, "a path, ending in the vault.json filename");
+  // Not token/key-shaped: a real secret value would never look like a
+  // filesystem path, and a filesystem path never happens to look like a
+  // real secret -- this is the same class of check scrubber.ts's own
+  // TOKEN_SHAPED_PATTERNS applies to log lines, restated here directly
+  // against what the adapter actually handed the kernel subprocess.
+  assert.doesNotMatch(raw.accVaultSeen, /^sk-|^gh[pousr]_|^AKIA|^ASIA|^xox[baprs]-|^AIza/);
+});
+
 test("start(): the mapped kernel contract is written to a real temp file and cleaned up afterward", async () => {
   const inv = writeInvocation("verify staging cleanup FAKE_OUTCOME=accepted");
   const before = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith("brain-kernel-contract-"));

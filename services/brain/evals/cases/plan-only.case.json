@@ -1,46 +1,66 @@
 {
   "case_id": "plan-only",
-  "description": "A report-type deliverable that produces no commits: the harness runs, the Brain's own verification confirms the repository was left exactly as handed over, and the task ends succeeded. Pins the path where a planning task is NOT penalised for changing nothing, which a verifier keyed on 'did anything happen' would get wrong. The harness outcome is scripted (see the corpus README); the acceptance command, the worktree, and the clean-tree check are all real.",
+  "description": "m6-01 seed case 1/5 (07 section 7.11): the plan-only shape -- a single task whose harness accepts and whose deliverable is a report, no code changes. Dispatched through the REAL pipeline (createDispatchFn) against src/adapters/fixture.ts's ScriptedFixtureAdapter, never a real credentialed harness -- PR-gate CI has no production secrets (10-cicd-deployment.md section 6). The adapter's [[fixture:accepted]] title marker scripts only the harness-level outcome; this case's own acceptance[].verify command still runs for real against the real worktree (verify.ts), so acceptance checking stays unmocked.",
   "contract": {
-    "task_id": "00000000-0000-4000-8000-000000000001",
-    "run_id": "00000000-0000-4000-8000-0000000000a1",
-    "title": "Draft a migration plan without changing code [[fixture:accepted]]",
-    "repo": { "url": "fixture://repo_files", "ref": "main" },
-    "harness": { "preferred": "claude-code", "fallback": [] },
+    "task_id": "00000000-0000-0000-0000-000000000001",
+    "run_id": "00000000-0000-0000-0000-000000000002",
+    "title": "m6-01 seed: plan-only [[fixture:accepted]]",
+    "repo": {
+      "url": "self",
+      "ref": "HEAD"
+    },
+    "harness": {
+      "preferred": "claude-code",
+      "fallback": []
+    },
     "autonomy": 1,
     "prompt": {
-      "objective": "Read the repository and produce a written migration plan. Do not modify any files.",
+      "objective": "Produce a plan-only report; no code changes expected.",
       "context_refs": [],
       "prompt_org_refs": []
     },
     "constraints": {
-      "allowed_paths": ["**"],
+      "allowed_paths": [
+        "**"
+      ],
       "denied_paths": [],
       "vault_keys": [],
-      "max_turns": 8,
-      "wall_clock_min": 10,
-      "token_budget": 20000,
+      "max_turns": 1,
+      "wall_clock_min": 5,
+      "token_budget": 1000,
       "network": "none"
     },
     "acceptance": [
       {
-        "id": "AC-repo-readable",
-        "statement": "When the plan-only task finishes, the repository it was handed shall still contain its original README.",
-        "verify": { "command": "test -f README.md", "cwd": "worktree", "expect_exit": 0, "timeout_s": 30 }
+        "id": "AC-worktree-exists",
+        "statement": "The task's git worktree still exists after the fixture harness returns.",
+        "verify": {
+          "command": "true",
+          "cwd": "worktree",
+          "expect_exit": 0,
+          "timeout_s": 10
+        }
       }
     ],
-    "deliverable": { "type": "report", "branch": "brain/eval-plan-only", "push": false, "draft_pr": false }
+    "deliverable": {
+      "type": "report",
+      "branch": "brain/eval-plan-only",
+      "push": false,
+      "draft_pr": false
+    }
   },
   "fixture": {
-    "kind": "repo_files",
-    "files": {
-      "README.md": "# eval fixture: plan-only\n\nA repository the task is expected to read and not modify.\n",
-      "src/app.txt": "placeholder\n"
-    }
+    "repo_tar": null,
+    "git_ref": null
   },
   "expected": {
     "status": "succeeded",
-    "verdicts": [{ "id": "AC-repo-readable", "pass": true, "exit": 0 }],
-    "max_cost_usd": 0.5
+    "verdicts": [
+      {
+        "id": "AC-worktree-exists",
+        "pass": true
+      }
+    ],
+    "max_cost_usd": null
   }
 }

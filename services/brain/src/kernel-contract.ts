@@ -43,7 +43,15 @@ export interface KernelContract {
   budget: { wallClockMin: number; toolCalls: number; tokens: number };
   acceptanceCriteria: KernelAcceptanceCriterion[];
   rollbackPlan: string;
-  _brainMeta: { contractVersion: "kernel.contract.v1"; taskId: string; runId: string };
+  /** m4-17 (07 section 7.9): "run_id -> task_id -> invocation_id
+   * propagate into kernel env and back through ledger refs." run.mjs's
+   * appendStarted/appendFinalized (kernel/ledger.mjs) store this whole
+   * contract verbatim in each ledger entry, so `_brainMeta` riding along
+   * inside it is what makes the kernel's own runs.jsonl joinable back to
+   * a Brain run/task/invocation without the kernel needing to understand
+   * or validate these fields itself (contract.mjs's validateContract only
+   * checks the REQUIRED_FIELDS list, never rejects extras). */
+  _brainMeta: { contractVersion: "kernel.contract.v1"; taskId: string; runId: string; invocationId: string };
 }
 
 const DEFAULT_TOOL_CALLS_BUDGET = 200;
@@ -118,7 +126,7 @@ function constraintLines(contract: TaskContractV1): string[] {
   return lines;
 }
 
-export function mapTaskContractToKernelContract(contract: TaskContractV1, worktreePath: string): KernelContract {
+export function mapTaskContractToKernelContract(contract: TaskContractV1, worktreePath: string, invocationId: string): KernelContract {
   return {
     goal: contract.prompt.objective,
     constraints: constraintLines(contract),
@@ -143,6 +151,6 @@ export function mapTaskContractToKernelContract(contract: TaskContractV1, worktr
     acceptanceCriteria: mapAcceptance(contract, worktreePath),
     rollbackPlan:
       "Task work is isolated to its own git worktree and never pushes to a default branch; discard the worktree without merging to roll back (07 section 7.4).",
-    _brainMeta: { contractVersion: "kernel.contract.v1", taskId: contract.task_id, runId: contract.run_id },
+    _brainMeta: { contractVersion: "kernel.contract.v1", taskId: contract.task_id, runId: contract.run_id, invocationId },
   };
 }

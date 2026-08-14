@@ -40,7 +40,7 @@ The VPS exposes one tailnet-only HTTPS origin. Tailscale provides the network bo
 | `/life/` | `/home/deploy/lifeos-ui/dist` | active static bundle |
 | `/life/api/` | `http://127.0.0.1:8000` | active loopback proxy |
 | `/api/` | `http://127.0.0.1:8200` | active loopback proxy (Handler A; `/api/intake/submit` and `/api/v1/complete`\|`stream`\|`count`, m4-05) |
-| `/brain/stream` | `http://127.0.0.1:8100` | reserved; do not configure before the Brain exists |
+| `/brain/stream` | `http://127.0.0.1:8100` | active loopback proxy (the Brain daemon, m4-21) |
 
 The command shape follows the current [Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve). Run the checked-in operator script on the VPS:
 
@@ -146,6 +146,41 @@ test "$(curl -fsS https://<origin>/api/healthz)" = '{"status":"ok"}'
 ```
 
 Record the workflow URL, deployed commit, health output, and rollback rehearsal, same as Shell. Live SSH, Infisical, tailnet ACL, and host behavior cannot be proven by repository tests.
+
+## Brain deployment
+
+`services/brain` is the Brain daemon (07-brain-architecture.md; `docs/planning/10-cicd-deployment.md` section 2.3). Like Handler A, it is a real container: `.github/workflows/deploy.yml`'s `build-brain`/`deploy-brain` jobs follow the exact same shape as Handler A's own deploy (build and push to `ghcr.io/kgsmith19/hyperbolic-core/brain`, then `docker pull`/`save`/`ssh`/`load` onto the VPS), in its own `brain/` compose project directory, entirely separate from `lifeos/` and `llm-handler/`.
+
+Configure these repository variables in addition to Shell's own (`DEPLOY_ENABLED`, `DEPLOY_HOST`, `INFISICAL_PROJECT_SLUG` are shared):
+
+| Variable | Purpose |
+| --- | --- |
+| `INFISICAL_BRAIN_DEPLOY_IDENTITY_ID` | Dedicated OIDC identity for this pipeline (ADR-05: never `shell-deploy`'s or `llm-handler-deploy`'s identity, even though all three ultimately reach the same `deploy` OS user). |
+
+The `brain-deploy` identity's `/brain/` secret path (ADR-05's own path convention -- never `/platform/brain-deploy/` or any path under `/platform/`, since the Brain's own key is isolated from every other unit's secrets by construction, not just by naming) must contain: `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` (tailnet join, shared shape with every other CI-joining workflow), `BRAIN_DEPLOY_SSH_KEY` (a distinct deploy key from Shell's and Handler A's own -- generate its own pair in the "VPS bootstrap" steps below), and `BRAIN_ANTHROPIC_API_KEY` (the Brain's own metered Anthropic API key -- 07-brain-architecture.md's own gate question 1: harness dispatch on the VPS authenticates with this key, not the operator's subscription session). Optionally also `SUPABASE_SERVICE_ROLE_KEY` (m4-17's core-mirror write-back; the daemon runs and passes its health check without it, just skips mirroring cost/telemetry rows) and, once a task class is wired to use it (m4-20's stubbed `LifeOsSurface` client), `BRAIN_AGENT_TOKEN_PUBLIC_KEY` / `BRAIN_AGENT_TOKEN_ISSUER` / `BRAIN_AGENT_TOKEN_AUDIENCE` (verifies LifeOS-minted agent tokens calling into the Brain's own `/api/brain/*` surface) and `LIFEOS_API_BASE_URL` / `LIFEOS_AGENT_TOKEN` (the Brain calling out to LifeOS). All of these are optional at the daemon's own boot (`config.ts` has no required field); the deploy job passes through whatever Infisical provides and omits the rest from the rendered `.env` rather than failing.
+
+`BRAIN_ANTHROPIC_API_KEY` is the one value the deploy job hard-requires (`test -n`) before rendering anything: `services/brain/compose.yaml`'s own `secrets:` block references a file that must exist for `docker compose up` to succeed at all, regardless of whether any task has exercised it yet. It is rendered to its own file (`brain/anthropic-api-key`, mode 600) and mounted into the container at `/run/secrets/anthropic-api-key` (Docker Compose's own secrets convention) -- the rendered `.env` sets `BRAIN_SECRET_FILE=/run/secrets/anthropic-api-key` to match, ADR-05's key-isolation mechanism (`isolation-check.mjs`'s own header comment: "the standard Docker/Compose secrets-mount convention"). `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are not secrets: the deploy job reads them from the same public repository variables Shell's and Handler A's builds already use (`vars.VITE_SUPABASE_URL`, `vars.VITE_SUPABASE_PUBLISHABLE_KEY`).
+
+Extend the "VPS bootstrap" steps above with the Brain's own key pair: generate a third `ssh-keygen -t ed25519` pair, install its public half into the SAME `~deploy/.ssh/authorized_keys`, store the private half at `/brain/BRAIN_DEPLOY_SSH_KEY`, and `mkdir -p ~deploy/brain`.
+
+Manual rollback mirrors Handler A's own container rollback: repoint the image tag and restart.
+
+```bash
+ssh deploy@<host> 'cd brain && sed -i "s#^BRAIN_IMAGE=.*#BRAIN_IMAGE=ghcr.io/kgsmith19/hyperbolic-core/brain:sha-<prior-sha>#" .env && docker compose up -d --wait'
+ssh deploy@<host> 'curl -fsS http://127.0.0.1:8100/healthz'
+```
+
+Verified over the loopback via ssh, matching exactly what `deploy-brain`'s own health-gate step checks -- not through the public tailnet origin. See "Operator evidence still required" immediately below for why.
+
+Brain state (SQLite WAL, run journal) lives entirely in the `brain-state` compose volume, never inside the image, so an image rollback never touches run history -- the same guarantee 10-cicd-deployment.md section 8.3 states for the standalone lifeos stack's own image rollback.
+
+### Operator evidence still required (ADR-05 identity isolation)
+
+This repository proves, in `docs/ops/deploy-workflow.test.mjs`, that `deploy-brain` and `deploy-llm-handler` are structurally disjoint: distinct Infisical secret paths (`/brain/` vs `/platform/llm-handler/`), distinct SSH key variables, distinct compose project directories, and distinct `concurrency` groups. It cannot prove the live Infisical project itself actually scopes the `brain-deploy` machine identity's ACL to read only `/brain/` (and `llm-handler-deploy`'s to read only `/platform/llm-handler/`) -- that is Infisical-side configuration, external to this repository, the same category of gap the tailscale-serve section above already names. When provisioning each identity, confirm in the Infisical console that its ACL grants read access to exactly its own path and no other, and record that confirmation here. `brain-ci.yml`'s own "ADR-05 isolation check" PR-gate step proves the narrower, code-side half of this guarantee on every PR: the Brain's secret file is unreadable from an ordinary (non-Brain-container) process, by construction.
+
+### Known gap: `/brain/stream` external reachability
+
+`services/brain/src/server.ts` (m4-14) registers its HTTP surface under `/api/brain/*` (matching Handler A's own `/api/` mount convention) plus a bare `/healthz` for the in-container Docker healthcheck. The tailscale route this deploy activates is `/brain/stream` (`docs/planning/10-cicd-deployment.md` section 4's own naming, carried into the m4-21 issue text verbatim) -- and tailscale forwards the full incoming path unchanged, the same mechanic already documented above for `/api/`, `/life/api/`. A request to `https://<origin>/brain/stream/...` therefore reaches the container as a literal `/brain/stream/...` path, which nothing in `server.ts` currently handles; only direct loopback calls (`http://127.0.0.1:8100/...`, what `deploy-brain`'s own health-gate step and this runbook's rollback check both use) are proven to work. Closing this -- either by adding a `/brain/stream`-prefixed alias alongside `/api/brain/*`, or by revisiting whether `/brain/stream` is still the right mount name now that m4-14's real route shape exists -- is application-routing work outside this CHORE issue's own scope (Docker/compose/deploy-pipeline/tailscale-route wiring only); it is named here rather than left to be discovered silently.
 
 ## One-time platform migration adoption
 

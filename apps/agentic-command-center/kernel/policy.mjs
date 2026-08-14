@@ -32,6 +32,11 @@ export const KERNEL_DEFAULTS = Object.freeze({
   checkpointMin: 20,
   alwaysAllowTools: ["TodoWrite"],
   extraDenyWriteRoots: [],
+  // 05-g-guards.md section 3b (m5-09): unset by default, meaning today's
+  // behavior (no Guards union) is unchanged for any policy.json that
+  // doesn't opt in. When set, the ABSOLUTE PATH to Guards' tracked base
+  // config (apps/toolbelt/guards/config.json).
+  guardsConfigPath: null,
 });
 
 export function loadKernelPolicy() {
@@ -55,11 +60,48 @@ export function loadKernelPolicy() {
   };
 }
 
+// 05-g-guards.md section 3b (m5-09): the kernel's own deny-write roots and
+// Guards' `protected` list (apps/toolbelt/guards/config.<profile>.json)
+// guard overlapping territory as two hand-maintained sets that will drift.
+// The no-import boundary between this app and apps/toolbelt/guards is
+// absolute in both directions (AGENTS.md product map) -- sharing CODE is
+// forbidden, so this deliberately duplicates the small profile-resolution
+// shape apps/toolbelt/guards/config-loader.mjs already implements, rather
+// than importing it, and reads Guards' config files as plain DATA.
+function guardsProfile(env = process.env) {
+  return env.GUARDS_PROFILE || os.hostname().toLowerCase();
+}
+
+// Never throws: an unreadable/malformed base or overlay yields an empty
+// list here, which the caller unions in -- so a broken guardsConfigPath
+// makes the roots no wider, never no guard (the design's own "fail
+// no-wider" requirement). Logs once per call so a persistently broken
+// path stays visible without ever blocking a run.
+function readGuardsProtected(guardsConfigPath, env = process.env) {
+  if (!guardsConfigPath) return [];
+  try {
+    const base = JSON.parse(stripBom(fs.readFileSync(guardsConfigPath, "utf8")));
+    const overlayPath = path.join(path.dirname(guardsConfigPath), `config.${guardsProfile(env)}.json`);
+    const overlay = fs.existsSync(overlayPath) ? JSON.parse(stripBom(fs.readFileSync(overlayPath, "utf8"))) : {};
+    // Shallow merge, overlay over base -- the exact same resolution
+    // apps/toolbelt/guards/config-loader.mjs's own loadConfig() performs,
+    // so this reads the SAME effective `protected` list a real Guards
+    // invocation on this machine would.
+    const merged = { ...base, ...overlay };
+    return Array.isArray(merged.protected) ? merged.protected.filter((s) => typeof s === "string" && s.trim()) : [];
+  } catch (e) {
+    console.warn(`kernel policy: guardsConfigPath unreadable, deny-write roots unaffected (${guardsConfigPath}: ${e.message})`);
+    return [];
+  }
+}
+
 // Written to regardless of contract: the guards repo (kernel code, ledger,
 // policy, vault) and the user's whole .claude tree (settings + hook scripts).
 // Derived, not literal, so a checkout at another path is still protected.
 export function alwaysDenyWriteRoots() {
-  return [REPO, path.join(os.homedir(), ".claude"), ...loadKernelPolicy().extraDenyWriteRoots].map(norm);
+  const policy = loadKernelPolicy();
+  const guardsProtected = readGuardsProtected(policy.guardsConfigPath);
+  return [REPO, path.join(os.homedir(), ".claude"), ...policy.extraDenyWriteRoots, ...guardsProtected].map(norm);
 }
 
 // The GUI's write path (gui/server.mjs). Validation and the atomic write live

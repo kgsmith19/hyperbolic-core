@@ -2,9 +2,12 @@
 
 Self-issued ES256 JWTs, verified locally: the mint side holds the private
 key (guards vault / operator .env, never this repo), the server holds only
-the public key. Scopes are explicit ``<domain>:read`` entries — mint and
-verify both refuse anything else, so a write scope cannot exist in a valid
-token, and a new domain stays dark until the operator re-mints (fail closed).
+the public key. Scopes are ``<domain>:read`` entries, plus exactly one
+sanctioned write-shaped exception: ``action-proposals:draft`` (M4-20,
+07-brain-architecture.md section 7.12, LO-4c) — the Brain's proposal lane.
+Mint and verify both refuse everything else, so no other write scope and no
+wildcard can exist in a valid token, and a new domain stays dark until the
+operator re-mints (fail closed).
 """
 
 import base64
@@ -22,20 +25,38 @@ AUDIENCE = "lifeos-mcp"
 _ALGORITHM = "ES256"
 _REQUIRED_CLAIMS = ["exp", "iat", "sub", "aud", "iss", "scopes"]
 
+# The one write-shaped scope a minted agent token may ever carry (LO-4c):
+# create-only access to the generic action-proposal lane
+# (domains/agents/proposals.py). Not a domain scope -- it names an action,
+# not a `<domain>:<read|write>` pair, which is why it is checked as an
+# exact literal rather than by the domain/action split below.
+ACTION_PROPOSALS_DRAFT_SCOPE = "action-proposals:draft"
+
 
 class AgentTokenError(Exception):
-    """Token is missing, malformed, expired, or carries a non-read scope."""
+    """Token is missing, malformed, expired, or carries a scope that is
+    neither ``<domain>:read`` nor the one sanctioned
+    ``action-proposals:draft`` exception."""
 
 
 def read_scopes(scopes: Iterable[str]) -> frozenset[str]:
-    """Validate that every scope is ``<domain>:read`` for a concrete domain."""
+    """Validate that every scope is ``<domain>:read`` for a concrete domain,
+    or exactly ``action-proposals:draft``. A wildcard is refused either way
+    -- it is never treated as a member of either sanctioned shape, so a
+    token cannot smuggle broader access by pairing it with a legitimate
+    scope name."""
     validated = frozenset(scopes)
     if not validated:
         raise AgentTokenError("agent tokens need at least one scope")
     for scope in validated:
+        if scope == ACTION_PROPOSALS_DRAFT_SCOPE:
+            continue
         domain, _, action = scope.rpartition(":")
         if action != "read" or not domain or "*" in domain:
-            raise AgentTokenError(f"agent scopes must be '<domain>:read', got: {scope!r}")
+            raise AgentTokenError(
+                f"agent scopes must be '<domain>:read' or "
+                f"{ACTION_PROPOSALS_DRAFT_SCOPE!r}, got: {scope!r}"
+            )
     return validated
 
 

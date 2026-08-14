@@ -78,7 +78,8 @@ test("createApprovalGate: cumulative run cost over the ceiling parks the NEXT di
   const store = new BrainStore(tmpDbPath());
   const contract = contractFor();
   const task = seedTask(store, contract);
-  store.insertCost({ id: "cost-1", taskId: task.id, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, usdEstimate: 6, recordedAt: new Date().toISOString() });
+  store.insertInvocation({ id: "inv-1", taskId: task.id, harness: "claude-code", sessionId: null, status: "completed", startedAt: new Date().toISOString(), finishedAt: null });
+  store.insertCost({ id: "cost-1", taskId: task.id, invocationId: "inv-1", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, usdEstimate: 6, recordedAt: new Date().toISOString() });
 
   const gate = createApprovalGate(store, undefined, { repoAllowlist: [], perRunCeilingUsd: 5 });
   const decision = await gate(task);

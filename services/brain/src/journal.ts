@@ -4,17 +4,37 @@
  * most the current in-flight stream deltas since the last journal flush
  * (flush per event)." One ndjson file per run under `<dataDir>/runs/`,
  * mirroring kernel/ledger.mjs's own append-only JSONL convention in ACC.
+ *
+ * m4-17 (07 section 7.9): "every journal and log line shall parse as JSON
+ * with the 07 section 7.9 required fields" ({ts, level, run_id?, task_id?,
+ * invocation_id?, event, fields}). append() below stamps those field
+ * names ADDITIVELY, alongside the original `runId`/`kind`/`...extra` wire
+ * shape m4-14's SSE stream and m4-15/16's Shell surface already parse --
+ * a superset, not a rename, so no already-shipped consumer breaks.
  */
 import fs from "node:fs";
 import path from "node:path";
+import type { LogLevel } from "./log.ts";
+import { scrubValue } from "./scrubber.ts";
 
 export interface JournalEventBase {
   runId: string;
   kind: string;
+  taskId?: string;
+  invocationId?: string;
+  level?: LogLevel;
   [key: string]: unknown;
 }
 
-export type JournalEvent = JournalEventBase & { ts: string };
+export type JournalEvent = JournalEventBase & {
+  ts: string;
+  level: LogLevel;
+  run_id: string;
+  task_id?: string;
+  invocation_id?: string;
+  event: string;
+  fields: Record<string, unknown>;
+};
 
 export class RunJournal {
   #dir: string;
@@ -32,7 +52,33 @@ export class RunJournal {
    * writeSync) so "flush per event" is a real durability guarantee, not
    * just a buffered write that might still be lost on a hard crash. */
   append(event: JournalEventBase): void {
-    const full: JournalEvent = { ...event, ts: new Date().toISOString() };
+    // Splitting the original event's extra properties (everything beyond
+    // runId/kind/taskId/invocationId/level) into `fields` gives 7.9's
+    // `fields` bucket real content instead of an always-empty object,
+    // without dropping any of them from the original flat shape below --
+    // both views of the same data coexist in one line.
+    const { runId, kind, taskId, invocationId, level, ...fields } = event;
+    // m4-18: scrubbed ONCE, then used for both views of the extra
+    // properties -- the flat top-level spread and the `fields` bucket --
+    // so neither one is a bypass of the other. runId/kind/taskId/
+    // invocationId/level are structural ids, never secret values, and
+    // stay unscrubbed (scrubbing them would corrupt m4-17's own
+    // trace-join ids).
+    const scrubbedFields = scrubValue(fields) as Record<string, unknown>;
+    const full: JournalEvent = {
+      ...scrubbedFields,
+      runId,
+      kind,
+      taskId,
+      invocationId,
+      ts: new Date().toISOString(),
+      level: level ?? "info",
+      run_id: runId,
+      task_id: taskId,
+      invocation_id: invocationId,
+      event: kind,
+      fields: scrubbedFields,
+    };
     const fd = fs.openSync(this.#pathFor(event.runId as string), "a");
     try {
       fs.writeSync(fd, `${JSON.stringify(full)}\n`);
