@@ -20,7 +20,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { ValidateFunction } from "ajv";
 import { compileValidator, formatErrors, validateTaskContract, type TaskContractV1, type ResultContractV1, type ValidationResult } from "./contracts.ts";
 import { submitContract } from "./run-service.ts";
@@ -31,6 +31,22 @@ import type { RunJournal } from "./journal.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CASE_SCHEMA_PATH = join(__dirname, "schemas", "brain.eval-case.v1.schema.json");
+
+/** m6-01: a seed case that wants to exercise a real `git clone` (worktree.ts's
+ * own createWorktree -- no eval case dispatches against a mocked repo)
+ * without depending on network reachability or a credential for this
+ * repo's own remote -- PR-gate CI has neither (10-cicd-deployment.md
+ * section 6). `contract.repo.url === "self"` resolves, at dispatch time,
+ * to the actual on-disk root of the checkout currently running this code
+ * -- three levels up from services/brain/src, the same computation
+ * config.ts's own `repoRoot` makes -- so `git clone --bare` clones the
+ * exact commit under test with zero network dependency, in every
+ * environment (sandbox, CI runner, any dev machine) alike. */
+const SELF_REPO_SENTINEL = "self";
+
+function resolveRepoUrl(url: string): string {
+  return url === SELF_REPO_SENTINEL ? resolve(__dirname, "..", "..", "..") : url;
+}
 
 export interface EvalCaseFile {
   case_id: string;
@@ -145,11 +161,12 @@ export async function runEvalCase(store: BrainStore, journal: RunJournal | undef
   const caseFile = loaded.case;
   const runId = newRunId();
   const taskId = newTaskId();
+  const repo = caseFile.fixture.git_ref ? { ...caseFile.contract.repo, ref: caseFile.fixture.git_ref } : caseFile.contract.repo;
   const contract: TaskContractV1 = {
     ...caseFile.contract,
     run_id: runId,
     task_id: taskId,
-    repo: caseFile.fixture.git_ref ? { ...caseFile.contract.repo, ref: caseFile.fixture.git_ref } : caseFile.contract.repo,
+    repo: { ...repo, url: resolveRepoUrl(repo.url) },
   };
 
   const submitted = submitContract(store, contract, journal);

@@ -5,8 +5,16 @@
     "task_id": "00000000-0000-0000-0000-000000000009",
     "run_id": "00000000-0000-0000-0000-000000000010",
     "title": "m6-01 seed: transport-retry",
-    "repo": { "url": "https://github.com/kgsmith19/hyperbolic-core", "ref": "main" },
-    "harness": { "preferred": "codex", "fallback": ["gemini"] },
+    "repo": {
+      "url": "self",
+      "ref": "HEAD"
+    },
+    "harness": {
+      "preferred": "codex",
+      "fallback": [
+        "gemini"
+      ]
+    },
     "autonomy": 1,
     "prompt": {
       "objective": "Exercise two consecutive transport failures on the preferred harness followed by a successful fallback.",
@@ -14,7 +22,9 @@
       "prompt_org_refs": []
     },
     "constraints": {
-      "allowed_paths": ["**"],
+      "allowed_paths": [
+        "**"
+      ],
       "denied_paths": [],
       "vault_keys": [],
       "max_turns": 1,
@@ -26,15 +36,33 @@
       {
         "id": "AC-fallback-succeeds",
         "statement": "The fallback harness's real acceptance check passes.",
-        "verify": { "command": "true", "cwd": "worktree", "expect_exit": 0, "timeout_s": 10 }
+        "verify": {
+          "command": "true",
+          "cwd": "worktree",
+          "expect_exit": 0,
+          "timeout_s": 10
+        }
       }
     ],
-    "deliverable": { "type": "commit", "branch": "brain/eval-transport-retry", "push": false, "draft_pr": false }
+    "deliverable": {
+      "type": "commit",
+      "branch": "brain/eval-transport-retry",
+      "push": false,
+      "draft_pr": false
+    }
   },
-  "fixture": { "repo_tar": null, "git_ref": "main" },
+  "fixture": {
+    "repo_tar": null,
+    "git_ref": null
+  },
   "expected": {
     "status": "succeeded",
-    "verdicts": [{ "id": "AC-fallback-succeeds", "pass": true }],
+    "verdicts": [
+      {
+        "id": "AC-fallback-succeeds",
+        "pass": true
+      }
+    ],
     "max_cost_usd": null
   }
 }

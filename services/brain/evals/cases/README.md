@@ -44,6 +44,19 @@ itself is never mocked, only "did the harness run" is scripted.
 `"claude-code" | "codex" | "gemini"`; the fixture supplies alternate
 adapter *objects* under those three existing ids, never a fourth id.
 
+Each seed case's `contract.repo.url` is the literal string `"self"`, not
+a real remote URL: `worktree.ts`'s `createWorktree()` still does a real
+`git clone --bare` (never mocked), but a bare PR-gate runner has no
+credential for this repo's own remote even when the clone target is
+itself, and a shallow `actions/checkout` never fetches `main` as a local
+ref either -- both were caught by this corpus's own first real CI run
+(see git history for the fix). `evals.ts`'s `runEvalCase` resolves
+`"self"` to the actual on-disk root of the checkout currently running the
+code (three levels up from `services/brain/src`, mirroring `config.ts`'s
+own `repoRoot`) before dispatch, and every case's `repo.ref` is `"HEAD"`,
+not `"main"` -- both resolve correctly against a shallow, detached-HEAD
+checkout with zero network dependency.
+
 **Known, documented approximation**: `approval-park` cannot be
 represented literally. `runEvalCase` dispatches by calling `dispatch()`
 directly, bypassing the scheduler entirely, and approval-gating

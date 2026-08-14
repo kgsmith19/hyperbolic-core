@@ -5,8 +5,14 @@
     "task_id": "00000000-0000-0000-0000-000000000001",
     "run_id": "00000000-0000-0000-0000-000000000002",
     "title": "m6-01 seed: plan-only [[fixture:accepted]]",
-    "repo": { "url": "https://github.com/kgsmith19/hyperbolic-core", "ref": "main" },
-    "harness": { "preferred": "claude-code", "fallback": [] },
+    "repo": {
+      "url": "self",
+      "ref": "HEAD"
+    },
+    "harness": {
+      "preferred": "claude-code",
+      "fallback": []
+    },
     "autonomy": 1,
     "prompt": {
       "objective": "Produce a plan-only report; no code changes expected.",
@@ -14,7 +20,9 @@
       "prompt_org_refs": []
     },
     "constraints": {
-      "allowed_paths": ["**"],
+      "allowed_paths": [
+        "**"
+      ],
       "denied_paths": [],
       "vault_keys": [],
       "max_turns": 1,
@@ -26,15 +34,33 @@
       {
         "id": "AC-worktree-exists",
         "statement": "The task's git worktree still exists after the fixture harness returns.",
-        "verify": { "command": "true", "cwd": "worktree", "expect_exit": 0, "timeout_s": 10 }
+        "verify": {
+          "command": "true",
+          "cwd": "worktree",
+          "expect_exit": 0,
+          "timeout_s": 10
+        }
       }
     ],
-    "deliverable": { "type": "report", "branch": "brain/eval-plan-only", "push": false, "draft_pr": false }
+    "deliverable": {
+      "type": "report",
+      "branch": "brain/eval-plan-only",
+      "push": false,
+      "draft_pr": false
+    }
   },
-  "fixture": { "repo_tar": null, "git_ref": "main" },
+  "fixture": {
+    "repo_tar": null,
+    "git_ref": null
+  },
   "expected": {
     "status": "succeeded",
-    "verdicts": [{ "id": "AC-worktree-exists", "pass": true }],
+    "verdicts": [
+      {
+        "id": "AC-worktree-exists",
+        "pass": true
+      }
+    ],
     "max_cost_usd": null
   }
 }
