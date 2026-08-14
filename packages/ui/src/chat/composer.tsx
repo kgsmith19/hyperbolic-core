@@ -76,6 +76,7 @@ function Composer({
       )}
       <div className="flex items-end gap-2">
         <Textarea
+          data-testid="composer-input"
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
@@ -85,7 +86,7 @@ function Composer({
           className="max-h-[calc(var(--text-sm--line-height)*8+1rem)] flex-1 overflow-y-auto resize-none"
         />
         {running ? (
-          <Button type="button" variant="destructive" onClick={onStop}>
+          <Button type="button" data-testid="composer-stop" variant="destructive" onClick={onStop}>
             <Square className="size-3.5" /> Stop
           </Button>
         ) : (
@@ -94,7 +95,11 @@ function Composer({
           </Button>
         )}
       </div>
-      {disabledReason && <p className="text-xs text-text-muted">{disabledReason}</p>}
+      {disabledReason && (
+        <p data-testid="composer-disabled-reason" className="text-xs text-text-muted">
+          {disabledReason}
+        </p>
+      )}
     </div>
   );
 }

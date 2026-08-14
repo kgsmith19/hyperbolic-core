@@ -12,9 +12,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createPlatformClient,
   createRegistryClient,
+  createBrainClient,
   type PlatformClient,
   type PlatformSession,
   type RegistryClient,
+  type BrainClient,
 } from "@hyperbolic/platform-client";
 
 // ADR-03: the toolbelt Supabase project (woltgcggxaehtuypkxqk) is the
@@ -57,6 +59,21 @@ export const registryClient: RegistryClient = createRegistryClient(
   },
   SUPABASE_PUBLISHABLE_KEY,
 );
+
+// m4-16: the Brain's HTTP+SSE origin (m4-14, services/brain, no VITE_
+// prefix collision with SUPABASE_URL above -- a genuinely different
+// backend, not PostgREST). Same fail-closed getAccessToken shape as
+// registryClient above: defers to the one session source of truth, zero
+// network calls when there is no session.
+export const BRAIN_BASE_URL = (import.meta.env?.VITE_BRAIN_API || "http://127.0.0.1:8100").replace(/\/+$/, "");
+
+export const brainClient: BrainClient = createBrainClient(BRAIN_BASE_URL, async () => {
+  const session = await platformClient.auth.getSession();
+  if (!session) {
+    throw new Error("brain-client: no active session, refusing to send request");
+  }
+  return session.accessToken;
+});
 
 declare global {
   interface Window {

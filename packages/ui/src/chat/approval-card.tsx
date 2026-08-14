@@ -239,10 +239,10 @@ function ApprovalCard({
         </div>
       ) : (
         <div className="mt-3 flex justify-end gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={openReasonPrompt}>
+          <Button type="button" data-testid="approval-reject" variant="outline" size="sm" onClick={openReasonPrompt}>
             <X className="size-3.5" /> Reject <kbd className="font-mono text-text-muted">n</kbd>
           </Button>
-          <Button type="button" size="sm" disabled={!approveEnabled} onClick={onApprove}>
+          <Button type="button" data-testid="approval-approve" size="sm" disabled={!approveEnabled} onClick={onApprove}>
             <Check className="size-3.5" /> Approve <kbd className="font-mono opacity-70">y</kbd>
           </Button>
         </div>

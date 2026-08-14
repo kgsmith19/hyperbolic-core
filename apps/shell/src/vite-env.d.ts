@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_PUBLISHABLE_KEY?: string;
   readonly VITE_ACC_API?: string;
   readonly VITE_LIFEOS_API?: string;
+  readonly VITE_BRAIN_API?: string;
   /** e2e-only test hook gate; see src/lib/session.ts's own comment. */
   readonly VITE_E2E_HOOKS?: string;
 }
