@@ -117,17 +117,38 @@ jobs:
           cat /tmp/prompt-organizer.log
           echo "Prompt Organizer did not become ready." >&2
           exit 1
+      # Mints the owner session AT JOB START rather than reading a
+      # hand-pasted access token straight out of the secret. Supabase access
+      # tokens expire in about an hour, so the previous wiring here (the raw
+      # secret threaded directly into the journey below) went red again within
+      # the hour of every manual re-mint, and its failure was indistinguishable
+      # from the token never having been set at all. The refresh token is
+      # long-lived, and export-test-sessions.mjs exchanges it for a fresh
+      # access token, exporting that through $GITHUB_ENV -- exactly what
+      # platform-contract.yml's own verify job already does.
+      #
+      # It also calls verifyOwnerAccessToken(), which fails this step outright
+      # when the resolved session is not platform.owner(). That matters: a
+      # wrong or expired credential otherwise surfaces only as an
+      # unrelated-looking "element(s) not found" in the journey below, because
+      # the test silently falls back to an RLS-powerless fixture login.
+      - name: Exchange and verify the owner session
+        run: node tests/export-test-sessions.mjs
+        working-directory: apps/toolbelt/apps/prompt-organizer
+        env:
+          TOOLBELT_OWNER_REFRESH_TOKEN: ${{ secrets.TOOLBELT_OWNER_REFRESH_TOKEN }}
+          TOOLBELT_OWNER_TOKEN: ${{ secrets.TOOLBELT_OWNER_TOKEN }}
       - name: Run Prompt Organizer critical browser journey
         run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/prompt-organizer/playwright.config.mjs
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:8812
-          # Threads the real owner session into critical-flow.test.mjs (see
-          # that file's own "Owner-credential threading" header comment) the
-          # same way platform-contract.yml's verify job already does. A noop
-          # until the TOOLBELT_OWNER_TOKEN secret itself exists (m1-07) --
-          # this alone does not turn the job green, it just removes the one
-          # missing wire so it does the moment that secret is set.
-          TOOLBELT_OWNER_TOKEN: ${{ secrets.TOOLBELT_OWNER_TOKEN }}
+          # TOOLBELT_OWNER_TOKEN is deliberately NOT set here. The exchange
+          # step above already exported a freshly minted one through
+          # $GITHUB_ENV, and a step-level env entry takes precedence over that
+          # -- re-pinning this step to the possibly-stale secret value and
+          # reintroducing the very expiry problem the exchange step removes.
+          # critical-flow.test.mjs reads the same variable either way (see its
+          # own "Owner-credential threading" header comment).
       - name: Upload Prompt Organizer browser evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
