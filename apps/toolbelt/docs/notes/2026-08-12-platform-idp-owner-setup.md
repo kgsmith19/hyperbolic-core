@@ -43,16 +43,20 @@ sufficient. Do this before merging m1-08, not after.
    **repository secrets** (the Secrets tab, never the Variables tab — a
    repository variable is stored in plaintext and shown in the UI):
 
-   - `TOOLBELT_OWNER_REFRESH_TOKEN` — the `refresh_token`. **This is the one
-     that matters.** It is long-lived, and both `toolbelt-ci.yml` and
-     `platform-contract.yml` exchange it for a fresh access token at job
-     start via `apps/toolbelt/apps/prompt-organizer/tests/export-test-sessions.mjs`.
-     Set this and CI stops needing attention.
-   - `TOOLBELT_OWNER_TOKEN` — the `access_token`. Accepted as a short-lived
-     compatibility fallback only (`tests/owner-session.mjs` prefers it when
-     present). It expires in about an hour, so a run that starts after that
-     fails exactly as if no credential had ever been set. Do not rely on it
-     alone.
+   - `TOOLBELT_OWNER_REFRESH_TOKEN` — the `refresh_token`. **This is the only
+     one CI reads.** It is long-lived, and it is exchanged for a fresh access
+     token at job start: `toolbelt-ci.yml` via
+     `tests/export-owner-session.mjs`, `platform-contract.yml` via
+     `tests/export-test-sessions.mjs`. Set this and CI stops needing
+     attention.
+   - `TOOLBELT_OWNER_TOKEN` — the `access_token`. **Do not set this.**
+     `toolbelt-ci.yml` no longer passes it, deliberately. A stored access
+     token expires in about an hour, and `resolveOwnerAccessToken()` returns a
+     supplied one verbatim without validating it, so configuring both made the
+     stale snapshot win and the refresh exchange never run. That produced a
+     step that passed at 18:33 and failed at 19:04 on an identical commit. It
+     remains accepted by `tests/owner-session.mjs` only for a caller that has
+     no refresh token at all.
 
    Two ways to get a session, neither of which stores a password anywhere:
    the `/auth/v1/token?grant_type=password` flow `apps/toolbelt/tests/helpers.mjs`
