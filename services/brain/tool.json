@@ -1,0 +1,36 @@
+{
+  "id": "brain",
+  "name": "The Brain",
+  "kind": "headless",
+  "version": "0.1.0",
+  "description": "07-brain-architecture.md: a long-lived autonomous-coding orchestrator (daemon, SQLite WAL state store, DAG scheduler, crash recovery). m4-08 ships the daemon skeleton; the task contract, harness adapters, and CLI/API/UI surfaces land in later M4 issues. Holds its own isolated Anthropic key (ADR-05) and cannot read /platform/llm/.",
+  "ownership": {
+    "owner": "kylegsmith19@gmail.com",
+    "path": "services/brain"
+  },
+  "entry": {
+    "headless": {
+      "command": "node src/index.ts"
+    }
+  },
+  "schemas": [],
+  "permissions": {
+    "db": {
+      "read": [
+        "core"
+      ],
+      "write": []
+    },
+    "networkEgress": [
+      "api.anthropic.com"
+    ],
+    "llmHandler": {
+      "access": false
+    }
+  },
+  "lifecycle": {
+    "migrate": "gh workflow run platform-migrations.yml",
+    "health": "node --test \"tests/*.test.ts\"",
+    "register": "20260814160000_register_brain.sql"
+  }
+}
