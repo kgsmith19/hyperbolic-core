@@ -117,7 +117,7 @@ function ownerAndLogMock(onLog?: (body: Record<string, unknown>) => void): Fetch
 // Auth gate (m4-05 acceptance criterion: 401 without a valid owner session)
 // ---------------------------------------------------------------------------
 
-for (const route of ["/v1/complete", "/v1/stream", "/v1/count"]) {
+for (const route of ["/api/v1/complete", "/api/v1/stream", "/api/v1/count"]) {
   test(`POST ${route} with no Authorization header returns 401, no network call`, async () => {
     let networkCalled = false;
     await withPatchedFetch(
@@ -165,7 +165,7 @@ test("POST /v1/complete with a malformed body (missing provider) returns 400 aft
     },
     () =>
       withServer(CONFIG, async (baseUrl) => {
-        const res = await fetch(`${baseUrl}/v1/complete`, {
+        const res = await fetch(`${baseUrl}/api/v1/complete`, {
           method: "POST",
           headers: { authorization: "Bearer owner-token" },
           body: JSON.stringify({ model: "x" }),
@@ -185,7 +185,7 @@ test("POST /v1/complete: happy path returns 200 with an LlmResponse and logs exa
     }),
     () =>
       withServer(CONFIG, async (baseUrl) => {
-        const res = await fetch(`${baseUrl}/v1/complete`, {
+        const res = await fetch(`${baseUrl}/api/v1/complete`, {
           method: "POST",
           headers: { authorization: "Bearer owner-token" },
           body: JSON.stringify(REQUEST_BODY),
@@ -220,7 +220,7 @@ test("POST /v1/complete: a provider error maps to a caller status and logs statu
     },
     () =>
       withServer(CONFIG, async (baseUrl) => {
-        const res = await fetch(`${baseUrl}/v1/complete`, {
+        const res = await fetch(`${baseUrl}/api/v1/complete`, {
           method: "POST",
           headers: { authorization: "Bearer owner-token" },
           body: JSON.stringify(REQUEST_BODY),
@@ -254,7 +254,7 @@ test("POST /v1/complete: a caller at its concurrency cap gets 429, no provider c
     },
     () =>
       withServer(config, async (baseUrl) => {
-        const first = fetch(`${baseUrl}/v1/complete`, {
+        const first = fetch(`${baseUrl}/api/v1/complete`, {
           method: "POST",
           headers: { authorization: "Bearer owner-token" },
           body: JSON.stringify(REQUEST_BODY),
@@ -262,7 +262,7 @@ test("POST /v1/complete: a caller at its concurrency cap gets 429, no provider c
         // Give the first request's async chain a turn to reach (and hold)
         // the provider call before firing the second.
         await new Promise((resolve) => setTimeout(resolve, 20));
-        const second = await fetch(`${baseUrl}/v1/complete`, {
+        const second = await fetch(`${baseUrl}/api/v1/complete`, {
           method: "POST",
           headers: { authorization: "Bearer owner-token" },
           body: JSON.stringify(REQUEST_BODY),
@@ -313,7 +313,7 @@ test("POST /v1/stream: happy path emits SSE text deltas and a done delta, and lo
     },
     () =>
       withServer(CONFIG, async (baseUrl) => {
-        const res = await fetch(`${baseUrl}/v1/stream`, {
+        const res = await fetch(`${baseUrl}/api/v1/stream`, {
           method: "POST",
           headers: { authorization: "Bearer owner-token" },
           body: JSON.stringify(REQUEST_BODY),
@@ -343,7 +343,7 @@ test("POST /v1/count returns a chars/4 token estimate with no provider call", as
     },
     () =>
       withServer(CONFIG, async (baseUrl) => {
-        const res = await fetch(`${baseUrl}/v1/count`, {
+        const res = await fetch(`${baseUrl}/api/v1/count`, {
           method: "POST",
           headers: { authorization: "Bearer owner-token" },
           body: JSON.stringify({ model: "claude-fixture", messages: [{ role: "user", content: "12345678" }] }),

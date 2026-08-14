@@ -148,7 +148,17 @@ export function createHandler(config: HandlerConfig, serviceRoleKey: string) {
       return;
     }
 
-    if (route === "/v1/complete" && req.method === "POST") {
+    // /api/v1/*, not bare /v1/*: docs/ops/runbook.md's Tailscale Serve
+    // table mounts Handler A's whole loopback origin at /api/ with the full
+    // incoming path forwarded unchanged (same mechanic /api/healthz's own
+    // comment above documents), and /api/intake/submit already established
+    // the precedent of a single canonical /api/-prefixed path with no bare
+    // alias (unlike /healthz, which genuinely needs both for the loopback
+    // Docker healthcheck). The Brain never calls this surface at all (08
+    // forced decision 5: it links packages/llm in-process with its own
+    // isolated key), so there is no legitimate bare-path loopback caller to
+    // support here either.
+    if (route === "/api/v1/complete" && req.method === "POST") {
       requireOwnerSession(req, res, config)
         .then(async (ok) => {
           if (ok) await llmRoutes.handleComplete(req, res, config, llmConcurrencyGate);
@@ -157,7 +167,7 @@ export function createHandler(config: HandlerConfig, serviceRoleKey: string) {
       return;
     }
 
-    if (route === "/v1/stream" && req.method === "POST") {
+    if (route === "/api/v1/stream" && req.method === "POST") {
       requireOwnerSession(req, res, config)
         .then(async (ok) => {
           if (ok) await llmRoutes.handleStream(req, res, config, llmConcurrencyGate);
@@ -166,7 +176,7 @@ export function createHandler(config: HandlerConfig, serviceRoleKey: string) {
       return;
     }
 
-    if (route === "/v1/count" && req.method === "POST") {
+    if (route === "/api/v1/count" && req.method === "POST") {
       requireOwnerSession(req, res, config)
         .then(async (ok) => {
           if (ok) await llmRoutes.handleCount(req, res);

@@ -91,7 +91,7 @@ async function signInAndGoTo(page: Page, path: string): Promise<void> {
 }
 
 test.describe("Locked rendering (II-3): a submitted idea is fully read-only", () => {
-  test("the editor renders only the issue link and a disabled derivative action -- no save/promote/delete/submit", async ({
+  test("the editor renders only the issue link and the derivative action -- no save/promote/delete/submit", async ({
     page,
   }) => {
     const id = intake.seedSubmittedIdea({
@@ -111,8 +111,14 @@ test.describe("Locked rendering (II-3): a submitted idea is fully read-only", ()
     await expect(page.getByTestId("promote-idea-button")).toHaveCount(0);
     await expect(page.getByTestId("delete-idea-button")).toHaveCount(0);
     await expect(page.getByTestId("submit-idea-button")).toHaveCount(0);
+    // m4-06 wires this button to a real network flow (rpc/get_prompt, then
+    // Handler A); this test only asserts the read-only view's static
+    // shape, so it checks the button is present and enabled without
+    // clicking it -- exercising the optimize flow itself is
+    // src/lib/optimize.test.ts and pages/ideas/editor.test.tsx's job, both
+    // of which mock that network entirely.
     const optimize = page.getByTestId("optimize-derivative-button");
-    await expect(optimize).toBeDisabled();
+    await expect(optimize).toBeEnabled();
     const issueLink = page.getByTestId("idea-issue-link");
     await expect(issueLink).toHaveAttribute("href", "https://github.com/kgsmith19/hyperbolic-core/issues/4242");
     await expect(issueLink).toContainText("#4242");

@@ -3,7 +3,10 @@
 // idea / Delete / Optimize; idea shows Save / Submit to GitHub / Optimize
 // (Demote is absent by design); submitted renders fully read-only with
 // exactly one action, 'Optimize as new derivative', plus the issue link."
-// Optimize is a disabled placeholder everywhere (m4-06 wires it up).
+// Optimize is wired to lib/optimize.ts (m4-06): draft/idea offers
+// apply-in-place, submitted offers derivative-only INSERT (II-3b) -- never
+// a direct mutation of a submitted row (the idea_guard_update trigger
+// would reject it server-side regardless).
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { ExternalLink } from "lucide-react";
@@ -38,6 +41,7 @@ import {
   type Confidence,
   type Idea,
 } from "../../lib/intake";
+import { optimizeIdea, type OptimizedDraft } from "../../lib/optimize";
 import { useAsync } from "../../lib/use-async";
 
 const TARGET_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -180,7 +184,152 @@ function SubmitModal({
   );
 }
 
+/** Review modal shared by both optimize entry points (draft/idea's
+ * apply-in-place and submitted's create-derivative): runs the LLM call on
+ * open, shows the resulting draft once it resolves, and only writes
+ * anything to the database when the operator explicitly confirms --
+ * `optimizeIdea` itself already logged the intake.optimization row by the
+ * time this dialog has anything to show, regardless of whether the
+ * operator goes on to confirm or cancel (lib/optimize.ts's own header
+ * comment on why that logging is unconditional). `confirmLabel` and
+ * `onConfirm` vary by call site: apply-in-place vs. derivative INSERT. */
+function OptimizeModal({
+  idea,
+  open,
+  onOpenChange,
+  confirmLabel,
+  onConfirm,
+}: {
+  idea: Idea;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  confirmLabel: string;
+  onConfirm: (draft: OptimizedDraft) => Promise<void>;
+}) {
+  const [pending, setPending] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<OptimizedDraft | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setPending(true);
+    setApplying(false);
+    setError(null);
+    setDraft(null);
+    let cancelled = false;
+    optimizeIdea(idea)
+      .then((result) => {
+        if (!cancelled) setDraft(result.draft);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Optimize failed.");
+      })
+      .finally(() => {
+        if (!cancelled) setPending(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per open, keyed on idea.id below
+  }, [open, idea.id]);
+
+  async function handleConfirm() {
+    if (!draft) return;
+    setApplying(true);
+    setError(null);
+    try {
+      await onConfirm(draft);
+      onOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Applying the optimized draft failed.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent data-testid="optimize-modal">
+        <DialogHeader>
+          <DialogTitle>Optimize with AI</DialogTitle>
+          <DialogDescription>
+            Reviewed before anything is saved. {confirmLabel} to keep it, or cancel to discard.
+          </DialogDescription>
+        </DialogHeader>
+        {pending && (
+          <div className="flex items-center gap-2 text-sm text-text-secondary" data-testid="optimize-pending">
+            <Spinner /> Optimizing...
+          </div>
+        )}
+        {draft && (
+          <div className="flex flex-col gap-3" data-testid="optimize-draft-preview">
+            <div>
+              <p className="text-xs font-medium tracking-wide text-text-secondary uppercase">Title</p>
+              <p className="text-sm text-text" data-testid="optimize-draft-title">
+                {draft.title}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium tracking-wide text-text-secondary uppercase">Problem</p>
+              <p className="text-sm whitespace-pre-wrap text-text" data-testid="optimize-draft-problem">
+                {draft.problem}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium tracking-wide text-text-secondary uppercase">Outcome</p>
+              <p className="text-sm whitespace-pre-wrap text-text" data-testid="optimize-draft-outcome">
+                {draft.outcome}
+              </p>
+            </div>
+            {draft.notes && (
+              <div>
+                <p className="text-xs font-medium tracking-wide text-text-secondary uppercase">Notes</p>
+                <p className="text-sm whitespace-pre-wrap text-text" data-testid="optimize-draft-notes">
+                  {draft.notes}
+                </p>
+              </div>
+            )}
+            <Badge variant="secondary" className="w-fit" data-testid="optimize-draft-confidence">
+              Confidence: {draft.confidence}
+            </Badge>
+          </div>
+        )}
+        {error && <InlineError message={error} data-testid="optimize-error" />}
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" disabled={applying} />}>Cancel</DialogClose>
+          <Button onClick={handleConfirm} disabled={pending || applying || !draft} data-testid="optimize-confirm-button">
+            {applying && <Spinner />} {confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function SubmittedView({ idea }: { idea: Idea }) {
+  const navigate = useNavigate();
+  const [optimizeOpen, setOptimizeOpen] = useState(false);
+  const [derivativeError, setDerivativeError] = useState<string | null>(null);
+
+  async function handleCreateDerivative(draft: OptimizedDraft) {
+    setDerivativeError(null);
+    try {
+      const created = await createDraft({
+        title: draft.title,
+        problem: draft.problem,
+        outcome: draft.outcome,
+        notes: draft.notes,
+        confidence: draft.confidence,
+        parentIdeaId: idea.id,
+      });
+      navigate(`/ideas/${created.id}`);
+    } catch (err) {
+      setDerivativeError(err instanceof Error ? err.message : "Creating the derivative failed.");
+      throw err;
+    }
+  }
+
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4 p-6" data-testid="idea-editor-page">
       <div className="flex items-center gap-2">
@@ -206,9 +355,17 @@ function SubmittedView({ idea }: { idea: Idea }) {
           Issue #{idea.githubIssueNumber} <ExternalLink className="size-3.5" />
         </a>
       )}
-      <Button variant="outline" disabled data-testid="optimize-derivative-button" className="w-fit">
+      {derivativeError && <InlineError message={derivativeError} data-testid="optimize-derivative-error" />}
+      <Button variant="outline" onClick={() => setOptimizeOpen(true)} data-testid="optimize-derivative-button" className="w-fit">
         Optimize as new derivative
       </Button>
+      <OptimizeModal
+        idea={idea}
+        open={optimizeOpen}
+        onOpenChange={setOptimizeOpen}
+        confirmLabel="Create derivative"
+        onConfirm={handleCreateDerivative}
+      />
     </div>
   );
 }
@@ -229,6 +386,7 @@ function IdeaEditorPage({ mode }: { mode: "create" | "edit" }) {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitOpen, setSubmitOpen] = useState(false);
+  const [optimizeOpen, setOptimizeOpen] = useState(false);
 
   useEffect(() => {
     if (mode === "edit" && loaded) {
@@ -301,6 +459,29 @@ function IdeaEditorPage({ mode }: { mode: "create" | "edit" }) {
       setFormError(err instanceof Error ? err.message : "Promote failed.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  /** 05-h section 5's "apply in place (ordinary field UPDATE, guard-
+   * permitted)": an immediate real UPDATE on confirm, not just a form-fill
+   * for a later manual Save -- symmetric with SubmittedView's derivative
+   * path, which also writes on confirm. Only reachable for mode === "edit"
+   * (the Optimize button is hidden entirely in create mode: there is no
+   * idea row yet to optimize or to log an intake.optimization row against). */
+  async function handleApplyOptimized(draft: OptimizedDraft) {
+    try {
+      const updated = await updateIdea(ideaId, {
+        title: draft.title,
+        problem: draft.problem,
+        outcome: draft.outcome,
+        notes: draft.notes,
+        confidence: draft.confidence,
+      });
+      setIdea(updated);
+      setForm(toFormState(updated));
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Applying the optimized draft failed.");
+      throw err;
     }
   }
 
@@ -441,13 +622,25 @@ function IdeaEditorPage({ mode }: { mode: "create" | "edit" }) {
             Delete
           </Button>
         )}
-        <Button variant="ghost" disabled data-testid="optimize-idea-button">
-          Optimize
-        </Button>
+        {mode === "edit" && idea && (
+          <Button variant="ghost" onClick={() => setOptimizeOpen(true)} disabled={saving} data-testid="optimize-idea-button">
+            Optimize
+          </Button>
+        )}
         <Button variant="ghost" render={<Link to="/ideas" />} className="ml-auto">
           Back to list
         </Button>
       </div>
+
+      {mode === "edit" && idea && (
+        <OptimizeModal
+          idea={idea}
+          open={optimizeOpen}
+          onOpenChange={setOptimizeOpen}
+          confirmLabel="Apply"
+          onConfirm={handleApplyOptimized}
+        />
+      )}
 
       {idea?.status === "idea" && (
         <SubmitModal

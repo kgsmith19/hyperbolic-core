@@ -39,7 +39,7 @@ The VPS exposes one tailnet-only HTTPS origin. Tailscale provides the network bo
 | `/` | `/home/deploy/shell/current` | active static bundle |
 | `/life/` | `/home/deploy/lifeos-ui/dist` | active static bundle |
 | `/life/api/` | `http://127.0.0.1:8000` | active loopback proxy |
-| `/api/` | `http://127.0.0.1:8200` | active loopback proxy (Handler A; `/api/intake/submit` today, `/v1/*` when m4-05 lands) |
+| `/api/` | `http://127.0.0.1:8200` | active loopback proxy (Handler A; `/api/intake/submit` and `/api/v1/complete`\|`stream`\|`count`, m4-05) |
 | `/brain/stream` | `http://127.0.0.1:8100` | reserved; do not configure before the Brain exists |
 
 The command shape follows the current [Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve). Run the checked-in operator script on the VPS:

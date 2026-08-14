@@ -19,6 +19,7 @@ import {
   updateIdea,
   type Idea,
 } from "../../lib/intake";
+import { optimizeIdea } from "../../lib/optimize";
 
 const mockNavigate = vi.fn();
 vi.mock("react-router", async (importOriginal) => {
@@ -39,12 +40,25 @@ vi.mock("../../lib/intake", () => ({
   })),
 }));
 
+vi.mock("../../lib/optimize", () => ({
+  optimizeIdea: vi.fn(),
+}));
+
 const mockedGetIdea = vi.mocked(getIdea);
 const mockedCreateDraft = vi.mocked(createDraft);
 const mockedUpdateIdea = vi.mocked(updateIdea);
 const mockedDeleteIdea = vi.mocked(deleteIdea);
 const mockedSubmitIdea = vi.mocked(submitIdea);
 const mockedBuildSubmitPreview = vi.mocked(buildSubmitPreview);
+const mockedOptimizeIdea = vi.mocked(optimizeIdea);
+
+const OPTIMIZED_DRAFT = {
+  title: "Optimized title",
+  problem: "Optimized problem",
+  outcome: "Optimized outcome",
+  notes: "Optimized notes",
+  confidence: "high" as const,
+};
 
 function idea(overrides: Partial<Idea>): Idea {
   return {
@@ -126,11 +140,11 @@ describe("IdeaEditorPage: create mode", () => {
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/ideas/new-id"));
   });
 
-  it("shows the target repo field (create is always draft-shaped) and the Optimize action, always disabled", async () => {
+  it("shows the target repo field (create is always draft-shaped) and hides Optimize (no idea row exists yet)", async () => {
     renderCreate();
     await screen.findByTestId("idea-editor-page");
     expect(screen.getByTestId("idea-target-repo-field")).toBeInTheDocument();
-    expect(screen.getByTestId("optimize-idea-button")).toBeDisabled();
+    expect(screen.queryByTestId("optimize-idea-button")).toBeNull();
     expect(screen.queryByTestId("delete-idea-button")).toBeNull();
     expect(screen.queryByTestId("promote-idea-button")).toBeNull();
     expect(screen.queryByTestId("submit-idea-button")).toBeNull();
@@ -170,7 +184,7 @@ describe("IdeaEditorPage: edit mode, load states", () => {
 });
 
 describe("IdeaEditorPage: edit mode, draft status action set", () => {
-  it("offers Save, Promote, Delete, and disabled Optimize -- never Submit", async () => {
+  it("offers Save, Promote, Delete, and enabled Optimize -- never Submit", async () => {
     mockedGetIdea.mockResolvedValue(idea({ status: "draft" }));
     renderEdit();
     await screen.findByTestId("idea-editor-page");
@@ -178,7 +192,7 @@ describe("IdeaEditorPage: edit mode, draft status action set", () => {
     expect(screen.getByTestId("save-idea-button")).toBeEnabled();
     expect(screen.getByTestId("promote-idea-button")).toBeInTheDocument();
     expect(screen.getByTestId("delete-idea-button")).toBeInTheDocument();
-    expect(screen.getByTestId("optimize-idea-button")).toBeDisabled();
+    expect(screen.getByTestId("optimize-idea-button")).toBeEnabled();
     expect(screen.queryByTestId("submit-idea-button")).toBeNull();
   });
 
@@ -389,7 +403,7 @@ describe("IdeaEditorPage: edit mode, idea status action set", () => {
 });
 
 describe("IdeaEditorPage: edit mode, submitted status is fully read-only", () => {
-  it("renders SubmittedView with no Save/Promote/Delete/Submit actions, only a disabled derivative action and the issue link", async () => {
+  it("renders SubmittedView with no Save/Promote/Delete/Submit actions, only the derivative action and the issue link", async () => {
     mockedGetIdea.mockResolvedValue(
       idea({
         status: "submitted_to_github",
@@ -408,12 +422,89 @@ describe("IdeaEditorPage: edit mode, submitted status is fully read-only", () =>
     expect(screen.queryByTestId("idea-title-field")).toBeNull();
 
     const optimize = screen.getByTestId("optimize-derivative-button");
-    expect(optimize).toBeDisabled();
+    expect(optimize).toBeEnabled();
     expect(optimize).toHaveTextContent("Optimize as new derivative");
 
     const issueLink = screen.getByTestId("idea-issue-link");
     expect(issueLink).toHaveAttribute("href", "https://github.com/kgsmith19/hyperbolic-core/issues/7");
     expect(issueLink).toHaveTextContent("Issue #7");
     expect(screen.getByText("Already shipped")).toBeInTheDocument();
+  });
+});
+
+describe("IdeaEditorPage: optimize flow (m4-06)", () => {
+  it("draft/idea: applies the optimized draft in place via an ordinary UPDATE, never an INSERT", async () => {
+    const original = idea({ status: "idea", targetRepo: "kgsmith19/hyperbolic-core" });
+    mockedGetIdea.mockResolvedValue(original);
+    mockedOptimizeIdea.mockResolvedValue({ draft: OPTIMIZED_DRAFT, handlerRunId: "run-1", model: "claude-sonnet-5" });
+    mockedUpdateIdea.mockResolvedValue({ ...original, ...OPTIMIZED_DRAFT });
+    const user = userEvent.setup();
+    renderEdit();
+    await screen.findByTestId("idea-editor-page");
+
+    await user.click(screen.getByTestId("optimize-idea-button"));
+    expect(mockedOptimizeIdea).toHaveBeenCalledWith(original);
+
+    await screen.findByTestId("optimize-draft-preview");
+    expect(screen.getByTestId("optimize-draft-title")).toHaveTextContent(OPTIMIZED_DRAFT.title);
+    expect(screen.getByTestId("optimize-draft-confidence")).toHaveTextContent("high");
+
+    await user.click(screen.getByTestId("optimize-confirm-button"));
+
+    await waitFor(() => expect(mockedUpdateIdea).toHaveBeenCalledTimes(1));
+    expect(mockedUpdateIdea).toHaveBeenCalledWith(
+      "idea-1",
+      expect.objectContaining({
+        title: OPTIMIZED_DRAFT.title,
+        problem: OPTIMIZED_DRAFT.problem,
+        outcome: OPTIMIZED_DRAFT.outcome,
+        notes: OPTIMIZED_DRAFT.notes,
+        confidence: OPTIMIZED_DRAFT.confidence,
+      })
+    );
+    expect(mockedCreateDraft).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("idea-title-field")).toHaveValue(OPTIMIZED_DRAFT.title));
+  });
+
+  it("draft/idea: a failed optimize call shows the error and never calls updateIdea", async () => {
+    mockedGetIdea.mockResolvedValue(idea({ status: "draft" }));
+    mockedOptimizeIdea.mockRejectedValue(new Error("Handler A returned 429"));
+    const user = userEvent.setup();
+    renderEdit();
+    await screen.findByTestId("idea-editor-page");
+
+    await user.click(screen.getByTestId("optimize-idea-button"));
+
+    await waitFor(() => expect(screen.getByTestId("optimize-error")).toHaveTextContent("Handler A returned 429"));
+    expect(screen.getByTestId("optimize-confirm-button")).toBeDisabled();
+    expect(mockedUpdateIdea).not.toHaveBeenCalled();
+  });
+
+  it("submitted: creates a derivative draft only, leaving the submitted idea untouched, and navigates to the new draft", async () => {
+    const submitted = idea({
+      id: "submitted-1",
+      status: "submitted_to_github",
+      githubIssueNumber: 7,
+      githubIssueUrl: "https://github.com/kgsmith19/hyperbolic-core/issues/7",
+    });
+    mockedGetIdea.mockResolvedValue(submitted);
+    mockedOptimizeIdea.mockResolvedValue({ draft: OPTIMIZED_DRAFT, handlerRunId: "run-2", model: "claude-sonnet-5" });
+    mockedCreateDraft.mockResolvedValue(idea({ id: "derivative-1", parentIdeaId: "submitted-1", ...OPTIMIZED_DRAFT }));
+    const user = userEvent.setup();
+    renderEdit("submitted-1");
+    await screen.findByTestId("idea-editor-page");
+
+    await user.click(screen.getByTestId("optimize-derivative-button"));
+    expect(mockedOptimizeIdea).toHaveBeenCalledWith(submitted);
+
+    await screen.findByTestId("optimize-draft-preview");
+    await user.click(screen.getByTestId("optimize-confirm-button"));
+
+    await waitFor(() => expect(mockedCreateDraft).toHaveBeenCalledTimes(1));
+    expect(mockedCreateDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ ...OPTIMIZED_DRAFT, parentIdeaId: "submitted-1" })
+    );
+    expect(mockedUpdateIdea).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/ideas/derivative-1"));
   });
 });
