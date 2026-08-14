@@ -22,7 +22,10 @@ import { EXIT_OK, EXIT_ERROR, EXIT_POLICY_REFUSED, EXIT_NOT_FOUND, EXIT_AWAITING
 const DEFAULT_REPO_URL = "https://github.com/kgsmith19/hyperbolic-core";
 const DEFAULT_REPO_REF = "main";
 
-function cumulativeCostForRun(store: BrainStore, runId: string): number {
+/** Shared with api-routes.ts's POST /runs handler -- same cumulative-cost
+ * computation the m4-12 always-approve check needs, exported so the API
+ * layer doesn't duplicate it. */
+export function cumulativeCostForRun(store: BrainStore, runId: string): number {
   return store.listCostsForRun(runId).reduce((sum, c) => sum + (c.usdEstimate ?? 0), 0);
 }
 

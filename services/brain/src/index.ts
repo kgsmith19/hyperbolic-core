@@ -36,7 +36,7 @@ const daemon = new BrainDaemon({
     }),
 });
 await daemon.start();
-const server = await startServer(daemon, config.port);
+const server = await startServer(daemon, config);
 console.log(`services/brain listening on 127.0.0.1:${config.port}`);
 
 let shuttingDown = false;

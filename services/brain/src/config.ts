@@ -36,6 +36,23 @@ export interface BrainConfig {
    * the monorepo layout relative to this file, same reasoning as
    * kernelRunPath. */
   readonly repoRoot: string;
+  /** m4-14's HTTP API auth (ADR-03). Optional/undefined rather than
+   * required() (services/llm-handler's own posture): every CLI verb
+   * (m4-13) operates on the store directly and has never needed
+   * Supabase, so making these required at daemon/CLI startup would
+   * break that whole surface for no reason. The API server's own job is
+   * refusing every /api/brain/* route with 401 when these aren't
+   * configured, not crashing the process. */
+  readonly supabaseUrl?: string;
+  readonly supabasePublishableKey?: string;
+  /** Scoped agent token verification (ADR-03's "scoped agent token"
+   * option) -- also optional; a deploy that hasn't provisioned agent
+   * tokens yet (true for V1 until m4-20 mints one from LifeOS) simply
+   * never has an agent-token credential accepted, owner-session auth
+   * still works. */
+  readonly agentTokenPublicKeyPem?: string;
+  readonly agentTokenIssuer?: string;
+  readonly agentTokenAudience?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
@@ -83,5 +100,32 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
 
   const repoRoot = env.BRAIN_REPO_ROOT ?? path.resolve(HERE, "..", "..", "..");
 
-  return { port, dbPath, dataDir, workspacesRoot, kernelRunPath, accRoot, accPolicy, accVault, repoAllowlist, perRunUsdCeiling, approvalTtlMs, repoRoot };
+  // A PEM key with literal "\n" escapes (the common env-var convention for
+  // multi-line secrets, since real newlines are awkward to set in most
+  // deploy tooling) is unescaped back to real newlines here; a PEM
+  // already containing real newlines (e.g. from a mounted file's
+  // contents) passes through unchanged.
+  const agentTokenPublicKeyPem = env.BRAIN_AGENT_TOKEN_PUBLIC_KEY?.replace(/\\n/g, "\n");
+  const agentTokenIssuer = env.BRAIN_AGENT_TOKEN_ISSUER;
+  const agentTokenAudience = env.BRAIN_AGENT_TOKEN_AUDIENCE;
+
+  return {
+    port,
+    dbPath,
+    dataDir,
+    workspacesRoot,
+    kernelRunPath,
+    accRoot,
+    accPolicy,
+    accVault,
+    repoAllowlist,
+    perRunUsdCeiling,
+    approvalTtlMs,
+    repoRoot,
+    supabaseUrl: env.SUPABASE_URL,
+    supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY,
+    agentTokenPublicKeyPem,
+    agentTokenIssuer,
+    agentTokenAudience,
+  };
 }
