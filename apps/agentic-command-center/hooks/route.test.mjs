@@ -78,6 +78,23 @@ test("--text fails safely when the route table is invalid", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("--text names ACC_ROUTING_MD when the route table is missing entirely", () => {
+  // A table that is unreadable rather than malformed is the case that broke
+  // silently after the monorepo import: a bare ENOENT gives the caller
+  // nothing to act on, so the message has to name the override.
+  const missing = path.join(os.tmpdir(), "acc-route-absent", "ROUTING.md");
+  const output = execFileSync(
+    process.execPath,
+    [path.join(here, "route.mjs"), "--text", "anything"],
+    { encoding: "utf8", env: { ...process.env, ACC_ROUTING_MD: missing } },
+  );
+  const result = JSON.parse(output);
+  assert.equal(result.path, null);
+  assert.match(result.error, /cannot read routing table/);
+  assert.match(result.error, /ACC_ROUTING_MD/);
+  assert.match(result.error, /ENOENT/);
+});
+
 test("doctor requires an exact route for each repository", () => {
   const routes = [{ path: "C:\\code\\guards" }, { path: "C:\\code" }];
   assert.deepEqual(doctor(routes, ["C:\\code\\guards", "C:\\code\\newrepo"]), ["C:\\code\\newrepo"]);
