@@ -71,4 +71,62 @@ export { Spinner } from "./feedback/spinner";
 export { InlineError } from "./feedback/inline-error";
 export { ErrorState } from "./feedback/error-state";
 
+// m4-15, the Brain run/chat surface primitives (docs/planning/09-design-
+// system.md section 7). Page wiring and SSE consumption are m4-16's job;
+// this package only ships the presentational pieces and their pure
+// streaming/virtualization/approval-gate logic.
+export { RunId } from "./chat/run-id";
+export { OperatorMessage, AgentMessage, ToolCallBlock, SystemRow } from "./chat/transcript-blocks";
+export type { OperatorMessageState, AgentMessageState, ToolCallStatus } from "./chat/transcript-blocks";
+export { ApprovalCard } from "./chat/approval-card";
+export {
+  initialApprovalState,
+  toggleEvidence,
+  markEvidenceSeen,
+  canApprove,
+  resolveApproved,
+  resolveRejected,
+  resolveExpired,
+  mapApprovalKey,
+  countLines,
+  AUTO_EXPAND_LINE_THRESHOLD,
+} from "./chat/approval-machine";
+export type {
+  ApprovalCardState,
+  ApprovalResolution,
+  ApprovalKeyAction,
+  ApprovalKeyEvent,
+  Evidence,
+  EvidenceKind,
+} from "./chat/approval-machine";
+export { Composer } from "./chat/composer";
+export type { ComposerTarget } from "./chat/composer";
+export { StatusStrip } from "./chat/status-strip";
+export type { ConnectionState, RunState } from "./chat/status-strip";
+export { CostTicker } from "./chat/cost-ticker";
+export { Transcript } from "./chat/transcript";
+export type { TranscriptItem } from "./chat/transcript";
+export {
+  VIRTUALIZE_THRESHOLD,
+  shouldVirtualize,
+  buildOffsets,
+  computeVirtualRange,
+} from "./chat/virtualize";
+export type { VirtualRange, VirtualRangeInput } from "./chat/virtualize";
+export {
+  createTokenBuffer,
+  appendToken,
+  flushTokenBuffer,
+  useCoalescedStream,
+} from "./chat/stream-buffer";
+export type { TokenBufferState, FlushResult, CoalescedStreamHandle } from "./chat/stream-buffer";
+export {
+  initialAutoscrollState,
+  onScroll as onTranscriptScroll,
+  onNewContent as onTranscriptNewContent,
+  jumpToLatest as jumpToLatestTranscript,
+  BOTTOM_THRESHOLD_PX,
+} from "./chat/autoscroll";
+export type { AutoscrollState, ScrollMetrics } from "./chat/autoscroll";
+
 export { cn } from "./lib/cn";
