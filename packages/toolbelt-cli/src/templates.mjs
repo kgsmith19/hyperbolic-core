@@ -307,14 +307,19 @@ export function buildRegistrationUpSql({ manifest, id, name, schema, kind, route
   const hash = manifestHash(manifest);
   return `-- Generated registration migration (docs/planning/05-c-toolbelt.md
 -- section 4.2) for apps/toolbelt/apps/${id}/tool.json, produced by
--- packages/toolbelt-cli's tool:new (m3-03). The shape follows section 4.2's
--- contract exactly: one collision-safe insert of the core.app row from tool.json
--- fields, matching m3-02's hand-written precedent
--- (apps/toolbelt/supabase/migrations/20260812240000_register_prompt-organizer.sql).
---
--- Local checks provide fast feedback; the core.app primary key remains the
--- authority for DB-only rows and concurrent generators. An exact reapply is
--- a no-op, while a different manifest at the same id aborts with 23505.
+-- packages/toolbelt-cli's tool:new (m3-03). Exactly one idempotent upsert of
+-- the core.app row from tool.json fields, matching every hand-written
+-- registration migration's own shape (apps/toolbelt/supabase/migrations/
+-- 20260814130200_register_idea-intake-v0.1.1.sql,
+-- 20260813173000_register_network-checker-v1.sql): status is deliberately
+-- excluded from the conflict update, since registration must never overwrite
+-- an independent lifecycle transition (building -> live -> retired) applied
+-- after this row first existed. Version bumps regenerate this migration
+-- (section 4.2), which is exactly what "on conflict (id) do update set"
+-- gives for free: re-running the SAME manifest is a true no-op, and a NEW
+-- registration migration for a version bump updates every other column in
+-- place through the same upsert -- both are ordinary applications of this
+-- one statement, not two different code paths.
 --
 -- manifest_hash is the sha256 hex digest of the canonicalized manifest
 -- (RFC-8785-style key-sorted JSON, no insignificant whitespace), computed by
@@ -324,8 +329,6 @@ export function buildRegistrationUpSql({ manifest, id, name, schema, kind, route
 -- asserts this literal string equals manifestHash() computed fresh over the
 -- real manifest file on disk, so the two can never silently drift apart
 -- (TB-1b parity, docs/planning/05-c-toolbelt.md section 11).
-do $tool_new$
-begin
 insert into core.app (
   id, name, schema_name, status, kind, route, version, description,
   manifest, manifest_hash, registered_at
@@ -338,24 +341,21 @@ values (
   ${sqlQuote(kind)},
   ${sqlLiteralOrNull(route)},
   ${sqlQuote(manifest.version)},
-  null,
+  ${sqlLiteralOrNull(manifest.description ?? null)},
   ${sqlQuote(compact)}::jsonb,
   ${sqlQuote(hash)},
   now()
 )
-on conflict (id) do nothing;
-
-if not exists (
-  select 1
-  from core.app
-  where id = ${sqlQuote(id)}
-    and manifest_hash = ${sqlQuote(hash)}
-    and manifest = ${sqlQuote(compact)}::jsonb
-) then
-  raise exception 'core.app id collision for %', ${sqlQuote(id)} using errcode = '23505';
-end if;
-end
-$tool_new$;
+on conflict (id) do update set
+  name          = excluded.name,
+  schema_name   = excluded.schema_name,
+  kind          = excluded.kind,
+  route         = excluded.route,
+  version       = excluded.version,
+  description   = excluded.description,
+  manifest      = excluded.manifest,
+  manifest_hash = excluded.manifest_hash,
+  registered_at = excluded.registered_at;
 `;
 }
 
