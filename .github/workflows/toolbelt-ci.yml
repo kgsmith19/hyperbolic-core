@@ -72,9 +72,19 @@ jobs:
       - name: Run Guards tests
         run: node --test *.test.mjs
         working-directory: apps/toolbelt/guards
+      # Enumerated, not globbed, and the distinction is load-bearing: this
+      # step runs the unit and real-local-Postgres suites, which need no
+      # credential and write nothing outside their own disposable database.
+      # tests/ also holds eight live-Supabase suites (archive, configuration,
+      # render-endpoint, restore, skeleton, tags, usage, versions) that
+      # authenticate via helpers.mjs's primaryToken() and write to the real
+      # hosted project. Since m1-08 pinned prompt.* RLS to the owner UUID they
+      # cannot pass on a fixture identity at all, so they are owner-only
+      # manual proofs -- a glob here would fail the gate outright.
       - name: Run Prompt Organizer tests
         run: |
           node --test --test-concurrency=1 \
+            tests/contract.test.mjs \
             tests/get-prompt.test.mjs \
             tests/helpers.unit.test.mjs \
             tests/migration-contract.test.mjs \
@@ -82,6 +92,7 @@ jobs:
             tests/panel.test.mjs \
             tests/performance.test.mjs \
             tests/prompt-usage-retention-atomic.test.mjs \
+            tests/purge_old_usage_revoke_public.test.mjs \
             tests/render.test.mjs \
             tests/retention.test.mjs \
             tests/search.test.mjs \
