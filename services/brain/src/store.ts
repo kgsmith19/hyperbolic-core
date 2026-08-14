@@ -317,6 +317,28 @@ export class BrainStore {
     return this.#db.prepare(`select * from cost order by recorded_at asc`).all().map(rowToCost);
   }
 
+  /** m6-02: the one query the cost dashboard's per-run/per-task/per-harness/
+   * per-day breakdown is built from. Neither `run_id` nor `harness` lives on
+   * the cost row itself (cost.task_id -> task.run_id; cost.invocation_id ->
+   * invocation.harness, the same two-hop join 07 section 7.9's own
+   * run_id -> task_id -> invocation_id trace model describes), so this joins
+   * both here rather than making every caller re-derive them -- the platform
+   * `core` mirror never receives this granularity at all (only a per-run
+   * total, core-mirror.ts), which is why the dashboard reads it from here,
+   * over Brain's own HTTP API, instead of through the platform session. */
+  listCostDetailsForSummary(sinceIso?: string): CostDetail[] {
+    const sql = `
+      select cost.*, task.run_id as run_id, invocation.harness as harness
+      from cost
+      join task on task.id = cost.task_id
+      join invocation on invocation.id = cost.invocation_id
+      ${sinceIso ? "where cost.recorded_at >= ?" : ""}
+      order by cost.recorded_at asc
+    `;
+    const rows = sinceIso ? this.#db.prepare(sql).all(sinceIso) : this.#db.prepare(sql).all();
+    return rows.map(rowToCostDetail);
+  }
+
   // --- eval_case / eval_result ----------------------------------------------
 
   insertEvalCase(evalCase: EvalCase): void {
@@ -432,6 +454,20 @@ function rowToCost(r: Row): Cost {
     usdEstimate: (r.usd_estimate as number | null) ?? null,
     recordedAt: r.recorded_at as string,
   };
+}
+
+/** One cost row plus the two joined columns listCostDetailsForSummary adds
+ * on top of the plain `Cost` shape -- kept as its own type rather than
+ * widening `Cost` itself, since `run_id`/`harness` are never columns on the
+ * `cost` table and every other store method's `Cost` return stays exactly
+ * what that table actually contains. */
+export interface CostDetail extends Cost {
+  runId: string;
+  harness: string;
+}
+
+function rowToCostDetail(r: Row): CostDetail {
+  return { ...rowToCost(r), runId: r.run_id as string, harness: r.harness as string };
 }
 
 function rowToEvalCase(r: Row): EvalCase {

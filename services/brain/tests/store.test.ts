@@ -158,6 +158,33 @@ test("cost: insertCost, listCostsForRun joins through task, listCostsForInvocati
   assert.deepEqual(store.listCostsForInvocation("inv-nonexistent"), []);
 });
 
+test("cost: listCostDetailsForSummary joins run_id and harness onto every cost row", () => {
+  const store = new BrainStore(tmpDbPath());
+  store.insertRun(fixtureRun());
+  store.insertTask(fixtureTask());
+  store.insertInvocation({ id: "inv-1", taskId: "task-1", harness: "codex", sessionId: null, status: "completed", startedAt: "2026-01-01T00:00:00.000Z", finishedAt: null });
+  const cost: Cost = { id: "cost-1", taskId: "task-1", invocationId: "inv-1", inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, usdEstimate: 0.05, recordedAt: "2026-01-01T00:00:00.000Z" };
+  store.insertCost(cost);
+
+  const [detail] = store.listCostDetailsForSummary();
+  assert.deepEqual(detail, { ...cost, runId: "run-1", harness: "codex" });
+});
+
+test("cost: listCostDetailsForSummary filters by sinceIso the same way listCosts does", () => {
+  const store = new BrainStore(tmpDbPath());
+  store.insertRun(fixtureRun());
+  store.insertTask(fixtureTask());
+  store.insertInvocation({ id: "inv-1", taskId: "task-1", harness: "claude-code", sessionId: null, status: "completed", startedAt: "2026-01-01T00:00:00.000Z", finishedAt: null });
+  store.insertCost({ id: "cost-old", taskId: "task-1", invocationId: "inv-1", inputTokens: 1, outputTokens: 0, cacheReadTokens: 0, usdEstimate: 0, recordedAt: "2026-01-01T00:00:00.000Z" });
+  store.insertCost({ id: "cost-new", taskId: "task-1", invocationId: "inv-1", inputTokens: 2, outputTokens: 0, cacheReadTokens: 0, usdEstimate: 0, recordedAt: "2026-01-03T00:00:00.000Z" });
+
+  const filtered = store.listCostDetailsForSummary("2026-01-02T00:00:00.000Z");
+  assert.deepEqual(
+    filtered.map((d) => d.id),
+    ["cost-new"]
+  );
+});
+
 test("eval_case/eval_result: insert and list by case", () => {
   const store = new BrainStore(tmpDbPath());
   store.insertEvalCase({ id: "case-1", name: "basic addition", specJson: JSON.stringify({ prompt: "2+2" }), createdAt: "2026-01-01T00:00:00.000Z" });

@@ -2,27 +2,35 @@
 // (apps/shell/src/pages/acc.tsx), alongside the Brain run/chat surface
 // (m4-16) in the same /acc area since both read Brain-owned telemetry.
 //
-// Two panels: Brain cost (per run, rolled up per day -- core.cost's own
-// primary key is run_id, so per-task/per-harness granularity has nowhere
-// to live in Postgres today; see lib/cost.ts's header comment) and
-// core.llm_call grouped by caller_app/purpose (08-llm-handlers.md section
-// 6's attribution model). Both are read-only, client-side-grouped queries
-// through the platform session (lib/cost.ts) -- no new tables, no server
-// aggregation dependency.
+// Three panels: Brain cost (per run, rolled up per day -- core.cost's own
+// primary key is run_id, so lib/cost.ts's own client-side PostgREST
+// queries only ever reach that granularity), Brain cost per task/per
+// harness (the ONE place that finer granularity exists at all -- the
+// Brain's own SQLite store, read live through GET /api/brain/cost since
+// the platform core mirror never receives it, see services/brain/src/
+// cost-summary.ts's header comment), and core.llm_call grouped by
+// caller_app/purpose (08-llm-handlers.md section 6's attribution model).
 import type { ReactNode } from "react";
 import { BarChart3 } from "lucide-react";
 import { EmptyState, ErrorState, Skeleton, useDelayedVisible } from "@hyperbolic/ui";
+import type { CostBucket, CostSummary } from "@hyperbolic/platform-client";
 import { groupBrainCostByDay, listBrainRunCosts, listLlmCallGroups, type BrainRunCost, type LlmCallGroup } from "../../lib/cost";
+import { brainClient } from "../../lib/session";
 import { useAsync } from "../../lib/use-async";
 
 interface CostData {
   runs: BrainRunCost[];
   llmCallGroups: LlmCallGroup[];
+  brainSummary: CostSummary;
 }
 
 async function loadCostData(): Promise<CostData> {
-  const [runs, llmCallGroups] = await Promise.all([listBrainRunCosts(), listLlmCallGroups()]);
-  return { runs, llmCallGroups };
+  const [runs, llmCallGroups, brainSummary] = await Promise.all([
+    listBrainRunCosts(),
+    listLlmCallGroups(),
+    brainClient.getCostSummary(),
+  ]);
+  return { runs, llmCallGroups, brainSummary };
 }
 
 function usd(value: number): string {
@@ -133,6 +141,36 @@ function LlmCallTable({ groups }: { groups: LlmCallGroup[] }) {
   );
 }
 
+/** Brain cost per task / per harness (m6-02): the two breakdowns that
+ * exist ONLY in the Brain's own SQLite store (services/brain/src/cost-
+ * summary.ts's own header comment) -- same row shape for both, only the
+ * key column's label changes. */
+function BucketTable({ testId, keyLabel, buckets }: { testId: string; keyLabel: string; buckets: CostBucket[] }) {
+  if (buckets.length === 0) return <p className="text-sm text-text-secondary">No cost recorded yet.</p>;
+  return (
+    <table className="w-full text-left text-sm" data-testid={testId}>
+      <thead>
+        <tr className="text-text-secondary">
+          <th className="pb-2 font-normal">{keyLabel}</th>
+          <th className="pb-2 font-normal">Calls</th>
+          <th className="pb-2 font-normal">Tokens</th>
+          <th className="pb-2 font-normal">USD</th>
+        </tr>
+      </thead>
+      <tbody>
+        {buckets.map((bucket) => (
+          <tr key={bucket.key} className="border-t border-border" data-testid={`${testId}-row`}>
+            <td className="py-1.5 font-mono text-xs">{bucket.key}</td>
+            <td className="py-1.5">{bucket.count}</td>
+            <td className="py-1.5">{(bucket.inputTokens + bucket.outputTokens).toLocaleString()}</td>
+            <td className="py-1.5">{usd(bucket.usdEstimate)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function CostPage() {
   const { status, data, errorMessage, retry } = useAsync(loadCostData);
   const showSkeleton = useDelayedVisible(status === "loading");
@@ -151,7 +189,10 @@ function CostPage() {
 
   if (!data) return null;
 
-  if (data.runs.length === 0 && data.llmCallGroups.length === 0) {
+  const hasBrainSummaryData =
+    data.brainSummary.byTask.length > 0 || data.brainSummary.byHarness.length > 0;
+
+  if (data.runs.length === 0 && data.llmCallGroups.length === 0 && !hasBrainSummaryData) {
     return (
       <div className="mx-auto max-w-4xl p-6">
         <EmptyState
@@ -167,9 +208,9 @@ function CostPage() {
       <div>
         <h2 className="text-xl font-semibold text-text">Cost dashboard</h2>
         <p className="mt-1 text-sm text-text-secondary">
-          Brain cost per run and per day (core.run/core.cost), and LLM call attribution per caller app and purpose
-          (core.llm_call, last 30 days). Per-task/per-harness Brain cost only exists in the Brain's own local store
-          today -- not shown here (docs/planning/issues/m6-02-feat-shell-cost-dashboard.md).
+          Brain cost per run and per day (core.run/core.cost), per task and per harness (the Brain's own SQLite
+          store, GET /api/brain/cost), and LLM call attribution per caller app and purpose (core.llm_call, last 30
+          days).
         </p>
       </div>
 
@@ -179,6 +220,14 @@ function CostPage() {
 
       <Panel title="Brain cost per run">
         <RunCostTable runs={data.runs} />
+      </Panel>
+
+      <Panel title="Brain cost per task">
+        <BucketTable testId="cost-task-table" keyLabel="Task" buckets={data.brainSummary.byTask} />
+      </Panel>
+
+      <Panel title="Brain cost per harness">
+        <BucketTable testId="cost-harness-table" keyLabel="Harness" buckets={data.brainSummary.byHarness} />
       </Panel>
 
       <Panel title="LLM calls by caller app / purpose">

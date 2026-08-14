@@ -55,9 +55,41 @@ async function mockCostRest(page: Page): Promise<void> {
   }
 }
 
-async function signInAndGoTo(page: Page): Promise<void> {
+interface CostBucketFixture {
+  key: string;
+  count: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  usdEstimate: number;
+}
+
+interface BrainCostSummaryFixture {
+  byRun: CostBucketFixture[];
+  byTask: CostBucketFixture[];
+  byHarness: CostBucketFixture[];
+  byDay: CostBucketFixture[];
+}
+
+const EMPTY_BRAIN_SUMMARY: BrainCostSummaryFixture = { byRun: [], byTask: [], byHarness: [], byDay: [] };
+
+/** GET /api/brain/cost (m6-02 hardening addition, services/brain/src/
+ * cost-summary.ts): the ONE place per-task/per-harness cost granularity
+ * exists, read live from the Brain's own HTTP API rather than through
+ * ./support/cost-fixture.ts's PostgREST shim. Defaults to empty buckets
+ * so every OTHER describe block in this file (which never seeds Brain-
+ * native data) still renders a harmless "No cost recorded yet" row
+ * instead of the whole page's Promise.all rejecting. */
+async function mockBrainCost(page: Page, summary: BrainCostSummaryFixture = EMPTY_BRAIN_SUMMARY): Promise<void> {
+  await page.route("**/api/brain/cost**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(summary) });
+  });
+}
+
+async function signInAndGoTo(page: Page, brainSummary?: BrainCostSummaryFixture): Promise<void> {
   await mockAuth(page);
   await mockCostRest(page);
+  await mockBrainCost(page, brainSummary);
   await page.goto("/acc/cost");
   await fillAndSubmitLogin(page);
   await page.waitForURL((url) => url.pathname === "/acc/cost");
@@ -173,10 +205,47 @@ test.describe("LLM call attribution per caller_app and purpose", () => {
   });
 });
 
+test.describe("Brain cost per task and per harness (m6-02 hardening addition: the ONE breakdown that exists only in the Brain's own SQLite store, GET /api/brain/cost)", () => {
+  const BRAIN_SUMMARY: BrainCostSummaryFixture = {
+    byRun: [{ key: "run-1", count: 2, inputTokens: 300, outputTokens: 150, cacheReadTokens: 0, usdEstimate: 0.06 }],
+    byTask: [
+      { key: "task-1", count: 1, inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, usdEstimate: 0.01 },
+      { key: "task-2", count: 1, inputTokens: 200, outputTokens: 100, cacheReadTokens: 0, usdEstimate: 0.05 },
+    ],
+    byHarness: [
+      { key: "claude-code", count: 1, inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, usdEstimate: 0.01 },
+      { key: "codex", count: 1, inputTokens: 200, outputTokens: 100, cacheReadTokens: 0, usdEstimate: 0.05 },
+    ],
+    byDay: [],
+  };
+
+  test("the rendered per-task and per-harness rows match GET /api/brain/cost exactly, never collapsing distinct tasks or harnesses into one row", async ({ page }) => {
+    await signInAndGoTo(page, BRAIN_SUMMARY);
+
+    const taskRows = page.getByTestId("cost-task-table-row");
+    await expect(taskRows).toHaveCount(2);
+    for (const bucket of BRAIN_SUMMARY.byTask) {
+      const row = taskRows.filter({ hasText: bucket.key });
+      await expect(row).toContainText(String(bucket.count));
+      await expect(row).toContainText(Number(bucket.inputTokens + bucket.outputTokens).toLocaleString());
+      await expect(row).toContainText(`$${bucket.usdEstimate.toFixed(4)}`);
+    }
+
+    const harnessRows = page.getByTestId("cost-harness-table-row");
+    await expect(harnessRows).toHaveCount(2);
+    for (const bucket of BRAIN_SUMMARY.byHarness) {
+      const row = harnessRows.filter({ hasText: bucket.key });
+      await expect(row).toContainText(String(bucket.count));
+      await expect(row).toContainText(`$${bucket.usdEstimate.toFixed(4)}`);
+    }
+  });
+});
+
 test.describe("Latency budget (m6-02: panel shall render within 500ms p95 warm)", () => {
   test("cost dashboard render: p95 <= 500ms over repeated warm navigations", async ({ page }) => {
     await mockAuth(page);
     await mockCostRest(page);
+    await mockBrainCost(page);
     await page.goto("/acc/cost");
     await fillAndSubmitLogin(page);
     await page.waitForURL((url) => url.pathname === "/acc/cost");
