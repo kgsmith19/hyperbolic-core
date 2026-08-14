@@ -47,6 +47,19 @@ async function signIn(page: Page) {
     window.localStorage.setItem("sb-test-auth-token", JSON.stringify(session));
   });
   await page.route("**/auth/v1/**", (route) => route.fulfill({ json: {} }));
+  // platform-client's enforceOwner() calls core.is_platform_owner() via a
+  // raw fetch on every session resolution path (getSession,
+  // onAuthStateChange -- packages/platform-client/src/index.ts's
+  // isOwnerSession()), the same mock apps/shell/e2e/support/auth.ts's own
+  // mockAuth() already has to carry for every Shell spec. Without it here
+  // too, that fetch reaches nothing this sandbox can answer and the owner
+  // check fails closed -- every page below renders "signed out" instead
+  // of the platform chrome, regardless of the session seeded above.
+  // PostgREST returns a scalar RPC's result as a bare JSON literal, not a
+  // wrapper object, matching isOwnerSession's `data === true` check.
+  await page.route("**/rest/v1/rpc/is_platform_owner**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: "true" }),
+  );
 }
 
 async function mockApi(page: Page) {
