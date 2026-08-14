@@ -137,14 +137,14 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
   }
 
   async #runKernel(inv: AdapterInvocation, contract: TaskContractV1): Promise<HarnessSession> {
-    const kernelContract = mapTaskContractToKernelContract(contract, inv.worktreePath);
+    const kernelContract = mapTaskContractToKernelContract(contract, inv.worktreePath, inv.invocationId);
     const stagingDir = mkdtempSync(path.join(os.tmpdir(), "brain-kernel-contract-"));
     const contractFile = path.join(stagingDir, "contract.json");
     writeFileSync(contractFile, JSON.stringify(kernelContract, null, 2));
 
     const sessionId = randomUUID();
     try {
-      const { stdout, stderr, outcomeExitCode } = await this.#spawnKernel(contractFile, sessionId);
+      const { stdout, stderr, outcomeExitCode } = await this.#spawnKernel(contractFile, sessionId, inv);
       let parsed: KernelRunResult;
       try {
         parsed = parseKernelStdout(stdout);
@@ -166,7 +166,11 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
     }
   }
 
-  #spawnKernel(contractFile: string, sessionId: string): Promise<{ stdout: string; stderr: string; outcomeExitCode: number | null }> {
+  #spawnKernel(
+    contractFile: string,
+    sessionId: string,
+    inv: AdapterInvocation
+  ): Promise<{ stdout: string; stderr: string; outcomeExitCode: number | null }> {
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [this.#config.kernelRunPath, contractFile], {
         detached: true,
@@ -175,6 +179,16 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
           ACC_ROOT: this.#config.accRoot,
           ACC_POLICY: this.#config.accPolicy,
           ACC_VAULT: this.#config.accVault,
+          // 07 section 7.9: "run_id -> task_id -> invocation_id propagate
+          // into kernel env" -- the kernel process itself doesn't read
+          // these today (it mints its own runId, kernel/run.mjs's own
+          // header comment), but any subprocess-of-the-subprocess the
+          // harness spawns (or a future kernel-side log line) can pick
+          // them up from its own environment without a code change on
+          // this side of the boundary.
+          BRAIN_RUN_ID: inv.runId,
+          BRAIN_TASK_ID: inv.taskId,
+          BRAIN_INVOCATION_ID: inv.invocationId,
         },
       });
       this.#inFlight.set(sessionId, child);

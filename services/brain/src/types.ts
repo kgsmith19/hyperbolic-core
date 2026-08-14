@@ -85,6 +85,12 @@ export interface Approval {
 export interface Cost {
   id: string;
   taskId: string;
+  /** m4-17: which attempt this cost is attributed to -- a task can have
+   * more than one invocation (retries, harness fallback), and only the
+   * invocation id disambiguates which attempt actually spent these
+   * tokens (07 section 7.9's run_id -> task_id -> invocation_id trace
+   * model). */
+  invocationId: string;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;

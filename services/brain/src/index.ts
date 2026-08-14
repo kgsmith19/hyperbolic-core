@@ -10,8 +10,19 @@ import { ClaudeCodeAdapter } from "./adapters/claude-code.ts";
 import { codexAdapter, geminiAdapter } from "./adapters/stub.ts";
 import type { AdapterRegistry } from "./router.ts";
 import { createApprovalGate } from "./approval-gate.ts";
+import { BrainLogger } from "./log.ts";
+import type { CoreMirrorConfig } from "./core-mirror.ts";
 
 const config = loadConfig();
+const logger = new BrainLogger(config.dataDir);
+// m4-17 (07 section 7.6): the core mirror is best-effort and optional --
+// undefined here means this deploy hasn't provisioned
+// SUPABASE_SERVICE_ROLE_KEY yet, and dispatch.ts's own finalizeRunIfComplete
+// skips the write rather than failing the run.
+const coreMirror: CoreMirrorConfig | undefined =
+  config.supabaseUrl && config.supabaseServiceRoleKey
+    ? { supabaseUrl: config.supabaseUrl, supabaseServiceRoleKey: config.supabaseServiceRoleKey }
+    : undefined;
 
 const adapters: AdapterRegistry = {
   "claude-code": new ClaudeCodeAdapter({
@@ -27,7 +38,7 @@ const adapters: AdapterRegistry = {
 const daemon = new BrainDaemon({
   dbPath: config.dbPath,
   dataDir: config.dataDir,
-  dispatchFactory: (store, journal) => createDispatchFn(store, { adapters, workspacesRoot: config.workspacesRoot, journal }),
+  dispatchFactory: (store, journal) => createDispatchFn(store, { adapters, workspacesRoot: config.workspacesRoot, journal, logger, coreMirror }),
   approvalGateFactory: (store, journal) =>
     createApprovalGate(store, journal, {
       repoAllowlist: config.repoAllowlist,

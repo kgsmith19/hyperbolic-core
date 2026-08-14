@@ -36,6 +36,11 @@ export interface BrainConfig {
    * the monorepo layout relative to this file, same reasoning as
    * kernelRunPath. */
   readonly repoRoot: string;
+  /** m4-19: the eval corpus (07 section 7.11's case files) lives under
+   * the Brain's own source tree, not `/data` -- it is committed content
+   * brain-ci.yml runs on every PR, not runtime state. Overridable so
+   * tests can point at a scratch directory instead of the real corpus. */
+  readonly evalsCasesDir: string;
   /** m4-14's HTTP API auth (ADR-03). Optional/undefined rather than
    * required() (services/llm-handler's own posture): every CLI verb
    * (m4-13) operates on the store directly and has never needed
@@ -45,6 +50,13 @@ export interface BrainConfig {
    * configured, not crashing the process. */
   readonly supabaseUrl?: string;
   readonly supabasePublishableKey?: string;
+  /** m4-17's core.log_run mirror (core-mirror.ts) -- optional for the same
+   * reason supabaseUrl/supabasePublishableKey are: the CLI/state-store
+   * surface has never needed Supabase, and a deploy that hasn't
+   * provisioned this yet should mirror nothing rather than fail to
+   * start. mirrorRunToCore's own job is skipping the write (not
+   * throwing) when this is undefined. */
+  readonly supabaseServiceRoleKey?: string;
   /** Scoped agent token verification (ADR-03's "scoped agent token"
    * option) -- also optional; a deploy that hasn't provisioned agent
    * tokens yet (true for V1 until m4-20 mints one from LifeOS) simply
@@ -53,6 +65,14 @@ export interface BrainConfig {
   readonly agentTokenPublicKeyPem?: string;
   readonly agentTokenIssuer?: string;
   readonly agentTokenAudience?: string;
+  /** m4-20's `LifeOsSurface` (lifeos-surface.ts, 05-e-lifeos.md section 3)
+   * -- optional for the same reason the two fields above are: no Brain
+   * task has this wired into its dispatch path yet (07-brain-architecture
+   * .md section 7.13 lists the client itself as a V1 stub), so a deploy
+   * that hasn't minted a LifeOS agent token yet simply has no
+   * LifeOS-backed task class available; nothing else breaks. */
+  readonly lifeosBaseUrl?: string;
+  readonly lifeosAgentToken?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
@@ -99,6 +119,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
   const approvalTtlMs = approvalTtlDays * 24 * 60 * 60 * 1000;
 
   const repoRoot = env.BRAIN_REPO_ROOT ?? path.resolve(HERE, "..", "..", "..");
+  const evalsCasesDir = env.BRAIN_EVALS_CASES_DIR ?? path.join(repoRoot, "services", "brain", "evals", "cases");
 
   // A PEM key with literal "\n" escapes (the common env-var convention for
   // multi-line secrets, since real newlines are awkward to set in most
@@ -108,6 +129,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
   const agentTokenPublicKeyPem = env.BRAIN_AGENT_TOKEN_PUBLIC_KEY?.replace(/\\n/g, "\n");
   const agentTokenIssuer = env.BRAIN_AGENT_TOKEN_ISSUER;
   const agentTokenAudience = env.BRAIN_AGENT_TOKEN_AUDIENCE;
+
+  // Named for the external system (LIFEOS_*, not BRAIN_*), matching
+  // SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY's own convention above -- this
+  // is a credential for calling OUT to LifeOS, the opposite direction
+  // from BRAIN_AGENT_TOKEN_* (which verifies tokens calling IN).
+  const lifeosBaseUrl = env.LIFEOS_API_BASE_URL;
+  const lifeosAgentToken = env.LIFEOS_AGENT_TOKEN;
 
   return {
     port,
@@ -122,10 +150,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
     perRunUsdCeiling,
     approvalTtlMs,
     repoRoot,
+    evalsCasesDir,
     supabaseUrl: env.SUPABASE_URL,
     supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY,
+    supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
     agentTokenPublicKeyPem,
     agentTokenIssuer,
     agentTokenAudience,
+    lifeosBaseUrl,
+    lifeosAgentToken,
   };
 }

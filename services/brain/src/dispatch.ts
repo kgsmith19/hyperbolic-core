@@ -12,18 +12,71 @@ import os from "node:os";
 import path from "node:path";
 import type { BrainStore } from "./store.ts";
 import type { RunJournal } from "./journal.ts";
-import type { Task, InvocationStatus } from "./types.ts";
+import type { BrainLogger } from "./log.ts";
+import { TERMINAL_TASK_STATUSES, TERMINAL_SUCCESS_TASK_STATUS, type Task, type InvocationStatus, type RunStatus } from "./types.ts";
 import type { TaskContractV1 } from "./contracts.ts";
 import type { AdapterInvocation, HarnessAdapter, HarnessSession } from "./adapters/types.ts";
 import { selectInitialAdapter, selectFallbackAdapter, type AdapterRegistry } from "./router.ts";
-import { classifySession, classifyThrown, extractRawVerdicts, mapSessionToResult, type FailureClass, type Verification } from "./result-mapper.ts";
+import {
+  classifySession,
+  classifyThrown,
+  extractRawVerdicts,
+  mapSessionToResult,
+  tokensFromSession,
+  type FailureClass,
+  type Verification,
+} from "./result-mapper.ts";
 import { createWorktree, removeWorktree } from "./worktree.ts";
 import { isWorktreeCleanOrCommitted, runVerification } from "./verify.ts";
+import { estimateUsd } from "./pricing.ts";
+import { mirrorRunToCore, type CoreMirrorConfig } from "./core-mirror.ts";
 
 export interface DispatchDeps {
   adapters: AdapterRegistry;
   workspacesRoot: string;
   journal?: RunJournal;
+  logger?: BrainLogger;
+  /** m4-17 (07 section 7.6): mirrors a run's cost summary to the platform
+   * core schema once every task in the run has reached a terminal state.
+   * Undefined = mirroring is unconfigured for this deploy; skipped, never
+   * an error (core-mirror.ts's own fail-soft posture). */
+  coreMirror?: CoreMirrorConfig;
+}
+
+/** m4-17: once `task` reaches a terminal status, checks whether every task
+ * in its run is now also terminal and, if so, rolls the run itself up to
+ * a terminal RunStatus and fires the core mirror -- 07 section 7.6's
+ * "run/cost summaries... after run completion." V1's planner only ever
+ * emits one task per run (run-service.ts's own skeleton), so this
+ * resolves immediately in practice, but it is written against the real
+ * task_edge DAG (listTasksForRun / TERMINAL_TASK_STATUSES) so it stays
+ * correct once a future planner emits more than one. Never throws: a
+ * mirror-write failure must not affect the task's own already-persisted
+ * completion (SQLite remains the source of truth, 7.6). */
+export async function finalizeRunIfComplete(store: BrainStore, runId: string, deps: Pick<DispatchDeps, "coreMirror" | "logger" | "journal">): Promise<void> {
+  const tasks = store.listTasksForRun(runId);
+  if (tasks.length === 0 || !tasks.every((t) => TERMINAL_TASK_STATUSES.has(t.status))) return;
+
+  const run = store.getRun(runId);
+  if (!run || run.status === "completed" || run.status === "failed" || run.status === "cancelled" || run.status === "interrupted") return;
+
+  const status: RunStatus = tasks.some((t) => t.status === "cancelled")
+    ? "cancelled"
+    : tasks.some((t) => t.status === "interrupted")
+      ? "interrupted"
+      : tasks.every((t) => t.status === TERMINAL_SUCCESS_TASK_STATUS)
+        ? "completed"
+        : "failed";
+
+  const now = new Date().toISOString();
+  store.updateRunStatus(runId, status, now);
+  deps.journal?.append({ runId, kind: "run.finalized", status });
+  deps.logger?.log("info", "run.finalized", { runId }, { status });
+
+  const costs = tasks.flatMap((t) => store.listInvocationsForTask(t.id).flatMap((inv) => store.listCostsForInvocation(inv.id)));
+  const wallClockMs = Date.parse(now) - Date.parse(run.createdAt);
+  const mirrored = await mirrorRunToCore(deps.coreMirror, run, costs, Math.max(0, wallClockMs));
+  deps.logger?.log(mirrored ? "info" : "warn", "run.core_mirror", { runId }, { mirrored });
 }
 
 const MAX_ATTEMPTS_PER_HARNESS = 2;
@@ -102,7 +155,31 @@ export function createDispatchFn(store: BrainStore, deps: DispatchDeps) {
         };
       }
 
-      store.updateInvocationStatus(invocationId, invocationStatusFor(session.outcome), new Date().toISOString());
+      const invFinishedAt = new Date().toISOString();
+      store.updateInvocationStatus(invocationId, invocationStatusFor(session.outcome), invFinishedAt);
+
+      // m4-17 / BR-5: every invocation gets its own cost row, attributed
+      // to this specific attempt (not just the task) -- a retried or
+      // harness-fallback task has more than one invocation, and only the
+      // invocation id says which attempt actually spent these tokens.
+      const tokens = tokensFromSession(session);
+      store.insertCost({
+        id: randomUUID(),
+        taskId: task.id,
+        invocationId,
+        inputTokens: tokens,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        usdEstimate: estimateUsd(tokens, 0, 0),
+        recordedAt: invFinishedAt,
+      });
+      deps.logger?.log(
+        "info",
+        "invocation.cost_recorded",
+        { runId: task.runId, taskId: task.id, invocationId },
+        { harness: adapter.id, outcome: session.outcome, tokens }
+      );
+
       return outcomeFailClass;
     };
 
@@ -160,16 +237,24 @@ export function createDispatchFn(store: BrainStore, deps: DispatchDeps) {
       branch: contract.deliverable.branch,
       durationS,
       transcriptRef: `runs/${task.runId}.events.ndjson`,
-      // Real ledger cross-referencing (the kernel's own runs.jsonl entry
-      // for this session) is m4-17's job (telemetry mirror, trace joins);
-      // this is a stable, greppable pointer in the meantime, not a
-      // resolved path.
+      // Resolving straight to the kernel's own runs.jsonl entry text is
+      // still not done here; m4-17 instead makes that entry FINDABLE by
+      // embedding this same invocationId in the contract's own _brainMeta
+      // (kernel-contract.ts), which the kernel stores verbatim in its
+      // ledger record -- a stable, greppable pointer, not a resolved path.
       ledgerRef: session!.sessionId ? `kernel-session:${session!.sessionId}` : "unknown",
       verification,
     });
 
     const now = new Date().toISOString();
     store.updateTaskStatus(task.id, result.status, now, { finishedAt: now, resultJson: JSON.stringify(result) });
+
+    // m4-17 / 07 section 7.6: "run/cost summaries... after run
+    // completion." Checked after every task's own status write since V1's
+    // planner never emits more than one task per run in practice, but the
+    // check itself is real (every task in the run terminal), not a
+    // single-task shortcut.
+    await finalizeRunIfComplete(store, task.runId, deps);
 
     await removeWorktree({
       workspacesRoot: deps.workspacesRoot,

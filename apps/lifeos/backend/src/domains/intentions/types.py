@@ -40,6 +40,13 @@ INTENTION_SCHEMA: dict[str, Any] = {
         "floor": {"type": ["string", "null"], "maxLength": 500},
         "next_action": {"type": "string", "maxLength": MAX_ACTION},
         "source": {"type": "string", "maxLength": 200},
+        # m5-08 (LO-3d): whether the operator marked this done. Absent or
+        # false means not done -- a domain-level schema addition, not a
+        # kernel change (out of scope per that issue's own wording, which
+        # is about kernel/, not a domain's own JSON schema); a plain
+        # boolean, the same shape `focus` already has, not x-pii (it is
+        # state, not free text about the operator's life).
+        "done": {"type": "boolean"},
     },
     "required": ["title", "kind", "status", "focus"],
     "additionalProperties": False,

@@ -13,9 +13,15 @@
 // The episodes line and the gate are both values the briefing computed, not
 // ids, so neither resolves anything. Keys an old-composition briefing left behind
 // (open_review_ids, latest_checkin_id) are ignored: feelings are pull-only.
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getEntity, searchEntities, type Entity } from "../api/client";
+import {
+  getEntity,
+  getIntentionsPlan,
+  markIntentionDone,
+  searchEntities,
+  type Entity,
+} from "../api/client";
 import { asGate, asIds, asString, type Attributes } from "../attributes";
 import {
   Appointments,
@@ -41,6 +47,70 @@ function newest(briefings: Entity[] | undefined): Entity | undefined {
     (best: Entity | undefined, item) =>
       best && rank(best) >= rank(item) ? best : item,
     undefined,
+  );
+}
+
+/**
+ * LO-3d (m5-08): the day's plannable intentions, already ordered by
+ * priority by the backend (focus goals first, then creation/import
+ * order). "Mark done" appends one event through the existing
+ * capture/event path (kernel/services/capture.py's own identity-match
+ * merge) — this component never edits history, only invalidates the
+ * plan query so the next read reflects it.
+ */
+function TodaysPlan() {
+  const queryClient = useQueryClient();
+  const plan = useQuery({
+    queryKey: ["intentions", "plan"],
+    queryFn: getIntentionsPlan,
+  });
+  const markDone = useMutation({
+    mutationFn: (id: string) => markIntentionDone(id),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ["intentions", "plan"] }),
+  });
+
+  if (plan.isPending) return <Loading />;
+  if (plan.isError) return <ErrorText error={plan.error} />;
+
+  return (
+    <section>
+      <h2 className="text-lg font-medium">Today's plan</h2>
+      {plan.data.length === 0 ? (
+        <Empty>No plannable intentions yet.</Empty>
+      ) : (
+        <ul className="mt-2 space-y-1">
+          {plan.data.map((item) => (
+            <li
+              key={item.intention_id}
+              className="flex flex-wrap items-center gap-2 text-sm"
+            >
+              <span className={item.done ? "text-zinc-400 line-through" : ""}>
+                {item.title}
+              </span>
+              {item.focus && (
+                <span className="text-xs text-amber-600">focus</span>
+              )}
+              {item.next_action && (
+                <span className="text-zinc-500">{item.next_action}</span>
+              )}
+              {!item.done && (
+                <button
+                  onClick={() => markDone.mutate(item.intention_id)}
+                  disabled={markDone.isPending}
+                  className="rounded border border-zinc-300 px-2 py-0.5 text-xs disabled:opacity-50"
+                >
+                  Mark done
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {markDone.error && (
+        <p className="mt-2 text-sm text-red-600">{String(markDone.error)}</p>
+      )}
+    </section>
   );
 }
 
@@ -89,6 +159,8 @@ export default function Tomorrow() {
             : "Nothing assembled yet"}
         </p>
       </div>
+
+      <TodaysPlan />
 
       {!attributes ? (
         <Empty>

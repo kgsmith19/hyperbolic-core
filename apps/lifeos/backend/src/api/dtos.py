@@ -49,6 +49,18 @@ class DecideIn(BaseModel):
     actor: str = DEFAULT_ACTOR
 
 
+class ProposeActionIn(BaseModel):
+    """M4-20's `proposeAction` (05-e-lifeos.md section 3): kind names a
+    task class, summary is the exact text an operator reviews and
+    approves against (the digest binds to this, never to payload), and
+    payload is opaque -- this system stores and displays it, and never
+    parses or acts on it."""
+
+    kind: str
+    summary: str
+    payload: dict[str, Any] = {}
+
+
 class ForgetIn(BaseModel):
     """`fields=None` erases every x-pii field the entity's types declare."""
 

@@ -198,8 +198,9 @@ test("logsVerb: returns every journaled event as an ndjson-ready line, optionall
 test("costVerb: --run filters to one run and sums usd_estimate", () => {
   const store = new BrainStore(tmpDbPath());
   const { run, task } = seedRunAndTask(store);
-  store.insertCost({ id: "c1", taskId: task.id, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, usdEstimate: 0.5, recordedAt: "2026-01-01T00:00:00.000Z" });
-  store.insertCost({ id: "c2", taskId: task.id, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, usdEstimate: 0.25, recordedAt: "2026-01-02T00:00:00.000Z" });
+  store.insertInvocation({ id: "inv-1", taskId: task.id, harness: "claude-code", sessionId: null, status: "completed", startedAt: "2026-01-01T00:00:00.000Z", finishedAt: null });
+  store.insertCost({ id: "c1", taskId: task.id, invocationId: "inv-1", inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, usdEstimate: 0.5, recordedAt: "2026-01-01T00:00:00.000Z" });
+  store.insertCost({ id: "c2", taskId: task.id, invocationId: "inv-1", inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, usdEstimate: 0.25, recordedAt: "2026-01-02T00:00:00.000Z" });
 
   const result = costVerb(store, { runId: run.id });
   const json = result.json as { totalUsd: number };
@@ -209,8 +210,9 @@ test("costVerb: --run filters to one run and sums usd_estimate", () => {
 test("costVerb: --since filters by timestamp", () => {
   const store = new BrainStore(tmpDbPath());
   const { task } = seedRunAndTask(store);
-  store.insertCost({ id: "c1", taskId: task.id, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, usdEstimate: 1, recordedAt: "2026-01-01T00:00:00.000Z" });
-  store.insertCost({ id: "c2", taskId: task.id, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, usdEstimate: 2, recordedAt: "2026-02-01T00:00:00.000Z" });
+  store.insertInvocation({ id: "inv-1", taskId: task.id, harness: "claude-code", sessionId: null, status: "completed", startedAt: "2026-01-01T00:00:00.000Z", finishedAt: null });
+  store.insertCost({ id: "c1", taskId: task.id, invocationId: "inv-1", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, usdEstimate: 1, recordedAt: "2026-01-01T00:00:00.000Z" });
+  store.insertCost({ id: "c2", taskId: task.id, invocationId: "inv-1", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, usdEstimate: 2, recordedAt: "2026-02-01T00:00:00.000Z" });
 
   const result = costVerb(store, { since: "2026-01-15T00:00:00.000Z" });
   const json = result.json as { totalUsd: number };

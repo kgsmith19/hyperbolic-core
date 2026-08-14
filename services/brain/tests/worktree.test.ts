@@ -40,6 +40,16 @@ test("createWorktree: clones a bare mirror on first use and adds a worktree at r
   assert.ok(fs.existsSync(bareRepoPath(workspacesRoot, repo)), "the bare mirror clone must exist");
 });
 
+test("createWorktree: creates workspacesRoot itself when it does not yet exist (m6-01: a bare CI runner has no pre-created /workspaces, unlike the Dockerfile's own VOLUME)", async () => {
+  const repo = initSourceRepo();
+  const workspacesRoot = path.join(tmpWorkspacesRoot(), "not-yet-created", "nested");
+  assert.equal(fs.existsSync(workspacesRoot), false);
+
+  const wtPath = await createWorktree({ workspacesRoot, repoUrl: repo, repoRef: "main", taskId: "t1" });
+
+  assert.ok(fs.existsSync(wtPath));
+});
+
 test("createWorktree: two concurrent tasks against the same repo get distinct worktree paths, neither shares state", async () => {
   const repo = initSourceRepo();
   const workspacesRoot = tmpWorkspacesRoot();

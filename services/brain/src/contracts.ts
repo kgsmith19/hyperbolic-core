@@ -81,7 +81,11 @@ function loadSchema(path: string): object {
   return JSON.parse(readFileSync(path, "utf8")) as object;
 }
 
-function compileValidator(path: string): ValidateFunction {
+/** Exported for evals.ts (m4-19): brain.eval-case.v1's own schema needs
+ * the exact same Ajv2020 + ajv-formats + strict:true compile step this
+ * module already established, rather than a second, possibly-drifting
+ * copy of the same six lines. */
+export function compileValidator(path: string): ValidateFunction {
   // strict: true (matching validate-manifests.mjs) so an accidental
   // unknown keyword or ambiguous type fails loudly at compile time rather
   // than silently passing everything through.
@@ -97,7 +101,7 @@ function compileValidator(path: string): ValidateFunction {
 let taskValidator: ValidateFunction | undefined;
 let resultValidator: ValidateFunction | undefined;
 
-function formatErrors(validate: ValidateFunction): string[] {
+export function formatErrors(validate: ValidateFunction): string[] {
   return (validate.errors ?? []).map((e) => `${e.instancePath || "(root)"} ${e.message ?? "invalid"}`);
 }
 

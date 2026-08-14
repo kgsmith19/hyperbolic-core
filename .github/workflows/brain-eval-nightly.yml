@@ -1,0 +1,53 @@
+name: "Brain Eval Nightly"
+
+# m6-01 (07-brain-architecture.md section 7.11): "a nightly full run" of
+# the eval corpus, beyond brain-ci.yml's per-PR gate. Runs the SAME
+# deterministic, credential-free fixture-adapter path brain-ci.yml's own
+# eval step already uses (services/brain/src/adapters/fixture.ts, wired
+# in only through bin/brain.mjs's evalAdapters()) -- not a real-credential
+# run. This is a deliberate scope choice, not an oversight: the seed
+# corpus's own design (see services/brain/evals/cases/README.md) already
+# commits to scripting only the harness-level outcome while keeping
+# verification real, so a nightly run gains nothing from a live Anthropic
+# credential that the PR-gate run doesn't already prove, and provisioning
+# one here would be a new standing secret for no corresponding new
+# coverage. Only schedule drift (a case that silently broke without a
+# services/brain/** PR to trigger the gate -- e.g. an unrelated schema or
+# dependency change) is genuinely new ground this catches.
+
+on:
+  schedule:
+    - cron: "17 9 * * *" # ~02:17 Pacific, matching this repo's other nightly-adjacent jobs' off-peak placement
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  eval-nightly:
+    name: Brain eval corpus (nightly, fixture adapters)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install root workspace dependencies
+        run: npm ci
+      - name: "Eval corpus (m6-01, 07 section 7.11): brain eval run over services/brain/evals/cases/*.case.json"
+        working-directory: services/brain
+        env:
+          # Scratch state, never the production /data or /workspaces
+          # volumes -- same env vars brain-ci.yml's own eval step uses,
+          # for the same throwaway-store reason. worktree.ts's own
+          # createWorktree() now mkdirSync(..., {recursive:true})'s
+          # workspacesRoot itself, so this only needs to name a path,
+          # not pre-create it.
+          BRAIN_DATA_DIR: ${{ runner.temp }}/brain-eval-nightly-data
+          BRAIN_WORKSPACES_ROOT: ${{ runner.temp }}/brain-eval-nightly-workspaces
+        run: node bin/brain.mjs eval run --json

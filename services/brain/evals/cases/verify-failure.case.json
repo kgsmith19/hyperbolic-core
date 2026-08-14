@@ -1,0 +1,66 @@
+{
+  "case_id": "verify-failure",
+  "description": "m6-01 seed case 3/5 (07 section 7.11): the harness reports it worked ([[fixture:accepted]]), but the Brain's own independent verification (verify.ts, BR-2) disagrees -- the real acceptance[].verify command below is deliberately made to fail (`false`, expect_exit 0). Proves the eval gate actually distinguishes a truthful failure from a scripted success, not just that the fixture adapter can be told to say 'accepted'.",
+  "contract": {
+    "task_id": "00000000-0000-0000-0000-000000000005",
+    "run_id": "00000000-0000-0000-0000-000000000006",
+    "title": "m6-01 seed: verify-failure [[fixture:accepted]]",
+    "repo": {
+      "url": "self",
+      "ref": "HEAD"
+    },
+    "harness": {
+      "preferred": "claude-code",
+      "fallback": []
+    },
+    "autonomy": 1,
+    "prompt": {
+      "objective": "Exercise the case where the harness claims success but real verification fails.",
+      "context_refs": [],
+      "prompt_org_refs": []
+    },
+    "constraints": {
+      "allowed_paths": [
+        "**"
+      ],
+      "denied_paths": [],
+      "vault_keys": [],
+      "max_turns": 1,
+      "wall_clock_min": 5,
+      "token_budget": 1000,
+      "network": "none"
+    },
+    "acceptance": [
+      {
+        "id": "AC-fails",
+        "statement": "A deliberately failing real acceptance check.",
+        "verify": {
+          "command": "false",
+          "cwd": "worktree",
+          "expect_exit": 0,
+          "timeout_s": 10
+        }
+      }
+    ],
+    "deliverable": {
+      "type": "commit",
+      "branch": "brain/eval-verify-failure",
+      "push": false,
+      "draft_pr": false
+    }
+  },
+  "fixture": {
+    "repo_tar": null,
+    "git_ref": null
+  },
+  "expected": {
+    "status": "failed",
+    "verdicts": [
+      {
+        "id": "AC-fails",
+        "pass": false
+      }
+    ],
+    "max_cost_usd": null
+  }
+}

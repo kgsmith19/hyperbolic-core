@@ -12,9 +12,9 @@ test("deploy discovery covers every manifest-owned migration directory", () => {
   assert.match(workflow, /\^apps\/toolbelt\/\(\.\*\/\)\?supabase\/migrations\//);
 });
 
-test("all four Shell and Handler A deploy jobs retain the explicit production gate", () => {
+test("all six Shell, Handler A, and Brain deploy jobs retain the explicit production gate", () => {
   const occurrences = workflow.match(/vars\.DEPLOY_ENABLED == 'true'/g) ?? [];
-  assert.equal(occurrences.length, 4);
+  assert.equal(occurrences.length, 6);
 });
 
 test("production migrations cannot be dispatched from a feature ref", () => {
@@ -29,23 +29,34 @@ test("production migrations cannot be dispatched from a feature ref", () => {
 test("manual deploy requires an explicit migration choice instead of coupling deploy to a DB write", () => {
   assert.match(workflow, /apply_migrations:[\s\S]+type: boolean[\s\S]+default: false/);
   assert.match(workflow, /deploy_shell:[\s\S]+type: boolean[\s\S]+default: true/);
+  assert.match(workflow, /deploy_brain:[\s\S]+type: boolean[\s\S]+default: true/);
   assert.match(workflow, /migrations=\$\{\{ inputs\.apply_migrations \}\}/);
   assert.doesNotMatch(workflow, /workflow_dispatch[\s\S]{0,500}migrations=true/);
 });
 
-test("Shell and Handler A deploy each read only their own dedicated Infisical path", () => {
+test("Shell, Handler A, and Brain deploy each read only their own dedicated Infisical path", () => {
   const paths = [...workflow.matchAll(/secret-path: "([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(new Set(paths), new Set(["/platform/shell-deploy/", "/platform/llm-handler/"]));
+  assert.deepEqual(new Set(paths), new Set(["/platform/shell-deploy/", "/platform/llm-handler/", "/brain/"]));
 });
 
-test("Handler A's deploy job uses its own SSH key variable, never Shell's, and vice versa", () => {
+test("Handler A's and the Brain's deploy jobs each use their own SSH key variable, never another unit's", () => {
   assert.match(workflow, /INFISICAL_LLM_HANDLER_DEPLOY_IDENTITY_ID/);
+  assert.match(workflow, /INFISICAL_BRAIN_DEPLOY_IDENTITY_ID/);
   const deployShell = workflow.slice(workflow.indexOf("  deploy-shell:"), workflow.indexOf("  build-llm-handler:"));
-  const deployLlmHandler = workflow.slice(workflow.indexOf("  deploy-llm-handler:"));
-  assert.match(deployShell, /SHELL_DEPLOY_SSH_KEY/);
-  assert.doesNotMatch(deployShell, /LLM_HANDLER_SSH_KEY/);
-  assert.match(deployLlmHandler, /LLM_HANDLER_SSH_KEY/);
-  assert.doesNotMatch(deployLlmHandler, /SHELL_DEPLOY_SSH_KEY/);
+  const deployLlmHandler = workflow.slice(workflow.indexOf("  deploy-llm-handler:"), workflow.indexOf("  build-brain:"));
+  const deployBrain = workflow.slice(workflow.indexOf("  deploy-brain:"));
+  const sshKeyVars = ["SHELL_DEPLOY_SSH_KEY", "LLM_HANDLER_SSH_KEY", "BRAIN_DEPLOY_SSH_KEY"];
+  const jobs = { deployShell, deployLlmHandler, deployBrain };
+  const owners = { SHELL_DEPLOY_SSH_KEY: "deployShell", LLM_HANDLER_SSH_KEY: "deployLlmHandler", BRAIN_DEPLOY_SSH_KEY: "deployBrain" };
+  for (const [jobName, body] of Object.entries(jobs)) {
+    for (const sshKeyVar of sshKeyVars) {
+      if (owners[sshKeyVar] === jobName) {
+        assert.match(body, new RegExp(sshKeyVar), `${jobName} must reference its own ${sshKeyVar}`);
+      } else {
+        assert.doesNotMatch(body, new RegExp(sshKeyVar), `${jobName} must never reference ${sshKeyVar}`);
+      }
+    }
+  }
 });
 
 test("release health is proven before pruning and failures have a rollback path", () => {
@@ -67,15 +78,45 @@ test("same-commit retries stage a distinct release instead of reusing stale byte
   assert.match(workflow, /test ! -e [^\n]*target/);
 });
 
-test("every deploy trigger is classified into a real deploy unit", () => {
-  assert.doesNotMatch(workflow, /services\/brain\/\*\*/);
+test("every deploy trigger is classified into a real deploy unit, including the Brain", () => {
+  assert.match(workflow, /services\/brain\/\*\*/);
   assert.match(workflow, /docs\/ops\/prune-dist-dirs\.sh/);
+  assert.match(workflow, /docs\/ops\/prune-docker-images\.sh/);
   assert.match(workflow, /\.github\/workflows\/deploy\\\.yml/);
+  const changesJob = workflow.slice(workflow.indexOf("  changes:"), workflow.indexOf("  migrate-platform:"));
+  assert.match(changesJob, /brain=true/);
+  assert.match(changesJob, /brain=false/);
+  assert.match(changesJob, /brain=\$\{\{ inputs\.deploy_brain \}\}/);
+});
+
+test("a services/brain-only change classifies as the brain unit alone, not Shell or Handler A", () => {
+  const shellLine = workflow.match(/if grep -Eq '([^']+)'[^\n]*\n\s*echo "shell=true"/)?.[1];
+  const llmLine = workflow.match(/if grep -Eq '([^']+)'[^\n]*\n\s*echo "llm_handler=true"/)?.[1];
+  const brainLine = workflow.match(/if grep -Eq '([^']+)'[^\n]*\n\s*echo "brain=true"/)?.[1];
+  assert.ok(brainLine, "brain classification regex must be present");
+  assert.match(brainLine, /services\/brain\//);
+  assert.doesNotMatch(brainLine, /apps\/shell\//);
+  assert.doesNotMatch(brainLine, /services\/llm-handler\//);
+  assert.ok(shellLine, "shell classification regex must be present");
+  assert.doesNotMatch(shellLine, /services\/brain\//);
+  assert.ok(llmLine, "llm_handler classification regex must be present");
+  assert.doesNotMatch(llmLine, /services\/brain\//);
 });
 
 test("checkout credentials are never persisted in deploy jobs", () => {
   const checkouts = workflow.match(/uses: actions\/checkout@[0-9a-f]{40}/g) ?? [];
   const disabled = workflow.match(/persist-credentials: false/g) ?? [];
-  assert.equal(checkouts.length, 5);
+  assert.equal(checkouts.length, 7);
   assert.equal(disabled.length, checkouts.length);
+});
+
+test("build-brain and deploy-brain each carry the same production-gate and success-dependency shape as build/deploy-llm-handler", () => {
+  const buildBrain = workflow.slice(workflow.indexOf("  build-brain:"), workflow.indexOf("  deploy-brain:"));
+  const deployBrain = workflow.slice(workflow.indexOf("  deploy-brain:"));
+  assert.match(buildBrain, /needs\.changes\.outputs\.brain == 'true'/);
+  assert.match(buildBrain, /file: services\/brain\/Dockerfile/);
+  assert.match(deployBrain, /needs\.build-brain\.result == 'success'/);
+  assert.match(deployBrain, /needs\.migrate-platform\.result == 'success' \|\| needs\.migrate-platform\.result == 'skipped'/);
+  assert.match(deployBrain, /group: deploy-brain-production/);
+  assert.match(deployBrain, /cancel-in-progress: false/);
 });
