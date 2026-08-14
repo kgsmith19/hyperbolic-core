@@ -132,8 +132,14 @@ jobs:
       # wrong or expired credential otherwise surfaces only as an
       # unrelated-looking "element(s) not found" in the journey below, because
       # the test silently falls back to an RLS-powerless fixture login.
+      #
+      # Runs export-OWNER-session.mjs, not the export-test-sessions.mjs that
+      # platform-contract.yml uses: that one also mints TEST_USER_A/B fixture
+      # sessions its deployed suites need, and TEST_USER_B does not exist in
+      # the platform project (its password grant 400s). The journey below uses
+      # only the owner token, so it should not depend on that fixture existing.
       - name: Exchange and verify the owner session
-        run: node tests/export-test-sessions.mjs
+        run: node tests/export-owner-session.mjs
         working-directory: apps/toolbelt/apps/prompt-organizer
         env:
           TOOLBELT_OWNER_REFRESH_TOKEN: ${{ secrets.TOOLBELT_OWNER_REFRESH_TOKEN }}
