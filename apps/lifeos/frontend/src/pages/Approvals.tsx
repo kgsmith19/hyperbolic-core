@@ -5,6 +5,14 @@
 // gate). So an approved proposal's letter comes only from the gated
 // GET .../draft, fetched below, and a rejected or withdrawn one shows no
 // letter at all: there is nothing left to authorise.
+//
+// GET .../draft only ever renders a bills dispute letter (domains/bills/
+// dispute.py's own emit_draft) — it 404s for any other proposal kind. Bills
+// proposals are always `kind === "dispute_draft"` (the only value
+// domains.bills.types.PROPOSAL_KINDS has ever held); a generic Brain-
+// originated proposal (M4-20, domains/agents/proposals.py) carries whatever
+// kind label the caller chose, so this listing tells the two apart by kind,
+// not by state alone, before ever calling the gated route.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 
@@ -17,6 +25,11 @@ import {
 } from "../api/client";
 import { Empty } from "../components/BriefingSections";
 import { ErrorText, Loading } from "../components/QueryStatus";
+
+// The one kind domains.bills.types.PROPOSAL_KINDS has ever held. Anything
+// else is a generic agent proposal (domains/agents/proposals.py) with no
+// bills-shaped draft letter behind it.
+const BILLS_DISPUTE_DRAFT_KIND = "dispute_draft";
 
 function GatedDraft({ proposalId }: { proposalId: string }) {
   // Exercises the gate on every view, not just once: an authority receipt
@@ -98,7 +111,7 @@ function Proposal({ view }: { view: ProposalView }) {
         </>
       )}
 
-      {view.state === "approved" && (
+      {view.state === "approved" && view.kind === BILLS_DISPUTE_DRAFT_KIND && (
         <div className="mt-2">
           <GatedDraft proposalId={view.proposal_id} />
         </div>

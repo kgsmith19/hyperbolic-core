@@ -21,7 +21,23 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from api.auth import AuthError, AuthUnavailableError, authenticate, principal
 from api.auth import settings as auth_settings
 from api.chat import router as chat_router
-from api.dtos import ApproveIn, CaptureIn, DecideIn, DefineTypeIn, ForgetIn, RelateIn
+from api.dtos import (
+    ApproveIn,
+    CaptureIn,
+    DecideIn,
+    DefineTypeIn,
+    ForgetIn,
+    ProposeActionIn,
+    RelateIn,
+)
+from domains.agents.proposals import (
+    approve_agent_proposal,
+    is_agent_proposal,
+    list_agent_proposals,
+    propose_action,
+    reject_agent_proposal,
+)
+from domains.agents.proposals import guard_capture as guard_agent_proposal_capture
 from domains.bills.dispute import (
     AuthorityRefused,
     DecisionResult,
@@ -332,11 +348,16 @@ def post_capture(body: CaptureIn, context: Ctx) -> CaptureResult:
     rule counts current records and refuses a capture that would make a
     fourth. Episodes (EP1): intensity within 0-10, end_date never before
     onset_date, feared_duration_days positive, playbook versions append-only,
-    and the `onset_date` identity key embargoed to the episode type."""
+    and the `onset_date` identity key embargoed to the episode type. Agent
+    proposals (M4-20): `agent_action_proposal` records are written only by
+    propose_action/approve_agent_proposal/reject_agent_proposal, never by a
+    direct capture — the same "never pre-decided through the generic door"
+    lock bills' own action_proposal keeps."""
     guard_bill_capture(context, body.type_name, body.attributes)
     guard_document_capture(body.type_name, body.attributes)
     guard_episode_capture(context, body.type_name, body.attributes)
     guard_intention_capture(context, body.type_name, body.attributes)
+    guard_agent_proposal_capture(body.type_name, body.attributes)
     return capture(
         context,
         body.type_name,
@@ -376,26 +397,55 @@ async def post_documents(context: Ctx, file: Annotated[UploadFile, File()]) -> E
 @app.get("/action-proposals")
 def get_action_proposals(context: Ctx, state: str | None = None) -> list[ProposalView]:
     """Drafts this system is proposing, with the letter rendered from live
-    records (ADR 018). Reading is only reading: no route below GET writes
-    anything, so nothing here can approve a proposal as a side effect. Each view
-    carries the `draft_digest` an approval must echo back."""
-    return list_proposals(context, state=state)
+    records (ADR 018), PLUS generic Brain-originated proposals (M4-20) --
+    one combined listing so the Approvals page (and LO-4b) needs no
+    per-kind route. Reading is only reading: no route below GET writes
+    anything, so nothing here can approve a proposal as a side effect. Each
+    view carries the digest an approval must echo back (`draft_digest` for
+    both kinds -- an agent proposal's is its summary's own digest, not a
+    rendered letter's, see domains/agents/proposals.py)."""
+    return list_proposals(context, state=state) + list_agent_proposals(context, state=state)
+
+
+@app.post("/action-proposals")
+def post_propose_action(body: ProposeActionIn, request: Request, context: Ctx) -> ProposalView:
+    """The Brain's `proposeAction` (05-e-lifeos.md section 3, LO-4b): the
+    single write-shaped capability a `action-proposals:draft`-scoped token
+    may reach. Creates a PENDING proposal only -- no entity other than the
+    proposal record itself is ever touched, so LO-4b's "no entity shall
+    change until operator approval" holds by construction. `proposed_by`
+    records who/what proposed it from the verified request identity,
+    mirroring approve/reject's own principal() discipline rather than
+    trusting a value the caller could name for itself.
+    """
+    subject, _verified = principal(request)
+    return propose_action(context, body.kind, body.summary, body.payload, proposed_by=subject)
 
 
 @app.post("/action-proposals/{proposal_id}/approve")
 def post_approve_proposal(
     proposal_id: UUID, body: ApproveIn, request: Request, context: Ctx
 ) -> DecisionResult:
-    """The one action that mints an authority receipt (ADR 018).
+    """The one action that mints an authority receipt (ADR 018), for a
+    bills dispute draft -- OR records approval of a generic Brain-
+    originated proposal (M4-20), dispatched here by which domain owns
+    `proposal_id`. Bills' own approve_proposal is called completely
+    unchanged for a bills proposal; nothing about this dispatch touches
+    its internals.
 
     Deliberately explicit in three ways: it is its own POST, it refuses unless
-    the caller echoes the digest of the draft it read, and who approved comes
-    from the claims verified for *this request* rather than from the body or
-    from configuration — a caller cannot say who approved, and neither can the
-    environment. `granted_via` records which of those two it was; the domain
-    refuses a scope-narrowed context outright.
+    the caller echoes the digest of the draft/summary it read, and who approved
+    comes from the claims verified for *this request* rather than from the body
+    or from configuration — a caller cannot say who approved, and neither can
+    the environment. `granted_via` records which of those two it was for a
+    bills proposal; the domain refuses a scope-narrowed context outright
+    either way.
     """
     subject, verified = principal(request)
+    if is_agent_proposal(context, proposal_id):
+        return approve_agent_proposal(
+            context, proposal_id, body.draft_digest, subject, actor=body.actor
+        )
     return approve_proposal(
         context,
         proposal_id,
@@ -408,7 +458,11 @@ def post_approve_proposal(
 
 @app.post("/action-proposals/{proposal_id}/reject")
 def post_reject_proposal(proposal_id: UUID, body: DecideIn, context: Ctx) -> DecisionResult:
-    """Say no. Mints nothing — there is no authority in a refusal."""
+    """Say no. Mints nothing — there is no authority in a refusal. Dispatched
+    by proposal kind, same as approve above; bills' own reject_proposal is
+    called completely unchanged for a bills proposal."""
+    if is_agent_proposal(context, proposal_id):
+        return reject_agent_proposal(context, proposal_id, actor=body.actor)
     return reject_proposal(context, proposal_id, actor=body.actor)
 
 

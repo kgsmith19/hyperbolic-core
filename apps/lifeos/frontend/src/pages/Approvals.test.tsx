@@ -124,6 +124,29 @@ describe("Approvals", () => {
     expect(await screen.findByText(/expired/i)).toBeInTheDocument();
   });
 
+  it("shows an approved agent proposal without fetching a bills-only draft", async () => {
+    // M4-20: a generic Brain proposal (domains/agents/proposals.py) is never
+    // "dispute_draft"-kinded, and GET .../draft only ever renders a bills
+    // dispute letter -- calling it for this kind would 404. The listing must
+    // tell approved proposals apart by kind before reaching for that route.
+    vi.mocked(listProposals).mockResolvedValue([
+      {
+        proposal_id: "p5",
+        kind: "test.brain-kind",
+        state: "approved",
+        subject_ids: [],
+        points: [],
+        unresolved_count: 0,
+        body: null,
+        draft_digest: null,
+      },
+    ]);
+    renderWithProviders(<Approvals />);
+
+    expect(await screen.findByText("approved")).toBeInTheDocument();
+    expect(getApprovedDraft).not.toHaveBeenCalled();
+  });
+
   it("shows no letter and no actions for a rejected proposal", async () => {
     vi.mocked(listProposals).mockResolvedValue([
       {
