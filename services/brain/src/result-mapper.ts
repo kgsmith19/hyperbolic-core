@@ -76,19 +76,42 @@ function exitCodeFor(criterion: KernelCriterion): number {
   return criterion.status === "pass" ? 0 : 1;
 }
 
-function statusFor(session: HarnessSession): ResultContractV1["status"] {
-  switch (session.outcome) {
-    case "accepted":
-      return "succeeded";
-    case "rejected":
-    case "refused":
-    case "failed-to-start":
-      return "failed";
-    case "aborted-by-budget":
-      return "timeout";
-    case "orphaned":
-      return "interrupted";
+/** The verdicts an adapter already reported on the session itself (the
+ * ACC kernel's own independent post-run verifyAll(), for claude-code).
+ * Exported so dispatch.ts can decide whether to trust this (non-empty --
+ * an already-independent check ran) or fall back to the Brain's own
+ * verify.ts (empty -- nothing verified anything yet, m4-11's BR-2
+ * backstop). */
+export function extractRawVerdicts(session: HarnessSession): ResultContractV1["verdicts"] {
+  const raw = session.raw as { criteria?: KernelCriterion[] } | undefined;
+  const criteria = Array.isArray(raw?.criteria) ? raw.criteria : [];
+  return criteria.map((c) => ({ id: c.id, pass: c.status === "pass", exit: exitCodeFor(c), output_tail: (c.detail ?? "").slice(-2000) }));
+}
+
+/** m4-11: the Brain's own, freshly-executed verification (verify.ts),
+ * authoritative over whatever the adapter itself reported once the
+ * harness has run to some terminal state (07 section 7.5's 3-condition
+ * completed definition, conditions 1 and 2). Absent for outcomes where
+ * verification either cannot mean anything (`orphaned`: unknown state)
+ * or never had anything to verify (`aborted-by-budget`, `failed-to-
+ * start`, `refused`: the harness never finished, or never ran) --
+ * dispatch.ts's job to decide when to supply this, not this module's. */
+export interface Verification {
+  verdicts: ResultContractV1["verdicts"];
+  worktreeClean: boolean;
+}
+
+function statusFor(session: HarnessSession, verification?: Verification): ResultContractV1["status"] {
+  if (session.outcome === "orphaned") return "interrupted";
+  if (session.outcome === "aborted-by-budget") return "timeout";
+  if (verification) {
+    const allPass = verification.verdicts.length > 0 && verification.verdicts.every((v) => v.pass);
+    return allPass && verification.worktreeClean ? "succeeded" : "failed";
   }
+  // No brain-side verification available (refused/failed-to-start, or a
+  // caller that hasn't wired m4-11's verification through) -- fall back
+  // to the adapter's own reported outcome.
+  return session.outcome === "accepted" ? "succeeded" : "failed";
 }
 
 export interface MapResultParams {
@@ -97,16 +120,16 @@ export interface MapResultParams {
   durationS: number;
   transcriptRef: string;
   ledgerRef: string;
+  verification?: Verification;
 }
 
 export function mapSessionToResult(session: HarnessSession, params: MapResultParams): ResultContractV1 {
-  const raw = session.raw as { criteria?: KernelCriterion[]; tokens?: number; error?: string; errors?: string[] } | undefined;
-  const criteria = Array.isArray(raw?.criteria) ? raw.criteria : [];
-  const verdicts = criteria.map((c) => ({ id: c.id, pass: c.status === "pass", exit: exitCodeFor(c), output_tail: (c.detail ?? "").slice(-2000) }));
+  const raw = session.raw as { tokens?: number; error?: string; errors?: string[] } | undefined;
+  const verdicts = params.verification ? params.verification.verdicts : extractRawVerdicts(session);
 
   return {
     task_id: params.taskId,
-    status: statusFor(session),
+    status: statusFor(session, params.verification),
     verdicts,
     // Commit discovery inside the worktree is not this issue's scope
     // (no git-log parsing added here); left empty rather than guessed.

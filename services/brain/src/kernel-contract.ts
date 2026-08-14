@@ -78,7 +78,7 @@ function wrapForExpectedExit(command: string, expectExit: number): string {
  * normative example (07 section 7.5) literally shows "worktree" as its
  * example value, which this treats as the worktree root itself (the "."
  * case) rather than a literal subdirectory named "worktree". */
-function resolveVerifyCwd(worktreePath: string, verifyCwd: string): string {
+export function resolveVerifyCwd(worktreePath: string, verifyCwd: string): string {
   if (verifyCwd === "worktree" || verifyCwd === ".") return worktreePath;
   return path.isAbsolute(verifyCwd) ? verifyCwd : path.join(worktreePath, verifyCwd);
 }

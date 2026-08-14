@@ -36,10 +36,10 @@ function tmpDbPath(): string {
  * HarnessSessions/throws in sequence, per test scenario. */
 class ScriptedAdapter implements HarnessAdapter {
   readonly id: HarnessId;
-  #script: Array<() => Promise<HarnessSession>>;
+  #script: Array<(inv: AdapterInvocation) => Promise<HarnessSession>>;
   attempts: AdapterInvocation[] = [];
 
-  constructor(id: HarnessId, script: Array<() => Promise<HarnessSession>>) {
+  constructor(id: HarnessId, script: Array<(inv: AdapterInvocation) => Promise<HarnessSession>>) {
     this.id = id;
     this.#script = script;
   }
@@ -52,7 +52,7 @@ class ScriptedAdapter implements HarnessAdapter {
     this.attempts.push(inv);
     const step = this.#script[this.attempts.length - 1];
     if (!step) throw new Error(`ScriptedAdapter(${this.id}): no script step for attempt ${this.attempts.length}`);
-    return step();
+    return step(inv);
   }
 
   async resume(): Promise<HarnessSession> {
@@ -62,7 +62,7 @@ class ScriptedAdapter implements HarnessAdapter {
   async cancel(): Promise<void> {}
 }
 
-function contractFor(repoUrl: string, taskId: string, runId: string, fallback: HarnessId[]): TaskContractV1 {
+function contractFor(repoUrl: string, taskId: string, runId: string, fallback: HarnessId[], acceptance: TaskContractV1["acceptance"] = []): TaskContractV1 {
   return {
     task_id: taskId,
     run_id: runId,
@@ -72,7 +72,7 @@ function contractFor(repoUrl: string, taskId: string, runId: string, fallback: H
     autonomy: 2,
     prompt: { objective: "do the thing", context_refs: [], prompt_org_refs: [] },
     constraints: { allowed_paths: ["**"], denied_paths: [], vault_keys: [], max_turns: 1, wall_clock_min: 1, token_budget: 1, network: "none" },
-    acceptance: [],
+    acceptance,
     deliverable: { type: "commit", branch: `brain/${taskId}`, push: false, draft_pr: false },
   };
 }
@@ -182,4 +182,88 @@ test("dispatch: a succeeded task's invocation row is marked completed, worktree 
   const [invocation] = store.listInvocationsForTask(task.id);
   assert.equal(invocation?.status, "completed");
   assert.equal(store.getTask(task.id)?.status, "succeeded");
+});
+
+// m4-11: the Brain's own independent verification (BR-2) is authoritative
+// once the harness has run to completion -- these exercise it end to end
+// through dispatch(), not just verify.ts in isolation.
+
+test("m4-11: an adapter reporting accepted with NO criteria of its own falls back to the Brain's own verification, which catches a real `false` command", async () => {
+  const repo = initSourceRepo();
+  const store = new BrainStore(tmpDbPath());
+  const workspacesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brain-dispatch-ws-"));
+
+  // Reports accepted with an EMPTY criteria array -- as if the adapter
+  // itself did no verification at all (a future non-kernel harness, or a
+  // kernel edge case). dispatch() must not just trust "accepted" blindly.
+  const claudeCode = new ScriptedAdapter("claude-code", [async () => ({ sessionId: "s", outcome: "accepted", raw: { criteria: [], tokens: 0 } })]);
+  const adapters: AdapterRegistry = { "claude-code": claudeCode };
+
+  const contract = contractFor(repo, "task-false-verify", "run-false-verify", [], [
+    { id: "AC-1", statement: "never passes", verify: { command: "false", cwd: "worktree", expect_exit: 0, timeout_s: 5 } },
+  ]);
+  const task = seedRunAndTask(store, contract);
+
+  const dispatch = createDispatchFn(store, { adapters, workspacesRoot });
+  await dispatch(task);
+
+  const finalTask = store.getTask(task.id);
+  assert.equal(finalTask?.status, "failed", "the adapter said accepted, but the Brain's OWN verification must be authoritative (BR-2)");
+  const result = JSON.parse(finalTask!.resultJson!);
+  assert.equal(result.verdicts[0].id, "AC-1");
+  assert.equal(result.verdicts[0].pass, false);
+});
+
+test("m4-11: the kernel's own already-independent criteria are trusted (not silently re-run) when non-empty", async () => {
+  const repo = initSourceRepo();
+  const store = new BrainStore(tmpDbPath());
+  const workspacesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brain-dispatch-ws-"));
+
+  // The adapter (standing in for the kernel's own verifyAll()) already
+  // reports a PASSING criterion, even though the REAL command below
+  // (if the Brain re-ran it itself) would fail -- proving dispatch()
+  // trusts the existing report rather than re-executing.
+  const claudeCode = new ScriptedAdapter("claude-code", [
+    async () => ({ sessionId: "s", outcome: "accepted", raw: { criteria: [{ id: "AC-1", method: "command", status: "pass", detail: "exit 0" }], tokens: 0 } }),
+  ]);
+  const adapters: AdapterRegistry = { "claude-code": claudeCode };
+
+  const contract = contractFor(repo, "task-trust-existing", "run-trust-existing", [], [
+    { id: "AC-1", statement: "would fail if re-run", verify: { command: "false", cwd: "worktree", expect_exit: 0, timeout_s: 5 } },
+  ]);
+  const task = seedRunAndTask(store, contract);
+
+  const dispatch = createDispatchFn(store, { adapters, workspacesRoot });
+  await dispatch(task);
+
+  assert.equal(store.getTask(task.id)?.status, "succeeded");
+});
+
+test("m4-11: a dirty (uncommitted) worktree fails the task even when every verdict passes (completed condition 2)", async () => {
+  const repo = initSourceRepo();
+  const store = new BrainStore(tmpDbPath());
+  const workspacesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brain-dispatch-ws-"));
+
+  // The adapter simulates a harness that leaves an uncommitted change
+  // behind in the worktree it was handed (real access via
+  // AdapterInvocation.worktreePath, exactly what a real harness would
+  // touch) while still reporting a fully passing criterion -- proving
+  // dispatch() doesn't just trust the verdicts, condition 2 (worktree
+  // clean or committed) is checked independently.
+  const claudeCode = new ScriptedAdapter("claude-code", [
+    async (inv: AdapterInvocation): Promise<HarnessSession> => {
+      fs.writeFileSync(path.join(inv.worktreePath, "left-uncommitted.txt"), "oops");
+      return { sessionId: "s", outcome: "accepted", raw: { criteria: [{ id: "AC-1", method: "command", status: "pass", detail: "exit 0" }], tokens: 0 } };
+    },
+  ]);
+  const adapters: AdapterRegistry = { "claude-code": claudeCode };
+
+  const contract = contractFor(repo, "task-dirty", "run-dirty", []);
+  const task = seedRunAndTask(store, contract);
+
+  const dispatch = createDispatchFn(store, { adapters, workspacesRoot });
+  await dispatch(task);
+
+  const finalTask = store.getTask(task.id);
+  assert.equal(finalTask?.status, "failed", "every verdict passed, but the worktree was left dirty -- condition 2 of the completed definition");
 });
