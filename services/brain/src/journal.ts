@@ -15,6 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { LogLevel } from "./log.ts";
+import { scrubValue } from "./scrubber.ts";
 
 export interface JournalEventBase {
   runId: string;
@@ -57,15 +58,26 @@ export class RunJournal {
     // without dropping any of them from the original flat shape below --
     // both views of the same data coexist in one line.
     const { runId, kind, taskId, invocationId, level, ...fields } = event;
+    // m4-18: scrubbed ONCE, then used for both views of the extra
+    // properties -- the flat top-level spread and the `fields` bucket --
+    // so neither one is a bypass of the other. runId/kind/taskId/
+    // invocationId/level are structural ids, never secret values, and
+    // stay unscrubbed (scrubbing them would corrupt m4-17's own
+    // trace-join ids).
+    const scrubbedFields = scrubValue(fields) as Record<string, unknown>;
     const full: JournalEvent = {
-      ...event,
+      ...scrubbedFields,
+      runId,
+      kind,
+      taskId,
+      invocationId,
       ts: new Date().toISOString(),
       level: level ?? "info",
       run_id: runId,
       task_id: taskId,
       invocation_id: invocationId,
       event: kind,
-      fields,
+      fields: scrubbedFields,
     };
     const fd = fs.openSync(this.#pathFor(event.runId as string), "a");
     try {

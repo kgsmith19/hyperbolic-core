@@ -44,6 +44,13 @@ jobs:
       - name: Run services/brain tests
         working-directory: services/brain
         run: npm test
+      - name: "ADR-05 isolation check (m4-18, BR-3/II-4): this runner is a real non-Brain process context -- no Brain secret file is ever mounted here"
+        run: |
+          if node services/brain/scripts/isolation-check.mjs; then
+            echo "isolation-check exited 0 (secret readable) from a non-Brain CI runner -- this must never happen" >&2
+            exit 1
+          fi
+          echo "isolation-check correctly exited non-zero: the Brain secret is not readable from this context"
       - name: Build the Brain image (verification only, never pushed from CI)
         run: docker build -f services/brain/Dockerfile -t brain:pr-gate .
       - name: Smoke-run the built image (brain status --offline, no live daemon required)

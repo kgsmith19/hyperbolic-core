@@ -53,6 +53,13 @@ if (goal.includes("FAKE_OUTCOME=accepted")) {
     tokens: 0,
     _brainMetaSeen: contract._brainMeta,
     envSeen: { runId: process.env.BRAIN_RUN_ID, taskId: process.env.BRAIN_TASK_ID, invocationId: process.env.BRAIN_INVOCATION_ID },
+    // m4-18's own environment-audit verification bullet: what this
+    // process actually received for credentials is a PATH (ACC_VAULT),
+    // never a resolved secret value -- envForKeys (kernel/credentials.mjs)
+    // is the one place that ever turns a vault key NAME into a value, and
+    // it runs later, inside the real kernel's own startTask() call, which
+    // this fixture stands in for rather than re-implements.
+    accVaultSeen: process.env.ACC_VAULT ?? null,
   });
   process.exit(0);
 } else if (goal.includes("FAKE_OUTCOME=noop")) {

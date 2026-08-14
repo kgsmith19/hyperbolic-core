@@ -15,6 +15,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { scrubText, scrubValue } from "./scrubber.ts";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -51,12 +52,16 @@ export class BrainLogger {
    * own append() ("flush per event", 7.6) -- a process log is only useful
    * for post-mortem debugging if it survives the crash it is meant to
    * explain. */
+  /** m4-18 (07 section 7.10): every field passes through the scrubber
+   * before it ever reaches disk -- unconditional, not opt-in, since a
+   * caller forgetting to scrub is exactly the failure mode this exists
+   * to cover. */
   log(level: LogLevel, event: string, ids: LogIds = {}, fields: Record<string, unknown> = {}): void {
     const line: LogLine = {
       ts: new Date().toISOString(),
       level,
-      event,
-      fields,
+      event: scrubText(event),
+      fields: scrubValue(fields) as Record<string, unknown>,
     };
     if (ids.runId !== undefined) line.run_id = ids.runId;
     if (ids.taskId !== undefined) line.task_id = ids.taskId;

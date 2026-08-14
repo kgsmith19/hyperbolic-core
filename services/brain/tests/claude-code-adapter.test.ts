@@ -110,6 +110,20 @@ test("start(): run_id/task_id/invocation_id propagate into the kernel's env and 
   assert.deepEqual(raw.envSeen, { runId: inv.runId, taskId: inv.taskId, invocationId: inv.invocationId });
 });
 
+test("start(): m4-18 environment audit -- the kernel receives ACC_VAULT as a plain file PATH, never a resolved credential value", async () => {
+  const inv = writeInvocation("do the thing FAKE_OUTCOME=echo-ids");
+  const session = await adapter().start(inv);
+  const raw = session.raw as { accVaultSeen: string | null };
+  assert.ok(raw.accVaultSeen, "ACC_VAULT must be set for the kernel to find its own credential-name lookup");
+  assert.match(raw.accVaultSeen, /vault\.json$/, "a path, ending in the vault.json filename");
+  // Not token/key-shaped: a real secret value would never look like a
+  // filesystem path, and a filesystem path never happens to look like a
+  // real secret -- this is the same class of check scrubber.ts's own
+  // TOKEN_SHAPED_PATTERNS applies to log lines, restated here directly
+  // against what the adapter actually handed the kernel subprocess.
+  assert.doesNotMatch(raw.accVaultSeen, /^sk-|^gh[pousr]_|^AKIA|^ASIA|^xox[baprs]-|^AIza/);
+});
+
 test("start(): the mapped kernel contract is written to a real temp file and cleaned up afterward", async () => {
   const inv = writeInvocation("verify staging cleanup FAKE_OUTCOME=accepted");
   const before = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith("brain-kernel-contract-"));
