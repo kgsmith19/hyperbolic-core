@@ -196,6 +196,26 @@ test("the harness is launched with the run's staging dir and the pinned settings
   assert.match(started.settingsSha256, /^[0-9a-f]{64}$/);
 });
 
+test("GU-2.1: the generated settings' PreToolUse chain includes the shared Guards hook alongside the kernel's own guardhook", () => {
+  const c = good();
+  const generated = S.generateSettings(c, { guardhookPath: "irrelevant/guardhook.mjs" });
+  assert.equal(generated.hooks.PreToolUse.length, 2);
+  assert.match(generated.hooks.PreToolUse[0].hooks[0].command, /guardhook\.mjs/);
+  assert.match(generated.hooks.PreToolUse[1].hooks[0].command, /guard\.mjs/);
+  assert.equal(generated.hooks.PreToolUse[1].matcher, "Edit|Write|NotebookEdit|Read");
+});
+
+test('GU-2.1: "a disabled guard is never silent" -- the started ledger entry records guardsEnabled (boolean or null), never omits it', async () => {
+  const { adapter } = recordingAdapter();
+  const c = good();
+  await R.runTask(contractFile(c), { adapter });
+  const started = L.readRuns().find((x) => x.event === "run_started");
+  assert.ok(
+    typeof started.guardsEnabled === "boolean" || started.guardsEnabled === null,
+    `guardsEnabled must be boolean or null, got ${JSON.stringify(started.guardsEnabled)}`
+  );
+});
+
 test("contract-listed vault keys reach the child env and NOTHING else (AC-L4)", async () => {
   const c = good();
   c.allowedActions.vaultKeys = ["TASK_KEY"];

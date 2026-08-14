@@ -66,6 +66,10 @@ export async function runTask(contractPath, { adapter, afterStage, tickMs = 6000
   appendStarted({
     runId, startedAt: new Date(startedAt).toISOString(),
     contract, settingsSha256: staged.sha256,
+    // GU-2.1/05-g-guards.md section 5: "a disabled guard is never silent" --
+    // recorded in the started ledger entry regardless of enabled/disabled/
+    // unknown, so an operator auditing a run never has to re-derive it.
+    guardsEnabled: staged.guardsEnabled,
   });
 
   const finalize = (extra) => {
