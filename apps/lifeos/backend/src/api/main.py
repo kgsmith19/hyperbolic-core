@@ -9,6 +9,7 @@ import hmac
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -67,6 +68,7 @@ from domains.documents.capture import guard_capture as guard_document_capture
 from domains.episodes.capture import guard_capture as guard_episode_capture
 from domains.health_connect.ingest import IngestResult, process_payload
 from domains.intentions.focus import guard_capture as guard_intention_capture
+from domains.ops.review import ReviewFeed, review_feed
 from kernel.access import AccessContext, ScopeError
 from kernel.env import read_env
 from kernel.models import Edge, Entity, EntityView, Event, TypeDefinition
@@ -593,3 +595,12 @@ def get_search(
     if parsed is not None and not isinstance(parsed, dict):
         raise ValueError("filters must be a JSON object")
     return find(context, type_name=type_name, filters=parsed, text=text)
+
+
+@app.get("/review")
+def get_review(context: Ctx, start: date, end: date) -> ReviewFeed:
+    """LO-3a/LO-3b (m5-07): briefing entities and execution receipts in
+    `[start, end]`, plus a job-health flag for every known scheduled job.
+    Read-only, like every route above this line -- nothing here writes
+    anything."""
+    return review_feed(context, start, end)

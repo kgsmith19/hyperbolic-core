@@ -131,6 +131,48 @@ export function rejectProposal(id: string) {
 export const getApprovedDraft = (id: string) =>
   api<EmittedDraft>(`/action-proposals/${id}/draft`);
 
+// LO-3 (m5-07): GET /review has no generated type yet -- types.gen.ts is
+// generated from a live backend (this file's own header comment / AGENTS.md)
+// and this sandbox has none to regenerate against, so this shape is
+// hand-declared here, matching its own backend response
+// (domains.ops.review.ReviewFeed) field for field, the same workaround
+// M4-20's ProposeActionIn-adjacent work used for the same constraint.
+export interface ReviewBriefingSummary {
+  briefing_id: string;
+  date: string;
+  focus_intention_ids: string[];
+  appointment_ids: string[];
+}
+
+export interface ReviewReceiptSummary {
+  receipt_id: string;
+  job: string;
+  started_at: string;
+  finished_at: string;
+  status: string;
+  summary: string;
+}
+
+export interface ReviewJobHealth {
+  job: string;
+  last_receipt_at: string | null;
+  last_status: string | null;
+  missed: boolean;
+}
+
+export interface ReviewFeed {
+  start: string;
+  end: string;
+  briefings: ReviewBriefingSummary[];
+  receipts: ReviewReceiptSummary[];
+  job_health: ReviewJobHealth[];
+}
+
+export function getReviewFeed(start: string, end: string) {
+  const query = new URLSearchParams({ start, end });
+  return api<ReviewFeed>(`/review?${query}`);
+}
+
 export type ChatCitations = {
   entity_ids: string[];
   event_ids: string[];
