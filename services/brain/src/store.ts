@@ -14,6 +14,8 @@
  * transition a single durable statement.
  */
 import { DatabaseSync } from "node:sqlite";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type {
   Approval,
   ApprovalStatus,
@@ -120,6 +122,13 @@ export class BrainStore {
   #db: DatabaseSync;
 
   constructor(dbPath: string) {
+    // node:sqlite does not create the parent directory itself (unlike
+    // journal.ts's/log.ts's own mkdirSync-before-write posture) -- a
+    // caller pointing BRAIN_DATA_DIR at a path that doesn't exist yet
+    // (a fresh CI runner's scratch dir, in particular) would otherwise
+    // fail with a bare "unable to open database file", not "no such
+    // directory."
+    mkdirSync(dirname(dbPath), { recursive: true });
     this.#db = new DatabaseSync(dbPath);
     this.#db.exec("pragma journal_mode = WAL;");
     this.#db.exec("pragma foreign_keys = ON;");
