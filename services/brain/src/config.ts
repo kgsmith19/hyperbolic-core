@@ -19,6 +19,16 @@ export interface BrainConfig {
   readonly accRoot: string;
   readonly accPolicy: string;
   readonly accVault: string;
+  /** m4-12 (07 section 7.7's always-approve list). Empty = unconfigured =
+   * no repo restriction (autonomy.ts's own documented default -- a
+   * deploy that wants this enforced sets it explicitly). */
+  readonly repoAllowlist: string[];
+  /** Per-run dollar ceiling; any task whose run has already accrued more
+   * than this always requires approval regardless of autonomy level. 07
+   * doesn't specify a numeric default, so this is a judgment call --
+   * documented, overridable. */
+  readonly perRunUsdCeiling: number;
+  readonly approvalTtlMs: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
@@ -41,5 +51,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
   const accRoot = env.BRAIN_ACC_ROOT ?? `${dataDir.replace(/\/+$/, "")}/acc-root`;
   const accPolicy = env.BRAIN_ACC_POLICY ?? `${accRoot}/policy.json`;
   const accVault = env.BRAIN_ACC_VAULT ?? `${accRoot}/vault.json`;
-  return { port, dbPath, dataDir, workspacesRoot, kernelRunPath, accRoot, accPolicy, accVault };
+
+  const repoAllowlist = (env.BRAIN_REPO_ALLOWLIST ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const perRunUsdCeiling = Number(env.BRAIN_PER_RUN_USD_CEILING ?? "5");
+  if (!Number.isFinite(perRunUsdCeiling) || perRunUsdCeiling <= 0) {
+    throw new Error(`services/brain: BRAIN_PER_RUN_USD_CEILING must be a positive number, got ${env.BRAIN_PER_RUN_USD_CEILING}`);
+  }
+
+  const approvalTtlDays = Number(env.BRAIN_APPROVAL_TTL_DAYS ?? "7");
+  if (!Number.isFinite(approvalTtlDays) || approvalTtlDays <= 0) {
+    throw new Error(`services/brain: BRAIN_APPROVAL_TTL_DAYS must be a positive number, got ${env.BRAIN_APPROVAL_TTL_DAYS}`);
+  }
+  const approvalTtlMs = approvalTtlDays * 24 * 60 * 60 * 1000;
+
+  return { port, dbPath, dataDir, workspacesRoot, kernelRunPath, accRoot, accPolicy, accVault, repoAllowlist, perRunUsdCeiling, approvalTtlMs };
 }

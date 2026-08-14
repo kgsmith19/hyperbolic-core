@@ -30,16 +30,31 @@ export interface DispatchFn {
   (task: Task): Promise<void>;
 }
 
+/** m4-12: consulted for every DAG-eligible task before it counts against
+ * the concurrency budget. Returning `needsApproval: true` means the gate
+ * itself already performed the parking side effect (approvals.ts's
+ * parkForApproval -- journaled state transition to `awaiting_approval`);
+ * the scheduler's only remaining job is to skip that task this tick
+ * without consuming a slot or touching `running`. Kept as an injected
+ * callback rather than a hard dependency on autonomy.ts/approvals.ts so
+ * this module stays exactly as adapter/policy-agnostic as m4-08 left it
+ * -- daemon.ts is what closes over store/config to build a real one. */
+export interface ApprovalGate {
+  (task: Task): Promise<{ needsApproval: boolean }>;
+}
+
 export class Scheduler {
   #store: BrainStore;
   #dispatch: DispatchFn;
+  #approvalGate?: ApprovalGate;
   #inFlight = new Set<string>();
   #maxConcurrent: number;
 
-  constructor(store: BrainStore, dispatch: DispatchFn, maxConcurrent = MAX_CONCURRENT_DISPATCH) {
+  constructor(store: BrainStore, dispatch: DispatchFn, maxConcurrent = MAX_CONCURRENT_DISPATCH, approvalGate?: ApprovalGate) {
     this.#store = store;
     this.#dispatch = dispatch;
     this.#maxConcurrent = maxConcurrent;
+    this.#approvalGate = approvalGate;
   }
 
   get inFlightCount(): number {
@@ -49,17 +64,28 @@ export class Scheduler {
   /** One scheduling pass: dispatches as many eligible pending tasks as the
    * remaining concurrency budget allows, across every run (a single
    * scheduler serves the whole daemon, not one run at a time -- 7.3's
-   * "single process... capped at N=2 concurrent" is a daemon-wide cap). */
+   * "single process... capped at N=2 concurrent" is a daemon-wide cap).
+   * A task the approval gate parks is skipped WITHOUT consuming budget --
+   * 07 section 7.7: "independent DAG branches continue" while one task is
+   * parked, which falls out naturally here since parked tasks just don't
+   * enter the dispatched set at all, leaving the full budget for siblings
+   * considered later in the same pass. */
   async tick(): Promise<Task[]> {
     const budget = this.#maxConcurrent - this.#inFlight.size;
     if (budget <= 0) return [];
 
     const pending = this.#store.listTasksByStatus("pending");
     const eligible = pending.filter((t) => !this.#inFlight.has(t.id) && isDispatchable(this.#store, t));
-    const toDispatch = eligible.slice(0, budget);
 
     const dispatched: Task[] = [];
-    for (const task of toDispatch) {
+    for (const task of eligible) {
+      if (dispatched.length >= budget) break;
+
+      if (this.#approvalGate) {
+        const decision = await this.#approvalGate(task);
+        if (decision.needsApproval) continue;
+      }
+
       // journaled before side effects (7.3): the status transition commits
       // to the store BEFORE dispatch() ever runs the harness, so a crash
       // between these two lines still leaves an accurate 'running' row for

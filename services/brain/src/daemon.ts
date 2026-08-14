@@ -15,7 +15,8 @@
  */
 import { BrainStore } from "./store.ts";
 import { RunJournal } from "./journal.ts";
-import { Scheduler, type DispatchFn } from "./scheduler.ts";
+import { Scheduler, type ApprovalGate, type DispatchFn } from "./scheduler.ts";
+import { sweepExpiredApprovals } from "./approvals.ts";
 
 export interface LiveProbeResult {
   /** true: the harness session is still alive and should be re-attached.
@@ -49,10 +50,19 @@ export interface DaemonOptions {
    * construct a SEPARATE store/journal pointed at the same paths just to
    * build it. Takes precedence over `dispatch` when both are supplied. */
   dispatchFactory?: (store: BrainStore, journal: RunJournal) => DispatchFn;
+  /** m4-12: same store/journal-dependency reasoning as dispatchFactory --
+   * approval-gate.ts's createApprovalGate needs the daemon's own store
+   * instance. */
+  approvalGateFactory?: (store: BrainStore, journal: RunJournal) => ApprovalGate;
   maxConcurrent?: number;
   /** Grace period before killTree on shutdown (07 section 7.3: "up to
    * 120 s"). Overridable for tests; production default is 120_000. */
   shutdownGraceMs?: number;
+  /** How often the approval-TTL sweep runs (07 section 7.7's TTL is
+   * measured in days, so this doesn't need 1 s granularity like the
+   * scheduler's own tick). Overridable for tests; production default is
+   * hourly. */
+  approvalSweepIntervalMs?: number;
 }
 
 export type HealthStatus = "ok" | "degraded";
@@ -76,6 +86,8 @@ export class BrainDaemon {
   #startedAt = 0;
   #shutdownGraceMs: number;
   #tickTimer: NodeJS.Timeout | null = null;
+  #approvalSweepTimer: NodeJS.Timeout | null = null;
+  #approvalSweepIntervalMs: number;
   #providerReachableCache: { ok: boolean; checkedAtMs: number } | null = null;
 
   constructor(options: DaemonOptions) {
@@ -83,10 +95,12 @@ export class BrainDaemon {
     this.journal = new RunJournal(options.dataDir);
     this.#liveProbe = options.liveProbe ?? stubLiveProbe;
     this.#shutdownGraceMs = options.shutdownGraceMs ?? 120_000;
+    this.#approvalSweepIntervalMs = options.approvalSweepIntervalMs ?? 60 * 60 * 1000;
     const dispatch: DispatchFn = options.dispatchFactory
       ? options.dispatchFactory(this.store, this.journal)
       : (options.dispatch ?? (async () => {}));
-    this.scheduler = new Scheduler(this.store, dispatch, options.maxConcurrent);
+    const approvalGate: ApprovalGate | undefined = options.approvalGateFactory?.(this.store, this.journal);
+    this.scheduler = new Scheduler(this.store, dispatch, options.maxConcurrent, approvalGate);
   }
 
   /** load config (caller's job before constructing this), open state store
@@ -99,6 +113,14 @@ export class BrainDaemon {
       void this.scheduler.tick();
     }, 1000);
     this.#tickTimer.unref();
+    // m4-12: TTL expiry (07 section 7.7: "an unapproved task expires to
+    // cancelled after a configurable TTL... with its rationale
+    // journaled"). Runs on its own slower cadence -- nothing about
+    // approval TTLs needs 1 s scheduler-tick granularity.
+    this.#approvalSweepTimer = setInterval(() => {
+      sweepExpiredApprovals(this.store, this.journal, new Date().toISOString());
+    }, this.#approvalSweepIntervalMs);
+    this.#approvalSweepTimer.unref();
   }
 
   /** Boot-time reconciliation (07 section 7.3): every task left in
@@ -174,6 +196,10 @@ export class BrainDaemon {
     if (this.#tickTimer) {
       clearInterval(this.#tickTimer);
       this.#tickTimer = null;
+    }
+    if (this.#approvalSweepTimer) {
+      clearInterval(this.#approvalSweepTimer);
+      this.#approvalSweepTimer = null;
     }
     const deadline = Date.now() + this.#shutdownGraceMs;
     while (this.scheduler.inFlightCount > 0 && Date.now() < deadline) {

@@ -265,6 +265,13 @@ export class BrainStore {
     return this.#db.prepare(`select * from approval where status = 'pending' order by requested_at asc`).all().map(rowToApproval);
   }
 
+  /** m4-12: lets the scheduler recognize a task that already has an
+   * approved (non-pending) approval on file, so re-checking the same
+   * always-approve condition on a later tick doesn't re-park it forever. */
+  listApprovalsForTask(taskId: string): Approval[] {
+    return this.#db.prepare(`select * from approval where task_id = ? order by requested_at asc`).all(taskId).map(rowToApproval);
+  }
+
   // --- cost -----------------------------------------------------------------
 
   insertCost(cost: Cost): void {

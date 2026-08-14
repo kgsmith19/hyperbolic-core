@@ -152,3 +152,58 @@ test("a task whose dispatch() rejects releases its in-flight slot and is marked 
   assert.equal(task?.status, "failed");
   assert.match(task?.resultJson ?? "", /harness crashed/);
 });
+
+// m4-12: an ApprovalGate parks a task instead of dispatching it, without
+// consuming concurrency budget -- 07 section 7.7's "independent DAG
+// branches continue" while one task is parked.
+
+test("Scheduler.tick: a task the approval gate parks never dispatches, and doesn't consume the concurrency budget", async () => {
+  const store = new BrainStore(tmpDbPath());
+  store.insertRun(fixtureRun());
+  store.insertTask(fixtureTask({ id: "t1" }));
+
+  const dispatched: string[] = [];
+  const scheduler = new Scheduler(
+    store,
+    async (task) => {
+      dispatched.push(task.id);
+    },
+    2,
+    async () => ({ needsApproval: true })
+  );
+
+  const result = await scheduler.tick();
+  assert.deepEqual(result, []);
+  assert.deepEqual(dispatched, []);
+  assert.equal(scheduler.inFlightCount, 0);
+  // The gate itself is responsible for the state transition (this fake
+  // gate doesn't perform one) -- Scheduler's own contract is just "don't
+  // dispatch it, don't count it against budget", verified above.
+});
+
+test("Scheduler.tick: while one task is parked, an independent sibling still dispatches in the SAME tick", async () => {
+  const store = new BrainStore(tmpDbPath());
+  store.insertRun(fixtureRun());
+  store.insertTask(fixtureTask({ id: "parked" }));
+  store.insertTask(fixtureTask({ id: "sibling" }));
+
+  const dispatched: string[] = [];
+  let resolveDispatch: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => (resolveDispatch = resolve));
+  const scheduler = new Scheduler(
+    store,
+    async (task) => {
+      dispatched.push(task.id);
+      await held;
+    },
+    2,
+    async (task) => ({ needsApproval: task.id === "parked" })
+  );
+
+  const result = await scheduler.tick();
+  assert.deepEqual(result.map((t) => t.id), ["sibling"]);
+  assert.equal(store.getTask("parked")?.status, "pending", "the parked task's status is the gate's job, not the scheduler's -- it just never became running");
+  assert.equal(store.getTask("sibling")?.status, "running");
+
+  resolveDispatch?.();
+});
