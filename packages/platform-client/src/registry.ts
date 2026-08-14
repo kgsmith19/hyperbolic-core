@@ -137,6 +137,20 @@ export function createRegistryClient(
       headers: {
         apikey: publishableKey,
         Authorization: `Bearer ${token}`,
+        // Verified live against the platform project: `pgrst.db_schemas` is
+        // `public, core, idea, prompt, ...` with `public` first, so a GET
+        // carrying no profile header resolves against `public.app` (which
+        // does not exist) and PostgREST answers 404 PGRST205 -- not `core.app`,
+        // where this table actually lives. Without this header, every real
+        // caller of this client (apps/shell/src/lib/registry.ts's /tools page
+        // and command-palette entries) 404s against the live project; the
+        // pre-existing test suite never caught it because every unit test here
+        // stubs `fetch` (asserting header/URL shape, never resolving a real
+        // schema) and the one Playwright spec that exercises a browser
+        // (apps/shell/e2e/tools.spec.ts) intercepts `**/rest/v1/app**` and
+        // re-serves it from a local shim that never runs real PostgREST at
+        // all -- both routes around the exact defect this line fixes.
+        "Accept-Profile": "core",
       },
     });
     if (!res.ok) {

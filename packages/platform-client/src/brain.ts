@@ -132,13 +132,13 @@ export class SseLineParser {
 export function createBrainClient(baseUrl: string, getAccessToken: () => Promise<string>): BrainClient {
   const base = baseUrl.replace(/\/+$/, "");
 
-  async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  async function authedFetch(path: string, init: RequestInit = {}, allowedStatuses: number[] = []): Promise<Response> {
     // Fail closed before issuing any network request, matching this
     // package's own index.ts authedFetch contract: getAccessToken()
     // rejecting when there's no active session propagates untouched.
     const token = await getAccessToken();
     const res = await fetch(`${base}${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } });
-    if (!res.ok && res.status !== 202) {
+    if (!res.ok && res.status !== 202 && !allowedStatuses.includes(res.status)) {
       const body = await res.text().catch(() => "");
       throw new Error(`brain-client: ${init.method ?? "GET"} ${path} failed with ${res.status}${body ? `: ${body}` : ""}`);
     }
@@ -162,7 +162,10 @@ export function createBrainClient(baseUrl: string, getAccessToken: () => Promise
     },
 
     async getRun(runId) {
-      const res = await authedFetch(`/api/brain/runs/${encodeURIComponent(runId)}`);
+      // 404 is an expected outcome here (an unknown/not-yet-visible run
+      // id), not a transport failure, so it must reach this check instead
+      // of authedFetch throwing on it first.
+      const res = await authedFetch(`/api/brain/runs/${encodeURIComponent(runId)}`, {}, [404]);
       if (res.status === 404) return null;
       return (await res.json()) as { run: BrainRun; tasks: BrainTask[] };
     },

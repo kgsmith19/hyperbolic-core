@@ -95,6 +95,15 @@ test("listTools issues GET /rest/v1/app with apikey + Authorization headers and 
     const headers = new Headers(init?.headers);
     assert.equal(headers.get("Authorization"), `Bearer ${FIXTURE_TOKEN}`);
     assert.ok(headers.get("apikey"), "expected an apikey header to be present");
+    // Regression test for a verified-live defect: pgrst.db_schemas on the
+    // real platform project is `public, core, idea, prompt, ...` with
+    // `public` first, so a request with no Accept-Profile header resolves
+    // against `public.app` (which doesn't exist) rather than `core.app`
+    // (confirmed against the live project: PGRST205 "Could not find the
+    // table 'public.app'"). Every existing test in this file stubbed fetch
+    // and never asserted this header, which is exactly how the defect
+    // shipped unnoticed.
+    assert.equal(headers.get("Accept-Profile"), "core");
     return jsonResponse([fixtureRow()]);
   });
 
