@@ -42,7 +42,7 @@ The operator asked to be pushed back on. Eight challenges to assumptions embedde
 ### C6. Prompt storage: unified Organizer vs. split storage (OPERATOR-DECIDED: unified)
 
 - Original dissent: prompts that version with code (harness system prompts, eval rubrics, CI prompt fixtures) belong in git next to the code they test; database storage adds a runtime dependency to builds and creates drift channels.
-- Operator decision (binding): All prompts must be stored and versioned in Prompt Organizer — the single source of truth for all runtime-injected prompts, Brain operational prompts, LifeOS chat, Idea Intake optimization, and test fixtures. Application code may contain only minimal bootstrap or emergency fallback text, documented as exceptions. No second prompt-management system.
+- Operator decision (binding): All prompts must be stored and versioned in Prompt Organizer -- the single source of truth for all runtime-injected prompts, Brain operational prompts, LifeOS chat, Idea Intake optimization, and test fixtures. Application code may contain only minimal bootstrap or emergency fallback text, documented as exceptions. No second prompt-management system.
 - Rationale for unified storage: eliminates split-brain risk, provides unified audit trail for all prompt changes, enables version history and restore capability across the entire system, simplifies runtime injection and metadata tracking, centralizes access control and change governance.
 - Cost accepted: Prompt Organizer becomes a critical runtime dependency; must be kept online for production operations. Mitigated by: fallback text in critical paths (defined per component), Prompt Organizer schema backup included in migration strategy.
 

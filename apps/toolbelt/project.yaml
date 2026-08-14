@@ -22,8 +22,6 @@ commands:
   prompt_browser_test: "cd apps/prompt-organizer && PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config playwright.config.mjs"
   network_check: "cd apps/network-checker && bash tools/check.sh"
   network_release_build: "cd apps/network-checker && bash tools/deploy.sh"
-  serve_local: "python3 -m http.server 8811"
-  browser_check: "open http://localhost:8811/web/index.html and verify the affected flow"
   apply_migration: "gh workflow run platform-migrations.yml (project woltgcggxaehtuypkxqk); validation runs in Toolbelt PR Gate via scripts/validate-migrations.mjs"
 
 ci:

@@ -22,8 +22,8 @@
        the Shell (apps/shell/src/pages/prompts/*), which owns the one real
        login and obtains its session from packages/platform-client (ADR-03).
        This standalone page has no bundler and cannot import that package,
-       so its own manual-check workflow (AGENTS.md: "Open
-       http://localhost:8811/web/index.html for a manual browser check")
+       so its own manual-check workflow (AGENTS.md: "python3 -m http.server
+       8812 --directory web", then open http://localhost:8812/)
        pastes an ALREADY-ISSUED access token instead of authenticating here
        -- the same "thread an existing owner token in, never mint one with a
        password" shape tests/e2e/critical-flow.test.mjs's own

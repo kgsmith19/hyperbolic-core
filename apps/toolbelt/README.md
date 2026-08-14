@@ -2,7 +2,10 @@
 
 `toolbelt` is the monorepo for small portfolio tools. The root shared foundation
 owns the `core` schema for runs, costs, outcomes, metrics, and events plus the
-`idea` schema and dependency-free idea-list client. `apps/prompt-organizer/`
+`idea` schema (the idea-list client lives in the Shell's Idea Intake surface,
+`apps/shell/src/pages/ideas/`; the root's own static client was deleted once
+that surface and the Shell's registry-driven tools list were both live --
+m3-09). `apps/prompt-organizer/`
 owns the `prompt` schema and prompt-library client. `apps/network-checker/`
 owns the standard-library-only network diagnostic CLI and offline dashboard.
 
@@ -15,18 +18,10 @@ owns the standard-library-only network diagnostic CLI and offline dashboard.
 ## Prerequisites
 
 - Node.js 22 or newer for the built-in test runner and native `fetch`.
-- Python 3, or another static file server, for local browser verification.
+- Python 3, or another static file server, for Prompt Organizer's local browser verification (see `apps/prompt-organizer/README.md`).
 
 There is no package manifest, framework, dependency installation, or application
 compilation step. Network Checker can optionally be packaged as a Docker image.
-
-## Run locally
-
-```bash
-python3 -m http.server 8811
-```
-
-Open `http://localhost:8811/web/index.html`, sign in to the `toolbelt` Supabase project, and verify the affected idea-list flow.
 
 ## Verify
 

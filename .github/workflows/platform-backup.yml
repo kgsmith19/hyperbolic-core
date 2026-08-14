@@ -1,41 +1,34 @@
-name: "Platform Backup"
+name: Platform Backup
 
-# m6-03: an age-encrypted recovery bundle of the platform Supabase project's
-# schemas, extending the pattern already proven in the LifeOS standalone
-# pipeline (apps/lifeos/.github/workflows/backup.yml) to a second target.
+# m6-03 (10-cicd-deployment.md sections 8.4/9): extends the age-encrypted
+# backup pattern already proven for the LifeOS stack
+# (apps/lifeos/.github/workflows/backup.yml -- inert here, that pipeline
+# runs only from the standalone kgsmith19/lifeos repo; this is a fresh
+# root workflow, not a copy of that inert file) to the platform Supabase
+# project (woltgcggxaehtuypkxqk). A fresh run of this workflow, with its
+# run id recorded in the PR, is the prerequisite 10-cicd-deployment.md
+# section 8.4 requires before any destructive platform migration.
 #
-# 10-cicd-deployment.md sections 8.4 and 9 forbid destructive platform
-# migrations until a backup pipeline exists. This is that pipeline, and the
-# runbook's destructive-migration precondition (docs/ops/runbook.md,
-# "Platform project backup and restore") references this workflow by name:
-# a destructive platform migration PR must record a fresh run id from here.
-#
-# Credential posture, unchanged from platform-migrations.yml: SUPABASE_DB_URL
-# arrives from Infisical over OIDC, GitHub stores no database secret, and the
-# age PRIVATE key never touches CI -- the workflow encrypts to a public
-# recipient and cannot read back what it wrote. That asymmetry is the point:
-# a compromised runner can create a backup but never open one.
+# Nightly plus dispatchable, same shape as the LifeOS pipeline. Not a PR
+# check: never gates a merge, only produces the encrypted artifact
+# 8.4's rule points at.
 
 on:
   schedule:
-    # 09:40 UTC daily, deliberately offset from the LifeOS backup (08:17) and
-    # the Brain eval nightly (07:20) so the three never contend for a runner.
-    - cron: "40 9 * * *"
+    - cron: "52 9 * * *" # off-peak, distinct from brain-eval-nightly (9:17) and the LifeOS pipeline's own 8:17
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 concurrency:
   group: platform-backup
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   bundle:
-    # Same repository-variable gate the other production-touching workflows
-    # use: a fork, or a clone that has not provisioned Infisical and an age
-    # recipient, must not attempt to reach the real platform project.
     if: vars.PLATFORM_BACKUP_ENABLED == 'true'
+    name: Encrypted platform schema backup
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -46,13 +39,18 @@ jobs:
         with:
           persist-credentials: false
 
+      # SUPABASE_DB_URL comes from Infisical via OIDC, its own dedicated
+      # identity (never platform-migrations.yml's or deploy.yml's identity
+      # -- ADR-05's one-identity-per-pipeline rule, docs/ops/runbook.md's
+      # own "One-time platform migration adoption" section states the same
+      # rule for that sibling pipeline). GitHub stores no secrets.
       - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
-          identity-id: ${{ vars.INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID }}
+          identity-id: ${{ vars.INFISICAL_PLATFORM_BACKUP_IDENTITY_ID }}
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           env-slug: prod
-          secret-path: "/platform/"
+          secret-path: "/toolbelt/"
           domain: https://app.infisical.com
 
       - name: Validate backup configuration
@@ -78,7 +76,7 @@ jobs:
       - name: Install age
         run: sudo apt-get update -qq && sudo apt-get install -y -qq age
 
-      - name: Create, verify, and encrypt the platform recovery bundle
+      - name: Create, verify, and encrypt the platform schema bundle
         env:
           AGE_PUBLIC_KEY: ${{ vars.PLATFORM_AGE_PUBLIC_KEY }}
         run: |
@@ -89,23 +87,20 @@ jobs:
           payload="$work/payload"
           mkdir "$payload"
 
-          # Pin the client major to the platform project's server major, and
-          # pass the URL only through the throwaway container environment so
-          # it never lands in a command line other processes could read.
-          #
-          # The platform project's own schemas only. auth/storage/realtime are
-          # Supabase-managed and are restored by the platform, not from here --
-          # dumping them would bloat the bundle with rows a restore must not
-          # replay anyway.
+          # Every schema that carries real operator data (platform.config's
+          # owner row; core/idea/prompt/intake's own tables). "test" is a
+          # CI-only fence schema (06-supabase-schema.md) with nothing worth
+          # restoring, deliberately excluded. Pin the client major to the
+          # target project's Postgres major -- 17, matching the LifeOS
+          # pipeline's own pin; adjust this tag if the platform project's
+          # actual server version ever differs (pg_dump's own version-skew
+          # error names the fix directly).
           docker run --rm -e SUPABASE_DB_URL postgres:17 \
-            sh -ec 'pg_dump --format=custom --no-owner --no-privileges \
-              --schema=core --schema=prompt --schema=idea --schema=public \
+            sh -ec 'pg_dump --format=custom --no-owner \
+              --schema=platform --schema=core --schema=idea --schema=prompt --schema=intake \
               "$SUPABASE_DB_URL"' \
             > "$payload/platform.dump"
 
-          # A dump that cannot be listed is not a backup. Verify before
-          # encrypting, so a corrupt bundle fails the run instead of sitting
-          # in artifact storage looking like protection.
           test -s "$payload/platform.dump"
           docker run --rm -i postgres:17 pg_restore --list \
             < "$payload/platform.dump" > /dev/null

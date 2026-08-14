@@ -4,7 +4,10 @@
 
 `toolbelt` is the monorepo for small portfolio tools. The root owns the shared
 Supabase `core` schema for runs, costs, outcomes, metrics, and events plus the
-`idea` schema and static idea-list client. `apps/prompt-organizer/` owns the
+`idea` schema (the idea-list client itself lives in the Shell's Idea Intake
+surface, `apps/shell/src/pages/ideas/`; the root's own static client was
+deleted once that surface and the Shell's registry-driven tools list were
+both live -- m3-09). `apps/prompt-organizer/` owns the
 `prompt` schema and prompt-library client. `apps/network-checker/` owns the
 local-first network diagnostic CLI and dashboard. `guards/` owns a standalone
 Claude Code `PreToolUse` security hook (secret-file blocking, protected-path
@@ -45,7 +48,6 @@ When explicitly assigned, an AI coding agent may create an Issue, branch, commit
 node --test "tests/*.test.mjs"
 npm run manifests:check
 npm run manifests:check -- --registry
-python3 -m http.server 8811
 cd guards && node --test "*.test.mjs"
 cd apps/prompt-organizer && node --test "tests/*.test.mjs"
 cd apps/prompt-organizer && python3 -m http.server 8812 --directory web
@@ -54,7 +56,7 @@ cd apps/prompt-organizer && PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwr
 cd apps/network-checker && bash tools/check.sh
 ```
 
-Open `http://localhost:8811/web/index.html` for a manual browser check when the UI changes. The Node suite calls the live Supabase project using the public anon key. Report network or rate-limit failures accurately; do not relabel them as passing.
+The root has no browser client of its own to check (m3-09: the static idea-list client was deleted once the Shell's registry-driven tools list and Idea Intake list surfaces were both live); a manual browser check for root-schema changes now means the Shell's `/tools` or `/ideas` pages. The Node suite calls the live Supabase project using the public anon key. Report network or rate-limit failures accurately; do not relabel them as passing.
 
 ## Documentation
 

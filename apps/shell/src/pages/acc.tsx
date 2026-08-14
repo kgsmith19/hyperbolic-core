@@ -1,6 +1,7 @@
 import { Link, Route, Routes } from "react-router";
 import { AccStatusCard } from "../components/acc-status-card";
 import BrainPage from "./acc/brain";
+import CostPage from "./acc/cost";
 
 /**
  * /acc route group (docs/planning/05-a-hyperbolic-core.md section 4):
@@ -25,6 +26,9 @@ function AccIndexPage() {
       <Link to="/acc/brain" className="text-sm font-medium text-accent underline" data-testid="brain-run-link">
         Open the Brain run surface
       </Link>
+      <Link to="/acc/cost" className="text-sm font-medium text-accent underline" data-testid="cost-dashboard-link">
+        Open the cost dashboard
+      </Link>
     </div>
   );
 }
@@ -34,6 +38,7 @@ function AccPage() {
     <Routes>
       <Route index element={<AccIndexPage />} />
       <Route path="brain" element={<BrainPage />} />
+      <Route path="cost" element={<CostPage />} />
     </Routes>
   );
 }
