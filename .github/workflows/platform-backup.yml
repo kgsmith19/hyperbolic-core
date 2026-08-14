@@ -1,0 +1,148 @@
+name: "Platform Backup"
+
+# m6-03: an age-encrypted recovery bundle of the platform Supabase project's
+# schemas, extending the pattern already proven in the LifeOS standalone
+# pipeline (apps/lifeos/.github/workflows/backup.yml) to a second target.
+#
+# 10-cicd-deployment.md sections 8.4 and 9 forbid destructive platform
+# migrations until a backup pipeline exists. This is that pipeline, and the
+# runbook's destructive-migration precondition (docs/ops/runbook.md,
+# "Platform project backup and restore") references this workflow by name:
+# a destructive platform migration PR must record a fresh run id from here.
+#
+# Credential posture, unchanged from platform-migrations.yml: SUPABASE_DB_URL
+# arrives from Infisical over OIDC, GitHub stores no database secret, and the
+# age PRIVATE key never touches CI -- the workflow encrypts to a public
+# recipient and cannot read back what it wrote. That asymmetry is the point:
+# a compromised runner can create a backup but never open one.
+
+on:
+  schedule:
+    # 09:40 UTC daily, deliberately offset from the LifeOS backup (08:17) and
+    # the Brain eval nightly (07:20) so the three never contend for a runner.
+    - cron: "40 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-backup
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    # Same repository-variable gate the other production-touching workflows
+    # use: a fork, or a clone that has not provisioned Infisical and an age
+    # recipient, must not attempt to reach the real platform project.
+    if: vars.PLATFORM_BACKUP_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/"
+          domain: https://app.infisical.com
+
+      - name: Validate backup configuration
+        env:
+          AGE_PUBLIC_KEY: ${{ vars.PLATFORM_AGE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_DB_URL:-}" ]; then
+            echo "SUPABASE_DB_URL was not supplied by Infisical." >&2
+            exit 1
+          fi
+          if [ -z "$AGE_PUBLIC_KEY" ]; then
+            echo "PLATFORM_AGE_PUBLIC_KEY repository variable is not set." >&2
+            exit 1
+          fi
+          # Refuse an identity file masquerading as a recipient: encrypting to
+          # a private key would silently produce an unopenable archive.
+          case "$AGE_PUBLIC_KEY" in
+            age1*) ;;
+            *) echo "PLATFORM_AGE_PUBLIC_KEY must be an age1... recipient, not an identity." >&2; exit 1 ;;
+          esac
+
+      - name: Install age
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq age
+
+      - name: Create, verify, and encrypt the platform recovery bundle
+        env:
+          AGE_PUBLIC_KEY: ${{ vars.PLATFORM_AGE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          payload="$work/payload"
+          mkdir "$payload"
+
+          # Pin the client major to the platform project's server major, and
+          # pass the URL only through the throwaway container environment so
+          # it never lands in a command line other processes could read.
+          #
+          # The platform project's own schemas only. auth/storage/realtime are
+          # Supabase-managed and are restored by the platform, not from here --
+          # dumping them would bloat the bundle with rows a restore must not
+          # replay anyway.
+          docker run --rm -e SUPABASE_DB_URL postgres:17 \
+            sh -ec 'pg_dump --format=custom --no-owner --no-privileges \
+              --schema=core --schema=prompt --schema=idea --schema=public \
+              "$SUPABASE_DB_URL"' \
+            > "$payload/platform.dump"
+
+          # A dump that cannot be listed is not a backup. Verify before
+          # encrypting, so a corrupt bundle fails the run instead of sitting
+          # in artifact storage looking like protection.
+          test -s "$payload/platform.dump"
+          docker run --rm -i postgres:17 pg_restore --list \
+            < "$payload/platform.dump" > /dev/null
+
+          # Record the migration ledger state alongside the dump: a restore
+          # has to know which migrations the snapshot already contains.
+          docker run --rm -e SUPABASE_DB_URL postgres:17 \
+            sh -ec 'psql "$SUPABASE_DB_URL" -X --no-psqlrc -At \
+              -c "select version from supabase_migrations.schema_migrations order by version"' \
+            > "$payload/MIGRATION_LEDGER.txt"
+
+          (cd "$payload" && sha256sum platform.dump MIGRATION_LEDGER.txt > SHA256SUMS)
+
+          tar -C "$payload" -cf "$work/platform-backup.tar" \
+            platform.dump MIGRATION_LEDGER.txt SHA256SUMS
+          age -r "$AGE_PUBLIC_KEY" \
+            -o "platform-backup-${GITHUB_RUN_ID}.tar.age" \
+            "$work/platform-backup.tar"
+
+          # Proves the artifact really is age-encrypted, not a tar that was
+          # renamed because the encryption step silently no-opped.
+          head -c 22 "platform-backup-${GITHUB_RUN_ID}.tar.age" | grep -q "age-encryption.org"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-backup-${{ github.run_id }}
+          path: platform-backup-${{ github.run_id }}.tar.age
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Record the run id for the destructive-migration precondition
+        run: |
+          {
+            echo "### Platform backup complete"
+            echo
+            echo "Backup run id: \`${GITHUB_RUN_ID}\`"
+            echo
+            echo "A destructive platform migration PR must cite this run id (see"
+            echo "docs/ops/runbook.md, \"Platform project backup and restore\")."
+          } >> "$GITHUB_STEP_SUMMARY"
