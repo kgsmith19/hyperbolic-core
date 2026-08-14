@@ -1,0 +1,107 @@
+name: Platform Backup
+
+# m6-03 (10-cicd-deployment.md sections 8.4/9): extends the age-encrypted
+# backup pattern already proven for the LifeOS stack
+# (apps/lifeos/.github/workflows/backup.yml -- inert here, that pipeline
+# runs only from the standalone kgsmith19/lifeos repo; this is a fresh
+# root workflow, not a copy of that inert file) to the platform Supabase
+# project (woltgcggxaehtuypkxqk). A fresh run of this workflow, with its
+# run id recorded in the PR, is the prerequisite 10-cicd-deployment.md
+# section 8.4 requires before any destructive platform migration.
+#
+# Nightly plus dispatchable, same shape as the LifeOS pipeline. Not a PR
+# check: never gates a merge, only produces the encrypted artifact
+# 8.4's rule points at.
+
+on:
+  schedule:
+    - cron: "52 9 * * *" # off-peak, distinct from brain-eval-nightly (9:17) and the LifeOS pipeline's own 8:17
+  workflow_dispatch:
+
+concurrency:
+  group: platform-backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    if: vars.PLATFORM_BACKUP_ENABLED == 'true'
+    name: Encrypted platform schema backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # SUPABASE_DB_URL comes from Infisical via OIDC, its own dedicated
+      # identity (never platform-migrations.yml's or deploy.yml's identity
+      # -- ADR-05's one-identity-per-pipeline rule, docs/ops/runbook.md's
+      # own "One-time platform migration adoption" section states the same
+      # rule for that sibling pipeline). GitHub stores no secrets.
+      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PLATFORM_BACKUP_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/toolbelt/"
+          domain: https://app.infisical.com
+
+      - name: Validate backup configuration
+        env:
+          AGE_PUBLIC_KEY: ${{ vars.AGE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DB_URL"
+          test -n "$AGE_PUBLIC_KEY"
+
+      - name: Install age
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq age
+
+      - name: Create, verify, and encrypt the platform schema bundle
+        env:
+          AGE_PUBLIC_KEY: ${{ vars.AGE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+          payload="$work/payload"
+          mkdir "$payload"
+
+          # Every schema that carries real operator data (platform.config's
+          # owner row; core/idea/prompt/intake's own tables). "test" is a
+          # CI-only fence schema (06-supabase-schema.md) with nothing worth
+          # restoring, deliberately excluded. Pin the client major to the
+          # target project's Postgres major -- 17, matching the LifeOS
+          # pipeline's own pin; adjust this tag if the platform project's
+          # actual server version ever differs (pg_dump's own version-skew
+          # error names the fix directly).
+          docker run --rm -e SUPABASE_DB_URL postgres:17 \
+            sh -ec 'pg_dump --format=custom --no-owner \
+              --schema=platform --schema=core --schema=idea --schema=prompt --schema=intake \
+              "$SUPABASE_DB_URL"' \
+            > "$payload/platform.dump"
+
+          test -s "$payload/platform.dump"
+          docker run --rm -i postgres:17 pg_restore --list \
+            < "$payload/platform.dump" > /dev/null
+          (cd "$payload" && sha256sum platform.dump > SHA256SUMS)
+
+          tar -C "$payload" -cf "$work/platform-backup.tar" platform.dump SHA256SUMS
+          age -r "$AGE_PUBLIC_KEY" \
+            -o "platform-backup-${GITHUB_RUN_ID}.tar.age" \
+            "$work/platform-backup.tar"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-backup-${{ github.run_id }}
+          path: platform-backup-${{ github.run_id }}.tar.age
+          retention-days: 90
+          if-no-files-found: error
