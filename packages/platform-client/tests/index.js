@@ -11,4 +11,3 @@
 import "./platform-client.test.ts";
 import "./registry.test.ts";
 import "./brain.test.ts";
-import "./cost.test.ts";

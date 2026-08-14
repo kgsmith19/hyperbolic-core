@@ -17,7 +17,6 @@ import { submitRun } from "./run-service.ts";
 import { determineApproval } from "./autonomy.ts";
 import { parkForApproval } from "./approvals.ts";
 import { statusVerb, tasksVerb, approveVerb, rejectVerb, cumulativeCostForRun } from "./cli/verbs.ts";
-import { summarizeCostDetails } from "./cost-summary.ts";
 import { BRAIN_RUN_PROPOSE_SCOPE, hasScope, type Principal } from "./auth.ts";
 
 const BODY_CAP = 16 * 1024;
@@ -152,18 +151,4 @@ export function handleApproveTask(res: ServerResponse, store: BrainStore, journa
 export function handleRejectTask(res: ServerResponse, store: BrainStore, journal: RunJournal | undefined, taskId: string, reason: string | undefined): void {
   const result = rejectVerb(store, journal, taskId, reason);
   send(res, result.exitCode === 0 ? 200 : 404, result.json);
-}
-
-/** GET /api/brain/cost (m6-02): the Shell dashboard's one read for
- * everything the platform `core` mirror cannot answer -- per-task and
- * per-harness breakdown, plus per-run and per-day (see cost-summary.ts's
- * own header comment for why this has to be a Brain API route rather than
- * a platform-session query). `since` is an optional ISO-8601 timestamp,
- * same param shape `brain cost --since` already established (cli/verbs.ts
- * costVerb) -- not reused directly because that verb returns raw rows
- * plus a single grand total, a different shape than the four grouped
- * breakdowns this route needs. */
-export function handleGetCost(res: ServerResponse, store: BrainStore, since: string | undefined): void {
-  const rows = store.listCostDetailsForSummary(since);
-  send(res, 200, summarizeCostDetails(rows));
 }

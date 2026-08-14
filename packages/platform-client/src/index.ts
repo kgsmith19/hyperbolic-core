@@ -39,12 +39,7 @@ export type {
   BrainEvent,
   StreamRunEventsOptions,
   ParsedSseEvent,
-  CostBucket,
-  CostSummary,
 } from "./brain.ts";
-
-export { createCostClient, buildListLlmCallsParams, groupLlmCallsByCallerAndPurpose } from "./cost.ts";
-export type { LlmCallRow, LlmCallFilter, CostClient, CallerPurposeBucket, LlmCallStatus } from "./cost.ts";
 
 function toPlatformSession(session: Session | null): PlatformSession | null {
   if (!session) {

@@ -103,6 +103,109 @@ Only items where the operator's answer changes work. Every other artifact gate q
 
 Informational confirmations wanted, not decisions: live values of `DEPLOY_ENABLED`/`BACKUP_ENABLED`; `supabase db diff` parity result (06 gate 5); netcheck mirror project existence; hook registration state; VPS capacity numbers.
 
+## 7. Harness-economics decision (m6-04 closure, 13 C5 / OD-01)
+
+Recorded as decided, not merely recommended, at V1 finalization: **(a) VPS dispatch on the metered Brain key**, OD-01's own recommendation. This is also what M4's implementation actually built -- the Brain's harness adapters (`services/brain/src/adapters/`) dispatch through the ACC kernel subprocess wherever the Brain daemon runs, with no operator-machine-worker alternative ever built alongside it -- so the decision has been exercised throughout, not left open pending this closure.
+
+**Kill criterion** (explicit and standalone, per this issue's own acceptance bullet -- previously only implicit inside the Brain's general kill criteria in section 4 above):
+
+> Abandon VPS-metered dispatch and fall back to an operator-machine worker (subscription billing, OD-01's option (b)) if, in any rolling 30-day window post-V1, metered harness spend (the `core.llm_call`/`core.cost` roll-up the m6-02 cost dashboard renders) exceeds twice the value-equivalent baseline of the same work done under the operator's subscription, with no mitigating per-run ceiling change already in flight.
+
+Status against the rest of the Brain's section-4 kill criteria: the "seed eval corpus cannot be made to pass deterministically" clause is now resolved-safe -- m6-01 shipped all 5 named cases passing deterministically in PR-gate CI (`services/brain/evals/cases/`), re-verified on every future PR touching `services/brain/**`. The approval-flow-bypass clause stays a live, ongoing watch item by nature (a point-in-time freeze cannot close an operational-drift condition); R-01's own early warning signal below remains the standing detector.
+
+## 8. Gate question disposition ledger
+
+Cross-checks every "## Gate questions" section across artifacts 01 through 13 against this register (60 items total, including 13-dissent.md's own 2, already covered by C1/C5 above and OD-05/OD-01). Three disposition values, per this issue's own acceptance criterion:
+
+- **answered** -- an OD-XX row, this artifact's own section 7 above, or another explicit resolution exists.
+- **accepted-default** -- the artifact's own stated default stands, uncontested through V1 completion; per section 6's own rule, this was always the silent behavior for any gate question not promoted to an OD row.
+- **reversed-with-issue-link** -- implementation diverged from the plan's stated default, with the issue that did it named.
+
+| Artifact:# | Question (short) | Disposition |
+| --- | --- | --- |
+| 01:1 | LifeOS CI status / `DEPLOY_ENABLED`/`BACKUP_ENABLED` values | accepted-default: informational confirmation only (section 6's own list); does not block V1 |
+| 01:2 | Guards/ACC hook registration in the live `~/.claude/settings.json` | accepted-default: informational, operator-machine-local state; GU-2 does not depend on it (05-g:1) |
+| 01:3 | Netcheck mirror Supabase project existence | accepted-default: informational; the mirror stays optional and unconfigured-safe (05-f:3) |
+| 01:4 | Release-smoke tailnet reachability mechanism | accepted-default: Out-of-Brief Register item (section 5); resolution recommended (10 section 9.1) but lands in the standalone lifeos repo |
+| 02:1 | D-13 `build-backend` ungated | accepted-default: Out-of-Brief Register item (section 5); one-line `if:` guard, standalone repo |
+| 02:2 | SEC-03 remediation ranking | answered: ADR-03 ranked it (dedicated test schema); implemented as the platform test-fence schema (m1-06) |
+| 03:1 | SH-4 measured at gateway vs browser | answered (OD-12): gateway |
+| 03:2 | LO-2 break-glass local login | accepted-default: no separate path named; LifeOS keeps only its documented `LIFEOS_AUTH_MODE=disabled` break-glass |
+| 04:1 | ADR-03 toolbelt vs lifeos project as IdP | answered (OD-02): toolbelt project |
+| 04:2 | ADR-04 VPS capacity headroom | accepted-default: informational (section 6); Out-of-Brief Register item owned by m1-13's VPS provisioning |
+| 04:3 | ADR-06 egress control deferral | accepted-default: deferred, stands; no V1 harness-egress firewalling built |
+| 05-a:1 | Command palette keep/cut | answered (OD-10): keep |
+| 05-a:2 | `/life/*` base-path config touching the standalone lifeos repo | accepted-default: accepted (Out-of-Brief Register item, section 5) |
+| 05-a:3 | Notification persistence absent in V1 | accepted-default: accepted; m2-05's notifications remain session-ephemeral as shipped |
+| 05-b:1 | Token bootstrap UX (printed fragment URL vs paste-into-page) | accepted-default: printed-fragment-URL design shipped as specified (m2-09) |
+| 05-b:2 | Rejected Forgepad ideas migration | answered (OD-07): default (archive tarball, printed audit) |
+| 05-b:3 | Absorption timing (four-page port post-V1) | accepted-default: accepted; only the `/acc` status card + link-out shipped (m3-08's forgepad supersession) |
+| 05-c:1 | Network Checker registered in `core.app` for discovery-completeness | accepted-default: accepted, listed (`kind=cli`, no route; m3-04) |
+| 05-c:2 | Manifest `permissions` review- vs runtime-enforced | accepted-default: review-enforced stands, no runtime egress enforcement built |
+| 05-c:3 | Golden Goose conditional slot | accepted-default: stays out of V1 (same item as 11:2) |
+| 05-d:1 | LifeOS chat system prompt store-consumption timing | answered (OD-13): default (seed-as-canonical-copy until post-V1) |
+| 05-d:2 | Rename-refusal UI-level vs DB-trigger | accepted-default: UI-level stands, as shipped (m5-01/m5-02) |
+| 05-d:3 | `name@latest` cache TTL (60s) | accepted-default: 60s stands, no objection recorded |
+| 05-e:1 | LifeOS V1 feature pair (a)+(g) vs swap in (e) | answered (OD-06): (a)+(g) |
+| 05-e:2 | Auth deploy train run as one train | accepted-default: accepted; Out-of-Brief Register item (section 5) |
+| 05-e:3 | Brain read lane transport (MCP vs HTTP+agent token) | answered: HTTP + agent token, as built (`services/brain/src/lifeos-surface.ts`, m4-20) |
+| 05-f:1 | Future Network Checker writer enablement | accepted-default: no writer enabled in V1 (M5-04's change lifecycle covers only the three existing fixes) |
+| 05-f:2 | `change approve` TTY-only, no browser/Brain approval surface | accepted-default: stands; no browser approval surface built |
+| 05-f:3 | Netcheck mirror project | accepted-default: informational (same item as 01:3) |
+| 05-g:1 | Guards hook registration state | accepted-default: informational (same item as 01:2) |
+| 05-g:2 | Gitleaks-style CI step | answered (OD-09): keep; shipped (M1-10) |
+| 05-g:3 | Per-machine overlay files tracked vs gitignored | accepted-default: tracked stands, as shipped (M1-12) |
+| 05-h:1 | Submit endpoint placement (Shell serving unit vs Handler A co-location) | reversed-with-issue-link: resolved during m3-06's implementation, Handler A co-location chosen (Shell turned out static-only); see m3-06's "Architecture gap found and resolved" note (same underlying fact as OD-04's "Acted on") |
+| 05-h:2 | Rejected forgepad ideas | answered (OD-07): default (shared row with 05-b:2) |
+| 05-h:3 | Type label set `FEAT\|BUG\|CHORE` casing/completeness | accepted-default: as specified, used throughout every `docs/planning/issues/` file |
+| 05-h:4 | `intake.optimization` read view in V1 UI | accepted-default: not added; table-only stands |
+| 06:1 | e2e suite as owner+per-run-namespacing vs fixture-account test schema | accepted-default: owner + per-run namespacing, as shipped throughout `apps/toolbelt/tests/` |
+| 06:2 | Owner refresh token: GitHub secret first vs Infisical immediately | accepted-default: GitHub-secret-first executed as the interim (m1-07); deploy-adjacent pipelines later moved to Infisical per ADR-05, `TOOLBELT_OWNER_TOKEN` remains a GH Actions secret for the live-Supabase test suites specifically (section 5's own Out-of-Brief Register entry), matching the stated default |
+| 06:3 | Prompt Organizer migration filename rename | answered (OD-08): rename executed |
+| 06:4 | `prompt.usage` hot retention (365 days) | accepted-default: 365 days stands, shipped (M1-09) |
+| 06:5 | Live-schema `supabase db diff` parity | accepted-default upgraded to standing practice: `platform-migrations.yml`'s own "Prove the ledger-applied schema has not drifted" step re-verifies parity on every dispatch (m1-05), not just a one-time confirmation |
+| 07:1 | Harness dispatch economics | answered (OD-01 / 13 C5): see section 7 above, now closed with an explicit kill criterion |
+| 07:2 | Codex/Gemini exact headless flags | accepted-default: remain stubs in V1, as specified (`services/brain/src/adapters/stub.ts`) |
+| 07:3 | `kernel.contract.v1` versioning | accepted-default: accepted, versioned as specified |
+| 08:1 | Handler A as 4th deployable unit vs Edge Function deferral | answered (OD-04): unit; acted on via m3-06 (timing note in the artifact's own text) |
+| 08:2 | `usd_estimate` rates via ACC's rates-table convention, no billing-API integration | accepted-default: accepted, as shipped (`services/llm-handler` pricing) |
+| 09:1 | Theme default: follow OS vs forced dark | answered (OD-11): follow OS |
+| 09:2 | `packages/ui` chat-bucket scope tracks the Brain milestone, not Shell day one | accepted-default: accepted; chat primitives landed with m4-15/m4-16 |
+| 09:3 | Geist Mono font vs zero-byte system stack | accepted-default: font addition accepted, as shipped |
+| 10:1 | Branch-protection required-check settings | accepted-default: informational GitHub-settings action; owned by m1-13 for the first three checks, `Brain PR Gate` added as the fourth once m4-08 landed (complete) |
+| 10:2 | release-smoke conversion + lifeos retention rows to Out-of-Brief Register | accepted-default: accepted, recorded there (section 5) |
+| 10:3 | Brain runtime Node 22 vs Python | accepted-default: Node 22 confirmed, as shipped throughout `services/brain` |
+| 10:4 | Destructive migrations forbidden until the backup workflow exists | answered: m6-03 (this milestone) shipped `platform-backup.yml`; the sequencing concern is now moot -- the backup workflow exists before any destructive platform migration has been proposed |
+| 11:1 | Command palette keep/cut before M2 | answered (OD-10, duplicate of 05-a:1): keep |
+| 11:2 | Golden Goose conditional slot | accepted-default (duplicate of 05-c:3): stays out of V1 |
+| 11:3 | Harness-economics decision as m6-04 exit criterion | answered: recorded in section 7 above, this same issue |
+| 11:4 | Branch protection / m1-13 / `Brain PR Gate` fourth check | accepted-default (duplicate of 10:1) |
+| 11:5 | Freeze rule executed by m6-04 | answered: executed by this issue -- freeze notice added to `README.md` (below) |
+| 13:1 (C1) | Freeze rule needs the operator's yes/no at V1 kickoff | answered (OD-05): freeze; executed by m6-04 at V1 finalization rather than kickoff, per 11:5's own contingency wording -- this issue's own assignment and title (`DOCS(planning): freeze docs/planning...`) is the authorization to execute, not a separate future step |
+| 13:2 (C5) | Harness-economics | answered: see section 7 above (same item as 07:1 / OD-01) |
+| 12 | (none new) | closes the loop by its own text; every item above resolves to an OD row, an accepted default, or a named reversal |
+
+Cross-check result: 60/60 gate questions carry a disposition. Zero unanswered.
+
+## 9. Risk sign-off
+
+Every risk in section 1's register, signed off at V1 finalization. "Reversal trigger" restates section 1's own "Early warning signal" column explicitly as the condition that would reopen this risk for re-mitigation -- observing it does not itself require action, but it ends this sign-off and returns the risk to active review.
+
+| ID | Risk | Owner | Status at V1 finalization | Reversal trigger |
+| --- | --- | --- | --- | --- |
+| R-01 | Brain harness economics (metered spend vs subscription) | Operator + 07 | Accepted; mitigated by per-run ceilings, the m6-02 cost dashboard, and the explicit kill criterion in section 7 above | first weekly `core.llm_call` roll-up exceeding the subscription-equivalent baseline |
+| R-02 | Provider correlation (one Anthropic incident degrades both the Brain and the primary harness) | 07 | Accepted; Codex/Gemini remain stubs (07:2, accepted-default), so the fallback mitigation is not yet load-bearing -- watched, not closed | provider status page incidents coinciding with parked runs |
+| R-03 | Single-VPS concentration (LifeOS + Shell + Brain + Handler A on one host) | Operator | Accepted; ADR-04 split-out order followed | sustained memory pressure or healthz latency drift |
+| R-04 | Platform IdP re-point stranding the LifeOS frontend | 05-e | Accepted; one-train deploy sequence and break-glass documented | login failures immediately after the auth train |
+| R-05 | RLS re-pin breaking live CI suites mid-transition | 06 | Accepted and closed in practice; the S1-S6 sequence completed (m1-08) | any red PR Gate during a future RLS change |
+| R-06 | Kernel contract coupling (Brain releases blocked by ACC kernel changes) | 07 + ACC | Accepted; `kernel.contract.v1` versioned as specified (07:3) | a Brain issue blocked on an ACC PR |
+| R-07 | Zone drift (Shell and LifeOS diverge despite `packages/ui`) | 09 | Accepted; shared tokens shipped, ADR-02 reversal trigger stands as written | operator notices two products at V1 review |
+| R-08 | Prompt injection steering Brain planning or harness actions | 07 | Accepted; data-fenced assembly, contract-derived allowlists, Guards, approval gates all shipped (m4-18) | eval corpus injection cases failing; unexplained contract deviations in the journal |
+| R-09 | Infisical single point of failure for deploys | ADR-05 | Accepted; SOPS/age reversal path documented, not exercised | two consecutive deploy failures on Infisical errors |
+| R-10 | Workspace tooling introducing cross-app build coupling | ADR-01 | Accepted; no cross-pipeline breakage observed through M6 | a change in `packages/*` breaking two app pipelines at once |
+| R-11 | Live-Supabase e2e flakiness | 05-d | Accepted; per-run namespacing shipped (06:1) | a second timing-symptom failure post-fix |
+| R-12 | Process-artifact regrowth (`docs/planning` becomes a living second source of truth) | Operator | Closed by this section and the freeze notice below -- the mechanism this risk named is now in force | edits to `docs/planning/` after this freeze, without a superseding Issue |
+
 ## Gate questions (batched, non-blocking)
 
 None new. This artifact closes the question loop: everything is either an OD row, an informational confirmation, or an adopted default.

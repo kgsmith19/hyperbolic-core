@@ -126,7 +126,6 @@ test("every /api/brain/* route returns 401 without a credential, fast (SH-4: und
       ["GET", "/api/brain/runs/nope"],
       ["GET", "/api/brain/runs/nope/tasks"],
       ["GET", "/api/brain/runs/nope/events"],
-      ["GET", "/api/brain/cost"],
       ["POST", "/api/brain/tasks/nope/approve"],
       ["POST", "/api/brain/tasks/nope/reject"],
     ];
@@ -249,33 +248,6 @@ test("GET /api/brain/runs/{id}: 404 for an unknown run, 200 with the run+tasks f
 
     const tasksRes = await fetch(`${baseUrl}/api/brain/runs/${run_id}/tasks`, authed(token));
     assert.equal(tasksRes.status, 200);
-  });
-});
-
-// --- GET /api/brain/cost (m6-02) -----------------------------------------
-
-test("GET /api/brain/cost: grouped summary over seeded run/task/invocation/cost rows, and since= filters it", async () => {
-  await withServer(async ({ baseUrl, token, daemon }) => {
-    const now = "2026-01-01T00:00:00.000Z";
-    const later = "2026-01-02T00:00:00.000Z";
-    daemon.store.insertRun({ id: "run-1", objective: "x", autonomy: 2, status: "completed", createdAt: now, updatedAt: now });
-    daemon.store.insertTask({ id: "task-1", runId: "run-1", title: "t", status: "succeeded", contractJson: "{}", resultJson: null, createdAt: now, updatedAt: now, startedAt: now, finishedAt: now });
-    daemon.store.insertInvocation({ id: "inv-1", taskId: "task-1", harness: "claude-code", sessionId: null, status: "completed", startedAt: now, finishedAt: now });
-    daemon.store.insertCost({ id: "cost-1", taskId: "task-1", invocationId: "inv-1", inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, usdEstimate: 0.5, recordedAt: now });
-    daemon.store.insertCost({ id: "cost-2", taskId: "task-1", invocationId: "inv-1", inputTokens: 10, outputTokens: 0, cacheReadTokens: 0, usdEstimate: 0.1, recordedAt: later });
-
-    const res = await fetch(`${baseUrl}/api/brain/cost`, authed(token));
-    assert.equal(res.status, 200);
-    const body = (await res.json()) as { byRun: { key: string; count: number; usdEstimate: number }[]; byTask: unknown[]; byHarness: unknown[]; byDay: unknown[] };
-    assert.equal(body.byRun.length, 1);
-    assert.equal(body.byRun[0]!.key, "run-1");
-    assert.equal(body.byRun[0]!.count, 2);
-    assert.equal(body.byRun[0]!.usdEstimate, 0.6);
-    assert.equal(body.byDay.length, 2);
-
-    const filtered = await fetch(`${baseUrl}/api/brain/cost?since=${encodeURIComponent(later)}`, authed(token));
-    const filteredBody = (await filtered.json()) as { byRun: { count: number }[] };
-    assert.equal(filteredBody.byRun[0]!.count, 1);
   });
 });
 

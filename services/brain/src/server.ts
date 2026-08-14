@@ -8,7 +8,7 @@
  */
 import http from "node:http";
 import { authenticate } from "./auth.ts";
-import { handleApproveTask, handleCreateRun, handleGetCost, handleGetRun, handleGetRunTasks, handleRejectTask, send } from "./api-routes.ts";
+import { handleApproveTask, handleCreateRun, handleGetRun, handleGetRunTasks, handleRejectTask, send } from "./api-routes.ts";
 import { parseLastEventId, streamRunEvents } from "./sse.ts";
 import type { BrainDaemon } from "./daemon.ts";
 import type { BrainConfig } from "./config.ts";
@@ -99,17 +99,6 @@ export function createHandler(daemon: BrainDaemon, config: BrainConfig) {
           const lastEventId = parseLastEventId(req.headers["last-event-id"]);
           const cleanup = streamRunEvents(res, daemon.journal, runId, { lastEventId });
           req.on("close", cleanup);
-        })
-        .catch((err: unknown) => send(res, 500, { error: err instanceof Error ? err.message : "internal error" }));
-      return;
-    }
-
-    if (route === "/api/brain/cost" && method === "GET") {
-      requireAuth(req, res, config)
-        .then((principal) => {
-          if (!principal) return;
-          const since = new URL(req.url ?? "/", "http://internal").searchParams.get("since") ?? undefined;
-          handleGetCost(res, daemon.store, since);
         })
         .catch((err: unknown) => send(res, 500, { error: err instanceof Error ? err.message : "internal error" }));
       return;

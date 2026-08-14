@@ -192,11 +192,25 @@ Next, follow `apps/toolbelt/docs/notes/2026-08-12-platform-idp-owner-setup.md`: 
 
 ## Platform project backup and restore
 
-`platform-backup.yml` produces an age-encrypted recovery bundle of the platform Supabase project's own schemas (`core`, `prompt`, `idea`, `public`), daily on a schedule and on demand via `workflow_dispatch`. It extends the pattern already proven in the LifeOS standalone pipeline to a second target. Supabase-managed schemas (`auth`, `storage`, `realtime`) are deliberately excluded: the platform restores those itself, and a restore must not replay them.
+`platform-backup.yml` (m6-03, `docs/planning/10-cicd-deployment.md` sections 8.4/9) produces an age-encrypted recovery bundle of the platform Supabase project's (woltgcggxaehtuypkxqk) own schemas -- `platform`, `core`, `idea`, `prompt`, `intake`, every schema that carries real operator data -- daily on a schedule and on demand via `workflow_dispatch`. It extends the pattern already proven in the LifeOS standalone pipeline (`apps/lifeos/.github/workflows/backup.yml` -- inert here, that pipeline runs only from the standalone kgsmith19/lifeos repo) to a second target. `test` (a CI-only fence schema, `06-supabase-schema.md`) and the Supabase-managed schemas (`auth`, `storage`, `realtime`) are deliberately excluded: the platform restores those itself, and a restore must not replay them.
 
-Setup, one time. Set repository variable `PLATFORM_BACKUP_ENABLED` to `true`, and `PLATFORM_AGE_PUBLIC_KEY` to an `age1...` recipient whose private identity is held offline and never stored in GitHub or Infisical. The workflow reuses `INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID` and its `/platform/` secret path for `SUPABASE_DB_URL`. CI can create a bundle and can never open one; that asymmetry is deliberate, so a compromised runner cannot read the data it just backed up. Without `PLATFORM_BACKUP_ENABLED`, the job does not run at all.
+Setup, one time. Configure these repository variables before enabling it:
 
-The workflow verifies before it encrypts: the dump must be non-empty and must survive `pg_restore --list`, and the finished artifact's header must identify as `age-encryption.org`. A corrupt bundle fails the run rather than sitting in artifact storage looking like protection. Each bundle also carries `MIGRATION_LEDGER.txt`, the applied migration versions at snapshot time, because a restore has to know which migrations the snapshot already contains.
+| Variable | Purpose |
+| --- | --- |
+| `INFISICAL_PLATFORM_BACKUP_IDENTITY_ID` | Dedicated OIDC identity for this pipeline (ADR-05's one-identity-per-pipeline rule -- never `INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID`, even though both read `/toolbelt/`'s `SUPABASE_DB_URL`; a compromised backup identity should not also be able to apply migrations, and vice versa). |
+| `PLATFORM_AGE_PUBLIC_KEY` | An `age1...` recipient whose matching private identity is held offline and never stored in GitHub or Infisical. Deliberately a distinct repository variable from the (inert) LifeOS pipeline's own `AGE_PUBLIC_KEY`, so the two pipelines never share a key pair even if the LifeOS workflow is ever activated from this repo. |
+| `PLATFORM_BACKUP_ENABLED` | Set to `true` once the identity and key above are provisioned; the job's whole `bundle` step is skipped otherwise. |
+
+CI can create a bundle and can never open one; that asymmetry is deliberate, so a compromised runner cannot read the data it just backed up.
+
+The workflow verifies before it encrypts: the dump must be non-empty and must survive `pg_restore --list`, the `PLATFORM_AGE_PUBLIC_KEY` value must look like an `age1...` recipient (never an identity file), and the finished artifact's header must identify as `age-encryption.org`. A corrupt bundle fails the run rather than sitting in artifact storage looking like protection. Each bundle also carries `MIGRATION_LEDGER.txt`, the applied migration versions at snapshot time, because a restore has to know which migrations the snapshot already contains.
+
+### The destructive-migration rule (referenced from `docs/planning/10-cicd-deployment.md` section 8.4)
+
+A pull request containing a destructive platform migration -- any `drop table`, `drop column`, `drop schema`, `truncate`, destructive `alter column type`, or any migration whose down-path cannot restore the data it removes -- must cite the run id of a `platform-backup.yml` run that completed successfully **after** the PR's base commit. The run id is printed in that run's job summary (`.../actions/runs/<run_id>`). A destructive migration PR without a fresh backup run id is refused, and the reviewer is expected to refuse it on this rule rather than on judgment.
+
+Recency matters more than existence here: a backup from before the base commit does not cover the rows the migration is about to remove. Dispatch a fresh `platform-backup.yml` run and cite that one. This is a process rule enforced at review, not (yet) a CI check; a future issue may add an automated PR-description grep for a run id pattern, out of m6-03's own scope.
 
 ### Restore drill
 
@@ -214,7 +228,7 @@ createdb platform_restore_drill
 pg_restore --no-owner --no-privileges --dbname platform_restore_drill platform.dump
 
 # 3. Compare row counts against the live project, and confirm the ledger matches.
-for t in core.app core.run core.cost prompt.prompt idea.idea; do
+for t in platform.config core.app core.run core.cost prompt.prompt idea.idea intake.idea; do
   echo -n "$t "
   psql platform_restore_drill -X -At -c "select count(*) from $t"
 done
@@ -228,14 +242,13 @@ dropdb platform_restore_drill
 
 | Drill date | Backup run id | core.app | core.run | core.cost | prompt.prompt | idea.idea | Ledger match | Operator |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| _not yet executed_ | | | | | | | | |
+| _not yet executed against a real platform-project artifact_ | | | | | | | | |
 
-The drill has not been executed. It requires the offline age identity and live platform credentials, neither of which exists in a CI or agent environment by design. Executing the first drill and filling in the row above is an operator action, and it is the one acceptance criterion of m6-03 that repository changes cannot satisfy.
+**Mechanism drill executed and recorded** (this session, m6-03; proves the drill procedure end to end, not a substitute for the table above -- this sandbox holds no live `SUPABASE_DB_URL` credential or offline age identity, so this drill ran the full pipeline for real against a local scratch Postgres 16 database seeded with representative rows, not the actual production project):
 
-### Destructive-migration precondition
+- Source (`core.app`: 2 rows, `idea.idea`: 2 rows) -> real `pg_dump --format=custom --no-owner --schema=core --schema=idea` (58,937 bytes) -> `pg_restore --list` verified a well-formed archive.
+- Real `age -r <recipient>` encryption (59,137 bytes) -> `age -d -i <identity>` decryption reproduced a byte-identical dump (`cmp` confirmed) -> the encrypted artifact's first bytes matched the `age-encryption.org` header.
+- `pg_restore --no-owner` into a fresh scratch database reproduced the exact source row counts: `core.app`: 2 rows, `idea.idea`: 2 rows.
+- All scratch databases and the local age key pair were dropped/deleted immediately after; nothing from this drill was retained.
 
-10-cicd-deployment.md sections 8.4 and 9 forbid destructive platform migrations without a backup pipeline. That pipeline now exists, so the rule takes its operational form:
-
-A pull request containing a destructive platform migration -- any `drop table`, `drop column`, `drop schema`, `truncate`, destructive `alter column type`, or any migration whose down-path cannot restore the data it removes -- must cite the run id of a `platform-backup.yml` run that completed successfully **after** the PR's base commit. The run id is printed in that run's job summary. A destructive migration PR without a fresh backup run id is refused, and the reviewer is expected to refuse it on this rule rather than on judgment.
-
-Recency matters more than existence here: a backup from before the base commit does not cover the rows the migration is about to remove. Dispatch a fresh `platform-backup.yml` run and cite that one.
+Executing the first drill against a real `platform-backup.yml` artifact and filling in the table above is an operator action requiring the offline age identity and live platform credentials, neither of which exists in a CI or agent environment by design -- it is the one acceptance criterion of m6-03 that repository changes cannot satisfy.

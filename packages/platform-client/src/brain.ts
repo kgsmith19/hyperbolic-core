@@ -71,26 +71,6 @@ export interface StreamRunEventsOptions {
   signal?: AbortSignal;
 }
 
-/** One grouping bucket from GET /api/brain/cost (m6-02,
- * services/brain/src/cost-summary.ts's `CostBucket` -- this type is that
- * module's JSON wire shape, copied field-for-field like every other
- * BrainClient type here). */
-export interface CostBucket {
-  key: string;
-  count: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  usdEstimate: number;
-}
-
-export interface CostSummary {
-  byRun: CostBucket[];
-  byTask: CostBucket[];
-  byHarness: CostBucket[];
-  byDay: CostBucket[];
-}
-
 export interface BrainClient {
   createRun(params: CreateRunParams): Promise<CreateRunResult>;
   getRun(runId: string): Promise<{ run: BrainRun; tasks: BrainTask[] } | null>;
@@ -100,12 +80,6 @@ export interface BrainClient {
    * aborts it, invoking `onEvent` for each event in arrival order. */
   streamRunEvents(runId: string, onEvent: (event: BrainEvent, id: number | null) => void, options?: StreamRunEventsOptions): Promise<void>;
   health(): Promise<{ status: string }>;
-  /** GET /api/brain/cost (m6-02): per-run/per-task/per-harness/per-day
-   * cost breakdown, the granularity that exists ONLY in the Brain's own
-   * SQLite store -- the platform `core` mirror never receives it (see
-   * cost-summary.ts's header comment). `since` is an optional ISO-8601
-   * timestamp. */
-  getCostSummary(since?: string): Promise<CostSummary>;
 }
 
 export interface ParsedSseEvent {
@@ -247,12 +221,6 @@ export function createBrainClient(baseUrl: string, getAccessToken: () => Promise
     async health() {
       const res = await fetch(`${base}/healthz`);
       return (await res.json()) as { status: string };
-    },
-
-    async getCostSummary(since) {
-      const query = since ? `?since=${encodeURIComponent(since)}` : "";
-      const res = await authedFetch(`/api/brain/cost${query}`);
-      return (await res.json()) as CostSummary;
     },
   };
 }
