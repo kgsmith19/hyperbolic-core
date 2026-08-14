@@ -190,35 +190,65 @@ The platform project predates the Supabase CLI ledger. Run the explicit `baselin
 
 Next, follow `apps/toolbelt/docs/notes/2026-08-12-platform-idp-owner-setup.md`: create the owner, insert the single `platform.config` row, and configure the owner CI credential (S2/S3). A normal migration dispatch then refuses to continue unless exactly one owner is present, applies the remaining forward migrations once, and runs the live platform contract. Never use baseline mode to repair a divergent or post-S1 ledger; investigate any attached schema diff instead of repairing around it.
 
-## Platform backup
+## Platform project backup and restore
 
-`.github/workflows/platform-backup.yml` (m6-03, `docs/planning/10-cicd-deployment.md` sections 8.4/9) extends the age-encrypted pattern `apps/lifeos/.github/workflows/backup.yml` already proved for the LifeOS stack to the platform Supabase project (woltgcggxaehtuypkxqk): `pg_dump --format=custom` of every schema carrying real operator data (`platform`, `core`, `idea`, `prompt`, `intake` -- `test` is a CI-only fence schema, deliberately excluded), verified with `pg_restore --list`, checksummed, tarred, then encrypted with `age -r "$AGE_PUBLIC_KEY"`. Nightly (nothing else in this repo depends on its schedule; the cron time is chosen only to avoid colliding with the migrations/eval-nightly workflows) plus `workflow_dispatch`. Gated on repository variable `PLATFORM_BACKUP_ENABLED == 'true'`, the same off-by-default posture `BACKUP_ENABLED` uses in the LifeOS pipeline -- flip it once the prerequisites below are provisioned.
+`platform-backup.yml` (m6-03, `docs/planning/10-cicd-deployment.md` sections 8.4/9) produces an age-encrypted recovery bundle of the platform Supabase project's (woltgcggxaehtuypkxqk) own schemas -- `platform`, `core`, `idea`, `prompt`, `intake`, every schema that carries real operator data -- daily on a schedule and on demand via `workflow_dispatch`. It extends the pattern already proven in the LifeOS standalone pipeline (`apps/lifeos/.github/workflows/backup.yml` -- inert here, that pipeline runs only from the standalone kgsmith19/lifeos repo) to a second target. `test` (a CI-only fence schema, `06-supabase-schema.md`) and the Supabase-managed schemas (`auth`, `storage`, `realtime`) are deliberately excluded: the platform restores those itself, and a restore must not replay them.
 
-Configure these repository variables before enabling it:
+Setup, one time. Configure these repository variables before enabling it:
 
 | Variable | Purpose |
 | --- | --- |
 | `INFISICAL_PLATFORM_BACKUP_IDENTITY_ID` | Dedicated OIDC identity for this pipeline (ADR-05's one-identity-per-pipeline rule -- never `INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID`, even though both read `/toolbelt/`'s `SUPABASE_DB_URL`; a compromised backup identity should not also be able to apply migrations, and vice versa). |
-| `AGE_PUBLIC_KEY` | This repository's own age recipient public key. May reuse the LifeOS repo's key pair or a fresh one at the operator's discretion; either way, the matching private key is held offline, never in CI, the same invariant `backup.yml`'s own header comment states. |
+| `PLATFORM_AGE_PUBLIC_KEY` | An `age1...` recipient whose matching private identity is held offline and never stored in GitHub or Infisical. Deliberately a distinct repository variable from the (inert) LifeOS pipeline's own `AGE_PUBLIC_KEY`, so the two pipelines never share a key pair even if the LifeOS workflow is ever activated from this repo. |
 | `PLATFORM_BACKUP_ENABLED` | Set to `true` once the identity and key above are provisioned; the job's whole `bundle` step is skipped otherwise. |
+
+CI can create a bundle and can never open one; that asymmetry is deliberate, so a compromised runner cannot read the data it just backed up.
+
+The workflow verifies before it encrypts: the dump must be non-empty and must survive `pg_restore --list`, the `PLATFORM_AGE_PUBLIC_KEY` value must look like an `age1...` recipient (never an identity file), and the finished artifact's header must identify as `age-encryption.org`. A corrupt bundle fails the run rather than sitting in artifact storage looking like protection. Each bundle also carries `MIGRATION_LEDGER.txt`, the applied migration versions at snapshot time, because a restore has to know which migrations the snapshot already contains.
 
 ### The destructive-migration rule (referenced from `docs/planning/10-cicd-deployment.md` section 8.4)
 
-A destructive platform migration (drop, irreversible rewrite, PII erasure) must not merge without a fresh backup. Concretely: dispatch `platform-backup.yml` from `main`, wait for the run to complete, and paste its run id (the `github.run_id` in the run's URL, e.g. `.../actions/runs/<run_id>`) into the PR description before requesting merge. A reviewer refuses a destructive migration PR that carries no recorded run id, or one whose recorded run predates the PR's own migration content (a backup taken before the destructive change was written proves nothing about restorability afterward -- run it again). This is a process rule enforced at review, not (yet) a CI check; a future issue may add an automated PR-description grep for a run id pattern, out of m6-03's own scope.
+A pull request containing a destructive platform migration -- any `drop table`, `drop column`, `drop schema`, `truncate`, destructive `alter column type`, or any migration whose down-path cannot restore the data it removes -- must cite the run id of a `platform-backup.yml` run that completed successfully **after** the PR's base commit. The run id is printed in that run's job summary (`.../actions/runs/<run_id>`). A destructive migration PR without a fresh backup run id is refused, and the reviewer is expected to refuse it on this rule rather than on judgment.
+
+Recency matters more than existence here: a backup from before the base commit does not cover the rows the migration is about to remove. Dispatch a fresh `platform-backup.yml` run and cite that one. This is a process rule enforced at review, not (yet) a CI check; a future issue may add an automated PR-description grep for a run id pattern, out of m6-03's own scope.
 
 ### Restore drill
 
-Procedure, to run against a real backup artifact once one exists:
+Run this against a scratch database, never the platform project. Record the date, the backup run id, and the row counts in the table below on each drill.
 
-1. Download the `platform-backup-<run_id>` artifact from the workflow run.
-2. `age -d -i <private-key-file> -o platform-backup.tar platform-backup-<run_id>.tar.age`
-3. `tar -xf platform-backup.tar` and `sha256sum -c SHA256SUMS`.
-4. `pg_restore --no-owner -d <scratch-database> platform.dump` against a throwaway database, never the live project.
-5. Compare row counts per schema (`select schemaname, relname, n_live_tup from pg_stat_user_tables where schemaname in ('platform','core','idea','prompt','intake')`) against the source project's own counts at backup time.
+```bash
+# 1. Download the artifact from the backup run, then decrypt with the offline identity.
+age -d -i /path/to/offline-identity.txt \
+  -o platform-backup.tar platform-backup-<run_id>.tar.age
+tar -xf platform-backup.tar          # platform.dump, MIGRATION_LEDGER.txt, SHA256SUMS
+sha256sum -c SHA256SUMS
 
-**Drill executed and recorded** (this session, m6-03; mechanism proof only -- this sandbox holds no live `SUPABASE_DB_URL` credential, so this drill ran the full pipeline for real against a local scratch Postgres 16 database seeded with representative rows, not the actual production project. An operator should re-run this same drill once against the real project's first real backup artifact and update this record with those figures):
+# 2. Restore into a scratch database.
+createdb platform_restore_drill
+pg_restore --no-owner --no-privileges --dbname platform_restore_drill platform.dump
+
+# 3. Compare row counts against the live project, and confirm the ledger matches.
+for t in platform.config core.app core.run core.cost prompt.prompt idea.idea intake.idea; do
+  echo -n "$t "
+  psql platform_restore_drill -X -At -c "select count(*) from $t"
+done
+psql platform_restore_drill -X -At \
+  -c "select version from supabase_migrations.schema_migrations order by version" \
+  | diff - MIGRATION_LEDGER.txt && echo "ledger matches"
+
+# 4. Tear down.
+dropdb platform_restore_drill
+```
+
+| Drill date | Backup run id | core.app | core.run | core.cost | prompt.prompt | idea.idea | Ledger match | Operator |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| _not yet executed against a real platform-project artifact_ | | | | | | | | |
+
+**Mechanism drill executed and recorded** (this session, m6-03; proves the drill procedure end to end, not a substitute for the table above -- this sandbox holds no live `SUPABASE_DB_URL` credential or offline age identity, so this drill ran the full pipeline for real against a local scratch Postgres 16 database seeded with representative rows, not the actual production project):
 
 - Source (`core.app`: 2 rows, `idea.idea`: 2 rows) -> real `pg_dump --format=custom --no-owner --schema=core --schema=idea` (58,937 bytes) -> `pg_restore --list` verified a well-formed archive.
 - Real `age -r <recipient>` encryption (59,137 bytes) -> `age -d -i <identity>` decryption reproduced a byte-identical dump (`cmp` confirmed) -> the encrypted artifact's first bytes matched the `age-encryption.org` header.
 - `pg_restore --no-owner` into a fresh scratch database reproduced the exact source row counts: `core.app`: 2 rows, `idea.idea`: 2 rows.
 - All scratch databases and the local age key pair were dropped/deleted immediately after; nothing from this drill was retained.
+
+Executing the first drill against a real `platform-backup.yml` artifact and filling in the table above is an operator action requiring the offline age identity and live platform credentials, neither of which exists in a CI or agent environment by design -- it is the one acceptance criterion of m6-03 that repository changes cannot satisfy.

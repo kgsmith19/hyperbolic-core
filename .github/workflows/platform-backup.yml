@@ -55,18 +55,30 @@ jobs:
 
       - name: Validate backup configuration
         env:
-          AGE_PUBLIC_KEY: ${{ vars.AGE_PUBLIC_KEY }}
+          AGE_PUBLIC_KEY: ${{ vars.PLATFORM_AGE_PUBLIC_KEY }}
         run: |
           set -euo pipefail
-          test -n "$SUPABASE_DB_URL"
-          test -n "$AGE_PUBLIC_KEY"
+          if [ -z "${SUPABASE_DB_URL:-}" ]; then
+            echo "SUPABASE_DB_URL was not supplied by Infisical." >&2
+            exit 1
+          fi
+          if [ -z "$AGE_PUBLIC_KEY" ]; then
+            echo "PLATFORM_AGE_PUBLIC_KEY repository variable is not set." >&2
+            exit 1
+          fi
+          # Refuse an identity file masquerading as a recipient: encrypting to
+          # a private key would silently produce an unopenable archive.
+          case "$AGE_PUBLIC_KEY" in
+            age1*) ;;
+            *) echo "PLATFORM_AGE_PUBLIC_KEY must be an age1... recipient, not an identity." >&2; exit 1 ;;
+          esac
 
       - name: Install age
         run: sudo apt-get update -qq && sudo apt-get install -y -qq age
 
       - name: Create, verify, and encrypt the platform schema bundle
         env:
-          AGE_PUBLIC_KEY: ${{ vars.AGE_PUBLIC_KEY }}
+          AGE_PUBLIC_KEY: ${{ vars.PLATFORM_AGE_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           umask 077
@@ -92,12 +104,25 @@ jobs:
           test -s "$payload/platform.dump"
           docker run --rm -i postgres:17 pg_restore --list \
             < "$payload/platform.dump" > /dev/null
-          (cd "$payload" && sha256sum platform.dump > SHA256SUMS)
 
-          tar -C "$payload" -cf "$work/platform-backup.tar" platform.dump SHA256SUMS
+          # Record the migration ledger state alongside the dump: a restore
+          # has to know which migrations the snapshot already contains.
+          docker run --rm -e SUPABASE_DB_URL postgres:17 \
+            sh -ec 'psql "$SUPABASE_DB_URL" -X --no-psqlrc -At \
+              -c "select version from supabase_migrations.schema_migrations order by version"' \
+            > "$payload/MIGRATION_LEDGER.txt"
+
+          (cd "$payload" && sha256sum platform.dump MIGRATION_LEDGER.txt > SHA256SUMS)
+
+          tar -C "$payload" -cf "$work/platform-backup.tar" \
+            platform.dump MIGRATION_LEDGER.txt SHA256SUMS
           age -r "$AGE_PUBLIC_KEY" \
             -o "platform-backup-${GITHUB_RUN_ID}.tar.age" \
             "$work/platform-backup.tar"
+
+          # Proves the artifact really is age-encrypted, not a tar that was
+          # renamed because the encryption step silently no-opped.
+          head -c 22 "platform-backup-${GITHUB_RUN_ID}.tar.age" | grep -q "age-encryption.org"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -105,3 +130,14 @@ jobs:
           path: platform-backup-${{ github.run_id }}.tar.age
           retention-days: 90
           if-no-files-found: error
+
+      - name: Record the run id for the destructive-migration precondition
+        run: |
+          {
+            echo "### Platform backup complete"
+            echo
+            echo "Backup run id: \`${GITHUB_RUN_ID}\`"
+            echo
+            echo "A destructive platform migration PR must cite this run id (see"
+            echo "docs/ops/runbook.md, \"Platform project backup and restore\")."
+          } >> "$GITHUB_STEP_SUMMARY"
