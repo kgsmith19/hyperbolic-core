@@ -4,7 +4,7 @@ React UI for ACC. The zero-runtime-dependency core serves a loopback API; this
 directory builds to static files that ACC serves same-origin through
 `--ui-dist`.
 
-**The API contract is ACC's `gui/README.md`.** `src/api.ts` mirrors it in types; `e2e/contract.spec.ts` proves it against a real ACC server. If ACC changes a route without updating its contract doc, this suite goes red — that is the whole cross-repo coupling.
+**The API contract is ACC's `backend/gui/README.md`.** `src/api.ts` mirrors it in types; `e2e/contract.spec.ts` proves it against a real ACC server. If ACC changes a route without updating its contract doc, this suite goes red — that is the whole cross-repo coupling.
 
 ## Stack
 
@@ -16,7 +16,7 @@ React 19 · Vite 8 · TypeScript 7 (strict) · Tailwind v4 · shadcn/ui on Base 
 npm install
 npm run dev        # http://127.0.0.1:5173 — proxies /api to a running ACC server
                    #   (in the ACC repo: npm run gui; override target with ACC_API=)
-npm run build      # dist/ — serve via ACC: node gui/server.mjs --ui-dist <this repo>/dist
+npm run build      # dist/ — serve via ACC: node backend/gui/server.mjs --ui-dist <this repo>/dist
 npm run e2e        # contract suite vs the real sandboxed ACC server
                    #   (ACC_DIR=.. by default from this directory)
 ```
@@ -24,7 +24,7 @@ npm run e2e        # contract suite vs the real sandboxed ACC server
 ## Layout
 
 ```
-src/api.ts               the typed client — one file, mirrors gui/README.md
+src/api.ts               the typed client — one file, mirrors backend/gui/README.md
 src/main.tsx             shell: nav, router, query client, dark mode
 src/pages/StartWork.tsx  create/route/launch directives, live list, log tails
 src/pages/Guards.tsx     toggle, protections, vault, runbox

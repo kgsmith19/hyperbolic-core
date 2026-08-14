@@ -17,7 +17,7 @@ const { DEFAULT_TABLE, doctor, route, scanRoots } = await import("./route.mjs");
 // while the suite stayed green. The table is machine-local and uncommitted,
 // so its existence cannot be asserted; where the default resolves to can.
 test("the built-in routing-table default resolves beside the checkout, never inside it", () => {
-  const checkout = path.resolve(here, "..", "..", "..");
+  const checkout = path.resolve(here, "..", "..", "..", "..");
   assert.equal(DEFAULT_TABLE, path.join(path.dirname(checkout), "ROUTING.md"));
   assert.ok(!DEFAULT_TABLE.startsWith(checkout + path.sep), `default must not resolve inside the checkout: ${DEFAULT_TABLE}`);
 });

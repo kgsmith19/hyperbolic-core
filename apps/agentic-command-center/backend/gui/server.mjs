@@ -161,8 +161,8 @@ function nodeExec(script, args, stdin, extraEnv) {
 // DEFAULT, not a hard dependency: ACC_GUARDS_CLI/ACC_GUARDS_CONFIG override
 // it (tests point these at fakes/fixtures; a deployment with a different
 // layout can point them anywhere).
-const guardsCliPath = () => process.env.ACC_GUARDS_CLI || path.join(HERE, "..", "..", "toolbelt", "guards", "cli.mjs");
-const guardsConfigPath = () => process.env.ACC_GUARDS_CONFIG || path.join(HERE, "..", "..", "toolbelt", "guards", "config.json");
+const guardsCliPath = () => process.env.ACC_GUARDS_CLI || path.join(HERE, "..", "..", "..", "toolbelt", "guards", "cli.mjs");
+const guardsConfigPath = () => process.env.ACC_GUARDS_CONFIG || path.join(HERE, "..", "..", "..", "toolbelt", "guards", "config.json");
 // engine.mjs still owns the "projects"/"runboxDir" fields inside the SAME
 // config.json guard.mjs/cli.mjs read — GUARDS_CONFIG is how it finds it now
 // that the file lives in apps/toolbelt/guards, not ACC's own root.

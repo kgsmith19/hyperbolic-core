@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A fake stand-in for apps/agentic-command-center/kernel/run.mjs's own CLI
+// A fake stand-in for apps/agentic-command-center/backend/kernel/run.mjs's own CLI
 // contract (`node kernel/run.mjs <contract.json>`, one JSON line to
 // stdout, exit 0 iff outcome === "accepted", else 2) -- used by
 // claude-code-adapter.test.ts to prove the adapter's spawn/parse mechanics

@@ -7,7 +7,7 @@
  * The names-only design (contracts.ts's TaskContractV1.constraints.
  * vault_keys, kernel-contract.ts's allowedActions.vaultKeys) already
  * means no vault key VALUE is structurally reachable from inside the
- * Brain process today -- envForKeys (apps/agentic-command-center/kernel/
+ * Brain process today -- envForKeys (apps/agentic-command-center/backend/kernel/
  * credentials.mjs) resolves names to values only inside the kernel
  * subprocess, never here. This module is the defense-in-depth layer for
  * everything that design doesn't structurally prevent: an accidental

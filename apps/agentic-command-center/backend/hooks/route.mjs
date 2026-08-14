@@ -22,12 +22,13 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // must not move it, or sandboxed tests would lose the real routes). It maps
 // this machine's own folder layout, so it is never committed -- it sits
 // beside the checkout, not inside it. HERE is
-// <checkout>/apps/agentic-command-center/hooks, so four levels up is the
-// directory containing the checkout. Two levels sufficed when ACC was its own
-// repo; the subtree import into this monorepo silently repointed the default
-// at <checkout>/apps/ROUTING.md, which never exists, and no test caught it
-// because every test sets ACC_ROUTING_MD.
-export const DEFAULT_TABLE = path.resolve(HERE, "..", "..", "..", "..", "ROUTING.md");
+// <checkout>/apps/agentic-command-center/backend/hooks, so five levels up is
+// the directory containing the checkout. Two levels sufficed when ACC was its
+// own repo; the subtree import into this monorepo silently repointed the
+// default at <checkout>/apps/ROUTING.md, which never exists, and no test
+// caught it because every test sets ACC_ROUTING_MD. route.test.mjs now pins
+// this depth so the backend/ split could not repeat it.
+export const DEFAULT_TABLE = path.resolve(HERE, "..", "..", "..", "..", "..", "ROUTING.md");
 const TABLE = process.env.ACC_ROUTING_MD || DEFAULT_TABLE;
 
 // A repo dir is covered ONLY by an exact route path (case-insensitive:

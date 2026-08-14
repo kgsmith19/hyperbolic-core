@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const { parseLcov, changedLibFiles, normPath, floors, parseRange } = await import("./covgate.mjs");
+const { parseLcov, changedLibFiles, normPath, floors, parseRange, unmovedFilter } = await import("./covgate.mjs");
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const COVGATE = path.join(HERE, "covgate.mjs");
@@ -38,6 +38,41 @@ function gitRootCommit(repo) {
   g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "root");
   return g;
 }
+
+// A move is not a change: relocating a file adds no lines to cover, so gating
+// it reports whatever coverage that content always had and pins it on whoever
+// did the move. git's own rename detection misses this under --relative when
+// files move INTO the scoped subtree, so the gate matches on content instead.
+test("unmovedFilter drops files whose exact content was already committed, keeps genuinely new and edited ones", () => {
+  const repo = path.join(BASE, "unmoved-fixture");
+  fs.mkdirSync(path.join(repo, "hooks"), { recursive: true });
+  const g = gitRootCommit(repo);
+  fs.writeFileSync(path.join(repo, "hooks", "moved.mjs"), "export const a = 1;\n");
+  fs.writeFileSync(path.join(repo, "hooks", "edited.mjs"), "export const b = 1;\n");
+  g("add", "-A");
+  g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base");
+
+  // Relocate one file verbatim, edit another, add a third.
+  fs.mkdirSync(path.join(repo, "backend", "hooks"), { recursive: true });
+  fs.renameSync(path.join(repo, "hooks", "moved.mjs"), path.join(repo, "backend", "hooks", "moved.mjs"));
+  fs.writeFileSync(path.join(repo, "hooks", "edited.mjs"), "export const b = 2;\n");
+  fs.writeFileSync(path.join(repo, "hooks", "added.mjs"), "export const c = 3;\n");
+
+  const keep = unmovedFilter("HEAD", repo);
+  assert.equal(keep("backend/hooks/moved.mjs"), false, "a verbatim move must not be gated");
+  assert.equal(keep("hooks/edited.mjs"), true, "an edit must stay gated");
+  assert.equal(keep("hooks/added.mjs"), true, "a genuinely new file must stay gated");
+});
+
+test("unmovedFilter fails closed when the base revision cannot be read", () => {
+  const repo = path.join(BASE, "unmoved-no-base");
+  fs.mkdirSync(repo, { recursive: true });
+  gitRootCommit(repo);
+  fs.writeFileSync(path.join(repo, "anything.mjs"), "export const a = 1;\n");
+  // No such revision: with no baseline to compare against, nothing may be
+  // silently exempted -- every candidate stays gated.
+  assert.equal(unmovedFilter("refs/heads/does-not-exist", repo)("anything.mjs"), true);
+});
 
 test("floors() falls back to defaults (100/100/90) when ACC_POLICY is unset, unreadable, or numbers are junk", () => {
   const saved = process.env.ACC_POLICY;

@@ -89,19 +89,21 @@ COPY --from=build /app/services/brain/bin services/brain/bin
 # package.json carries zero dependencies -- kernel/hooks/runner are pure
 # Node-built-in .mjs, confirmed by grepping their imports) and has no
 # UI/GUI/Windows-only pieces the Brain's headless subprocess spawn needs
-# (apps/agentic-command-center/{ui,gui,shim,watcher,forgepad} are
+# (apps/agentic-command-center/frontend and backend/{gui,shim,watcher} are
 # deliberately NOT copied). config.ts's default BRAIN_KERNEL_RUN_PATH
-# assumes this exact relative layout is preserved. Copied directly from the
-# build context (never routed through the `build` stage above, which only
-# ever ran `npm ci`/`tsc` over the npm-workspace tree these plain .mjs
-# files are not part of).
-COPY apps/agentic-command-center/kernel apps/agentic-command-center/kernel
-COPY apps/agentic-command-center/hooks apps/agentic-command-center/hooks
-COPY apps/agentic-command-center/runner apps/agentic-command-center/runner
-COPY apps/agentic-command-center/policy.json apps/agentic-command-center/policy.json
+# assumes this exact relative layout is preserved. backend/policy.json must
+# keep landing one level above backend/kernel: every backend module resolves
+# its root as HERE/".." and would otherwise read a policy that isn't there.
+# Copied directly from the build context (never routed through the `build`
+# stage above, which only ever ran `npm ci`/`tsc` over the npm-workspace tree
+# these plain .mjs files are not part of).
+COPY apps/agentic-command-center/backend/kernel apps/agentic-command-center/backend/kernel
+COPY apps/agentic-command-center/backend/hooks apps/agentic-command-center/backend/hooks
+COPY apps/agentic-command-center/backend/runner apps/agentic-command-center/backend/runner
+COPY apps/agentic-command-center/backend/policy.json apps/agentic-command-center/backend/policy.json
 # kernel/settings.mjs's guardMjsPath()/guardsCliPath() default to this
-# exact sibling path (../../toolbelt/guards relative to kernel/) unless
-# ACC_GUARDS_HOOK/ACC_GUARDS_CLI override it -- m4-07's automatic,
+# exact sibling path (../../../toolbelt/guards relative to backend/kernel/)
+# unless ACC_GUARDS_HOOK/ACC_GUARDS_CLI override it -- m4-07's automatic,
 # fail-closed guard registration depends on this being present.
 COPY apps/toolbelt/guards apps/toolbelt/guards
 

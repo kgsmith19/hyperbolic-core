@@ -16,9 +16,9 @@ commands:
   test: npm test
   test_windows: npm run test:windows
   coverage: npm run covgate
-  ui_setup: cd ui && npm ci
-  ui_build: cd ui && npm run build
-  ui_e2e: cd ui && ACC_DIR=.. npm run e2e
+  frontend_setup: cd frontend && npm ci
+  frontend_build: cd frontend && npm run build
+  frontend_e2e: cd frontend && ACC_DIR=.. npm run e2e
   dev: npm run gui
 
 ci:

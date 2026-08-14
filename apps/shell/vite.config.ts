@@ -58,7 +58,7 @@ export default defineConfig({
     __BUILD_TIME__: BUILD_TIME,
   },
   server: {
-    // Explicit IPv4 host, matching apps/agentic-command-center/ui/vite.config.ts's
+    // Explicit IPv4 host, matching apps/agentic-command-center/frontend/vite.config.ts's
     // own comment: Vite's default (host: false) binds the ambiguous
     // "localhost", which some environments resolve to the IPv6 loopback
     // only, breaking 127.0.0.1-based health checks even though Vite reports

@@ -1,21 +1,21 @@
 # gui/ — the web Command Center
 
-`node gui/server.mjs --port 43117` (or `npm run gui`) serves the loopback API
+`node backend/gui/server.mjs --port 43117` (or `npm run gui`) serves the loopback API
 on `http://127.0.0.1:43117`. ACC itself is headless — it has no page of its
-own. Add `--ui-dist <path>` (or `ACC_UI_DIST`) pointing at `ui/`'s built
-`dist/` (`cd ui && npm run build`) and `/` plus every non-API GET serve that
+own. Add `--ui-dist <path>` (or `ACC_UI_DIST`) pointing at `frontend/`'s built
+`dist/` (`cd frontend && npm run build`) and `/` plus every non-API GET serve that
 app same-origin (SPA fallback to its index; resolved-path containment, no URL
 decoding — traversal shapes cannot escape the dist). Without `--ui-dist`,
 every non-API GET is a 404.
 
 Previously, `/` and `/guards` served built-in plain-HTML pages
-(`kernel.html`, `guards.html`) as an incremental migration step while `ui/`
-matured. Those pages were retired once `ui/e2e/contract.spec.ts` went green
+(`kernel.html`, `guards.html`) as an incremental migration step while `frontend/`
+matured. Those pages were retired once `frontend/e2e/contract.spec.ts` went green
 against a live ACC server for every page it replaced (guards, vault,
 spending, start-work, kernel) — the criterion under which they were always
 meant to go. `--ui-dist` is now the only way to reach a browser UI.
 
-**This file is the API contract.** `ui/` builds against exactly what is
+**This file is the API contract.** `frontend/` builds against exactly what is
 written here; any route change lands in the same commit as its edit to this
 file.
 
@@ -25,7 +25,7 @@ file.
 - Every `/api/*` request — GET and POST alike — demands the header `X-ACC-Token: <value>` (ACC-5), compared to the session credential constant-time; see "Session credential" below. Missing or wrong is `401 {"error":"unauthorized"}`, identical whether the route exists or not, so an unauthenticated caller can't use responses to enumerate routes. This is additive: none of the other checks on this list are replaced or weakened by it.
 - Every POST demands the header `X-ACC: 1`, enforced once globally in the handler — an unknown POST without it is 403, not 404. The optional Shell bridge grants only the configured origin, fixed `GET, POST` methods, and fixed `X-ACC-Token, X-ACC, Content-Type` headers; it never echoes arbitrary preflight input or enables cookies.
 - Bodies are JSON, capped at 64 KiB (over-cap connections are destroyed unparsed).
-- The server holds zero business logic: it shells the real owners (`hooks/engine.mjs`, `hooks/budget.mjs`, `hooks/usage.mjs`, `hooks/route.mjs`, `hooks/directive.mjs`, `hooks/lane.mjs`, `runner/runner.mjs`, `kernel/policy.mjs`) via `execFile` — never a shell, never a browser string as a path or flag.
+- The server holds zero business logic: it shells the real owners (`backend/hooks/engine.mjs`, `backend/hooks/budget.mjs`, `backend/hooks/usage.mjs`, `backend/hooks/route.mjs`, `backend/hooks/directive.mjs`, `backend/hooks/lane.mjs`, `backend/runner/runner.mjs`, `backend/kernel/policy.mjs`) via `execFile` — never a shell, never a browser string as a path or flag.
 - Directive ids match `/^d-[A-Za-z0-9_-]{1,38}$/` and are validated **before** any path is built from one.
 
 ## Session credential (ACC-5)
@@ -54,7 +54,7 @@ for a loopback socket that has never needed one.
   is not a claim that full HTTP response timing is constant.
 - **Bootstrap**: on startup the server prints
   `http://127.0.0.1:43117/#acc-token=<value>` to the console once — the one
-  intentional place the token is ever printed. `ui/src/api.ts` reads the
+  intentional place the token is ever printed. `frontend/src/api.ts` reads the
   fragment on load, stores it in `sessionStorage`, strips it from the URL
   with `history.replaceState` (so it never lingers in browser history), and
   attaches it as `X-ACC-Token` on every API call after that. A fragment
@@ -132,11 +132,11 @@ a transport error.
 | `ACC_GUI_TOKEN_FILE` | the session-credential token file path (default `<ACC_ROOT>/.acc/gui-token`) |
 | `ACC_ALLOWED_ORIGIN` | optional exact HTTPS Shell origin for the token-gated CORS/PNA bridge (loopback HTTP allowed for development) |
 | `ACC_ENGINE` / `ACC_USAGE` / `ACC_BUDGET` / `ACC_RUNNER` | the shelled script for each owner (fakes in tests; `ACC_RUNNER` is what `/api/launch` spawns) |
-| `ACC_DIRECTIVES_DIR` | directive store dir (mirrors `hooks/directive.mjs`) |
+| `ACC_DIRECTIVES_DIR` | directive store dir (mirrors `backend/hooks/directive.mjs`) |
 | `ACC_ROUTING_MD` | the routing table `route.mjs` reads |
 | `ACC_LANE_DIR` | launch-lane state dir |
 
-Tests: `node --test gui/server.test.mjs` (API), `cd ui && ACC_DIR=.. npm run e2e`
+Tests: `node --test backend/gui/server.test.mjs` (API), `cd frontend && ACC_DIR=.. npm run e2e`
 (Playwright, single worker — all specs share one sandbox dir). The Playwright
 contract suite carries the session credential the same way a real browser
 does: `contract.spec.ts` reads the token straight from the sandbox server's

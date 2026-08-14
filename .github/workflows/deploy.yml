@@ -9,10 +9,10 @@ on:
       - "packages/**"
       - "services/llm-handler/**"
       - "services/brain/**"
-      - "apps/agentic-command-center/kernel/**"
-      - "apps/agentic-command-center/hooks/**"
-      - "apps/agentic-command-center/runner/**"
-      - "apps/agentic-command-center/policy.json"
+      - "apps/agentic-command-center/backend/kernel/**"
+      - "apps/agentic-command-center/backend/hooks/**"
+      - "apps/agentic-command-center/backend/runner/**"
+      - "apps/agentic-command-center/backend/policy.json"
       - "apps/toolbelt/guards/**"
       - "apps/toolbelt/**/supabase/migrations/**"
       - "docs/ops/prune-dist-dirs.sh"
@@ -95,7 +95,7 @@ jobs:
           else
             echo "llm_handler=false" >> "$GITHUB_OUTPUT"
           fi
-          if grep -Eq '^(services/brain/|apps/agentic-command-center/(kernel|hooks|runner)/|apps/agentic-command-center/policy\.json$|apps/toolbelt/guards/|packages/|docs/ops/prune-docker-images\.sh$|\.github/workflows/deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
+          if grep -Eq '^(services/brain/|apps/agentic-command-center/backend/(kernel|hooks|runner)/|apps/agentic-command-center/backend/policy\.json$|apps/toolbelt/guards/|packages/|docs/ops/prune-docker-images\.sh$|\.github/workflows/deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
             echo "brain=true" >> "$GITHUB_OUTPUT"
           else
             echo "brain=false" >> "$GITHUB_OUTPUT"

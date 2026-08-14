@@ -1,6 +1,6 @@
 // Handler A's HTTP surface. Raw node:http, no framework -- matching this
 // repo's own precedent for a small, security-relevant loopback service
-// (apps/agentic-command-center/gui/server.mjs), and 08-llm-handlers.md's
+// (apps/agentic-command-center/backend/gui/server.mjs), and 08-llm-handlers.md's
 // "small deployed service" framing. /healthz, POST /api/intake/submit
 // (m3-06), and /v1/complete, /v1/stream, /v1/count (08 section 5, m4-05).
 

@@ -3,11 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// The CONTRACT suite: this UI against a REAL ACC server (gui/server.mjs from
-// the ACC repo), sandboxed via ACC's own e2e fake seams — fake engine/usage/
-// budget/runner, throwaway ACC_ROOT — so nothing here can touch live state or
-// spawn a real claude. ACC_DIR points at the ACC monorepo root; from ui/ the
-// default is its parent directory.
+// The CONTRACT suite: this UI against a REAL ACC server
+// (backend/gui/server.mjs), sandboxed via ACC's own e2e fake seams — fake
+// engine/usage/budget/runner, throwaway ACC_ROOT — so nothing here can touch
+// live state or spawn a real claude. ACC_DIR points at the ACC app root; from
+// frontend/ the default is its parent directory.
 const ACC = path.resolve(process.env.ACC_DIR || "..");
 const dir = process.env.ACC_UI_E2E_DIR || fs.mkdtempSync(path.join(os.tmpdir(), "acc-ui-e2e-"));
 process.env.ACC_UI_E2E_DIR = dir;
@@ -31,17 +31,17 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `node ${path.join(ACC, "gui", "server.mjs")} --port 43117`,
+      command: `node ${path.join(ACC, "backend", "gui", "server.mjs")} --port 43117`,
       url: "http://127.0.0.1:43117/api/kernel-policy",
       reuseExistingServer: false,
       env: {
         ACC_POLICY: path.join(dir, "policy.json"),
         ACC_ROOT: dir,
-        ACC_ENGINE: path.join(ACC, "gui", "e2e", "fake-engine.e2e.mjs"),
-        ACC_GUARDS_CLI: path.join(ACC, "gui", "e2e", "fake-guards.e2e.mjs"),
-        ACC_USAGE: path.join(ACC, "gui", "e2e", "fake-usage.e2e.mjs"),
-        ACC_BUDGET: path.join(ACC, "gui", "e2e", "fake-budget.e2e.mjs"),
-        ACC_RUNNER: path.join(ACC, "gui", "e2e", "fake-runner.e2e.mjs"),
+        ACC_ENGINE: path.join(ACC, "backend", "gui", "e2e", "fake-engine.e2e.mjs"),
+        ACC_GUARDS_CLI: path.join(ACC, "backend", "gui", "e2e", "fake-guards.e2e.mjs"),
+        ACC_USAGE: path.join(ACC, "backend", "gui", "e2e", "fake-usage.e2e.mjs"),
+        ACC_BUDGET: path.join(ACC, "backend", "gui", "e2e", "fake-budget.e2e.mjs"),
+        ACC_RUNNER: path.join(ACC, "backend", "gui", "e2e", "fake-runner.e2e.mjs"),
         ACC_ROUTING_MD: path.join(dir, "ROUTING.md"),
         ACC_LANE_DIR: path.join(dir, "lane"),
         ACC_GUI_E2E_DIR: dir,

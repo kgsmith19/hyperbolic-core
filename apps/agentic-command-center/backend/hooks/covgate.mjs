@@ -119,6 +119,34 @@ function git(args, cwd) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).split(/\r?\n/).filter(Boolean);
 }
 
+// A file that only MOVED has no new lines to cover, so gating it reports the
+// coverage its content always had and blames it on whoever did the move --
+// which is how the backend/ split first surfaced hooks/usage.mjs's long
+// standing 72% as if the move had caused it.
+//
+// git's own rename detection cannot see these: --relative scopes the diff to
+// the cwd subtree, so when files move INTO that subtree the source side is
+// filtered out and every one of them looks like a fresh add. Matching on
+// content instead is both simpler and move-agnostic -- if this exact blob was
+// already in the tree at the base revision, under any path, then nothing about
+// it is new and there is nothing for a CHANGED-file gate to say about it.
+// Exported for its own suite.
+export function unmovedFilter(rev, cwd) {
+  let known = new Set();
+  try {
+    // --full-tree: ls-tree otherwise scopes to the cwd's path prefix, which
+    // for a directory that did not exist at `rev` (exactly the move case)
+    // yields an empty list and silently turns this filter into a no-op.
+    known = new Set(git(["ls-tree", "-r", "--full-tree", "--format=%(objectname)", rev], cwd));
+  } catch {
+    // No readable baseline (a shallow clone without `rev`, say). An empty set
+    // matches nothing, so every candidate stays gated -- fail closed, which is
+    // this gate's posture everywhere else too.
+  }
+  // Callers filter to existing files first, so hash-object cannot fail here.
+  return (file) => !known.has(git(["hash-object", "--", file], cwd)[0]);
+}
+
 // Optional explicit commit-range mode. It never mutates the caller's repo:
 // the check is one `git diff` between two revisions supplied by the caller.
 export function parseRange(raw) {
@@ -141,7 +169,7 @@ function main() {
       }
       changed = changedLibFiles(
         git(["diff", "--name-only", "--relative", range.oldrev, range.newrev], cwd)
-      ).filter((f) => fs.existsSync(path.join(cwd, f)));
+      ).filter((f) => fs.existsSync(path.join(cwd, f))).filter(unmovedFilter(range.oldrev, cwd));
     } else {
       changed = changedLibFiles([
         // --relative: paths relative to cwd, not the repo root — identical
@@ -152,7 +180,7 @@ function main() {
         // root-relative, and this doesn't pass it).
         ...git(["diff", "--name-only", "--relative", "HEAD"], cwd),
         ...git(["ls-files", "--others", "--exclude-standard"], cwd),
-      ]).filter((f) => fs.existsSync(path.join(cwd, f)));
+      ]).filter((f) => fs.existsSync(path.join(cwd, f))).filter(unmovedFilter("HEAD", cwd));
     }
   } catch (e) {
     console.error(`covgate: FAIL — cannot determine what changed (${String(e.message || e).trim()})`);

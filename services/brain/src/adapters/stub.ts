@@ -2,7 +2,7 @@
  * Codex/Gemini stub adapters (07-brain-architecture.md section 7.4, this
  * issue's own scope: "Codex and Gemini stub adapters whose probe returns
  * not-available"). Unlike claude-code.ts, these have no ACC kernel
- * counterpart to spawn at all (apps/agentic-command-center/kernel/adapters/
+ * counterpart to spawn at all (apps/agentic-command-center/backend/kernel/adapters/
  * only ships claude-code.mjs) -- these exist purely so router.ts's routing
  * rule and fallback logic have a real, typed HarnessAdapter to route
  * *away* from, never toward, until each gets its own implementation issue

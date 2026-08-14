@@ -238,7 +238,7 @@ test("GET on the submit route (wrong method) returns 404, not a 405 that leaks r
 });
 
 test("an oversized request body is refused (connection closed, not a crash or a hang)", async () => {
-  // Matches apps/agentic-command-center/gui/server.mjs's own reviewed
+  // Matches apps/agentic-command-center/backend/gui/server.mjs's own reviewed
   // over-cap behavior exactly (req.destroy() once the cap is exceeded):
   // the server refuses to buffer the payload at all rather than parsing an
   // oversized body, which severs the connection instead of completing an
