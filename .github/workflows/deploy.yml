@@ -8,8 +8,15 @@ on:
       - "apps/shell/**"
       - "packages/**"
       - "services/llm-handler/**"
+      - "services/brain/**"
+      - "apps/agentic-command-center/kernel/**"
+      - "apps/agentic-command-center/hooks/**"
+      - "apps/agentic-command-center/runner/**"
+      - "apps/agentic-command-center/policy.json"
+      - "apps/toolbelt/guards/**"
       - "apps/toolbelt/**/supabase/migrations/**"
       - "docs/ops/prune-dist-dirs.sh"
+      - "docs/ops/prune-docker-images.sh"
   workflow_dispatch:
     inputs:
       deploy_shell:
@@ -22,8 +29,13 @@ on:
         required: true
         type: boolean
         default: true
+      deploy_brain:
+        description: Build and deploy the Brain (services/brain) from the current main commit.
+        required: true
+        type: boolean
+        default: true
       apply_migrations:
-        description: Apply pending platform migrations before Shell/Handler A deploy.
+        description: Apply pending platform migrations before Shell/Handler A/Brain deploy.
         required: true
         type: boolean
         default: false
@@ -39,6 +51,7 @@ jobs:
     outputs:
       shell: ${{ steps.changes.outputs.shell }}
       llm_handler: ${{ steps.changes.outputs.llm_handler }}
+      brain: ${{ steps.changes.outputs.brain }}
       migrations: ${{ steps.changes.outputs.migrations }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,6 +70,7 @@ jobs:
             {
               echo "shell=${{ inputs.deploy_shell }}"
               echo "llm_handler=${{ inputs.deploy_llm_handler }}"
+              echo "brain=${{ inputs.deploy_brain }}"
               echo "migrations=${{ inputs.apply_migrations }}"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -65,6 +79,7 @@ jobs:
             {
               echo "shell=true"
               echo "llm_handler=true"
+              echo "brain=true"
               echo "migrations=false"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -75,10 +90,15 @@ jobs:
           else
             echo "shell=false" >> "$GITHUB_OUTPUT"
           fi
-          if grep -Eq '^(services/llm-handler/|packages/|\.github/workflows/deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
+          if grep -Eq '^(services/llm-handler/|packages/|docs/ops/prune-docker-images\.sh$|\.github/workflows/deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
             echo "llm_handler=true" >> "$GITHUB_OUTPUT"
           else
             echo "llm_handler=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -Eq '^(services/brain/|apps/agentic-command-center/(kernel|hooks|runner)/|apps/agentic-command-center/policy\.json$|apps/toolbelt/guards/|packages/|docs/ops/prune-docker-images\.sh$|\.github/workflows/deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
+            echo "brain=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "brain=false" >> "$GITHUB_OUTPUT"
           fi
           if grep -Eq '^apps/toolbelt/(.*/)?supabase/migrations/' "$RUNNER_TEMP/changed-paths"; then
             echo "migrations=true" >> "$GITHUB_OUTPUT"
@@ -413,3 +433,168 @@ jobs:
           scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.prod" "deploy@$DEPLOY_HOST:llm-handler/.env"
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
             "cd llm-handler && chmod 600 .env && LLM_HANDLER_IMAGE=$IMAGE docker compose up -d --wait && curl -fsS http://127.0.0.1:8200/healthz"
+      - name: Prune superseded Handler A images (10-cicd-deployment.md section 8.3b, keep newest 3)
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          IMAGE: ghcr.io/${{ github.repository }}/llm-handler:sha-${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          scp "${ssh_options[@]}" docs/ops/prune-docker-images.sh "deploy@$DEPLOY_HOST:llm-handler/prune-docker-images.sh"
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            "chmod 0755 llm-handler/prune-docker-images.sh && llm-handler/prune-docker-images.sh ghcr.io/${{ github.repository }}/llm-handler '$IMAGE'"
+
+  build-brain:
+    name: Build the Brain
+    needs: changes
+    if: >-
+      needs.changes.outputs.brain == 'true' &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push the Brain image
+        # Deliberately a NEW image name under this repository (10-cicd-
+        # deployment.md section 2.3), never the bare
+        # ghcr.io/kgsmith19/hyperbolic-core the root AGENTS.md warns
+        # about, and gated inside deploy.yml only -- the same posture
+        # build-llm-handler already established, above.
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: services/brain/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/brain:main
+            ghcr.io/${{ github.repository }}/brain:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-brain:
+    name: Deploy the Brain
+    needs: [changes, migrate-platform, build-brain]
+    if: >-
+      always() &&
+      needs.changes.outputs.brain == 'true' &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      needs.build-brain.result == 'success' &&
+      (needs.migrate-platform.result == 'success' || needs.migrate-platform.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
+    concurrency:
+      group: deploy-brain-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_BRAIN_DEPLOY_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/brain/"
+          domain: https://app.infisical.com
+      - name: Load the deploy SSH key
+        # Same gap and same fix as deploy-shell's/deploy-llm-handler's own
+        # "Load the deploy SSH key" step: Infisical/secrets-action never
+        # writes an SSH key file itself. A distinct key from either of
+        # theirs (ADR-05: one identity's leaked secret must not grant
+        # another identity's access), materialized at the same default
+        # path since each job runs on its own fresh, single-use runner.
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${BRAIN_DEPLOY_SSH_KEY:-}" ]; then
+            echo "::error::BRAIN_DEPLOY_SSH_KEY was not injected from Infisical (/brain/) -- cannot authenticate to the deploy host." >&2
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$BRAIN_DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+      - name: Join tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
+      - name: Deploy the Brain
+        # Same shape as deploy-llm-handler above; the one addition is the
+        # ADR-05 secrets-mount file (compose.yaml's own `secrets:` block,
+        # BRAIN_SECRET_FILE, isolation-check.mjs) -- rendered here,
+        # alongside .env, never baked into the image or committed.
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          IMAGE: ghcr.io/${{ github.repository }}/brain:sha-${{ github.sha }}
+          # Public project values (same convention Shell's and Handler A's
+          # own deploy jobs already use, above) -- never sourced from
+          # Infisical, which is reserved for values that are actually
+          # secret. Only SUPABASE_SERVICE_ROLE_KEY (truly secret) comes
+          # from this job's own /brain/ Infisical path, below.
+          SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          test -n "${BRAIN_ANTHROPIC_API_KEY:-}"
+          umask 077
+          {
+            printf 'BRAIN_IMAGE=%s\n' "$IMAGE"
+            printf 'BRAIN_SECRET_FILE=/run/secrets/anthropic-api-key\n'
+            [ -n "${SUPABASE_URL:-}" ] && printf 'SUPABASE_URL=%s\n' "$SUPABASE_URL"
+            [ -n "${SUPABASE_PUBLISHABLE_KEY:-}" ] && printf 'SUPABASE_PUBLISHABLE_KEY=%s\n' "$SUPABASE_PUBLISHABLE_KEY"
+            [ -n "${SUPABASE_SERVICE_ROLE_KEY:-}" ] && printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$SUPABASE_SERVICE_ROLE_KEY"
+            [ -n "${BRAIN_AGENT_TOKEN_PUBLIC_KEY:-}" ] && printf 'BRAIN_AGENT_TOKEN_PUBLIC_KEY=%s\n' "$BRAIN_AGENT_TOKEN_PUBLIC_KEY"
+            [ -n "${BRAIN_AGENT_TOKEN_ISSUER:-}" ] && printf 'BRAIN_AGENT_TOKEN_ISSUER=%s\n' "$BRAIN_AGENT_TOKEN_ISSUER"
+            [ -n "${BRAIN_AGENT_TOKEN_AUDIENCE:-}" ] && printf 'BRAIN_AGENT_TOKEN_AUDIENCE=%s\n' "$BRAIN_AGENT_TOKEN_AUDIENCE"
+            [ -n "${LIFEOS_API_BASE_URL:-}" ] && printf 'LIFEOS_API_BASE_URL=%s\n' "$LIFEOS_API_BASE_URL"
+            [ -n "${LIFEOS_AGENT_TOKEN:-}" ] && printf 'LIFEOS_AGENT_TOKEN=%s\n' "$LIFEOS_AGENT_TOKEN"
+          } > "$RUNNER_TEMP/.env.prod"
+          printf '%s' "$BRAIN_ANTHROPIC_API_KEY" > "$RUNNER_TEMP/anthropic-api-key"
+          docker pull --quiet "$IMAGE"
+          docker save "$IMAGE" | gzip | ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'gunzip | docker load'
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'mkdir -p brain'
+          scp "${ssh_options[@]}" services/brain/compose.yaml "deploy@$DEPLOY_HOST:brain/compose.yaml"
+          scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.prod" "deploy@$DEPLOY_HOST:brain/.env"
+          scp "${ssh_options[@]}" "$RUNNER_TEMP/anthropic-api-key" "deploy@$DEPLOY_HOST:brain/anthropic-api-key"
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            "cd brain && chmod 600 .env anthropic-api-key && BRAIN_IMAGE=$IMAGE docker compose up -d --wait && curl -fsS http://127.0.0.1:8100/healthz"
+      - name: Prune superseded Brain images (10-cicd-deployment.md section 8.3, keep newest 3)
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          IMAGE: ghcr.io/${{ github.repository }}/brain:sha-${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          scp "${ssh_options[@]}" docs/ops/prune-docker-images.sh "deploy@$DEPLOY_HOST:brain/prune-docker-images.sh"
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            "chmod 0755 brain/prune-docker-images.sh && brain/prune-docker-images.sh ghcr.io/${{ github.repository }}/brain '$IMAGE'"
