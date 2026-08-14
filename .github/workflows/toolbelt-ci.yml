@@ -121,7 +121,13 @@ jobs:
         run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/prompt-organizer/playwright.config.mjs
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:8812
-          PROMPT_E2E_MOCK: "1"
+          # Threads the real owner session into critical-flow.test.mjs (see
+          # that file's own "Owner-credential threading" header comment) the
+          # same way platform-contract.yml's verify job already does. A noop
+          # until the TOOLBELT_OWNER_TOKEN secret itself exists (m1-07) --
+          # this alone does not turn the job green, it just removes the one
+          # missing wire so it does the moment that secret is set.
+          TOOLBELT_OWNER_TOKEN: ${{ secrets.TOOLBELT_OWNER_TOKEN }}
       - name: Upload Prompt Organizer browser evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
