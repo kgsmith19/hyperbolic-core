@@ -173,6 +173,30 @@ export function getReviewFeed(start: string, end: string) {
   return api<ReviewFeed>(`/review?${query}`);
 }
 
+// LO-3d (m5-08): same hand-declared-type situation as ReviewFeed above --
+// no generated type for these two endpoints in this sandbox.
+export interface PlannedIntention {
+  intention_id: string;
+  title: string;
+  kind: string;
+  status: string;
+  focus: boolean;
+  floor: string | null;
+  next_action: string | null;
+  done: boolean;
+  created_at: string;
+}
+
+export const getIntentionsPlan = () =>
+  api<PlannedIntention[]>("/intentions/plan");
+
+export function markIntentionDone(id: string) {
+  return api<PlannedIntention>(`/intentions/${id}/done`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export type ChatCitations = {
   entity_ids: string[];
   event_ids: string[];

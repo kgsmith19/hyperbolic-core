@@ -68,6 +68,7 @@ from domains.documents.capture import guard_capture as guard_document_capture
 from domains.episodes.capture import guard_capture as guard_episode_capture
 from domains.health_connect.ingest import IngestResult, process_payload
 from domains.intentions.focus import guard_capture as guard_intention_capture
+from domains.intentions.planner import PlannedIntention, mark_done, plan_today
 from domains.ops.review import ReviewFeed, review_feed
 from kernel.access import AccessContext, ScopeError
 from kernel.env import read_env
@@ -604,3 +605,20 @@ def get_review(context: Ctx, start: date, end: date) -> ReviewFeed:
     Read-only, like every route above this line -- nothing here writes
     anything."""
     return review_feed(context, start, end)
+
+
+@app.get("/intentions/plan")
+def get_intentions_plan(context: Ctx) -> list[PlannedIntention]:
+    """LO-3d (m5-08): the day's plannable intentions, ordered by priority
+    (focus goals first, then creation/import order). Read-only."""
+    return plan_today(context)
+
+
+@app.post("/intentions/{intention_id}/done")
+def post_mark_intention_done(
+    intention_id: UUID, body: DecideIn, context: Ctx
+) -> PlannedIntention:
+    """LO-3d: marks one intention done. Appends a single `entity.updated`
+    event through capture()'s own identity-match merge; every prior
+    event, including the intention's own creation, is untouched."""
+    return mark_done(context, intention_id, actor=body.actor)

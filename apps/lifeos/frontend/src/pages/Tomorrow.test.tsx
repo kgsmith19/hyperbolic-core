@@ -2,12 +2,19 @@ import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import Tomorrow from "./Tomorrow";
-import { getEntity, searchEntities } from "../api/client";
-import { renderWithProviders } from "../test-utils";
+import {
+  getEntity,
+  getIntentionsPlan,
+  markIntentionDone,
+  searchEntities,
+} from "../api/client";
+import { renderWithProviders, setupUser } from "../test-utils";
 
 vi.mock("../api/client", () => ({
   searchEntities: vi.fn(),
   getEntity: vi.fn(),
+  getIntentionsPlan: vi.fn(),
+  markIntentionDone: vi.fn(),
 }));
 
 const APPOINTMENT_LATE = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -108,7 +115,14 @@ const FULL = {
 };
 
 describe("Tomorrow", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Every test in this file renders <Tomorrow/>, which always mounts
+    // <TodaysPlan/> regardless of briefing state -- an empty plan is the
+    // default so the pre-existing briefing-section tests below don't each
+    // need to know about m5-08's own data source.
+    vi.mocked(getIntentionsPlan).mockResolvedValue([]);
+  });
 
   it("leads with the focus intentions, floor and next action shown", async () => {
     mockBriefing(FULL);
@@ -278,5 +292,111 @@ describe("Tomorrow", () => {
         /appointment \(99999999\) is no longer available/i,
       ),
     ).toBeInTheDocument();
+  });
+
+  describe("Today's plan (m5-08)", () => {
+    const INTENTION_ID = "22222222-0000-0000-0000-000000000001";
+
+    it("renders the plan the backend already ordered, with focus and next-action shown", async () => {
+      mockBriefing(null);
+      vi.mocked(getIntentionsPlan).mockResolvedValue([
+        {
+          intention_id: INTENTION_ID,
+          title: "Ship the slice",
+          kind: "task",
+          status: "active",
+          focus: true,
+          floor: null,
+          next_action: "open the PR",
+          done: false,
+          created_at: "2026-07-29T06:00:00Z",
+        },
+      ]);
+      renderWithProviders(<Tomorrow />);
+
+      expect(await screen.findByText("Ship the slice")).toBeInTheDocument();
+      expect(screen.getByText("focus")).toBeInTheDocument();
+      expect(screen.getByText("open the PR")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /mark done/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("says plainly when there is nothing to plan", async () => {
+      mockBriefing(null);
+      renderWithProviders(<Tomorrow />);
+
+      expect(
+        await screen.findByText("No plannable intentions yet."),
+      ).toBeInTheDocument();
+    });
+
+    it("marking an item done calls the API and refreshes the list", async () => {
+      mockBriefing(null);
+      vi.mocked(getIntentionsPlan).mockResolvedValue([
+        {
+          intention_id: INTENTION_ID,
+          title: "Ship the slice",
+          kind: "task",
+          status: "active",
+          focus: false,
+          floor: null,
+          next_action: null,
+          done: false,
+          created_at: "2026-07-29T06:00:00Z",
+        },
+      ]);
+      vi.mocked(markIntentionDone).mockResolvedValue({
+        intention_id: INTENTION_ID,
+        title: "Ship the slice",
+        kind: "task",
+        status: "active",
+        focus: false,
+        floor: null,
+        next_action: null,
+        done: true,
+        created_at: "2026-07-29T06:00:00Z",
+      });
+      const user = setupUser();
+      renderWithProviders(<Tomorrow />);
+      await screen.findByText("Ship the slice");
+
+      await user.click(screen.getByRole("button", { name: /mark done/i }));
+
+      expect(markIntentionDone).toHaveBeenCalledWith(INTENTION_ID);
+      // A refetch after invalidation calls getIntentionsPlan a second time.
+      expect(getIntentionsPlan).toHaveBeenCalledTimes(2);
+    });
+
+    it("a done item shows no mark-done button and reads as done", async () => {
+      mockBriefing(null);
+      vi.mocked(getIntentionsPlan).mockResolvedValue([
+        {
+          intention_id: INTENTION_ID,
+          title: "Already finished",
+          kind: "task",
+          status: "active",
+          focus: false,
+          floor: null,
+          next_action: null,
+          done: true,
+          created_at: "2026-07-29T06:00:00Z",
+        },
+      ]);
+      renderWithProviders(<Tomorrow />);
+
+      expect(await screen.findByText("Already finished")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /mark done/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("surfaces a plan fetch error instead of hiding it", async () => {
+      mockBriefing(null);
+      vi.mocked(getIntentionsPlan).mockRejectedValue(new Error("plan unreachable"));
+      renderWithProviders(<Tomorrow />);
+
+      expect(await screen.findByText(/plan unreachable/i)).toBeInTheDocument();
+    });
   });
 });
