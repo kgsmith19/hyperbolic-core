@@ -43,7 +43,3 @@ data:
   security_boundary: row-level-security
   accepted_client_key: public-anon-key
   forbidden_client_key: service-role-key
-
-standard:
-  lock_file: standard.lock
-  mode: informational

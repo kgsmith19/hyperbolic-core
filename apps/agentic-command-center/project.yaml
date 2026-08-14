@@ -31,7 +31,3 @@ ci:
 
 work_tracking:
   system: github-issues
-
-standard:
-  repo: kgsmith19/agent-engineering-standard
-  lock_file: standard.lock

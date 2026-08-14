@@ -1,12 +1,6 @@
-# Repository facts. The shared standard reference is informational only.
+# Repository facts. The standard pin lives once, at the repo root.
 name: lifeos
 type: python-api-and-react-ui-monorepo
-
-standard:
-  repository: kgsmith19/agent-engineering-standard
-  commit: eb769955a895e8a3f2c985ab8d9ff675c4910d8e
-  mode: informational
-  lock_file: standard.lock
 
 commands:
   backend_setup: cd backend && python -m pip install -e .[dev]

@@ -68,7 +68,7 @@ The root has no browser client of its own to check (m3-09: the static idea-list 
   deterministic scanners, fix scripts, tests, and nested `AGENTS.md`.
 - `guards/` contains its own `README.md`.
 - `project.yaml` contains root commands and repository facts.
-- `standard.lock` is an informational reference only and does not impose policy.
+- The root `standard.lock` is an informational reference only and does not impose policy.
 
 ## Completion
 
