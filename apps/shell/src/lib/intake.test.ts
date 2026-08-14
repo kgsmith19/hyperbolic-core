@@ -29,7 +29,9 @@ vi.mock("@hyperbolic/platform-client", () => ({
     rejectTask: vi.fn(),
     streamRunEvents: vi.fn(),
     health: vi.fn(),
+    getCostSummary: vi.fn(),
   }),
+  createCostClient: () => ({ listLlmCalls: vi.fn() }),
 }));
 
 import {

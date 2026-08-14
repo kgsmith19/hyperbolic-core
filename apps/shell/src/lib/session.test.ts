@@ -53,7 +53,12 @@ vi.mock("@hyperbolic/platform-client", () => ({
     rejectTask: vi.fn(),
     streamRunEvents: vi.fn(),
     health: vi.fn(),
+    getCostSummary: vi.fn(),
   }),
+  // m6-02: session.ts's module-level `createCostClient(...)` call
+  // (costClient) resolves against this mock the same way. A trivial stub
+  // is enough here since this file only tests useShellSession.
+  createCostClient: () => ({ listLlmCalls: vi.fn() }),
 }));
 
 import { useShellSession } from "./session";

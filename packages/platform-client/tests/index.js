@@ -10,3 +10,5 @@
 // every test below, by loading them as a side effect.
 import "./platform-client.test.ts";
 import "./registry.test.ts";
+import "./brain.test.ts";
+import "./cost.test.ts";

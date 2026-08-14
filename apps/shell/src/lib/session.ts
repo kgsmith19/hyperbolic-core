@@ -13,10 +13,12 @@ import {
   createPlatformClient,
   createRegistryClient,
   createBrainClient,
+  createCostClient,
   type PlatformClient,
   type PlatformSession,
   type RegistryClient,
   type BrainClient,
+  type CostClient,
 } from "@hyperbolic/platform-client";
 
 // ADR-03: the toolbelt Supabase project (woltgcggxaehtuypkxqk) is the
@@ -74,6 +76,20 @@ export const brainClient: BrainClient = createBrainClient(BRAIN_BASE_URL, async 
   }
   return session.accessToken;
 });
+
+// m6-02: core.llm_call rides the SAME platform session as registryClient
+// above -- same PostgREST project, same fail-closed getAccessToken shape.
+export const costClient: CostClient = createCostClient(
+  SUPABASE_URL,
+  async () => {
+    const session = await platformClient.auth.getSession();
+    if (!session) {
+      throw new Error("cost-client: no active session, refusing to send request");
+    }
+    return session.accessToken;
+  },
+  SUPABASE_PUBLISHABLE_KEY,
+);
 
 declare global {
   interface Window {
