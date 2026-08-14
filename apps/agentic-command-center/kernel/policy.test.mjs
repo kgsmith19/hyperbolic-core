@@ -57,6 +57,53 @@ test("always-deny write roots cover the guards repo and the user .claude dir (AC
   assert.ok(roots.every((r) => r === r.toLowerCase() && !r.includes("\\")), "roots must be normalized");
 });
 
+// ALN-1 (05-g-guards.md section 3b, m5-09): the kernel's deny-write roots
+// union in Guards' own protected list, read as data -- never imported --
+// and the failure mode is no wider, never no guard.
+test("ALN-1: a guardsConfigPath union includes every Guards protected path, base and profile overlay both", () => {
+  const guardsDir = fs.mkdtempSync(path.join(os.tmpdir(), "acc-kernel-guards-"));
+  const profile = "policy-test-machine";
+  fs.writeFileSync(path.join(guardsDir, "config.json"), JSON.stringify({ enabled: true, secrets: [".env"] }));
+  fs.writeFileSync(
+    path.join(guardsDir, `config.${profile}.json`),
+    JSON.stringify({ protected: [path.join(guardsDir, "settings.json"), path.join(guardsDir, "vault.json")] }),
+  );
+  const savedProfile = process.env.GUARDS_PROFILE;
+  process.env.GUARDS_PROFILE = profile;
+  try {
+    writePolicy({ guardsConfigPath: path.join(guardsDir, "config.json") });
+    const roots = alwaysDenyWriteRoots();
+    const norm = (p) => path.resolve(p).replaceAll("\\", "/").toLowerCase();
+    assert.ok(roots.includes(norm(path.join(guardsDir, "settings.json"))));
+    assert.ok(roots.includes(norm(path.join(guardsDir, "vault.json"))));
+    // The base + repo/.claude roots are still present -- a union, not a
+    // replacement.
+    assert.ok(roots.includes(norm(path.join(os.homedir(), ".claude"))));
+  } finally {
+    if (savedProfile === undefined) delete process.env.GUARDS_PROFILE;
+    else process.env.GUARDS_PROFILE = savedProfile;
+  }
+});
+
+test("ALN-1: an unreadable guardsConfigPath leaves the built-in roots unchanged and never throws", () => {
+  writePolicy({ guardsConfigPath: path.join(BASE, "definitely-does-not-exist", "config.json") });
+  const roots = alwaysDenyWriteRoots();
+  const norm = (p) => path.resolve(p).replaceAll("\\", "/").toLowerCase();
+  // The built-in roots survive exactly as they would with no
+  // guardsConfigPath set at all -- "no wider", never "no guard".
+  assert.ok(roots.includes(norm(REAL_REPO_ROOT)));
+  assert.ok(roots.includes(norm(path.join(os.homedir(), ".claude"))));
+});
+
+test("ALN-1: a malformed (unparseable) guardsConfigPath also fails no-wider, not no-guard", () => {
+  const guardsDir = fs.mkdtempSync(path.join(os.tmpdir(), "acc-kernel-guards-"));
+  fs.writeFileSync(path.join(guardsDir, "config.json"), "{ not json");
+  writePolicy({ guardsConfigPath: path.join(guardsDir, "config.json") });
+  const roots = alwaysDenyWriteRoots();
+  const norm = (p) => path.resolve(p).replaceAll("\\", "/").toLowerCase();
+  assert.ok(roots.includes(norm(path.join(os.homedir(), ".claude"))));
+});
+
 test("kernelRoot honors ACC_ROOT so tests never touch live state", () => {
   assert.equal(kernelRoot(), path.resolve(process.env.ACC_ROOT));
 });
