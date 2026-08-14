@@ -13,7 +13,7 @@
 // wiring. This is the narrow version: one session, the one actually used.
 import { appendFile } from "node:fs/promises";
 import { ANON_KEY, SUPABASE_URL } from "./helpers.mjs";
-import { resolveOwnerAccessToken, verifyOwnerAccessToken } from "./owner-session.mjs";
+import { resolveOwnerAccessToken } from "./owner-session.mjs";
 
 const environmentFile = process.env.GITHUB_ENV;
 if (!environmentFile) throw new Error("GITHUB_ENV is required");
@@ -34,6 +34,37 @@ const ownerToken = await resolveOwnerAccessToken({
 // unrelated-looking "element(s) not found" three assertions into the journey
 // (which is what a fixture-login fallback produces once prompt.* RLS is pinned
 // to the real owner).
-await verifyOwnerAccessToken({ token: ownerToken, supabaseUrl: SUPABASE_URL, anonKey: ANON_KEY });
+//
+// Deliberately NOT owner-session.mjs's verifyOwnerAccessToken(): that function
+// posts to a `platform_owner_subject` RPC which does not exist in the platform
+// project and is defined by no migration in this repository -- it returns 404,
+// so the helper can never succeed against the real database. Its unit tests
+// pass only because they stub fetch and assert against that same invented URL.
+// core.is_platform_owner() is the function that actually exists, is already
+// granted to `authenticated`, and answers precisely this question:
+//   select (select auth.uid()) = (select platform.owner())
+const preflight = await fetch(`${SUPABASE_URL}/rest/v1/rpc/is_platform_owner`, {
+  method: "POST",
+  headers: {
+    apikey: ANON_KEY,
+    Authorization: `Bearer ${ownerToken}`,
+    "Content-Type": "application/json",
+    // core is not the default exposed schema; same header convention
+    // services/llm-handler's core.log_llm_call caller already uses.
+    "Content-Profile": "core",
+  },
+  body: "{}",
+});
+if (!preflight.ok) {
+  // Status only, never the body: a failed auth response can echo credential
+  // detail, and this runs in a public-by-default CI log.
+  throw new Error(`owner identity preflight failed: ${preflight.status}`);
+}
+if ((await preflight.json()) !== true) {
+  throw new Error(
+    "the configured owner credential authenticated successfully but is not platform.owner() -- " +
+      "check that TOOLBELT_OWNER_REFRESH_TOKEN belongs to the user pinned in platform.config",
+  );
+}
 
 await appendFile(environmentFile, `TOOLBELT_OWNER_TOKEN=${ownerToken}\n`, { mode: 0o600 });
