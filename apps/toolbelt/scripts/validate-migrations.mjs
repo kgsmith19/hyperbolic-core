@@ -35,9 +35,6 @@ export function discoverMigrationDirs(toolbeltRoot = TOOLBELT_ROOT) {
 
   for (const manifestPath of manifestPaths) {
     const realManifest = realpathSync(manifestPath);
-    if (!inside(realRoot, realManifest)) {
-      throw new Error(`${manifestPath}: manifest escapes the toolbelt root`);
-    }
     let manifest;
     try { manifest = JSON.parse(readFileSync(realManifest, "utf8")); }
     catch (error) { throw new Error(`${manifestPath}: cannot parse tool manifest (${error.message})`); }
@@ -46,7 +43,18 @@ export function discoverMigrationDirs(toolbeltRoot = TOOLBELT_ROOT) {
     }
 
     const isRoot = resolve(manifestPath) === rootManifest;
+    // A schema-less manifest (services/<id>/tool.json's own documented
+    // ownership.path exception, tool.schema.json; 08-llm-handlers.md
+    // forced decision 7) has no migrations of its own to discover and is
+    // NEVER expected to live inside the toolbelt root -- that is the whole
+    // point of the exception -- so it must be skipped before the
+    // toolbelt-root containment check below, not after: this check only
+    // protects the shared ledger's migration-directory discovery, which a
+    // schema-less manifest never participates in.
     if (!isRoot && manifest.schemas.length === 0) continue;
+    if (!inside(realRoot, realManifest)) {
+      throw new Error(`${manifestPath}: manifest escapes the toolbelt root`);
+    }
     const migrationDir = resolve(dirname(manifestPath), "supabase", "migrations");
     let realMigrationDir;
     try { realMigrationDir = realpathSync(migrationDir); }

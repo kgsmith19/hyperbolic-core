@@ -1,0 +1,38 @@
+{
+  "id": "llm-handler",
+  "name": "Handler A",
+  "kind": "headless",
+  "version": "0.1.0",
+  "description": "The general-purpose LLM handler (08-llm-handlers.md forced decisions 5/7): wraps packages/llm with the general-purpose provider keys, an HTTP surface (/v1/complete, /v1/stream, /v1/count), and core.llm_call logging. Holds no Brain key and cannot read /brain/ secrets (ADR-05).",
+  "ownership": {
+    "owner": "kylegsmith19@gmail.com",
+    "path": "services/llm-handler"
+  },
+  "entry": {
+    "headless": {
+      "command": "node src/index.ts"
+    }
+  },
+  "schemas": [],
+  "permissions": {
+    "db": {
+      "read": [
+        "core"
+      ],
+      "write": []
+    },
+    "networkEgress": [
+      "api.anthropic.com",
+      "api.openai.com",
+      "generativelanguage.googleapis.com"
+    ],
+    "llmHandler": {
+      "access": false
+    }
+  },
+  "lifecycle": {
+    "migrate": "gh workflow run platform-migrations.yml",
+    "health": "node --test \"tests/*.test.ts\"",
+    "register": "20260814150000_register_llm-handler.sql"
+  }
+}

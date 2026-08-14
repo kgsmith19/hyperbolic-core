@@ -1,13 +1,14 @@
 // Handler A's HTTP surface. Raw node:http, no framework -- matching this
 // repo's own precedent for a small, security-relevant loopback service
 // (apps/agentic-command-center/gui/server.mjs), and 08-llm-handlers.md's
-// "small deployed service" framing. Only /healthz and
-// POST /api/intake/submit exist today; /v1/complete, /v1/stream, /v1/count
-// (08 section 5) are added when m4-05 actually lands.
+// "small deployed service" framing. /healthz, POST /api/intake/submit
+// (m3-06), and /v1/complete, /v1/stream, /v1/count (08 section 5, m4-05).
 
 import http from "node:http";
 import { extractBearerToken, verifyOwnerSession } from "./auth.ts";
+import { ConcurrencyGate } from "./concurrency.ts";
 import { submitIdea, type SubmitDeps } from "./intake-submit.ts";
+import { llmRoutes } from "./llm-routes.ts";
 import type { HandlerConfig } from "./types.ts";
 
 const BODY_CAP = 16 * 1024;
@@ -101,7 +102,27 @@ async function handleIntakeSubmit(
   }
 }
 
+/** Shared ADR-03 gate for every /v1/* route: reuses m3-06's
+ * extractBearerToken/verifyOwnerSession unchanged (see llm-routes.ts's own
+ * header comment on why this is owner-only today). Returns true on a
+ * verified owner session, or sends the 401 itself and returns false. */
+async function requireOwnerSession(req: http.IncomingMessage, res: http.ServerResponse, config: HandlerConfig): Promise<boolean> {
+  const bearerToken = extractBearerToken(req.headers.authorization);
+  if (!bearerToken) {
+    send(res, 401, { error: "missing or malformed Authorization header" });
+    return false;
+  }
+  const isOwner = await verifyOwnerSession(config.supabaseUrl, config.supabasePublishableKey, bearerToken);
+  if (!isOwner) {
+    send(res, 401, { error: "not an active platform owner session" });
+    return false;
+  }
+  return true;
+}
+
 export function createHandler(config: HandlerConfig, serviceRoleKey: string) {
+  const llmConcurrencyGate = new ConcurrencyGate(config.llmMaxConcurrencyPerCaller);
+
   return function handler(req: http.IncomingMessage, res: http.ServerResponse): void {
     const route = (req.url ?? "/").split("?")[0];
 
@@ -124,6 +145,33 @@ export function createHandler(config: HandlerConfig, serviceRoleKey: string) {
       handleIntakeSubmit(req, res, config, serviceRoleKey).catch((err: unknown) => {
         send(res, 500, { error: err instanceof Error ? err.message : "internal error" });
       });
+      return;
+    }
+
+    if (route === "/v1/complete" && req.method === "POST") {
+      requireOwnerSession(req, res, config)
+        .then(async (ok) => {
+          if (ok) await llmRoutes.handleComplete(req, res, config, llmConcurrencyGate);
+        })
+        .catch((err: unknown) => send(res, 500, { error: err instanceof Error ? err.message : "internal error" }));
+      return;
+    }
+
+    if (route === "/v1/stream" && req.method === "POST") {
+      requireOwnerSession(req, res, config)
+        .then(async (ok) => {
+          if (ok) await llmRoutes.handleStream(req, res, config, llmConcurrencyGate);
+        })
+        .catch((err: unknown) => send(res, 500, { error: err instanceof Error ? err.message : "internal error" }));
+      return;
+    }
+
+    if (route === "/v1/count" && req.method === "POST") {
+      requireOwnerSession(req, res, config)
+        .then(async (ok) => {
+          if (ok) await llmRoutes.handleCount(req, res);
+        })
+        .catch((err: unknown) => send(res, 500, { error: err instanceof Error ? err.message : "internal error" }));
       return;
     }
 
