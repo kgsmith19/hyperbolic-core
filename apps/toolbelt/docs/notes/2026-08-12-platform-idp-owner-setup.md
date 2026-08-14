@@ -38,16 +38,43 @@ sufficient. Do this before merging m1-08, not after.
    Until this row exists, `platform.owner()` returns null and every
    owner-pinned policy evaluates false (fail closed) — this is deliberate,
    not a bug to troubleshoot.
-3. **Mint a long-lived access token for CI.** Exchange the owner's
-   credentials for a session once (e.g. the same `/auth/v1/token?grant_type=password`
-   flow `apps/toolbelt/tests/helpers.mjs` uses for fixtures), then store the
-   resulting **access token** (not the password) as a GitHub Actions
-   repository secret named `TOOLBELT_OWNER_TOKEN`. Access tokens expire; plan
-   to re-mint and rotate this periodically until the ADR-05 Infisical
+3. **Mint an owner session for CI.** Exchange the owner's credentials for a
+   session once, then store the resulting tokens as GitHub Actions
+   **repository secrets** (the Secrets tab, never the Variables tab — a
+   repository variable is stored in plaintext and shown in the UI):
+
+   - `TOOLBELT_OWNER_REFRESH_TOKEN` — the `refresh_token`. **This is the only
+     one CI reads.** It is long-lived, and it is exchanged for a fresh access
+     token at job start: `toolbelt-ci.yml` via
+     `tests/export-owner-session.mjs`, `platform-contract.yml` via
+     `tests/export-test-sessions.mjs`. Set this and CI stops needing
+     attention.
+   - `TOOLBELT_OWNER_TOKEN` — the `access_token`. **Do not set this.**
+     `toolbelt-ci.yml` no longer passes it, deliberately. A stored access
+     token expires in about an hour, and `resolveOwnerAccessToken()` returns a
+     supplied one verbatim without validating it, so configuring both made the
+     stale snapshot win and the refresh exchange never run. That produced a
+     step that passed at 18:33 and failed at 19:04 on an identical commit. It
+     remains accepted by `tests/owner-session.mjs` only for a caller that has
+     no refresh token at all.
+
+   Two ways to get a session, neither of which stores a password anywhere:
+   the `/auth/v1/token?grant_type=password` flow `apps/toolbelt/tests/helpers.mjs`
+   uses for fixtures, or a magic link sent from the Auth → Users panel, whose
+   redirect lands with `#access_token=...&refresh_token=...` in the URL
+   fragment (the landing page 404ing is fine; the tokens are in the address
+   bar regardless). Both are stopgaps until the ADR-05 Infisical
    machine-identity path takes over (`docs/planning/06-supabase-schema.md`
    gate question 2 — GitHub secret first, Infisical later, deliberately).
-   Never put the password or the token in a commit, a command's argv, or a
+   Never put the password or either token in a commit, a command's argv, or a
    log line.
+
+   To confirm the plumbing without reading a token: a correctly-set secret
+   prints as `TOOLBELT_OWNER_TOKEN: ***` in the job's env block, while an
+   unset or misplaced one prints blank. `export-test-sessions.mjs` also runs
+   `verifyOwnerAccessToken()`, which fails the step outright if the resolved
+   session is not `platform.owner()` — so a wrong credential is reported as
+   itself rather than as a downstream test failure.
 4. **Confirm sign-ups are actually refused**:
    ```bash
    curl -s -X POST "https://woltgcggxaehtuypkxqk.supabase.co/auth/v1/signup" \
