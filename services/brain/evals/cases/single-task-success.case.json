@@ -1,0 +1,40 @@
+{
+  "case_id": "single-task-success",
+  "description": "m6-01 seed case 2/5 (07 section 7.11): the generic happy path -- one task, one commit-type deliverable, harness accepts and the real acceptance verify passes. Distinguished from plan-only by deliverable.type. Dispatched through the REAL pipeline against src/adapters/fixture.ts's ScriptedFixtureAdapter; the [[fixture:accepted]] marker scripts only the harness-level outcome, the acceptance[].verify command below runs for real against the real worktree.",
+  "contract": {
+    "task_id": "00000000-0000-0000-0000-000000000003",
+    "run_id": "00000000-0000-0000-0000-000000000004",
+    "title": "m6-01 seed: single-task success [[fixture:accepted]]",
+    "repo": { "url": "https://github.com/kgsmith19/hyperbolic-core", "ref": "main" },
+    "harness": { "preferred": "claude-code", "fallback": [] },
+    "autonomy": 1,
+    "prompt": {
+      "objective": "Complete one self-contained task end to end.",
+      "context_refs": [],
+      "prompt_org_refs": []
+    },
+    "constraints": {
+      "allowed_paths": ["**"],
+      "denied_paths": [],
+      "vault_keys": [],
+      "max_turns": 1,
+      "wall_clock_min": 5,
+      "token_budget": 1000,
+      "network": "none"
+    },
+    "acceptance": [
+      {
+        "id": "AC-passes",
+        "statement": "The task's real acceptance check passes.",
+        "verify": { "command": "true", "cwd": "worktree", "expect_exit": 0, "timeout_s": 10 }
+      }
+    ],
+    "deliverable": { "type": "commit", "branch": "brain/eval-single-task-success", "push": false, "draft_pr": false }
+  },
+  "fixture": { "repo_tar": null, "git_ref": "main" },
+  "expected": {
+    "status": "succeeded",
+    "verdicts": [{ "id": "AC-passes", "pass": true }],
+    "max_cost_usd": null
+  }
+}

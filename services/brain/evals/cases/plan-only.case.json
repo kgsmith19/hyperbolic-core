@@ -1,0 +1,40 @@
+{
+  "case_id": "plan-only",
+  "description": "m6-01 seed case 1/5 (07 section 7.11): the plan-only shape -- a single task whose harness accepts and whose deliverable is a report, no code changes. Dispatched through the REAL pipeline (createDispatchFn) against src/adapters/fixture.ts's ScriptedFixtureAdapter, never a real credentialed harness -- PR-gate CI has no production secrets (10-cicd-deployment.md section 6). The adapter's [[fixture:accepted]] title marker scripts only the harness-level outcome; this case's own acceptance[].verify command still runs for real against the real worktree (verify.ts), so acceptance checking stays unmocked.",
+  "contract": {
+    "task_id": "00000000-0000-0000-0000-000000000001",
+    "run_id": "00000000-0000-0000-0000-000000000002",
+    "title": "m6-01 seed: plan-only [[fixture:accepted]]",
+    "repo": { "url": "https://github.com/kgsmith19/hyperbolic-core", "ref": "main" },
+    "harness": { "preferred": "claude-code", "fallback": [] },
+    "autonomy": 1,
+    "prompt": {
+      "objective": "Produce a plan-only report; no code changes expected.",
+      "context_refs": [],
+      "prompt_org_refs": []
+    },
+    "constraints": {
+      "allowed_paths": ["**"],
+      "denied_paths": [],
+      "vault_keys": [],
+      "max_turns": 1,
+      "wall_clock_min": 5,
+      "token_budget": 1000,
+      "network": "none"
+    },
+    "acceptance": [
+      {
+        "id": "AC-worktree-exists",
+        "statement": "The task's git worktree still exists after the fixture harness returns.",
+        "verify": { "command": "true", "cwd": "worktree", "expect_exit": 0, "timeout_s": 10 }
+      }
+    ],
+    "deliverable": { "type": "report", "branch": "brain/eval-plan-only", "push": false, "draft_pr": false }
+  },
+  "fixture": { "repo_tar": null, "git_ref": "main" },
+  "expected": {
+    "status": "succeeded",
+    "verdicts": [{ "id": "AC-worktree-exists", "pass": true }],
+    "max_cost_usd": null
+  }
+}

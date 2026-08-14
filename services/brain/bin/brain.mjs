@@ -31,8 +31,7 @@ import {
   evalCaptureVerb,
 } from "../src/cli/verbs.ts";
 import { emit } from "../src/cli/result.ts";
-import { ClaudeCodeAdapter } from "../src/adapters/claude-code.ts";
-import { codexAdapter, geminiAdapter } from "../src/adapters/stub.ts";
+import { createEvalFixtureAdapters } from "../src/adapters/fixture.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -266,17 +265,19 @@ function refreshContextCommand() {
   return result.exitCode;
 }
 
-function evalAdapters(config) {
-  return {
-    "claude-code": new ClaudeCodeAdapter({
-      kernelRunPath: config.kernelRunPath,
-      accRoot: config.accRoot,
-      accPolicy: config.accPolicy,
-      accVault: config.accVault,
-    }),
-    codex: codexAdapter,
-    gemini: geminiAdapter,
-  };
+// m6-01: `brain eval run`/`eval capture` re-dispatch each case through the
+// REAL dispatch pipeline (evals.ts's runEvalCase -> createDispatchFn), and
+// brain-ci.yml runs this as a PR-gate step on every push touching
+// services/brain/** -- a runner with zero production secrets
+// (10-cicd-deployment.md section 6). A real ClaudeCodeAdapter here would
+// need a live Anthropic credential this environment deliberately never
+// has, so the eval CLI path gets its own deterministic, credential-free
+// fixture adapters (src/adapters/fixture.ts) instead of the real
+// ClaudeCodeAdapter/codex/gemini wiring -- scoped to this one function
+// only; `brain run`'s own production dispatch (src/index.ts) never
+// imports fixture.ts and is unaffected by this.
+function evalAdapters() {
+  return createEvalFixtureAdapters();
 }
 
 async function evalCommand(rest) {
@@ -287,7 +288,7 @@ async function evalCommand(rest) {
     const store = new BrainStore(config.dbPath);
     const journal = new RunJournal(config.dataDir);
     try {
-      const result = await evalRunVerb(store, journal, { adapters: evalAdapters(config), workspacesRoot: config.workspacesRoot }, config.evalsCasesDir);
+      const result = await evalRunVerb(store, journal, { adapters: evalAdapters(), workspacesRoot: config.workspacesRoot }, config.evalsCasesDir);
       emit(result, jsonMode);
       return result.exitCode;
     } finally {

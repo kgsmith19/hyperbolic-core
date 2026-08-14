@@ -1,0 +1,39 @@
+{
+  "case_id": "approval-park",
+  "description": "m6-01 seed case 4/5 (07 section 7.11) -- KNOWN APPROXIMATION, documented not hidden: runEvalCase calls createDispatchFn's dispatch() directly, bypassing the scheduler entirely, and approval-gating (approval-gate.ts) only runs inside the scheduler. There is no dispatch-level way to produce a genuinely awaiting-approval session, and brain.eval-case.v1's own expected.status enum (succeeded/failed/timeout/cancelled/interrupted) has no approval-pending value to assert against even if there were. This case approximates 'a task that stops short of completing because a human-relevant ceiling was hit' with the closest real terminal status the pipeline can produce: [[fixture:aborted-by-budget]], which result-mapper.ts's statusFor() maps directly to status:'timeout' before any verification runs. It is not a literal test of the approval-park autonomy gate (m4-12 owns that behavior and is covered by its own unit tests) -- only a placeholder in the named 5-case corpus per 07 section 7.11, kept honest about what it does and does not prove.",
+  "contract": {
+    "task_id": "00000000-0000-0000-0000-000000000007",
+    "run_id": "00000000-0000-0000-0000-000000000008",
+    "title": "m6-01 seed: approval-park (approximated) [[fixture:aborted-by-budget]]",
+    "repo": { "url": "https://github.com/kgsmith19/hyperbolic-core", "ref": "main" },
+    "harness": { "preferred": "claude-code", "fallback": [] },
+    "autonomy": 1,
+    "prompt": {
+      "objective": "Approximate a task that stops short of completing pending a human-relevant ceiling.",
+      "context_refs": [],
+      "prompt_org_refs": []
+    },
+    "constraints": {
+      "allowed_paths": ["**"],
+      "denied_paths": [],
+      "vault_keys": [],
+      "max_turns": 1,
+      "wall_clock_min": 5,
+      "token_budget": 1000,
+      "network": "none"
+    },
+    "acceptance": [
+      {
+        "id": "AC-unreached",
+        "statement": "Never actually run: dispatch.ts only verifies an accepted/rejected session, and aborted-by-budget resolves to a terminal status before verification.",
+        "verify": { "command": "true", "cwd": "worktree", "expect_exit": 0, "timeout_s": 10 }
+      }
+    ],
+    "deliverable": { "type": "commit", "branch": "brain/eval-approval-park", "push": false, "draft_pr": false }
+  },
+  "fixture": { "repo_tar": null, "git_ref": "main" },
+  "expected": {
+    "status": "timeout",
+    "max_cost_usd": null
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "case_id": "transport-retry",
+  "description": "m6-01 seed case 5/5 (07 section 7.11): exercises the REAL retry-then-fallback logic in dispatch.ts/router.ts, not a mock of it. harness.preferred is 'codex' -- src/adapters/fixture.ts wires the eval CLI's codex slot to a fixed always-transport-failure instance (raw.error matches result-mapper.ts's TRANSPORT_SIGNAL_RE) -- so dispatch.ts calls adapter.start() twice (MAX_ATTEMPTS_PER_HARNESS), both transport-classified, then falls back to the first probe-passing entry in harness.fallback: 'gemini', wired to a fixed always-accepted instance. Three real adapter.start() calls total (codex x2, gemini x1); the case's own acceptance[].verify then runs for real against the real worktree once the fallback succeeds.",
+  "contract": {
+    "task_id": "00000000-0000-0000-0000-000000000009",
+    "run_id": "00000000-0000-0000-0000-000000000010",
+    "title": "m6-01 seed: transport-retry",
+    "repo": { "url": "https://github.com/kgsmith19/hyperbolic-core", "ref": "main" },
+    "harness": { "preferred": "codex", "fallback": ["gemini"] },
+    "autonomy": 1,
+    "prompt": {
+      "objective": "Exercise two consecutive transport failures on the preferred harness followed by a successful fallback.",
+      "context_refs": [],
+      "prompt_org_refs": []
+    },
+    "constraints": {
+      "allowed_paths": ["**"],
+      "denied_paths": [],
+      "vault_keys": [],
+      "max_turns": 1,
+      "wall_clock_min": 5,
+      "token_budget": 1000,
+      "network": "none"
+    },
+    "acceptance": [
+      {
+        "id": "AC-fallback-succeeds",
+        "statement": "The fallback harness's real acceptance check passes.",
+        "verify": { "command": "true", "cwd": "worktree", "expect_exit": 0, "timeout_s": 10 }
+      }
+    ],
+    "deliverable": { "type": "commit", "branch": "brain/eval-transport-retry", "push": false, "draft_pr": false }
+  },
+  "fixture": { "repo_tar": null, "git_ref": "main" },
+  "expected": {
+    "status": "succeeded",
+    "verdicts": [{ "id": "AC-fallback-succeeds", "pass": true }],
+    "max_cost_usd": null
+  }
+}
