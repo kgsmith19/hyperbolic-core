@@ -18,13 +18,24 @@ import { resolveOwnerAccessToken } from "./owner-session.mjs";
 const environmentFile = process.env.GITHUB_ENV;
 if (!environmentFile) throw new Error("GITHUB_ENV is required");
 
-// Prefers a supplied access token, otherwise exchanges the long-lived refresh
-// token for a fresh one. Minting at job start is the point: a hand-pasted
-// access token expires in about an hour, and its expiry is indistinguishable
-// from never having set it at all.
+// Prefer the REFRESH token whenever one is configured; pass the stored access
+// token only as a fallback for a deploy that has not provisioned a refresh one.
+//
+// This ordering is load-bearing, and getting it backwards is not hypothetical.
+// resolveOwnerAccessToken() returns a supplied access token VERBATIM, without
+// validating it -- so handing it both credentials means the stored snapshot
+// always wins and the refresh exchange never runs. That snapshot expires in
+// about an hour. This step passed at 18:33 and failed at 19:04 with a 401 on
+// the identical commit for exactly that reason: the stored access token aged
+// out between two runs while a perfectly good refresh token sat unused.
+//
+// Minting from the refresh token at job start is the entire point of this
+// step. A stored access token is a photograph of a session; the refresh token
+// is the session.
+const refreshToken = process.env.TOOLBELT_OWNER_REFRESH_TOKEN?.trim();
 const ownerToken = await resolveOwnerAccessToken({
-  accessToken: process.env.TOOLBELT_OWNER_TOKEN,
-  refreshToken: process.env.TOOLBELT_OWNER_REFRESH_TOKEN,
+  accessToken: refreshToken ? undefined : process.env.TOOLBELT_OWNER_TOKEN,
+  refreshToken,
   supabaseUrl: SUPABASE_URL,
   anonKey: ANON_KEY,
 });
