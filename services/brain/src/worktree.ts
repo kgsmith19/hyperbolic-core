@@ -81,6 +81,16 @@ export async function createWorktree(params: CreateWorktreeParams): Promise<stri
   const bare = bareRepoPath(params.workspacesRoot, params.repoUrl);
   const wtPath = worktreePath(params.workspacesRoot, params.repoUrl, params.taskId);
 
+  // The Dockerfile pre-creates /workspaces (config.ts's own default) as a
+  // VOLUME for the real production container, but nothing guarantees it
+  // exists for every caller -- a bare CI runner in particular has no such
+  // directory. store.ts/journal.ts already mkdirSync their own directory
+  // before first use for exactly this reason; withRepoLock's own
+  // mkdirSync(lockDir) below needs workspacesRoot itself to already exist
+  // (a non-recursive mkdir fails on a missing parent), so this has to run
+  // first, not be left to whichever caller happens to remember it.
+  mkdirSync(params.workspacesRoot, { recursive: true });
+
   await withRepoLock(bare, async () => {
     if (!existsSync(bare)) {
       await exec(["clone", "--bare", params.repoUrl, bare], params.workspacesRoot);

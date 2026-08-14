@@ -42,8 +42,12 @@ jobs:
       - name: "Eval corpus (m6-01, 07 section 7.11): brain eval run over services/brain/evals/cases/*.case.json"
         working-directory: services/brain
         env:
-          # Scratch state, never the production /data volume -- same
-          # env var brain-ci.yml's own eval step uses, for the same
-          # throwaway-store reason.
+          # Scratch state, never the production /data or /workspaces
+          # volumes -- same env vars brain-ci.yml's own eval step uses,
+          # for the same throwaway-store reason. worktree.ts's own
+          # createWorktree() now mkdirSync(..., {recursive:true})'s
+          # workspacesRoot itself, so this only needs to name a path,
+          # not pre-create it.
           BRAIN_DATA_DIR: ${{ runner.temp }}/brain-eval-nightly-data
+          BRAIN_WORKSPACES_ROOT: ${{ runner.temp }}/brain-eval-nightly-workspaces
         run: node bin/brain.mjs eval run --json
