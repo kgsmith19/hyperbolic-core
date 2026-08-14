@@ -28,6 +28,19 @@ export type {
   ToolStatus,
 } from "./registry.ts";
 
+export { createBrainClient, SseLineParser } from "./brain.ts";
+export type {
+  BrainClient,
+  BrainRun,
+  BrainTask,
+  CreateRunParams,
+  CreateRunResult,
+  TaskActionResult,
+  BrainEvent,
+  StreamRunEventsOptions,
+  ParsedSseEvent,
+} from "./brain.ts";
+
 function toPlatformSession(session: Session | null): PlatformSession | null {
   if (!session) {
     return null;

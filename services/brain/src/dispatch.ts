@@ -16,8 +16,9 @@ import type { Task, InvocationStatus } from "./types.ts";
 import type { TaskContractV1 } from "./contracts.ts";
 import type { AdapterInvocation, HarnessAdapter, HarnessSession } from "./adapters/types.ts";
 import { selectInitialAdapter, selectFallbackAdapter, type AdapterRegistry } from "./router.ts";
-import { classifySession, classifyThrown, mapSessionToResult, type FailureClass } from "./result-mapper.ts";
+import { classifySession, classifyThrown, extractRawVerdicts, mapSessionToResult, type FailureClass, type Verification } from "./result-mapper.ts";
 import { createWorktree, removeWorktree } from "./worktree.ts";
+import { isWorktreeCleanOrCommitted, runVerification } from "./verify.ts";
 
 export interface DispatchDeps {
   adapters: AdapterRegistry;
@@ -131,6 +132,28 @@ export function createDispatchFn(store: BrainStore, deps: DispatchDeps) {
       }
     }
 
+    // m4-11 / BR-2: verification is never delegated to the harness that
+    // did the work. `orphaned` (unknown final state) and `aborted-by-
+    // budget`/`failed-to-start`/`refused` (the harness never finished, or
+    // never ran at all) have nothing meaningful to verify -- only a
+    // session that reached `accepted`/`rejected` (the kernel's own
+    // independent verifyAll() already ran) gets the Brain's own check.
+    // MUST run before removeWorktree() below: the worktree-clean check
+    // needs the worktree to still exist.
+    let verification: Verification | undefined;
+    if (session!.outcome === "accepted" || session!.outcome === "rejected") {
+      const existing = extractRawVerdicts(session!);
+      // Trust the kernel's own already-independent verifyAll() report
+      // when it produced one (the normal claude-code path always does,
+      // since kernel-contract.ts guarantees >=1 acceptanceCriteria); only
+      // fall back to running the commands ourselves when nothing did --
+      // BR-2's "never silently dropped" backstop, not routine duplicate
+      // work.
+      const verdicts = existing.length > 0 ? existing : await runVerification(contract, worktreePath);
+      const worktreeClean = await isWorktreeCleanOrCommitted(worktreePath);
+      verification = { verdicts, worktreeClean };
+    }
+
     const durationS = (Date.now() - startedAtMs) / 1000;
     const result = mapSessionToResult(session!, {
       taskId: task.id,
@@ -142,6 +165,7 @@ export function createDispatchFn(store: BrainStore, deps: DispatchDeps) {
       // this is a stable, greppable pointer in the meantime, not a
       // resolved path.
       ledgerRef: session!.sessionId ? `kernel-session:${session!.sessionId}` : "unknown",
+      verification,
     });
 
     const now = new Date().toISOString();

@@ -49,11 +49,37 @@ test("brain run --dry-run <objective>: exits 0, prints one contract, journals a 
   }
 });
 
-test("brain run (no --dry-run): refuses with exit 2, writes nothing", () => {
-  const { env } = tmpEnv();
+// m4-13: real (non-dry-run) submission is now implemented, running the
+// m4-12 approval decision inline since there's no live daemon connection
+// for the CLI to consult yet (m4-14's job).
+
+test("brain run (no --dry-run) at the default autonomy (0, A0 plan): parks awaiting approval, exit 4", () => {
+  const { env, dbPath } = tmpEnv();
   const res = runCli(["run", "add a health endpoint"], env);
-  assert.equal(res.status, 2);
-  assert.match(res.stderr, /--dry-run/);
+  assert.equal(res.status, 4);
+
+  const store = new BrainStore(dbPath);
+  try {
+    assert.equal(store.listPendingApprovals().length, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("brain run --autonomy 2 (no --dry-run): submits for real, exit 0, task left pending for a live daemon to dispatch", () => {
+  const { env, dbPath } = tmpEnv();
+  const res = runCli(["run", "--autonomy", "2", "add a health endpoint"], env);
+  assert.equal(res.status, 0, res.stderr);
+
+  const store = new BrainStore(dbPath);
+  try {
+    const runs = store.listRuns();
+    assert.equal(runs.length, 1);
+    const [task] = store.listTasksForRun(runs[0].id);
+    assert.equal(task?.status, "pending");
+  } finally {
+    store.close();
+  }
 });
 
 test("brain run --dry-run --contract <valid fixture>: exits 0 and journals the fixture's own run/task ids", () => {

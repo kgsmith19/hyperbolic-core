@@ -18,6 +18,14 @@ const { auth } = vi.hoisted(() => ({
 vi.mock("@hyperbolic/platform-client", () => ({
   createPlatformClient: () => ({ auth, fetch: vi.fn() }),
   createRegistryClient: () => ({ listTools: vi.fn(), getTool: vi.fn() }),
+  createBrainClient: () => ({
+    createRun: vi.fn(),
+    getRun: vi.fn(),
+    approveTask: vi.fn(),
+    rejectTask: vi.fn(),
+    streamRunEvents: vi.fn(),
+    health: vi.fn(),
+  }),
 }));
 
 import {

@@ -72,8 +72,22 @@
 -- one-time dedup delete in 20260807041000 established exactly this pattern
 -- for prompt.prompt alone (no trigger side effect there); this is its
 -- two-table extension.
+--
+-- NULL-OWNER GUARD (same fix, same reason, as 20260813130000's own header
+-- comment): the INSERT below put platform.owner() into a NOT NULL column
+-- value rather than an RLS comparison, which fails outright on any fresh
+-- replay with no owner configured yet -- including platform-migrations.yml's
+-- own CI drift-check container, on every run since this migration was
+-- introduced. Wrapped so that replay is a clean no-op; the real production
+-- database already has its owner row (m1-07).
 alter table prompt.prompt no force row level security;
 alter table prompt.prompt_version no force row level security;
+
+do $$
+begin
+  if (select platform.owner()) is null then
+    return;
+  end if;
 
 create temporary table po_seed_starters as
 select * from (values
@@ -225,6 +239,7 @@ from po_seed_starters s
 on conflict (user_id, lower(title)) do nothing;
 
 drop table po_seed_starters;
+end $$;
 
 alter table prompt.prompt force row level security;
 alter table prompt.prompt_version force row level security;

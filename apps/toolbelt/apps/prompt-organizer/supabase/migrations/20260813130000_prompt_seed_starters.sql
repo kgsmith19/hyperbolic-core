@@ -29,8 +29,27 @@
 -- one-time dedup delete in 20260807041000 established exactly this pattern
 -- for prompt.prompt alone (no trigger side effect there); this is its
 -- two-table extension.
+--
+-- NULL-OWNER GUARD: platform_owner_bootstrap.sql's own header comment
+-- documents the invariant this insert originally violated --
+-- "platform.owner() returns null... until the operator inserts the one
+-- config row" -- but every other owner-pinned statement in this codebase
+-- uses owner() only inside an RLS *comparison* (safely evaluates to
+-- no-match when null), never as a NOT NULL column value. A fresh replay
+-- with no owner configured yet (every CI drift-check run of
+-- platform-migrations.yml, which spins up a blank ephemeral database) hit
+-- prompt.prompt's user_id NOT NULL constraint here every time. Wrapped in
+-- a guard so that replay is a clean no-op instead; the real production
+-- database already has its owner row (m1-07), so this migration still
+-- seeds for real once it reaches that database.
 alter table prompt.prompt no force row level security;
 alter table prompt.prompt_version no force row level security;
+
+do $$
+begin
+  if (select platform.owner()) is null then
+    return;
+  end if;
 
 insert into prompt.prompt (user_id, title, body)
 select (select platform.owner()), v.title, v.body
@@ -171,6 +190,7 @@ Confidence reflects how much of the draft came directly from the input versus ho
 
 ) as v(title, body)
 on conflict (lower(title)) do nothing;
+end $$;
 
 alter table prompt.prompt force row level security;
 alter table prompt.prompt_version force row level security;

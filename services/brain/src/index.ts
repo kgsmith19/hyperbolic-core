@@ -9,6 +9,7 @@ import { createDispatchFn } from "./dispatch.ts";
 import { ClaudeCodeAdapter } from "./adapters/claude-code.ts";
 import { codexAdapter, geminiAdapter } from "./adapters/stub.ts";
 import type { AdapterRegistry } from "./router.ts";
+import { createApprovalGate } from "./approval-gate.ts";
 
 const config = loadConfig();
 
@@ -27,9 +28,15 @@ const daemon = new BrainDaemon({
   dbPath: config.dbPath,
   dataDir: config.dataDir,
   dispatchFactory: (store, journal) => createDispatchFn(store, { adapters, workspacesRoot: config.workspacesRoot, journal }),
+  approvalGateFactory: (store, journal) =>
+    createApprovalGate(store, journal, {
+      repoAllowlist: config.repoAllowlist,
+      perRunCeilingUsd: config.perRunUsdCeiling,
+      ttlMs: config.approvalTtlMs,
+    }),
 });
 await daemon.start();
-const server = await startServer(daemon, config.port);
+const server = await startServer(daemon, config);
 console.log(`services/brain listening on 127.0.0.1:${config.port}`);
 
 let shuttingDown = false;

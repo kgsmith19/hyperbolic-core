@@ -265,6 +265,13 @@ export class BrainStore {
     return this.#db.prepare(`select * from approval where status = 'pending' order by requested_at asc`).all().map(rowToApproval);
   }
 
+  /** m4-12: lets the scheduler recognize a task that already has an
+   * approved (non-pending) approval on file, so re-checking the same
+   * always-approve condition on a later tick doesn't re-park it forever. */
+  listApprovalsForTask(taskId: string): Approval[] {
+    return this.#db.prepare(`select * from approval where task_id = ? order by requested_at asc`).all(taskId).map(rowToApproval);
+  }
+
   // --- cost -----------------------------------------------------------------
 
   insertCost(cost: Cost): void {
@@ -281,6 +288,15 @@ export class BrainStore {
       .prepare(`select cost.* from cost join task on task.id = cost.task_id where task.run_id = ? order by recorded_at asc`)
       .all(runId)
       .map(rowToCost);
+  }
+
+  /** m4-13's `brain cost` verb: every cost row, optionally since a given
+   * ISO timestamp, across every run (not just one). */
+  listCosts(sinceIso?: string): Cost[] {
+    if (sinceIso) {
+      return this.#db.prepare(`select * from cost where recorded_at >= ? order by recorded_at asc`).all(sinceIso).map(rowToCost);
+    }
+    return this.#db.prepare(`select * from cost order by recorded_at asc`).all().map(rowToCost);
   }
 
   // --- eval_case / eval_result ----------------------------------------------

@@ -31,6 +31,8 @@ export interface SubmitRunParams {
    * module does no network I/O of its own. */
   promptOrgRefs?: string[];
   acceptance?: TaskContractV1["acceptance"];
+  /** m4-13's `brain run --budget-tokens N`. */
+  tokenBudget?: number;
 }
 
 export type SubmitRunResult =
@@ -50,6 +52,7 @@ export function buildContract(params: SubmitRunParams, runId: string, taskId: st
     contextRefs: params.contextRefs,
     promptOrgRefs: params.promptOrgRefs,
     acceptance: params.acceptance,
+    tokenBudget: params.tokenBudget,
   };
   return planObjective(planParams);
 }

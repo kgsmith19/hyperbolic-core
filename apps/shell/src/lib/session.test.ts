@@ -43,6 +43,17 @@ vi.mock("@hyperbolic/platform-client", () => ({
   // packages/platform-client/tests/registry.test.ts and
   // src/lib/registry.test.ts's job).
   createRegistryClient: () => ({ listTools: vi.fn(), getTool: vi.fn() }),
+  // m4-16: session.ts's module-level `createBrainClient(...)` call
+  // (brainClient) resolves against this mock the same way. A trivial stub
+  // is enough here since this file only tests useShellSession.
+  createBrainClient: () => ({
+    createRun: vi.fn(),
+    getRun: vi.fn(),
+    approveTask: vi.fn(),
+    rejectTask: vi.fn(),
+    streamRunEvents: vi.fn(),
+    health: vi.fn(),
+  }),
 }));
 
 import { useShellSession } from "./session";

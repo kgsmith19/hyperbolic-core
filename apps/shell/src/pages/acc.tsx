@@ -1,12 +1,16 @@
+import { Link, Route, Routes } from "react-router";
 import { AccStatusCard } from "../components/acc-status-card";
+import BrainPage from "./acc/brain";
 
 /**
  * /acc route group (docs/planning/05-a-hyperbolic-core.md section 4):
  * "V1: ACC status card and link-out to the operator-local ACC UI." Ported
  * ACC pages (05-b section 6) land here after absorption -- out of scope for
- * this issue.
+ * this issue. Mounted at "/acc/*" (app.tsx), so this component owns its own
+ * nested routing (mirrors src/pages/ideas.tsx): the index route is the
+ * original status card, "brain" is the m4-16 run/chat surface.
  */
-function AccPage() {
+function AccIndexPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
       <div>
@@ -18,7 +22,19 @@ function AccPage() {
         </p>
       </div>
       <AccStatusCard />
+      <Link to="/acc/brain" className="text-sm font-medium text-accent underline" data-testid="brain-run-link">
+        Open the Brain run surface
+      </Link>
     </div>
+  );
+}
+
+function AccPage() {
+  return (
+    <Routes>
+      <Route index element={<AccIndexPage />} />
+      <Route path="brain" element={<BrainPage />} />
+    </Routes>
   );
 }
 

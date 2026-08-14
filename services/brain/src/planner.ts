@@ -39,6 +39,8 @@ export interface PlanObjectiveParams {
    * this function does no network I/O of its own. */
   promptOrgRefs?: string[];
   acceptance?: TaskContractV1["acceptance"];
+  /** m4-13's `brain run --budget-tokens N`. */
+  tokenBudget?: number;
 }
 
 function truncateTitle(objective: string): string {
@@ -69,7 +71,7 @@ export function planObjective(params: PlanObjectiveParams): TaskContractV1 {
       vault_keys: DEFAULT_VAULT_KEYS,
       max_turns: DEFAULT_MAX_TURNS,
       wall_clock_min: DEFAULT_WALL_CLOCK_MIN,
-      token_budget: DEFAULT_TOKEN_BUDGET,
+      token_budget: params.tokenBudget ?? DEFAULT_TOKEN_BUDGET,
       network: DEFAULT_NETWORK,
     },
     acceptance: params.acceptance ?? [],
