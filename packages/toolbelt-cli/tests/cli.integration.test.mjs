@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { withFixtureToolbeltRoot, rootManifest, snapshotTree } from "./helpers.mjs";
+import { checkRegistryParity, findManifestPaths } from "../../../apps/toolbelt/scripts/validate-manifests.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BIN = join(__dirname, "..", "bin", "tool.mjs");
@@ -69,6 +70,31 @@ test("bin/tool.mjs generates a real tool end-to-end against a fixture root", () 
     assert.equal(result.status, 0, result.stderr);
     assert.ok(existsSync(join(root, "apps", "spawn-tool", "tool.json")));
     assert.match(result.stdout, /generated apps\/toolbelt\/apps\/spawn-tool\//);
+  });
+});
+
+// Real-world regression: 156 unit tests in this package all passed while
+// buildRegistrationUpSql generated a migration shape (`do $tool_new$ ...
+// on conflict (id) do nothing ... raise exception` in a PL/pgSQL block)
+// that apps/toolbelt/scripts/validate-manifests.mjs's own checkRegistryParity
+// rejects outright ("registration is not an idempotent ON CONFLICT (id)
+// upsert") -- because no test in this package had ever actually run that
+// validator against the CLI's own generated output. This closes exactly
+// that gap: a real scaffold, checked against the SAME validator CI runs.
+test("a freshly scaffolded tool's registration migration passes the real checkRegistryParity validator CI actually runs", () => {
+  withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
+    const result = runCli(["--toolbelt-root", root, "--id", "parity-tool", "--name", "Parity Tool", "--kind", "cli"]);
+    assert.equal(result.status, 0, result.stderr);
+
+    const manifestPath = join(root, "apps", "parity-tool", "tool.json");
+    assert.ok(existsSync(manifestPath));
+
+    const failures = checkRegistryParity(findManifestPaths(root, { servicesRoot: undefined }), { root });
+    assert.deepEqual(
+      failures.filter((f) => f.includes("parity-tool")),
+      [],
+      `expected zero registry-parity failures for the freshly scaffolded tool, got: ${JSON.stringify(failures, null, 2)}`,
+    );
   });
 });
 

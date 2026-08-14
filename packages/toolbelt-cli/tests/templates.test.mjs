@@ -126,15 +126,20 @@ test("buildRegistrationUpSql embeds the exact compact JSON manifestToCompactJSON
   assert.ok(sql.includes(`'${compact}'::jsonb`));
 });
 
-test("buildRegistrationUpSql accepts an exact retry but fails closed on a different DB manifest at the same id", () => {
+test("buildRegistrationUpSql is exactly one idempotent ON CONFLICT (id) DO UPDATE upsert, matching every hand-written registration migration's own shape", () => {
   const manifest = buildManifest(CASES[1].opts);
   const sql = buildRegistrationUpSql({ manifest, id: manifest.id, name: manifest.name, schema: "scratch_cli", kind: manifest.kind, route: null }).toLowerCase();
   assert.match(sql, /insert\s+into\s+core\.app/);
-  assert.match(sql, /on\s+conflict\s*\(\s*id\s*\)\s+do\s+nothing/);
-  assert.match(sql, /manifest_hash\s*=\s*'[0-9a-f]{64}'/);
-  assert.match(sql, /raise\s+exception\s+'core\.app id collision/);
-  assert.match(sql, /errcode\s*=\s*'23505'/);
-  assert.doesNotMatch(sql, /do\s+update/);
+  assert.match(sql, /on\s+conflict\s*\(\s*id\s*\)\s+do\s+update\s+set/);
+  assert.match(sql, /'[0-9a-f]{64}'/);
+  assert.match(sql, /manifest\s*=\s*excluded\.manifest\b/);
+  assert.match(sql, /manifest_hash\s*=\s*excluded\.manifest_hash\b/);
+  // status is deliberately excluded from the conflict update -- re-registering
+  // must never overwrite an independent lifecycle transition applied after
+  // this row first existed (matches every hand-written precedent's own rule).
+  assert.doesNotMatch(sql, /status\s*=\s*excluded\.status/);
+  assert.doesNotMatch(sql, /raise\s+exception/);
+  assert.doesNotMatch(sql, /do\s+nothing/);
 });
 
 test("buildRegistrationUpSql sets route to a SQL NULL literal for a cli tool (no route)", () => {
