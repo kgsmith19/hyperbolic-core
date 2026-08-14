@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hyperbolic-core.invalid/schemas/brain.task.v1.schema.json",
+  "title": "brain.task.v1",
+  "description": "The Brain's task contract (07-brain-architecture.md section 7.5, m4-09/BR-1): the keystone artifact the Brain issues to exactly one harness per task. Field names are snake_case, matching section 7.5's own normative example verbatim (this is a wire contract handed to the ACC kernel and stored as JSON, not an internal TS API).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "run_id", "title", "repo", "harness", "autonomy", "prompt", "constraints", "acceptance", "deliverable"],
+  "properties": {
+    "task_id": { "type": "string", "format": "uuid", "description": "Brain-assigned." },
+    "run_id": { "type": "string", "format": "uuid", "description": "Owning run (DAG)." },
+    "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "ref"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1 },
+        "ref": { "type": "string", "minLength": 1, "description": "The base ref the task's worktree is created from -- may legitimately be a default branch (e.g. main); only deliverable.branch below may never be." }
+      }
+    },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preferred", "fallback"],
+      "properties": {
+        "preferred": { "enum": ["claude-code", "codex", "gemini", null] },
+        "fallback": { "type": "array", "items": { "enum": ["claude-code", "codex", "gemini"] } }
+      }
+    },
+    "autonomy": { "type": "integer", "minimum": 0, "maximum": 3, "description": "0..3, see 07 section 7.7; execution requires >= 1." },
+    "prompt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objective", "context_refs", "prompt_org_refs"],
+      "properties": {
+        "objective": { "type": "string", "minLength": 1, "description": "Imperative outcome." },
+        "context_refs": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Path-or-doc refs assembled by the 7.6 selector." },
+        "prompt_org_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+@(latest|[0-9]+)$",
+            "description": "name@version, pinned to a concrete version_no by plan-time resolution through getPrompt -- never left as name@latest in a journaled contract (see src/prompt-refs.ts)."
+          }
+        }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_paths", "denied_paths", "vault_keys", "max_turns", "wall_clock_min", "token_budget", "network"],
+      "properties": {
+        "allowed_paths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "denied_paths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "vault_keys": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }, "description": "Names only; the kernel injects values (ADR-05)." },
+        "max_turns": { "type": "integer", "exclusiveMinimum": 0 },
+        "wall_clock_min": { "type": "integer", "exclusiveMinimum": 0 },
+        "token_budget": { "type": "integer", "exclusiveMinimum": 0 },
+        "network": { "enum": ["none", "provider-only", "open"], "description": "open requires approval, 07 section 7.7." }
+      }
+    },
+    "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "verify"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "statement": { "type": "string", "minLength": 1, "description": "EARS sentence." },
+          "verify": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command", "cwd", "expect_exit", "timeout_s"],
+            "properties": {
+              "command": { "type": "string", "minLength": 1 },
+              "cwd": { "type": "string", "minLength": 1 },
+              "expect_exit": { "type": "integer", "minimum": 0, "maximum": 255 },
+              "timeout_s": { "type": "integer", "exclusiveMinimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "deliverable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "branch", "push", "draft_pr"],
+      "properties": {
+        "type": { "enum": ["commit", "patch", "report"] },
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "not": { "enum": ["main", "master"] },
+          "description": "07 section 7.5's own example: 'brain/<task_id> -- never a default branch'."
+        },
+        "push": { "type": "boolean", "description": "push/draft_pr true requires autonomy >= 2 (07 section 7.7)." },
+        "draft_pr": { "type": "boolean" }
+      }
+    }
+  }
+}

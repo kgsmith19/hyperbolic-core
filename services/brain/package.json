@@ -2,7 +2,7 @@
   "name": "@hyperbolic/brain",
   "version": "0.0.0",
   "private": true,
-  "description": "The Brain daemon (07-brain-architecture.md): one long-lived autonomous-coding orchestrator. m4-08 ships the daemon lifecycle, SQLite WAL state store, DAG scheduler, and crash recovery; the task contract (m4-09), real harness adapters (m4-10), and the CLI/API/UI surfaces (m4-13/14/15) land in later issues.",
+  "description": "The Brain daemon (07-brain-architecture.md): one long-lived autonomous-coding orchestrator. m4-08 ships the daemon lifecycle, SQLite WAL state store, DAG scheduler, and crash recovery. m4-09 adds the brain.task.v1/brain.result.v1 contract schemas, the skeleton planner, and journaled run submission; real harness adapters (m4-10) and the CLI/API/UI surfaces (m4-13/14/15) land in later issues.",
   "type": "module",
   "main": "./src/index.ts",
   "bin": {
@@ -12,7 +12,11 @@
     "test": "node --test tests/*.test.ts",
     "typecheck": "tsc -b ."
   },
-  "dependencies": {},
+  "dependencies": {
+    "@hyperbolic/llm": "*",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
+  },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "typescript": "^5.9.3"

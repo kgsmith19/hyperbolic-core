@@ -1,0 +1,20 @@
+{
+  "task_id": "44444444-4444-4444-4444-444444444444",
+  "run_id": "33333333-3333-3333-3333-333333333333",
+  "title": "fixture with a default-branch deliverable (invalid)",
+  "repo": { "url": "https://github.com/kgsmith19/hyperbolic-core", "ref": "main" },
+  "harness": { "preferred": "claude-code", "fallback": ["claude-code"] },
+  "autonomy": 2,
+  "prompt": { "objective": "this contract must be refused", "context_refs": [], "prompt_org_refs": [] },
+  "constraints": {
+    "allowed_paths": ["**"],
+    "denied_paths": [],
+    "vault_keys": [],
+    "max_turns": 40,
+    "wall_clock_min": 60,
+    "token_budget": 500000,
+    "network": "provider-only"
+  },
+  "acceptance": [],
+  "deliverable": { "type": "commit", "branch": "main", "push": true, "draft_pr": true }
+}

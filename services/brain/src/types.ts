@@ -1,9 +1,11 @@
 /**
  * Shared types for the Brain daemon (07-brain-architecture.md section 7.6's
  * table list; sections 7.5/7.7 for the field names below). The task
- * contract's OWN schema (brain.task.v1) is m4-09's job -- this file stores
- * it as opaque JSON (`contractJson`) rather than a typed shape, so m4-09
- * can land its schema without a breaking change here.
+ * contract's own schema (brain.task.v1) and its TS shape (TaskContractV1)
+ * live in contracts.ts, m4-09's job; this file still stores it as a plain
+ * JSON string (`contractJson`) at the store layer -- the store itself
+ * remains contract-shape-agnostic, since validation is run-service.ts's
+ * job (before a row is ever written) rather than the store's.
  */
 
 export type RunStatus = "planning" | "running" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "interrupted";
@@ -39,7 +41,9 @@ export interface Task {
   runId: string;
   title: string;
   status: TaskStatus;
-  /** The brain.task.v1 contract, opaque here (m4-09 owns its schema). */
+  /** JSON.stringify of a brain.task.v1 contract (contracts.ts's
+   * TaskContractV1) -- validated by run-service.ts before the row
+   * containing it is ever inserted. */
   contractJson: string;
   resultJson: string | null;
   createdAt: string;
