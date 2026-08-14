@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hyperbolic-core.invalid/schemas/brain.result.v1.schema.json",
+  "title": "brain.result.v1",
+  "description": "07-brain-architecture.md section 7.5's result contract, written once a task reaches a terminal status. Completed means, exactly: (1) every acceptance[].verify command, executed by the Brain in the worktree after the harness exits, returns its expect_exit; (2) the worktree is clean or committed per deliverable; (3) the harness session terminated without orphaned. Anything else is failed, timeout, cancelled, or interrupted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "status", "verdicts", "commits", "branch", "pr_url", "cost", "duration_s", "transcript_ref", "ledger_ref"],
+  "properties": {
+    "task_id": { "type": "string", "format": "uuid" },
+    "status": { "enum": ["succeeded", "failed", "timeout", "cancelled", "interrupted"] },
+    "verdicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "pass", "exit", "output_tail"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "description": "Matches an acceptance[].id from the task contract." },
+          "pass": { "type": "boolean" },
+          "exit": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "output_tail": { "type": "string" }
+        }
+      }
+    },
+    "commits": { "type": "array", "items": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" } },
+    "branch": { "type": "string", "minLength": 1 },
+    "pr_url": { "type": ["string", "null"] },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_tokens", "output_tokens", "cache_read_tokens", "usd_estimate"],
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "cache_read_tokens": { "type": "integer", "minimum": 0 },
+        "usd_estimate": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "duration_s": { "type": "number", "minimum": 0 },
+    "transcript_ref": { "type": "string", "minLength": 1 },
+    "ledger_ref": { "type": "string", "minLength": 1 }
+  }
+}

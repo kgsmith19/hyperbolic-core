@@ -1,0 +1,48 @@
+#!/usr/bin/env node
+// A fake stand-in for apps/agentic-command-center/kernel/run.mjs's own CLI
+// contract (`node kernel/run.mjs <contract.json>`, one JSON line to
+// stdout, exit 0 iff outcome === "accepted", else 2) -- used by
+// claude-code-adapter.test.ts to prove the adapter's spawn/parse mechanics
+// work against a REAL subprocess without needing a real `claude` binary or
+// a fully provisioned ACC checkout. The scenario is picked by a marker
+// embedded in the mapped kernel contract's own `goal` field (which is
+// exactly contract.prompt.objective from the originating brain.task.v1
+// contract, per kernel-contract.ts's mapping) rather than an env var, so
+// concurrent test cases never interfere with each other's spawn env.
+import fs from "node:fs";
+
+const contractPath = process.argv[2];
+if (!contractPath) {
+  console.error("usage: node fake-run.mjs <contract.json>");
+  process.exit(2);
+}
+const contract = JSON.parse(fs.readFileSync(contractPath, "utf8"));
+const goal = contract.goal ?? "";
+const runId = "r-fake-" + Date.now();
+
+function print(result) {
+  console.log(JSON.stringify(result));
+}
+
+if (goal.includes("FAKE_OUTCOME=accepted")) {
+  print({ runId, outcome: "accepted", errors: [], harness: { name: "claude-code", version: "1.0.0" }, criteria: [{ id: "AC-1", method: "command", status: "pass", detail: "exit 0" }], tokens: 1234 });
+  process.exit(0);
+} else if (goal.includes("FAKE_OUTCOME=rejected")) {
+  print({ runId, outcome: "rejected", errors: [], harness: { name: "claude-code", version: "1.0.0" }, criteria: [{ id: "AC-1", method: "command", status: "fail", detail: "exit 1" }], tokens: 500 });
+  process.exit(2);
+} else if (goal.includes("FAKE_OUTCOME=failed-to-start-transport")) {
+  print({ runId, outcome: "failed-to-start", error: "429 rate limited", harness: null, criteria: [], tokens: 0 });
+  process.exit(2);
+} else if (goal.includes("FAKE_OUTCOME=failed-to-start-logic")) {
+  print({ runId, outcome: "failed-to-start", error: "settings integrity check failed before launch", harness: null, criteria: [], tokens: 0 });
+  process.exit(2);
+} else if (goal.includes("FAKE_OUTCOME=noop")) {
+  // Prints nothing parseable -- simulates the kernel process dying or
+  // otherwise never producing its one expected JSON line.
+  process.exit(1);
+} else {
+  // Default: same as accepted, so a fixture contract with no marker still
+  // exercises the golden path.
+  print({ runId, outcome: "accepted", errors: [], harness: { name: "claude-code", version: "1.0.0" }, criteria: [], tokens: 0 });
+  process.exit(0);
+}
