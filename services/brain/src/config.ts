@@ -3,6 +3,7 @@
 // services/llm-handler/src/config.ts's own posture.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readOverrides } from "./config-overrides.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +30,12 @@ export interface BrainConfig {
    * documented, overridable. */
   readonly perRunUsdCeiling: number;
   readonly approvalTtlMs: number;
+  /** m4-13's `brain refresh-context`: the hyperbolic-core checkout to
+   * index (07 section 7.6 -- this is about the Brain's OWN home repo's
+   * guidance chain, not an arbitrary task's target repo). Default assumes
+   * the monorepo layout relative to this file, same reasoning as
+   * kernelRunPath. */
+  readonly repoRoot: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
@@ -52,21 +59,29 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
   const accPolicy = env.BRAIN_ACC_POLICY ?? `${accRoot}/policy.json`;
   const accVault = env.BRAIN_ACC_VAULT ?? `${accRoot}/vault.json`;
 
-  const repoAllowlist = (env.BRAIN_REPO_ALLOWLIST ?? "")
+  // m4-13's `brain config set`: env var > persisted override > built-in
+  // default. Read after dataDir is known (that's where the override file
+  // lives), before it, so an override can't ever affect where itself is
+  // stored.
+  const overrides = readOverrides(dataDir);
+
+  const repoAllowlist = (env.BRAIN_REPO_ALLOWLIST ?? overrides.BRAIN_REPO_ALLOWLIST ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const perRunUsdCeiling = Number(env.BRAIN_PER_RUN_USD_CEILING ?? "5");
+  const perRunUsdCeiling = Number(env.BRAIN_PER_RUN_USD_CEILING ?? overrides.BRAIN_PER_RUN_USD_CEILING ?? "5");
   if (!Number.isFinite(perRunUsdCeiling) || perRunUsdCeiling <= 0) {
     throw new Error(`services/brain: BRAIN_PER_RUN_USD_CEILING must be a positive number, got ${env.BRAIN_PER_RUN_USD_CEILING}`);
   }
 
-  const approvalTtlDays = Number(env.BRAIN_APPROVAL_TTL_DAYS ?? "7");
+  const approvalTtlDays = Number(env.BRAIN_APPROVAL_TTL_DAYS ?? overrides.BRAIN_APPROVAL_TTL_DAYS ?? "7");
   if (!Number.isFinite(approvalTtlDays) || approvalTtlDays <= 0) {
     throw new Error(`services/brain: BRAIN_APPROVAL_TTL_DAYS must be a positive number, got ${env.BRAIN_APPROVAL_TTL_DAYS}`);
   }
   const approvalTtlMs = approvalTtlDays * 24 * 60 * 60 * 1000;
 
-  return { port, dbPath, dataDir, workspacesRoot, kernelRunPath, accRoot, accPolicy, accVault, repoAllowlist, perRunUsdCeiling, approvalTtlMs };
+  const repoRoot = env.BRAIN_REPO_ROOT ?? path.resolve(HERE, "..", "..", "..");
+
+  return { port, dbPath, dataDir, workspacesRoot, kernelRunPath, accRoot, accPolicy, accVault, repoAllowlist, perRunUsdCeiling, approvalTtlMs, repoRoot };
 }

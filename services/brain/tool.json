@@ -3,7 +3,7 @@
   "name": "The Brain",
   "kind": "headless",
   "version": "0.1.0",
-  "description": "07-brain-architecture.md: a long-lived autonomous-coding orchestrator (daemon, SQLite WAL state store, DAG scheduler, crash recovery, brain.task.v1/brain.result.v1 contracts, ACC-kernel-subprocess harness adapters with worktree isolation). The CLI/API/UI surfaces land in later M4 issues. Holds its own isolated Anthropic key (ADR-05) and cannot read /platform/llm/.",
+  "description": "07-brain-architecture.md: a long-lived autonomous-coding orchestrator (daemon, SQLite WAL state store, DAG scheduler, crash recovery, brain.task.v1/brain.result.v1 contracts, ACC-kernel-subprocess harness adapters with worktree isolation, autonomy/approval policy, and the full `brain` CLI verb surface). The HTTP API and UI surfaces land in later M4 issues. Holds its own isolated Anthropic key (ADR-05) and cannot read /platform/llm/.",
   "ownership": {
     "owner": "kylegsmith19@gmail.com",
     "path": "services/brain"
@@ -31,7 +31,7 @@
   },
   "lifecycle": {
     "migrate": "gh workflow run platform-migrations.yml",
-    "health": "node --test \"tests/*.test.ts\"",
+    "health": "npm test",
     "register": "20260814160000_register_brain.sql"
   }
 }

@@ -290,6 +290,15 @@ export class BrainStore {
       .map(rowToCost);
   }
 
+  /** m4-13's `brain cost` verb: every cost row, optionally since a given
+   * ISO timestamp, across every run (not just one). */
+  listCosts(sinceIso?: string): Cost[] {
+    if (sinceIso) {
+      return this.#db.prepare(`select * from cost where recorded_at >= ? order by recorded_at asc`).all(sinceIso).map(rowToCost);
+    }
+    return this.#db.prepare(`select * from cost order by recorded_at asc`).all().map(rowToCost);
+  }
+
   // --- eval_case / eval_result ----------------------------------------------
 
   insertEvalCase(evalCase: EvalCase): void {
