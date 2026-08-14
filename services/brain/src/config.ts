@@ -65,14 +65,6 @@ export interface BrainConfig {
   readonly agentTokenPublicKeyPem?: string;
   readonly agentTokenIssuer?: string;
   readonly agentTokenAudience?: string;
-  /** m4-20's `LifeOsSurface` (lifeos-surface.ts, 05-e-lifeos.md section 3)
-   * -- optional for the same reason the two fields above are: no Brain
-   * task has this wired into its dispatch path yet (07-brain-architecture
-   * .md section 7.13 lists the client itself as a V1 stub), so a deploy
-   * that hasn't minted a LifeOS agent token yet simply has no
-   * LifeOS-backed task class available; nothing else breaks. */
-  readonly lifeosBaseUrl?: string;
-  readonly lifeosAgentToken?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
@@ -130,13 +122,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
   const agentTokenIssuer = env.BRAIN_AGENT_TOKEN_ISSUER;
   const agentTokenAudience = env.BRAIN_AGENT_TOKEN_AUDIENCE;
 
-  // Named for the external system (LIFEOS_*, not BRAIN_*), matching
-  // SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY's own convention above -- this
-  // is a credential for calling OUT to LifeOS, the opposite direction
-  // from BRAIN_AGENT_TOKEN_* (which verifies tokens calling IN).
-  const lifeosBaseUrl = env.LIFEOS_API_BASE_URL;
-  const lifeosAgentToken = env.LIFEOS_AGENT_TOKEN;
-
   return {
     port,
     dbPath,
@@ -157,7 +142,5 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
     agentTokenPublicKeyPem,
     agentTokenIssuer,
     agentTokenAudience,
-    lifeosBaseUrl,
-    lifeosAgentToken,
   };
 }
