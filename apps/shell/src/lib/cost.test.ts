@@ -96,14 +96,44 @@ describe("listBrainRunCosts", () => {
     expect(runs[1]).toMatchObject({ runId: "run-2", inputTokens: 0, outputTokens: 0, usd: 0 });
   });
 
-  it("makes no second request when there are zero runs", async () => {
+  it("returns an empty list when there are zero runs, still firing both requests concurrently", async () => {
     resetMocks();
-    const spy = mockFetchSequence([{ status: 200, body: [] }]);
+    const spy = mockFetchSequence([
+      { status: 200, body: [] },
+      { status: 200, body: [] },
+    ]);
 
     const runs = await listBrainRunCosts();
 
     expect(runs).toEqual([]);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("fires the run and cost requests concurrently, not sequentially -- the cost query never waits on the run query's result", async () => {
+    resetMocks();
+    let costRequestStartedBeforeRunResponseResolved = false;
+    let resolveRunResponse!: (value: Response) => void;
+    const spy = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/rest/v1/run")) {
+        return new Promise<Response>((resolve) => {
+          resolveRunResponse = resolve;
+        });
+      }
+      costRequestStartedBeforeRunResponseResolved = true;
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", spy);
+
+    const pending = listBrainRunCosts();
+    // Flush the microtask queue (getAccessToken's own await chain runs
+    // through a few ticks before either fetch() call fires) before
+    // resolving the run request -- if the cost request truly fires
+    // without waiting on it, its handler has already run by now.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(costRequestStartedBeforeRunResponseResolved).toBe(true);
+    resolveRunResponse(new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await pending;
   });
 });
 

@@ -182,12 +182,25 @@ test.describe("Latency budget (m6-02: panel shall render within 500ms p95 warm)"
     await page.waitForURL((url) => url.pathname === "/acc/cost");
     await page.getByTestId("cost-dashboard-page").waitFor({ state: "visible" });
 
+    // Client-side transitions (nav-rail click to /acc, then the panel's
+    // own in-page link to /acc/cost), not page.goto() -- a goto() forces
+    // a full document reload (re-parse/re-execute the whole SPA bundle)
+    // on every iteration, which e2e/chrome.spec.ts's own "internal clicks
+    // stay client-side" test proves is NOT what a real warm navigation
+    // between two already-loaded zones looks like, and made this budget
+    // measure bundle-reload noise instead of the panel's own render cost.
+    const accNavRailItem = page.locator('nav[data-testid="platform-nav"] [data-slot="nav-rail-item"][data-zone="acc"]');
     const samples: number[] = [];
     const RUNS = 12;
     for (let i = 0; i < RUNS; i += 1) {
-      await page.goto("/acc");
+      await accNavRailItem.click();
+      // toHaveURL polls the current URL rather than waiting for a "load"
+      // event (waitForURL's default) -- a client-side route change never
+      // fires one, the same reason e2e/chrome.spec.ts's own client-side-nav
+      // assertions use toHaveURL, never waitForURL, after a nav-rail click.
+      await expect(page).toHaveURL(/\/acc\/?$/);
       const start = performance.now();
-      await page.goto("/acc/cost");
+      await page.getByTestId("cost-dashboard-link").click();
       await page.getByTestId("cost-dashboard-page").waitFor({ state: "visible" });
       samples.push(performance.now() - start);
     }

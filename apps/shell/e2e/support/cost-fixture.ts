@@ -150,16 +150,15 @@ export async function setupCostFixture(): Promise<CostFixture> {
     return { status: 200, body: rows };
   }
 
-  function handleGetCost(url: URL): { status: number; body: unknown } {
-    const runIdParam = url.searchParams.get("run_id");
-    const m = runIdParam ? /^in\.\((.*)\)$/.exec(runIdParam) : null;
-    if (!m) return { status: 400, body: { message: "cost-fixture shim: expected run_id=in.(...)" } };
-    const ids = m[1]!.split(",").filter(Boolean).map((id) => pgQuote(id));
-    if (ids.length === 0) return { status: 200, body: [] };
+  function handleGetCost(_url: URL): { status: number; body: unknown } {
+    // lib/cost.ts's listBrainRunCosts() fetches every core.cost row
+    // unfiltered (fired concurrently with the run query, joined
+    // client-side) specifically so it never waits on the run query's own
+    // result first -- see that function's own header comment.
     const rows = psqlJsonQuery(
       dbName,
       `select run_id::text, input_tokens, output_tokens, cache_read_tokens, wall_clock_ms, usd
-       from core.cost where run_id in (${ids.join(",")})`
+       from core.cost`
     );
     return { status: 200, body: rows };
   }
