@@ -236,6 +236,54 @@ test("health: GETs /healthz unauthenticated (no bearer token required)", async (
   assert.deepEqual(result, { status: "ok" });
 });
 
+test("getCostSummary: GETs /api/brain/cost with the bearer token, no since= param when omitted", async () => {
+  const spy = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    assert.equal(url.pathname, "/api/brain/cost");
+    assert.equal(url.search, "");
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get("authorization"), `Bearer ${FIXTURE_TOKEN}`);
+    return jsonResponse({ byRun: [], byTask: [], byHarness: [], byDay: [] });
+  };
+
+  const result = await withPatchedFetch(spy, async () => {
+    const client = createBrainClient(FIXTURE_URL, async () => FIXTURE_TOKEN);
+    return client.getCostSummary();
+  });
+
+  assert.deepEqual(result, { byRun: [], byTask: [], byHarness: [], byDay: [] });
+});
+
+test("getCostSummary: passes since= as an encoded querystring param when given", async () => {
+  const spy = async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    assert.equal(url.searchParams.get("since"), "2026-01-01T00:00:00.000Z");
+    return jsonResponse({ byRun: [], byTask: [], byHarness: [], byDay: [] });
+  };
+
+  await withPatchedFetch(spy, async () => {
+    const client = createBrainClient(FIXTURE_URL, async () => FIXTURE_TOKEN);
+    await client.getCostSummary("2026-01-01T00:00:00.000Z");
+  });
+});
+
+test("getCostSummary: the grouped buckets pass through untouched (no client-side reshaping to get subtly wrong)", async () => {
+  const summary = {
+    byRun: [{ key: "run-1", count: 2, inputTokens: 120, outputTokens: 55, cacheReadTokens: 10, usdEstimate: 0.6 }],
+    byTask: [],
+    byHarness: [],
+    byDay: [],
+  };
+  const spy = async () => jsonResponse(summary);
+
+  const result = await withPatchedFetch(spy, async () => {
+    const client = createBrainClient(FIXTURE_URL, async () => FIXTURE_TOKEN);
+    return client.getCostSummary();
+  });
+
+  assert.deepEqual(result, summary);
+});
+
 test("getAccessToken rejecting (no session) reaches zero network calls, fail-closed like AuthedFetch", async () => {
   let called = false;
   const spy = async () => {

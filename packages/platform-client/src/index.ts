@@ -39,6 +39,8 @@ export type {
   BrainEvent,
   StreamRunEventsOptions,
   ParsedSseEvent,
+  CostBucket,
+  CostSummary,
 } from "./brain.ts";
 
 function toPlatformSession(session: Session | null): PlatformSession | null {
