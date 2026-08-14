@@ -51,6 +51,14 @@ jobs:
             exit 1
           fi
           echo "isolation-check correctly exited non-zero: the Brain secret is not readable from this context"
+      - name: "Eval corpus gate (m4-19, 07 section 7.11): brain eval run over services/brain/evals/cases/*.case.json"
+        working-directory: services/brain
+        env:
+          # Scratch state, never the production /data volume -- this CLI
+          # invocation only needs somewhere to open a throwaway SQLite
+          # store and journal dir for the duration of the eval run.
+          BRAIN_DATA_DIR: ${{ runner.temp }}/brain-eval-data
+        run: node bin/brain.mjs eval run --json
       - name: Build the Brain image (verification only, never pushed from CI)
         run: docker build -f services/brain/Dockerfile -t brain:pr-gate .
       - name: Smoke-run the built image (brain status --offline, no live daemon required)

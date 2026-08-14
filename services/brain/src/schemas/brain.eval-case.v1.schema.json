@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hyperbolic-core.invalid/schemas/brain.eval-case.v1.schema.json",
+  "title": "brain.eval-case.v1",
+  "description": "07-brain-architecture.md section 7.11's corpus format: '{case_id, description, contract: brain.task.v1, fixture: {repo_tar or git ref}, expected: {status, verdicts, max_cost_usd}}'. `contract` is deliberately loosely typed HERE ({type: object}) -- evals.ts's own validateEvalCase() separately runs it through contracts.ts's validateTaskContract (the single source of truth for brain.task.v1), rather than duplicating that schema via a cross-file $ref.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["case_id", "description", "contract", "fixture", "expected"],
+  "properties": {
+    "case_id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9_-]+$" },
+    "description": { "type": "string", "minLength": 1 },
+    "contract": { "type": "object" },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repo_tar": { "type": ["string", "null"], "description": "Path to a packed repo tarball fixture. V1 gap: capture never populates this (see evals.ts's own header comment); reserved for a future issue that needs a frozen, non-live repo snapshot rather than a real git ref." },
+        "git_ref": { "type": ["string", "null"], "description": "A resolvable ref in contract.repo -- V1's actual supported fixture strategy: the case simply re-dispatches contract.repo at this ref." }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["succeeded", "failed", "timeout", "cancelled", "interrupted"] },
+        "verdicts": {
+          "type": "array",
+          "description": "Optional subset check: every {id, pass} listed here must match the corresponding verdict in the fresh run's own result exactly. A verdict id absent from `expected.verdicts` is not checked (the grader does not require an exhaustive list).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "pass"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "pass": { "type": "boolean" }
+            }
+          }
+        },
+        "max_cost_usd": { "type": ["number", "null"], "minimum": 0 }
+      }
+    }
+  }
+}

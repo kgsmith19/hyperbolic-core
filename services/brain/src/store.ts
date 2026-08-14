@@ -314,6 +314,20 @@ export class BrainStore {
     this.#db.prepare(`insert into eval_case (id, name, spec_json, created_at) values (?, ?, ?, ?)`).run(evalCase.id, evalCase.name, evalCase.specJson, evalCase.createdAt);
   }
 
+  /** m4-19's `brain eval run`: every eval_result row has a NOT NULL FK to
+   * eval_case(id), but `brain eval run` reads cases straight from
+   * evals/cases/*.case.json -- files a corpus can carry without ever
+   * having gone through `brain eval capture`'s own insertEvalCase call
+   * (a case authored by hand, or checked in from another machine). This
+   * is the write path that keeps that FK satisfiable regardless of how
+   * the case file got there, idempotent so re-running the corpus never
+   * errors on a case it already knows about. */
+  upsertEvalCase(evalCase: EvalCase): void {
+    this.#db
+      .prepare(`insert into eval_case (id, name, spec_json, created_at) values (?, ?, ?, ?) on conflict(id) do nothing`)
+      .run(evalCase.id, evalCase.name, evalCase.specJson, evalCase.createdAt);
+  }
+
   insertEvalResult(result: EvalResult): void {
     this.#db
       .prepare(`insert into eval_result (id, eval_case_id, run_id, passed, output_json, recorded_at) values (?, ?, ?, ?, ?, ?)`)

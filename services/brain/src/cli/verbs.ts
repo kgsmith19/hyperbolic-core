@@ -3,8 +3,7 @@
  * architecture.md section 7.8's CLI table). Pure functions over
  * store/journal/config -- bin/brain.mjs is only argv parsing and calling
  * these, so every exit-code/JSON-shape decision is unit-testable without
- * spawning a subprocess for every scenario. `brain eval` is out of this
- * issue's scope (m4-19); the HTTP API is m4-14's.
+ * spawning a subprocess for every scenario. The HTTP API is m4-14's.
  */
 import { readFileSync } from "node:fs";
 import type { BrainStore } from "../store.ts";
@@ -17,6 +16,8 @@ import { parkForApproval, resolveApproval, type ApprovalOutcome } from "../appro
 import { buildContextIndex, writeContextIndex } from "../context-index.ts";
 import { SETTABLE_KEYS, isSettableKey, writeOverride } from "../config-overrides.ts";
 import { TERMINAL_TASK_STATUSES } from "../types.ts";
+import { loadCasesFromDir, runEvalCase, captureEvalCase, type EvalCaseOutcome } from "../evals.ts";
+import type { DispatchDeps } from "../dispatch.ts";
 import { EXIT_OK, EXIT_ERROR, EXIT_POLICY_REFUSED, EXIT_NOT_FOUND, EXIT_AWAITING_APPROVAL, type VerbResult } from "./result.ts";
 
 const DEFAULT_REPO_URL = "https://github.com/kgsmith19/hyperbolic-core";
@@ -332,4 +333,79 @@ export function configVerb(config: BrainConfig, args: ConfigVerbArgs): VerbResul
   writeOverride(config.dataDir, args.key, args.value);
   const message = `${args.key} set to ${args.value} (persisted; effective on next load)`;
   return { exitCode: EXIT_OK, json: { key: args.key, value: args.value }, humanText: message };
+}
+
+// --- eval ------------------------------------------------------------------
+
+/** `brain eval run` (07 section 7.8/7.11): exit 0 iff every case in the
+ * corpus passes; exit 1 iff any regresses -- "when brain eval run
+ * executes a passing corpus, it shall exit 0; when any case regresses,
+ * it shall exit 1" (this issue's own acceptance criterion, verbatim). A
+ * corpus load error (unparseable/schema-invalid case file) counts as a
+ * regression too -- a broken case is not silently skipped. An empty
+ * corpus (V1's own state; the 5 seed cases are m6-01's job) is
+ * vacuously passing. */
+export async function evalRunVerb(store: BrainStore, journal: RunJournal | undefined, deps: DispatchDeps, casesDir: string): Promise<VerbResult> {
+  const loaded = loadCasesFromDir(casesDir);
+  const outcomes: EvalCaseOutcome[] = [];
+  for (const l of loaded) {
+    const outcome = await runEvalCase(store, journal, deps, l);
+    outcomes.push(outcome);
+    // A load error (l.case === null) has no valid spec to persist as an
+    // eval_case row -- outcome.case_id is just the filename in that
+    // case, not a real case_id, so it's reported in `outcomes` but never
+    // written to the store.
+    if (l.case) {
+      const now = new Date().toISOString();
+      // eval_result.eval_case_id is a NOT NULL FK to eval_case(id): a
+      // case authored/checked in without ever going through `brain eval
+      // capture` (which is the only OTHER writer of eval_case rows)
+      // still needs one here before insertEvalResult can succeed.
+      store.upsertEvalCase({ id: l.case.case_id, name: l.case.description, specJson: JSON.stringify(l.case), createdAt: now });
+      store.insertEvalResult({
+        id: `${outcome.case_id}-${outcome.runId || now}`,
+        evalCaseId: outcome.case_id,
+        runId: outcome.runId || null,
+        passed: outcome.pass,
+        outputJson: JSON.stringify({ actual: outcome.actual, reasons: outcome.reasons }),
+        recordedAt: now,
+      });
+    }
+  }
+
+  const failed = outcomes.filter((o) => !o.pass);
+  const humanText =
+    outcomes.length === 0
+      ? "no eval cases in the corpus (nothing to run)"
+      : [
+          ...outcomes.map((o) => `${o.pass ? "PASS" : "FAIL"}  ${o.case_id}${o.reasons.length ? `  (${o.reasons.join("; ")})` : ""}`),
+          `${outcomes.length - failed.length}/${outcomes.length} passed`,
+        ].join("\n");
+
+  return {
+    exitCode: failed.length === 0 ? EXIT_OK : EXIT_ERROR,
+    json: { total: outcomes.length, passed: outcomes.length - failed.length, failed: failed.length, outcomes },
+    humanText,
+  };
+}
+
+export interface EvalCaptureVerbArgs {
+  runId: string;
+  caseId?: string;
+  description?: string;
+}
+
+/** `brain eval capture <run_id>` (07 section 7.8/7.11): "freezes the
+ * contract, repo state reference, and operator-edited expected outcome
+ * into a case file that validates against the case format." */
+export function evalCaptureVerb(store: BrainStore, casesDir: string, args: EvalCaptureVerbArgs): VerbResult {
+  const caseId = args.caseId ?? `run-${args.runId}`;
+  const description = args.description ?? `Captured from run ${args.runId}`;
+  const result = captureEvalCase(store, casesDir, args.runId, caseId, description);
+  if (!result.ok) {
+    const message = `eval capture failed: ${result.errors.join("; ")}`;
+    return { exitCode: EXIT_ERROR, json: { errors: result.errors }, humanText: message };
+  }
+  const message = `captured ${result.path}`;
+  return { exitCode: EXIT_OK, json: { case_id: caseId, path: result.path }, humanText: message };
 }

@@ -36,6 +36,11 @@ export interface BrainConfig {
    * the monorepo layout relative to this file, same reasoning as
    * kernelRunPath. */
   readonly repoRoot: string;
+  /** m4-19: the eval corpus (07 section 7.11's case files) lives under
+   * the Brain's own source tree, not `/data` -- it is committed content
+   * brain-ci.yml runs on every PR, not runtime state. Overridable so
+   * tests can point at a scratch directory instead of the real corpus. */
+  readonly evalsCasesDir: string;
   /** m4-14's HTTP API auth (ADR-03). Optional/undefined rather than
    * required() (services/llm-handler's own posture): every CLI verb
    * (m4-13) operates on the store directly and has never needed
@@ -106,6 +111,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
   const approvalTtlMs = approvalTtlDays * 24 * 60 * 60 * 1000;
 
   const repoRoot = env.BRAIN_REPO_ROOT ?? path.resolve(HERE, "..", "..", "..");
+  const evalsCasesDir = env.BRAIN_EVALS_CASES_DIR ?? path.join(repoRoot, "services", "brain", "evals", "cases");
 
   // A PEM key with literal "\n" escapes (the common env-var convention for
   // multi-line secrets, since real newlines are awkward to set in most
@@ -129,6 +135,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
     perRunUsdCeiling,
     approvalTtlMs,
     repoRoot,
+    evalsCasesDir,
     supabaseUrl: env.SUPABASE_URL,
     supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY,
     supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
