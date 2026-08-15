@@ -214,20 +214,30 @@ function parseMissingVariables(message: string): string[] {
   return match ? (match[1] as string).split(", ") : [];
 }
 
-async function callGetPrompt(base: string, apiKey: string, token: string, name: string, opts: GetPromptOptions): Promise<GetPromptRpcResponse> {
-  const res = await fetch(`${base}/rest/v1/rpc/get_prompt`, {
+/** POST a PostgREST RPC and hand back its parsed body.
+ *
+ *  `rpcName` is named once and used for both the URL and the error label.
+ *  Spelling it twice, as the two callers below used to, is a live drift
+ *  hazard: an error saying rpc/get_prompt failed while the request actually
+ *  went to a different function would send a reader to the wrong RPC. */
+async function postRpc(base: string, apiKey: string, token: string, rpcName: string, body: unknown): Promise<unknown> {
+  const res = await fetch(`${base}/rest/v1/rpc/${rpcName}`, {
     method: "POST",
     headers: { ...schemaHeaders(apiKey, token), "Content-Type": "application/json" },
-    body: JSON.stringify({
-      p_name: name,
-      p_version: opts.version ?? null,
-      p_config: opts.config ?? null,
-      p_values: opts.variables ?? null,
-      p_sections: opts.sections ?? null,
-    }),
+    body: JSON.stringify(body),
   });
+  return readRpcResponse<unknown>(res, rpcName);
+}
 
-  return parseGetPromptResponse(await readRpcResponse<unknown>(res, "get_prompt"), opts.version ?? null);
+async function callGetPrompt(base: string, apiKey: string, token: string, name: string, opts: GetPromptOptions): Promise<GetPromptRpcResponse> {
+  const body = {
+    p_name: name,
+    p_version: opts.version ?? null,
+    p_config: opts.config ?? null,
+    p_values: opts.variables ?? null,
+    p_sections: opts.sections ?? null,
+  };
+  return parseGetPromptResponse(await postRpc(base, apiKey, token, "get_prompt", body), opts.version ?? null);
 }
 
 async function callGetPromptSource(
@@ -238,12 +248,8 @@ async function callGetPromptSource(
   version: number | null,
   ifVersion: number | null,
 ): Promise<GetPromptSourceRpcResponse> {
-  const res = await fetch(`${base}/rest/v1/rpc/get_prompt_source`, {
-    method: "POST",
-    headers: { ...schemaHeaders(apiKey, token), "Content-Type": "application/json" },
-    body: JSON.stringify({ p_name: name, p_version: version, p_if_version: ifVersion }),
-  });
-  return parseGetPromptSourceResponse(await readRpcResponse<unknown>(res, "get_prompt_source"), version);
+  const body = { p_name: name, p_version: version, p_if_version: ifVersion };
+  return parseGetPromptSourceResponse(await postRpc(base, apiKey, token, "get_prompt_source", body), version);
 }
 
 function parseGetPromptSourceResponse(value: unknown, expectedVersion: number | null): GetPromptSourceRpcResponse {
