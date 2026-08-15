@@ -89,11 +89,31 @@ async function requireOwnerSession(req: http.IncomingMessage, res: http.ServerRe
   return true;
 }
 
+/** Every POST /api/v1/* route, keyed by path. `handleCount` ignores the
+ * trailing two arguments (it neither reads config nor takes a concurrency
+ * slot); giving all three the same signature is what lets one dispatch site
+ * cover them. */
+type V1Route = (
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  config: HandlerConfig,
+  gate: ConcurrencyGate
+) => Promise<void>;
+
+const V1_ROUTES: Record<string, V1Route> = {
+  "/api/v1/complete": (req, res, config, gate) => llmRoutes.handleComplete(req, res, config, gate),
+  "/api/v1/stream": (req, res, config, gate) => llmRoutes.handleStream(req, res, config, gate),
+  "/api/v1/count": (req, res) => llmRoutes.handleCount(req, res),
+};
+
 export function createHandler(config: HandlerConfig, serviceRoleKey: string) {
   const llmConcurrencyGate = new ConcurrencyGate(config.llmMaxConcurrencyPerCaller);
 
   return function handler(req: http.IncomingMessage, res: http.ServerResponse): void {
-    const route = (req.url ?? "/").split("?")[0];
+    // The `?? "/"` is for the type checker, not the runtime: split always
+    // yields at least one element, but under noUncheckedIndexedAccess the
+    // result is `string | undefined`, which cannot index the route table.
+    const route = (req.url ?? "/").split("?")[0] ?? "/";
 
     // /healthz: the loopback-only Docker healthcheck and
     // tailscale-serve-apply.sh's preflight both curl 127.0.0.1:8200
@@ -127,28 +147,17 @@ export function createHandler(config: HandlerConfig, serviceRoleKey: string) {
     // forced decision 5: it links packages/llm in-process with its own
     // isolated key), so there is no legitimate bare-path loopback caller to
     // support here either.
-    if (route === "/api/v1/complete" && req.method === "POST") {
+    // One table, one gate. Each /v1 route used to repeat the same eight lines
+    // -- requireOwnerSession, then-await-the-handler, catch-to-500 -- differing
+    // only in the path and which handler ran. Dispatching through a table makes
+    // "no /v1 route reaches its handler without a verified owner session" a
+    // property of the structure rather than of three copies staying in step, so
+    // a fourth route cannot be added with the gate accidentally left off.
+    const v1 = V1_ROUTES[route];
+    if (v1 && req.method === "POST") {
       requireOwnerSession(req, res, config)
         .then(async (ok) => {
-          if (ok) await llmRoutes.handleComplete(req, res, config, llmConcurrencyGate);
-        })
-        .catch((err: unknown) => send(res, 500, { error: err instanceof Error ? err.message : "internal error" }));
-      return;
-    }
-
-    if (route === "/api/v1/stream" && req.method === "POST") {
-      requireOwnerSession(req, res, config)
-        .then(async (ok) => {
-          if (ok) await llmRoutes.handleStream(req, res, config, llmConcurrencyGate);
-        })
-        .catch((err: unknown) => send(res, 500, { error: err instanceof Error ? err.message : "internal error" }));
-      return;
-    }
-
-    if (route === "/api/v1/count" && req.method === "POST") {
-      requireOwnerSession(req, res, config)
-        .then(async (ok) => {
-          if (ok) await llmRoutes.handleCount(req, res);
+          if (ok) await v1(req, res, config, llmConcurrencyGate);
         })
         .catch((err: unknown) => send(res, 500, { error: err instanceof Error ? err.message : "internal error" }));
       return;
