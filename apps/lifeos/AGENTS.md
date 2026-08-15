@@ -30,6 +30,6 @@ Product runtime safeguards remain mandatory: preserve provenance, keep sensitive
 
 ## Delivery
 
-GitHub Issues are the durable work source. The root `.github/workflows/ci.yml` is the only merge gate; its terminal check is `PR Gate`. It verifies both applications and deploys from `main` only when repository variables enable deployment. `ops.yml`, `backup.yml`, and `release-smoke.yml` are operational workflows, not merge gates.
+GitHub Issues are the durable work source. The merge gate is the REPOSITORY ROOT's `.github/workflows/lifeos-ci.yml`, terminal check `LifeOS PR Gate`, which runs this app's backend and frontend suites. This directory's own `.github/workflows/` is INERT -- GitHub only executes workflows from the repository root -- so `ci.yml`, `ops.yml` and `backup.yml` here run nothing, and `ci.yml` must never be copied to the root: its `build-backend` job carries no repository-variable gate and would publish a Docker image on every push to `main` (see the repo-root AGENTS.md invariant). Deployment is driven by the root's own `deploy.yml`, not from here.
 
 AI coding agents may create assigned branches, commits, Issues, and pull requests. They must not submit reviews, approve or block pull requests, request reviewers, or post unsolicited comments. They may answer in an Issue or pull request only when explicitly tagged with a direct question.
