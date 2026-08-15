@@ -19,7 +19,9 @@
 // own established reasoning: no dependency on PostgREST's optional
 // aggregate-embed feature, which is not guaranteed enabled on every
 // project.
-import { platformClient, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "./session";
+import { postgrestFor } from "./postgrest";
+
+const postgrest = postgrestFor("cost-client", "core");
 
 export interface BrainRunCost {
   runId: string;
@@ -74,27 +76,7 @@ interface RawLlmCall {
   usd_estimate: number | null;
 }
 
-async function getAccessToken(): Promise<string> {
-  const session = await platformClient.auth.getSession();
-  if (!session) {
-    throw new Error("cost-client: no active session, refusing to send request");
-  }
-  return session.accessToken;
-}
 
-async function postgrest(path: string): Promise<Response> {
-  const token = await getAccessToken();
-  const headers = new Headers();
-  headers.set("apikey", SUPABASE_PUBLISHABLE_KEY);
-  headers.set("Authorization", `Bearer ${token}`);
-  headers.set("Accept-Profile", "core");
-  const res = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1${path}`, { headers });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`cost-client: GET ${path} failed with ${res.status}${body ? `: ${body}` : ""}`);
-  }
-  return res;
-}
 
 /** core-mirror.ts's own literal call: `p_app_id: "brain", p_kind: "run"`
  * (services/brain/src/core-mirror.ts) -- the only rows this dashboard's

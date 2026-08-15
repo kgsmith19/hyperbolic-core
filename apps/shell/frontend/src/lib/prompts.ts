@@ -13,7 +13,9 @@
 // apps/toolbelt/apps/prompt-organizer/frontend/panel.mjs already used (see that
 // file's own header comment on why it is a local copy, not an import from
 // packages/llm).
-import { platformClient, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "./session";
+import { postgrestFor } from "./postgrest";
+
+const postgrest = postgrestFor("prompts-client", "prompt");
 
 export interface PromptVersion {
   versionNo: number;
@@ -70,36 +72,7 @@ function toPrompt(row: RawPromptRow, usageCount: number): Prompt {
   };
 }
 
-async function getAccessToken(): Promise<string> {
-  const session = await platformClient.auth.getSession();
-  if (!session) {
-    throw new Error("prompts-client: no active session, refusing to send request");
-  }
-  return session.accessToken;
-}
 
-async function postgrest(path: string, init: RequestInit = {}, profile = "prompt"): Promise<Response> {
-  const token = await getAccessToken();
-  const headers = new Headers(init.headers);
-  headers.set("apikey", SUPABASE_PUBLISHABLE_KEY);
-  headers.set("Authorization", `Bearer ${token}`);
-  headers.set("Accept-Profile", profile);
-  headers.set("Content-Profile", profile);
-  if (init.body !== undefined) {
-    headers.set("Content-Type", "application/json");
-    if (!headers.has("Prefer")) {
-      headers.set("Prefer", "return=representation");
-    }
-  }
-  const res = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1${path}`, { ...init, headers });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(
-      `prompts-client: ${init.method ?? "GET"} ${path} failed with ${res.status}${body ? `: ${body}` : ""}`
-    );
-  }
-  return res;
-}
 
 /** Every usage row for the given prompt ids, counted client-side (no
  * dependency on PostgREST's optional aggregate-embed feature, which is not
