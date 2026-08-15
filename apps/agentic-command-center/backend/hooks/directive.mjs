@@ -68,12 +68,8 @@ function normalizeBudgetValue(value, { name, integer = false } = {}) {
 }
 
 function defaultBudget() {
-  try {
-    const raw = fs.readFileSync(process.env.ACC_POLICY || path.join(HERE, "..", "policy.json"), "utf8").replace(/^\uFEFF/, "");
-    return JSON.parse(raw).directives?.budget || {};
-  } catch {
-    return {};
-  }
+  const policy = process.env.ACC_POLICY || path.join(HERE, "..", "policy.json");
+  return readJson(policy, {}).directives?.budget || {};
 }
 
 function normalizeDirectiveBudget(budget = {}, defaults = defaultBudget()) {

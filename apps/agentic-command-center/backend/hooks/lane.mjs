@@ -72,8 +72,7 @@ const DEFAULTS = {
 // Reads the flat `lane` object from policy.json over DEFAULTS, per call —
 // dial edits apply on the next acquire with no restart.
 export function laneConfig() {
-  let raw = {};
-  try { raw = JSON.parse(fs.readFileSync(POLICY(), "utf8").replace(/^\uFEFF/, "")).lane || {}; } catch {}
+  const raw = readJson(POLICY(), {}).lane || {};
   return { ...DEFAULTS, ...raw };
 }
 

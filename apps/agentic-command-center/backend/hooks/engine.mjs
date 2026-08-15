@@ -290,7 +290,7 @@ export async function main({ argv = process.argv.slice(2), io = PROCESS_IO } = {
         c.projects = (c.projects ?? []).filter((x) => norm(x).toLowerCase() !== p.toLowerCase());
         writeJson(CONFIG(), c);
         say(io, `watching: ${c.projects.join(", ") || "(only the central runbox)"}`);
-        say(io, `note: ${p}\\.guards was left on disk — delete it by hand if you want it gone`);
+        say(io, `note: ${p}/.guards was left on disk — delete it by hand if you want it gone`);
         return 0;
       }
       case "list": {
