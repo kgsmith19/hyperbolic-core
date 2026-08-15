@@ -365,6 +365,13 @@ function arg(argv, name, dflt = "") {
   const i = argv.indexOf(name);
   return i >= 0 && argv[i + 1] !== undefined ? argv[i + 1] : dflt;
 }
+
+// Identical to arg() except that an absent flag yields undefined rather than
+// "". NOT expressible as arg(argv, name, undefined): passing undefined to a
+// defaulted parameter triggers the default, so that call returns "" -- and
+// normalizeDoneWhen rejects "" while skipping undefined entirely, so the flag
+// would stop being optional. Confirmed by trying exactly that and watching
+// four directive-creation tests fail.
 function optionalArg(argv, name) {
   const i = argv.indexOf(name);
   return i >= 0 && argv[i + 1] !== undefined ? argv[i + 1] : undefined;
@@ -454,7 +461,7 @@ export function main() {
   if (cmd === "done" || cmd === "blocked" || cmd === "paused") {
     const id = resolveId(argv);
     if (!id) return console.log("no active directive (pass the id)");
-    setStatus(id, cmd === "paused" ? "paused" : cmd, arg(argv, "--why"));
+    setStatus(id, cmd, arg(argv, "--why"));
     console.log(`directive ${id} -> ${cmd}`);
     return;
   }
