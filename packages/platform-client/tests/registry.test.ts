@@ -1,19 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildListToolsParams, createRegistryClient } from "../src/registry.ts";
+import { jsonResponse } from "./support.ts";
 
 // Fixture data only; not a real project or credential.
 const FIXTURE_URL = "https://fixture-project.supabase.invalid";
 const FIXTURE_TOKEN = "fixture.session.token";
 
 type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
 
 async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Promise<T> {
   const original = globalThis.fetch;

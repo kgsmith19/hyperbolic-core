@@ -6,31 +6,10 @@ import path from "node:path";
 import { BrainStore } from "../src/store.ts";
 import { isDispatchable, Scheduler, MAX_CONCURRENT_DISPATCH } from "../src/scheduler.ts";
 import type { Run, Task } from "../src/types.ts";
+import { fixtureRun, fixtureTask } from "./support.ts";
 
 function tmpDbPath(): string {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "brain-scheduler-")), "brain.db");
-}
-
-function fixtureRun(overrides: Partial<Run> = {}): Run {
-  const now = new Date().toISOString();
-  return { id: "run-1", objective: "x", autonomy: 2, status: "running", createdAt: now, updatedAt: now, ...overrides };
-}
-
-function fixtureTask(overrides: Partial<Task> = {}): Task {
-  const now = new Date().toISOString();
-  return {
-    id: "t1",
-    runId: "run-1",
-    title: "x",
-    status: "pending",
-    contractJson: "{}",
-    resultJson: null,
-    createdAt: now,
-    updatedAt: now,
-    startedAt: null,
-    finishedAt: null,
-    ...overrides,
-  };
 }
 
 test("MAX_CONCURRENT_DISPATCH is 2 (07 section 7.3/7.7's N=2 cap)", () => {

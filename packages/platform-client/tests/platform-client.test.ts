@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createPlatformClient } from "../src/index.ts";
+import { jsonResponse } from "./support.ts";
 
 // Fixture data only; this is not a real credential or a real project.
 const FIXTURE_OWNER_UUID = "00000000-0000-4000-8000-000000000001";
@@ -24,13 +25,6 @@ type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respo
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
 }
 
 // --- Finding #47 fixture plumbing -------------------------------------------
