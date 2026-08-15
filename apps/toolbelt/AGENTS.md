@@ -5,7 +5,7 @@
 `toolbelt` is the monorepo for small portfolio tools. The root owns the shared
 Supabase `core` schema for runs, costs, outcomes, metrics, and events plus the
 `idea` schema (the idea-list client itself lives in the Shell's Idea Intake
-surface, `apps/shell/src/pages/ideas/`; the root's own static client was
+surface, `apps/shell/frontend/src/pages/ideas/`; the root's own static client was
 deleted once that surface and the Shell's registry-driven tools list were
 both live -- m3-09). `apps/prompt-organizer/` owns the
 `prompt` schema and prompt-library client. `apps/network-checker/` owns the
@@ -50,7 +50,7 @@ npm run manifests:check
 npm run manifests:check -- --registry
 cd guards && node --test "*.test.mjs"
 cd apps/prompt-organizer && node --test "tests/*.test.mjs"
-cd apps/prompt-organizer && python3 -m http.server 8812 --directory web
+cd apps/prompt-organizer && python3 -m http.server 8812 --directory frontend
 cd apps/prompt-organizer && npm install --no-save --no-package-lock @playwright/test@1.52.0
 cd apps/prompt-organizer && PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config playwright.config.mjs
 cd apps/network-checker && bash tools/check.sh

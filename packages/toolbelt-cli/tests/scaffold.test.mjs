@@ -42,13 +42,13 @@ function safeReaddirForTest(dir) {
 
 // --- buildPlan --------------------------------------------------------
 
-test("buildPlan for a ui tool includes tool.json, AGENTS.md, web/index.html, schema migration pair, test, and registration pair", () => {
+test("buildPlan for a ui tool includes tool.json, AGENTS.md, frontend/index.html, schema migration pair, test, and registration pair", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const plan = buildPlan(opts(), { toolbeltRoot: root });
     const relPaths = plan.files.map((f) => f.path.slice(root.length + 1));
     assert.ok(relPaths.includes("apps/scratch-tool/tool.json"));
     assert.ok(relPaths.includes("apps/scratch-tool/AGENTS.md"));
-    assert.ok(relPaths.includes("apps/scratch-tool/web/index.html"));
+    assert.ok(relPaths.includes("apps/scratch-tool/frontend/index.html"));
     assert.ok(relPaths.some((p) => /^apps\/scratch-tool\/supabase\/migrations\/\d+_scratch_tool_create_schema\.sql$/.test(p)));
     assert.ok(relPaths.some((p) => /^apps\/scratch-tool\/supabase\/migrations\/\d+_scratch_tool_create_schema_down\.sql$/.test(p)));
     assert.ok(relPaths.includes("apps/scratch-tool/tests/registration.test.mjs"));
@@ -58,11 +58,11 @@ test("buildPlan for a ui tool includes tool.json, AGENTS.md, web/index.html, sch
   });
 });
 
-test("buildPlan for a cli tool omits web/index.html", () => {
+test("buildPlan for a cli tool omits frontend/index.html", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const plan = buildPlan(opts({ kind: "cli", route: undefined }), { toolbeltRoot: root });
     const relPaths = plan.files.map((f) => f.path.slice(root.length + 1));
-    assert.ok(!relPaths.some((p) => p.includes("web/")));
+    assert.ok(!relPaths.some((p) => p.includes("frontend/")));
   });
 });
 

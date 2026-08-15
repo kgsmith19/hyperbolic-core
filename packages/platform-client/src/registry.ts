@@ -8,11 +8,11 @@
  * Discovery contract (05-c section 4.3): query `core.app` through PostgREST,
  * filtered by the caller to whatever `RegistryFilter` it passes (the Shell's
  * own /tools page and command palette scope this to
- * `status in ('building','live')` -- see apps/shell/src/lib/registry.ts).
+ * `status in ('building','live')` -- see apps/shell/frontend/src/lib/registry.ts).
  * This module holds no opinion about WHICH statuses are "discoverable"; it
  * only translates whatever filter it is given into the matching PostgREST
  * querystring. Rows with a non-null `route` vs. rows without is a decision
- * the CALLER makes (again, apps/shell/src/lib/registry.ts's splitByRoute) --
+ * the CALLER makes (again, apps/shell/frontend/src/lib/registry.ts's splitByRoute) --
  * this client only fetches and maps rows, never filters or shapes them
  * beyond the caller's own explicit `RegistryFilter`.
  */
@@ -130,7 +130,7 @@ export function createRegistryClient(
     // Fail closed before issuing any network request, matching
     // src/index.ts's authedFetch contract: getAccessToken() is the caller's
     // job to reject/throw when there is no active session (see
-    // apps/shell/src/lib/session.ts's wiring), and that rejection propagates
+    // apps/shell/frontend/src/lib/session.ts's wiring), and that rejection propagates
     // here untouched rather than reaching `fetch` with no token at all.
     const token = await getAccessToken();
     const res = await fetch(`${base}/rest/v1/app?${params.toString()}`, {
@@ -142,12 +142,12 @@ export function createRegistryClient(
         // carrying no profile header resolves against `public.app` (which
         // does not exist) and PostgREST answers 404 PGRST205 -- not `core.app`,
         // where this table actually lives. Without this header, every real
-        // caller of this client (apps/shell/src/lib/registry.ts's /tools page
+        // caller of this client (apps/shell/frontend/src/lib/registry.ts's /tools page
         // and command-palette entries) 404s against the live project; the
         // pre-existing test suite never caught it because every unit test here
         // stubs `fetch` (asserting header/URL shape, never resolving a real
         // schema) and the one Playwright spec that exercises a browser
-        // (apps/shell/e2e/tools.spec.ts) intercepts `**/rest/v1/app**` and
+        // (apps/shell/frontend/e2e/tools.spec.ts) intercepts `**/rest/v1/app**` and
         // re-serves it from a local shim that never runs real PostgREST at
         // all -- both routes around the exact defect this line fixes.
         "Accept-Profile": "core",

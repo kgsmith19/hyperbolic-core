@@ -2,18 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openaiDriver } from "../src/drivers/openai.ts";
 import { complete } from "../src/complete.ts";
-import { MAX_RETRIES } from "../src/retry.ts";
 import { isLlmError } from "../src/errors.ts";
 import type { LlmDelta, LlmRequest } from "../src/types.ts";
-import {
-  collectStream,
-  jsonResponse,
-  pacedSseResponse as rawPacedSseResponse,
-  sseResponse as rawSseResponse,
-  tickInSteps,
-  withPatchedFetch,
-  type SseOptions,
-} from "./driver-harness.ts";
+import { collectStream, jsonResponse, pacedSseResponse as rawPacedSseResponse, sseLine, sseResponse as rawSseResponse, tickInSteps, type SseOptions, withPatchedFetch } from "./driver-harness.ts";
 
 // ---------------------------------------------------------------------------
 // OpenAI-specific wire fixtures. The transport plumbing (fetch patching,
@@ -45,10 +36,6 @@ function fixtureChatCompletion(overrides: Record<string, unknown> = {}) {
     usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, prompt_tokens_details: { cached_tokens: 3 } },
     ...overrides,
   };
-}
-
-function sseLine(data: unknown): string {
-  return `data: ${JSON.stringify(data)}\n\n`;
 }
 
 /** Chat Completions frames chunks as bare `data: {...}` and terminates the

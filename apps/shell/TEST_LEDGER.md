@@ -18,8 +18,8 @@ provider SDKs into the bundle and blow the size budget. Each carries a test
 that fuzzes it directly against the original, so a hand-edit to either side
 that silently diverges fails a test rather than a code review:
 
-- `src/lib/prompt-render.test.ts` vs `apps/toolbelt/apps/prompt-organizer/web/render.mjs`
-- `src/lib/prompt-search.test.ts` vs `apps/toolbelt/apps/prompt-organizer/web/search.mjs`
+- `src/lib/prompt-render.test.ts` vs `apps/toolbelt/apps/prompt-organizer/frontend/render.mjs`
+- `src/lib/prompt-search.test.ts` vs `apps/toolbelt/apps/prompt-organizer/frontend/search.mjs`
 
 `packages/llm/tests/prompt-render-parity.test.mjs` proves the same original
 against `packages/llm`'s own separate copy.

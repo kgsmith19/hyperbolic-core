@@ -34,6 +34,7 @@ import OpenAI from "openai";
 import { createLlmError, isLlmError } from "../errors.ts";
 import { createStallWatchdog, STREAM_STALL_MS } from "../retry.ts";
 import { createAttemptController } from "./abort.ts";
+import { isTextPart, toPlainText } from "./parts.ts";
 import { parseRetryAfterMs } from "./retry-after.ts";
 import type {
   Credentials,
@@ -45,7 +46,6 @@ import type {
   Message,
   MessagePart,
   StopReason,
-  TextPart,
   ToolCall,
   ToolChoice,
   ToolDef,
@@ -58,14 +58,6 @@ const PROVIDER = "openai" as const;
 // ---------------------------------------------------------------------------
 // Request mapping: our provider-agnostic shapes -> OpenAI wire params.
 // ---------------------------------------------------------------------------
-
-function toPlainText(content: string | TextPart[]): string {
-  return typeof content === "string" ? content : content.map((t) => t.text).join("");
-}
-
-function isTextPart(part: MessagePart): part is Extract<MessagePart, { type: "text" }> {
-  return part.type === "text";
-}
 
 function isToolUsePart(part: MessagePart): part is Extract<MessagePart, { type: "tool_use" }> {
   return part.type === "tool_use";

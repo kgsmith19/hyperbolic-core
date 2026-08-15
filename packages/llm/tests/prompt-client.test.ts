@@ -98,7 +98,7 @@ test("getPrompt(name, {version, variables, sections, config}) passes every field
 test("a call naming a saved `config` always goes to the network, even when the name@version is already cached", async (t) => {
   let sourceCalls = 0;
   let renderRpcCalls = 0;
-  const spy = t.mock.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  const spy = t.mock.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     if (url.pathname === "/rest/v1/rpc/get_prompt") {
       renderRpcCalls += 1;

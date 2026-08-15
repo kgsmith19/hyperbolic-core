@@ -1,6 +1,6 @@
 // POST /v1/count (08-llm-handlers.md section 5): a budget-awareness
 // estimate, never an exact provider token count -- the same chars/4
-// heuristic and "always labeled estimate" posture apps/shell/src/lib/
+// heuristic and "always labeled estimate" posture apps/shell/frontend/src/lib/
 // prompts.ts's estimateTokenCount already uses for Prompt Organizer (05-d
 // section 9, rank 2). Deliberately duplicated rather than imported: that
 // file's own header comment already documents why a consumer of this

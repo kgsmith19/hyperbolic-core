@@ -6,10 +6,9 @@ The Shell is hyperbolic-core's unified web front end: one React/Vite SPA that
 composes every zone (Tools, Ideas, Prompt Organizer, the ACC area, the Brain
 run/chat surface, the cost dashboard) behind a single owner login.
 
-It is **frontend-only by design** — there is no `backend/` here, and that
-absence is deliberate rather than an oversight. The Shell owns no schema and
-runs no server of its own. Everything it renders comes from a backend that
-lives elsewhere and is reached through a typed client:
+It is **frontend-only**: there is no `backend/` here because the Shell owns
+no schema and runs no server of its own. Everything it renders comes from a
+backend that lives elsewhere and is reached through a typed client:
 
 - `packages/platform-client` — Supabase session, authed fetch, the Brain and
   registry clients.
@@ -17,10 +16,11 @@ lives elsewhere and is reached through a typed client:
 - `apps/agentic-command-center/backend/gui/server.mjs` — ACC's loopback API,
   proxied in development.
 
-Because of that, the repo-wide "backend work under `backend/`, frontend work
-under `frontend/`" rule has nothing to separate here: `src/` is entirely
-frontend. Sibling apps that genuinely have both halves (`apps/lifeos`,
-`apps/agentic-command-center`) do carry the split.
+All frontend work still lives under `frontend/`, the same rule every other app
+follows: `apps/lifeos` and `apps/agentic-command-center` carry both halves,
+this one carries only the half it has. `package.json` stays at the app root
+because it is the npm workspace member, not a frontend file — the same shape
+ACC uses.
 
 ## Product boundaries
 
@@ -39,14 +39,16 @@ frontend. Sibling apps that genuinely have both halves (`apps/lifeos`,
 ## Layout
 
 ```
-src/app.tsx        route table and the app shell
-src/main.tsx       entry point
-src/pages/         one directory per zone
-src/components/    shared presentational components
-src/lib/           typed clients, hooks, and pure helpers (each with a
-                   colocated *.test.ts)
-e2e/               Playwright specs against a real sandboxed server
-test/              standalone check scripts (bundle size, healthz)
+package.json                 workspace member; all scripts live here
+frontend/src/app.tsx         route table and the app shell
+frontend/src/main.tsx        entry point
+frontend/src/pages/          one directory per zone
+frontend/src/components/     shared presentational components
+frontend/src/lib/            typed clients, hooks, and pure helpers (each
+                             with a colocated *.test.ts)
+frontend/e2e/                Playwright specs against a real sandboxed server
+frontend/test/               standalone check scripts (bundle size, healthz)
+frontend/vite.config.ts      pins `root` to frontend/, so dist/ lands there
 ```
 
 ## Commands

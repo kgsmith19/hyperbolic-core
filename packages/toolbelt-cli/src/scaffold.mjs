@@ -108,7 +108,7 @@ export function buildPlan(options, { toolbeltRoot, now = new Date() }) {
   files.push({ path: join(toolDir, "AGENTS.md"), content: buildAgentsMd({ id, name, hasSchema, schema }) });
 
   if (kind === "ui" || kind === "hybrid") {
-    files.push({ path: join(toolDir, "web", "index.html"), content: buildWebIndexHtml({ id, name }) });
+    files.push({ path: join(toolDir, "frontend", "index.html"), content: buildWebIndexHtml({ id, name }) });
   }
 
   if (hasSchema) {

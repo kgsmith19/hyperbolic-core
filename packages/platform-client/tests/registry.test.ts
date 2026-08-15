@@ -1,19 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildListToolsParams, createRegistryClient } from "../src/registry.ts";
+import { jsonResponse } from "./support.ts";
 
 // Fixture data only; not a real project or credential.
 const FIXTURE_URL = "https://fixture-project.supabase.invalid";
 const FIXTURE_TOKEN = "fixture.session.token";
 
 type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
 
 async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Promise<T> {
   const original = globalThis.fetch;
@@ -44,7 +38,7 @@ function fixtureRow(overrides: Partial<Record<string, unknown>> = {}) {
 // --- buildListToolsParams: pure filter-building logic -----------------------
 // This is one of the two places the issue's own testing bar names as where a
 // bug would silently leak or hide a tool (the other is the Shell's
-// route-vs-status-page split, apps/shell/src/lib/registry.ts's splitByRoute).
+// route-vs-status-page split, apps/shell/frontend/src/lib/registry.ts's splitByRoute).
 
 test("buildListToolsParams: no filter omits status/kind entirely (unfiltered, not zero-match)", () => {
   const params = buildListToolsParams();

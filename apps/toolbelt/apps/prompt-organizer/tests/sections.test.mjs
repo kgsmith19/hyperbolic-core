@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractSections, render } from "../web/render.mjs";
+import { extractSections, render } from "../frontend/render.mjs";
 
 // The AC-001/AC-002 fixture: two well-formed sections with plain text on
 // either side, so exclusion can be checked for both content loss and

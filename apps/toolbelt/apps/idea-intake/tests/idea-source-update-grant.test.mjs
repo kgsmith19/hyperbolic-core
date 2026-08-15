@@ -11,45 +11,28 @@
 // (m3-05 lineage): stubs GoTrue's auth schema/roles a bare local Postgres
 // lacks, applies the real, committed migration files from disk verbatim.
 import { test } from "node:test";
-import { createPostgresHarness, supabaseHarnessSql } from "../../../tests/postgres-harness.mjs";
+import { createPostgresHarness } from "../../../tests/postgres-harness.mjs";
+import {
+  asAuthenticatedOwner,
+  intakeMigration,
+  makeWithDb,
+} from "./intake-db.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const TOOL_DIR = join(__dirname, "..");
-const ROOT_MIGRATIONS_DIR = join(TOOL_DIR, "..", "..", "supabase", "migrations");
-const INTAKE_MIGRATIONS_DIR = join(TOOL_DIR, "supabase", "migrations");
 
-const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
-const INTAKE_UP = join(INTAKE_MIGRATIONS_DIR, "20260813002605_intake_create_schema.sql");
-const FIX_UP = join(INTAKE_MIGRATIONS_DIR, "20260814090000_intake_idea_source_update_grant.sql");
-const FIX_DOWN = join(INTAKE_MIGRATIONS_DIR, "20260814090000_intake_idea_source_update_grant_down.sql");
+const FIX_UP = intakeMigration("20260814090000_intake_idea_source_update_grant.sql");
+const FIX_DOWN = intakeMigration("20260814090000_intake_idea_source_update_grant_down.sql");
 
-const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
 
-const { psql, psqlOk, applyMigrationWithRetry, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f35_source_grant");
+const PG = createPostgresHarness("f35_source_grant");
+const { psql, psqlOk, applyMigrationWithRetry, withDatabase, skipReason: SKIP_REASON } = PG;
 const psqlAllowError = psql;
 
-const HARNESS_SQL = supabaseHarnessSql([OWNER_UUID]);
 
-const OWNER_BOOTSTRAP_SQL = `insert into platform.config (owner_uuid) values ('${OWNER_UUID}');`;
 
-function asAuthenticatedOwner(sqlText) {
-  return `set role authenticated;\ndo $$ begin perform set_config('app.test_uid', '${OWNER_UUID}', false); end $$;\n${sqlText}`;
-}
 
-function withDb(applyFix, fn) {
-  return withDatabase((db) => {
-    psqlOk(db, HARNESS_SQL);
-    psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
-    psqlOk(db, OWNER_BOOTSTRAP_SQL);
-    applyMigrationWithRetry(db, readFileSync(INTAKE_UP, "utf8"));
-    if (applyFix) psqlOk(db, readFileSync(FIX_UP, "utf8"));
-    return fn(db);
-  });
-}
+const withDb = makeWithDb(PG, FIX_UP);
 
 function insertDraftIdea(db, title, source) {
   return psqlOk(

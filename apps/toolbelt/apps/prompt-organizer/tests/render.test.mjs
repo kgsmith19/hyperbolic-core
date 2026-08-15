@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractVariables, render } from "../web/render.mjs";
+import { extractVariables, render } from "../frontend/render.mjs";
 
 // T-U-006 -> AC-001, PROP-003 -> FR-004. Literal AC-001 fixture (SPEC-0003
 // section 4): a single token, fully supplied, substitutes exactly and the

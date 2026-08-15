@@ -5,8 +5,8 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { render } from "../web/render.mjs";
-import { searchPrompts } from "../web/search.mjs";
+import { render } from "../frontend/render.mjs";
+import { searchPrompts } from "../frontend/search.mjs";
 
 // Rendering a maximum-size prompt must stay below this p95 budget.
 const BUDGET_MS = 100;
@@ -291,7 +291,7 @@ test(
       const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
       const max = samples[samples.length - 1];
 
-      // Same "[perf] ..." console.log convention as apps/shell/e2e/tools.spec.ts's
+      // Same "[perf] ..." console.log convention as apps/shell/frontend/e2e/tools.spec.ts's
       // perf tests, so a CI log always shows the real measured numbers even
       // when the assertion passes comfortably.
       console.log(

@@ -3,33 +3,24 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { BrainDaemon } from "../src/daemon.ts";
 import { startServer } from "../src/server.ts";
 import type { BrainConfig } from "../src/config.ts";
 import { BRAIN_RUN_PROPOSE_SCOPE } from "../src/auth.ts";
+import { generateEcKeyPair, signJwt } from "./support.ts";
+import type { PrivateKey } from "./support.ts";
 
 const ISSUER = "test-issuer";
 const AUDIENCE = "brain";
 
-function base64Url(input: Buffer): string {
-  return input.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function generateEcKeyPair() {
-  const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-  return { publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString(), privateKey };
-}
-
-function signToken(privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"], scopes: string[]): string {
+function signToken(privateKey: PrivateKey, scopes: string[]): string {
   const nowS = Math.floor(Date.now() / 1000);
-  const header = { alg: "ES256", typ: "JWT" };
-  const payload = { iss: ISSUER, aud: AUDIENCE, sub: "agent:test", scopes, iat: nowS, exp: nowS + 3600 };
-  const headerB64 = base64Url(Buffer.from(JSON.stringify(header)));
-  const payloadB64 = base64Url(Buffer.from(JSON.stringify(payload)));
-  const signature = cryptoSign("SHA256", Buffer.from(`${headerB64}.${payloadB64}`), { key: privateKey, dsaEncoding: "ieee-p1363" });
-  return `${headerB64}.${payloadB64}.${base64Url(signature)}`;
+  return signJwt(
+    privateKey,
+    { alg: "ES256", typ: "JWT" },
+    { iss: ISSUER, aud: AUDIENCE, sub: "agent:test", scopes, iat: nowS, exp: nowS + 3600 },
+  );
 }
 
 function tmpDataDir(): string {

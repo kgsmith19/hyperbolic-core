@@ -15,6 +15,17 @@ const DEFAULT_RATES = {
   unknown: { in: 3, out: 15 },
 };
 
+// A deliberate copy of usage.mjs's family(), NOT an import, and it should stay
+// that way. Importing it means editing usage.mjs, and covgate gates every
+// changed file whole-file at 100/100/90 — usage.mjs sits at 72/63/45 because
+// its CLI half (cmdWeek/cmdSessions/cmdCheck and the argv dispatch) is only
+// ever reached through spawnSync, and node does not merge child-process V8
+// coverage into the parent report. So no amount of added testing can lift that
+// file to the floor; the only way through is an override at ~72%, which would
+// switch the gate off for a 487-line budget-enforcement file and paper over
+// its several genuinely untested paths at the same time. Five duplicated lines
+// is the cheaper defect. Keep the two lists in sync by hand: a model added to
+// one and not the other prices as "unknown" in that caller.
 function family(model) {
   if (!model) return "unknown";
   const m = String(model).toLowerCase();

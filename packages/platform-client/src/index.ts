@@ -140,7 +140,7 @@ async function isOwnerSession(
  *
  * A `null` input (no session at all) passes through untouched -- there is
  * nothing to check ownership of. A non-null session that is NOT the owner
- * is best-effort signed out (mirrors apps/shell/src/lib/session.ts's own
+ * is best-effort signed out (mirrors apps/shell/frontend/src/lib/session.ts's own
  * signOut(), which also swallows a failed network call rather than letting
  * it block state transitions) so a non-owner session never lingers half-real
  * in browser storage, and this function resolves `null` either way --
@@ -314,7 +314,7 @@ export function createPlatformClient(config: PlatformClientConfig): PlatformClie
  * a real caller needs (e.g. a LifeOS API that stops being same-origin under
  * some future deployment topology) without reopening `authedFetch` to
  * arbitrary hosts again. Every current real call site in this repo
- * (apps/shell/e2e/single-session.spec.ts, idp-down.spec.ts,
+ * (apps/shell/frontend/e2e/single-session.spec.ts, idp-down.spec.ts,
  * src/lib/session.ts) uses same-origin relative paths -- ADR-02's one-origin
  * V1 topology -- so this list is empty by default; nothing in the current
  * repo needs to populate it.

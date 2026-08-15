@@ -1,5 +1,5 @@
 // m4-04: packages/llm/src/prompt-render.ts is a deliberate copy of
-// apps/toolbelt/apps/prompt-organizer/web/render.mjs (see that file's header
+// apps/toolbelt/apps/prompt-organizer/frontend/render.mjs (see that file's header
 // comment for why it is a copy, not an import, across the apps/* boundary).
 // docs/planning/05-d-prompt-organizer.md section 8 says the pure render()
 // model and the SQL RPC are "provably equivalent," a claim
@@ -18,7 +18,7 @@
 // does, on purpose, specifically to prove the copy is faithful.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as original from "../../../apps/toolbelt/apps/prompt-organizer/web/render.mjs";
+import * as original from "../../../apps/toolbelt/apps/prompt-organizer/frontend/render.mjs";
 import * as ported from "../src/prompt-render.ts";
 
 function assertParity(body, values, sections) {

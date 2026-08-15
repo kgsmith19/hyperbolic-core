@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { searchPrompts, filterByActive, shouldFocusSearch } from "../web/search.mjs";
+import { searchPrompts, filterByActive, shouldFocusSearch } from "../frontend/search.mjs";
 
 // AC-001 fixture (SPEC-0001 section 4), literal.
 const PROMPTS = [

@@ -349,7 +349,7 @@ all, since its session was reading the OLD project's Auth):
 3. **Frontend re-point**: `VITE_SUPABASE_URL` /
    `VITE_SUPABASE_PUBLISHABLE_KEY` (`frontend/.env.example`) move to the
    platform project's public values — the same ones
-   `apps/shell/src/lib/session.ts` already hardcodes as its default in the
+   `apps/shell/frontend/src/lib/session.ts` already hardcodes as its default in the
    `hyperbolic-core` tree, since both zones read the one platform session
    (ADR-03; `docs/planning/05-a-hyperbolic-core.md` section 6).
 4. **Session source swap**: the frontend stops calling `signInWithPassword`

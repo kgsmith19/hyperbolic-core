@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import {
   extractBearerToken,
   verifyOwnerSession,
@@ -10,28 +9,10 @@ import {
   BRAIN_RUN_PROPOSE_SCOPE,
   type AgentTokenClaims,
 } from "../src/auth.ts";
+import { base64Url, generateEcKeyPair, signJwt } from "./support.ts";
 
 const ISSUER = "lifeos";
 const AUDIENCE = "brain";
-
-function base64Url(input: Buffer): string {
-  return input.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function generateEcKeyPair() {
-  const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-  return {
-    publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
-    privateKey,
-  };
-}
-
-function signToken(privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"], header: object, payload: object): string {
-  const headerB64 = base64Url(Buffer.from(JSON.stringify(header)));
-  const payloadB64 = base64Url(Buffer.from(JSON.stringify(payload)));
-  const signature = cryptoSign("SHA256", Buffer.from(`${headerB64}.${payloadB64}`), { key: privateKey, dsaEncoding: "ieee-p1363" });
-  return `${headerB64}.${payloadB64}.${base64Url(signature)}`;
-}
 
 function fixtureClaims(overrides: Partial<Record<string, unknown>> = {}) {
   const nowS = Math.floor(Date.now() / 1000);
@@ -110,7 +91,7 @@ test("verifyOwnerSession: false on a network error, fails closed rather than thr
 test("verifyAgentToken: a validly signed token verifies and returns its claims", () => {
   const { publicKeyPem, privateKey } = generateEcKeyPair();
   const claims = fixtureClaims();
-  const token = signToken(privateKey, { alg: "ES256", typ: "JWT" }, claims);
+  const token = signJwt(privateKey, { alg: "ES256", typ: "JWT" }, claims);
 
   const verified = verifyAgentToken(token, { publicKeyPem, issuer: ISSUER, audience: AUDIENCE });
   assert.deepEqual(verified, claims);
@@ -118,8 +99,8 @@ test("verifyAgentToken: a validly signed token verifies and returns its claims",
 
 test("verifyAgentToken: rejects a tampered payload (signature no longer matches)", () => {
   const { publicKeyPem, privateKey } = generateEcKeyPair();
-  const token = signToken(privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims());
-  const [headerB64, payloadB64, sigB64] = token.split(".");
+  const token = signJwt(privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims());
+  const [headerB64, , sigB64] = token.split(".");
   const tamperedPayload = base64Url(Buffer.from(JSON.stringify(fixtureClaims({ scopes: ["everything:write"] }))));
   const tampered = `${headerB64}.${tamperedPayload}.${sigB64}`;
 
@@ -129,33 +110,33 @@ test("verifyAgentToken: rejects a tampered payload (signature no longer matches)
 test("verifyAgentToken: rejects a signature from the WRONG key", () => {
   const a = generateEcKeyPair();
   const b = generateEcKeyPair();
-  const token = signToken(a.privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims());
+  const token = signJwt(a.privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims());
   assert.equal(verifyAgentToken(token, { publicKeyPem: b.publicKeyPem, issuer: ISSUER, audience: AUDIENCE }), null);
 });
 
 test("verifyAgentToken: rejects any algorithm other than ES256 (algorithm confusion defense)", () => {
   const { publicKeyPem, privateKey } = generateEcKeyPair();
-  const token = signToken(privateKey, { alg: "none", typ: "JWT" }, fixtureClaims());
+  const token = signJwt(privateKey, { alg: "none", typ: "JWT" }, fixtureClaims());
   assert.equal(verifyAgentToken(token, { publicKeyPem, issuer: ISSUER, audience: AUDIENCE }), null);
 });
 
 test("verifyAgentToken: rejects an expired token", () => {
   const { publicKeyPem, privateKey } = generateEcKeyPair();
   const nowS = Math.floor(Date.now() / 1000);
-  const token = signToken(privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims({ iat: nowS - 7200, exp: nowS - 3600 }));
+  const token = signJwt(privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims({ iat: nowS - 7200, exp: nowS - 3600 }));
   assert.equal(verifyAgentToken(token, { publicKeyPem, issuer: ISSUER, audience: AUDIENCE }), null);
 });
 
 test("verifyAgentToken: rejects a token issued too far in the future (beyond clock-skew allowance)", () => {
   const { publicKeyPem, privateKey } = generateEcKeyPair();
   const nowS = Math.floor(Date.now() / 1000);
-  const token = signToken(privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims({ iat: nowS + 3600, exp: nowS + 7200 }));
+  const token = signJwt(privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims({ iat: nowS + 3600, exp: nowS + 7200 }));
   assert.equal(verifyAgentToken(token, { publicKeyPem, issuer: ISSUER, audience: AUDIENCE }), null);
 });
 
 test("verifyAgentToken: rejects a mismatched issuer or audience", () => {
   const { publicKeyPem, privateKey } = generateEcKeyPair();
-  const token = signToken(privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims());
+  const token = signJwt(privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims());
   assert.equal(verifyAgentToken(token, { publicKeyPem, issuer: "someone-else", audience: AUDIENCE }), null);
   assert.equal(verifyAgentToken(token, { publicKeyPem, issuer: ISSUER, audience: "someone-else" }), null);
 });
@@ -184,7 +165,7 @@ test("authenticate: null when no Authorization header is present", async () => {
 
 test("authenticate: a valid agent token yields an agent principal without any network call", async () => {
   const { publicKeyPem, privateKey } = generateEcKeyPair();
-  const token = signToken(privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims());
+  const token = signJwt(privateKey, { alg: "ES256", typ: "JWT" }, fixtureClaims());
   const originalFetch = globalThis.fetch;
   let fetchCalled = false;
   try {

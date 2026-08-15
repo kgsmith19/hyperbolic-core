@@ -38,17 +38,6 @@ function openaiErrorResponse(status: number, message: string): Response {
   return jsonResponse({ error: { message, type: null, param: null, code: null } }, status);
 }
 
-function fixtureOpenAIChatCompletion(): unknown {
-  return {
-    id: "chatcmpl_fixture",
-    object: "chat.completion",
-    created: 1_700_000_000,
-    model: "gpt-fixture-resolved",
-    choices: [{ index: 0, finish_reason: "stop", logprobs: null, message: { role: "assistant", content: "from openai", refusal: null } }],
-    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-  };
-}
-
 function fixtureGeminiGenerateContentResponse(): unknown {
   return {
     candidates: [{ content: { role: "model", parts: [{ text: "from gemini" }] }, finishReason: "STOP", index: 0 }],

@@ -37,7 +37,14 @@
 // -- this suite needs only that file's core.event_monthly_agg table and
 // core.purge_old_events() function, neither pg_cron-related).
 import { test } from "node:test";
-import { createPostgresHarness, psqlSpawnSpec, supabaseHarnessSql } from "./postgres-harness.mjs";
+import {
+  createPostgresHarness,
+  migrationBeforeMarker,
+  psqlAsync,
+  psqlSpawnSpec,
+  supabaseHarnessSql,
+  waitFor,
+} from "./postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -54,12 +61,7 @@ const FIX_DOWN = join(MIGRATIONS_DIR, "20260814070000_core_event_retention_atomi
 
 const CRON_SPLIT_MARKER = "create extension pg_cron;";
 
-function coreEventRetentionWithoutCron() {
-  const full = readFileSync(CORE_EVENT_RETENTION_UP, "utf8");
-  const idx = full.indexOf(CRON_SPLIT_MARKER);
-  assert.ok(idx > 0, "expected to find the pg_cron marker in the real retention migration");
-  return full.slice(0, idx);
-}
+const coreEventRetentionWithoutCron = () => migrationBeforeMarker(CORE_EVENT_RETENTION_UP, CRON_SPLIT_MARKER);
 
 // Minimal Supabase stubs: core.run.user_id references auth.users(id) and
 // defaults to auth.uid(), while the baseline migrations grant privileges
@@ -89,33 +91,6 @@ function insertOldEventsSql(n, label) {
   return `insert into core.event (run_id, at, kind, name) values\n    ${values};`;
 }
 
-
-// Async (non-blocking) psql invocation: needed for the real two-session
-// concurrency proof below, since spawnSync would serialize what must run
-// in parallel.
-function psqlAsync(dbName, sqlText) {
-  return new Promise((resolve) => {
-    const child = spawn(...psqlSpawnSpec(dbName), {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => (stdout += d));
-    child.stderr.on("data", (d) => (stderr += d));
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
-    child.stdin.write(sqlText);
-    child.stdin.end();
-  });
-}
-
-async function waitFor(predicate, timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (predicate()) return true;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  return false;
-}
 
 function withDb(applyFix, fn) {
   return withDatabase((db) => {

@@ -2,18 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { geminiDriver } from "../src/drivers/gemini.ts";
 import { complete } from "../src/complete.ts";
-import { MAX_RETRIES } from "../src/retry.ts";
 import { isLlmError } from "../src/errors.ts";
 import type { LlmDelta, LlmRequest } from "../src/types.ts";
-import {
-  collectStream,
-  jsonResponse,
-  pacedSseResponse as rawPacedSseResponse,
-  sseResponse as rawSseResponse,
-  tickInSteps,
-  withPatchedFetch,
-  type SseOptions,
-} from "./driver-harness.ts";
+import { collectStream, jsonResponse, pacedSseResponse as rawPacedSseResponse, sseLine, sseResponse as rawSseResponse, type SseOptions, withPatchedFetch } from "./driver-harness.ts";
 
 // ---------------------------------------------------------------------------
 // Gemini-specific wire fixtures. The transport plumbing (fetch patching,
@@ -23,13 +14,6 @@ import {
 // this file covers only what is genuinely Gemini-shaped.
 // ---------------------------------------------------------------------------
 
-/** Gemini's wire error shape: {"error": {"code", "message", "status"}}. Our
- * classifier only reads the HTTP status (ApiError carries no type/code
- * field at all), so the body content itself is not load-bearing here. */
-function geminiErrorResponse(status: number, message: string): Response {
-  return jsonResponse({ error: { code: status, message, status: "FIXTURE" } }, status);
-}
-
 function fixtureGenerateContentResponse(overrides: Record<string, unknown> = {}) {
   return {
     candidates: [{ content: { role: "model", parts: [{ text: "hello there" }] }, finishReason: "STOP", index: 0 }],
@@ -37,10 +21,6 @@ function fixtureGenerateContentResponse(overrides: Record<string, unknown> = {})
     usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 18, cachedContentTokenCount: 3 },
     ...overrides,
   };
-}
-
-function sseLine(data: unknown): string {
-  return `data: ${JSON.stringify(data)}\n\n`;
 }
 
 /** Gemini's `alt=sse` format frames chunks as bare `data: {...}` and closes

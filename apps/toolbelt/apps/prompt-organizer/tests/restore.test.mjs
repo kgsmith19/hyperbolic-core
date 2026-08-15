@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isCurrentVersion } from "../web/restore.mjs";
+import { isCurrentVersion } from "../frontend/restore.mjs";
 import { login, rest, primaryToken, USER_B } from "./helpers.mjs";
 
 // SPEC-0005 (SL-008): restore a prior version as the new current version.

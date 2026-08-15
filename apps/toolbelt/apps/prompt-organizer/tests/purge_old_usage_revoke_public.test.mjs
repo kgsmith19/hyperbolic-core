@@ -30,7 +30,11 @@
 // stays callable by that same unprivileged-role-agnostic connection (no
 // `SET ROLE`) after the fix.
 import { test } from "node:test";
-import { createPostgresHarness, supabaseHarnessSql } from "../../../tests/postgres-harness.mjs";
+import {
+  createPostgresHarness,
+  migrationBeforeMarker,
+  supabaseHarnessSql,
+} from "../../../tests/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -51,12 +55,7 @@ const FIX_DOWN = join(PO_MIGRATIONS_DIR, "20260814030000_prompt_purge_old_usage_
 
 const CRON_SPLIT_MARKER = "select cron.schedule(";
 
-function promptUsageRetentionWithoutCron() {
-  const full = readFileSync(PROMPT_USAGE_RETENTION_UP, "utf8");
-  const idx = full.indexOf(CRON_SPLIT_MARKER);
-  assert.ok(idx > 0, "expected to find the cron.schedule marker in the real retention migration");
-  return full.slice(0, idx);
-}
+const promptUsageRetentionWithoutCron = () => migrationBeforeMarker(PROMPT_USAGE_RETENTION_UP, CRON_SPLIT_MARKER);
 
 const { psql, psqlOk, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f2b_purge_usage");
 const psqlAllowError = psql;
