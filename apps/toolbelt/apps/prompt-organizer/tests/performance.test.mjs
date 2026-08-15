@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { createPostgresHarness } from "../../../tests/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -209,79 +210,36 @@ $$;
 insert into auth.users (id) values ('${PERF_OWNER_UUID}');
 `;
 
-function perfTryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], { encoding: "utf8", timeout: 5000 });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
 
-function perfDetectRunner() {
-  if (perfTryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (perfTryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
+const { psql, psqlOk, applyMigrationWithRetry, freshDatabaseName: freshDbName, available: perfAvailable } =
+  createPostgresHarness("m4_03_perf_test", { timeout: 30000 });
 
-const PERF_RUNNER = perfDetectRunner();
-const PERF_SKIP_REASON = PERF_RUNNER
+const PERF_SKIP_REASON = perfAvailable
   ? false
   : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); get_prompt is not deployed " +
     "on the live Supabase project yet (confirmed live: rpc/get_prompt returns PGRST202), so this suite has " +
     "nothing honest to measure against either target without a reachable engine";
 
-function perfPsql(dbName, sqlText) {
-  return spawnSync(PERF_RUNNER.cmd, [...PERF_RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
-    encoding: "utf8",
-    input: sqlText,
-    timeout: 30000,
-  });
-}
-
-function perfPsqlOk(dbName, sqlText) {
-  const result = perfPsql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-
-// See get-prompt.test.mjs for the "tuple concurrently updated" rationale.
-function perfApplyWithRetry(dbName, sqlText, attempts = 5) {
-  const wrapped = `begin;\n${sqlText}\ncommit;\n`;
-  let lastResult;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    lastResult = perfPsql(dbName, wrapped);
-    if (lastResult.status === 0) return lastResult.stdout;
-    if (!/tuple concurrently updated/.test(lastResult.stderr || "")) break;
-  }
-  assert.equal(lastResult.status, 0, `psql failed against ${dbName}: ${lastResult.stderr || lastResult.stdout}`);
-  return lastResult.stdout;
-}
-
-function perfFreshDbName() {
-  return `m4_03_perf_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
-
 test(
   "real Postgres: rpc/get_prompt p95 over 50 warm calls stays under the PO-2 150ms budget (engine-level; see comment above for the network-layer gap)",
   { skip: PERF_SKIP_REASON },
   () => {
-    const db = perfFreshDbName();
-    perfPsqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
+    const db = freshDbName();
+    psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
     try {
-      perfPsqlOk(db, PERF_HARNESS_SQL);
-      perfPsqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
-      perfPsqlOk(db, `insert into platform.config (owner_uuid) values ('${PERF_OWNER_UUID}');`);
+      psqlOk(db, PERF_HARNESS_SQL);
+      psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
+      psqlOk(db, `insert into platform.config (owner_uuid) values ('${PERF_OWNER_UUID}');`);
       for (const name of PO_MIGRATIONS_IN_ORDER) {
         const sql = readFileSync(join(PO_MIGRATIONS_DIR, name), "utf8");
-        if (name === "20260807020000_prompt_create_prompt.sql") perfApplyWithRetry(db, sql);
-        else perfPsqlOk(db, sql);
+        if (name === "20260807020000_prompt_create_prompt.sql") applyMigrationWithRetry(db, sql);
+        else psqlOk(db, sql);
       }
 
       // A realistic-sized prompt (variables + an optional section), not a
       // trivial one-token body, so the measured cost reflects the same
       // section-then-variable resolution work a real injection call does.
-      perfPsqlOk(
+      psqlOk(
         db,
         `set role authenticated;
          do $$ begin perform set_config('app.test_uid', '${PERF_OWNER_UUID}', false); end $$;
@@ -294,7 +252,7 @@ test(
          from prompt.prompt where title = 'perf/get-prompt-fixture';`,
       );
 
-      const samplesRaw = perfPsqlOk(
+      const samplesRaw = psqlOk(
         db,
         `set role authenticated;
          do $$ begin perform set_config('app.test_uid', '${PERF_OWNER_UUID}', false); end $$;
@@ -346,7 +304,7 @@ test(
           `(all 50 samples: ${samples.map((n) => n.toFixed(2)).join(", ")})`,
       );
     } finally {
-      perfPsqlOk("postgres", `drop database if exists ${db};`);
+      psqlOk("postgres", `drop database if exists ${db};`);
     }
   },
 );

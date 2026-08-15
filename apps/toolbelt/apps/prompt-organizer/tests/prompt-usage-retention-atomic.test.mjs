@@ -20,6 +20,7 @@
 // Same harness/skip mechanics and same pg_cron caveat/fix as
 // apps/toolbelt/apps/prompt-organizer/tests/purge_old_usage_revoke_public.test.mjs.
 import { test } from "node:test";
+import { createPostgresHarness, psqlSpawnSpec, supabaseHarnessSql } from "../../../tests/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -54,15 +55,10 @@ function promptUsageRetentionWithoutCron() {
   return full.slice(0, idx);
 }
 
-const HARNESS_SQL = `
-create schema if not exists auth;
-create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid()
-);
-create or replace function auth.uid() returns uuid
-language sql stable
-as $$ select null::uuid $$;
-`;
+const { psql, psqlOk, freshDatabaseName: freshDbName, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f33_prompt_retention");
+const psqlAllowError = psql;
+
+const HARNESS_SQL = supabaseHarnessSql([]);
 
 const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
 const PROMPT_ID = "66666666-6666-6666-6666-666666666666";
@@ -82,47 +78,10 @@ function insertOldUsageSql(n, label) {
   return `insert into prompt.usage (prompt_id, version_no, user_id, created_at) values\n    ${values};`;
 }
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], { encoding: "utf8", timeout: 5000 });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-if (process.env.PROMPT_REQUIRE_POSTGRES === "1" && !RUNNER) {
-  throw new Error("PROMPT_REQUIRE_POSTGRES=1 but no local PostgreSQL server is reachable");
-}
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); " +
-    "this suite proves real concurrent behavior against an actual engine and has nothing honest to assert without one";
-
-function psql(dbName, sqlText) {
-  return spawnSync(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
-    encoding: "utf8",
-    input: sqlText,
-    timeout: 20000,
-  });
-}
-
-function psqlOk(dbName, sqlText) {
-  const result = psql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
 
 function psqlAsync(dbName, sqlText) {
   return new Promise((resolve) => {
-    const child = spawn(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
+    const child = spawn(...psqlSpawnSpec(dbName), {
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -144,14 +103,8 @@ async function waitFor(predicate, timeoutMs) {
   return false;
 }
 
-function freshDbName() {
-  return `f33_prompt_retention_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
-
 function withDb(applyFix, fn) {
-  const db = freshDbName();
-  psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
-  try {
+  return withDatabase((db) => {
     psqlOk(db, HARNESS_SQL);
     psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
     psqlOk(db, readFileSync(PROMPT_CREATE_PROMPT_UP, "utf8"));
@@ -161,9 +114,7 @@ function withDb(applyFix, fn) {
     if (applyFix) psqlOk(db, readFileSync(FIX_UP, "utf8"));
     psqlOk(db, FIXTURE_SQL);
     return fn(db);
-  } finally {
-    psqlOk("postgres", `drop database if exists ${db};`);
-  }
+  });
 }
 
 test(
@@ -239,7 +190,7 @@ test(
       psqlOk(db, FIXTURE_SQL);
       psqlOk(db, insertOldUsageSql(5, "green-concurrent"));
 
-      const locker = spawn(RUNNER.cmd, [...RUNNER.args, "-d", db, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
+      const locker = spawn(...psqlSpawnSpec(db), {
         stdio: ["pipe", "pipe", "pipe"],
       });
       let lockerOut = "";

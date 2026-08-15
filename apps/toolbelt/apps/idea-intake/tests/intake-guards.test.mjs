@@ -18,6 +18,7 @@
 // session GUC (app.test_uid) instead of GoTrue's JWT claim. This stub is
 // local-only test scaffolding, never a committed migration.
 import { test } from "node:test";
+import { createPostgresHarness, psqlSpawnSpec, supabaseHarnessSql } from "../../../tests/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -60,107 +61,13 @@ const INTAKE_DOWN = join(INTAKE_MIGRATIONS_DIR, "20260813002605_intake_create_sc
 const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
 const STRANGER_UUID = "22222222-2222-2222-2222-222222222222";
 
-const HARNESS_SQL = `
-create schema if not exists auth;
-create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid()
-);
-create or replace function auth.uid() returns uuid
-language sql stable
-as $$ select nullif(current_setting('app.test_uid', true), '')::uuid $$;
+const { psql, psqlOk, applyMigrationWithRetry, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("m3_05_intake_test");
+const psqlAllowError = psql;
 
-do $$
-begin
-  if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticator') then create role authenticator nologin; end if;
-end
-$$;
-
-insert into auth.users (id) values ('${OWNER_UUID}'), ('${STRANGER_UUID}');
-`;
+const HARNESS_SQL = supabaseHarnessSql([OWNER_UUID, STRANGER_UUID]);
 
 const OWNER_BOOTSTRAP_SQL = `insert into platform.config (owner_uuid) values ('${OWNER_UUID}');`;
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], {
-      encoding: "utf8",
-      timeout: 5000,
-    });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-if (process.env.TOOLBELT_REQUIRE_POSTGRES === "1" && !RUNNER) {
-  throw new Error("TOOLBELT_REQUIRE_POSTGRES=1 but no local PostgreSQL server is reachable");
-}
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); " +
-    "this suite proves real trigger/grant/RLS behavior against an actual engine and has nothing honest to " +
-    "assert without one -- see the m3-05 implementation report for the interactive proof run where a local " +
-    "engine was available";
-
-// -q (quiet): suppresses psql's own command-completion announcements
-// ("SET", "INSERT 0 1", "CREATE TABLE", ...) that it otherwise prints for
-// every executed statement in a script, even under -tA (which only
-// suppresses SELECT result headers/footers, not those announcements) --
-// needed here because several helpers below combine a session-setup
-// statement with the actual query-of-interest in one invocation (a fresh
-// psql process per call has no session to carry SET ROLE/set_config
-// across separate calls, so they must be combined).
-function psql(dbName, sqlText) {
-  return spawnSync(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
-    encoding: "utf8",
-    input: sqlText,
-    timeout: 20000,
-  });
-}
-
-function psqlOk(dbName, sqlText) {
-  const result = psql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-
-// Applies a migration file with a bounded retry on Postgres's transient
-// "tuple concurrently updated" error -- reproduced via repeated real runs
-// once this file started running alongside
-// tests/migrate-forgepad-e2e.test.mjs (m3-08), which applies this same
-// migration in its own scratch databases. The cause: this migration's
-// `alter role authenticator set pgrst.db_schemas = ...` (like the identical
-// pattern in 20260812150000_test_create_fence.sql and Prompt Organizer's
-// own schema-exposure migration) is unscoped (no `IN DATABASE`), so it
-// writes one role-wide row in the shared pg_db_role_setting catalog --
-// every scratch database applying it contends on that same row. Wrapping
-// the script in one explicit transaction makes a retry safe and idempotent
-// (Postgres DDL is transactional, so a failure rolls back every earlier
-// statement in the same script too; the retry starts from a clean slate
-// rather than re-running non-idempotent `create schema`/`create table`
-// against partially-applied state). Test-harness fix only -- the real
-// Supabase project only ever applies this migration once.
-function applyMigrationWithRetry(dbName, sqlText, attempts = 5) {
-  const wrapped = `begin;\n${sqlText}\ncommit;\n`;
-  let lastResult;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    lastResult = psql(dbName, wrapped);
-    if (lastResult.status === 0) return lastResult.stdout;
-    if (!/tuple concurrently updated/.test(lastResult.stderr || "")) break;
-  }
-  assert.equal(lastResult.status, 0, `psql failed against ${dbName}: ${lastResult.stderr || lastResult.stdout}`);
-  return lastResult.stdout;
-}
 
 // Runs sqlText as the `authenticated` role with auth.uid() pinned to uuid
 // for the duration of this one psql invocation (mirrors what PostgREST does
@@ -180,19 +87,13 @@ function submitToGithub(dbName, ideaId, issueNumber) {
   );
 }
 
-function freshDbName() {
-  return `m3_05_intake_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
-
 // Applies the harness stub plus the real forward chain used by production:
 // platform bootstrap, immutable intake schema, submission RPC, legacy
 // source-key reconciliation, source editing grant, optimization FK/index
 // repair, integrity hardening, and stable idempotency identity, in global
 // ledger order. Always drops the db afterward.
 function withMigratedDb(fn) {
-  const db = freshDbName();
-  psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
-  try {
+  return withDatabase((db) => {
     psqlOk(db, HARNESS_SQL);
     psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
     psqlOk(db, OWNER_BOOTSTRAP_SQL);
@@ -204,9 +105,7 @@ function withMigratedDb(fn) {
     applyMigrationWithRetry(db, readFileSync(INTAKE_HARDENING_UP, "utf8"));
     applyMigrationWithRetry(db, readFileSync(INTAKE_IDEMPOTENCY_UP, "utf8"));
     return fn(db);
-  } finally {
-    psqlOk("postgres", `drop database if exists ${db};`);
-  }
+  });
 }
 
 test(
@@ -571,8 +470,7 @@ test(
       ).trim();
 
       const reapply = spawnSync(
-        RUNNER.cmd,
-        [...RUNNER.args, "-d", db, "-v", "ON_ERROR_STOP=1", "-1", "-tA"],
+        ...psqlSpawnSpec(db, ["-1"]),
         { encoding: "utf8", input: readFileSync(INTAKE_UP, "utf8"), timeout: 20000 },
       );
       assert.notEqual(reapply.status, 0, "re-applying the up migration verbatim should fail (create table has no IF NOT EXISTS)");
