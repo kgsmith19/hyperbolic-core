@@ -1,6 +1,7 @@
 """Token verification: the API refuses everything but the owner's valid
 ES256 Supabase JWT, and a scopes claim narrows the AccessContext."""
 
+import base64
 import os
 import time
 from collections.abc import Iterator
@@ -10,12 +11,19 @@ from typing import Any
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    PublicFormat,
+)
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from api import auth
 from api.main import app
-from kernel.access import ALL_SCOPES
+from kernel.access import ALL_SCOPES, has
+from mcp_server.tokens import ACTION_PROPOSALS_DRAFT_SCOPE, mint
 
 SUPABASE_URL = "https://project.supabase.co"
 ISSUER = f"{SUPABASE_URL}/auth/v1"
@@ -275,3 +283,111 @@ def test_lo2_valid_platform_owner_token_still_succeeds() -> None:
     client = TestClient(app)
     response = client.get("/types", headers={"Authorization": f"Bearer {make_token()}"})
     assert response.status_code == 200
+
+
+# --- M4-20: agent tokens on the HTTP door -----------------------------------
+#
+# The Brain's LifeOsSurface client (services/brain/src/lifeos-surface.ts)
+# calls this API over HTTP, not the stdio MCP transport, so `authenticate()`
+# grew a second credential kind: the same self-issued ES256 agent token
+# `mcp_server.tokens` already mints/verifies for the MCP door. These tests
+# exercise that path directly against `auth.authenticate`/`auth.principal`;
+# `mcp_server/tests/test_tokens.py` already covers `mint`/`verify` themselves
+# (scope validation, expiry, wrong key), so these focus on what's new here:
+# routing an agent token to the right verifier, wiring `LIFEOS_AGENT_JWT_
+# PUBLIC_KEY`, and `principal()` reading the resulting `sub`.
+
+_AGENT_PRIVATE_KEY = ec.generate_private_key(ec.SECP256R1())
+_AGENT_PUBLIC_PEM = (
+    _AGENT_PRIVATE_KEY.public_key()
+    .public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+    .decode()
+)
+_AGENT_PRIVATE_PEM = _AGENT_PRIVATE_KEY.private_bytes(
+    Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
+).decode()
+_OTHER_AGENT_PRIVATE_PEM = (
+    ec.generate_private_key(ec.SECP256R1())
+    .private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
+    .decode()
+)
+
+
+def _agent_token(*scopes: str, private_pem: str = _AGENT_PRIVATE_PEM, agent: str = "brain") -> str:
+    return mint(private_pem, scopes, agent=agent, days=1)
+
+
+def test_agent_token_grants_exactly_its_own_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "LIFEOS_AGENT_JWT_PUBLIC_KEY", base64.b64encode(_AGENT_PUBLIC_PEM.encode()).decode()
+    )
+    token = _agent_token("ops:read", ACTION_PROPOSALS_DRAFT_SCOPE)
+    context = auth.authenticate(request_with(token))
+    assert has(context, "ops:read")
+    assert has(context, ACTION_PROPOSALS_DRAFT_SCOPE)
+    assert not has(context, "bills:write")
+    assert context.scopes != frozenset({ALL_SCOPES})
+
+
+def test_agent_token_without_configured_public_key_fails_closed() -> None:
+    """Unconfigured must refuse, not silently fall through to the owner
+    path (an agent token would never verify as a Supabase JWT anyway, but
+    the failure must name the real reason)."""
+    token = _agent_token("ops:read")
+    with pytest.raises(auth.AuthError, match="agent signing key"):
+        auth.authenticate(request_with(token))
+
+
+def test_agent_token_signed_by_the_wrong_key_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "LIFEOS_AGENT_JWT_PUBLIC_KEY", base64.b64encode(_AGENT_PUBLIC_PEM.encode()).decode()
+    )
+    forged = _agent_token("ops:read", private_pem=_OTHER_AGENT_PRIVATE_PEM)
+    with pytest.raises(auth.AuthError, match="invalid agent token"):
+        auth.authenticate(request_with(forged))
+
+
+def test_agent_token_principal_reads_the_agent_subject(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "LIFEOS_AGENT_JWT_PUBLIC_KEY", base64.b64encode(_AGENT_PUBLIC_PEM.encode()).decode()
+    )
+    request = request_with(_agent_token(ACTION_PROPOSALS_DRAFT_SCOPE, agent="brain"))
+    auth.authenticate(request)
+    assert request.state.claims["sub"] == "agent:brain"
+    assert auth.principal(request) == ("agent:brain", True)
+
+
+def test_owner_supabase_token_still_authenticates_when_agent_key_is_also_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two credential kinds coexist: configuring agent-token support
+    must not disturb the owner JWT path this door has always served."""
+    monkeypatch.setenv(
+        "LIFEOS_AGENT_JWT_PUBLIC_KEY", base64.b64encode(_AGENT_PUBLIC_PEM.encode()).decode()
+    )
+    context = auth.authenticate(request_with(make_token()))
+    assert context.scopes == frozenset({ALL_SCOPES})
+
+
+def test_route_accepts_an_agent_token_over_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    """05-e-lifeos.md section 3 gate question 3, resolved: the Brain's read
+    lane reaches this API over plain HTTP with an agent token, not only via
+    the stdio MCP transport."""
+    monkeypatch.setenv(
+        "LIFEOS_AGENT_JWT_PUBLIC_KEY", base64.b64encode(_AGENT_PUBLIC_PEM.encode()).decode()
+    )
+    client = TestClient(app)
+    token = _agent_token("ops:read")
+    response = client.get("/types", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+
+
+def test_route_rejects_a_forged_agent_token_with_401(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "LIFEOS_AGENT_JWT_PUBLIC_KEY", base64.b64encode(_AGENT_PUBLIC_PEM.encode()).decode()
+    )
+    client = TestClient(app)
+    forged = _agent_token("ops:read", private_pem=_OTHER_AGENT_PRIVATE_PEM)
+    response = client.get("/types", headers={"Authorization": f"Bearer {forged}"})
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"

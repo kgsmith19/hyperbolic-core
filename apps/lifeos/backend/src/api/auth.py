@@ -3,8 +3,21 @@
 The API is the seam where identities become scoped contexts (invariant 5):
 tokens are verified against the project's public JWKS (ES256), the subject
 must be the allowlisted owner, and an optional ``scopes`` claim narrows the
-context — the same path future agent tokens take with less than every scope.
-Verification is local (cached public keys); no round-trip to Supabase.
+context. Verification is local (cached public keys); no round-trip to
+Supabase.
+
+M4-20 adds a second, unrelated credential kind on this same door: the
+self-issued ES256 agent token `mcp_server.tokens` already mints and verifies
+for the stdio MCP transport. The Brain's `LifeOsSurface` client
+(services/brain/src/lifeos-surface.ts) needs the HTTP surface (`/search`,
+`/entities/*`, `/types`, `/action-proposals`) rather than an MCP subprocess,
+and 05-e-lifeos.md section 3's own gate question 3 leaves that transport
+choice open ("this plan's contract is transport-neutral and both are already
+implemented server-side") — this file is that choice, made by extending
+`authenticate()` rather than adding a parallel auth path. `read_scopes`
+already refuses anything but `<domain>:read` or `action-proposals:draft`
+(mcp_server/tokens.py), so an agent token can never reach `authenticate()`
+with owner-level power.
 """
 
 import re
@@ -17,12 +30,19 @@ from fastapi import Request
 
 from kernel.access import AccessContext
 from kernel.env import read_env
+from mcp_server.tokens import AgentTokenError, decode_key
+from mcp_server.tokens import verify as verify_agent_token
 
 MODE_SUPABASE = "supabase"
 MODE_DISABLED = "disabled"
 
 _ALGORITHMS = ["ES256"]
 _REQUIRED_CLAIMS = ["exp", "iat", "sub", "aud", "iss"]
+
+# mcp_server.tokens.ISSUER, restated here rather than imported: importing it
+# would pull in `mint`'s dependency on a private key this process never
+# holds, for the sake of one string constant this module only ever reads.
+_AGENT_TOKEN_ISSUER = "lifeos"
 
 
 class AuthError(Exception):
@@ -73,6 +93,46 @@ def _jwks_client(url: str) -> jwt.PyJWKClient:
     return jwt.PyJWKClient(url, cache_keys=True, lifespan=600)
 
 
+def _looks_like_agent_token(token: str) -> bool:
+    """Peek the (unverified) issuer claim to pick which verifier to run.
+
+    This decides ROUTING only, never TRUST: whichever branch `authenticate`
+    takes still fully verifies signature, expiry, audience and issuer itself
+    against the real key for that credential kind. An owner JWT's issuer is
+    always a Supabase project URL (`settings().issuer`, never the literal
+    string below), so a forged `iss: "lifeos"` claim on a token signed by
+    neither key is rejected the normal way: agent-token verification runs
+    and fails the signature check.
+    """
+    try:
+        claims = jwt.decode(token, options={"verify_signature": False})
+    except jwt.PyJWTError:
+        return False
+    return claims.get("iss") == _AGENT_TOKEN_ISSUER
+
+
+def _authenticate_agent(request: Request, token: str) -> AccessContext:
+    """M4-20's second credential kind on this door: a self-issued agent
+    token in `mcp_server.tokens.mint`'s own format, verified with the exact
+    function the stdio MCP transport already relies on — no new crypto
+    logic, only a new place to call it from. Fails closed the same way a
+    missing Supabase config already does: unconfigured means refused, not
+    silently skipped."""
+    public_key_b64 = read_env("LIFEOS_AGENT_JWT_PUBLIC_KEY")
+    if not public_key_b64:
+        raise AuthError("agent token presented but no agent signing key is configured")
+    try:
+        context = verify_agent_token(token, decode_key(public_key_b64))
+        # Signature already proven valid above; this second, unverified
+        # decode only reads `sub` back out for `principal()` (mint() always
+        # sets it to `agent:<name>`, which `_SUBJECT` already accepts).
+        unverified = jwt.decode(token, options={"verify_signature": False})
+    except AgentTokenError as exc:
+        raise AuthError(f"invalid agent token: {exc}") from exc
+    request.state.claims = {"sub": unverified.get("sub")}
+    return context
+
+
 def authenticate(request: Request) -> AccessContext:
     conf = settings()
     if conf.mode == MODE_DISABLED:
@@ -84,6 +144,8 @@ def authenticate(request: Request) -> AccessContext:
     token = token.strip()
     if scheme.lower() != "bearer" or not token:
         raise AuthError("authorization header is not a bearer token")
+    if _looks_like_agent_token(token):
+        return _authenticate_agent(request, token)
     try:
         key = _jwks_client(conf.jwks_url).get_signing_key_from_jwt(token).key
     except jwt.PyJWKClientConnectionError as exc:
