@@ -27,11 +27,10 @@ hex sha256 and a fixed suffix, so no stored ref can contain a newline and none
 can become `invalid` under the tightened schema.
 """
 
-from psycopg.types.json import Jsonb
-
 from domains.documents.types import DOCUMENT_SCHEMA
 from kernel import db
-from kernel.events import append_event, tx_now
+from kernel.events import tx_now
+from scripts.type_redefinition import redefine_types
 
 ACTOR = "scripts.migrate_document_ref_anchor"
 _NAME = "document"
@@ -39,34 +38,10 @@ _REASON = "ADR 015 / FIX-1: storage_ref anchored with \\Z, so a trailing newline
 
 
 def migrate() -> dict[str, int]:
-    counts = {"types_updated": 0}
     with db.connect() as conn:
         now = tx_now(conn)
-        row = conn.execute(
-            "select id, json_schema from type_definition where name = %s", (_NAME,)
-        ).fetchone()
-        if row is None:
-            return counts  # never defined here: define_missing will use the new schema
-        if row["json_schema"] == DOCUMENT_SCHEMA:
-            return counts  # already migrated
-        conn.execute(
-            "update type_definition set json_schema = %s where id = %s",
-            (Jsonb(DOCUMENT_SCHEMA), row["id"]),
-        )
-        append_event(
-            conn,
-            entity_id=None,
-            event_type="type.redefined",
-            payload={
-                "type": {"id": str(row["id"]), "name": _NAME, "json_schema": DOCUMENT_SCHEMA},
-                "reason": _REASON,
-            },
-            valid_time=now,
-            recorded_at=now,
-            actor=ACTOR,
-        )
-        counts["types_updated"] += 1
-    return counts
+        updated = redefine_types(conn, {_NAME: DOCUMENT_SCHEMA}, _REASON, ACTOR, now)
+        return {"types_updated": updated}
 
 
 if __name__ == "__main__":
