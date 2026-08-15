@@ -55,7 +55,7 @@ export function inject(event, text, io = PROCESS_IO) {
 }
 
 // Stop: force the model to keep going with an instruction.
-export function blockStop(reason, io = PROCESS_IO) {
+function blockStop(reason, io = PROCESS_IO) {
   io.out(JSON.stringify({ decision: "block", reason }));
   io.exit(0);
 }
@@ -181,7 +181,7 @@ function directiveContext(p) {
   return parts.join("\n");
 }
 
-export function onSessionStart(p, policy, io = PROCESS_IO) {
+function onSessionStart(p, policy, io = PROCESS_IO) {
   ensureDirs();
   const start = p.transcript_path ? startContextOf(p.transcript_path) : 0;
   try {
@@ -230,7 +230,7 @@ export function onSessionStart(p, policy, io = PROCESS_IO) {
   inject("SessionStart", lines.join("\n"), io);
 }
 
-export function onUserPromptSubmit(p, policy, io = PROCESS_IO) {
+function onUserPromptSubmit(p, policy, io = PROCESS_IO) {
   // Keep state/tier.json warm for the status line. weekTier() is otherwise only
   // called on the subagent-spawn path, and subagents are allowlisted down to
   // Explore - so the cache was almost never written and the status line silently
@@ -255,7 +255,7 @@ export function onUserPromptSubmit(p, policy, io = PROCESS_IO) {
 // It never blocks. Blocking here would also block the Write that the checkpoint
 // needs, wedging the session at precisely the moment it must save its work.
 // Pressure is applied as injected text; the Stop hook still does the hard halt.
-export function onPostToolUse(p, policy, io = PROCESS_IO) {
+function onPostToolUse(p, policy, io = PROCESS_IO) {
   if (!p.transcript_path) allow(io);
   const ctx = contextOf(p.transcript_path);
   const { softK, hardK } = policy.context;
@@ -379,7 +379,7 @@ export function onStop(p, policy, io = PROCESS_IO) {
   io.exit(0);
 }
 
-export function onPreToolUseAgent(p, policy, io = PROCESS_IO) {
+function onPreToolUseAgent(p, policy, io = PROCESS_IO) {
   const input = p.tool_input || {};
   const type = input.subagent_type || "general-purpose";
 

@@ -133,7 +133,7 @@ export function laneStatus() {
 }
 
 // The full picture for the CLI / GUI status display.
-export function laneStatusAll() {
+function laneStatusAll() {
   return { automation: laneStatus(), breaker: breakerState() };
 }
 

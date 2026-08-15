@@ -19,7 +19,7 @@ import { createHash } from "node:crypto";
 import { kernelRoot } from "./policy.mjs";
 import { toolsFor } from "./contract.mjs";
 
-export const runsRoot = () => path.join(kernelRoot(), "runner", "kernel-runs");
+const runsRoot = () => path.join(kernelRoot(), "runner", "kernel-runs");
 export const runDir = (runId) => path.join(runsRoot(), runId);
 
 // GU-2.1/05-g-guards.md section 5: every generated PreToolUse chain includes

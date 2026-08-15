@@ -239,7 +239,7 @@ const nonNegNum = (n) => Number.isFinite(n) && n >= 0;
 // key the dials form does not own byte-identical. Returns the new policy
 // object, or throws naming the first bad field — the caller writes only on a
 // clean return, so a bad dial never partially corrupts policy.json.
-export function mergeDials(policy, d) {
+function mergeDials(policy, d) {
   const req = (name, v, ok) => { if (!ok(v)) throw new Error(`invalid ${name}`); return v; };
   if (!Array.isArray(d.allow) || d.allow.some((s) => typeof s !== "string")) throw new Error("invalid allow (must be a string array)");
   return {

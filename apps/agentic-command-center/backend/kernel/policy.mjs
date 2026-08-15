@@ -110,7 +110,7 @@ function req(cond, msg) { if (!cond) throw new Error(`kernel policy: ${msg}`); }
 const isNum = (v) => typeof v === "number" && Number.isFinite(v);
 const strList = (v) => Array.isArray(v) && v.every((s) => typeof s === "string" && s.trim());
 
-export function validateKernelBlock(k) {
+function validateKernelBlock(k) {
   req(k && typeof k === "object", "block must be an object");
   req(typeof k.harness === "string" && k.harness.trim(), "harness must be a non-empty string");
   req(isNum(k.budget?.wallClockMin) && k.budget.wallClockMin > 0, "budget.wallClockMin must be > 0");
