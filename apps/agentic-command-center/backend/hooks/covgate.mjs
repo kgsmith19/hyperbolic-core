@@ -50,14 +50,16 @@ const POLICY = () => process.env.ACC_POLICY || path.join(HERE, "..", "policy.jso
 // together; the overridden files' true, isolated coverage comfortably
 // clears the default floor (see policy.json's *FloorOverrides notes for
 // the measured numbers per file).
+// A finite number, or the fallback. Used for both the per-file overrides and
+// the policy-wide defaults they replace, so it lives above both.
+const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+
 function overridden(t, key, file, dflt) {
-  const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
   return num(file && t[key] ? t[key][file] : undefined, dflt);
 }
 export function floors(file) {
   let t = {};
   try { t = JSON.parse(fs.readFileSync(POLICY(), "utf8").replace(/^\uFEFF/, "")).tests || {}; } catch {}
-  const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
   return {
     lines: overridden(t, "lineFloorOverrides", file, num(t.changedLineCoverage, 100)),
     funcs: overridden(t, "functionFloorOverrides", file, num(t.changedFunctionCoverage, 100)),
