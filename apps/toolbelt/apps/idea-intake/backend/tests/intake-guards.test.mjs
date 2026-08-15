@@ -29,50 +29,22 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { INTAKE_UP, makeWithMigratedDb } from "./intake-db.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BACKEND_DIR = join(__dirname, "..");
-const ROOT_MIGRATIONS_DIR = join(BACKEND_DIR, "..", "..", "..", "supabase", "migrations");
 const INTAKE_MIGRATIONS_DIR = join(BACKEND_DIR, "supabase", "migrations");
 
-const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
-const INTAKE_UP = join(INTAKE_MIGRATIONS_DIR, "20260813002605_intake_create_schema.sql");
-const INTAKE_SUBMISSION_RPC_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814040000_intake_mark_submitted_to_github_rpc.sql",
-);
-const INTAKE_SOURCE_DEDUP_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814050000_intake_forgepad_source_dedup.sql",
-);
-const INTAKE_SOURCE_UPDATE_GRANT_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814090000_intake_idea_source_update_grant.sql",
-);
-const INTAKE_OPTIMIZATION_CASCADE_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814100000_intake_optimization_fk_cascade_and_indexes.sql",
-);
-const INTAKE_IDEMPOTENCY_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814120100_intake_forgepad_idempotency_key.sql",
-);
-const INTAKE_HARDENING_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814120000_intake_submission_metadata_integrity.sql",
-);
 const INTAKE_DOWN = join(INTAKE_MIGRATIONS_DIR, "20260813002605_intake_create_schema_down.sql");
 
 const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
 const STRANGER_UUID = "22222222-2222-2222-2222-222222222222";
 
-const { psql, psqlOk, applyMigrationWithRetry, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("m3_05_intake_test");
-const psqlAllowError = psql;
+const PG = createPostgresHarness("m3_05_intake_test");
+const { psql, psqlOk, applyMigrationWithRetry, withDatabase } = PG;
+const SKIP_REASON = PG.skipReason;
 
 const HARNESS_SQL = supabaseHarnessSql([OWNER_UUID, STRANGER_UUID]);
-
-const OWNER_BOOTSTRAP_SQL = `insert into platform.config (owner_uuid) values ('${OWNER_UUID}');`;
-
 
 // Runs sqlText as the `authenticated` role with auth.uid() pinned to uuid
 // for the duration of this one psql invocation (mirrors what PostgREST does
@@ -95,21 +67,7 @@ function submitToGithub(dbName, ideaId, issueNumber) {
 // source-key reconciliation, source editing grant, optimization FK/index
 // repair, integrity hardening, and stable idempotency identity, in global
 // ledger order. Always drops the db afterward.
-function withMigratedDb(fn) {
-  return withDatabase((db) => {
-    psqlOk(db, HARNESS_SQL);
-    psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
-    psqlOk(db, OWNER_BOOTSTRAP_SQL);
-    applyMigrationWithRetry(db, readFileSync(INTAKE_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_SUBMISSION_RPC_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_SOURCE_DEDUP_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_SOURCE_UPDATE_GRANT_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_OPTIMIZATION_CASCADE_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_HARDENING_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_IDEMPOTENCY_UP, "utf8"));
-    return fn(db);
-  });
-}
+const withMigratedDb = makeWithMigratedDb(PG, { harnessSql: HARNESS_SQL });
 
 test(
   "real Postgres: draft -> idea -> service-role submission RPC succeeds, all three github fields set atomically (II-1a allowed pair)",

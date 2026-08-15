@@ -19,46 +19,18 @@
 // need and exercises the CLI exactly as an operator would run it against a
 // real project (service/superuser connection bypassing PostgREST grants).
 import { after, test } from "node:test";
-import { createPostgresHarness, runnerUsesSudo, supabaseHarnessSql } from "../../../../tests/postgres-harness.mjs";
+import { createPostgresHarness, runnerUsesSudo } from "../../../../tests/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, statSync, readdirSync } from "node:fs";
+import { copyFileSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, statSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
+import { makeWithMigratedDb } from "./intake-db.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BACKEND_DIR = join(__dirname, "..");
-const ROOT_MIGRATIONS_DIR = join(BACKEND_DIR, "..", "..", "..", "supabase", "migrations");
-const INTAKE_MIGRATIONS_DIR = join(BACKEND_DIR, "supabase", "migrations");
 const CLI_PATH = join(BACKEND_DIR, "tools", "migrate-forgepad.mjs");
-
-const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
-const INTAKE_UP = join(INTAKE_MIGRATIONS_DIR, "20260813002605_intake_create_schema.sql");
-const INTAKE_SUBMISSION_RPC_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814040000_intake_mark_submitted_to_github_rpc.sql",
-);
-const INTAKE_SOURCE_DEDUP_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814050000_intake_forgepad_source_dedup.sql",
-);
-const INTAKE_SOURCE_UPDATE_GRANT_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814090000_intake_idea_source_update_grant.sql",
-);
-const INTAKE_OPTIMIZATION_CASCADE_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814100000_intake_optimization_fk_cascade_and_indexes.sql",
-);
-const INTAKE_HARDENING_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814120000_intake_submission_metadata_integrity.sql",
-);
-const INTAKE_IDEMPOTENCY_UP = join(
-  INTAKE_MIGRATIONS_DIR,
-  "20260814120100_intake_forgepad_idempotency_key.sql",
-);
 
 const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
 
@@ -69,13 +41,9 @@ const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
 // entirely) but the schema migration itself still references auth.users via
 // intake.idea's user_id foreign key, so that piece of the stub is required
 // here too.
-const { psql, psqlOk, applyMigrationWithRetry, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("m3_08_forgepad_test");
-const psqlAllowError = psql;
-
-const HARNESS_SQL = supabaseHarnessSql([OWNER_UUID]);
-
-const OWNER_BOOTSTRAP_SQL = `insert into platform.config (owner_uuid) values ('${OWNER_UUID}');`;
-
+const PG = createPostgresHarness("m3_08_forgepad_test");
+const { psql, psqlOk, applyMigrationWithRetry, withDatabase } = PG;
+const SKIP_REASON = PG.skipReason;
 
 // GitHub-hosted checkouts can live beneath an owner-only runner directory.
 // When peer auth requires the postgres OS user, Node then reports the real
@@ -94,21 +62,7 @@ if (runnerUsesSudo) {
   after(() => rmSync(stagedCliDir, { recursive: true, force: true }));
 }
 
-function withMigratedDb(fn) {
-  return withDatabase((db) => {
-    psqlOk(db, HARNESS_SQL);
-    psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
-    psqlOk(db, OWNER_BOOTSTRAP_SQL);
-    applyMigrationWithRetry(db, readFileSync(INTAKE_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_SUBMISSION_RPC_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_SOURCE_DEDUP_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_SOURCE_UPDATE_GRANT_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_OPTIMIZATION_CASCADE_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_HARDENING_UP, "utf8"));
-    applyMigrationWithRetry(db, readFileSync(INTAKE_IDEMPOTENCY_UP, "utf8"));
-    return fn(db);
-  });
-}
+const withMigratedDb = makeWithMigratedDb(PG, {});
 
 // Recursively opens permissions so the `postgres` OS user (a different
 // principal from whichever user created these fixture files, e.g. the CLI

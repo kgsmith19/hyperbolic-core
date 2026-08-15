@@ -10,7 +10,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { complete, isLlmError, stream, type LlmDelta, type LlmErrorClass, type LlmResponse } from "@hyperbolic/llm";
 import type { ConcurrencyGate } from "./concurrency.ts";
-import { send } from "./http.ts";
+import { readJsonBody, send } from "./http.ts";
 import { estimateMessagesTokens } from "./count.ts";
 import { logLlmCall } from "./llm-call-log.ts";
 import { parseLlmRequest } from "./llm-request.ts";
@@ -45,32 +45,6 @@ function errorResponseFor(err: unknown): { status: number; class: string; messag
  * reason to admit an unbounded body) while comfortably covering any real
  * request this route needs to accept. */
 const LLM_BODY_CAP = 2 * 1024 * 1024;
-
-function readJsonBody(req: IncomingMessage, cap: number): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    let overCap = false;
-    req.on("data", (chunk: Buffer) => {
-      data += chunk;
-      if (data.length > cap) {
-        overCap = true;
-        req.destroy();
-      }
-    });
-    req.on("end", () => {
-      if (overCap) {
-        reject(new Error("request body too large"));
-        return;
-      }
-      try {
-        resolve(data.length ? JSON.parse(data) : {});
-      } catch {
-        reject(new Error("request body is not valid JSON"));
-      }
-    });
-    req.on("error", reject);
-  });
-}
 
 /** Aborts when the client disconnects, so an abandoned /v1/complete or
  * /v1/stream call stops burning provider quota and a concurrency slot
