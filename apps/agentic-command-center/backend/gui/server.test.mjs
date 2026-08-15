@@ -138,16 +138,31 @@ test("handler(): a request with no Host header at all is denied (defensive defau
   assert.equal(res.code, 403);
 });
 
-test("a POST body over the cap is dropped before parsing (no memory blow-up)", async () => {
+// This case previously accepted `req.on("error", resolve)` as a pass, with the
+// note "either an error or an unfinished response is fine" -- so it could not
+// distinguish answering from HANGING, and readBody was in fact hanging:
+// destroy() emits `close`, never `end`, so the reply left to the `end` handler
+// was never sent and the caller waited out its own timeout. Asserting a real
+// 413 is what makes that difference visible; a regression to the old shape
+// fails here on timeout rather than passing quietly.
+test("a POST body over the cap is refused with 413 and never parsed", async () => {
   const port = Number(new URL(base).port);
   const before = fs.readFileSync(process.env.ACC_POLICY, "utf8");
-  await new Promise((resolve) => {
-    const req = http.request({ host: "127.0.0.1", port, path: "/api/kernel-policy", method: "POST", headers: { "content-type": "application/json", "X-ACC": "1" } });
-    req.on("error", resolve); // req.destroy() aborts the socket; either an error or an unfinished response is fine
-    req.on("response", (res) => { res.resume(); res.on("end", resolve); });
+  const status = await new Promise((resolve, reject) => {
+    // X-ACC-Token is required (ACC-5). Without it the request 401s in the
+    // security preamble and never reaches readBody at all -- which is exactly
+    // what the old, outcome-agnostic version of this test was silently
+    // measuring: it asserted policy.json was unchanged, trivially true of a
+    // request that was rejected before any body was read.
+    const req = http.request({ host: "127.0.0.1", port, path: "/api/kernel-policy", method: "POST", headers: { "content-type": "application/json", "X-ACC": "1", "X-ACC-Token": TOKEN } });
+    req.on("response", (res) => { res.resume(); res.on("end", () => resolve(res.statusCode)); });
+    // A transport error now means the server answered nothing, which is the
+    // defect this test exists to catch -- not an acceptable outcome.
+    req.on("error", (e) => reject(new Error(`server sent no response to an over-cap body: ${e.message}`)));
     req.write("x".repeat(70 * 1024));
     req.end();
   });
+  assert.equal(status, 413, "an over-cap body must be answered, not left hanging");
   assert.equal(fs.readFileSync(process.env.ACC_POLICY, "utf8"), before, "an over-cap body must never reach saveKernelPolicy");
 });
 

@@ -266,11 +266,24 @@ function controlAction(action) {
 
 function readBody(req, res, cb) {
   let body = "";
+  let answered = false;
   req.on("data", (c) => {
+    if (answered) return;
     body += c;
-    if (body.length > BODY_CAP) req.destroy(); // over-cap is dropped, never parsed
+    if (body.length > BODY_CAP) {
+      // Answer BEFORE destroying, and never from the `end` handler: destroy()
+      // emits `close`, not `end`, so the old code (destroy alone, everything
+      // else left to `end`) replied nothing at all -- the request hung and the
+      // caller waited out its own timeout. Sending first lets the 413 flush;
+      // destroying then stops the rest of the upload arriving.
+      answered = true;
+      body = "";
+      send(res, 413, { error: "body too large" });
+      req.destroy();
+    }
   });
   req.on("end", () => {
+    if (answered) return;
     let parsed;
     try { parsed = JSON.parse(body); }
     catch { return send(res, 400, { error: "body is not JSON" }); }
