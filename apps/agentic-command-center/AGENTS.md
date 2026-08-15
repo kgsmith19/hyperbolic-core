@@ -17,7 +17,13 @@ harness integration; generic kernel code must remain harness-neutral.
 - `backend/gui/server.mjs` serves the loopback web interface. `backend/gui/README.md` is its
   API contract.
 - `frontend/` is the React front end served through `backend/gui/server.mjs --ui-dist`.
+  `frontend/src/api.ts` is the typed client mirroring `backend/gui/README.md`, and
   `frontend/e2e/contract.spec.ts` verifies it against the real sandboxed server.
+  Contract drift is a product defect: change the server contract, the client
+  types, and the contract test together. `frontend/` is a standalone npm
+  project, not a workspace member, so it installs and builds on its own.
+- Generated output (`frontend/dist/`, Playwright reports, test results) is
+  read-only. Change a source file and regenerate.
 - `backend/kernel/` runs bounded headless tasks and records their results. Read
   `backend/kernel/README.md` before changing the kernel contract or adapters.
 - `backend/runner/` owns directive execution and lifecycle state. Read
@@ -82,8 +88,8 @@ subsystem documentation before running them.
    spanning the API and React client must keep `backend/gui/README.md`, `frontend/src/api.ts`,
    and the UI contract suite consistent.
 4. Open a pull request that links the Issue and reports exact verification.
-5. Let `.github/workflows/ci.yml` produce the single required check,
-   `PR Gate`.
+5. Let `.github/workflows/acc-ci.yml` produce this app's required check,
+   `ACC PR Gate`.
 6. After the configured gate passes, GitHub may squash-merge the pull request
    and delete the branch.
 
