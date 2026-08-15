@@ -116,8 +116,7 @@ export async function startTask({
   // `events` is the LIVE array the stdout parser pushes into, not a copy: the
   // orchestrator's ceiling checks read it while the run is still going, which
   // is the only way a token ceiling can stop a run instead of noticing after.
-  const handle = { pid: child.pid, child, done, killFn, events };
-  return handle;
+  return { pid: child.pid, child, done, killFn, events };
 }
 
 export async function stopTask(handle) {
@@ -130,6 +129,11 @@ export async function stopTask(handle) {
 // event carries the model's own summary ("all tests pass"); it is deliberately
 // dropped here so it cannot reach an acceptance decision — that is the
 // verifier's job, from the filesystem, after the process is dead (AC-A6/AC-V5).
+//
+// Only `tokens` has a consumer (run.mjs's supervisor tick). `toolCalls` must
+// never grow one: it is the harness's own count of itself, and the ceiling is
+// enforced against decisionCounts() — what the guardhook actually observed —
+// precisely so a harness cannot under-report its way past a budget.
 export function readState(events) {
   let toolCalls = 0;
   let tokens = 0;

@@ -11,7 +11,7 @@
 
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { withLaunchSlot, retryTransport } from "../hooks/lane.mjs";
+import { withLaunchSlot, retryTransport, pidAlive } from "../hooks/lane.mjs";
 import { spawnSpec } from "../hooks/cmdline.mjs";
 import { readDirective, appendCycle, lastCycleBody, KICK_TEXT, logPath, receiptsDir } from "../hooks/directive.mjs";
 import { directiveSpend } from "../hooks/directive-spend.mjs";
@@ -218,13 +218,6 @@ export function liveTier(exec = execFileSync) {
   } catch {
     return "green";
   }
-}
-
-// EPERM = the pid exists but belongs to another user: alive for our purposes.
-function pidAlive(pid) {
-  const n = Number(pid || 0);
-  if (!n) return false;
-  try { process.kill(n, 0); return true; } catch (e) { return e && e.code === "EPERM"; }
 }
 
 // One loop per job, machine-wide (SPEC-0005). Two runner loops on one

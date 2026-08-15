@@ -12,7 +12,10 @@
 //    (authedFetch) is the right tool here: it verifies the target is
 //    same-origin/allowlisted and attaches the live session token itself,
 //    unlike the manual-header PostgREST calls above.
-import { platformClient, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "./session";
+import { platformClient } from "./session";
+import { postgrestFor } from "./postgrest";
+
+const postgrest = postgrestFor("intake-client", "intake");
 
 export type IdeaStatus = "draft" | "idea" | "submitted_to_github";
 export type Confidence = "low" | "medium" | "high";
@@ -84,36 +87,7 @@ function toIdea(row: RawIdeaRow): Idea {
   };
 }
 
-async function getAccessToken(): Promise<string> {
-  const session = await platformClient.auth.getSession();
-  if (!session) {
-    throw new Error("intake-client: no active session, refusing to send request");
-  }
-  return session.accessToken;
-}
 
-async function postgrest(path: string, init: RequestInit = {}): Promise<Response> {
-  const token = await getAccessToken();
-  const headers = new Headers(init.headers);
-  headers.set("apikey", SUPABASE_PUBLISHABLE_KEY);
-  headers.set("Authorization", `Bearer ${token}`);
-  headers.set("Accept-Profile", "intake");
-  headers.set("Content-Profile", "intake");
-  if (init.body !== undefined) {
-    headers.set("Content-Type", "application/json");
-    if (!headers.has("Prefer")) {
-      headers.set("Prefer", "return=representation");
-    }
-  }
-  const res = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1${path}`, { ...init, headers });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(
-      `intake-client: ${init.method ?? "GET"} ${path} failed with ${res.status}${body ? `: ${body}` : ""}`
-    );
-  }
-  return res;
-}
 
 /** One query, ordered newest-first; list.tsx applies the filter-tab and
  * title-filter narrowing client-side (05-h section 8's own simplicity rule:

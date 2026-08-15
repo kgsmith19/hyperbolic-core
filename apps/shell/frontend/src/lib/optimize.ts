@@ -19,6 +19,7 @@
 // II-4: this file never touches a provider API key or the Brain key -- it
 // only ever calls Handler A's HTTP surface with the operator's own session.
 import { platformClient, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "./session";
+import { accessToken } from "./postgrest";
 import type { Confidence, Idea } from "./intake";
 
 export interface OptimizedDraft {
@@ -47,16 +48,9 @@ const MODEL = "claude-sonnet-5";
 const MAX_TOKENS = 1024;
 const TIMEOUT_MS = 30_000;
 
-async function getAccessToken(): Promise<string> {
-  const session = await platformClient.auth.getSession();
-  if (!session) {
-    throw new Error("optimize-client: no active session, refusing to send request");
-  }
-  return session.accessToken;
-}
 
 async function getOptimizePrompt(variables: Record<string, string>): Promise<string> {
-  const token = await getAccessToken();
+  const token = await accessToken("optimize-client");
   const res = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/rpc/get_prompt`, {
     method: "POST",
     headers: {
@@ -140,7 +134,7 @@ async function completeOptimizePrompt(promptText: string, runRef: string): Promi
  * intake.optimization row either way": the LLM call itself already
  * happened and must be attributed even if the user discards the draft. */
 async function logOptimization(inputIdeaId: string, model: string, handlerRunId: string): Promise<void> {
-  const token = await getAccessToken();
+  const token = await accessToken("optimize-client");
   const res = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/optimization`, {
     method: "POST",
     headers: {

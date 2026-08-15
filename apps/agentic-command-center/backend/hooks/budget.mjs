@@ -44,7 +44,6 @@ function statePath(sid, suffix) {
   return path.join(STATE(), `${String(sid || "unknown").slice(0, 40)}.${suffix}`);
 }
 
-
 // ------------------------------------------------------------- hook output
 
 // UserPromptSubmit / SessionStart: inject text into the session.
@@ -78,7 +77,6 @@ export const allow = (io = PROCESS_IO) => io.exit(0);
 // enforcement, the statusline, and the GUI all read ONE authority instead of
 // the drift-prone copy that used to live here.
 export function weekTier(policy, deps = {}) {
-  const now = deps.now || Date.now;
   const tierForFn = deps.tierFor || tierFor;
   const tierWindowTotalFn = deps.tierWindowTotal || tierWindowTotal;
   const readJsonFn = deps.readJson || readJson;
@@ -86,10 +84,10 @@ export function weekTier(policy, deps = {}) {
   if (!(policy.week.redTokens || 0) && !(policy.week.amberTokens || 0)) return { tier: "green", weekTokens: 0, pct: 0 };
   const cacheFile = path.join(STATE(), "tier.json");
   const cached = readJsonFn(cacheFile, null);
-  if (cached && now() - cached.ts < 6e5) return cached;
+  if (cached && Date.now() - cached.ts < 6e5) return cached;
   let out;
   try {
-    out = { ...tierForFn(tierWindowTotalFn()), ts: now() };
+    out = { ...tierForFn(tierWindowTotalFn()), ts: Date.now() };
   } catch {
     return { tier: "green", weekTokens: 0, pct: 0 };
   }
@@ -120,7 +118,7 @@ export function lastAssistantText(transcript) {
     const lines = fs.readFileSync(transcript, "utf8").split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
       const l = lines[i];
-      if (!l || l.charCodeAt(0) !== 123) continue;
+      if (!l || l.charCodeAt(0) !== 123) continue; // fast '{' check
       let o;
       try {
         o = JSON.parse(l);
@@ -226,10 +224,8 @@ export function onSessionStart(p, policy, io = PROCESS_IO) {
   } catch {}
 
   lines.push(
-    ...[
     `[ACC] Context budget: soft ${softK}k, hard ${hardK}k. Context is checked after EVERY tool call; past ${hardK}k you will be told to checkpoint and end the turn, and the Stop hook enforces it.`,
-    `[ACC] Helper limits: allowed types ${JSON.stringify(policy.subagents.allow)}; session cap ${policy.subagents.maxPerSession}; temporary fan-out cap ${policy.review.maxFinders}.`,
-    ]
+    `[ACC] Helper limits: allowed types ${JSON.stringify(policy.subagents.allow)}; session cap ${policy.subagents.maxPerSession}; temporary fan-out cap ${policy.review.maxFinders}.`
   );
   inject("SessionStart", lines.join("\n"), io);
 }
@@ -265,8 +261,7 @@ export function onPostToolUse(p, policy, io = PROCESS_IO) {
   const { softK, hardK } = policy.context;
   if (ctx < softK * 1000) allow(io);
 
-  const over = ctx >= hardK * 1000;
-  if (!over) {
+  if (ctx < hardK * 1000) {
     // Below the ceiling: warn once per 10k band so this stays cheap.
     const band = Math.floor(ctx / 10000);
     const f = statePath(p.session_id, "band");
@@ -471,21 +466,16 @@ export function main({ argv = process.argv.slice(2), policy = applyProfile(loadP
   allow(io);
 }
 
-function appendBudgetError(line) {
-  fs.appendFileSync(path.join(LOGS(), "budget-errors.log"), line);
-}
-
 export function runAsMain(opts = {}) {
   const run = opts.run || main;
   const exit = opts.exit || process.exit.bind(process);
-  const appendError = opts.appendError || appendBudgetError;
   try {
     run();
   } catch (e) {
     // Fail open, but leave a trace.
     try {
       ensureDirs();
-      appendError(`${new Date().toISOString()} ${e && e.stack}\n`);
+      fs.appendFileSync(path.join(LOGS(), "budget-errors.log"), `${new Date().toISOString()} ${e && e.stack}\n`);
     } catch {}
     exit(0);
   }

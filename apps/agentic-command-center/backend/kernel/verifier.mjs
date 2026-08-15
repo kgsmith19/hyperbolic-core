@@ -10,7 +10,7 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const run = (execFn, cmd, args, cwd) =>
-  (execFn || ((c, a, o) => spawnSync(c, a, o)))(cmd, args, { cwd, encoding: "utf8", shell: true, timeout: 10 * 60 * 1000 });
+  (execFn || spawnSync)(cmd, args, { cwd, encoding: "utf8", shell: true, timeout: 10 * 60 * 1000 });
 
 const result = (criterion, status, detail) => ({
   id: criterion.id, method: criterion.verify?.method ?? null, status, detail,
