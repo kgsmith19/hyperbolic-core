@@ -65,6 +65,17 @@ export interface BrainConfig {
   readonly agentTokenPublicKeyPem?: string;
   readonly agentTokenIssuer?: string;
   readonly agentTokenAudience?: string;
+  /** m4-20's `LifeOsSurface` client (lifeos-surface.ts): the LifeOS API's
+   * base URL and a pre-minted agent token in `mcp_server.tokens.mint`'s own
+   * format (read scopes plus, optionally, `action-proposals:draft`).
+   * Optional for the same reason every other cross-service credential above
+   * is: minting requires the private key, which never lives in a repo
+   * (mcp_server/tokens.py's own header comment), so a deploy without one
+   * provisioned yet simply has no LifeOS surface rather than a daemon that
+   * fails to start. `createLifeOsSurface`'s own job is refusing a call, not
+   * this file's. */
+  readonly lifeosApiUrl?: string;
+  readonly lifeosAgentToken?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
@@ -142,5 +153,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
     agentTokenPublicKeyPem,
     agentTokenIssuer,
     agentTokenAudience,
+    lifeosApiUrl: env.BRAIN_LIFEOS_API_URL,
+    lifeosAgentToken: env.BRAIN_LIFEOS_AGENT_TOKEN,
   };
 }
