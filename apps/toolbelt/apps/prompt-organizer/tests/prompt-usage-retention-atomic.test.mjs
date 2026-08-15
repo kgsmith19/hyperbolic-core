@@ -20,7 +20,13 @@
 // Same harness/skip mechanics and same pg_cron caveat/fix as
 // apps/toolbelt/apps/prompt-organizer/tests/purge_old_usage_revoke_public.test.mjs.
 import { test } from "node:test";
-import { createPostgresHarness, psqlSpawnSpec, supabaseHarnessSql } from "../../../tests/postgres-harness.mjs";
+import {
+  createPostgresHarness,
+  psqlAsync,
+  psqlSpawnSpec,
+  supabaseHarnessSql,
+  waitFor,
+} from "../../../tests/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -78,30 +84,6 @@ function insertOldUsageSql(n, label) {
   return `insert into prompt.usage (prompt_id, version_no, user_id, created_at) values\n    ${values};`;
 }
 
-
-function psqlAsync(dbName, sqlText) {
-  return new Promise((resolve) => {
-    const child = spawn(...psqlSpawnSpec(dbName), {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => (stdout += d));
-    child.stderr.on("data", (d) => (stderr += d));
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
-    child.stdin.write(sqlText);
-    child.stdin.end();
-  });
-}
-
-async function waitFor(predicate, timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (predicate()) return true;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  return false;
-}
 
 function withDb(applyFix, fn) {
   return withDatabase((db) => {

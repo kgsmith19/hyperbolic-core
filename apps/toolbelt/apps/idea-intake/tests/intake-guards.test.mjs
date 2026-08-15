@@ -18,7 +18,12 @@
 // session GUC (app.test_uid) instead of GoTrue's JWT claim. This stub is
 // local-only test scaffolding, never a committed migration.
 import { test } from "node:test";
-import { createPostgresHarness, psqlSpawnSpec, supabaseHarnessSql } from "../../../tests/postgres-harness.mjs";
+import {
+  asRole,
+  createPostgresHarness,
+  psqlSpawnSpec,
+  supabaseHarnessSql,
+} from "../../../tests/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -76,9 +81,7 @@ const OWNER_BOOTSTRAP_SQL = `insert into platform.config (owner_uuid) values ('$
 // its own to the output -- a bare top-level `select set_config(...)` would
 // print its return value as real tuple output ahead of sqlText's, even
 // under -q, since that line is genuine query data, not an announcement.
-function asAuthenticated(uuid, sqlText) {
-  return `set role authenticated;\ndo $$ begin perform set_config('app.test_uid', '${uuid}', false); end $$;\n${sqlText}`;
-}
+const asAuthenticated = (uuid, sqlText) => asRole("authenticated", uuid, sqlText);
 
 function submitToGithub(dbName, ideaId, issueNumber) {
   return psqlOk(

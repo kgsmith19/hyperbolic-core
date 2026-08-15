@@ -26,7 +26,7 @@
 // avoid that trap; row contents are asserted afterward with a separate,
 // plain `select ... from intake.idea where id = ...` query instead.
 import { test } from "node:test";
-import { createPostgresHarness, supabaseHarnessSql } from "../../../tests/postgres-harness.mjs";
+import { asRole, createPostgresHarness, supabaseHarnessSql } from "../../../tests/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -51,13 +51,9 @@ const HARNESS_SQL = supabaseHarnessSql([OWNER_UUID]);
 
 const OWNER_BOOTSTRAP_SQL = `insert into platform.config (owner_uuid) values ('${OWNER_UUID}');`;
 
-function asAuthenticatedOwner(sqlText) {
-  return `set role authenticated;\ndo $$ begin perform set_config('app.test_uid', '${OWNER_UUID}', false); end $$;\n${sqlText}`;
-}
+const asAuthenticatedOwner = (sqlText) => asRole("authenticated", OWNER_UUID, sqlText);
 
-function asServiceRole(sqlText) {
-  return `set role service_role;\n${sqlText}`;
-}
+const asServiceRole = (sqlText) => asRole("service_role", null, sqlText);
 
 function withDb(applyFix, fn) {
   return withDatabase((db) => {

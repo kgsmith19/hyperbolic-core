@@ -9,7 +9,7 @@
 // PROMPT_* for Prompt Organizer). Honouring both keeps that contract intact
 // while the implementation is shared.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const URL_VAR = process.env.TOOLBELT_TEST_DATABASE_URL?.trim() ? "TOOLBELT_TEST_DATABASE_URL" : "PROMPT_TEST_DATABASE_URL";
 const DATABASE_URL = process.env.TOOLBELT_TEST_DATABASE_URL?.trim() || process.env.PROMPT_TEST_DATABASE_URL?.trim();
@@ -63,9 +63,6 @@ function assertIdentifier(value) {
   assert.match(value, /^[a-z][a-z0-9_]{0,62}$/, `unsafe PostgreSQL identifier: ${value}`);
 }
 
-// `userIds` may be empty: suites that only assert GRANT/REVOKE behavior need
-// the roles and the auth.uid() stub but seed no users, and an INSERT with an
-// empty VALUES list is a syntax error rather than a no-op.
 // The detected psql invocation for a given database, as [cmd, args]. Suites
 // that must drive a SECOND concurrent session -- proving row-lock or advisory-
 // lock behavior needs two live connections, which the synchronous helpers
@@ -83,6 +80,38 @@ export function psqlSpawnSpec(dbName, extraArgs = ["-q"]) {
  *  a few suites must know to make fixture files readable by that user. */
 export const runnerUsesSudo = RUNNER?.cmd === "sudo";
 
+/** psql as a promise instead of a blocking call. The two-session concurrency
+ *  proofs need this: spawnSync would serialize the very overlap they exist to
+ *  demonstrate. Never rejects -- a non-zero exit is returned as `code` so the
+ *  caller can assert on the failure rather than catch it. */
+export function psqlAsync(dbName, sqlText) {
+  return new Promise((resolve) => {
+    const child = spawn(...psqlSpawnSpec(dbName), { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+    child.on("close", (code) => resolve({ code, stdout, stderr }));
+    child.stdin.write(sqlText);
+    child.stdin.end();
+  });
+}
+
+/** Poll `predicate` until it returns truthy or `timeoutMs` elapses; resolves
+ *  true if it fired, false on timeout. Returning the verdict rather than
+ *  throwing keeps "it never happened" assertable as a value. */
+export async function waitFor(predicate, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return false;
+}
+
+// `userIds` may be empty: suites that only assert GRANT/REVOKE behavior need
+// the roles and the auth.uid() stub but seed no users, and an INSERT with an
+// empty VALUES list is a syntax error rather than a no-op.
 export function supabaseHarnessSql(userIds) {
   const seed = userIds.length
     ? `\ninsert into auth.users (id) values ${userIds.map((id) => `('${id}'::uuid)`).join(", ")};\n`
@@ -129,6 +158,12 @@ ${sqlText}`;
 // app.test_uid (what auth.uid() reads), with no request.jwt.claims. Suites
 // asserting pure GRANT/REVOKE behavior use this -- a policy that consulted
 // the JWT would be a different assertion than the one they mean to make.
+//
+// set_config goes through a DO block (PERFORM, not SELECT) so it contributes
+// no row of its own. A bare top-level `select set_config(...)` would print its
+// return value as real tuple output ahead of sqlText's, even under -q, because
+// that line is genuine query data rather than an announcement -- which shifts
+// every row index the caller then asserts on.
 export function asRole(role, uuidOrNull, sqlText) {
   assertIdentifier(role);
   const setUid = uuidOrNull
