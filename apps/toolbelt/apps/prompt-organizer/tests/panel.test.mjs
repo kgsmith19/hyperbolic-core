@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyConfigValues } from "../web/panel.mjs";
+import { applyConfigValues } from "../frontend/panel.mjs";
 
 // SPEC-0011 (SL-005): named configurations.
 

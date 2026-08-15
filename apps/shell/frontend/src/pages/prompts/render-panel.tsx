@@ -3,7 +3,7 @@
 // per <!--OPTIONAL:id--> section (checked by default -- the full prompt is
 // the expected copy, unchecking is the deliberate "lean" action), a saved-
 // configuration select/save pair, and a preview+copy action. Ported from
-// apps/toolbelt/apps/prompt-organizer/web/panel.mjs's exact behavior (same
+// apps/toolbelt/apps/prompt-organizer/frontend/panel.mjs's exact behavior (same
 // empty-input-means-absent-key rule, same post-confirmation fire-and-forget
 // usage log) onto ../../lib/prompt-render's render()/extractVariables()/
 // extractSections() -- a local copy, not @hyperbolic/llm's (see that

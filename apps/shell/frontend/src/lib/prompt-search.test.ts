@@ -1,5 +1,5 @@
 // Parity + behavior tests for the port of
-// apps/toolbelt/apps/prompt-organizer/web/search.mjs. The parity block
+// apps/toolbelt/apps/prompt-organizer/frontend/search.mjs. The parity block
 // mirrors packages/llm/tests/prompt-render-parity.test.mjs's own rationale
 // verbatim: a hand-copy can silently drift from its source without either
 // suite ever noticing, so this imports BOTH implementations and asserts
@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error -- plain .mjs, no type declarations; imported only for
 // this file's runtime parity check against the TS port below.
-import * as original from "../../../../toolbelt/apps/prompt-organizer/web/search.mjs";
+import * as original from "../../../../toolbelt/apps/prompt-organizer/frontend/search.mjs";
 import { filterByActive, searchPrompts, shouldFocusSearch, toggleTagFilter } from "./prompt-search";
 import type { Prompt } from "./prompts";
 

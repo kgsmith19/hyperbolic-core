@@ -33,7 +33,7 @@ When explicitly assigned, an AI coding agent may create an Issue, branch, commit
 
 ```bash
 node --test "tests/*.test.mjs"
-python3 -m http.server 8812 --directory web
+python3 -m http.server 8812 --directory frontend
 npm install --no-save --no-package-lock @playwright/test@1.52.0
 npx playwright install --with-deps chromium
 PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config playwright.config.mjs

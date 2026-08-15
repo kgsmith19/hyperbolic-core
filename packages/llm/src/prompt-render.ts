@@ -6,7 +6,7 @@
  * network").
  *
  * This is a deliberate, byte-for-byte-behavioral COPY of
- * apps/toolbelt/apps/prompt-organizer/web/render.mjs, not a fresh
+ * apps/toolbelt/apps/prompt-organizer/frontend/render.mjs, not a fresh
  * reimplementation. Section 8 of 05-d says the pure `render()` model and the
  * SQL `prompt.get_prompt` RPC are "provably equivalent," a claim two existing
  * suites in that app assert (tests/render.test.mjs, tests/render-endpoint.

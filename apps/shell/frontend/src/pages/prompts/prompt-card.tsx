@@ -1,5 +1,5 @@
 // One prompt, expandable in place -- the same interaction model
-// apps/toolbelt/apps/prompt-organizer/web/index.html's showPrompt() already
+// apps/toolbelt/apps/prompt-organizer/frontend/index.html's showPrompt() already
 // established (a <details> per row), extended with m5-02's body-edit UI,
 // rename refusal for namespaced prompts, and the usage-count badge.
 import { useState } from "react";

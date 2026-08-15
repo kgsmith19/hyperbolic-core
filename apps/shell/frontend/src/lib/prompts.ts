@@ -10,7 +10,7 @@
 // packages/llm's injection client) that don't hold the raw body. This
 // management UI already has the body in hand from the list query, so it
 // renders locally with ./prompt-render's render() -- the same pure model
-// apps/toolbelt/apps/prompt-organizer/web/panel.mjs already used (see that
+// apps/toolbelt/apps/prompt-organizer/frontend/panel.mjs already used (see that
 // file's own header comment on why it is a local copy, not an import from
 // packages/llm).
 import { platformClient, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "./session";

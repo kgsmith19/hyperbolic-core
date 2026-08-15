@@ -1,6 +1,6 @@
 /**
  * A deliberate, byte-for-byte-behavioral COPY of
- * apps/toolbelt/apps/prompt-organizer/web/render.mjs (05-d-prompt-organizer.md
+ * apps/toolbelt/apps/prompt-organizer/frontend/render.mjs (05-d-prompt-organizer.md
  * section 8's pure `render()` model), not a fresh reimplementation --
  * mirrors packages/llm/src/prompt-render.ts's own copy of the same source
  * for the identical reason, stated there and repeated here: importing
@@ -11,7 +11,7 @@
  * copy is worse than two, but a browser bundle pulling in three LLM
  * provider SDKs to render `{{VAR}}` substitution is worse still.
  * src/lib/prompt-render.test.ts fuzzes this against
- * apps/toolbelt/apps/prompt-organizer/web/render.mjs directly (the same
+ * apps/toolbelt/apps/prompt-organizer/frontend/render.mjs directly (the same
  * drift-detection shape src/lib/prompt-search.test.ts already uses for its
  * own web/search.mjs port), so a hand-edit to either side that silently
  * diverges fails a test, not a code review.

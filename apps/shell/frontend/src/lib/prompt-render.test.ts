@@ -1,5 +1,5 @@
 // Parity + behavior tests for the port of
-// apps/toolbelt/apps/prompt-organizer/web/render.mjs. Same rationale as
+// apps/toolbelt/apps/prompt-organizer/frontend/render.mjs. Same rationale as
 // src/lib/prompt-search.test.ts's own parity block (and
 // packages/llm/tests/prompt-render-parity.test.mjs, which proves the SAME
 // original against a DIFFERENT copy): a hand-copy can silently drift from
@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error -- plain .mjs, no type declarations; imported only for
 // this file's runtime parity check against the TS port below.
-import * as original from "../../../../toolbelt/apps/prompt-organizer/web/render.mjs";
+import * as original from "../../../../toolbelt/apps/prompt-organizer/frontend/render.mjs";
 import { extractSections, extractVariables, render } from "./prompt-render";
 
 describe("parity with web/render.mjs", () => {

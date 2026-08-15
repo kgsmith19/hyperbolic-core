@@ -5,8 +5,8 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { render } from "../web/render.mjs";
-import { searchPrompts } from "../web/search.mjs";
+import { render } from "../frontend/render.mjs";
+import { searchPrompts } from "../frontend/search.mjs";
 
 // Rendering a maximum-size prompt must stay below this p95 budget.
 const BUDGET_MS = 100;

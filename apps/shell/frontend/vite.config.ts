@@ -52,11 +52,6 @@ const BUILD_SHA = JSON.stringify(gitSha());
 const BUILD_TIME = JSON.stringify(new Date().toISOString());
 
 export default defineConfig({
-  // Pinned to this file's own directory rather than left to default to the
-  // process cwd: every command runs from the app root (apps/shell/, where
-  // package.json lives) while the whole frontend tree -- index.html, src/,
-  // e2e/, and the dist/ build output -- sits one level down in frontend/.
-  root: here,
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(here, "src") } },
   define: {

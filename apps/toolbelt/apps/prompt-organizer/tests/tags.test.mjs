@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toggleTagFilter } from "../web/search.mjs";
+import { toggleTagFilter } from "../frontend/search.mjs";
 import { rest, primaryToken } from "./helpers.mjs";
 
 // SPEC-0004 (SL-006): tags on prompts, filter and search.

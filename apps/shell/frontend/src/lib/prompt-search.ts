@@ -1,5 +1,5 @@
 // Ported verbatim (algorithm unchanged, only types added) from
-// apps/toolbelt/apps/prompt-organizer/web/search.mjs -- the same
+// apps/toolbelt/apps/prompt-organizer/frontend/search.mjs -- the same
 // "narrow, deliberate duplication" ./prompt-render.ts documents for its
 // own port, for the same reason: this logic is Shell-list-UI-only
 // (title/tag/body search, tag-filter toggling, archived-visibility, the "/"

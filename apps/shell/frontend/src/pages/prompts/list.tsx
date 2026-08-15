@@ -1,6 +1,6 @@
 // /prompts (05-d-prompt-organizer.md, ADR-01/ADR-02: "the Shell absorbs...
 // the Toolbelt tool UIs"). Same interaction model
-// apps/toolbelt/apps/prompt-organizer/web/index.html already established
+// apps/toolbelt/apps/prompt-organizer/frontend/index.html already established
 // (a save form, a searchable/filterable list of expandable rows) ported
 // onto Shell session/PostgREST conventions and packages/ui primitives, with
 // m5-02's additions: usage badge, token estimate, body-edit-in-place, and
