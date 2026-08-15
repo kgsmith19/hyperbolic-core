@@ -84,7 +84,7 @@ test("ScriptedFixtureAdapter: resume() is scripted the same as start(), not a th
 
 test("ScriptedFixtureAdapter: cancel is a no-op", async () => {
   const adapter = new ScriptedFixtureAdapter("claude-code");
-  await adapter.cancel("s", 1000);
+  await assert.doesNotReject(() => adapter.cancel("s", 1000));
 });
 
 test("createEvalFixtureAdapters: registers exactly the three frozen HarnessIds", () => {

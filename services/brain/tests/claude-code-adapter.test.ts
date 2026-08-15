@@ -151,5 +151,5 @@ test("resume(): explicitly unsupported -- throws rather than silently starting a
 
 test("cancel(): a sessionId with no in-flight process is a safe no-op", async () => {
   const a = adapter();
-  await a.cancel("never-started", 1000);
+  await assert.doesNotReject(() => a.cancel("never-started", 1000));
 });
