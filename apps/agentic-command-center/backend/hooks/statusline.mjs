@@ -7,11 +7,10 @@
 // is free. Must be fast and must never throw - a failing statusline is
 // rendered verbatim to the user.
 
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPolicy, contextOf, applyProfile } from "./usage.mjs";
-import { resolveRoot, readStdinJson } from "./root.mjs";
+import { readJson, resolveRoot, readStdinJson } from "./root.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = resolveRoot(HERE);
@@ -30,21 +29,13 @@ function bar(frac, width = 10) {
 }
 
 function agentCount(sid) {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(STATE, `${sid}.agents`), "utf8")).n || 0;
-  } catch {
-    return 0;
-  }
+  return readJson(path.join(STATE, `${sid}.agents`), {}).n || 0;
 }
 
+// Written by budget.mjs (10-min cache). Stale is fine for a status line.
 function weekPct() {
-  try {
-    const t = JSON.parse(fs.readFileSync(path.join(STATE, "tier.json"), "utf8"));
-    // Written by budget.mjs (10-min cache). Stale is fine for a status line.
-    return t.pct > 0 ? t : null;
-  } catch {
-    return null;
-  }
+  const t = readJson(path.join(STATE, "tier.json"), null);
+  return t && t.pct > 0 ? t : null;
 }
 
 function main() {
