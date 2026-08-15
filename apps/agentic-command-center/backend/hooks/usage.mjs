@@ -79,7 +79,10 @@ export function applyProfile(policy) {
   };
 }
 
-function family(model) {
+// Exported so directive-spend.mjs prices against the SAME family mapping
+// rather than its own copy: a model added to one list and not the other
+// would silently price as "unknown" in one of the two callers.
+export function family(model) {
   if (!model) return "unknown";
   const m = String(model).toLowerCase();
   for (const f of ["opus", "sonnet", "haiku", "fable"]) if (m.includes(f)) return f;

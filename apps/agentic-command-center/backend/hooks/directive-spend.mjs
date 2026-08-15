@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { family } from "./usage.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
@@ -14,13 +15,6 @@ const DEFAULT_RATES = {
   haiku: { in: 0.8, out: 4 },
   unknown: { in: 3, out: 15 },
 };
-
-function family(model) {
-  if (!model) return "unknown";
-  const m = String(model).toLowerCase();
-  for (const f of ["opus", "sonnet", "haiku", "fable"]) if (m.includes(f)) return f;
-  return "unknown";
-}
 
 function loadRates() {
   try {

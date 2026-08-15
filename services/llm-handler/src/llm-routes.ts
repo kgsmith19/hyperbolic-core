@@ -10,16 +10,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { complete, isLlmError, stream, type LlmDelta, type LlmErrorClass, type LlmResponse } from "@hyperbolic/llm";
 import type { ConcurrencyGate } from "./concurrency.ts";
+import { send } from "./http.ts";
 import { estimateMessagesTokens } from "./count.ts";
 import { logLlmCall } from "./llm-call-log.ts";
 import { parseLlmRequest } from "./llm-request.ts";
 import type { HandlerConfig } from "./types.ts";
-
-function send(res: ServerResponse, code: number, body: unknown): void {
-  const text = JSON.stringify(body);
-  res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
-  res.end(text);
-}
 
 // Handler A's own admission-control/validation-error mapping. Distinct from
 // LlmError.retryable (which governs packages/llm's internal retry/fallover

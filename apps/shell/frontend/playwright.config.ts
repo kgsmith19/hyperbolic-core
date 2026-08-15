@@ -1,3 +1,4 @@
+import path from "node:path";
 import { defineConfig } from "@playwright/test";
 
 // e2e proof against a REAL production build (`npm run build && npm run
@@ -22,6 +23,11 @@ export default defineConfig({
   },
   webServer: {
     command: "npm run build && npm run preview -- --port 4173 --strictPort",
+    // Playwright spawns webServer from THIS config's directory, and package.json
+    // lives one level up at the app root (it is the npm workspace member, not a
+    // frontend file). Without this, `npm run` here fails ENOENT on a missing
+    // package.json before any test runs.
+    cwd: path.resolve(import.meta.dirname, ".."),
     url: "http://127.0.0.1:4173",
     reuseExistingServer: false,
     timeout: 120_000,

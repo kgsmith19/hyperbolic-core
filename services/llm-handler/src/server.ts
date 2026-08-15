@@ -9,15 +9,10 @@ import { extractBearerToken, verifyOwnerSession } from "./auth.ts";
 import { ConcurrencyGate } from "./concurrency.ts";
 import { submitIdea, type SubmitDeps } from "./intake-submit.ts";
 import { llmRoutes } from "./llm-routes.ts";
+import { send } from "./http.ts";
 import type { HandlerConfig } from "./types.ts";
 
 const BODY_CAP = 16 * 1024;
-
-function send(res: http.ServerResponse, code: number, body: unknown): void {
-  const text = JSON.stringify(body);
-  res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
-  res.end(text);
-}
 
 function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {

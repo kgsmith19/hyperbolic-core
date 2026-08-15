@@ -27,7 +27,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(HERE, "../../../.."); // e2e/support -> shell -> apps -> repo root
+const REPO_ROOT = path.resolve(HERE, "../../../../.."); // e2e/support -> e2e -> frontend -> shell -> apps -> repo root
 const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/supabase/migrations");
 
 const PLATFORM_BOOTSTRAP_UP = path.join(PLATFORM_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
