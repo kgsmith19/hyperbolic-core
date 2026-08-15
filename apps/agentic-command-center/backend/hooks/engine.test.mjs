@@ -19,7 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { main, RUNNERS, isDeniedVaultKey } from "./engine.mjs";
+import { main, RUNNERS, isDeniedVaultKey, headLines } from "./engine.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ENGINE_PATH = path.join(HERE, "engine.mjs");
@@ -494,6 +494,18 @@ test("vault-import: non-key convenience values are unaffected by the denylist (A
   assert.equal(r.code, 0);
   const v = JSON.parse(fs.readFileSync(path.join(root, "vault.json"), "utf8"));
   assert.deepEqual(v, { GITHUB_TOKEN: "x", DB_PASSWORD: "y", API_KEY: "z" });
+});
+
+// headLines is the single read behind both `keep` and `summary`, so an
+// unreadable script must degrade to "no marker, no summary" rather than
+// taking `list` down with it -- a runbox is a directory a human drops files
+// into, so a path that cannot be read as text is an ordinary occurrence, not
+// a corrupt-state emergency.
+test("headLines: an unreadable path yields no lines instead of throwing", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "acc-headlines-"));
+  after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.deepEqual(headLines(dir), [], "a directory is not readable as text");
+  assert.deepEqual(headLines(path.join(dir, "absent.ps1")), [], "a missing file reads as empty");
 });
 
 // isDeniedVaultKey, direct and exhaustive (the real denylist is small and
