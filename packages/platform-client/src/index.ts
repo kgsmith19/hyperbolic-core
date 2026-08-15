@@ -280,6 +280,20 @@ export function createPlatformClient(config: PlatformClientConfig): PlatformClie
       );
     }
 
+    // COST, stated because it is not obvious from the call: this
+    // getSession() runs enforceOwner, which POSTs to
+    // rpc/is_platform_owner. Every authedFetch is therefore TWO network
+    // round-trips, not one, and the owner check is on the critical path of
+    // every authenticated request the Shell makes.
+    //
+    // Memoizing it per accessToken would be correctness-preserving against
+    // the token (the RPC answers "is the subject of THIS token the owner",
+    // a pure function of the token) and would collapse the overhead to once
+    // per token lifetime. It is NOT done here because it trades a real
+    // property for the speed: today a change to platform.owner() takes
+    // effect on the very next request, whereas a per-token cache would let
+    // a revoked owner keep transacting until that token expired. Do not
+    // add the cache without deciding that trade deliberately.
     const session = await auth.getSession();
     if (!session) {
       throw new Error("platform-client: no active session, refusing to send request");

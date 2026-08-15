@@ -111,7 +111,9 @@ export function validateOptions(options) {
 
   if (!options.name) {
     errors.push("--name is required");
-  } else if (options.name.length < 1 || options.name.length > 100) {
+    // No `length < 1` companion to this bound: `!options.name` above already
+    // took the empty string, and parseArgs only ever assigns argv strings.
+  } else if (options.name.length > 100) {
     errors.push("--name must be 1-100 characters (tool.schema.json name field)");
   } else if (options.name.trim().length === 0) {
     // Passes the length check above (e.g. all spaces) but is not a
