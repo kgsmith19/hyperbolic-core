@@ -71,6 +71,7 @@ from domains.ops.receipts import STATUS_FAILED, STATUS_OK, JobResult, run_job
 from kernel import services
 from kernel.access import AccessContext, require
 from kernel.env import read_env
+from kernel.model_client import get_model_client
 
 log = logging.getLogger("lifeos.bills")
 
@@ -205,12 +206,6 @@ LLM_SCHEMA: dict[str, Any] = {
     "required": ["bills", "eobs"],
     "additionalProperties": False,
 }
-
-
-def get_model_client() -> anthropic.Anthropic:
-    """The same client construction /chat uses (ADR 011): the repo secret
-    convention, since the SDK's own resolution only looks at process env."""
-    return anthropic.Anthropic(api_key=read_env("ANTHROPIC_API_KEY"))
 
 
 def model_name() -> str:

@@ -35,6 +35,7 @@ from domains.episodes import lines as episode_lines
 from kernel import services
 from kernel.access import AccessContext
 from kernel.env import read_env
+from kernel.model_client import get_model_client
 from mcp_server import tools
 
 log = logging.getLogger("lifeos.chat")
@@ -60,12 +61,6 @@ class ChatMessage(BaseModel):
 
 class ChatIn(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1)
-
-
-def get_model_client() -> anthropic.Anthropic:
-    # Follow the repo secret convention (env var or repo .env via read_env) —
-    # the SDK's own resolution only looks at process env.
-    return anthropic.Anthropic(api_key=read_env("ANTHROPIC_API_KEY"))
 
 
 def read_only_context(owner: AccessContext) -> AccessContext:
