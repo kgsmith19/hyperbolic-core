@@ -85,9 +85,20 @@ jobs:
       # Unit and browser tests intercept every external request. These public,
       # non-production values let the Supabase client initialize without
       # coupling PR validation to a deployed project.
+      #
+      # VITE_API_URL is deliberately NOT set, and that is load-bearing.
+      # playwright.config.ts's webServer.env sets only the two values above
+      # and says why: "VITE_API_URL is deliberately UNSET: src/api/client.ts's
+      # default ('/life/api', same-origin relative) is real behavior this suite
+      # exercises". But webServer.env is MERGED over process.env, not
+      # substituted for it, so a job-level VITE_API_URL still reaches Vite and
+      # repoints the client at an absolute origin that page.route() never
+      # intercepts. Five of six browser tests then fail on "element not found"
+      # because the mocked data never arrives. The inert ci.yml this workflow
+      # was modelled on carries that same variable -- it just never ran, so
+      # nothing ever contradicted its own config's comment.
       VITE_SUPABASE_URL: https://test.supabase.co
       VITE_SUPABASE_PUBLISHABLE_KEY: test-public-anon-key
-      VITE_API_URL: https://api.test.invalid
     defaults:
       run:
         working-directory: apps/lifeos/frontend
