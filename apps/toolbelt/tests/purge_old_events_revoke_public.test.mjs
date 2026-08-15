@@ -31,7 +31,11 @@
 // manual/CI-operator verification, not something this REST/psql-only
 // harness fakes.
 import { test } from "node:test";
-import { createPostgresHarness, supabaseHarnessSql } from "./postgres-harness.mjs";
+import {
+  createPostgresHarness,
+  migrationBeforeMarker,
+  supabaseHarnessSql,
+} from "./postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -51,12 +55,7 @@ const FIX_DOWN = join(MIGRATIONS_DIR, "20260814020000_core_purge_old_events_revo
 
 const CRON_SPLIT_MARKER = "create extension pg_cron;";
 
-function coreEventRetentionWithoutCron() {
-  const full = readFileSync(CORE_EVENT_RETENTION_UP, "utf8");
-  const idx = full.indexOf(CRON_SPLIT_MARKER);
-  assert.ok(idx > 0, "expected to find the pg_cron marker in the real retention migration");
-  return full.slice(0, idx);
-}
+const coreEventRetentionWithoutCron = () => migrationBeforeMarker(CORE_EVENT_RETENTION_UP, CRON_SPLIT_MARKER);
 
 const { psql, psqlOk, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f2a_purge_events");
 const psqlAllowError = psql;

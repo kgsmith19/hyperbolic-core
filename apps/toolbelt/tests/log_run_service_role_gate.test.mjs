@@ -25,7 +25,12 @@
 // established for a service_role-gated RPC) -- and applies the real,
 // committed migration files from disk verbatim.
 import { test } from "node:test";
-import { createPostgresHarness, supabaseHarnessSql, asRole } from "./postgres-harness.mjs";
+import {
+  asRole,
+  createPostgresHarness,
+  migrationBeforeMarker,
+  supabaseHarnessSql,
+} from "./postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -50,12 +55,7 @@ const FIX_UP = join(MIGRATIONS_DIR, "20260814180000_core_log_run_service_role_ga
 // sandbox's local Postgres has no pg_cron control file installed.
 const CRON_SPLIT_MARKER = "create extension pg_cron;";
 
-function coreEventRetentionWithoutCron() {
-  const full = readFileSync(CORE_EVENT_RETENTION_UP, "utf8");
-  const idx = full.indexOf(CRON_SPLIT_MARKER);
-  assert.ok(idx > 0, "expected to find the pg_cron marker in the real retention migration");
-  return full.slice(0, idx);
-}
+const coreEventRetentionWithoutCron = () => migrationBeforeMarker(CORE_EVENT_RETENTION_UP, CRON_SPLIT_MARKER);
 
 const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
 const STRANGER_UUID = "22222222-2222-2222-2222-222222222222";

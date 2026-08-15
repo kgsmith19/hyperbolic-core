@@ -10,6 +10,7 @@
 // while the implementation is shared.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 const URL_VAR = process.env.TOOLBELT_TEST_DATABASE_URL?.trim() ? "TOOLBELT_TEST_DATABASE_URL" : "PROMPT_TEST_DATABASE_URL";
 const DATABASE_URL = process.env.TOOLBELT_TEST_DATABASE_URL?.trim() || process.env.PROMPT_TEST_DATABASE_URL?.trim();
@@ -107,6 +108,21 @@ export async function waitFor(predicate, timeoutMs) {
     await new Promise((r) => setTimeout(r, 50));
   }
   return false;
+}
+
+/** The prefix of a real migration file, cut immediately before `marker`.
+ *
+ *  Several suites apply a committed retention migration to a throwaway
+ *  database that has no pg_cron. Rather than keeping a hand-copied excerpt --
+ *  which silently rots the moment the real migration changes -- each reads the
+ *  real file and stops at the point where it starts requiring the extension.
+ *  The assertion matters: if the marker ever moves or is reworded, this fails
+ *  loudly instead of quietly applying the whole file, or none of it. */
+export function migrationBeforeMarker(migrationPath, marker) {
+  const full = readFileSync(migrationPath, "utf8");
+  const idx = full.indexOf(marker);
+  assert.ok(idx > 0, `expected to find ${JSON.stringify(marker)} in ${migrationPath}`);
+  return full.slice(0, idx);
 }
 
 // `userIds` may be empty: suites that only assert GRANT/REVOKE behavior need

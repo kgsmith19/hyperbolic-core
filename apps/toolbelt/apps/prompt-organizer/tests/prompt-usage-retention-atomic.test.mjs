@@ -22,6 +22,7 @@
 import { test } from "node:test";
 import {
   createPostgresHarness,
+  migrationBeforeMarker,
   psqlAsync,
   psqlSpawnSpec,
   supabaseHarnessSql,
@@ -54,12 +55,7 @@ const FIX_DOWN = join(PO_MIGRATIONS_DIR, "20260814080000_prompt_usage_retention_
 
 const CRON_SPLIT_MARKER = "select cron.schedule(";
 
-function promptUsageRetentionWithoutCron() {
-  const full = readFileSync(PROMPT_USAGE_RETENTION_UP, "utf8");
-  const idx = full.indexOf(CRON_SPLIT_MARKER);
-  assert.ok(idx > 0, "expected to find the cron.schedule marker in the real retention migration");
-  return full.slice(0, idx);
-}
+const promptUsageRetentionWithoutCron = () => migrationBeforeMarker(PROMPT_USAGE_RETENTION_UP, CRON_SPLIT_MARKER);
 
 const { psql, psqlOk, freshDatabaseName: freshDbName, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f33_prompt_retention");
 const psqlAllowError = psql;

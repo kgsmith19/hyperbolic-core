@@ -39,6 +39,7 @@
 import { test } from "node:test";
 import {
   createPostgresHarness,
+  migrationBeforeMarker,
   psqlAsync,
   psqlSpawnSpec,
   supabaseHarnessSql,
@@ -60,12 +61,7 @@ const FIX_DOWN = join(MIGRATIONS_DIR, "20260814070000_core_event_retention_atomi
 
 const CRON_SPLIT_MARKER = "create extension pg_cron;";
 
-function coreEventRetentionWithoutCron() {
-  const full = readFileSync(CORE_EVENT_RETENTION_UP, "utf8");
-  const idx = full.indexOf(CRON_SPLIT_MARKER);
-  assert.ok(idx > 0, "expected to find the pg_cron marker in the real retention migration");
-  return full.slice(0, idx);
-}
+const coreEventRetentionWithoutCron = () => migrationBeforeMarker(CORE_EVENT_RETENTION_UP, CRON_SPLIT_MARKER);
 
 // Minimal Supabase stubs: core.run.user_id references auth.users(id) and
 // defaults to auth.uid(), while the baseline migrations grant privileges
