@@ -496,17 +496,33 @@ function tokenMatches(presented, token) {
 // token per server instance and passes it explicitly (a closure, not this
 // default), so independent server instances in the same process can never
 // cross-contaminate each other's credential.
-export function handler(req, res, token = loadOrCreateToken(), allowedOrigin = parseAllowedOrigin()) {
-  if (!localHost(req.headers.host)) return send(res, 403, { error: "non-local Host" });
-  if (!localOrigin(req.headers.origin) && !configuredCorsRequest(req, allowedOrigin)) {
-    return send(res, 403, { error: "non-local Origin" });
+/**
+ * Every cross-cutting check a request clears before any route sees it.
+ *
+ * Returns the resolved route when the request may proceed, or `null` when it
+ * has already been answered and the caller must stop. Its own function so the
+ * property handler's comments assert -- these run ONCE, and a future route
+ * cannot forget them -- is structural rather than a matter of where someone
+ * pastes the next `if`.
+ */
+function enforceRequestSecurity(req, res, token, allowedOrigin) {
+  if (!localHost(req.headers.host)) {
+    send(res, 403, { error: "non-local Host" });
+    return null;
   }
-  if (handlePreflight(req, res, allowedOrigin)) return;
+  if (!localOrigin(req.headers.origin) && !configuredCorsRequest(req, allowedOrigin)) {
+    send(res, 403, { error: "non-local Origin" });
+    return null;
+  }
+  if (handlePreflight(req, res, allowedOrigin)) return null;
   setCorsResponseHeaders(req, res, allowedOrigin);
   // Every mutating route demands the custom header (unsettable cross-origin
-  // without a CORS grant this server never issues) — enforced ONCE here so a
-  // future route cannot forget it. Non-POST methods carry no mutation.
-  if (req.method === "POST" && req.headers["x-acc"] !== "1") return send(res, 403, { error: "missing X-ACC header" });
+  // without a CORS grant this server never issues). Non-POST methods carry
+  // no mutation.
+  if (req.method === "POST" && req.headers["x-acc"] !== "1") {
+    send(res, 403, { error: "missing X-ACC header" });
+    return null;
+  }
   const route = req.url.split("?")[0];
   // Every /api/* request needs the session credential, GET and POST alike
   // (ACC-5) — checked before any route match so an unauthenticated caller
@@ -515,8 +531,15 @@ export function handler(req, res, token = loadOrCreateToken(), allowedOrigin = p
   // by design) are unaffected: the browser has to load that page at all
   // before it can ever hold a token to send.
   if (route.startsWith("/api/") && !tokenMatches(req.headers["x-acc-token"], token)) {
-    return send(res, 401, { error: "unauthorized" });
+    send(res, 401, { error: "unauthorized" });
+    return null;
   }
+  return route;
+}
+
+export function handler(req, res, token = loadOrCreateToken(), allowedOrigin = parseAllowedOrigin()) {
+  const route = enforceRequestSecurity(req, res, token, allowedOrigin);
+  if (route === null) return;
   // With a dist configured, it owns "/" and every non-API GET.
   const dist = process.env.ACC_UI_DIST;
   if (req.method === "GET" && dist && !route.startsWith("/api/")) {

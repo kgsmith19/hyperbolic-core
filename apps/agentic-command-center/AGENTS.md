@@ -65,8 +65,15 @@ the `X-ACC` header, then the token — enforced once so a future route cannot
 forget it, followed by 14 `route === "/api/..."` branches and 17 method
 checks.
 
-A route table is the natural fix and it is **arithmetically blocked**, not
-merely risky. `policy.json` floors this file at 98% lines / 88.5% branches
+The security preamble is now its own `enforceRequestSecurity`, so "these run
+ONCE and a future route cannot forget them" is structural rather than a matter
+of where someone pastes the next `if`. That cost 23 lines rather than saving
+any, and it was kept because the property is worth more than the lines; it was
+verified by measurement, not argued -- 614/614 ACC tests and covgate at 98.4%
+lines / 88.9% branches, both slightly ABOVE the pre-change 98.3 / 88.8.
+
+A route table for the remaining 14 `route === "..."` branches is a different
+matter, and it is **arithmetically blocked**, not merely risky. `policy.json` floors this file at 98% lines / 88.5% branches
 against a measured 98.32 / 88.79, and names precisely which branches are
 uncovered: Windows-only ACL application, POSIX ownership-mismatch defenses no
 unprivileged portable test can reach, and the losing sides of an exclusive
