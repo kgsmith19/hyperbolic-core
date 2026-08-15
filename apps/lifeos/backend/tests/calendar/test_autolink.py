@@ -21,9 +21,9 @@ from domains.calendar.autolink import (
     run_autolink,
 )
 from domains.calendar.types import define_calendar_types, email_hash
-from kernel import db
 from kernel.access import AccessContext, ScopeError
 from kernel.services import capture, find, forget, get_entity, history, relate
+from tests.support import event_count
 
 
 @pytest.fixture(scope="module")
@@ -50,13 +50,6 @@ def links_of(ctx: AccessContext, attendee_id: UUID) -> list[UUID]:
 def review_for(ctx: AccessContext, attendee_id: UUID, reason: str) -> dict[str, object] | None:
     found = find(ctx, type_name="link_review", filters={"review_key": f"{attendee_id}:{reason}"})
     return dict(found[0].attributes) if found else None
-
-
-def event_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 def test_normalization_is_exact_with_google_aliases_only() -> None:

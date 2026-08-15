@@ -156,10 +156,6 @@ export function taskTitleLookup(tasks: readonly BrainTask[]): (taskId: string) =
   return (taskId) => byId.get(taskId);
 }
 
-export function deriveRunStateLabel(run: BrainRun | undefined): string | undefined {
-  return run?.status;
-}
-
 // --- Connection state (09 section 7.3: reconnect UX) ------------------
 
 export type BrainConnectionState = "live" | "reconnecting" | "offline";

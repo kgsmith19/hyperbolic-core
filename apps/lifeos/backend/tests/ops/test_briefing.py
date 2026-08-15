@@ -32,6 +32,7 @@ from kernel.access import AccessContext, ScopeError
 from kernel.services import capture, find, history
 from scripts.define_daily_checkin import define_daily_checkin
 from scripts.migrate_briefing_composition import migrate
+from tests.support import event_count
 
 DAY = date(2031, 3, 4)  # a Tuesday: the daily edition
 EMPTY_DAY = date(2031, 3, 7)
@@ -117,13 +118,6 @@ def make_checkin(ctx: AccessContext, on: date) -> UUID:
         "daily_checkin",
         {"date": on.isoformat(), "mood": 3, "energy": 3, "stress": 3, "sleep_quality": 3},
     ).entity_id
-
-
-def event_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 def stored(ctx: AccessContext, day: date) -> dict[str, Any]:

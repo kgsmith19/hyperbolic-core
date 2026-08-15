@@ -14,23 +14,9 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 from domains.bills.types import STATE_APPROVED, STATE_PROPOSED, STATE_REJECTED
-from kernel import db
+from tests.support import entity_count, event_count
 
 client = TestClient(app)
-
-
-def event_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
-
-
-def entity_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from entity").fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 def propose(marker: str) -> dict[str, Any]:
