@@ -10,14 +10,31 @@
  * reimplementation. Section 8 of 05-d says the pure `render()` model and the
  * SQL `prompt.get_prompt` RPC are "provably equivalent," a claim two existing
  * suites in that app assert (tests/render.test.mjs, tests/render-endpoint.
- * test.mjs). Importing render.mjs directly from packages/llm was rejected:
- * apps/toolbelt is a separately-subtree-imported app (see AGENTS.md's
- * repository-purpose note) and no package in this monorepo reaches across an
- * apps/* boundary into another app's source today, so a relative import
- * would be a new, unprecedented coupling between an app and a package. A copy
- * keeps packages/llm's dependency graph exactly what its package.json already
- * declares (zero deps beyond the three provider SDKs) at the cost of needing
- * to keep this file in sync by hand if render.mjs's algorithm ever changes.
+ * test.mjs). Importing render.mjs directly from packages/llm was rejected on
+ * the grounds that "no package in this monorepo reaches across an apps/*
+ * boundary into another app's source today, so a relative import would be a
+ * new, unprecedented coupling."
+ *
+ * THAT PREMISE IS FALSE, and was already false when it was written. Four
+ * imports cross that boundary today:
+ *
+ *   packages/toolbelt-cli/src/manifests-shared.mjs (x2)   production source
+ *   packages/toolbelt-cli/tests/cli.integration.test.mjs
+ *   packages/llm/tests/prompt-render-parity.test.mjs      <- THIS package
+ *
+ * The last one is the awkward part: the parity test that exists to police
+ * this copy imports render.mjs across exactly the boundary the copy exists to
+ * avoid. And manifests-shared.mjs is not an accident -- it is a deliberate
+ * "single point of contact" module whose whole job is to make the crossing
+ * happen in one reviewable place, with tests/paths.test.mjs asserting the two
+ * trees stay aligned. That is a working pattern this file could have followed.
+ *
+ * What survives of the rationale is narrower: a copy keeps packages/llm's
+ * dependency graph exactly what its package.json declares (zero deps beyond
+ * the three provider SDKs), at the cost of hand-syncing this file if
+ * render.mjs's algorithm changes. Whether that is worth a 149-line duplicate
+ * is a live question, not a settled one -- decide it deliberately rather than
+ * inheriting it from a claim about the repo that does not hold.
  * packages/llm/tests/prompt-render-parity.test.mjs fuzzes both
  * implementations against the same inputs and asserts identical output,
  * which is this repo's actual enforcement mechanism for that sync, not just

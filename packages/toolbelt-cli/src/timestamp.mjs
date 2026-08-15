@@ -32,7 +32,22 @@ export function nextTimestamp(existingBasenames, from = new Date()) {
   }
   let candidate = new Date(from.getTime());
   let ts = formatTimestamp(candidate);
-  const latest = [...taken].sort().at(-1);
+  // `latest` must consider only genuine 14-digit timestamps. The catch-up
+  // branch below parses it by fixed 14-wide slices, so feeding it a digit run
+  // of any other length yields a wrong-but-plausible date rather than an
+  // error: a "999" version produced version "9981130000001" (13 digits, year
+  // 998), and a 16-digit one produced 15 digits. Neither collides, so nothing
+  // downstream objected -- the CLI would simply have written a migration whose
+  // version violates the convention it exists to uphold. Only a genuine
+  // 14-digit timestamp is a valid input to that arithmetic.
+  //
+  // `taken` still holds every digit run, matching validate-migrations.mjs's
+  // own `/^\d+$/` test (this repo carries real 4-digit versions like
+  // 0001_init.sql). That is belt-and-braces rather than load-bearing:
+  // formatTimestamp always emits 14 digits, so a shorter or longer version
+  // can never equal a generated one. Keeping them costs nothing and keeps
+  // this set's definition identical to the validator's.
+  const latest = [...taken].filter((v) => v.length === 14).sort().at(-1);
   if (latest && ts <= latest) {
     if (latest === "99991231235959") {
       throw new Error("migration version space exhausted after 99991231235959");

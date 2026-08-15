@@ -29,7 +29,22 @@ export function extractBearerToken(authorizationHeader: string | undefined | nul
 /** Answers "is `bearerToken` a live session for the platform owner",
  * exactly as packages/platform-client's isOwnerSession does. Fails closed
  * on every inconclusive outcome: a network error, a non-2xx response, or
- * any body other than the literal boolean `true`. */
+ * any body other than the literal boolean `true`.
+ *
+ * COST, stated because the call site does not show it: server.ts gates EVERY
+ * request through this, so each one spends a Supabase round trip before any
+ * real work begins. On /v1/complete and /v1/stream that is small beside the
+ * upstream model call; on /v1/count, which is otherwise fast, it can dominate
+ * the request.
+ *
+ * Memoizing per bearer token would be correctness-preserving against the
+ * token (this RPC answers for exactly that token, nothing else) and would
+ * collapse the cost to once per token lifetime. It is NOT done, for the same
+ * reason packages/platform-client/src/index.ts's authedFetch does not do it:
+ * today a change to platform.owner() takes effect on the very next request,
+ * where a cache would let a revoked owner keep transacting until the token
+ * expired. Decide that trade deliberately, in both places at once, or not at
+ * all. */
 export async function verifyOwnerSession(
   supabaseUrl: string,
   supabasePublishableKey: string,
