@@ -130,24 +130,31 @@ function filesIn(dir) {
   });
 }
 
-function firstComment(file) {
+// The first ten lines, or none when the file cannot be read. Both readers
+// below want exactly this, and pendingScripts asks for both per script -- so
+// the file is opened once, not once each.
+export function headLines(file) {
   try {
-    for (const line of readFileSync(file, "utf8").split(/\r?\n/).slice(0, 10)) {
-      const t = line.trim();
-      if (/^(#|\/\/)/.test(t)) {
-        const text = t.replace(/^(#|\/\/)\s*/, "");
-        if (/^guards:\s*keep/i.test(text)) continue; // marker line, not a description
-        if (text) return text.slice(0, 160);
-      } else if (t) break; // first real code line: no leading comment
-    }
-  } catch { /* unreadable: no summary */ }
+    return readFileSync(file, "utf8").split(/\r?\n/).slice(0, 10);
+  } catch {
+    return []; // unreadable: no marker, no summary
+  }
+}
+
+function firstComment(lines) {
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^(#|\/\/)/.test(t)) {
+      const text = t.replace(/^(#|\/\/)\s*/, "");
+      if (/^guards:\s*keep/i.test(text)) continue; // marker line, not a description
+      if (text) return text.slice(0, 160);
+    } else if (t) break; // first real code line: no leading comment
+  }
   return "";
 }
 
-function hasKeepMarker(file) {
-  try {
-    return readFileSync(file, "utf8").split(/\r?\n/).slice(0, 10).some((l) => /^\s*(#|\/\/)\s*guards:\s*keep/i.test(l));
-  } catch { return false; }
+function hasKeepMarker(lines) {
+  return lines.some((l) => /^\s*(#|\/\/)\s*guards:\s*keep/i.test(l));
 }
 
 function pendingScripts(c) {
@@ -156,10 +163,11 @@ function pendingScripts(c) {
     for (const name of filesIn(box.dir)) {
       if (!RUNNABLE.test(name)) continue;
       const full = path.join(box.dir, name);
+      const head = headLines(full);
       out.push({
         label: box.label, name, dir: box.dir, cwd: box.cwd,
-        keep: hasKeepMarker(full),
-        summary: firstComment(full),
+        keep: hasKeepMarker(head),
+        summary: firstComment(head),
         mtime: statSync(full).mtime.toISOString(),
       });
     }
@@ -174,7 +182,7 @@ function trashedScripts(c) {
     for (const name of filesIn(trash)) {
       out.push({
         label: box.label, name, dir: trash, runboxDir: box.dir,
-        summary: firstComment(path.join(trash, name)),
+        summary: firstComment(headLines(path.join(trash, name))),
         mtime: statSync(path.join(trash, name)).mtime.toISOString(),
       });
     }
