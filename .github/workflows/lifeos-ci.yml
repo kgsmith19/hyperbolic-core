@@ -100,6 +100,21 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: apps/lifeos/frontend/package-lock.json
+      # This app's frontend depends on @hyperbolic/ui and
+      # @hyperbolic/platform-client through `file:` paths, and its tsconfig
+      # project-references them, so `tsc -b` compiles platform-client's OWN
+      # source. That needs the root workspace install (for
+      # @supabase/supabase-js, which platform-client depends on) and needs
+      # packages/ui built to emit the declarations App.tsx imports. Neither
+      # happens from inside apps/lifeos/frontend, which is why the first run
+      # of this gate failed on both. shell-ci.yml does the same two steps for
+      # the same reason.
+      - name: Install root workspace dependencies
+        run: npm ci
+        working-directory: .
+      - name: Build the packages/ui dependency
+        run: npm run build --workspace=packages/ui
+        working-directory: .
       - run: npm ci
       - run: npm run lint
       - run: npx tsc -b
