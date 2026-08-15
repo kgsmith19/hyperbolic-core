@@ -24,6 +24,21 @@ harness integration; generic kernel code must remain harness-neutral.
   project, not a workspace member, so it installs and builds on its own.
 - Generated output (`frontend/dist/`, Playwright reports, test results) is
   read-only. Change a source file and regenerate.
+- `frontend/src/components/ui/` holds seven primitives — badge, button, card,
+  input, label, radio-group, textarea — that all also exist in `packages/ui/src/
+  primitives/`, the package created to own exactly these. **They have already
+  drifted**, 8–24 differing lines each, and not only cosmetically: this app's
+  badge renders `rounded-4xl` where the package renders `rounded-full`, and the
+  two use different design-token vocabularies entirely (here `bg-primary` /
+  `text-primary-foreground` / `destructive`; the package `bg-accent` /
+  `text-accent-fg` / `danger`). This frontend defines its own tokens in
+  `src/index.css` and never loads `packages/ui/styles/tokens.css`, so it is not
+  on the platform design system at all. Adopting the package is not a lean edit:
+  `frontend/` is deliberately a standalone npm project rather than a workspace
+  member (see the bullet above), so consuming `@hyperbolic/ui` is a build- and
+  dependency-graph change with its own contract-suite consequences. Do not fix
+  it incidentally, and do not "improve" a primitive here without knowing you are
+  editing the copy that the Shell does not use.
 - `backend/kernel/` runs bounded headless tasks and records their results. Read
   `backend/kernel/README.md` before changing the kernel contract or adapters.
 - `backend/runner/` owns directive execution and lifecycle state. Read
