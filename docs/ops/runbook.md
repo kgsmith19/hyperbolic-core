@@ -2,7 +2,7 @@
 title: Platform Operations Runbook
 status: active
 owner: Kyle
-updated: 2026-08-13
+updated: 2026-08-15
 ---
 
 # Platform Operations Runbook
@@ -10,25 +10,139 @@ updated: 2026-08-13
 ## VPS bootstrap (from nothing)
 
 Every section below assumes a `deploy@$DEPLOY_HOST` that already exists, is
-joined to the tailnet, and already trusts the deploy key. This section is
-that starting point, run once per VPS (see
-`docs/planning/issues/m1-13-chore-platform-production-bootstrap.md`).
+joined to the tailnet, and already trusts all three deploy keys (Shell,
+Handler A, Brain). This section is that starting point, run once per VPS
+(see `docs/planning/issues/m1-13-chore-platform-production-bootstrap.md`).
+
+**One script**, run once as root on the fresh VPS, does steps 2-4 below --
+creating the `deploy` user, generating and installing all three deploy
+keypairs, and creating every directory `deploy.yml` expects to own:
+
+```bash
+# Preview every command it would run -- no mutation.
+docs/ops/bootstrap-vps.sh --dry-run
+
+# Also joins the tailnet first if you pass a reusable auth key
+# (Settings -> Keys in the Tailscale admin console; omit to join yourself
+# with `tailscale up` before running this).
+sudo docs/ops/bootstrap-vps.sh --apply --tailnet-authkey=<tskey-...>
+```
+
+It prints the three PRIVATE key halves once at the end -- paste each
+immediately into its Infisical path (see "Infisical and GitHub
+configuration" below) and do not save them anywhere else; the script shreds
+its own key files from disk before exiting. Rerunning is safe: it rotates
+each key by name (replaces the matching `authorized_keys` entry) rather than
+accumulating dead ones, so it also doubles as the key-rotation procedure.
+
+Spelled out, what it does and why -- and the two steps it deliberately
+leaves to you:
 
 1. Provision one VPS and join it to the tailnet as an approved device
-   (`tailscale up`, approve in the admin console if the ACL requires manual
-   approval for non-`tag:ci` devices).
-2. Create the `deploy` OS user: `useradd -m -s /bin/bash deploy`.
-3. Generate the deploy key pair (`ssh-keygen -t ed25519 -C deploy@hyperbolic-core -f deploy_key`,
-   no passphrase -- it must be usable non-interactively from CI). Install the
+   (`tailscale up` -- the script's own `--tailnet-authkey` flag does this if
+   given a reusable key; approve in the admin console if the ACL requires
+   manual approval for non-`tag:ci` devices). **Not scriptable from inside
+   the box**: the admin-console approval step, when the ACL requires it.
+2. Create the `deploy` OS user: `useradd -m -s /bin/bash deploy` (skipped if
+   it already exists).
+3. Generate three deploy key pairs, one per pipeline (ADR-05's
+   one-identity-per-pipeline rule extends to keys, not just Infisical
+   identities): `ssh-keygen -t ed25519 -C <name>@hyperbolic-core -f <key>`,
+   no passphrase (must be usable non-interactively from CI). Install each
    **public** half into `~deploy/.ssh/authorized_keys` (mode 600, directory
-   mode 700, owned by `deploy`). Store the **private** half in Infisical at
-   `/platform/shell-deploy/SHELL_DEPLOY_SSH_KEY` -- never in this repository,
-   never on a workstation disk longer than the copy takes.
-4. Create the directories `deploy.yml` expects to own: `mkdir -p ~deploy/shell ~deploy/lifeos-ui`.
+   mode 700, owned by `deploy`). The **private** halves are printed once,
+   for you to paste into Infisical at `/platform/shell-deploy/SHELL_DEPLOY_SSH_KEY`,
+   `/platform/llm-handler/LLM_HANDLER_SSH_KEY`, and `/brain/BRAIN_DEPLOY_SSH_KEY`
+   -- never in this repository, never on a workstation disk longer than the
+   copy takes.
+4. Create the directories `deploy.yml` expects to own: `mkdir -p ~deploy/{shell,lifeos-ui,llm-handler,brain}`.
 5. Confirm `ssh -o BatchMode=yes deploy@<tailnet-name> true` succeeds from a
    tailnet client before the first real CI dispatch; `deploy.yml`'s own
    `ssh_options` use `BatchMode=yes`, so a passphrase-protected or
-   not-yet-trusted key fails the job immediately rather than hanging.
+   not-yet-trusted key fails the job immediately rather than hanging. **Not
+   scriptable from inside the box being bootstrapped**: this has to run from
+   a separate tailnet client, after step 1's admin-console approval (if any)
+   has actually landed.
+
+## Infisical and GitHub configuration
+
+The one part of m1-13 with no API to script against without an account
+first: creating the Infisical organization itself is a one-time web-console
+signup, same as any other SaaS org. Everything after that is scriptable.
+
+**Console, once** (`app.infisical.com`, or self-hosted):
+
+1. Create a project for this repo (distinct from the standalone
+   `kgsmith19/lifeos` repo's own separate Infisical project).
+2. Create environment `prod`.
+3. Create three GitHub-OIDC machine identities, one per pipeline that needs
+   one beyond Shell/Handler A/Brain deploy (`shell-deploy`,
+   `llm-handler-deploy`, `brain-deploy` already covered by the VPS keys
+   above; add `platform-migrations` and `platform-backup`), each trusting
+   this repo's OIDC subject (`repo:kgsmith19/hyperbolic-core:*`, or narrower
+   per-environment/per-ref if the console offers it) and scoped by ACL to
+   read only its own secret path below -- confirm that scoping in the
+   console; it cannot be verified from this repository (see "Operator
+   evidence still required" under Brain deployment).
+4. Create the secret paths and set the non-VPS-key values by hand (PATs, the
+   DB connection string, OAuth secrets -- material only you hold, that no
+   script here can generate):
+
+   | Path | Keys |
+   | --- | --- |
+   | `/platform/shell-deploy/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `SHELL_DEPLOY_SSH_KEY` (from the VPS script's output) |
+   | `/platform/llm-handler/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `LLM_HANDLER_SSH_KEY` (from the VPS script's output), `TOOLBELT_GITHUB_INTAKE_PAT`, `SUPABASE_SERVICE_ROLE_KEY` |
+   | `/brain/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `BRAIN_DEPLOY_SSH_KEY` (from the VPS script's output), `BRAIN_ANTHROPIC_API_KEY` |
+   | `/toolbelt/` | `SUPABASE_DB_URL` (table-owner Postgres connection string -- platform-migrations and platform-backup both read this path) |
+
+**One script**, run once locally with `gh auth login` already done as an
+account holding admin on the repo, sets every repository variable this
+runbook's later sections reference, and (optionally) branch protection:
+
+```bash
+# Preview every `gh` call it would make -- no mutation.
+docs/ops/bootstrap-github.sh --dry-run \
+  --repo=kgsmith19/hyperbolic-core \
+  --deploy-host=<tailnet-name> \
+  --infisical-project-slug=<slug> \
+  --infisical-shell-deploy-identity=<id> \
+  --infisical-llm-handler-deploy-identity=<id> \
+  --infisical-brain-deploy-identity=<id> \
+  --infisical-platform-migrations-identity=<id> \
+  --infisical-platform-backup-identity=<id> \
+  --platform-age-public-key=<age1...>
+
+# Run for real once the values above look right. Flip the go-live gates and
+# require the PR Gate checks on main in the same pass, or leave them off
+# and run this again later once you're actually ready to deploy.
+docs/ops/bootstrap-github.sh --apply \
+  --repo=kgsmith19/hyperbolic-core \
+  --deploy-host=<tailnet-name> \
+  --infisical-project-slug=<slug> \
+  --infisical-shell-deploy-identity=<id> \
+  --infisical-llm-handler-deploy-identity=<id> \
+  --infisical-brain-deploy-identity=<id> \
+  --infisical-platform-migrations-identity=<id> \
+  --infisical-platform-backup-identity=<id> \
+  --platform-age-public-key=<age1...> \
+  --enable-deploy --enable-backup --branch-protection
+```
+
+`--enable-deploy`/`--enable-backup` are separate opt-in flags rather than
+bundled into the identity-recording pass: recording where the secrets live
+and actually flipping `deploy.yml`/`platform-backup.yml` live are different
+decisions, and the script keeps them separable so a rerun to correct one
+variable can't silently also go live. `--branch-protection` sets exactly
+this issue's own acceptance criterion (`Toolbelt PR Gate`, `ACC PR Gate`,
+`Shell PR Gate` required on `main`); GitHub's branch-protection API replaces
+the whole rule on every call, so this is safe to rerun but will overwrite
+any protection settings configured by hand outside this script.
+
+Once both scripts have run, the one remaining action name a placeholder in
+this runbook can't stand in for is `TOOLBELT_OWNER_TOKEN`: set it once
+m1-07's owner setup produces a real owner access token (`12-risk-register.md`
+section 5's Out-of-Brief Register has the full writeup of why
+`toolbelt-ci.yml` needs it).
 
 ## Single-origin Tailscale Serve routes
 
