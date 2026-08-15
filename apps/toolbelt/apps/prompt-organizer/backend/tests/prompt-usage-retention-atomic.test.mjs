@@ -22,42 +22,22 @@
 import { test } from "node:test";
 import {
   createPostgresHarness,
-  migrationBeforeMarker,
   psqlAsync,
   psqlSpawnSpec,
   supabaseHarnessSql,
   waitFor,
 } from "../../../../tests/postgres-harness.mjs";
+import { applyRetentionSchema, makeWithRetentionDb, poMigration } from "./prompt-db.mjs";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BACKEND_DIR = join(__dirname, "..");
-const ROOT_MIGRATIONS_DIR = join(BACKEND_DIR, "..", "..", "..", "supabase", "migrations");
-const PO_MIGRATIONS_DIR = join(BACKEND_DIR, "supabase", "migrations");
+const FIX_UP = poMigration("20260814080000_prompt_usage_retention_atomic.sql");
+const FIX_DOWN = poMigration("20260814080000_prompt_usage_retention_atomic_down.sql");
 
-// prompt.usage_monthly_agg's owner_rw policy (20260812210000) calls
-// platform.owner() -- the function must exist for CREATE POLICY itself to
-// compile, even though every check below runs as the superuser (bypasses
-// RLS entirely, so no owner row needs to be bootstrapped into
-// platform.config).
-const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
-
-const PROMPT_CREATE_PROMPT_UP = join(PO_MIGRATIONS_DIR, "20260807020000_prompt_create_prompt.sql");
-const PROMPT_VERSIONS_UP = join(PO_MIGRATIONS_DIR, "20260807041000_prompt_versions_and_unique_title.sql");
-const PROMPT_CREATE_USAGE_UP = join(PO_MIGRATIONS_DIR, "20260807070000_prompt_create_usage.sql");
-const PROMPT_USAGE_RETENTION_UP = join(PO_MIGRATIONS_DIR, "20260812210000_prompt_usage_retention.sql");
-const FIX_UP = join(PO_MIGRATIONS_DIR, "20260814080000_prompt_usage_retention_atomic.sql");
-const FIX_DOWN = join(PO_MIGRATIONS_DIR, "20260814080000_prompt_usage_retention_atomic_down.sql");
-
-const CRON_SPLIT_MARKER = "select cron.schedule(";
-
-const promptUsageRetentionWithoutCron = () => migrationBeforeMarker(PROMPT_USAGE_RETENTION_UP, CRON_SPLIT_MARKER);
-
-const { psql, psqlOk, freshDatabaseName: freshDbName, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f33_prompt_retention");
+const PG = createPostgresHarness("f33_prompt_retention");
+const { psql, psqlOk, freshDatabaseName: freshDbName, withDatabase } = PG;
+const SKIP_REASON = PG.skipReason;
 const psqlAllowError = psql;
 
 const HARNESS_SQL = supabaseHarnessSql([]);
@@ -80,20 +60,11 @@ function insertOldUsageSql(n, label) {
   return `insert into prompt.usage (prompt_id, version_no, user_id, created_at) values\n    ${values};`;
 }
 
-
-function withDb(applyFix, fn) {
-  return withDatabase((db) => {
-    psqlOk(db, HARNESS_SQL);
-    psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
-    psqlOk(db, readFileSync(PROMPT_CREATE_PROMPT_UP, "utf8"));
-    psqlOk(db, readFileSync(PROMPT_VERSIONS_UP, "utf8"));
-    psqlOk(db, readFileSync(PROMPT_CREATE_USAGE_UP, "utf8"));
-    psqlOk(db, promptUsageRetentionWithoutCron());
-    if (applyFix) psqlOk(db, readFileSync(FIX_UP, "utf8"));
-    psqlOk(db, FIXTURE_SQL);
-    return fn(db);
-  });
-}
+const withDb = makeWithRetentionDb(PG, {
+  harnessSql: HARNESS_SQL,
+  fixtureSql: FIXTURE_SQL,
+  fixUp: FIX_UP,
+});
 
 test(
   "real Postgres RED: the OLD two-statement shape, with both calls' aggregate step interleaved before either's delete step, permanently double-counts usage_monthly_agg (Finding 33 reproduction)",
@@ -158,14 +129,11 @@ test(
     const db = freshDbName();
     psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
     try {
-      psqlOk(db, HARNESS_SQL);
-      psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
-      psqlOk(db, readFileSync(PROMPT_CREATE_PROMPT_UP, "utf8"));
-      psqlOk(db, readFileSync(PROMPT_VERSIONS_UP, "utf8"));
-      psqlOk(db, readFileSync(PROMPT_CREATE_USAGE_UP, "utf8"));
-      psqlOk(db, promptUsageRetentionWithoutCron());
-      psqlOk(db, readFileSync(FIX_UP, "utf8"));
-      psqlOk(db, FIXTURE_SQL);
+      applyRetentionSchema(psqlOk, db, {
+        harnessSql: HARNESS_SQL,
+        fixtureSql: FIXTURE_SQL,
+        fixUp: FIX_UP,
+      });
       psqlOk(db, insertOldUsageSql(5, "green-concurrent"));
 
       const locker = spawn(...psqlSpawnSpec(db), {
