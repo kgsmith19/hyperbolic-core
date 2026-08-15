@@ -56,6 +56,30 @@ decision record; historical rationale otherwise lives in git history.
 - Do not weaken or delete a regression test unless the behavior it protects
   has intentionally been removed and the change explains why.
 
+### `backend/gui/server.mjs`'s `handler` — why the obvious refactor is blocked
+
+`handler` is the most complex function in this repository by a wide margin
+(143 decision points across 253 lines; the next highest anywhere is 68). It
+reads as ~20 lines of security preamble — Host, then Origin, preflight, CORS,
+the `X-ACC` header, then the token — enforced once so a future route cannot
+forget it, followed by 14 `route === "/api/..."` branches and 17 method
+checks.
+
+A route table is the natural fix and it is **arithmetically blocked**, not
+merely risky. `policy.json` floors this file at 98% lines / 88.5% branches
+against a measured 98.32 / 88.79, and names precisely which branches are
+uncovered: Windows-only ACL application, POSIX ownership-mismatch defenses no
+unprivileged portable test can reach, and the losing sides of an exclusive
+token-file race. A route table removes *covered* dispatch branches while every
+*uncovered* branch stays, so branch coverage moves toward that untestable
+remainder and falls below the floor — 87.3–88.0% depending on the true branch
+total, never above it.
+
+So the refactor requires either covering branches that are structurally
+uncoverable here, or lowering a security boundary's coverage floor to buy
+readability. Do neither incidentally. If this is taken on, it is its own
+change with the coverage question settled first.
+
 ## Commands
 
 ```bash
