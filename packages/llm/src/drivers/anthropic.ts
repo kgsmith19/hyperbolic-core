@@ -17,6 +17,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createLlmError, isLlmError } from "../errors.ts";
 import { createStallWatchdog, STREAM_STALL_MS } from "../retry.ts";
 import { createAttemptController } from "./abort.ts";
+import { classifyHttpStatus } from "./status-class.ts";
 import { parseRetryAfterMs } from "./retry-after.ts";
 import type {
   Credentials,
@@ -193,22 +194,9 @@ const KNOWN_TYPE_CLASS: Record<string, LlmErrorClass> = {
 };
 
 function classifyByStatus(status: number | undefined): LlmErrorClass {
-  if (status === undefined) {
-    return "transport"; // no response at all: connection-level failure
-  }
-  if (status === 429) {
-    return "rate_limit";
-  }
-  if (status === 529) {
-    return "overloaded";
-  }
-  if (status >= 500) {
-    return "transport";
-  }
-  if (status >= 400) {
-    return "invalid_request";
-  }
-  return "provider_bug";
+  if (status === undefined) return "transport"; // no response at all: connection-level failure
+  if (status === 529) return "overloaded"; // Anthropic-specific overload signal
+  return classifyHttpStatus(status);
 }
 
 /**

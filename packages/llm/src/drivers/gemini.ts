@@ -30,6 +30,7 @@ import type { Content, FunctionCall, FunctionDeclaration, GenerateContentConfig,
 import { createLlmError, isLlmError } from "../errors.ts";
 import { createStallWatchdog, STREAM_STALL_MS } from "../retry.ts";
 import { createAttemptController } from "./abort.ts";
+import { classifyHttpStatus } from "./status-class.ts";
 import { isTextPart, toPlainText } from "./parts.ts";
 import type {
   Credentials,
@@ -319,25 +320,14 @@ function fromGeminiResponse(response: GenerateContentResponse, requestedModel: s
 // ---------------------------------------------------------------------------
 
 function classifyByStatus(status: number): LlmErrorClass {
-  if (status === 401 || status === 403) {
-    return "auth";
-  }
+  if (status === 401 || status === 403) return "auth"; // the SDK surfaces auth failures as these
   if (status === 408) {
     // Request Timeout: retry-worthy by HTTP semantics, and the installed
     // SDK's own retry allowlist agrees -- DEFAULT_RETRY_HTTP_STATUS_CODES in
     // dist/index.mjs lists 408 alongside 429/500/502/503/504.
     return "transport";
   }
-  if (status === 429) {
-    return "rate_limit";
-  }
-  if (status >= 500) {
-    return "transport";
-  }
-  if (status >= 400) {
-    return "invalid_request";
-  }
-  return "provider_bug";
+  return classifyHttpStatus(status);
 }
 
 /**
