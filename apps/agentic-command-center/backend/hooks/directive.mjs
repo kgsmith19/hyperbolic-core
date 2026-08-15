@@ -214,8 +214,11 @@ export function createDirective({ text, doneWhen, cwd, profile, budget, tags, ro
     cycles: 0,
     tags: normalizeDirectiveTags(userTags, autoRouteTag ? [autoRouteTag] : []),
     budget: normalizedBudget,
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
+    // The same instant the id encodes, not a second reading of the clock:
+    // they were milliseconds apart and could disagree. `updatedAt` is not set
+    // here at all -- write() below stamps it unconditionally, so any value
+    // put here is overwritten before it reaches disk.
+    createdAt: iso,
   };
   if (normalizedDoneWhen !== undefined) directive.doneWhen = normalizedDoneWhen;
   write(directive);
