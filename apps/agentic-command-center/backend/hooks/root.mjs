@@ -17,10 +17,17 @@ export function resolveRoot(here) {
 /** Parse a JSON file, or hand back `dflt` if it is missing or malformed.
  *  The on-disk sibling of readStdinJson below: same swallow-and-default
  *  contract, because a hook that dies on a corrupt state file is worse than
- *  one that starts from the default. */
+ *  one that starts from the default.
+ *
+ *  A leading BOM is stripped rather than treated as malformed. policy.json is
+ *  hand-edited on Windows, where several editors add one, and a BOM would
+ *  otherwise make JSON.parse throw and silently hand back the default -- i.e.
+ *  every policy dial reverting to its built-in value with no error anywhere.
+ *  Six readers of that file each carried this same strip; this is the one
+ *  they can share. */
 export function readJson(p, dflt) {
   try {
-    return JSON.parse(fs.readFileSync(p, "utf8"));
+    return JSON.parse(fs.readFileSync(p, "utf8").replace(/^\uFEFF/, ""));
   } catch {
     return dflt;
   }
