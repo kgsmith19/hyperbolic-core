@@ -1,6 +1,6 @@
 # LifeOS repository guidance
 
-**Location note.** This tree is a `git subtree` copy of `kgsmith19/lifeos` inside the `hyperbolic-core` monorepo. "`.github/workflows/`" below means `apps/lifeos/.github/workflows/`, which GitHub does **not** execute — these files are inert here. The live merge gate, deploy, backup, and ops automation run only from the standalone `kgsmith19/lifeos` repo. Never relocate these workflows to hyperbolic-core's root `.github/workflows/`.
+**Location note.** This tree is a `git subtree` copy of `kgsmith19/lifeos` inside the `hyperbolic-core` monorepo. `apps/lifeos/.github/workflows/` is **not** executed here — GitHub runs workflows only from the repository root — so the `ci.yml`, `ops.yml` and `backup.yml` in this directory are inert, and are kept only because the standalone `kgsmith19/lifeos` repo still runs them. In THIS repo the merge gate is the root's `.github/workflows/lifeos-ci.yml`. Never relocate these workflows to the root: `ci.yml`'s `build-backend` job has no repository-variable gate and would publish a Docker image on every push to `main`.
 
 LifeOS is one product with two applications:
 

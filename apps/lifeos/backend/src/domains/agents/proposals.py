@@ -3,9 +3,9 @@
 Mediation, not scope-forwarding: `propose_action` checks the CALLER's own
 `action-proposals:draft` scope (mcp_server.tokens.ACTION_PROPOSALS_DRAFT_SCOPE)
 itself, then performs the actual entity write under a fixed, code-defined
-internal context scoped to exactly `agents:write` -- never the caller's own
+internal context scoped to exactly this domain -- never the caller's own
 context. A Brain token never holds `agents:write`; only this module's own
-gate does, and it never receives write access to any OTHER domain, since
+gate does, and it never receives access to any OTHER domain, since
 `kernel.services.capture`'s type_name is hardcoded here to
 TYPE_AGENT_PROPOSAL and no caller-supplied entity id is ever accepted. This
 is the same "the service holds broader trust than its caller" shape
@@ -48,11 +48,19 @@ from kernel.events import DEFAULT_ACTOR
 from kernel.models import Entity
 from mcp_server.tokens import ACTION_PROPOSALS_DRAFT_SCOPE
 
-# The one context this module ever writes with -- never the caller's own.
-# Scoped to exactly this domain's write and nothing else, constructed here
-# rather than accepted as a parameter so no caller can ever substitute a
-# broader one.
-_INTERNAL_WRITE_CTX = AccessContext.of(f"{DOMAIN}:write")
+# The one context this module ever acts with -- never the caller's own.
+# Scoped to exactly this domain and nothing else, constructed here rather
+# than accepted as a parameter so no caller can ever substitute a broader
+# one.
+#
+# Read AND write. Every one of this module's own reads goes through this
+# context -- services.find, get_entity, _load -- and so does
+# define_missing(), whose whole job is to LIST the already-registered types
+# and define only what is absent. With write alone that list came back
+# empty, so define_agent_types() re-declared a type that already existed and
+# propose_action() raised "type already defined" on its SECOND call in any
+# process. Same read+write pairing bills uses for define_bills_types().
+_INTERNAL_CTX = AccessContext.of(f"{DOMAIN}:read", f"{DOMAIN}:write")
 
 
 def summary_digest(summary: str) -> str:
@@ -105,11 +113,11 @@ def propose_action(
     entity shall change until operator approval" true by construction
     rather than by a check that could be wrong."""
     require(ctx, ACTION_PROPOSALS_DRAFT_SCOPE)
-    define_agent_types(_INTERNAL_WRITE_CTX)
+    define_agent_types(_INTERNAL_CTX)
 
     key = proposal_key(kind, summary, proposed_by)
     existing = services.find(
-        _INTERNAL_WRITE_CTX, type_name=TYPE_AGENT_PROPOSAL, filters={"proposal_key": key}
+        _INTERNAL_CTX, type_name=TYPE_AGENT_PROPOSAL, filters={"proposal_key": key}
     )
     if existing:
         return _view(existing[0])
@@ -126,9 +134,9 @@ def propose_action(
         "proposed_by": proposed_by,
     }
     result = services.capture(
-        _INTERNAL_WRITE_CTX, TYPE_AGENT_PROPOSAL, attributes, actor=DEFAULT_ACTOR
+        _INTERNAL_CTX, TYPE_AGENT_PROPOSAL, attributes, actor=DEFAULT_ACTOR
     )
-    view = services.get_entity(_INTERNAL_WRITE_CTX, result.entity_id)
+    view = services.get_entity(_INTERNAL_CTX, result.entity_id)
     return _view(view.entity)
 
 
@@ -188,7 +196,7 @@ def approve_agent_proposal(
             "a proposal is approved only under the owner's own unrestricted session; "
             "a scope-narrowed context may read a proposal but may not approve one"
         )
-    attributes = _load(_INTERNAL_WRITE_CTX, proposal_id)
+    attributes = _load(_INTERNAL_CTX, proposal_id)
     if attributes.get("state") != STATE_PROPOSED:
         raise ProposalStateError(
             f"proposal {proposal_id} is {attributes.get('state')}, not {STATE_PROPOSED}"
@@ -206,7 +214,7 @@ def approve_agent_proposal(
 
     now = datetime.now(UTC)
     services.capture(
-        _INTERNAL_WRITE_CTX,
+        _INTERNAL_CTX,
         TYPE_AGENT_PROPOSAL,
         {
             **attributes,
@@ -224,13 +232,13 @@ def reject_agent_proposal(
 ) -> DecisionResult:
     """Say no. Mints nothing -- there is no authority in a refusal."""
     require(ctx, f"{DOMAIN}:write")
-    attributes = _load(_INTERNAL_WRITE_CTX, proposal_id)
+    attributes = _load(_INTERNAL_CTX, proposal_id)
     if attributes.get("state") != STATE_PROPOSED:
         raise ProposalStateError(
             f"proposal {proposal_id} is {attributes.get('state')}, not {STATE_PROPOSED}"
         )
     services.capture(
-        _INTERNAL_WRITE_CTX,
+        _INTERNAL_CTX,
         TYPE_AGENT_PROPOSAL,
         {**attributes, "state": STATE_REJECTED, "decided_at": datetime.now(UTC).isoformat()},
         actor=actor,
