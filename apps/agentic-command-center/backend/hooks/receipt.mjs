@@ -109,7 +109,6 @@ export function buildReceipt(directive, { status, why, lastSummary } = {}) {
     finishedAt,
     durationMs,
     cycles: Number(directive.cycles || 0),
-    freshContextCount: Number(directive.cycles || 0),
     profile: directive.profile || "",
     spend: directiveSpend(directive.sessionIds || []),
     budget: directive.budget || {},
