@@ -18,14 +18,19 @@
 // `postgres` superuser, which bypasses RLS by definition, mirroring
 // registry-fixture.ts's own accepted scope); the state-machine triggers,
 // CHECK constraints, and the RPC's own logic are all real and unmodified.
-import { execFileSync } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  REPO_ROOT,
+  pgQuote,
+  psqlFile,
+  psqlInline,
+  psqlScalar,
+  sudoPostgres,
+  uniqueDbName,
+} from "./psql.js";
+import { sqlErrorToShimError, type ShimError } from "./shim.js";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(HERE, "../../../../.."); // e2e/support -> e2e -> frontend -> shell -> apps -> repo root
 const INTAKE_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/apps/idea-intake/supabase/migrations");
 const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/supabase/migrations");
 
@@ -86,31 +91,7 @@ create function auth.uid() returns uuid language sql stable as $$ select '${OWNE
 insert into auth.users (id) values ('${OWNER_UUID}');
 `;
 
-function sudoPostgres(args: string[], input?: string): string {
-  return execFileSync("sudo", ["-n", "-u", "postgres", ...args], { encoding: "utf8", input });
-}
-
-function psqlFile(dbName: string, filePath: string): void {
-  sudoPostgres(["psql", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", "-"], readFileSync(filePath, "utf8"));
-}
-
-function psqlInline(dbName: string, sql: string): void {
-  sudoPostgres(["psql", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", sql]);
-}
-
 /** Runs `sql` and returns its single-column, single-row text output (`-t -A`), or throws with the raised message on failure. */
-function psqlScalar(dbName: string, sql: string): string {
-  return sudoPostgres(["psql", "-d", dbName, "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql]).trim();
-}
-
-function uniqueDbName(): string {
-  return `m3_07_shell_intake_e2e_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
-}
-
-function pgQuote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
 function pgLiteral(value: unknown): string {
   if (value === null || value === undefined) return "null";
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
@@ -141,19 +122,6 @@ const ROW_SELECT = `
   left join intake.idea p on p.id = i.parent_idea_id
 `;
 
-interface ShimError {
-  status: number;
-  message: string;
-}
-
-function sqlErrorToShimError(err: unknown): ShimError {
-  const raw = err instanceof Error ? err.message : String(err);
-  // psql's stderr carries the raised RAISE EXCEPTION text (e.g. "II-1:
-  // illegal transition draft -> submitted_to_github") after "ERROR:  ".
-  const match = /ERROR:\s+(.*)/.exec(raw);
-  return { status: 400, message: (match?.[1] ?? raw).trim() };
-}
-
 export interface IntakeFixture {
   dbName: string;
   shimBaseUrl: string;
@@ -174,7 +142,7 @@ export interface IntakeFixture {
 }
 
 export async function setupIntakeFixture(): Promise<IntakeFixture> {
-  const dbName = uniqueDbName();
+  const dbName = uniqueDbName("m3_07_shell_intake_e2e");
   sudoPostgres(["createdb", dbName]);
 
   psqlInline(dbName, BOOTSTRAP_ROLES_SQL);

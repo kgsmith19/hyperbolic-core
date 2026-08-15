@@ -14,6 +14,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuth, fillAndSubmitLogin } from "./support/auth";
 import { setupCostFixture, psqlJsonQuery, type CostFixture } from "./support/cost-fixture";
+import { pickHeaders } from "./support/shim.js";
 
 let fixture: CostFixture;
 
@@ -29,15 +30,6 @@ test.afterAll(() => {
 
 const FORWARDED_HEADERS = ["apikey", "authorization", "accept-profile", "content-profile"];
 
-function pickHeaders(all: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const name of FORWARDED_HEADERS) {
-    const value = all[name];
-    if (value !== undefined) out[name] = value;
-  }
-  return out;
-}
-
 const SHIMMED_PATHS = ["/rest/v1/run", "/rest/v1/cost", "/rest/v1/llm_call"];
 
 async function mockCostRest(page: Page): Promise<void> {
@@ -47,7 +39,7 @@ async function mockCostRest(page: Page): Promise<void> {
       const search = new URL(req.url()).search;
       const res = await fetch(`${fixture.shimBaseUrl}${pathPrefix}${search}`, {
         method: req.method(),
-        headers: pickHeaders(req.headers()),
+        headers: pickHeaders(req.headers(), FORWARDED_HEADERS),
       });
       const body = await res.text();
       await route.fulfill({ status: res.status, contentType: res.headers.get("content-type") ?? "application/json", body });

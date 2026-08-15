@@ -11,6 +11,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuth, fillAndSubmitLogin } from "./support/auth";
 import { setupPromptFixture, type PromptFixture } from "./support/prompt-fixture";
+import { pickHeaders } from "./support/shim.js";
 
 let fixture: PromptFixture;
 
@@ -26,15 +27,6 @@ test.afterAll(() => {
 
 const FORWARDED_HEADERS = ["apikey", "authorization", "accept-profile", "content-profile", "content-type", "prefer"];
 
-function pickHeaders(all: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const name of FORWARDED_HEADERS) {
-    const value = all[name];
-    if (value !== undefined) out[name] = value;
-  }
-  return out;
-}
-
 const SHIMMED_PATHS = ["/rest/v1/prompt", "/rest/v1/prompt_version", "/rest/v1/tag", "/rest/v1/usage", "/rest/v1/configuration", "/rest/v1/rpc/log_run"];
 
 async function mockPromptRest(page: Page): Promise<void> {
@@ -44,7 +36,7 @@ async function mockPromptRest(page: Page): Promise<void> {
       const search = new URL(req.url()).search;
       const res = await fetch(`${fixture.shimBaseUrl}${pathPrefix}${search}`, {
         method: req.method(),
-        headers: pickHeaders(req.headers()),
+        headers: pickHeaders(req.headers(), FORWARDED_HEADERS),
         body: req.postData() ?? undefined,
       });
       const body = await res.text();

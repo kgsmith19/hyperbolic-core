@@ -20,14 +20,19 @@
 // Postgres has no pg_cron control file installed, the same constraint
 // apps/toolbelt/tests/log_run_owner_null_guard.test.mjs's own header
 // comment documents for a different migration file.
-import { execFileSync } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  REPO_ROOT,
+  pgQuote,
+  psqlFile,
+  psqlScalar,
+  psqlText,
+  sudoPostgres,
+  uniqueDbName,
+} from "./psql.js";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(HERE, "../../../../.."); // e2e/support -> e2e -> frontend -> shell -> apps -> repo root
 const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/supabase/migrations");
 
 const PLATFORM_BOOTSTRAP_UP = path.join(PLATFORM_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
@@ -65,35 +70,11 @@ insert into auth.users (id) values ('${OWNER_UUID}');
 
 const APP_FIXTURE_SQL = `insert into core.app (id, name, schema_name) values ('brain', 'The Brain', 'core');`;
 
-function sudoPostgres(args: string[], input?: string): string {
-  return execFileSync("sudo", ["-n", "-u", "postgres", ...args], { encoding: "utf8", input });
-}
-
-function psqlFile(dbName: string, filePath: string): void {
-  sudoPostgres(["psql", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", "-"], readFileSync(filePath, "utf8"));
-}
-
-function psqlText(dbName: string, sql: string): void {
-  sudoPostgres(["psql", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", "-"], sql);
-}
-
-function psqlScalar(dbName: string, sql: string): string {
-  return sudoPostgres(["psql", "-d", dbName, "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql]).trim();
-}
-
 /** The same ground-truth path a spec's own "compare against psql group-by
  * output" assertion uses -- a plain scalar/JSON text query against the
  * fixture's real database, independent of the shim's own SQL. */
 export function psqlJsonQuery(dbName: string, sql: string): unknown {
   return JSON.parse(psqlScalar(dbName, `select coalesce(json_agg(row_to_json(t)), '[]'::json)::text from (${sql}) t;`));
-}
-
-function uniqueDbName(): string {
-  return `m6_02_shell_cost_e2e_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
-}
-
-function pgQuote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
 }
 
 export interface CostFixture {
@@ -124,7 +105,7 @@ export interface CostFixture {
 }
 
 export async function setupCostFixture(): Promise<CostFixture> {
-  const dbName = uniqueDbName();
+  const dbName = uniqueDbName("m6_02_shell_cost_e2e");
   sudoPostgres(["createdb", dbName]);
 
   psqlText(dbName, BOOTSTRAP_ROLES_SQL);

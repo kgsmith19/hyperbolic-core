@@ -22,6 +22,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { mockAuth, fillAndSubmitLogin } from "./support/auth";
 import { setupIntakeFixture, type IntakeFixture } from "./support/intake-fixture";
 import { setupHandlerAFixture, type HandlerAFixture } from "./support/handler-a-fixture";
+import { pickHeaders } from "./support/shim.js";
 
 let intake: IntakeFixture;
 let handlerA: HandlerAFixture;
@@ -40,15 +41,6 @@ test.afterAll(() => {
 
 const FORWARDED_HEADERS = ["apikey", "authorization", "accept-profile", "content-profile", "content-type", "prefer"];
 
-function pickHeaders(all: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const name of FORWARDED_HEADERS) {
-    const value = all[name];
-    if (value !== undefined) out[name] = value;
-  }
-  return out;
-}
-
 /** Forwards the browser's real `/rest/v1/idea` requests (src/lib/intake.ts's
  * postgrest() helper, and services/llm-handler's own reads, are never
  * touched) to the real Postgres-backed shim. */
@@ -58,7 +50,7 @@ async function mockIntakeRest(page: Page): Promise<void> {
     const search = new URL(req.url()).search;
     const res = await fetch(`${intake.shimBaseUrl}/rest/v1/idea${search}`, {
       method: req.method(),
-      headers: pickHeaders(req.headers()),
+      headers: pickHeaders(req.headers(), FORWARDED_HEADERS),
       body: req.postData() ?? undefined,
     });
     const body = await res.text();
@@ -73,7 +65,7 @@ async function mockSubmitApi(page: Page): Promise<void> {
     const req = route.request();
     const res = await fetch(`${handlerA.baseUrl}/api/intake/submit`, {
       method: req.method(),
-      headers: pickHeaders(req.headers()),
+      headers: pickHeaders(req.headers(), FORWARDED_HEADERS),
       body: req.postData() ?? undefined,
     });
     const body = await res.text();

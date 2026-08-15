@@ -43,6 +43,7 @@ import {
   updateBody,
   updateTitle,
 } from "./prompts";
+import { mockFetchJson, mockFetchSequence } from "../test-support.js";
 
 const FIXTURE_TOKEN = "fixture-access-token";
 
@@ -56,27 +57,6 @@ const RAW_ROW = {
   prompt_version: [{ version_no: 3 }],
   configuration: [{ name: "default", values: { THING: "x" }, sections: [] }],
 };
-
-function mockFetchJson(status: number, body: unknown) {
-  const response = new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-  const spy = vi.fn().mockResolvedValue(response);
-  vi.stubGlobal("fetch", spy);
-  return spy;
-}
-
-function mockFetchSequence(bodies: Array<{ status: number; body: unknown }>) {
-  const spy = vi.fn();
-  for (const { status, body } of bodies) {
-    spy.mockImplementationOnce(
-      async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
-    );
-  }
-  vi.stubGlobal("fetch", spy);
-  return spy;
-}
 
 function resetMocks() {
   auth.getSession.mockReset();

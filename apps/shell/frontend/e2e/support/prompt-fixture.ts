@@ -22,14 +22,19 @@
 // `rpc/is_platform_owner`: it is a telemetry side-effect this fixture's
 // scope isn't about, and the shim records every call so a spec can still
 // assert it happened.
-import { execFileSync } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  REPO_ROOT,
+  pgQuote,
+  psqlFile,
+  psqlInline,
+  psqlScalar,
+  sudoPostgres,
+  uniqueDbName,
+} from "./psql.js";
+import { sqlErrorToShimError, type ShimError } from "./shim.js";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(HERE, "../../../../.."); // e2e/support -> e2e -> frontend -> shell -> apps -> repo root
 const PO_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/apps/prompt-organizer/supabase/migrations");
 const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/supabase/migrations");
 
@@ -72,30 +77,6 @@ create function auth.uid() returns uuid language sql stable as $$ select '${OWNE
 insert into auth.users (id) values ('${OWNER_UUID}');
 `;
 
-function sudoPostgres(args: string[], input?: string): string {
-  return execFileSync("sudo", ["-n", "-u", "postgres", ...args], { encoding: "utf8", input });
-}
-
-function psqlFile(dbName: string, filePath: string): void {
-  sudoPostgres(["psql", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", "-"], readFileSync(filePath, "utf8"));
-}
-
-function psqlInline(dbName: string, sql: string): void {
-  sudoPostgres(["psql", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", sql]);
-}
-
-function psqlScalar(dbName: string, sql: string): string {
-  return sudoPostgres(["psql", "-d", dbName, "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql]).trim();
-}
-
-function uniqueDbName(): string {
-  return `m5_01_shell_prompt_e2e_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
-}
-
-function pgQuote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
 function pgJsonbQuote(value: unknown): string {
   return `${pgQuote(JSON.stringify(value))}::jsonb`;
 }
@@ -128,17 +109,6 @@ const ROW_SELECT = `
   from prompt.prompt p
 `;
 
-interface ShimError {
-  status: number;
-  message: string;
-}
-
-function sqlErrorToShimError(err: unknown): ShimError {
-  const raw = err instanceof Error ? err.message : String(err);
-  const match = /ERROR:\s+(.*)/.exec(raw);
-  return { status: 400, message: (match?.[1] ?? raw).trim() };
-}
-
 export interface PromptFixture {
   dbName: string;
   shimBaseUrl: string;
@@ -151,7 +121,7 @@ export interface PromptFixture {
 }
 
 export async function setupPromptFixture(): Promise<PromptFixture> {
-  const dbName = uniqueDbName();
+  const dbName = uniqueDbName("m5_01_shell_prompt_e2e");
   sudoPostgres(["createdb", dbName]);
 
   psqlInline(dbName, BOOTSTRAP_ROLES_SQL);

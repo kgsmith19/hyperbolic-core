@@ -43,10 +43,16 @@ import { createServer } from "node:http";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  REPO_ROOT,
+  pgQuote,
+  psqlFile,
+  psqlInline,
+  psqlScalar,
+  sudoPostgres,
+  uniqueDbName,
+} from "./psql.js";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(HERE, "../../../../.."); // e2e/support -> e2e -> frontend -> shell -> apps -> repo root
 const TOOLBELT_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/supabase/migrations");
 const TOOLBELT_ROOT_MANIFEST = path.join(REPO_ROOT, "apps/toolbelt/tool.json");
 const TOOLBELT_CLI_BIN = path.join(REPO_ROOT, "packages/toolbelt-cli/bin/tool.mjs");
@@ -92,35 +98,6 @@ create table auth.users (id uuid primary key);
 create function auth.uid() returns uuid language sql stable as $$ select null::uuid $$;
 `;
 
-function sudoPostgres(args: string[], input?: string): string {
-  return execFileSync("sudo", ["-n", "-u", "postgres", ...args], { encoding: "utf8", input });
-}
-
-function psqlFile(dbName: string, filePath: string): void {
-  // GitHub's runner checkout is not necessarily traversable by the
-  // `postgres` OS user. Read as the checkout owner, then preserve psql's
-  // file-processing mode while sending the exact script over stdin.
-  sudoPostgres(
-    ["psql", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", "-"],
-    readFileSync(filePath, "utf8")
-  );
-}
-
-function psqlInline(dbName: string, sql: string): void {
-  sudoPostgres(["psql", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", sql]);
-}
-
-function psqlJsonQuery(dbName: string, sql: string): string {
-  return sudoPostgres(["psql", "-d", dbName, "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", sql]).trim();
-}
-
-function uniqueDbName(): string {
-  const pid = process.pid;
-  const ts = Date.now();
-  const rand = Math.floor(Math.random() * 1_000_000);
-  return `m3_04_shell_registry_e2e_${pid}_${ts}_${rand}`;
-}
-
 export interface RegisteredRow {
   id: string;
   name: string;
@@ -152,7 +129,7 @@ export interface RegistryFixture {
 }
 
 export async function setupRegistryFixture(): Promise<RegistryFixture> {
-  const dbName = uniqueDbName();
+  const dbName = uniqueDbName("m3_04_shell_registry_e2e");
   sudoPostgres(["createdb", dbName]);
 
   psqlInline(dbName, BOOTSTRAP_ROLES_SQL);
@@ -240,7 +217,7 @@ export async function setupRegistryFixture(): Promise<RegistryFixture> {
         ${limitSql}
       ) t;`;
 
-      const body = psqlJsonQuery(dbName, sql);
+      const body = psqlScalar(dbName, sql);
       res.writeHead(200, { "content-type": "application/json" });
       res.end(body);
     } catch (error) {
@@ -266,7 +243,7 @@ export async function setupRegistryFixture(): Promise<RegistryFixture> {
       select id, name, schema_name, status, kind, route, version, description, manifest_hash, registered_at
       from core.app where id = ${pgQuote(fixtureId)}
     ) t;`;
-    const rows = JSON.parse(psqlJsonQuery(dbName, sql)) as RegisteredRow[];
+    const rows = JSON.parse(psqlScalar(dbName, sql)) as RegisteredRow[];
     return rows[0] ?? null;
   }
 
@@ -298,10 +275,6 @@ export async function setupRegistryFixture(): Promise<RegistryFixture> {
     applyFixtureDownMigration,
     teardown,
   };
-}
-
-function pgQuote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
 }
 
 function pgInFilter(column: "status" | "kind", raw: string): string {

@@ -30,19 +30,9 @@ vi.mock("@hyperbolic/platform-client", () => ({
 }));
 
 import { groupBrainCostByDay, listBrainRunCosts, listLlmCallGroups, type BrainRunCost } from "./cost";
+import { mockFetchSequence } from "../test-support.js";
 
 const FIXTURE_TOKEN = "fixture-access-token";
-
-function mockFetchSequence(bodies: Array<{ status: number; body: unknown }>) {
-  const spy = vi.fn();
-  for (const { status, body } of bodies) {
-    spy.mockImplementationOnce(
-      async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
-    );
-  }
-  vi.stubGlobal("fetch", spy);
-  return spy;
-}
 
 function resetMocks() {
   auth.getSession.mockReset();

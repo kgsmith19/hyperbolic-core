@@ -43,6 +43,7 @@ import {
   updateIdea,
   type Idea,
 } from "./intake";
+import { mockFetchJson } from "../test-support.js";
 
 const FIXTURE_TOKEN = "fixture-access-token";
 
@@ -65,16 +66,6 @@ const RAW_ROW = {
   updated_at: "2026-08-02T00:00:00.000Z",
   parent: null,
 };
-
-function mockFetchJson(status: number, body: unknown) {
-  const response = new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-  const spy = vi.fn().mockResolvedValue(response);
-  vi.stubGlobal("fetch", spy);
-  return spy;
-}
 
 function mockFetchText(status: number, text: string) {
   const spy = vi.fn().mockResolvedValue(new Response(text, { status }));
