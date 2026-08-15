@@ -209,12 +209,17 @@ export function buildSchemaCreateSql({ id, schema }) {
 -- apps/toolbelt/supabase/migrations/20260812160000_core_idea_owner_pin.sql's
 -- Pattern B (single-owner table with no user_id column):
 --
---   alter table ${schema}.<table> enable row level security;
---   alter table ${schema}.<table> force row level security;
---   create policy owner_rw on ${schema}.<table>
+--   alter table ${quoteIdent(schema)}.<table> enable row level security;
+--   alter table ${quoteIdent(schema)}.<table> force row level security;
+--   create policy owner_rw on ${quoteIdent(schema)}.<table>
 --     for all to authenticated
 --     using ((select auth.uid()) = (select platform.owner()))
 --     with check ((select auth.uid()) = (select platform.owner()));
+--
+-- (The schema identifier is quoted here for the same reason the DDL below
+-- quotes it: SCHEMA_PATTERN permits exact matches for reserved keywords such
+-- as "order" or "user", so an unquoted copy-paste of this block would be a
+-- parse error for precisely the schema names quoting was added to handle.)
 --
 -- (Pattern A, for a table with its own user_id column, is the same
 -- migration's core.run policy -- see that file.)
