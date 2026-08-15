@@ -2,42 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { complete, stream } from "../src/complete.ts";
 import { createLlmError } from "../src/errors.ts";
-import type { LlmDriver } from "../src/drivers/types.ts";
 import { MAX_RETRIES } from "../src/retry.ts";
-import type { Credentials, LlmDelta, LlmRequest, LlmResponse, Provider } from "../src/types.ts";
-
-/** A minimal fake driver whose complete()/stream() behavior and call count
- * are fully controlled by the test -- no real network, no real SDK. This
- * is what makes the fallback/retry-hop tests exact and fast: they exercise
- * complete.ts's own orchestration logic in isolation from any one driver's
- * wire format. */
-function fakeDriver(
-  provider: Provider,
-  behavior: {
-    complete?: (request: LlmRequest, credentials: Credentials) => Promise<LlmResponse>;
-    stream?: (request: LlmRequest, credentials: Credentials) => AsyncGenerator<LlmDelta, void, unknown>;
-  },
-): LlmDriver & { calls: number } {
-  const driver = {
-    provider,
-    calls: 0,
-    async complete(request: LlmRequest, credentials: Credentials): Promise<LlmResponse> {
-      driver.calls += 1;
-      if (!behavior.complete) {
-        throw new Error(`fakeDriver(${provider}): complete() not implemented for this test`);
-      }
-      return behavior.complete(request, credentials);
-    },
-    async *stream(request: LlmRequest, credentials: Credentials): AsyncGenerator<LlmDelta, void, unknown> {
-      driver.calls += 1;
-      if (!behavior.stream) {
-        throw new Error(`fakeDriver(${provider}): stream() not implemented for this test`);
-      }
-      yield* behavior.stream(request, credentials);
-    },
-  };
-  return driver;
-}
+import type { LlmDelta, LlmRequest } from "../src/types.ts";
+import { fakeDriver, fixtureResponse } from "./driver-harness.ts";
 
 /** Drives `run()` to completion under fake timers, so a test that forces a
  * real retry/backoff wait (via a genuinely retryable fake-driver error)
@@ -87,18 +54,6 @@ async function drainWithFakeTimers(
   }
   await drain; // surface any rejection; no-op if already settled
   return collected;
-}
-
-function fixtureResponse(provider: Provider, model: string): LlmResponse {
-  return {
-    text: `answered by ${provider}/${model}`,
-    toolCalls: [],
-    stopReason: "end",
-    usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0 },
-    provider,
-    model,
-    latencyMs: 1,
-  };
 }
 
 const BASE_REQUEST: LlmRequest = {

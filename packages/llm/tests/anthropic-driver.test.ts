@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { anthropicDriver } from "../src/drivers/anthropic.ts";
 import { complete } from "../src/complete.ts";
 import { isLlmError } from "../src/errors.ts";
-import { MAX_RETRIES } from "../src/retry.ts";
-import type { LlmDelta, LlmErrorClass, LlmRequest } from "../src/types.ts";
+import type { LlmDelta, LlmRequest } from "../src/types.ts";
 import {
   collectStream,
   jsonResponse,

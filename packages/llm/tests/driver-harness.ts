@@ -5,11 +5,14 @@
 // exercised through its real SDK against a fake wire.
 //
 // Everything here is provider-neutral by construction. The SSE builders take
-// *pre-encoded* chunk strings so each driver test file keeps its own one-line
-// wire encoder (Anthropic's `event: <name>\ndata: ...`, OpenAI's and Gemini's
-// bare `data: ...`) and its own terminator convention (OpenAI sends a
-// `data: [DONE]` sentinel; the other two just end the body).
+// *pre-encoded* chunk strings, so a driver whose framing is its own keeps its
+// own encoder -- Anthropic's `event: <name>\ndata: ...` lives in its test file.
+// OpenAI and Gemini share the bare `data: ...` form, which is sseLine() below.
+// Terminators stay per-file either way (OpenAI sends a `data: [DONE]`
+// sentinel; the other two just end the body).
 import assert from "node:assert/strict";
+import type { LlmDriver } from "../src/drivers/types.ts";
+import type { Credentials, LlmDelta, LlmRequest, LlmResponse, Provider } from "../src/types.ts";
 
 export type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -174,4 +177,58 @@ export async function settleUnderFakeTimers(t: TimerContext, promise: Promise<un
   await promise.catch(() => undefined);
   assert.ok(settled, `${label} never settled`);
   return settled;
+}
+
+/** One SSE frame in the bare `data: {...}` form OpenAI and Gemini both use.
+ *  (Anthropic prefixes an `event:` line, so its test file keeps its own.) */
+export function sseLine(data: unknown): string {
+  return `data: ${JSON.stringify(data)}\n\n`;
+}
+
+/** A driver that does exactly what a test tells it to and counts its calls.
+ *  Behaviors are optional so a test can supply only the half it exercises;
+ *  the other half throws a named error rather than silently returning
+ *  undefined, which would otherwise surface much later as a confusing
+ *  assertion failure somewhere downstream. */
+export function fakeDriver(
+  provider: Provider,
+  behavior: {
+    complete?: (request: LlmRequest, credentials: Credentials) => Promise<LlmResponse>;
+    stream?: (request: LlmRequest, credentials: Credentials) => AsyncGenerator<LlmDelta, void, unknown>;
+  },
+): LlmDriver & { calls: number } {
+  const driver = {
+    provider,
+    calls: 0,
+    async complete(request: LlmRequest, credentials: Credentials): Promise<LlmResponse> {
+      driver.calls += 1;
+      if (!behavior.complete) {
+        throw new Error(`fakeDriver(${provider}): complete() not implemented for this test`);
+      }
+      return behavior.complete(request, credentials);
+    },
+    async *stream(request: LlmRequest, credentials: Credentials): AsyncGenerator<LlmDelta, void, unknown> {
+      driver.calls += 1;
+      if (!behavior.stream) {
+        throw new Error(`fakeDriver(${provider}): stream() not implemented for this test`);
+      }
+      yield* behavior.stream(request, credentials);
+    },
+  };
+  return driver;
+}
+
+/** A minimal successful response whose text names its own origin, so a
+ *  fallback assertion can say WHICH provider answered, not merely that one
+ *  did. */
+export function fixtureResponse(provider: Provider, model: string): LlmResponse {
+  return {
+    text: `answered by ${provider}/${model}`,
+    toolCalls: [],
+    stopReason: "end",
+    usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0 },
+    provider,
+    model,
+    latencyMs: 1,
+  };
 }

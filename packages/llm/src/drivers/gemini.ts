@@ -30,6 +30,7 @@ import type { Content, FunctionCall, FunctionDeclaration, GenerateContentConfig,
 import { createLlmError, isLlmError } from "../errors.ts";
 import { createStallWatchdog, STREAM_STALL_MS } from "../retry.ts";
 import { createAttemptController } from "./abort.ts";
+import { isTextPart, toPlainText } from "./parts.ts";
 import type {
   Credentials,
   LlmDelta,
@@ -38,9 +39,7 @@ import type {
   LlmRequest,
   LlmResponse,
   Message,
-  MessagePart,
   StopReason,
-  TextPart,
   ToolCall,
   ToolChoice,
   ToolDef,
@@ -53,14 +52,6 @@ const PROVIDER = "gemini" as const;
 // ---------------------------------------------------------------------------
 // Request mapping: our provider-agnostic shapes -> Gemini wire params.
 // ---------------------------------------------------------------------------
-
-function toPlainText(content: string | TextPart[]): string {
-  return typeof content === "string" ? content : content.map((t) => t.text).join("");
-}
-
-function isTextPart(part: MessagePart): part is Extract<MessagePart, { type: "text" }> {
-  return part.type === "text";
-}
 
 function toGeminiSystemInstruction(messages: Message[]): string | undefined {
   const parts = messages.filter((m): m is Extract<Message, { role: "system" }> => m.role === "system").map((m) => m.content);

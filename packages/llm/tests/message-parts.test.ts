@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { complete, stream } from "../src/complete.ts";
-import type { LlmDriver } from "../src/drivers/types.ts";
-import type { Credentials, LlmDelta, LlmRequest, LlmResponse, Message, Provider } from "../src/types.ts";
+import type { LlmRequest, Message } from "../src/types.ts";
+import { fakeDriver, fixtureResponse } from "./driver-harness.ts";
 
 /**
  * Finding #81: complete.ts's assertValidMessageParts is the one central
@@ -15,46 +15,6 @@ import type { Credentials, LlmDelta, LlmRequest, LlmResponse, Message, Provider 
  * network call happens in this file, and `driver.calls` proves whether
  * dispatch was ever reached.
  */
-
-function fakeDriver(
-  provider: Provider,
-  behavior: {
-    complete?: (request: LlmRequest, credentials: Credentials) => Promise<LlmResponse>;
-    stream?: (request: LlmRequest, credentials: Credentials) => AsyncGenerator<LlmDelta, void, unknown>;
-  },
-): LlmDriver & { calls: number } {
-  const driver = {
-    provider,
-    calls: 0,
-    async complete(request: LlmRequest, credentials: Credentials): Promise<LlmResponse> {
-      driver.calls += 1;
-      if (!behavior.complete) {
-        throw new Error(`fakeDriver(${provider}): complete() not implemented for this test`);
-      }
-      return behavior.complete(request, credentials);
-    },
-    async *stream(request: LlmRequest, credentials: Credentials): AsyncGenerator<LlmDelta, void, unknown> {
-      driver.calls += 1;
-      if (!behavior.stream) {
-        throw new Error(`fakeDriver(${provider}): stream() not implemented for this test`);
-      }
-      yield* behavior.stream(request, credentials);
-    },
-  };
-  return driver;
-}
-
-function fixtureResponse(provider: Provider, model: string): LlmResponse {
-  return {
-    text: `answered by ${provider}/${model}`,
-    toolCalls: [],
-    stopReason: "end",
-    usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0 },
-    provider,
-    model,
-    latencyMs: 1,
-  };
-}
 
 const BASE_REQUEST: LlmRequest = {
   provider: "anthropic",
