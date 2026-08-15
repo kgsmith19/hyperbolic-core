@@ -68,8 +68,6 @@ function signalRe(sig) {
   return new RegExp(raw, "i");
 }
 
-// Lowest common ancestor among the table's own paths, so a tie between two
-// repos lands on the folder that contains both rather than on either one.
 // The next rung up the escalation ladder: the nearest listed route that
 // strictly contains this one. null at the widest route.
 function parentOf(routes, p) {
@@ -79,6 +77,8 @@ function parentOf(routes, p) {
   return up.length ? up[0].path : null;
 }
 
+// Lowest common ancestor among the table's own paths, so a tie between two
+// repos lands on the folder that contains both rather than on either one.
 function ancestor(routes, hits) {
   const candidates = routes.filter((r) => hits.every((h) => isUnder(h.path, r.path)));
   if (!candidates.length) return null;
