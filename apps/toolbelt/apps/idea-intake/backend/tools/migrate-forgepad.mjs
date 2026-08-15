@@ -456,7 +456,7 @@ select json_build_object(
 // and Postgres rolls back the still-open transaction on disconnect) none
 // do. Returns how many were actually inserted versus already present from a
 // prior run.
-export function insertRows(databaseUrl, rows) {
+function insertRows(databaseUrl, rows) {
   if (!rows.length) return { inserted: 0, alreadyPresent: 0 };
   partitionNewRows(rows, new Set()); // fail before touching the DB on duplicate provenance IDs
   const result = runPsql(databaseUrl, buildImportSql(rows));

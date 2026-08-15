@@ -35,7 +35,7 @@ function readStoredAccToken(): string {
 }
 
 /** Consumes only the exact ACC bootstrap fragment and always strips attempted credentials. */
-export function consumeAccTokenBootstrap(): string {
+function consumeAccTokenBootstrap(): string {
   if (typeof window === "undefined") return "";
   const hash = window.location.hash;
   if (!/(?:^#|&)acc-token(?:=|&|$)/.test(hash)) return readStoredAccToken();
@@ -89,7 +89,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function parseAccProcessStatus(value: unknown): AccProcessStatus | null {
+function parseAccProcessStatus(value: unknown): AccProcessStatus | null {
   if (!isRecord(value) || typeof value.weekText !== "string" || value.weekText.length > 512) {
     return null;
   }

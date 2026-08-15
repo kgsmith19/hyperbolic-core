@@ -41,7 +41,7 @@ export type SubmitRunResult =
 
 const DEFAULT_AUTONOMY = 0;
 
-export function buildContract(params: SubmitRunParams, runId: string, taskId: string): TaskContractV1 {
+function buildContract(params: SubmitRunParams, runId: string, taskId: string): TaskContractV1 {
   const planParams: PlanObjectiveParams = {
     runId,
     taskId,
