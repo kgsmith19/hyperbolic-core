@@ -18,8 +18,8 @@
 import type { ServerResponse } from "node:http";
 import type { JournalEvent, RunJournal } from "./journal.ts";
 
-export const SSE_HEARTBEAT_MS = 15_000;
-export const SSE_POLL_MS = 250;
+const SSE_HEARTBEAT_MS = 15_000;
+const SSE_POLL_MS = 250;
 
 export function writeSseEvent(res: ServerResponse, id: number, event: JournalEvent): void {
   res.write(`id: ${id}\n`);

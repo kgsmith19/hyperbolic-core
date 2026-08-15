@@ -4,7 +4,7 @@ import { Search, LogOut } from "lucide-react";
 
 import { ZONE_ENTRIES, type Zone } from "./zones";
 import { ThemeSwitch } from "./theme-switch";
-import type { PlatformSession } from "./session";
+import type { PlatformSession } from "./types";
 import { NotificationBell } from "../notifications/notification-bell";
 import type { PlatformNotification } from "../notifications/types";
 

@@ -7,7 +7,7 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { cn } from "../lib/cn";
 import { ZONE_ENTRIES, shouldNavigateClientSide, type NavigateAdapter, type Zone } from "./zones";
 import { paletteMatch } from "./palette-match";
-import type { ToolPaletteEntry } from "./tool-entry";
+import type { ToolPaletteEntry } from "./types";
 
 interface CommandPaletteProps {
   open: boolean;

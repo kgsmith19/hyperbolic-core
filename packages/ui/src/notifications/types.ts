@@ -7,7 +7,7 @@
 //
 // `Unsubscribe` is defined locally rather than imported from
 // `@hyperbolic/platform-client` (which also declares it, identically, in its
-// src/types.ts) for the exact reason chrome/session.ts states for its own
+// src/types.ts) for the exact reason chrome/types.ts states for its own
 // local `PlatformSession` copy: packages/ui takes no dependency on that
 // package, so a hard 60 KB gzipped budget never inherits
 // @supabase/supabase-js's type graph. It is a one-line structural alias;
