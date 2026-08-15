@@ -6,7 +6,7 @@ to fake-send and nothing to verify was never sent -- the same reasoning
 tests/bills/test_dispute.py states for its own module.
 
 Tests share the session database, so every test uses its own kind/summary
-marker to avoid colliding with another test's proposal_key.
+marker to avoid colliding with another test's agent_proposal_key.
 """
 
 from uuid import uuid4
@@ -15,11 +15,11 @@ import pytest
 
 from domains.agents.proposals import (
     AgentProposalCaptureRefused,
+    agent_proposal_key,
     approve_agent_proposal,
     guard_capture,
     is_agent_proposal,
     list_agent_proposals,
-    proposal_key,
     propose_action,
     reject_agent_proposal,
     summary_digest,
@@ -155,16 +155,20 @@ def test_approve_refuses_a_scope_narrowed_context_even_if_it_somehow_held_write(
 
 def test_guard_capture_refuses_a_direct_capture_of_the_proposal_type(seeded: object) -> None:
     with pytest.raises(AgentProposalCaptureRefused):
-        guard_capture(TYPE_AGENT_PROPOSAL, {"proposal_key": "a" * 64, "state": STATE_APPROVED})
+        guard_capture(
+            TYPE_AGENT_PROPOSAL, {"agent_proposal_key": "a" * 64, "state": STATE_APPROVED}
+        )
 
 
 def test_guard_capture_allows_every_other_type_name(seeded: object) -> None:
     guard_capture("something_else", {})  # must not raise
 
 
-def test_proposal_key_is_stable_for_identical_inputs_and_differs_otherwise(seeded: object) -> None:
-    a = proposal_key("kind-a", "summary-a", "agent:brain")
-    b = proposal_key("kind-a", "summary-a", "agent:brain")
-    c = proposal_key("kind-b", "summary-a", "agent:brain")
+def test_agent_proposal_key_is_stable_for_identical_inputs_and_differs_otherwise(
+    seeded: object,
+) -> None:
+    a = agent_proposal_key("kind-a", "summary-a", "agent:brain")
+    b = agent_proposal_key("kind-a", "summary-a", "agent:brain")
+    c = agent_proposal_key("kind-b", "summary-a", "agent:brain")
     assert a == b
     assert a != c

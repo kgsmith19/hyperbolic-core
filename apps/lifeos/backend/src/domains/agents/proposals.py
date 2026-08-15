@@ -71,10 +71,14 @@ def summary_digest(summary: str) -> str:
     return sha256(summary.encode()).hexdigest()
 
 
-def proposal_key(kind: str, summary: str, proposed_by: str) -> str:
+def agent_proposal_key(kind: str, summary: str, proposed_by: str) -> str:
     """One proposal per (proposer, kind, summary): a re-submitted identical
     proposal resolves to the same record rather than piling up duplicates
-    (the same invariant-3 reasoning dispute.py's own proposal_key keeps)."""
+    (the same invariant-3 reasoning dispute.py's own proposal_key keeps).
+
+    Named for this type, not `proposal_key` -- see the field's own note in
+    types.py: identity resolution matches on the field NAME across types, and
+    bills owns that one."""
     return sha256(f"{proposed_by}|{kind}|{summary}".encode()).hexdigest()
 
 
@@ -115,16 +119,21 @@ def propose_action(
     require(ctx, ACTION_PROPOSALS_DRAFT_SCOPE)
     define_agent_types(_INTERNAL_CTX)
 
-    key = proposal_key(kind, summary, proposed_by)
+    # Return an existing proposal untouched rather than capturing over it.
+    # This is NOT made redundant by the type's x-identity: a capture would
+    # resolve onto the same record, but it would also write `state: proposed`
+    # back over a proposal a human had already approved or rejected. Re-
+    # proposing is idempotent; it is never a way to reopen a decision.
+    key = agent_proposal_key(kind, summary, proposed_by)
     existing = services.find(
-        _INTERNAL_CTX, type_name=TYPE_AGENT_PROPOSAL, filters={"proposal_key": key}
+        _INTERNAL_CTX, type_name=TYPE_AGENT_PROPOSAL, filters={"agent_proposal_key": key}
     )
     if existing:
         return _view(existing[0])
 
     now = datetime.now(UTC)
     attributes = {
-        "proposal_key": key,
+        "agent_proposal_key": key,
         "kind": kind,
         "state": STATE_PROPOSED,
         "summary": summary,
@@ -133,9 +142,7 @@ def propose_action(
         "proposed_at": now.isoformat(),
         "proposed_by": proposed_by,
     }
-    result = services.capture(
-        _INTERNAL_CTX, TYPE_AGENT_PROPOSAL, attributes, actor=DEFAULT_ACTOR
-    )
+    result = services.capture(_INTERNAL_CTX, TYPE_AGENT_PROPOSAL, attributes, actor=DEFAULT_ACTOR)
     view = services.get_entity(_INTERNAL_CTX, result.entity_id)
     return _view(view.entity)
 

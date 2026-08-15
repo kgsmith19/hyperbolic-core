@@ -21,10 +21,10 @@ import pytest
 from domains.intentions.focus import capture_intention
 from domains.intentions.import_priorities import run_import
 from domains.intentions.planner import PlannedIntention, mark_done, plan_today
-from domains.intentions.types import STATUS_CANDIDATE, define_intention_types
+from domains.intentions.types import STATUS_CANDIDATE, TYPE_NAME, define_intention_types
 from domains.ops.receipts import JobResult, emit_receipt
 from domains.ops.types import define_ops_types
-from kernel import db
+from kernel import db, services
 from kernel.access import AccessContext, ScopeError
 from tests.intentions.test_import_priorities import FakeClient, listing
 
@@ -45,6 +45,29 @@ def seed_ctx(ctx: AccessContext) -> AccessContext:
     define_intention_types(ctx)
     define_ops_types(ctx)  # the not-an-intention refusal case captures a receipt
     return ctx
+
+
+@pytest.fixture
+def focus_ctx(seed_ctx: AccessContext) -> AccessContext:
+    """A context whose focus-3 budget is clear, for the tests below that need
+    to focus intentions of their own.
+
+    The focus rule (ADR-019 rule 3, domains/intentions/focus.py) is global and
+    every test module shares one database, so the three focus slots are a
+    SESSION-wide resource: whoever captures a focus=true intention holds a slot
+    until something releases it, and nothing did. The two tests below were the
+    ones that happened to ask for a slot after the third was taken, so they
+    failed on FocusLimitExceeded for a reason unrelated to the ordering they
+    assert -- test isolation, not a defect in the rule or the planner.
+
+    Releasing is a re-capture with focus=False, which supersedes by `title`
+    (the type's own x-identity) exactly as an operator clearing a focus goal in
+    the UI does -- not a direct row edit, so the guard and the event log both
+    see it as the ordinary write it is.
+    """
+    for entity in services.find(seed_ctx, type_name=TYPE_NAME, filters={"focus": True}):
+        capture_intention(seed_ctx, {**entity.attributes, "focus": False})
+    return seed_ctx
 
 
 def seed(ctx: AccessContext, title: str, **overrides: object) -> None:
@@ -79,30 +102,30 @@ def test_plan_excludes_still_unconfirmed_candidates(seed_ctx: AccessContext) -> 
     assert candidate not in titles
 
 
-def test_focus_intentions_lead_non_focus_ones(seed_ctx: AccessContext) -> None:
+def test_focus_intentions_lead_non_focus_ones(focus_ctx: AccessContext) -> None:
     plain = a_title("plain")
     focused = a_title("focused")
-    seed(seed_ctx, plain, focus=False)
-    seed(seed_ctx, focused, focus=True)
+    seed(focus_ctx, plain, focus=False)
+    seed(focus_ctx, focused, focus=True)
 
-    plan = plan_today(seed_ctx)
+    plan = plan_today(focus_ctx)
     plain_index = next(i for i, p in enumerate(plan) if p.title == plain)
     focused_index = next(i for i, p in enumerate(plan) if p.title == focused)
 
     assert focused_index < plain_index
 
 
-def test_creation_order_breaks_ties_within_a_focus_group(seed_ctx: AccessContext) -> None:
+def test_creation_order_breaks_ties_within_a_focus_group(focus_ctx: AccessContext) -> None:
     first = a_title("first")
     second = a_title("second")
     # Captured in this exact order -- created_at is server-assigned
     # (kernel/services/capture.py's own `now`), so the real sequence of
     # these two calls IS the fixture, the same way it is the operator's
     # own priority-list import order in production.
-    seed(seed_ctx, first, focus=True)
-    seed(seed_ctx, second, focus=True)
+    seed(focus_ctx, first, focus=True)
+    seed(focus_ctx, second, focus=True)
 
-    plan = plan_today(seed_ctx)
+    plan = plan_today(focus_ctx)
     first_index = next(i for i, p in enumerate(plan) if p.title == first)
     second_index = next(i for i, p in enumerate(plan) if p.title == second)
 

@@ -49,7 +49,7 @@ AGENT_ACTION_PROPOSAL_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "required": [
-        "proposal_key",
+        "agent_proposal_key",
         "kind",
         "state",
         "summary",
@@ -63,7 +63,14 @@ AGENT_ACTION_PROPOSAL_SCHEMA: dict[str, Any] = {
         # re-submitted identical proposal resolves to the same record
         # rather than piling up duplicates (the same invariant-3 reasoning
         # domains.bills.dispute.proposal_key already documents).
-        "proposal_key": {"type": "string", "minLength": 1, "maxLength": 128},
+        #
+        # NOT named `proposal_key`, which is bills' own. ExactIdentityResolver
+        # matches on the identity field *name* across every type declaring it,
+        # so sharing the name would let an agent proposal and a bills proposal
+        # resolve onto each other -- exactly what domains.bills.verify.OWNED_KEYS
+        # embargoes `proposal_key` to prevent. Its own name, like `bill_key`,
+        # `eob_key` and `cpap_receipt_key` each keep.
+        "agent_proposal_key": {"type": "string", "minLength": 1, "maxLength": 128},
         "kind": {"type": "string", "minLength": 1, "maxLength": MAX_KIND_LEN},
         "state": {"enum": list(PROPOSAL_STATES)},
         "summary": {"type": "string", "minLength": 1, "maxLength": MAX_SUMMARY_LEN},
@@ -88,6 +95,15 @@ AGENT_ACTION_PROPOSAL_SCHEMA: dict[str, Any] = {
         # its counterpart on the other end of the decision.
         "approved_by": {"type": "string", "minLength": 1, "maxLength": 128},
     },
+    # Without this the type declared NO identity field, and
+    # ExactIdentityResolver's "no identity fields declared -> always NEW" rule
+    # meant every capture wrote a brand-new entity. approve/reject therefore
+    # created a SECOND record carrying `state: approved`, while the id the
+    # caller held still addressed the original `proposed` one -- so approving
+    # or rejecting appeared to succeed and changed nothing, and a decided
+    # proposal could be decided again. Same declaration bills' own
+    # `action_proposal` carries, for the same reason.
+    "x-identity": ["agent_proposal_key"],
 }
 
 
