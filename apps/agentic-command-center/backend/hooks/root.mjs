@@ -14,6 +14,18 @@ export function resolveRoot(here) {
   return process.env.ACC_ROOT ? path.resolve(process.env.ACC_ROOT) : path.resolve(here, "..");
 }
 
+/** Parse a JSON file, or hand back `dflt` if it is missing or malformed.
+ *  The on-disk sibling of readStdinJson below: same swallow-and-default
+ *  contract, because a hook that dies on a corrupt state file is worse than
+ *  one that starts from the default. */
+export function readJson(p, dflt) {
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {
+    return dflt;
+  }
+}
+
 export function readStdinJson(dflt = {}) {
   try {
     return JSON.parse(fs.readFileSync(0, "utf8") || "{}");
