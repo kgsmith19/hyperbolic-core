@@ -7,7 +7,7 @@
   "main": "./src/index.ts",
   "scripts": {
     "test": "node --test tests/*.test.ts",
-    "typecheck": "tsc -b ."
+    "typecheck": "tsc -b . && tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "@hyperbolic/llm": "*"

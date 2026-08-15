@@ -46,8 +46,8 @@ a bare `**/path` pattern that can intercept unrelated traffic.
 
 ## Work and delivery
 
-GitHub Issues are the durable source for requested work. The root
-`../.github/workflows/ci.yml` runs the only merge gate, including frontend
+GitHub Issues are the durable source for requested work. The merge gate is the
+REPOSITORY ROOT's `.github/workflows/lifeos-ci.yml`, whose frontend job runs
 lint, type checks, unit tests, browser tests, and the production build. The
-root `release-smoke.yml` remains an independent scheduled/manual deployed-system
-test. Follow the delivery and AI contribution boundaries in `../AGENTS.md`.
+`.github/` directory beside this app is inert and gates nothing -- see
+`../AGENTS.md`. Follow the delivery and AI contribution boundaries there.

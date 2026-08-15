@@ -31,8 +31,7 @@ export { Tabs, TabsList, TabsTab, TabsIndicator, TabsPanel } from "./primitives/
 export { Chrome } from "./chrome/chrome";
 export type { ChromeProps } from "./chrome/chrome";
 export type { Zone } from "./chrome/zones";
-export type { PlatformSession } from "./chrome/session";
-export type { ToolPaletteEntry } from "./chrome/tool-entry";
+export type { PlatformSession, ToolPaletteEntry } from "./chrome/types";
 export { ThemeSwitch } from "./chrome/theme-switch";
 // Added by apps/shell (m2-02): theme-switch.tsx's own doc comment already
 // names this exact purpose -- "useThemeChoice is exported separately from

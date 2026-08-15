@@ -19,12 +19,12 @@ const SCRIPT = join(__dirname, "..", "scripts", "isolation-check.mjs");
 // (this repo's own Gitleaks PR gate) -- same reasoning as scrubber.test.ts.
 const FAKE_KEY_CONTENTS = "sk-ant-" + "fixture-not-a-real-key";
 
-function run(env) {
+function run(env: NodeJS.ProcessEnv) {
   try {
     execFileSync(process.execPath, [SCRIPT], { env: { ...process.env, ...env }, stdio: "pipe" });
     return 0;
   } catch (err) {
-    return err.status ?? 1;
+    return (err as { status?: number }).status ?? 1;
   }
 }
 

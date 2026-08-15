@@ -336,7 +336,7 @@ test(
   async (t) => {
     let rpcCallCount = 0;
     const signOutUrls: string[] = [];
-    const spy = t.mock.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const spy = t.mock.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (isSignInUrl(url)) {
         return jsonResponse(fixtureSignInBody(nowSeconds() + 3600, FIXTURE_OWNER_UUID));

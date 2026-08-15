@@ -4,7 +4,7 @@ React UI for ACC. The zero-runtime-dependency core serves a loopback API; this
 directory builds to static files that ACC serves same-origin through
 `--ui-dist`.
 
-**The API contract is ACC's `backend/gui/README.md`.** `src/api.ts` mirrors it in types; `e2e/contract.spec.ts` proves it against a real ACC server. If ACC changes a route without updating its contract doc, this suite goes red — that is the whole cross-repo coupling.
+**The API contract is ACC's `backend/gui/README.md`.** `src/api.ts` mirrors it in types; `e2e/contract.spec.ts` proves it against a real ACC server. If a route changes without its contract doc, this suite goes red — that is the whole coupling between the two halves of this app.
 
 ## Stack
 
@@ -15,8 +15,8 @@ React 19 · Vite 8 · TypeScript 7 (strict) · Tailwind v4 · shadcn/ui on Base 
 ```bash
 npm install
 npm run dev        # http://127.0.0.1:5173 — proxies /api to a running ACC server
-                   #   (in the ACC repo: npm run gui; override target with ACC_API=)
-npm run build      # dist/ — serve via ACC: node backend/gui/server.mjs --ui-dist <this repo>/dist
+                   #   (start one from the app root: npm run gui; override with ACC_API=)
+npm run build      # dist/ — serve it: node backend/gui/server.mjs --ui-dist frontend/dist
 npm run e2e        # contract suite vs the real sandboxed ACC server
                    #   (ACC_DIR=.. by default from this directory)
 ```

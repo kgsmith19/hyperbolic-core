@@ -13,10 +13,21 @@ from ACC's legacy Forgepad files.
 - Keep every migration paired with a down migration that reverses the same change (existing toolbelt convention).
 - `ownership.owner` in `tool.json` is fixed to `kylegsmith19@gmail.com` by `tool.schema.json`; do not change it.
 
+## Layout
+
+```
+tool.json                     the app manifest, read by the Toolbelt validators
+backend/supabase/migrations/  the intake schema, paired up/down
+backend/tests/                schema, guard-trigger and RLS suites
+backend/tools/                the one-shot Forgepad migration CLI
+frontend/                     the app's own page shell; the real UI is the
+                              Shell's Idea Intake surface
+```
+
 ## Commands
 
 ```bash
-node --test "tests/*.test.mjs"
+node --test "backend/tests/*.test.mjs"
 ```
 
 Run `npm run manifests:check -- --registry` from `apps/toolbelt/` after any

@@ -35,7 +35,7 @@
 -- already know), so EXECUTE is granted to `authenticated` broadly -- unlike
 -- platform.owner() itself (never exposed over the API at all) or
 -- intake.mark_submitted_to_github() (service_role only; this session's
--- other P1 fix, apps/toolbelt/apps/idea-intake/supabase/migrations/
+-- other P1 fix, apps/toolbelt/apps/idea-intake/backend/supabase/migrations/
 -- 20260814040000_intake_mark_submitted_to_github_rpc.sql): this RPC's whole
 -- purpose IS for any authenticated caller to invoke it and get a truthful
 -- answer, safely.

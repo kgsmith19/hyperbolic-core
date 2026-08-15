@@ -31,8 +31,8 @@ schema collision across manifests, bad flag combination); no partial writes on f
 
 export const ID_PATTERN = /^[a-z][a-z0-9-]{1,62}[a-z0-9]$/;
 export const SCHEMA_PATTERN = /^[a-z][a-z0-9_]*$/;
-export const ROUTE_PATTERN = /^\/[a-z0-9/-]*$/;
-export const KINDS = ["ui", "cli", "headless", "hybrid"];
+const ROUTE_PATTERN = /^\/[a-z0-9/-]*$/;
+const KINDS = ["ui", "cli", "headless", "hybrid"];
 
 // Postgres's NAMEDATALEN identifier cap (63 bytes, the last byte reserved
 // for the null terminator internally -- 63 usable characters is the actual
@@ -44,7 +44,7 @@ export const KINDS = ["ui", "cli", "headless", "hybrid"];
 // permits ids up to 64 characters -- one longer than a schema derived from
 // it via a length-preserving dash-to-underscore transform could ever
 // legally be.
-export const POSTGRES_IDENTIFIER_MAX_BYTES = 63;
+const POSTGRES_IDENTIFIER_MAX_BYTES = 63;
 
 // Rejects a --name that is nothing but raw control characters (or would
 // become empty once whitespace is stripped) and, independently, a --name

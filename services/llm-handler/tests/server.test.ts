@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { startServer } from "../src/server.ts";
 import type { HandlerConfig } from "../src/types.ts";
 
-type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type FetchImpl = (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response>;
 
 // The test's own HTTP client (talking to the local loopback server under
 // test) and the server's internal outbound calls (Supabase/GitHub) share
@@ -13,10 +13,10 @@ type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respo
 // or every server-level test would need to fully emulate its own transport.
 async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Promise<T> {
   const original = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
     if (url.includes("127.0.0.1") || url.includes("localhost")) {
-      return original(input as RequestInfo, init);
+      return original(input as Parameters<typeof fetch>[0], init);
     }
     return impl(input, init);
   }) as typeof fetch;
@@ -32,6 +32,12 @@ const CONFIG: HandlerConfig = {
   supabaseUrl: "https://proj.supabase.co",
   supabasePublishableKey: "anon-key",
   githubIntakePat: "ghp_fixture",
+  // Both required by HandlerConfig and both were missing: this fixture was a
+  // shape loadConfig() can never produce, which nothing caught while the tests
+  // were outside any type-check program. Empty credentials are the honest
+  // value here -- these suites exercise the intake routes, not /v1/*.
+  llmCredentials: {},
+  llmMaxConcurrencyPerCaller: 2,
 };
 const SERVICE_ROLE_KEY = "service-role-key";
 const IDEA_ID = "11111111-1111-1111-1111-111111111111";

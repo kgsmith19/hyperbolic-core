@@ -75,11 +75,22 @@ test("scrubValue: recursively scrubs strings inside nested objects/arrays, leave
       nothing: null,
     },
   };
-  const out = scrubValue(input);
+  // scrubValue is intentionally typed `unknown -> unknown`; this test knows the
+  // shape it fed in, so it names that shape rather than asserting through `any`.
+  const out = scrubValue(input) as {
+    event: string;
+    fields: {
+      note: string;
+      attempts: ({ detail: string } | undefined)[];
+      count: number;
+      ok: boolean;
+      nothing: null;
+    };
+  };
   assert.equal(out.event, "invocation.started");
   assert.doesNotMatch(out.fields.note, /sk-ant-/);
-  assert.doesNotMatch(out.fields.attempts[0].detail, /ghp_/);
-  assert.equal(out.fields.attempts[1].detail, "clean");
+  assert.doesNotMatch(out.fields.attempts[0]!.detail, /ghp_/);
+  assert.equal(out.fields.attempts[1]!.detail, "clean");
   assert.equal(out.fields.count, 3);
   assert.equal(out.fields.ok, true);
   assert.equal(out.fields.nothing, null);

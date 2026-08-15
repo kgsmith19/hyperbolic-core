@@ -224,7 +224,7 @@ export function buildSchemaCreateSql({ id, schema }) {
 -- part of 5.1's "schema skeleton" list above, and computing the current
 -- authoritative schema list safely belongs with the migration that adds the
 -- first real table, following
--- apps/toolbelt/apps/prompt-organizer/supabase/migrations/20260807020000_prompt_create_prompt.sql
+-- apps/toolbelt/apps/prompt-organizer/backend/supabase/migrations/20260807020000_prompt_create_prompt.sql
 -- as the concrete template (and remember to record the prior value in that
 -- migration's own down file, same as that one does).
 create schema ${quoteIdent(schema)};

@@ -11,7 +11,7 @@
   },
   "scripts": {
     "test": "node --test tests/",
-    "typecheck": "tsc -b ."
+    "typecheck": "tsc -b . && tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

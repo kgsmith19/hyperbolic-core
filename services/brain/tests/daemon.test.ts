@@ -4,7 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BrainDaemon, stubLiveProbe, type LiveProbeFn } from "../src/daemon.ts";
-import type { Run, Task } from "../src/types.ts";
 import { fixtureRun, fixtureTask } from "./support.ts";
 
 function tmpDataDir(): string {

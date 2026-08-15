@@ -2,7 +2,7 @@
 // sandbox's already-running cluster, same `sudo -n -u postgres psql`
 // mechanism as ./registry-fixture.ts) with the REAL `intake` schema applied
 // byte-for-byte from every migration already committed under
-// apps/toolbelt/apps/idea-intake/supabase/migrations/ -- so
+// apps/toolbelt/apps/idea-intake/backend/supabase/migrations/ -- so
 // intake.guard_idea_insert/update/delete (the II-1/II-3 state-machine and
 // immutability triggers) and intake.mark_submitted_to_github (the
 // service-role-only write-back RPC) all fire for real, not as a
@@ -31,7 +31,7 @@ import {
 } from "./psql.js";
 import { sqlErrorToShimError, type ShimError } from "./shim.js";
 
-const INTAKE_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/apps/idea-intake/supabase/migrations");
+const INTAKE_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/apps/idea-intake/backend/supabase/migrations");
 const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/supabase/migrations");
 
 // Chronological order, exactly as committed -- see this file's header for

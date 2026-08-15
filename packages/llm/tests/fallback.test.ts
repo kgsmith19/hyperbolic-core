@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { complete, stream } from "../src/complete.ts";
 import { createLlmError } from "../src/errors.ts";
@@ -10,7 +11,7 @@ import { fakeDriver, fixtureResponse } from "./driver-harness.ts";
  * real retry/backoff wait (via a genuinely retryable fake-driver error)
  * doesn't burn real wall-clock seconds. Re-throws a rejection so callers can
  * still use `assert.rejects(() => withFakeTimers(t, ...))`. */
-async function withFakeTimers<T>(t: { mock: { timers: { enable(opts: { apis: string[] }): void; tick(ms: number): void } } }, run: () => Promise<T>): Promise<T> {
+async function withFakeTimers<T>(t: TestContext, run: () => Promise<T>): Promise<T> {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const promise = run();
   let settled: { ok: true; value: T } | { ok: false; error: unknown } | undefined;
@@ -36,7 +37,7 @@ async function withFakeTimers<T>(t: { mock: { timers: { enable(opts: { apis: str
  * which also forces a real retry/backoff wait via a genuinely retryable
  * fake-driver error. */
 async function drainWithFakeTimers(
-  t: { mock: { timers: { enable(opts: { apis: string[] }): void; tick(ms: number): void } } },
+  t: TestContext,
   gen: AsyncGenerator<LlmDelta, void, unknown>,
 ): Promise<LlmDelta[]> {
   t.mock.timers.enable({ apis: ["setTimeout"] });

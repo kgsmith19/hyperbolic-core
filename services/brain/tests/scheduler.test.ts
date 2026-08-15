@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { BrainStore } from "../src/store.ts";
 import { isDispatchable, Scheduler, MAX_CONCURRENT_DISPATCH } from "../src/scheduler.ts";
-import type { Run, Task } from "../src/types.ts";
 import { fixtureRun, fixtureTask } from "./support.ts";
 
 function tmpDbPath(): string {

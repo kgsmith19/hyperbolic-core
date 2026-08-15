@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { extractBearerToken, verifyOwnerSession } from "../src/auth.ts";
 
-type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type FetchImpl = (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response>;
 
 async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Promise<T> {
   const original = globalThis.fetch;

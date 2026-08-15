@@ -21,7 +21,7 @@
 // managed auth schema/roles, so HARNESS_SQL stubs auth.uid() (a session
 // GUC) and auth.role() (literally the ambient `SET ROLE`, the same
 // "SET ROLE simulates the caller's JWT role" convention
-// idea-intake/tests/mark_submitted_to_github_rpc.test.mjs already
+// idea-intake/backend/tests/mark_submitted_to_github_rpc.test.mjs already
 // established for a service_role-gated RPC) -- and applies the real,
 // committed migration files from disk verbatim.
 import { test } from "node:test";

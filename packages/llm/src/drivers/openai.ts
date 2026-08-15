@@ -34,6 +34,7 @@ import OpenAI from "openai";
 import { createLlmError, isLlmError } from "../errors.ts";
 import { createStallWatchdog, STREAM_STALL_MS } from "../retry.ts";
 import { createAttemptController } from "./abort.ts";
+import { classifyHttpStatus } from "./status-class.ts";
 import { isTextPart, toPlainText } from "./parts.ts";
 import { parseRetryAfterMs } from "./retry-after.ts";
 import type {
@@ -261,9 +262,7 @@ function fromOpenAIChatCompletion(completion: OpenAI.ChatCompletion, latencyMs: 
 // ---------------------------------------------------------------------------
 
 function classifyByStatus(status: number | undefined): LlmErrorClass {
-  if (status === undefined) {
-    return "transport"; // no response at all: connection-level failure
-  }
+  if (status === undefined) return "transport"; // no response at all: connection-level failure
   if (status === 408) {
     // Request Timeout: no named OpenAI SDK subclass exists for this status,
     // but it is retry-worthy by HTTP semantics -- Google's Gemini SDK's own
@@ -272,16 +271,7 @@ function classifyByStatus(status: number | undefined): LlmErrorClass {
     // confirmation available given OpenAI's own SDK has no opinion here.
     return "transport";
   }
-  if (status === 429) {
-    return "rate_limit";
-  }
-  if (status >= 500) {
-    return "transport";
-  }
-  if (status >= 400) {
-    return "invalid_request";
-  }
-  return "provider_bug";
+  return classifyHttpStatus(status);
 }
 
 /**

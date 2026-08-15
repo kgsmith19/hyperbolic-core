@@ -49,8 +49,8 @@ test("buildPlan for a ui tool includes tool.json, AGENTS.md, frontend/index.html
     assert.ok(relPaths.includes("apps/scratch-tool/tool.json"));
     assert.ok(relPaths.includes("apps/scratch-tool/AGENTS.md"));
     assert.ok(relPaths.includes("apps/scratch-tool/frontend/index.html"));
-    assert.ok(relPaths.some((p) => /^apps\/scratch-tool\/supabase\/migrations\/\d+_scratch_tool_create_schema\.sql$/.test(p)));
-    assert.ok(relPaths.some((p) => /^apps\/scratch-tool\/supabase\/migrations\/\d+_scratch_tool_create_schema_down\.sql$/.test(p)));
+    assert.ok(relPaths.some((p) => /^apps\/scratch-tool\/backend\/supabase\/migrations\/\d+_scratch_tool_create_schema\.sql$/.test(p)));
+    assert.ok(relPaths.some((p) => /^apps\/scratch-tool\/backend\/supabase\/migrations\/\d+_scratch_tool_create_schema_down\.sql$/.test(p)));
     assert.ok(relPaths.includes("apps/scratch-tool/tests/registration.test.mjs"));
     assert.ok(relPaths.some((p) => /^supabase\/migrations\/\d+_register_scratch-tool\.sql$/.test(p)));
     assert.ok(relPaths.some((p) => /^supabase\/migrations\/\d+_register_scratch-tool_down\.sql$/.test(p)));
@@ -117,7 +117,7 @@ test("RED: allocating registration and schema timestamps independently, each che
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const now = new Date(Date.UTC(2026, 7, 13, 12, 0, 0));
     const registrationDir = join(root, "supabase", "migrations");
-    const toolMigrationsDir = join(root, "apps", "scratch-tool", "supabase", "migrations");
+    const toolMigrationsDir = join(root, "apps", "scratch-tool", "backend", "supabase", "migrations");
     const registerTs = nextTimestamp(safeReaddirForTest(registrationDir), now);
     const schemaTs = nextTimestamp(safeReaddirForTest(toolMigrationsDir), now);
     assert.equal(
@@ -165,7 +165,7 @@ test("buildPlan's timestamp allocation avoids colliding with a pre-existing migr
         permissions: { db: { read: [], write: [] }, networkEgress: [], llmHandler: { access: false } },
         lifecycle: { migrate: "supabase db push", health: "true", register: "pending" },
       },
-      [`apps/other-tool/supabase/migrations/${nowTs}_other_tool_create_schema.sql`]: "create schema other_tool;",
+      [`apps/other-tool/backend/supabase/migrations/${nowTs}_other_tool_create_schema.sql`]: "create schema other_tool;",
     },
     (root) => {
       const plan = buildPlan(opts(), { toolbeltRoot: root, now });

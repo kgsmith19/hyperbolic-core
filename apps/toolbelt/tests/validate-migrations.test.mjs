@@ -278,9 +278,12 @@ test("validateAll rejects a required migration directory that does not exist", (
 test("discoverMigrationDirs includes root plus every schema-owning manifest in stable order", () => {
   const root = mkdtempSync(join(tmpdir(), "migration-discovery-"));
   try {
+    // A tool keeps its migrations under backend/; only the spine at the
+    // root keeps them directly beside its own manifest.
     const addManifest = (relativeDir, id, schemas) => {
       const dir = join(root, relativeDir);
-      mkdirSync(join(dir, "supabase", "migrations"), { recursive: true });
+      const migrations = relativeDir === "." ? [dir, "supabase", "migrations"] : [dir, "backend", "supabase", "migrations"];
+      mkdirSync(join(...migrations), { recursive: true });
       writeFileSync(join(dir, "tool.json"), JSON.stringify({ id, schemas }));
     };
     addManifest(".", "toolbelt", ["core"]);
@@ -290,8 +293,8 @@ test("discoverMigrationDirs includes root plus every schema-owning manifest in s
 
     assert.deepEqual(discoverMigrationDirs(root), [
       join(root, "supabase", "migrations"),
-      join(root, "apps", "alpha", "supabase", "migrations"),
-      join(root, "apps", "zeta", "supabase", "migrations"),
+      join(root, "apps", "alpha", "backend", "supabase", "migrations"),
+      join(root, "apps", "zeta", "backend", "supabase", "migrations"),
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -316,10 +319,10 @@ test("discoverMigrationDirs rejects a schema-owner migration symlink escaping th
   const outside = mkdtempSync(join(tmpdir(), "migration-discovery-outside-"));
   try {
     mkdirSync(join(root, "supabase", "migrations"), { recursive: true });
-    mkdirSync(join(root, "apps", "escape", "supabase"), { recursive: true });
+    mkdirSync(join(root, "apps", "escape", "backend", "supabase"), { recursive: true });
     writeFileSync(join(root, "tool.json"), JSON.stringify({ id: "toolbelt", schemas: ["core"] }));
     writeFileSync(join(root, "apps", "escape", "tool.json"), JSON.stringify({ id: "escape", schemas: ["escape"] }));
-    symlinkSync(outside, join(root, "apps", "escape", "supabase", "migrations"));
+    symlinkSync(outside, join(root, "apps", "escape", "backend", "supabase", "migrations"));
     assert.throws(() => discoverMigrationDirs(root), /escapes the toolbelt root/);
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { findIssueByMarker, createIssue } from "../src/github-client.ts";
 import { GithubSubmitError } from "../src/types.ts";
 
-type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type FetchImpl = (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response>;
 
 async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Promise<T> {
   const original = globalThis.fetch;

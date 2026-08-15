@@ -49,11 +49,11 @@ node --test "tests/*.test.mjs"
 npm run manifests:check
 npm run manifests:check -- --registry
 cd guards && node --test "*.test.mjs"
-cd apps/prompt-organizer && node --test "tests/*.test.mjs"
+cd apps/prompt-organizer && node --test "backend/tests/*.test.mjs" "frontend/tests/*.test.mjs"
 cd apps/prompt-organizer && python3 -m http.server 8812 --directory frontend
 cd apps/prompt-organizer && npm install --no-save --no-package-lock @playwright/test@1.52.0
-cd apps/prompt-organizer && PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config playwright.config.mjs
-cd apps/network-checker && bash tools/check.sh
+cd apps/prompt-organizer && PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config frontend/playwright.config.mjs
+cd apps/network-checker && bash backend/tools/check.sh
 ```
 
 The root has no browser client of its own to check (m3-09: the static idea-list client was deleted once the Shell's registry-driven tools list and Idea Intake list surfaces were both live); a manual browser check for root-schema changes now means the Shell's `/tools` or `/ideas` pages. The Node suite calls the live Supabase project using the public anon key. Report network or rate-limit failures accurately; do not relabel them as passing.

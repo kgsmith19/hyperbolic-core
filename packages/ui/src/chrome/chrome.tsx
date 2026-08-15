@@ -8,8 +8,7 @@ import { CommandPalette } from "./command-palette";
 import { ShortcutsOverlay } from "./shortcuts-overlay";
 import { useGlobalKeyboardModel } from "./keyboard";
 import { ZONE_ENTRIES, type NavigateAdapter, type Zone } from "./zones";
-import type { PlatformSession } from "./session";
-import type { ToolPaletteEntry } from "./tool-entry";
+import type { PlatformSession, ToolPaletteEntry } from "./types";
 import { NotificationToaster } from "../notifications/toast-stack";
 import { useNotificationStack } from "../notifications/use-notification-stack";
 import { getNotificationSurface } from "../notifications/surface";
@@ -29,7 +28,7 @@ import type { NotificationSurface } from "../notifications/types";
  * pre-written extension-point comment): the command palette's registry-
  * sourced entries, fed in by the Shell (the only zone that owns a registry
  * client) rather than fetched by packages/ui itself -- this package has no
- * dependency on @hyperbolic/platform-client (chrome/session.ts's own doc
+ * dependency on @hyperbolic/platform-client (chrome/types.ts's own doc
  * comment states why) and no HTTP/Supabase awareness at all. Optional and
  * defaults to empty, so every pre-m3-04 caller keeps compiling unchanged.
  *

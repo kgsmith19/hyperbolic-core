@@ -1,6 +1,6 @@
 # LifeOS repository guidance
 
-**Location note.** This tree is a `git subtree` copy of `kgsmith19/lifeos` inside the `hyperbolic-core` monorepo. "`.github/workflows/`" below means `apps/lifeos/.github/workflows/`, which GitHub does **not** execute — these files are inert here. The live merge gate, deploy, backup, and ops automation run only from the standalone `kgsmith19/lifeos` repo. Never relocate these workflows to hyperbolic-core's root `.github/workflows/`.
+**Location note.** This tree is a `git subtree` copy of `kgsmith19/lifeos` inside the `hyperbolic-core` monorepo. `apps/lifeos/.github/workflows/` is **not** executed here — GitHub runs workflows only from the repository root — so the `ci.yml`, `ops.yml` and `backup.yml` in this directory are inert, and are kept only because the standalone `kgsmith19/lifeos` repo still runs them. In THIS repo the merge gate is the root's `.github/workflows/lifeos-ci.yml`. Never relocate these workflows to the root: `ci.yml`'s `build-backend` job has no repository-variable gate and would publish a Docker image on every push to `main`.
 
 LifeOS is one product with two applications:
 
@@ -30,6 +30,6 @@ Product runtime safeguards remain mandatory: preserve provenance, keep sensitive
 
 ## Delivery
 
-GitHub Issues are the durable work source. The root `.github/workflows/ci.yml` is the only merge gate; its terminal check is `PR Gate`. It verifies both applications and deploys from `main` only when repository variables enable deployment. `ops.yml`, `backup.yml`, and `release-smoke.yml` are operational workflows, not merge gates.
+GitHub Issues are the durable work source. The merge gate is the REPOSITORY ROOT's `.github/workflows/lifeos-ci.yml`, terminal check `LifeOS PR Gate`, which runs this app's backend and frontend suites. This directory's own `.github/workflows/` is INERT -- GitHub only executes workflows from the repository root -- so `ci.yml`, `ops.yml` and `backup.yml` here run nothing, and `ci.yml` must never be copied to the root: its `build-backend` job carries no repository-variable gate and would publish a Docker image on every push to `main` (see the repo-root AGENTS.md invariant). Deployment is driven by the root's own `deploy.yml`, not from here.
 
 AI coding agents may create assigned branches, commits, Issues, and pull requests. They must not submit reviews, approve or block pull requests, request reviewers, or post unsolicited comments. They may answer in an Issue or pull request only when explicitly tagged with a direct question.

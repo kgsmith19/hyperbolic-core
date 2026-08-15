@@ -135,7 +135,7 @@ def test_capture_refuses_to_author_an_agent_proposal_directly(seeded: object) ->
         "/capture",
         json={
             "type_name": "agent_action_proposal",
-            "attributes": {"proposal_key": "a" * 64, "state": STATE_APPROVED},
+            "attributes": {"agent_proposal_key": "a" * 64, "state": STATE_APPROVED},
         },
     )
     assert forged.status_code == 422, forged.text

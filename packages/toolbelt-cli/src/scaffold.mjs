@@ -52,7 +52,9 @@ export function buildPlan(options, { toolbeltRoot, now = new Date() }) {
 
   const toolDir = join(toolbeltRoot, "apps", id);
   const registrationDir = join(toolbeltRoot, "supabase", "migrations");
-  const toolMigrationsDir = join(toolDir, "supabase", "migrations");
+  // Under backend/, matching every existing tool: a tool's backend work all
+  // lives there, so validate-migrations.mjs discovers it at exactly this path.
+  const toolMigrationsDir = join(toolDir, "backend", "supabase", "migrations");
 
   // Finding 27 (independent security review, re-verified against current
   // HEAD): "Registration and schema versions are allocated independently,

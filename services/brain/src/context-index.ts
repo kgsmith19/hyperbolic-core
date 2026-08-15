@@ -93,21 +93,11 @@ export function buildContextIndex(repoRoot: string, now: string): ContextIndex {
   return { builtAt: now, repoRoot, entries };
 }
 
-export function contextIndexPath(dataDir: string): string {
+function contextIndexPath(dataDir: string): string {
   return path.join(dataDir, "context-index.json");
 }
 
 export function writeContextIndex(dataDir: string, index: ContextIndex): void {
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(contextIndexPath(dataDir), JSON.stringify(index, null, 2));
-}
-
-export function readContextIndex(dataDir: string): ContextIndex | null {
-  const file = contextIndexPath(dataDir);
-  if (!existsSync(file)) return null;
-  try {
-    return JSON.parse(readFileSync(file, "utf8")) as ContextIndex;
-  } catch {
-    return null;
-  }
 }

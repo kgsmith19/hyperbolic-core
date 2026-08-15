@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPolicy, contextOf, startContextOf, applyProfile, tierFor, tierWindowTotal } from "./usage.mjs";
 import { bindSession, appendCycle, logTail, directiveForSession } from "./directive.mjs";
-import { resolveRoot, readStdinJson, isMainModule } from "./root.mjs";
+import { resolveRoot, readJson, readStdinJson, isMainModule } from "./root.mjs";
 import { notify } from "./notify.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -44,13 +44,6 @@ function statePath(sid, suffix) {
   return path.join(STATE(), `${String(sid || "unknown").slice(0, 40)}.${suffix}`);
 }
 
-function readJson(p, dflt) {
-  try {
-    return JSON.parse(fs.readFileSync(p, "utf8"));
-  } catch {
-    return dflt;
-  }
-}
 
 // ------------------------------------------------------------- hook output
 

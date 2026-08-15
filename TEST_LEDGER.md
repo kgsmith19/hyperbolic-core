@@ -12,6 +12,7 @@ These run on `pull_request` and `merge_group`. A change is not mergeable until t
 | `ACC PR Gate` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` | `acc-ci.yml` |
 | `Brain PR Gate` | `services/brain/**` | `brain-ci.yml` |
 | `Shell PR Gate` | `apps/shell/**`, `packages/**` | `shell-ci.yml` |
+| `LifeOS PR Gate` | `apps/lifeos/**` | `lifeos-ci.yml` |
 | `Gitleaks` | the whole repo, every PR | `secret-scan.yml` |
 
 ## Deploy
@@ -39,5 +40,7 @@ These run on `pull_request` and `merge_group`. A change is not mergeable until t
 ## Inert here
 
 `apps/lifeos/.github/workflows/` is **not** executed. GitHub only runs workflows from the repository root's `.github/workflows/`, never from a nested path, and those files are kept as-is from the standalone `lifeos` repo. See the repo-root `AGENTS.md` for why they must never be copied to the root.
+
+Until `lifeos-ci.yml` was added at the root, that inertness meant LifeOS had **no merge gate at all** here: no root workflow matched `apps/lifeos/**`, so its 59 backend test modules and its frontend unit and browser suites never ran on a pull request, while the app's own `AGENTS.md` stated that a root gate verified them. `lifeos-ci.yml` is written fresh rather than copied, and carries the two test jobs only -- no `build-backend`, no `deploy-backend`, and no `push` trigger for either to key off.
 
 See `apps/toolbelt/TEST_LEDGER.md` and `apps/agentic-command-center/TEST_LEDGER.md` for suite-level detail within each app.

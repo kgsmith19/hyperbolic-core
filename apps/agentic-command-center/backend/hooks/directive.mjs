@@ -22,7 +22,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveRoot, isMainModule } from "./root.mjs";
+import { readJson, resolveRoot, isMainModule } from "./root.mjs";
 import { notify } from "./notify.mjs";
 import { writeReceiptOnce } from "./receipt.mjs";
 
@@ -99,13 +99,6 @@ function ensureDirs() {
   fs.mkdirSync(doneDir(), { recursive: true });
 }
 
-function readJson(p, dflt) {
-  try {
-    return JSON.parse(fs.readFileSync(p, "utf8"));
-  } catch {
-    return dflt;
-  }
-}
 
 function directivePath(id) {
   return path.join(directivesDir(), `${safeId(id)}.json`);
