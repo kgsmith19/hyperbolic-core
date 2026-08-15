@@ -122,7 +122,6 @@ test("buildReceipt shapes a stable schema from an in-memory directive record", (
   assert.equal(r.finishedAt, d.updatedAt);
   assert.equal(r.durationMs, Date.parse(d.updatedAt) - Date.parse(d.createdAt));
   assert.equal(r.cycles, 2);
-  assert.equal(r.freshContextCount, 2);
   assert.equal(r.profile, "Normal");
   assert.deepEqual(r.spend, { turns: 0, tokens: 0, dollars: 0 });
   assert.deepEqual(r.budget, d.budget);

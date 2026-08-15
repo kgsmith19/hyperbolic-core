@@ -48,7 +48,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { isMainModule } from "./root.mjs";
+import { isMainModule, readJson } from "./root.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const POLICY = () => process.env.ACC_POLICY || path.join(HERE, "..", "policy.json");
@@ -86,7 +86,7 @@ function pidAlive(pid) {
 }
 
 function ownerOf(slotDir) {
-  try { return JSON.parse(fs.readFileSync(path.join(slotDir, "owner.json"), "utf8")); } catch { return null; }
+  return readJson(path.join(slotDir, "owner.json"), null);
 }
 
 // Stale = reclaimable. An unreadable owner.json counts once it is older than a
@@ -134,8 +134,7 @@ export function laneStatusAll() {
 // which is all the gap is for.
 async function paceStart(cfg, onLog) {
   const stamp = path.join(LANE_DIR(), "last-start.json");
-  let last = 0;
-  try { last = Number(JSON.parse(fs.readFileSync(stamp, "utf8")).t) || 0; } catch {}
+  const last = Number(readJson(stamp, {}).t) || 0;
   const wait = last + cfg.minGapMs - Date.now();
   if (wait > 0) {
     onLog?.(`lane: pacing start, ${wait}ms behind the previous launch`);

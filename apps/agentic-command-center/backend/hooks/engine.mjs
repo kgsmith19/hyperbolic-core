@@ -48,9 +48,15 @@ const ROOT = () => resolveRoot(HERE);
 const CONFIG = () => process.env.GUARDS_CONFIG || path.join(ROOT(), "config.json");
 const VAULT = () => path.join(ROOT(), "vault.json");
 
-const readJson = (p, fallback) => (existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : fallback);
+// Absent -> fallback, but CORRUPT -> throw. Deliberately NOT root.mjs's
+// readJson, which returns its default for both: that is right for a hook
+// reading disposable state, and wrong here. vault() and config() feed
+// read-modify-write paths, so treating an unparseable vault.json as `{}`
+// would let the next write replace real secrets with an empty object. The
+// name says which of the two this is, because they are one directory apart.
+const readJsonOrThrow = (p, fallback) => (existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : fallback);
 const writeJson = (p, j) => writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
-const vault = () => readJson(VAULT(), {});
+const vault = () => readJsonOrThrow(VAULT(), {});
 
 // ADR-05 (secrets): vault.json is operator-machine convenience storage with
 // filesystem-only protection -- not a place provider API keys may live
@@ -83,7 +89,7 @@ export const isDeniedVaultKey = (k) => DENIED_VAULT_KEYS.has(String(k).toUpperCa
 // propagate instead of being swallowed as exit 1.
 class CliFail extends Error {}
 const fail = (m) => { throw new CliFail(m); };
-const config = () => readJson(CONFIG(), null) ?? fail(`no config.json at ${CONFIG()}`);
+const config = () => readJsonOrThrow(CONFIG(), null) ?? fail(`no config.json at ${CONFIG()}`);
 const norm = (p) => path.resolve(p).replaceAll("\\", "/");
 
 async function stdinText() {
