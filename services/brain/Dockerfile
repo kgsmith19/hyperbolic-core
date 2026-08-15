@@ -58,7 +58,11 @@ COPY services/brain/bin services/brain/bin
 # Fails the image build itself on a type error, the same gate brain-ci.yml
 # already runs on a bare runner -- redundant with that PR check by design
 # (a build run from a stale/unchecked ref should still refuse to ship).
-RUN npm run typecheck --workspace=@hyperbolic/brain
+# typecheck:src, not typecheck: this image deliberately copies only src/ and
+# bin/, so the test program (tsconfig.test.json + tests/) is not present here.
+# The image verifies what it ships; brain-ci.yml runs the full typecheck --
+# tests included -- on a bare runner that has the whole checkout.
+RUN npm run typecheck:src --workspace=@hyperbolic/brain
 
 # Removes typescript/@types/node and every other devDependency from the
 # already-resolved tree, in place -- the runtime stage below copies this
