@@ -56,14 +56,12 @@ decision record; historical rationale otherwise lives in git history.
 - Do not weaken or delete a regression test unless the behavior it protects
   has intentionally been removed and the change explains why.
 
-### `backend/gui/server.mjs`'s `handler` — why the obvious refactor is blocked
+### `backend/gui/server.mjs`'s `handler` — how far the refactor can go
 
 `handler` is the most complex function in this repository by a wide margin
-(143 decision points across 253 lines; the next highest anywhere is 68). It
-reads as ~20 lines of security preamble — Host, then Origin, preflight, CORS,
-the `X-ACC` header, then the token — enforced once so a future route cannot
-forget it, followed by 14 `route === "/api/..."` branches and 17 method
-checks.
+(143 decision points; the next highest anywhere is 68): a security preamble —
+Host, then Origin, preflight, CORS, the `X-ACC` header, then the token —
+followed by 14 `route === "/api/..."` branches and 17 method checks.
 
 The security preamble is now its own `enforceRequestSecurity`, so "these run
 ONCE and a future route cannot forget them" is structural rather than a matter
