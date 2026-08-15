@@ -44,7 +44,7 @@ import { createPromptClient, MissingVariablesError, PromptNotFoundError } from "
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..", "..");
 const ROOT_MIGRATIONS_DIR = join(REPO_ROOT, "apps", "toolbelt", "supabase", "migrations");
-const PO_MIGRATIONS_DIR = join(REPO_ROOT, "apps", "toolbelt", "apps", "prompt-organizer", "supabase", "migrations");
+const PO_MIGRATIONS_DIR = join(REPO_ROOT, "apps", "toolbelt", "apps", "prompt-organizer", "backend", "supabase", "migrations");
 const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
 
 // Verbatim from get-prompt.test.mjs: the exact real migration files, in
@@ -243,7 +243,7 @@ function mapSqlRpcResult(result: ReturnType<typeof psql>): RpcResult {
   if (codeMatch) {
     const status = Number(codeMatch[1]!.slice(2));
     const messageMatch = /ERROR:\s+PT\d{3}:\s*(.+)/.exec(stderr);
-    return { status, body: { code: codeMatch[1], message: (messageMatch ? messageMatch[1] : stderr).trim() } };
+    return { status, body: { code: codeMatch[1], message: (messageMatch?.[1] ?? stderr).trim() } };
   }
   return { status: 400, body: { code: "42000", message: stderr.trim() || "unknown error" } };
 }

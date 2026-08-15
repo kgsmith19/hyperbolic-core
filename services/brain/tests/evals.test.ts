@@ -103,7 +103,6 @@ test("validateEvalCase: missing required top-level field is rejected", () => {
 test("validateEvalCase: an embedded contract that itself fails brain.task.v1 is rejected, prefixed 'contract:'", () => {
   const repo = initSourceRepo();
   const bad = fixtureCase(repo);
-  // @ts-expect-error deliberately malformed for the test
   bad.contract.deliverable.branch = "main"; // never a default branch
   const result = validateEvalCase(bad);
   assert.equal(result.valid, false);

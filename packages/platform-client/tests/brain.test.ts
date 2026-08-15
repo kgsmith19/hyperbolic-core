@@ -31,7 +31,7 @@ test("SseLineParser: multi-line data fields are joined with \\n per spec", () =>
   const parser = new SseLineParser();
   const events = parser.push("data: line one\ndata: line two\n\n");
   assert.equal(events.length, 1);
-  assert.equal(events[0].data, "line one\nline two");
+  assert.equal(events[0]!.data, "line one\nline two");
 });
 
 test("SseLineParser: buffers a partial event across multiple push() calls", () => {
@@ -48,14 +48,14 @@ test("SseLineParser: a partial line held mid-token is not emitted until it compl
   assert.deepEqual(parser.push("id: 2\ndata: {\"a\":1"), []);
   const events = parser.push("}\n\n");
   assert.equal(events.length, 1);
-  assert.equal(events[0].data, '{"a":1}');
+  assert.equal(events[0]!.data, '{"a":1}');
 });
 
 test("SseLineParser: comment/heartbeat lines (leading ':') are ignored, not dispatched as events", () => {
   const parser = new SseLineParser();
   const events = parser.push(": heartbeat\n\ndata: real\n\n");
   assert.equal(events.length, 1);
-  assert.equal(events[0].data, "real");
+  assert.equal(events[0]!.data, "real");
 });
 
 test("SseLineParser: a blank line with no accumulated data lines dispatches nothing", () => {
@@ -201,7 +201,7 @@ test("rejectTask: omits the JSON body entirely when no reason is given", async (
 });
 
 test("rejectTask: sends a JSON reason body when a reason is given", async () => {
-  const spy = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const spy = async (_input: RequestInfo | URL, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
     assert.equal(headers.get("content-type"), "application/json");
     assert.deepEqual(JSON.parse(String(init?.body)), { reason: "not needed" });
@@ -343,7 +343,7 @@ test("streamRunEvents: invokes onEvent for each parsed SSE event, in order, with
 });
 
 test("streamRunEvents: sends a last-event-id header when options.lastEventId is set", async () => {
-  const spy = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const spy = async (_input: RequestInfo | URL, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
     assert.equal(headers.get("last-event-id"), "1");
     return new Response(sseBodyStream(["id: 2\nevent: e2\ndata: {\"runId\":\"run-1\",\"kind\":\"e2\",\"ts\":\"t2\"}\n\n"]), { status: 200 });

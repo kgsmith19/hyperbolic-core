@@ -52,6 +52,10 @@ function seedRunAndTask(store: BrainStore, overrides: Partial<Task> = {}): { run
 
 function fixtureConfig(overrides: Partial<BrainConfig> = {}): BrainConfig {
   return {
+    // Required by BrainConfig and missing from this fixture: it was building a
+    // config loadConfig() can never produce, which nothing caught while these
+    // tests sat outside any type-check program.
+    evalsCasesDir: "/nonexistent/eval-cases",
     port: 8100,
     dbPath: ":memory:",
     dataDir: fs.mkdtempSync(path.join(os.tmpdir(), "brain-verbs-cfg-")),

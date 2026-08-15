@@ -41,6 +41,10 @@ async function withServer<T>(run: (fixture: ServerFixture) => Promise<T>, config
   await daemon.start();
 
   const config: BrainConfig = {
+    // Required by BrainConfig and missing from this fixture: it was building a
+    // config loadConfig() can never produce, which nothing caught while these
+    // tests sat outside any type-check program.
+    evalsCasesDir: path.join(dataDir, "eval-cases"),
     port: 0,
     dbPath: path.join(dataDir, "brain.db"),
     dataDir,

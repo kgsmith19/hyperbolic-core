@@ -10,6 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ScriptedFixtureAdapter, createEvalFixtureAdapters } from "../src/adapters/fixture.ts";
+import type { HarnessAdapter } from "../src/adapters/types.ts";
 import type { AdapterInvocation } from "../src/adapters/types.ts";
 
 function invWithTitle(title: string): AdapterInvocation {
@@ -83,7 +84,7 @@ test("ScriptedFixtureAdapter: resume() is scripted the same as start(), not a th
 });
 
 test("ScriptedFixtureAdapter: cancel is a no-op", async () => {
-  const adapter = new ScriptedFixtureAdapter("claude-code");
+  const adapter: HarnessAdapter = new ScriptedFixtureAdapter("claude-code");
   await assert.doesNotReject(() => adapter.cancel("s", 1000));
 });
 

@@ -4,17 +4,17 @@ import type { AddressInfo } from "node:net";
 import { startServer } from "../src/server.ts";
 import type { HandlerConfig } from "../src/types.ts";
 
-type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type FetchImpl = (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response>;
 
 // Same idiom as server.test.ts's own withPatchedFetch: only the server's
 // OUTBOUND calls (Supabase, the provider) are mocked; a request to the
 // loopback server under test falls through to the real fetch.
 async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Promise<T> {
   const original = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
     if (url.includes("127.0.0.1") || url.includes("localhost")) {
-      return original(input as RequestInfo, init);
+      return original(input as Parameters<typeof fetch>[0], init);
     }
     return impl(input, init);
   }) as typeof fetch;
@@ -301,7 +301,7 @@ test("POST /v1/stream: happy path emits SSE text deltas and a done delta, and lo
   ];
   let logCalls = 0;
   await withPatchedFetch(
-    async (input, init) => {
+    async (input) => {
       const url = String(input);
       if (url.includes("is_platform_owner")) return jsonResponse(true);
       if (url.includes("rpc/log_llm_call")) {

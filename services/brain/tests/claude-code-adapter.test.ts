@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { ClaudeCodeAdapter } from "../src/adapters/claude-code.ts";
 import type { TaskContractV1 } from "../src/contracts.ts";
 import type { AdapterInvocation } from "../src/adapters/types.ts";
+import type { HarnessAdapter } from "../src/adapters/types.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FAKE_KERNEL = join(__dirname, "fixtures", "kernel", "fake-run.mjs");
@@ -145,7 +146,7 @@ test("probe(): reports unavailable when the `claude` binary cannot be found (PAT
 });
 
 test("resume(): explicitly unsupported -- throws rather than silently starting an unrelated fresh session", async () => {
-  const a = adapter();
+  const a: HarnessAdapter = adapter();
   await assert.rejects(() => a.resume("some-session", writeInvocation("x")), /resume is not supported/);
 });
 

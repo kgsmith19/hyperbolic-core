@@ -7,6 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { summarizeCostDetails } from "../src/cost-summary.ts";
+import type { CostBucket } from "../src/cost-summary.ts";
 import type { CostDetail } from "../src/store.ts";
 
 function detail(overrides: Partial<CostDetail>): CostDetail {
@@ -25,10 +26,14 @@ function detail(overrides: Partial<CostDetail>): CostDetail {
   };
 }
 
-function findBucket(buckets: { key: string }[], key: string) {
+// Typed against the real CostBucket, not a hand-written `{ key: string }`.
+// With the weaker shape every assertion below except the key one was
+// unchecked -- summarizeCostDetails could rename a field and this file would
+// still compile.
+function findBucket(buckets: CostBucket[], key: string): CostBucket {
   const bucket = buckets.find((b) => b.key === key);
   assert.ok(bucket, `expected a bucket for key "${key}"`);
-  return bucket!;
+  return bucket;
 }
 
 test("summarizeCostDetails: a single row appears once in every one of the four breakdowns", () => {

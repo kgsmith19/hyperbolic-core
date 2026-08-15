@@ -75,7 +75,7 @@ test("brain run --autonomy 2 (no --dry-run): submits for real, exit 0, task left
   try {
     const runs = store.listRuns();
     assert.equal(runs.length, 1);
-    const [task] = store.listTasksForRun(runs[0].id);
+    const [task] = store.listTasksForRun(runs[0]!.id);
     assert.equal(task?.status, "pending");
   } finally {
     store.close();

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { submitIdea, type SubmitDeps } from "../src/intake-submit.ts";
 
-type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type FetchImpl = (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response>;
 
 async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Promise<T> {
   const original = globalThis.fetch;
@@ -44,7 +44,7 @@ function ideaRow(overrides: Record<string, unknown> = {}) {
 /** A router keyed by (method, url substring) -> handler, mirroring the real
  * three endpoints submitIdea() calls: PostgREST select, GitHub list/create,
  * PostgREST RPC write-back. Records every call for call-count assertions. */
-function router(handlers: Array<{ match: (url: string, method: string) => boolean; respond: (url: string, init?: RequestInit) => Response }>) {
+function router(handlers: Array<{ match: (url: string, method: string) => boolean; respond: (url: string, init?: RequestInit) => Response | Promise<Response> }>) {
   const calls: Array<{ url: string; method: string }> = [];
   const impl: FetchImpl = async (input, init) => {
     const url = String(input);
@@ -54,7 +54,7 @@ function router(handlers: Array<{ match: (url: string, method: string) => boolea
     if (!handler) {
       throw new Error(`unexpected fetch call: ${method} ${url}`);
     }
-    return handler.respond(url, init);
+    return await handler.respond(url, init);
   };
   return { impl, calls };
 }

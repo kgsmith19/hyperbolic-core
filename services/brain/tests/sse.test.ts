@@ -48,7 +48,17 @@ test("parseLastEventId: parses a valid numeric header, including from an array (
 
 test("writeSseEvent: writes id/event/data lines per the SSE wire format", () => {
   const res = fakeResponse();
-  writeSseEvent(res as never, 2, { runId: "r1", kind: "run.submitted", ts: "2026-01-01T00:00:00.000Z" });
+  writeSseEvent(res as never, 2, {
+    runId: "r1",
+    kind: "run.submitted",
+    ts: "2026-01-01T00:00:00.000Z",
+    // level, run_id, event and fields are all required by JournalEvent and were
+    // all missing: this fixture was not a value the journal can actually emit.
+    level: "info",
+    run_id: "r1",
+    event: "run.submitted",
+    fields: {},
+  });
   const out = res.writes.join("");
   assert.match(out, /^id: 2\n/);
   assert.match(out, /event: run\.submitted\n/);

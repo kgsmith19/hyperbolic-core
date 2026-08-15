@@ -64,7 +64,7 @@ test("validateTaskContract: a non-default branch name still validates", () => {
 });
 
 test("validateTaskContract: rejects a missing required field", () => {
-  const contract = validContract() as Record<string, unknown>;
+  const contract = validContract() as unknown as Record<string, unknown>;
   delete contract.repo;
   const result = validateTaskContract(contract);
   assert.equal(result.valid, false);
