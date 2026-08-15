@@ -51,7 +51,7 @@ function addFile(file, totals, rates) {
   let text = "";
   try { text = fs.readFileSync(file, "utf8"); } catch { return; }
   for (const line of text.split("\n")) {
-    if (!line || line.charCodeAt(0) !== 123) continue;
+    if (!line || line.charCodeAt(0) !== 123) continue; // fast '{' check
     let o;
     try { o = JSON.parse(line); } catch { continue; }
     if (o.type !== "assistant" || !o.message?.usage) continue;

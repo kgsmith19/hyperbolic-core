@@ -120,7 +120,7 @@ export function lastAssistantText(transcript) {
     const lines = fs.readFileSync(transcript, "utf8").split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
       const l = lines[i];
-      if (!l || l.charCodeAt(0) !== 123) continue;
+      if (!l || l.charCodeAt(0) !== 123) continue; // fast '{' check
       let o;
       try {
         o = JSON.parse(l);
@@ -226,10 +226,8 @@ export function onSessionStart(p, policy, io = PROCESS_IO) {
   } catch {}
 
   lines.push(
-    ...[
     `[ACC] Context budget: soft ${softK}k, hard ${hardK}k. Context is checked after EVERY tool call; past ${hardK}k you will be told to checkpoint and end the turn, and the Stop hook enforces it.`,
-    `[ACC] Helper limits: allowed types ${JSON.stringify(policy.subagents.allow)}; session cap ${policy.subagents.maxPerSession}; temporary fan-out cap ${policy.review.maxFinders}.`,
-    ]
+    `[ACC] Helper limits: allowed types ${JSON.stringify(policy.subagents.allow)}; session cap ${policy.subagents.maxPerSession}; temporary fan-out cap ${policy.review.maxFinders}.`
   );
   inject("SessionStart", lines.join("\n"), io);
 }
