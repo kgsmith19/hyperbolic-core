@@ -1,12 +1,12 @@
 // The LifeOS-zone login gate's decision function (m2-08), mirroring
-// apps/shell/src/lib/auth-gate.ts's `computeGateDecision` shape and its own
+// apps/shell/frontend/src/lib/auth-gate.ts's `computeGateDecision` shape and its own
 // rationale for staying a plain, router-free function: directly
 // unit-testable without mounting a component tree.
 //
 // One real difference from the Shell's version, and it is the whole reason
 // this is not a byte-for-byte copy: the Shell's gate redirects with
 // react-router's client-side `<Navigate>`, because `/login` is one of ITS
-// OWN routes (apps/shell/src/app.tsx). LifeOS has no `/login` route at all
+// OWN routes (apps/shell/frontend/src/app.tsx). LifeOS has no `/login` route at all
 // (Login.tsx is deleted by this issue) -- the Shell owns the one login
 // surface (ADR-03), and LifeOS is a SEPARATE bundle behind a SEPARATE
 // `tailscale serve` mount (docs/planning/05-a-hyperbolic-core.md section 4:

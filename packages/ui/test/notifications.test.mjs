@@ -17,7 +17,7 @@
 // to each OTHER but never echo to the sender -- so the transport tests here
 // exercise a real channel, not a mock. They are still not the cross-DOCUMENT
 // proof: that one needs two real pages and lives in
-// apps/shell/e2e/notifications.spec.ts.
+// apps/shell/frontend/e2e/notifications.spec.ts.
 
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -457,7 +457,7 @@ describe("cross-zone transport over BroadcastChannel", () => {
    * occasionally exceeded it. Timing under a bound is still asserted -- the
    * 500ms ceiling below is what fails the test if delivery never happens --
    * and the real, calibrated latency assertion for this transport is the
-   * two-page one in apps/shell/e2e/notifications.spec.ts, measured in a
+   * two-page one in apps/shell/frontend/e2e/notifications.spec.ts, measured in a
    * browser against a wall clock.
    */
   async function waitFor(predicate, timeoutMs = 500) {

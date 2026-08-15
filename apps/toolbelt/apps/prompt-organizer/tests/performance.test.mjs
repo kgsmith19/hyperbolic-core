@@ -291,7 +291,7 @@ test(
       const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
       const max = samples[samples.length - 1];
 
-      // Same "[perf] ..." console.log convention as apps/shell/e2e/tools.spec.ts's
+      // Same "[perf] ..." console.log convention as apps/shell/frontend/e2e/tools.spec.ts's
       // perf tests, so a CI log always shows the real measured numbers even
       // when the assertion passes comfortably.
       console.log(

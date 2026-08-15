@@ -11,7 +11,7 @@
 // by real SQL. No `postgrest` binary is
 // installed in this sandbox (confirmed: `which postgrest` finds nothing), so
 // this file takes the shim route, following
-// apps/shell/e2e/support/registry-fixture.ts's (m3-04) established pattern:
+// apps/shell/frontend/e2e/support/registry-fixture.ts's (m3-04) established pattern:
 // a real disposable database, real migrations applied verbatim via `psql
 // -f`, and a tiny node:http server that turns PostgREST-shaped querystrings
 // into real SQL against that real database.

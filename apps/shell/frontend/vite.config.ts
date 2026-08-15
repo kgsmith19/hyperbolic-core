@@ -6,7 +6,9 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const here = import.meta.dirname;
-const pkg: unknown = JSON.parse(readFileSync(path.join(here, "package.json"), "utf8"));
+// package.json stays at the app root (apps/shell/), one level above this
+// frontend/ tree -- it is the npm workspace member, not a frontend file.
+const pkg: unknown = JSON.parse(readFileSync(path.join(here, "..", "package.json"), "utf8"));
 
 /**
  * Finding #72 (PR #8 security review): package.json previously had no
@@ -50,6 +52,11 @@ const BUILD_SHA = JSON.stringify(gitSha());
 const BUILD_TIME = JSON.stringify(new Date().toISOString());
 
 export default defineConfig({
+  // Pinned to this file's own directory rather than left to default to the
+  // process cwd: every command runs from the app root (apps/shell/, where
+  // package.json lives) while the whole frontend tree -- index.html, src/,
+  // e2e/, and the dist/ build output -- sits one level down in frontend/.
+  root: here,
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(here, "src") } },
   define: {

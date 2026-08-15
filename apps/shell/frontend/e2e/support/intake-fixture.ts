@@ -9,7 +9,7 @@
 // reimplementation.
 //
 // A small local HTTP server then answers the exact PostgREST-shaped
-// requests this repo's own two real callers send -- apps/shell/src/lib/intake.ts
+// requests this repo's own two real callers send -- apps/shell/frontend/src/lib/intake.ts
 // (GET/POST/PATCH/DELETE .../rest/v1/idea, caller-JWT-shaped) and
 // services/llm-handler/src/postgrest.ts (the same GET, plus
 // POST .../rpc/mark_submitted_to_github, service-role-key-shaped) -- by

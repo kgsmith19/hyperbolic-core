@@ -9,7 +9,7 @@
 //    packages/llm's createPromptClient: that barrel also re-exports the
 //    three provider drivers, which would drag @anthropic-ai/sdk et al into
 //    this bundle for zero benefit -- see packages/llm/src/index.ts's own
-//    header comment and apps/shell/src/lib/prompts.ts's identical
+//    header comment and apps/shell/frontend/src/lib/prompts.ts's identical
 //    "deliberately NOT... packages/llm" precedent).
 // 2. POST /api/v1/complete (services/llm-handler, m4-05) runs the actual
 //    completion through the general-purpose handler -- platformClient.fetch

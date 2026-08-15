@@ -59,7 +59,7 @@ jobs:
         run: npm run build --workspace=packages/ui
 
       - name: Type-check apps/shell
-        run: npx tsc -b apps/shell
+        run: npx tsc -b apps/shell/frontend
 
       - name: Type-check packages/platform-client
         run: npm run typecheck --workspace=packages/platform-client
@@ -130,7 +130,7 @@ jobs:
         with:
           name: shell-e2e-evidence
           path: |
-            apps/shell/playwright-report/
-            apps/shell/test-results/
+            apps/shell/frontend/playwright-report/
+            apps/shell/frontend/test-results/
           if-no-files-found: ignore
           retention-days: 14

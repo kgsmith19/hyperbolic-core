@@ -19,7 +19,7 @@
 //     `VITE_SUPABASE_URL=https://test.supabase.co` (playwright.config.ts's
 //     `webServer.env`) -- `src/lib/session.ts`'s `platformClient` reads
 //     that key on `getSession()`, the same mechanism
-//     apps/shell/e2e/support/auth.ts's `mockAuth()` exercises for the
+//     apps/shell/frontend/e2e/support/auth.ts's `mockAuth()` exercises for the
 //     Shell's own login form, just seeded directly here since this zone has
 //     no form of its own to submit through (LO-2b).
 import { expect, test, type Page } from "@playwright/test";
@@ -50,7 +50,7 @@ async function signIn(page: Page) {
   // platform-client's enforceOwner() calls core.is_platform_owner() via a
   // raw fetch on every session resolution path (getSession,
   // onAuthStateChange -- packages/platform-client/src/index.ts's
-  // isOwnerSession()), the same mock apps/shell/e2e/support/auth.ts's own
+  // isOwnerSession()), the same mock apps/shell/frontend/e2e/support/auth.ts's own
   // mockAuth() already has to carry for every Shell spec. Without it here
   // too, that fetch reaches nothing this sandbox can answer and the owner
   // check fails closed -- every page below renders "signed out" instead
@@ -119,7 +119,7 @@ test("redirects toward the Shell's login when signed out", async ({ page }) => {
   // one thing that is actually this zone's responsibility: the gate fires
   // and the browser is actually sent to "/login" carrying the originally
   // requested "/life" path, not that the Shell's login page itself renders
-  // (apps/shell/e2e/auth-gate.spec.ts already covers that page, for the
+  // (apps/shell/frontend/e2e/auth-gate.spec.ts already covers that page, for the
   // Shell's own routes).
   await page.goto("/life/capture");
   await page.waitForURL((url) => url.pathname === "/login");

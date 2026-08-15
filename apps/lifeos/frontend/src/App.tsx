@@ -2,7 +2,7 @@
 // Chrome adoption from packages/ui (contract C-3) and session from
 // packages/platform-client, replacing this file's own `Shell` header/nav
 // and `useSession`/`supabase` login gate. Mirrors
-// apps/shell/src/components/protected-layout.tsx's pattern -- see
+// apps/shell/frontend/src/components/protected-layout.tsx's pattern -- see
 // src/lib/session.ts and src/lib/auth-gate.ts's own comments for the two
 // real differences (no `signIn`, and a full-document redirect instead of a
 // client-side one) forced by LifeOS being a separate zone bundle rather
@@ -60,14 +60,14 @@ function Gate() {
     // Renders neither the zone's content nor a login form for either
     // "loading" or "redirect-to-shell-login" -- the same "no flash of
     // gated content before redirect" property
-    // apps/shell/src/components/protected-layout.tsx documents for its own
+    // apps/shell/frontend/src/components/protected-layout.tsx documents for its own
     // identical two non-"render" branches.
     return <div className="min-h-dvh bg-bg" data-testid="auth-checking" />;
   }
 
   return (
     <Chrome activeZone="life" session={session} onSignOut={signOut}>
-      {/* Mirrors apps/shell/src/components/protected-layout.tsx's own
+      {/* Mirrors apps/shell/frontend/src/components/protected-layout.tsx's own
           `[data-app-data]` marker: this whole subtree does not exist in the
           DOM for any status other than "signed-in" (see the branch above),
           so its mere presence is what an e2e assertion checks for "gated

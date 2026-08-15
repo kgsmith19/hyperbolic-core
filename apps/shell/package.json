@@ -8,15 +8,15 @@
     "node": ">=22.22.0"
   },
   "scripts": {
-    "dev": "vite",
-    "build:app": "tsc -b && vite build",
+    "dev": "vite --config frontend/vite.config.ts",
+    "build:app": "tsc -b frontend && vite build --config frontend/vite.config.ts",
     "build": "npm run build --workspace=@hyperbolic/ui && npm run build:app",
-    "preview": "vite preview",
-    "test:unit": "vitest run",
+    "preview": "vite preview --config frontend/vite.config.ts",
+    "test:unit": "vitest run --config frontend/vite.config.ts",
     "test": "npm run build --workspace=@hyperbolic/ui && npm run test:unit",
-    "e2e": "playwright test",
-    "size-check": "node test/size-check.mjs",
-    "healthz-check": "node test/healthz-check.mjs"
+    "e2e": "playwright test --config frontend/playwright.config.ts",
+    "size-check": "node frontend/test/size-check.mjs",
+    "healthz-check": "node frontend/test/healthz-check.mjs"
   },
   "dependencies": {
     "@hyperbolic/platform-client": "*",

@@ -7,6 +7,7 @@ project:
     - typescript
     - css
   has_backend: false  # owns no schema and runs no server; see AGENTS.md
+  frontend_root: frontend  # all frontend work lives here; package.json stays at the app root
 
 commands:
   dev: npm run dev

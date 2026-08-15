@@ -44,7 +44,7 @@ function fixtureRow(overrides: Partial<Record<string, unknown>> = {}) {
 // --- buildListToolsParams: pure filter-building logic -----------------------
 // This is one of the two places the issue's own testing bar names as where a
 // bug would silently leak or hide a tool (the other is the Shell's
-// route-vs-status-page split, apps/shell/src/lib/registry.ts's splitByRoute).
+// route-vs-status-page split, apps/shell/frontend/src/lib/registry.ts's splitByRoute).
 
 test("buildListToolsParams: no filter omits status/kind entirely (unfiltered, not zero-match)", () => {
   const params = buildListToolsParams();

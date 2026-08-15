@@ -4,7 +4,7 @@
 // that ever performs a password sign-in (LO-2b's grep contract -- see this
 // issue's report for the exact command; deliberately not spelled out
 // verbatim in this comment, since that string is itself what the grep
-// matches on); this module mirrors apps/shell/src/lib/session.ts's own
+// matches on); this module mirrors apps/shell/frontend/src/lib/session.ts's own
 // construction of
 // `createPlatformClient` almost verbatim, deliberately -- "Session from
 // packages/platform-client" (this issue's own scope line) means LifeOS
@@ -31,7 +31,7 @@ import {
 // ADR-03: the toolbelt Supabase project (woltgcggxaehtuypkxqk) is the
 // platform IdP that every zone -- Shell and LifeOS alike -- re-points to
 // (docs/planning/05-e-lifeos.md section 4 steps 1-3). These are the exact
-// same public defaults apps/shell/src/lib/session.ts hardcodes for the
+// same public defaults apps/shell/frontend/src/lib/session.ts hardcodes for the
 // identical reason (that file's own comment: "the anon key is designed for
 // client-side exposure, RLS is the actual boundary") -- VITE_SUPABASE_URL /
 // VITE_SUPABASE_PUBLISHABLE_KEY (frontend/.env.example) override for a
@@ -58,13 +58,13 @@ export interface LifeOsSession {
    * "checking": the one `getSession()` call this hook owns hasn't resolved
    * yet -- App.tsx's gate renders neither the zone's content nor triggers
    * the redirect-to-login navigation while this holds, matching
-   * apps/shell/src/components/protected-layout.tsx's own "no flash of
+   * apps/shell/frontend/src/components/protected-layout.tsx's own "no flash of
    * gated content before redirect".
    */
   status: SessionStatus;
   session: PlatformSession | null;
   /**
-   * Deliberately NO `signIn` here (contrast with apps/shell/src/lib/session.ts's
+   * Deliberately NO `signIn` here (contrast with apps/shell/frontend/src/lib/session.ts's
    * `ShellSession.signIn`): LifeOS has no login form to call it from
    * (Login.tsx is deleted by this same issue) and must never grow one --
    * that is the one-sentence version of LO-2b.

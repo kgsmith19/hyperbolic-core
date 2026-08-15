@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error -- plain .mjs, no type declarations; imported only for
 // this file's runtime parity check against the TS port below.
-import * as original from "../../../toolbelt/apps/prompt-organizer/web/search.mjs";
+import * as original from "../../../../toolbelt/apps/prompt-organizer/web/search.mjs";
 import { filterByActive, searchPrompts, shouldFocusSearch, toggleTagFilter } from "./prompt-search";
 import type { Prompt } from "./prompts";
 

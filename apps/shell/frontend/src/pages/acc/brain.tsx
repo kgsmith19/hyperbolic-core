@@ -1,6 +1,6 @@
 // The Brain run/chat surface (m4-16, docs/planning/issues/m4-16-feat-shell-
 // brain-surface.md; anatomy per docs/planning/09-design-system.md section
-// 7.1). Mounted at /acc/brain (apps/shell/src/pages/acc.tsx).
+// 7.1). Mounted at /acc/brain (apps/shell/frontend/src/pages/acc.tsx).
 //
 // Real API-shape constraint, stated once here: services/brain's HTTP API
 // (m4-14) has no "list all runs" route -- only POST /runs (create) and GET

@@ -18,7 +18,7 @@ name: "Shell IdP-Down (manual, real backoff timing)"
 # with no real or fake-timer wait needed at all, since apps/shell's own
 # useShellSession hook has no retry/backoff of its own to fake) still runs
 # on every PR via shell-ci.yml's ordinary "Unit tests: apps/shell (vitest)"
-# step: apps/shell/src/idp-down-contract.test.tsx. What ONLY this workflow
+# step: apps/shell/frontend/src/idp-down-contract.test.tsx. What ONLY this workflow
 # proves is the real backoff TIMING itself against a real browser -- run it
 # by hand after touching auth/session code, or on a schedule if that
 # coverage gap is ever felt in practice.

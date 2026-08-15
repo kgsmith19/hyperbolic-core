@@ -34,7 +34,7 @@ import { mockAuth, blockIdp, fillAndSubmitLogin } from "./support/auth";
 // half of the exact same UI contract this file proves -- fail-closed
 // getSession() redirects to /login, no chrome, no data nodes, no real or
 // fake-timer wait needed -- still runs on every PR:
-// apps/shell/src/idp-down-contract.test.tsx (vitest).
+// apps/shell/frontend/src/idp-down-contract.test.tsx (vitest).
 test.describe("Fail-closed while the IdP is unreachable (SH-6)", () => {
   test("a cached session with an expired token redirects to login instead of rendering gated content, once the IdP is unreachable", async ({
     page,

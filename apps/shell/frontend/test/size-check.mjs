@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Size-check gate for apps/shell (docs/planning/09-design-system.md
 // section 6: "Shell initial JS (entry + shared chunks to first render):
-// 250 KB gz ... size script in CI over apps/shell/dist").
+// 250 KB gz ... size script in CI over apps/shell/frontend/dist").
 //
 // This measures the REAL production build output, not a probe bundle
 // (unlike packages/ui/test/size-check.mjs, which builds a synthetic probe
@@ -95,7 +95,7 @@ async function main() {
     measured.push({ file: relPath, raw: content.length, gzip: gz.length });
   }
 
-  console.log("[size-check] apps/shell/dist initial JS (entry + modulepreload chunks referenced by index.html):");
+  console.log("[size-check] apps/shell/frontend/dist initial JS (entry + modulepreload chunks referenced by index.html):");
   for (const m of measured) {
     console.log(`  ${m.file.padEnd(32)} raw ${fmtKb(m.raw).padStart(10)}  gzip ${fmtKb(m.gzip).padStart(10)}`);
   }

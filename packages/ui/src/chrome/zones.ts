@@ -34,7 +34,7 @@ export interface ZoneEntry {
    * Finding #70 (PR #8 security review): marks entries that are NOT part of
    * this SPA's own router at all -- currently just `life`, LifeOS being a
    * wholly separate zone stitched in at the infrastructure level (see
-   * apps/shell/src/pages/home.tsx's identically-named, identically-scoped
+   * apps/shell/frontend/src/pages/home.tsx's identically-named, identically-scoped
    * `hardNavigate` flag on its own LAUNCHERS table, added for that same
    * P1 fix; this mirrors it exactly rather than inventing a second
    * mechanism). Every other zone entry is a genuine Shell route and is

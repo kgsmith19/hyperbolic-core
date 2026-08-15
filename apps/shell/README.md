@@ -26,16 +26,14 @@ npm run size-check     # 250 KB gzipped budget
 ## Layout
 
 ```
-src/app.tsx        route table and the app shell
-src/main.tsx       entry point
-src/pages/         one directory per zone
-src/components/    shared presentational components
-src/lib/           typed clients, hooks, and pure helpers
-e2e/               Playwright specs
-test/              standalone check scripts (bundle size, healthz)
+package.json          workspace member; every script lives here
+frontend/src/         app shell, pages, components, and lib helpers
+frontend/e2e/         Playwright specs
+frontend/test/        standalone check scripts (bundle size, healthz)
 ```
 
-This app is frontend-only. It owns no schema and runs no server: everything it
-renders comes from `packages/platform-client`, `services/llm-handler`, or
-ACC's loopback API. See `AGENTS.md` for why there is no `backend/` here and
-`TEST_LEDGER.md` for the suites.
+All frontend work lives under `frontend/`, the same rule every app follows.
+There is no `backend/` because this app owns no schema and runs no server:
+everything it renders comes from `packages/platform-client`,
+`services/llm-handler`, or ACC's loopback API. See `AGENTS.md` for the
+boundary and `TEST_LEDGER.md` for the suites.

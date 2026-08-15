@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error -- plain .mjs, no type declarations; imported only for
 // this file's runtime parity check against the TS port below.
-import * as original from "../../../toolbelt/apps/prompt-organizer/web/render.mjs";
+import * as original from "../../../../toolbelt/apps/prompt-organizer/web/render.mjs";
 import { extractSections, extractVariables, render } from "./prompt-render";
 
 describe("parity with web/render.mjs", () => {

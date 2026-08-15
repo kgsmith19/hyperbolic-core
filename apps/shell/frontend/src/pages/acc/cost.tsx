@@ -1,5 +1,5 @@
 // The platform cost dashboard (m6-02). Mounted at /acc/cost
-// (apps/shell/src/pages/acc.tsx), alongside the Brain run/chat surface
+// (apps/shell/frontend/src/pages/acc.tsx), alongside the Brain run/chat surface
 // (m4-16) in the same /acc area since both read Brain-owned telemetry.
 //
 // Three panels: Brain cost (per run, rolled up per day -- core.cost's own

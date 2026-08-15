@@ -17,8 +17,8 @@
 //      dependency" boundary services/llm-handler's own unit tests already
 //      draw (tests/github-client.test.ts).
 import { createServer, type Server } from "node:http";
-import { createHandler } from "../../../../services/llm-handler/src/server.ts";
-import type { HandlerConfig } from "../../../../services/llm-handler/src/types.ts";
+import { createHandler } from "../../../../../services/llm-handler/src/server.ts";
+import type { HandlerConfig } from "../../../../../services/llm-handler/src/types.ts";
 
 export interface FixtureCreatedIssue {
   number: number;
