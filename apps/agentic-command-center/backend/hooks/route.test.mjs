@@ -8,7 +8,19 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 process.env.ACC_ROUTING_MD ||= path.join(here, "fixtures", "ROUTING.md");
-const { doctor, route, scanRoots } = await import("./route.mjs");
+const { DEFAULT_TABLE, doctor, route, scanRoots } = await import("./route.mjs");
+
+// Every other test in this file sets ACC_ROUTING_MD, so nothing here ever
+// exercised the built-in default -- which is exactly how it came to point at
+// <checkout>/apps/ROUTING.md (a path that never exists) when ACC was imported
+// into the monorepo as a subtree, breaking /api/route/suggest in production
+// while the suite stayed green. The table is machine-local and uncommitted,
+// so its existence cannot be asserted; where the default resolves to can.
+test("the built-in routing-table default resolves beside the checkout, never inside it", () => {
+  const checkout = path.resolve(here, "..", "..", "..", "..");
+  assert.equal(DEFAULT_TABLE, path.join(path.dirname(checkout), "ROUTING.md"));
+  assert.ok(!DEFAULT_TABLE.startsWith(checkout + path.sep), `default must not resolve inside the checkout: ${DEFAULT_TABLE}`);
+});
 
 test("backend and frontend tasks route to their LifeOS monorepo slices", () => {
   assert.equal(route("add a supabase migration and pytest").label, "lifeos-backend");
@@ -64,6 +76,23 @@ test("--text fails safely when the route table is invalid", () => {
   );
   assert.match(JSON.parse(output).error, /no json block/);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("--text names ACC_ROUTING_MD when the route table is missing entirely", () => {
+  // A table that is unreadable rather than malformed is the case that broke
+  // silently after the monorepo import: a bare ENOENT gives the caller
+  // nothing to act on, so the message has to name the override.
+  const missing = path.join(os.tmpdir(), "acc-route-absent", "ROUTING.md");
+  const output = execFileSync(
+    process.execPath,
+    [path.join(here, "route.mjs"), "--text", "anything"],
+    { encoding: "utf8", env: { ...process.env, ACC_ROUTING_MD: missing } },
+  );
+  const result = JSON.parse(output);
+  assert.equal(result.path, null);
+  assert.match(result.error, /cannot read routing table/);
+  assert.match(result.error, /ACC_ROUTING_MD/);
+  assert.match(result.error, /ENOENT/);
 });
 
 test("doctor requires an exact route for each repository", () => {

@@ -4,37 +4,24 @@ import { openaiDriver } from "../src/drivers/openai.ts";
 import { complete } from "../src/complete.ts";
 import { MAX_RETRIES } from "../src/retry.ts";
 import { isLlmError } from "../src/errors.ts";
-import type { LlmDelta, LlmErrorClass, LlmRequest } from "../src/types.ts";
+import type { LlmDelta, LlmRequest } from "../src/types.ts";
+import {
+  collectStream,
+  jsonResponse,
+  pacedSseResponse as rawPacedSseResponse,
+  sseResponse as rawSseResponse,
+  tickInSteps,
+  withPatchedFetch,
+  type SseOptions,
+} from "./driver-harness.ts";
 
 // ---------------------------------------------------------------------------
-// Fixtures and fake-transport helpers. Same idiom as anthropic-driver.test.ts:
-// no real network call happens in this file -- every test patches
-// globalThis.fetch for its duration and lets the real `openai` SDK run
-// against that fake transport.
+// OpenAI-specific wire fixtures. The transport plumbing (fetch patching,
+// fake-clock stepping, SSE body construction) is shared -- see
+// driver-harness.ts. Provider-agnostic behavior (auth refusal, error
+// classification, connection failure) lives in driver-conformance.test.ts;
+// this file covers only what is genuinely OpenAI-shaped.
 // ---------------------------------------------------------------------------
-
-type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
-async function tickInSteps(t: { mock: { timers: { tick(ms: number): void } } }, totalMs: number, stepMs = 250): Promise<void> {
-  for (let advanced = 0; advanced < totalMs; advanced += stepMs) {
-    t.mock.timers.tick(Math.min(stepMs, totalMs - advanced));
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-}
-
-async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Promise<T> {
-  const original = globalThis.fetch;
-  globalThis.fetch = impl as typeof fetch;
-  try {
-    return await run();
-  } finally {
-    globalThis.fetch = original;
-  }
-}
-
-function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
-}
 
 /** OpenAI's wire error shape: {"error": {"message", "type", "param", "code"}}. */
 function openaiErrorResponse(status: number, message: string, headers: Record<string, string> = {}): Response {
@@ -64,41 +51,12 @@ function sseLine(data: unknown): string {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
 
-/** Builds a fake SSE Response for Chat Completions' `data: {...}\n\n` /
- * `data: [DONE]\n\n` framing. When `holdOpen` is true the stream is left
- * open after emitting `events` and only terminates when the caller's
- * AbortSignal fires -- same idiom as anthropic-driver.test.ts's sseResponse. */
-function sseResponse(events: unknown[], opts: { signal?: AbortSignal | null; holdOpen?: boolean } = {}): Response {
-  const encoder = new TextEncoder();
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const e of events) {
-        controller.enqueue(encoder.encode(sseLine(e)));
-      }
-      if (!opts.holdOpen) {
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        controller.close();
-        return;
-      }
-      const signal = opts.signal;
-      if (!signal) {
-        return; // held open forever; only used in tests that abort explicitly
-      }
-      const errorStream = () => {
-        try {
-          controller.error(new DOMException("The operation was aborted.", "AbortError"));
-        } catch {
-          // already closed/errored -- fine, nothing left to signal.
-        }
-      };
-      if (signal.aborted) {
-        errorStream();
-      } else {
-        signal.addEventListener("abort", errorStream);
-      }
-    },
-  });
-  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+/** Chat Completions frames chunks as bare `data: {...}` and terminates the
+ * stream with a `data: [DONE]` sentinel. */
+const OPENAI_DONE = "data: [DONE]\n\n";
+
+function sseResponse(events: unknown[], opts: SseOptions = {}): Response {
+  return rawSseResponse(events.map(sseLine), { terminator: OPENAI_DONE, ...opts });
 }
 
 const BASE_REQUEST: LlmRequest = {
@@ -110,34 +68,10 @@ const BASE_REQUEST: LlmRequest = {
   timeoutMs: 30_000,
 };
 
-async function collectStream(gen: AsyncGenerator<LlmDelta, void, unknown>): Promise<LlmDelta[]> {
-  const collected: LlmDelta[] = [];
-  for await (const delta of gen) {
-    collected.push(delta);
-  }
-  return collected;
-}
 
 // ---------------------------------------------------------------------------
 // Zero key handling: defensive check, no network call
 // ---------------------------------------------------------------------------
-
-test("openaiDriver.complete: rejects with no API key before any network call", async () => {
-  let fetchCalls = 0;
-  await withPatchedFetch(
-    async () => {
-      fetchCalls += 1;
-      throw new Error("must not be called");
-    },
-    async () => {
-      await assert.rejects(
-        () => openaiDriver.complete(BASE_REQUEST, { apiKey: "" }),
-        (error: { class: string }) => error.class === "invalid_request",
-      );
-    },
-  );
-  assert.equal(fetchCalls, 0);
-});
 
 // ---------------------------------------------------------------------------
 // Non-streaming: success, request mapping, response mapping
@@ -366,108 +300,10 @@ test("openaiDriver.complete: malformed choice or model fields are provider_bug r
   }
 });
 
-test("openaiDriver.complete: the existing refusal (message.refusal) path still works unchanged -- not reclassified as provider_bug", async () => {
-  const response = await withPatchedFetch(
-    async () =>
-      jsonResponse(
-        fixtureChatCompletion({
-          choices: [{ index: 0, finish_reason: "stop", logprobs: null, message: { role: "assistant", content: null, refusal: "I can't help with that." } }],
-        }),
-      ),
-    () => openaiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
-  );
-  assert.equal(response.stopReason, "refusal");
-  assert.equal(response.text, "I can't help with that.");
-});
-
-test("openaiDriver.complete: the existing content_filter path still works unchanged -- not reclassified as provider_bug", async () => {
-  const response = await withPatchedFetch(
-    async () =>
-      jsonResponse(
-        fixtureChatCompletion({
-          choices: [{ index: 0, finish_reason: "content_filter", logprobs: null, message: { role: "assistant", content: null, refusal: null } }],
-        }),
-      ),
-    () => openaiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
-  );
-  assert.equal(response.stopReason, "refusal");
-});
-
 // ---------------------------------------------------------------------------
 // Error taxonomy + retry, exercised through the real driver via complete()
 // ---------------------------------------------------------------------------
 
-const CLASSIFICATION_CASES: Array<{ status: number; expectClass: LlmErrorClass; expectRetryable: boolean }> = [
-  { status: 400, expectClass: "invalid_request", expectRetryable: false },
-  { status: 401, expectClass: "auth", expectRetryable: false },
-  { status: 403, expectClass: "auth", expectRetryable: false },
-  { status: 404, expectClass: "invalid_request", expectRetryable: false },
-  { status: 409, expectClass: "invalid_request", expectRetryable: false },
-  { status: 422, expectClass: "invalid_request", expectRetryable: false },
-  { status: 429, expectClass: "rate_limit", expectRetryable: true },
-  { status: 500, expectClass: "transport", expectRetryable: true },
-  // No SDK-named subclass exists for 402/408: falls through to the generic
-  // OpenAI.APIError branch's status-based classification.
-  { status: 402, expectClass: "invalid_request", expectRetryable: false },
-  { status: 408, expectClass: "transport", expectRetryable: true },
-];
-
-test("complete(): classifies every documented OpenAI error status and retries only the retryable classes exactly MAX_RETRIES times", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  for (const testCase of CLASSIFICATION_CASES) {
-    let fetchCalls = 0;
-    const promise = withPatchedFetch(
-      async () => {
-        fetchCalls += 1;
-        return openaiErrorResponse(testCase.status, `status ${testCase.status} fixture`);
-      },
-      () => complete(BASE_REQUEST, { openai: { apiKey: "fixture-key" } }, { drivers: { openai: openaiDriver } }),
-    );
-    let settled: { ok: boolean; error?: { class: string; retryable: boolean } } | undefined;
-    promise.then(
-      () => (settled = { ok: true }),
-      (error) => (settled = { ok: false, error }),
-    );
-    for (let i = 0; i < 20 && !settled; i++) {
-      t.mock.timers.tick(1000);
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    await promise.catch(() => undefined);
-    assert.ok(settled, `case ${testCase.status} never settled`);
-    assert.equal(settled?.ok, false, `case ${testCase.status} should reject`);
-    assert.ok(isLlmError(settled?.error), `case ${testCase.status} must throw a genuinely typed LlmError`);
-    assert.equal(settled?.error?.class, testCase.expectClass, `case ${testCase.status} class`);
-    assert.equal(settled?.error?.retryable, testCase.expectRetryable, `case ${testCase.status} retryable`);
-    assert.equal(fetchCalls, testCase.expectRetryable ? MAX_RETRIES + 1 : 1, `case ${testCase.status} attempt count`);
-  }
-});
-
-test("complete(): a raw connection failure (fetch rejects) classifies as transport and retries", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  let fetchCalls = 0;
-  const promise = withPatchedFetch(
-    async () => {
-      fetchCalls += 1;
-      throw new TypeError("fetch failed");
-    },
-    () => complete(BASE_REQUEST, { openai: { apiKey: "fixture-key" } }, { drivers: { openai: openaiDriver } }),
-  );
-  let settled: { ok: boolean; error?: { class: string; retryable: boolean } } | undefined;
-  promise.then(
-    () => (settled = { ok: true }),
-    (error) => (settled = { ok: false, error }),
-  );
-  for (let i = 0; i < 20 && !settled; i++) {
-    t.mock.timers.tick(1000);
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  await promise.catch(() => undefined);
-  assert.equal(settled?.ok, false);
-  assert.ok(isLlmError(settled?.error));
-  assert.equal(settled?.error?.class, "transport");
-  assert.equal(settled?.error?.retryable, true);
-  assert.equal(fetchCalls, MAX_RETRIES + 1);
-});
 
 test("complete(): honors a 429 retry-after header verbatim, not the computed backoff, then recovers", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -736,58 +572,11 @@ test("openaiDriver.stream: aborts as transport when no delta arrives for 60 seco
 /** Like sseResponse, but chunks are enqueued at scheduled fake-clock offsets
  * (via global setTimeout, driven by t.mock.timers) instead of all at once at
  * stream start. */
-function pacedSseResponse(scheduled: Array<{ atMs: number; data: unknown }>, opts: { signal?: AbortSignal | null; closeAfterMs?: number } = {}): Response {
-  const encoder = new TextEncoder();
-  const timers: ReturnType<typeof setTimeout>[] = [];
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const item of scheduled) {
-        timers.push(
-          setTimeout(() => {
-            try {
-              controller.enqueue(encoder.encode(sseLine(item.data)));
-            } catch {
-              // stream already closed/errored -- nothing left to enqueue into.
-            }
-          }, item.atMs),
-        );
-      }
-      if (opts.closeAfterMs !== undefined) {
-        timers.push(
-          setTimeout(() => {
-            try {
-              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-              controller.close();
-            } catch {
-              // already closed/errored
-            }
-          }, opts.closeAfterMs),
-        );
-      }
-      const signal = opts.signal;
-      if (!signal) {
-        return; // no close scheduled and no signal: held open until the test ends
-      }
-      const errorStream = () => {
-        try {
-          controller.error(new DOMException("The operation was aborted.", "AbortError"));
-        } catch {
-          // already closed/errored -- fine, nothing left to signal.
-        }
-      };
-      if (signal.aborted) {
-        errorStream();
-      } else {
-        signal.addEventListener("abort", errorStream);
-      }
-    },
-    cancel() {
-      for (const timer of timers) {
-        clearTimeout(timer);
-      }
-    },
-  });
-  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+function pacedSseResponse(scheduled: Array<{ atMs: number; data: unknown }>, opts: SseOptions & { closeAfterMs?: number } = {}): Response {
+  return rawPacedSseResponse(
+    scheduled.map((item) => ({ atMs: item.atMs, chunk: sseLine(item.data) })),
+    { terminator: OPENAI_DONE, ...opts },
+  );
 }
 
 /** A chunk carrying no content, no tool_calls, and no usage -- a real,

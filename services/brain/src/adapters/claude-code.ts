@@ -22,7 +22,7 @@ import type { TaskContractV1 } from "../contracts.ts";
 const execFileAsync = promisify(execFile);
 
 export interface ClaudeCodeAdapterConfig {
-  /** Absolute path to apps/agentic-command-center/kernel/run.mjs. */
+  /** Absolute path to apps/agentic-command-center/backend/kernel/run.mjs. */
   kernelRunPath: string;
   /** ACC_ROOT: an isolated tree for the Brain's own ledger/kernel-runs
    * scratch state (07 section 7.6's telemetry mirror is separate; this is

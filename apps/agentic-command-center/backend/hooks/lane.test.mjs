@@ -327,19 +327,37 @@ test("retry backoff is full jitter — delay can land anywhere from 0 up to the 
   setPolicy(BASELINE);
 });
 
-test("529/overloaded failures use overloadBaseMs, not backoffBaseMs", async () => {
-  setPolicy({ slots: 1, minGapMs: 0, retries: 1, backoffBaseMs: 1, overloadBaseMs: 5000, backoffCapMs: 5000, pollMs: 20 });
+// Each half sets the base it EXPECTS to be picked to 1ms and the other to
+// 5000ms, then asserts the retries were fast. Reading the wrong base makes a
+// single retry U(0, 5000); across 8 samples, the chance the broken branch
+// still finishes under 500ms total is (0.1^8)/8! ~= 2.5e-13. So the passing
+// run costs single-digit milliseconds and only a genuine regression is slow.
+// (An earlier version of this test asserted only `calls === 2`, which passes
+// with either base and proved nothing about which one was read.)
+async function elapsedOver(samples, failureText) {
   const t0 = Date.now();
-  let calls = 0;
-  await retryTransport("overload-base", async () => {
-    calls++;
-    return calls === 1 ? { code: 1, err: "api error: 529 overloaded_error" } : { code: 0 };
-  });
-  // base=1 would make this near-instant; overloadBaseMs=5000 with cap=5000
-  // means the single retry's delay is U(0, 5000) — not a tight bound, but
-  // enough headroom (>=50ms) to prove it picked the overload base at all,
-  // without making the test itself slow or flaky in the common case.
-  assert.equal(calls, 2);
+  for (let s = 0; s < samples; s++) {
+    let calls = 0;
+    await retryTransport("backoff-base", async () => {
+      calls++;
+      return calls === 1 ? { code: 1, err: failureText } : { code: 0 };
+    });
+    assert.equal(calls, 2, "each sample must actually retry once");
+  }
+  return Date.now() - t0;
+}
+
+test("529/overloaded failures back off on overloadBaseMs, not backoffBaseMs", async () => {
+  setPolicy({ slots: 1, minGapMs: 0, retries: 1, backoffBaseMs: 5000, overloadBaseMs: 1, backoffCapMs: 5000, pollMs: 20 });
+  const elapsed = await elapsedOver(8, "api error: 529 overloaded_error");
+  assert.ok(elapsed < 500, `overload retries must use overloadBaseMs=1, but 8 retries took ${elapsed}ms`);
+  setPolicy(BASELINE);
+});
+
+test("non-overload transport failures back off on backoffBaseMs, not overloadBaseMs", async () => {
+  setPolicy({ slots: 1, minGapMs: 0, retries: 1, backoffBaseMs: 1, overloadBaseMs: 5000, backoffCapMs: 5000, pollMs: 20 });
+  const elapsed = await elapsedOver(8, "econnreset while talking to the API");
+  assert.ok(elapsed < 500, `non-overload retries must use backoffBaseMs=1, but 8 retries took ${elapsed}ms`);
   setPolicy(BASELINE);
 });
 

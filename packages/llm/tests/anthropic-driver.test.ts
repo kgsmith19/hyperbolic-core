@@ -5,40 +5,23 @@ import { complete } from "../src/complete.ts";
 import { isLlmError } from "../src/errors.ts";
 import { MAX_RETRIES } from "../src/retry.ts";
 import type { LlmDelta, LlmErrorClass, LlmRequest } from "../src/types.ts";
+import {
+  collectStream,
+  jsonResponse,
+  pacedSseResponse as rawPacedSseResponse,
+  sseResponse as rawSseResponse,
+  tickInSteps,
+  withPatchedFetch,
+  type SseOptions,
+} from "./driver-harness.ts";
 
 // ---------------------------------------------------------------------------
-// Fixtures and fake-transport helpers. No real network call happens in this
-// file: every test patches globalThis.fetch for its duration (same idiom as
-// packages/platform-client's own tests) or, for the driver, constructs the
-// Anthropic client entirely from a fake fetch response.
+// Anthropic-specific wire fixtures. The transport plumbing (fetch patching,
+// fake-clock stepping, SSE body construction) is shared -- see
+// driver-harness.ts. Provider-agnostic behavior (auth refusal, error
+// classification, connection failure) lives in driver-conformance.test.ts;
+// this file covers only what is genuinely Anthropic-shaped.
 // ---------------------------------------------------------------------------
-
-type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
-/** Advances the fake clock by `totalMs` in small `stepMs` increments,
- * flushing real microtasks/setImmediate between each step so a chain of
- * awaits many levels deep (auth, request building, fetch, JSON parsing,
- * classification, backoff scheduling) gets as many turns as it needs. */
-async function tickInSteps(t: { mock: { timers: { tick(ms: number): void } } }, totalMs: number, stepMs = 250): Promise<void> {
-  for (let advanced = 0; advanced < totalMs; advanced += stepMs) {
-    t.mock.timers.tick(Math.min(stepMs, totalMs - advanced));
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-}
-
-async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Promise<T> {
-  const original = globalThis.fetch;
-  globalThis.fetch = impl as typeof fetch;
-  try {
-    return await run();
-  } finally {
-    globalThis.fetch = original;
-  }
-}
-
-function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
-}
 
 function anthropicErrorResponse(status: number, type: string, message: string, headers: Record<string, string> = {}): Response {
   return jsonResponse({ type: "error", error: { type, message }, request_id: "req_fixture" }, status, headers);
@@ -72,40 +55,13 @@ function sseEvent(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-/** Builds a fake SSE Response. When `holdOpen` is true the stream is left
- * open after emitting `events` (simulating a stalled connection) and only
- * terminates when the caller's AbortSignal fires -- exactly the real
- * fetch/undici behavior our driver's stall watchdog and hard timeout rely on. */
-function sseResponse(events: Array<{ event: string; data: unknown }>, opts: { signal?: AbortSignal | null; holdOpen?: boolean } = {}): Response {
-  const encoder = new TextEncoder();
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const e of events) {
-        controller.enqueue(encoder.encode(sseEvent(e.event, e.data)));
-      }
-      if (!opts.holdOpen) {
-        controller.close();
-        return;
-      }
-      const signal = opts.signal;
-      if (!signal) {
-        return; // held open forever; only used in tests that abort explicitly
-      }
-      const errorStream = () => {
-        try {
-          controller.error(new DOMException("The operation was aborted.", "AbortError"));
-        } catch {
-          // already closed/errored -- fine, nothing left to signal.
-        }
-      };
-      if (signal.aborted) {
-        errorStream();
-      } else {
-        signal.addEventListener("abort", errorStream);
-      }
-    },
-  });
-  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+/** Anthropic's SSE framing is `event: <name>\ndata: {...}`, and the body
+ * simply ends -- there is no `[DONE]` sentinel the way OpenAI's has. */
+function sseResponse(events: Array<{ event: string; data: unknown }>, opts: SseOptions = {}): Response {
+  return rawSseResponse(
+    events.map((e) => sseEvent(e.event, e.data)),
+    opts,
+  );
 }
 
 const BASE_REQUEST: LlmRequest = {
@@ -116,35 +72,6 @@ const BASE_REQUEST: LlmRequest = {
   metadata: { callerApp: "test-suite", purpose: "unit-test" },
   timeoutMs: 30_000,
 };
-
-async function collectStream(gen: AsyncGenerator<LlmDelta, void, unknown>): Promise<LlmDelta[]> {
-  const collected: LlmDelta[] = [];
-  for await (const delta of gen) {
-    collected.push(delta);
-  }
-  return collected;
-}
-
-// ---------------------------------------------------------------------------
-// Zero key handling: defensive check, no network call
-// ---------------------------------------------------------------------------
-
-test("anthropicDriver.complete: rejects with no API key before any network call", async () => {
-  let fetchCalls = 0;
-  await withPatchedFetch(
-    async () => {
-      fetchCalls += 1;
-      throw new Error("must not be called");
-    },
-    async () => {
-      await assert.rejects(
-        () => anthropicDriver.complete(BASE_REQUEST, { apiKey: "" }),
-        (error: { class: string }) => error.class === "invalid_request",
-      );
-    },
-  );
-  assert.equal(fetchCalls, 0);
-});
 
 // ---------------------------------------------------------------------------
 // Non-streaming: success, request mapping, response mapping
@@ -255,51 +182,6 @@ test("anthropicDriver.complete: a malformed successful response is a non-retryab
       );
     },
   );
-});
-
-// ---------------------------------------------------------------------------
-// Error taxonomy + retry, exercised through the real driver via complete()
-// ---------------------------------------------------------------------------
-
-const CLASSIFICATION_CASES: Array<{ status: number; type: string; expectClass: LlmErrorClass; expectRetryable: boolean }> = [
-  { status: 400, type: "invalid_request_error", expectClass: "invalid_request", expectRetryable: false },
-  { status: 401, type: "authentication_error", expectClass: "auth", expectRetryable: false },
-  { status: 403, type: "permission_error", expectClass: "auth", expectRetryable: false },
-  { status: 404, type: "not_found_error", expectClass: "invalid_request", expectRetryable: false },
-  { status: 429, type: "rate_limit_error", expectClass: "rate_limit", expectRetryable: true },
-  { status: 500, type: "api_error", expectClass: "transport", expectRetryable: true },
-  { status: 529, type: "overloaded_error", expectClass: "overloaded", expectRetryable: true },
-];
-
-test("complete(): classifies every documented Anthropic error type and retries only the retryable classes exactly MAX_RETRIES times", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  for (const testCase of CLASSIFICATION_CASES) {
-    let fetchCalls = 0;
-    const promise = withPatchedFetch(
-      async () => {
-        fetchCalls += 1;
-        return anthropicErrorResponse(testCase.status, testCase.type, `${testCase.type} fixture`);
-      },
-      () => complete(BASE_REQUEST, { anthropic: { apiKey: "fixture-key" } }),
-    );
-    let settled: { ok: boolean; error?: { class: string; retryable: boolean } } | undefined;
-    promise.then(
-      () => (settled = { ok: true }),
-      (error) => (settled = { ok: false, error }),
-    );
-    // Worst-case cumulative backoff across two retries is well under 10s;
-    // advance generously since exact timing is covered in retry.test.ts.
-    for (let i = 0; i < 20 && !settled; i++) {
-      t.mock.timers.tick(1000);
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    await promise.catch(() => undefined);
-    assert.ok(settled, `case ${testCase.status} never settled`);
-    assert.equal(settled?.ok, false, `case ${testCase.status} should reject`);
-    assert.equal(settled?.error?.class, testCase.expectClass, `case ${testCase.status} class`);
-    assert.equal(settled?.error?.retryable, testCase.expectRetryable, `case ${testCase.status} retryable`);
-    assert.equal(fetchCalls, testCase.expectRetryable ? MAX_RETRIES + 1 : 1, `case ${testCase.status} attempt count`);
-  }
 });
 
 test("complete(): honors a 429 retry-after header verbatim, not the computed backoff, then recovers", async (t) => {
@@ -470,57 +352,11 @@ test("anthropicDriver.stream: aborts as transport when no delta arrives for 60 s
 /** Like sseResponse, but events are enqueued at scheduled fake-clock offsets
  * (via global setTimeout, driven by t.mock.timers) instead of all at once at
  * stream start. */
-function pacedSseResponse(scheduled: Array<{ atMs: number; event: string; data: unknown }>, opts: { signal?: AbortSignal | null; closeAfterMs?: number } = {}): Response {
-  const encoder = new TextEncoder();
-  const timers: ReturnType<typeof setTimeout>[] = [];
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const item of scheduled) {
-        timers.push(
-          setTimeout(() => {
-            try {
-              controller.enqueue(encoder.encode(sseEvent(item.event, item.data)));
-            } catch {
-              // stream already closed/errored -- nothing left to enqueue into.
-            }
-          }, item.atMs),
-        );
-      }
-      if (opts.closeAfterMs !== undefined) {
-        timers.push(
-          setTimeout(() => {
-            try {
-              controller.close();
-            } catch {
-              // already closed/errored
-            }
-          }, opts.closeAfterMs),
-        );
-      }
-      const signal = opts.signal;
-      if (!signal) {
-        return; // no close scheduled and no signal: held open until the test ends
-      }
-      const errorStream = () => {
-        try {
-          controller.error(new DOMException("The operation was aborted.", "AbortError"));
-        } catch {
-          // already closed/errored -- fine, nothing left to signal.
-        }
-      };
-      if (signal.aborted) {
-        errorStream();
-      } else {
-        signal.addEventListener("abort", errorStream);
-      }
-    },
-    cancel() {
-      for (const timer of timers) {
-        clearTimeout(timer);
-      }
-    },
-  });
-  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+function pacedSseResponse(scheduled: Array<{ atMs: number; event: string; data: unknown }>, opts: SseOptions & { closeAfterMs?: number } = {}): Response {
+  return rawPacedSseResponse(
+    scheduled.map((item) => ({ atMs: item.atMs, chunk: sseEvent(item.event, item.data) })),
+    opts,
+  );
 }
 
 test("anthropicDriver.stream: keepalive-only transport activity (message_start + periodic no-op content_block_start events, no real content) does not prevent the 60s stall abort", async (t) => {

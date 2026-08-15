@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ACC_ROUTING_MD: ${{ github.workspace }}/apps/agentic-command-center/hooks/fixtures/ROUTING.md
+  ACC_ROUTING_MD: ${{ github.workspace }}/apps/agentic-command-center/backend/hooks/fixtures/ROUTING.md
 
 jobs:
   portable:
@@ -65,15 +65,15 @@ jobs:
         working-directory: apps/agentic-command-center
       - name: Launch-shim tests
         shell: pwsh
-        run: powershell -File shim/claude.test.ps1
+        run: powershell -File backend/shim/claude.test.ps1
         working-directory: apps/agentic-command-center
       - name: Cap-watcher tests
         shell: pwsh
-        run: powershell -File watcher/claude-cap-watch.test.ps1
+        run: powershell -File backend/watcher/claude-cap-watch.test.ps1
         working-directory: apps/agentic-command-center
       - name: Cap-watcher installer tests
         shell: pwsh
-        run: powershell -File watcher/install-cap-watch-task.test.ps1
+        run: powershell -File backend/watcher/install-cap-watch-task.test.ps1
         working-directory: apps/agentic-command-center
 
   ui:
@@ -88,21 +88,21 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: apps/agentic-command-center/ui/package-lock.json
+          cache-dependency-path: apps/agentic-command-center/frontend/package-lock.json
       - run: npm ci
-        working-directory: apps/agentic-command-center/ui
+        working-directory: apps/agentic-command-center/frontend
       - run: npm run build
-        working-directory: apps/agentic-command-center/ui
+        working-directory: apps/agentic-command-center/frontend
       - name: Cache Playwright Chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: acc-ui-playwright-chromium-${{ runner.os }}-${{ hashFiles('apps/agentic-command-center/ui/package-lock.json') }}
+          key: acc-ui-playwright-chromium-${{ runner.os }}-${{ hashFiles('apps/agentic-command-center/frontend/package-lock.json') }}
       - run: npx playwright install --with-deps chromium
-        working-directory: apps/agentic-command-center/ui
+        working-directory: apps/agentic-command-center/frontend
       - name: Contract end-to-end against the monorepo ACC server
         run: npm run e2e
-        working-directory: apps/agentic-command-center/ui
+        working-directory: apps/agentic-command-center/frontend
         env:
           ACC_DIR: ${{ github.workspace }}/apps/agentic-command-center
       - name: Upload UI Playwright failure evidence
@@ -111,8 +111,8 @@ jobs:
         with:
           name: acc-ui-playwright-failure-evidence
           path: |
-            apps/agentic-command-center/ui/playwright-report/
-            apps/agentic-command-center/ui/test-results/
+            apps/agentic-command-center/frontend/playwright-report/
+            apps/agentic-command-center/frontend/test-results/
           if-no-files-found: ignore
           retention-days: 14
 

@@ -5,10 +5,10 @@ session — fresh context per task by construction (a live session cannot
 /clear itself; a new process needs no clearing). No daemon: run it by hand
 or let Windows Task Scheduler own time.
 
-    node runner/runner.mjs slice-runner            # loop now
-    node runner/runner.mjs slice-runner --once     # one run (debug)
-    node runner/runner.mjs slice-runner --install  # schtasks entry (needs job.schedule)
-    node runner/runner.mjs slice-runner --status   # log tail + alerts
+    node backend/runner/runner.mjs slice-runner            # loop now
+    node backend/runner/runner.mjs slice-runner --once     # one run (debug)
+    node backend/runner/runner.mjs slice-runner --install  # schtasks entry (needs job.schedule)
+    node backend/runner/runner.mjs slice-runner --status   # log tail + alerts
 
 Job spec (`jobs/<name>.json`): `name`, `workdir`, `bootstrap` (the -p
 prompt), `statusFile` (progress = its hash changes between runs),
@@ -19,8 +19,8 @@ prompt), `statusFile` (progress = its hash changes between runs),
 
 Directive jobs (SPEC-0001, ADR-0001/0004 — the headless continuity path):
 
-    node runner/runner.mjs directive:<id>           # run a directive to completion
-    node runner/runner.mjs directive:<id> --once    # one run (debug)
+    node backend/runner/runner.mjs directive:<id>           # run a directive to completion
+    node backend/runner/runner.mjs directive:<id> --once    # one run (debug)
 
 No job file: the directive store supplies workdir (its `cwd` — required) and
 identity; the bootstrap is only the kick constant because the SessionStart
@@ -55,9 +55,9 @@ Design constraints (deliberate):
   job workdir's status file.
 
 Outcome receipts (FR-015, issue #68): every time a directive leaves `active`
-— `done`/`blocked`/`dead` via `hooks/directive.mjs`'s `setStatus`, or a
+— `done`/`blocked`/`dead` via `backend/hooks/directive.mjs`'s `setStatus`, or a
 runner budget-ceiling halt (exit 7) — exactly one bounded JSON receipt is
-written to `runner/directives/receipts/<id>.receipt.json` (`hooks/receipt.mjs`).
+written to `backend/runner/directives/receipts/<id>.receipt.json` (`backend/hooks/receipt.mjs`).
 It carries status, started/finished/duration, cycle and fresh-context counts,
 profile, spend (`directive-spend.mjs`), the directive's budget, a bounded
 why/blocker classification, a few bounded "verification" lines pulled from

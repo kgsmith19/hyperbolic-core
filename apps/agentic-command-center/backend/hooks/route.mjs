@@ -18,9 +18,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// The table is config, not runner state: it anchors to the repo (ACC_ROOT
-// must not move it, or sandboxed tests would lose the real routes).
-const TABLE = process.env.ACC_ROUTING_MD || path.resolve(HERE, "..", "..", "ROUTING.md");
+// The table is config, not runner state: it anchors to the checkout (ACC_ROOT
+// must not move it, or sandboxed tests would lose the real routes). It maps
+// this machine's own folder layout, so it is never committed -- it sits
+// beside the checkout, not inside it. HERE is
+// <checkout>/apps/agentic-command-center/backend/hooks, so five levels up is
+// the directory containing the checkout. Two levels sufficed when ACC was its
+// own repo; the subtree import into this monorepo silently repointed the
+// default at <checkout>/apps/ROUTING.md, which never exists, and no test
+// caught it because every test sets ACC_ROUTING_MD. route.test.mjs now pins
+// this depth so the backend/ split could not repeat it.
+export const DEFAULT_TABLE = path.resolve(HERE, "..", "..", "..", "..", "..", "ROUTING.md");
+const TABLE = process.env.ACC_ROUTING_MD || DEFAULT_TABLE;
 
 // A repo dir is covered ONLY by an exact route path (case-insensitive:
 // Windows). The wide root route does not cover repos - a repo silently
@@ -31,7 +40,14 @@ export function doctor(routes, repoDirs) {
 }
 
 function loadTable() {
-  const md = fs.readFileSync(TABLE, "utf8");
+  let md;
+  try {
+    md = fs.readFileSync(TABLE, "utf8");
+  } catch (e) {
+    // Name the override explicitly: a missing table is a configuration gap,
+    // and a bare ENOENT gives the caller nothing to act on.
+    throw new Error(`cannot read routing table ${TABLE} (set ACC_ROUTING_MD to point at it): ${e.code || e.message}`);
+  }
   const m = md.match(/```json\s*([\s\S]*?)```/);
   if (!m) throw new Error(`no json block in ${TABLE}`);
   const t = JSON.parse(m[1]);

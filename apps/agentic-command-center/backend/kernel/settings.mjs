@@ -34,8 +34,8 @@ export const runDir = (runId) => path.join(runsRoot(), runId);
 // its own name for the same script. guard.mjs (the hook script itself) has
 // no prior convention to collide with, so it gets its own new name.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-export const guardMjsPath = () => process.env.ACC_GUARDS_HOOK || path.join(HERE, "..", "..", "toolbelt", "guards", "guard.mjs");
-const guardsCliPath = () => process.env.ACC_GUARDS_CLI || path.join(HERE, "..", "..", "toolbelt", "guards", "cli.mjs");
+export const guardMjsPath = () => process.env.ACC_GUARDS_HOOK || path.join(HERE, "..", "..", "..", "toolbelt", "guards", "guard.mjs");
+const guardsCliPath = () => process.env.ACC_GUARDS_CLI || path.join(HERE, "..", "..", "..", "toolbelt", "guards", "cli.mjs");
 
 // No GUARDS_CONFIG/GUARDS_PROFILE override is injected into the hook's own
 // command here: guard.mjs's own config-loader already resolves the correct

@@ -10,26 +10,26 @@ harness integration; generic kernel code must remain harness-neutral.
   globs, protected paths) live in `apps/toolbelt/guards` — a standalone
   module this repo does not import. The guard fails closed when its input or
   configuration cannot be read.
-- `hooks/engine.mjs` owns the vault and runbox (watched-project) mutations.
-  `gui/server.mjs` shells both it and `apps/toolbelt/guards/cli.mjs` for
+- `backend/hooks/engine.mjs` owns the vault and runbox (watched-project) mutations.
+  `backend/gui/server.mjs` shells both it and `apps/toolbelt/guards/cli.mjs` for
   every guards-related route, composing them where the browser-facing API
   still expects one shape (`GET /api/guards/status`).
-- `gui/server.mjs` serves the loopback web interface. `gui/README.md` is its
+- `backend/gui/server.mjs` serves the loopback web interface. `backend/gui/README.md` is its
   API contract.
-- `ui/` is the React front end served through `gui/server.mjs --ui-dist`.
-  `ui/e2e/contract.spec.ts` verifies it against the real sandboxed server.
-- `kernel/` runs bounded headless tasks and records their results. Read
-  `kernel/README.md` before changing the kernel contract or adapters.
-- `runner/` owns directive execution and lifecycle state. Read
-  `runner/README.md` before changing the directive loop.
-- `hooks/lane.mjs` serializes automated harness launches. Every automated
+- `frontend/` is the React front end served through `backend/gui/server.mjs --ui-dist`.
+  `frontend/e2e/contract.spec.ts` verifies it against the real sandboxed server.
+- `backend/kernel/` runs bounded headless tasks and records their results. Read
+  `backend/kernel/README.md` before changing the kernel contract or adapters.
+- `backend/runner/` owns directive execution and lifecycle state. Read
+  `backend/runner/README.md` before changing the directive loop.
+- `backend/hooks/lane.mjs` serializes automated harness launches. Every automated
   launch must use the lane.
 - `policy.json` is product runtime configuration. Preserve unowned keys when
   updating part of it.
 
 GitHub Issues define new work. This repository does not keep committed ADRs
 or SPEC documents — architectural rationale that matters operationally lives
-in the code and docs it governs (e.g. `gui/README.md`), not in a separate
+in the code and docs it governs (e.g. `backend/gui/README.md`), not in a separate
 decision record; historical rationale otherwise lives in git history.
 
 ## Safety boundaries
@@ -46,7 +46,7 @@ decision record; historical rationale otherwise lives in git history.
 - Tests that touch state must use temporary `ACC_ROOT`, `ACC_POLICY`, and,
   where applicable, `ACC_LANE_DIR` paths. Do not run hooks manually against
   live state.
-- Preserve the machine-wide launch-lane constraint in `hooks/lane.mjs`.
+- Preserve the machine-wide launch-lane constraint in `backend/hooks/lane.mjs`.
 - Do not weaken or delete a regression test unless the behavior it protects
   has intentionally been removed and the change explains why.
 
@@ -58,17 +58,17 @@ npm test
 npm run covgate
 npm run test:windows
 npm run gui
-cd ui && npm ci
-cd ui && npm run build
-cd ui && ACC_DIR=.. npm run e2e
+cd frontend && npm ci
+cd frontend && npm run build
+cd frontend && ACC_DIR=.. npm run e2e
 ```
 
 The Windows suite also exercises:
 
 ```powershell
-powershell -File shim/claude.test.ps1
-powershell -File watcher/claude-cap-watch.test.ps1
-powershell -File watcher/install-cap-watch-task.test.ps1
+powershell -File backend/shim/claude.test.ps1
+powershell -File backend/watcher/claude-cap-watch.test.ps1
+powershell -File backend/watcher/install-cap-watch-task.test.ps1
 ```
 
 Real-token proof commands are intentionally manual. Read the relevant
@@ -79,7 +79,7 @@ subsystem documentation before running them.
 1. Start from a GitHub Issue with a concrete outcome and acceptance criteria.
 2. Implement the smallest coherent change.
 3. Add or update focused tests and run the relevant commands above. Changes
-   spanning the API and React client must keep `gui/README.md`, `ui/src/api.ts`,
+   spanning the API and React client must keep `backend/gui/README.md`, `frontend/src/api.ts`,
    and the UI contract suite consistent.
 4. Open a pull request that links the Issue and reports exact verification.
 5. Let `.github/workflows/ci.yml` produce the single required check,

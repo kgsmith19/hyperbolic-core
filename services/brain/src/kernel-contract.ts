@@ -1,7 +1,7 @@
 /**
  * Maps a brain.task.v1 contract (contracts.ts's TaskContractV1) to the ACC
  * kernel's own (unversioned, pre-existing) contract shape
- * (apps/agentic-command-center/kernel/contract.mjs's REQUIRED_FIELDS:
+ * (apps/agentic-command-center/backend/kernel/contract.mjs's REQUIRED_FIELDS:
  * goal, constraints, allowedActions, budget, acceptanceCriteria,
  * rollbackPlan). "kernel.contract.v1" (07 gate question 3) names the
  * MAPPED OUTPUT this function produces -- there is no such version tag

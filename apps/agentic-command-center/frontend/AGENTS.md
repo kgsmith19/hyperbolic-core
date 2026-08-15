@@ -5,7 +5,7 @@ built `dist/` directory same-origin through `--ui-dist`.
 
 ## Product contract
 
-- ACC's `gui/README.md` is the API contract.
+- ACC's `backend/gui/README.md` is the API contract.
 - `src/api.ts` is the typed client that mirrors that contract.
 - `e2e/contract.spec.ts` verifies the UI against a real, sandboxed ACC server.
 - Contract drift is a product defect. Update the server contract, client

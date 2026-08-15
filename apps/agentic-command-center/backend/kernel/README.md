@@ -7,7 +7,7 @@ every run in one structured ledger, and tightens its own ceilings after a
 run of failures.
 
 ```
-node kernel/run.mjs <contract.json>
+node backend/kernel/run.mjs <contract.json>
 ```
 
 Two distinct failure shapes, never conflated: **refused** (the contract is
@@ -19,7 +19,7 @@ Outcomes are a closed set: `accepted`, `rejected`, `aborted-by-budget`,
 
 ## The contract
 
-A JSON file with these required fields (`kernel/contract.mjs`):
+A JSON file with these required fields (`backend/kernel/contract.mjs`):
 
 ```jsonc
 {
@@ -47,18 +47,18 @@ that key), but `acceptanceCriteria` must be non-empty and every criterion
 must name a real `verify.method` — a run whose outcome cannot be checked is
 refused before a harness process exists. A `writeRoots` entry that overlaps
 this repo or the user's `~/.claude` tree is refused before launch,
-regardless of contract (`kernel/policy.mjs` `alwaysDenyWriteRoots`).
+regardless of contract (`backend/kernel/policy.mjs` `alwaysDenyWriteRoots`).
 
 ## Swapping the harness — step by step
 
-1. Write `kernel/adapters/<name>.mjs` exporting exactly five members plus an
+1. Write `backend/kernel/adapters/<name>.mjs` exporting exactly five members plus an
    id: `id`, `identity()`, `startTask()`, `sendStep()`, `readState()`,
-   `stopTask()` — the shape `kernel/adapter.mjs`'s `ADAPTER_INTERFACE` checks.
+   `stopTask()` — the shape `backend/kernel/adapter.mjs`'s `ADAPTER_INTERFACE` checks.
 2. Set `policy.json`'s `kernel.harness` to `<name>`.
-3. Run `node --test kernel/adapter.test.mjs` — the shape check and the
+3. Run `node --test backend/kernel/adapter.test.mjs` — the shape check and the
    isolation test are what prove the swap needs no other change.
 
-No file outside `kernel/adapters/` mentions a harness by name. The module
+No file outside `backend/kernel/adapters/` mentions a harness by name. The module
 path is derived from the configured name by convention
 (`./adapters/<name>.mjs`), so a swap is exactly one config value and one new
 file — never a registry table to edit.
@@ -68,7 +68,7 @@ file — never a registry table to edit.
 Two independent layers. `--tools` is a real allowlist over the CLI's built-in
 tool set, derived from which `allowedActions` arrays are non-empty — a tool
 the contract grants no authority to does not exist for the run at all. The
-kernel guardhook (`kernel/guardhook.mjs`, registered on every tool that does
+kernel guardhook (`backend/kernel/guardhook.mjs`, registered on every tool that does
 exist) then enforces the *arguments* of those tools on every fire, reading
 the contract and policy live — a policy edit or a contract check applies to
 the very next tool call, not the next run.
@@ -87,7 +87,7 @@ the supervisor's, checked at each `checkpointMin` tick.
 A harness that hangs silently — including one hung because the upstream API
 itself is overloaded and the CLI never surfaces that as an error — is bounded
 by the same ceilings as any other failure mode. `checkpointVerdict` (called
-from `kernel/run.mjs`'s supervisor tick) never reads the harness child's
+from `backend/kernel/run.mjs`'s supervisor tick) never reads the harness child's
 stdout, stderr, or exit code; it only compares elapsed wall-clock time,
 accumulated tokens, and tool-call counts against `effectiveCeilings`. A
 silent hang starves the token and tool-call signals too — both stay flat —
@@ -95,7 +95,7 @@ so detection falls through to the wall-clock ceiling, which fires
 unconditionally on a plain clock read. On breach, `stopTask` calls `killFn`
 (`killTree`) directly against the child process; it does not wait for, or
 depend on, the harness's own error reporting to say anything at all.
-`kernel/run.test.mjs`'s AC-B1 test proves exactly this shape: a fake adapter
+`backend/kernel/run.test.mjs`'s AC-B1 test proves exactly this shape: a fake adapter
 whose `done` promise has no resolver except the supervisor's own `stopTask`
 call, with every other signal (events, tokens, tool calls) held at zero for
 the whole run — structurally identical to a silently-hung CLI — and the run
@@ -105,7 +105,7 @@ independent bound on the harness's lane slot, for the same reason.
 
 ## Credentials
 
-The contract lists vault key **names**; `kernel/credentials.mjs` is the only
+The contract lists vault key **names**; `backend/kernel/credentials.mjs` is the only
 place values exist, and the only thing it does with them is hand them to the
 child process's environment — never argv, never stdout, never the ledger.
 Revocation is loss of local access: the process holding the values dies and
@@ -117,13 +117,13 @@ documented, not papered over.
 ## Ledger queries
 
 ```
-node kernel/ledger.mjs query [--status <s>] [--harness <h>] [--since <date>] [--until <date>]
+node backend/kernel/ledger.mjs query [--status <s>] [--harness <h>] [--since <date>] [--until <date>]
 ```
 
 `--status` is the finalized outcome, or `interrupted` for a `run_started`
 with no matching `run_finalized`. Each row: `{ runId, status, harness,
 startedAt, finishedAt, criteria }`. No dashboard — this CLI plus the JSONL
-ledger under `runner/ledger/` is the whole "queryable" requirement.
+ledger under `backend/runner/ledger/` is the whole "queryable" requirement.
 
 ## Out of scope
 

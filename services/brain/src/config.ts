@@ -79,11 +79,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
   const workspacesRoot = env.BRAIN_WORKSPACES_ROOT ?? "/workspaces";
   // Default kernelRunPath assumes the monorepo layout is preserved
   // relative to this file (services/brain/src/config.ts ->
-  // apps/agentic-command-center/kernel/run.mjs) -- true both in a local
+  // apps/agentic-command-center/backend/kernel/run.mjs) -- true both in a local
   // dev checkout and in the Docker image, which COPYs
   // apps/agentic-command-center alongside services/brain (see
   // Dockerfile). Overridable for any deployment shape that doesn't match.
-  const kernelRunPath = env.BRAIN_KERNEL_RUN_PATH ?? path.resolve(HERE, "..", "..", "..", "apps", "agentic-command-center", "kernel", "run.mjs");
+  const kernelRunPath = env.BRAIN_KERNEL_RUN_PATH ?? path.resolve(HERE, "..", "..", "..", "apps", "agentic-command-center", "backend", "kernel", "run.mjs");
   const accRoot = env.BRAIN_ACC_ROOT ?? `${dataDir.replace(/\/+$/, "")}/acc-root`;
   const accPolicy = env.BRAIN_ACC_POLICY ?? `${accRoot}/policy.json`;
   const accVault = env.BRAIN_ACC_VAULT ?? `${accRoot}/vault.json`;
