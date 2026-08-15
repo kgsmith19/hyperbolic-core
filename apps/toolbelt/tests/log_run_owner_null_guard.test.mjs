@@ -8,7 +8,7 @@
 //
 // Mirrors the detection/skip mechanics and scratch-database harness already
 // established by apps/toolbelt/tests/registry-migrations-idempotency.test.mjs
-// (m3-02) and apps/toolbelt/apps/idea-intake/tests/intake-guards.test.mjs
+// (m3-02) and apps/toolbelt/apps/idea-intake/backend/tests/intake-guards.test.mjs
 // (m3-05): detects a usable local `psql`, skips itself cleanly via
 // node:test's own skip mechanism (reported SKIPPED, never silently omitted
 // or falsely green) when no local Postgres engine is reachable, and applies

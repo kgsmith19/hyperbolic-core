@@ -171,7 +171,9 @@ export async function setupRegistryFixture(): Promise<RegistryFixture> {
   );
 
   const fixtureMigrationsDir = path.join(scratchToolbeltRoot, "supabase", "migrations");
-  const fixtureToolMigrationsDir = path.join(scratchToolbeltRoot, "apps", fixtureId, "supabase", "migrations");
+  // backend/, matching what the real scaffold CLI now emits: a tool keeps
+  // its backend work -- migrations included -- under backend/.
+  const fixtureToolMigrationsDir = path.join(scratchToolbeltRoot, "apps", fixtureId, "backend", "supabase", "migrations");
 
   const schemaUpFile = readdirSync(fixtureToolMigrationsDir)
     .find((f) => f.endsWith("_create_schema.sql"));

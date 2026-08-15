@@ -6,7 +6,7 @@
 // SQL against this real database, as the `postgres` superuser, which
 // bypasses RLS and grants by construction. RLS/grant ENFORCEMENT itself is
 // already exhaustively proven by
-// apps/toolbelt/apps/prompt-organizer/tests/contract.test.mjs; this fixture
+// apps/toolbelt/apps/prompt-organizer/backend/tests/contract.test.mjs; this fixture
 // exists to prove the Shell's OWN code (src/lib/prompts.ts,
 // src/pages/prompts/*) against real data and real triggers, not to
 // re-prove RLS.
@@ -35,7 +35,7 @@ import {
 } from "./psql.js";
 import { sqlErrorToShimError, type ShimError } from "./shim.js";
 
-const PO_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/apps/prompt-organizer/supabase/migrations");
+const PO_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/apps/prompt-organizer/backend/supabase/migrations");
 const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/supabase/migrations");
 
 const REAL_MIGRATIONS = [

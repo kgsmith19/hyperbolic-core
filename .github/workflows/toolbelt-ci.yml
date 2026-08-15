@@ -84,20 +84,20 @@ jobs:
       - name: Run Prompt Organizer tests
         run: |
           node --test --test-concurrency=1 \
-            tests/contract.test.mjs \
-            tests/get-prompt.test.mjs \
-            tests/helpers.unit.test.mjs \
-            tests/migration-contract.test.mjs \
-            tests/owner-session.test.mjs \
-            tests/panel.test.mjs \
-            tests/performance.test.mjs \
-            tests/prompt-usage-retention-atomic.test.mjs \
-            tests/purge_old_usage_revoke_public.test.mjs \
-            tests/render.test.mjs \
-            tests/retention.test.mjs \
-            tests/search.test.mjs \
-            tests/sections.test.mjs \
-            tests/seed.test.mjs
+            backend/tests/contract.test.mjs \
+            backend/tests/get-prompt.test.mjs \
+            backend/tests/helpers.unit.test.mjs \
+            backend/tests/migration-contract.test.mjs \
+            backend/tests/owner-session.test.mjs \
+            frontend/tests/panel.test.mjs \
+            backend/tests/performance.test.mjs \
+            backend/tests/prompt-usage-retention-atomic.test.mjs \
+            backend/tests/purge_old_usage_revoke_public.test.mjs \
+            frontend/tests/render.test.mjs \
+            backend/tests/retention.test.mjs \
+            frontend/tests/search.test.mjs \
+            frontend/tests/sections.test.mjs \
+            backend/tests/seed.test.mjs
         working-directory: apps/toolbelt/apps/prompt-organizer
         env:
           PROMPT_REQUIRE_POSTGRES: "1"
@@ -159,12 +159,12 @@ jobs:
       # closed with "TOOLBELT_OWNER_REFRESH_TOKEN is required", which is the
       # honest outcome.
       - name: Exchange and verify the owner session
-        run: node tests/export-owner-session.mjs
+        run: node backend/tests/export-owner-session.mjs
         working-directory: apps/toolbelt/apps/prompt-organizer
         env:
           TOOLBELT_OWNER_REFRESH_TOKEN: ${{ secrets.TOOLBELT_OWNER_REFRESH_TOKEN }}
       - name: Run Prompt Organizer critical browser journey
-        run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/prompt-organizer/playwright.config.mjs
+        run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/prompt-organizer/frontend/playwright.config.mjs
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:8812
           # TOOLBELT_OWNER_TOKEN is deliberately NOT set here. The exchange
@@ -180,21 +180,21 @@ jobs:
         with:
           name: prompt-organizer-e2e-evidence
           path: |
-            apps/toolbelt/apps/prompt-organizer/playwright-report/
-            apps/toolbelt/apps/prompt-organizer/test-results/
+            apps/toolbelt/apps/prompt-organizer/frontend/playwright-report/
+            apps/toolbelt/apps/prompt-organizer/frontend/test-results/
           if-no-files-found: ignore
           retention-days: 14
       - name: Run Network Checker tests and deterministic scanners
-        run: bash tools/check.sh
+        run: bash backend/tools/check.sh
         working-directory: apps/toolbelt/apps/network-checker
       - name: Prepare Network Checker dashboard fixture
-        run: python3 tests/e2e/seed_dashboard_fixture.py
+        run: python3 backend/tests/e2e/seed_dashboard_fixture.py
         working-directory: apps/toolbelt/apps/network-checker
       - name: Start Network Checker dashboard
         run: python3 -m netcheck serve --no-open >network-checker.log 2>&1 &
-        working-directory: apps/toolbelt/apps/network-checker
+        working-directory: apps/toolbelt/apps/network-checker/backend
         env:
-          NETCHECK_DB: ${{ github.workspace }}/apps/toolbelt/apps/network-checker/tests/e2e/dashboard-fixture.db
+          NETCHECK_DB: ${{ github.workspace }}/apps/toolbelt/apps/network-checker/backend/tests/e2e/dashboard-fixture.db
       - name: Wait for Network Checker dashboard
         shell: bash
         run: |
@@ -204,11 +204,11 @@ jobs:
             fi
             sleep 1
           done
-          cat apps/toolbelt/apps/network-checker/network-checker.log
+          cat apps/toolbelt/apps/network-checker/backend/network-checker.log
           echo "Network Checker did not become ready." >&2
           exit 1
       - name: Run Network Checker critical browser journey
-        run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/network-checker/playwright.config.mjs
+        run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/network-checker/frontend/playwright.config.mjs
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:8787
       - name: Upload Network Checker browser evidence
@@ -217,8 +217,8 @@ jobs:
         with:
           name: network-checker-e2e-evidence
           path: |
-            apps/toolbelt/apps/network-checker/playwright-report/
-            apps/toolbelt/apps/network-checker/test-results/
-            apps/toolbelt/apps/network-checker/network-checker.log
+            apps/toolbelt/apps/network-checker/frontend/playwright-report/
+            apps/toolbelt/apps/network-checker/frontend/test-results/
+            apps/toolbelt/apps/network-checker/backend/network-checker.log
           if-no-files-found: ignore
           retention-days: 14

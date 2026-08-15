@@ -63,7 +63,14 @@ export function discoverMigrationDirs(toolbeltRoot = TOOLBELT_ROOT) {
     if (!inside(realRoot, realManifest)) {
       throw new Error(`${manifestPath}: manifest escapes the toolbelt root`);
     }
-    const migrationDir = resolve(dirname(manifestPath), "supabase", "migrations");
+    // A tool keeps ALL of its backend work under backend/, migrations
+    // included, so its frontend/ and backend/ halves are separable at a
+    // glance. The toolbelt root is not a tool -- it is the spine that owns
+    // the shared core/idea schemas and has no frontend to separate from --
+    // so its own migrations stay at its root.
+    const migrationDir = isRoot
+      ? resolve(dirname(manifestPath), "supabase", "migrations")
+      : resolve(dirname(manifestPath), "backend", "supabase", "migrations");
     let realMigrationDir;
     try { realMigrationDir = realpathSync(migrationDir); }
     catch (error) {

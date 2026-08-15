@@ -32,7 +32,7 @@
 -- untouched -- service_role has no owner JWT to compare; the service-role
 -- key itself is the trust boundary, the same posture
 -- intake.mark_submitted_to_github() already established for a
--- service-role-only RPC (apps/toolbelt/apps/idea-intake/supabase/
+-- service-role-only RPC (apps/toolbelt/apps/idea-intake/backend/supabase/
 -- migrations/20260814040000) -- while still closing the hole for every
 -- other caller. auth.role() reads the JWT's own role claim, independent
 -- of the auth.uid()/session-role machinery a SECURITY DEFINER body would

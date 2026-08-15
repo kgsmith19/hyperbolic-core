@@ -1,5 +1,5 @@
 // PostgREST access via the CALLER's own bearer token, never a service-role
-// key. owner_rw RLS (apps/toolbelt/apps/idea-intake/supabase/migrations/
+// key. owner_rw RLS (apps/toolbelt/apps/idea-intake/backend/supabase/migrations/
 // 20260813002605_intake_create_schema.sql) already restricts every row to
 // the platform owner; since /api/intake/submit only ever runs after
 // verifyOwnerSession() (auth.ts) has proven the caller IS the owner, riding

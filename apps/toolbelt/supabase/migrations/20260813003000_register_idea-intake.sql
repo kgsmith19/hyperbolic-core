@@ -20,7 +20,7 @@
 -- (RFC-8785-style key-sorted JSON, no insignificant whitespace), computed by
 -- apps/toolbelt/scripts/validate-manifests.mjs's canonicalJSON/manifestHash
 -- functions -- imported and called directly by the generator that wrote this
--- file, never reimplemented. apps/toolbelt/apps/idea-intake/tests/registration.test.mjs
+-- file, never reimplemented. apps/toolbelt/apps/idea-intake/backend/tests/registration.test.mjs
 -- asserts this literal string equals manifestHash() computed fresh over the
 -- real manifest file on disk, so the two can never silently drift apart
 -- (TB-1b parity, docs/planning/05-c-toolbelt.md section 11).

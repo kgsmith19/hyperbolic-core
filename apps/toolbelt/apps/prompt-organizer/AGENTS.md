@@ -29,14 +29,26 @@ When explicitly assigned, an AI coding agent may create an Issue, branch, commit
 - Keep every migration paired with a down migration that reverses the same change.
 - Preserve product schema, migrations, tests, and existing security invariants unless the linked Issue explicitly changes them.
 
+## Layout
+
+```
+tool.json                     the app manifest, read by the Toolbelt validators
+backend/supabase/migrations/  the prompt schema, paired up/down
+backend/tests/                schema, RLS and live-Supabase suites
+frontend/                     the browser client (index.html + four modules)
+frontend/tests/               unit tests for those modules, no database
+frontend/e2e/                 the Playwright critical journey
+frontend/playwright.config.mjs
+```
+
 ## Commands
 
 ```bash
-node --test "tests/*.test.mjs"
+node --test "backend/tests/*.test.mjs" "frontend/tests/*.test.mjs"
 python3 -m http.server 8812 --directory frontend
 npm install --no-save --no-package-lock @playwright/test@1.52.0
 npx playwright install --with-deps chromium
-PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config playwright.config.mjs
+PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config frontend/playwright.config.mjs
 ```
 
 The Node and browser suites call the live Supabase project using the public anon key. Report network or rate-limit failures accurately; do not relabel them as passing.

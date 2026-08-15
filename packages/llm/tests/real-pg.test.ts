@@ -17,7 +17,7 @@
 // into real SQL against that real database.
 //
 // Migration list, HARNESS_SQL, and the psql/detection helpers below are
-// adapted from apps/toolbelt/apps/prompt-organizer/tests/get-prompt.test.mjs
+// adapted from apps/toolbelt/apps/prompt-organizer/backend/tests/get-prompt.test.mjs
 // (m4-03's own real-Postgres suite for this exact RPC) -- same migration
 // files, same order, same local-auth-schema stub, same skip mechanics --
 // because that file is the authoritative source for "how to stand up this

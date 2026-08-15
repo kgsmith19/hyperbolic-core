@@ -31,7 +31,7 @@ function withFixtureDirs(dirSpecs, fn) {
 }
 
 // layout: { "tool.json": {...}, "apps/tool-a/tool.json": {...},
-// "apps/tool-a/supabase/migrations/x.sql": "..." } -> materializes a scratch
+// "apps/tool-a/backend/supabase/migrations/x.sql": "..." } -> materializes a scratch
 // toolbelt-root tree. Mirrors tests/validate-migrations.test.mjs's own
 // helper of the same shape.
 function withFixtureToolbeltRoot(layout, fn) {
@@ -165,7 +165,7 @@ test("collectStagedFiles, driven by discoverMigrationDirs, stages a newly scaffo
     {
       "tool.json": rootManifest(),
       "apps/brand-new-tool/tool.json": schemaOwningManifest("brand-new-tool"),
-      "apps/brand-new-tool/supabase/migrations/20260901000000_brand_new_tool_create_schema.sql": "create schema brand_new_tool;",
+      "apps/brand-new-tool/backend/supabase/migrations/20260901000000_brand_new_tool_create_schema.sql": "create schema brand_new_tool;",
     },
     (root) => {
       const dirs = discoverMigrationDirs(root);
@@ -183,7 +183,7 @@ test("collectStagedFiles, driven by discoverMigrationDirs, never stages a schema
     {
       "tool.json": rootManifest(),
       "apps/no-schema-tool/tool.json": { ...schemaOwningManifest("no-schema-tool"), schemas: [] },
-      "apps/no-schema-tool/supabase/migrations/0001_init.sql": "create table x();",
+      "apps/no-schema-tool/backend/supabase/migrations/0001_init.sql": "create table x();",
     },
     (root) => {
       const dirs = discoverMigrationDirs(root);
