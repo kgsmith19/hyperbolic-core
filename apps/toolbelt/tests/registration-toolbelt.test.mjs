@@ -13,8 +13,8 @@
 // touching an existing, out-of-scope shared fixture list" posture
 // idea-intake's own registration tests already established for this repo.
 import { test } from "node:test";
+import { createPostgresHarness } from "./postgres-harness.mjs";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +32,8 @@ const REGISTER_DOWN = join(MIGRATIONS_DIR, "20260814130000_register_toolbelt-v0.
 const HASH_LINE_RE = /^\s*'([0-9a-f]{64})',\s*$/m;
 
 // --- Static, no-live-DB-needed checks --------------------------------
+
+const { psqlOk, freshDatabaseName: freshDbName, skipReason: SKIP_REASON } = createPostgresHarness("m3_02_registration_test");
 
 test("tool.json's register field names the real registration migration file, not the scaffold placeholder", () => {
   const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
@@ -89,47 +91,6 @@ create table core.app (
 );
 `;
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], { encoding: "utf8", timeout: 5000 });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-if (process.env.TOOLBELT_REQUIRE_POSTGRES === "1" && !RUNNER) {
-  throw new Error("TOOLBELT_REQUIRE_POSTGRES=1 but no local PostgreSQL server is reachable");
-}
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); see the m3-02/m3-05 " +
-    "implementation reports for the interactive proof runs where a local engine was available";
-
-function psql(dbName, sqlText) {
-  return spawnSync(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA"], {
-    encoding: "utf8",
-    input: sqlText,
-    timeout: 20000,
-  });
-}
-
-function psqlOk(dbName, sqlText) {
-  const result = psql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-
-function freshDbName() {
-  return `f43_register_toolbelt_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
 
 test(
   "real Postgres: applying the toolbelt registration migration inserts exactly one correctly-shaped row",

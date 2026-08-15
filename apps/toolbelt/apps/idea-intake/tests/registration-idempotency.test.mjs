@@ -7,8 +7,8 @@
 // detection/skip mechanics: skips cleanly, reported SKIPPED via node:test's
 // own mechanism, when no local Postgres is reachable.
 import { test } from "node:test";
+import { createPostgresHarness } from "../../../tests/postgres-harness.mjs";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,44 +39,7 @@ create table core.app (
 );
 `;
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], { encoding: "utf8", timeout: 5000 });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); see the m3-05 " +
-    "implementation report for the interactive proof run where a local engine was available";
-
-function psql(dbName, sqlText) {
-  return spawnSync(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA"], {
-    encoding: "utf8",
-    input: sqlText,
-    timeout: 20000,
-  });
-}
-
-function psqlOk(dbName, sqlText) {
-  const result = psql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-
-function freshDbName() {
-  return `m3_05_register_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
+const { psqlOk, freshDatabaseName: freshDbName, skipReason: SKIP_REASON } = createPostgresHarness("m3_05_register_test");
 
 test(
   "real Postgres: re-applying the idea-intake registration migration is a true no-op (row count AND row content unchanged, except registered_at's intentional re-stamp)",

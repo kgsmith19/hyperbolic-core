@@ -21,8 +21,8 @@
 // applying the actual committed migration files from disk verbatim (never
 // a reimplementation of their logic).
 import { test } from "node:test";
+import { createPostgresHarness } from "./postgres-harness.mjs";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,58 +89,12 @@ insert into core.app (id, name, schema_name, status)
 values ('prompt-organizer', 'Prompt Organizer', 'prompt', 'building');
 `;
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], {
-      encoding: "utf8",
-      timeout: 5000,
-    });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  // -n: non-interactive. Fails immediately instead of prompting for a
-  // password, so a sandbox/CI runner without passwordless sudo never hangs.
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-if (process.env.TOOLBELT_REQUIRE_POSTGRES === "1" && !RUNNER) {
-  throw new Error("TOOLBELT_REQUIRE_POSTGRES=1 but no local PostgreSQL server is reachable");
-}
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); " +
-    "this suite proves real SQL behavior against an actual engine and has nothing honest to assert without one -- " +
-    "see the m3-02 implementation report for the interactive proof run where a local engine was available";
-
-function psql(dbName, sqlText) {
-  const result = spawnSync(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA"], {
-    encoding: "utf8",
-    input: sqlText,
-    timeout: 20000,
-  });
-  return result; // caller inspects .status/.stdout/.stderr; some tests want the failure case
-}
-
-function psqlOk(dbName, sqlText) {
-  const result = psql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
 
 function applyFiles(dbName, paths) {
   for (const path of paths) psqlOk(dbName, readFileSync(path, "utf8"));
 }
 
-function freshDbName() {
-  return `m3_02_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
+const { psql, psqlOk, freshDatabaseName: freshDbName, skipReason: SKIP_REASON } = createPostgresHarness("m3_02_registry_idem_test");
 
 test(
   "real Postgres: full up-cascade registers all current manifests with the correct, non-default columns",

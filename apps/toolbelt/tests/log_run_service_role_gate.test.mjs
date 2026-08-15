@@ -25,8 +25,8 @@
 // established for a service_role-gated RPC) -- and applies the real,
 // committed migration files from disk verbatim.
 import { test } from "node:test";
+import { createPostgresHarness, supabaseHarnessSql, asRole } from "./postgres-harness.mjs";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,83 +66,13 @@ const STRANGER_UUID = "22222222-2222-2222-2222-222222222222";
 // authenticated/service_role/anon before the call" (asRole() below), the
 // same substitution mark_submitted_to_github_rpc.test.mjs's asServiceRole()
 // already relies on for a service_role-gated RPC.
-const HARNESS_SQL = `
-create schema if not exists auth;
-create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid()
-);
-create or replace function auth.uid() returns uuid
-language sql stable
-as $$ select nullif(current_setting('app.test_uid', true), '')::uuid $$;
-create or replace function auth.role() returns text
-language sql stable
-as $$ select current_setting('role') $$;
+const { psql, psqlOk, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f_log_run_svc_gate");
+const psqlAllowError = psql;
 
-do $$
-begin
-  if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticator') then create role authenticator nologin; end if;
-end
-$$;
-
-insert into auth.users (id) values ('${OWNER_UUID}'), ('${STRANGER_UUID}');
-`;
+const HARNESS_SQL = supabaseHarnessSql([OWNER_UUID, STRANGER_UUID]);
 
 const APP_FIXTURE_SQL = `insert into core.app (id, name, schema_name) values ('log-run-svc-gate-test-app', 'Test App', 'test');`;
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], {
-      encoding: "utf8",
-      timeout: 5000,
-    });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); " +
-    "this suite proves real grant/guard behavior against an actual engine and has nothing honest to " +
-    "assert without one";
-
-function psql(dbName, sqlText) {
-  return spawnSync(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
-    encoding: "utf8",
-    input: sqlText,
-    timeout: 20000,
-  });
-}
-
-const psqlAllowError = psql;
-
-function psqlOk(dbName, sqlText) {
-  const result = psql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-
-function freshDbName() {
-  return `f_log_run_svc_gate_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
-
-function asRole(role, uuidOrNull, sqlText) {
-  const setUid = uuidOrNull
-    ? `do $$ begin perform set_config('app.test_uid', '${uuidOrNull}', false); end $$;\n`
-    : "";
-  return `set role ${role};\n${setUid}${sqlText}`;
-}
 
 const LOG_RUN_8ARG = "select core.log_run('log-run-svc-gate-test-app','job',7,null,10,20,5,0.5);";
 
@@ -150,9 +80,7 @@ const LOG_RUN_8ARG = "select core.log_run('log-run-svc-gate-test-app','job',7,nu
 // (the regressed state m6-02 found) on a fresh scratch database, then
 // optionally applies FIX_UP on top.
 function withDb(applyFix, fn) {
-  const db = freshDbName();
-  psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
-  try {
+  return withDatabase((db) => {
     psqlOk(db, HARNESS_SQL);
     psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
     psqlOk(db, readFileSync(CORE_CREATE_SCHEMA_UP, "utf8"));
@@ -167,9 +95,7 @@ function withDb(applyFix, fn) {
     psqlOk(db, `insert into platform.config (owner_uuid) values ('${OWNER_UUID}');`);
     psqlOk(db, APP_FIXTURE_SQL);
     return fn(db);
-  } finally {
-    psqlOk("postgres", `drop database if exists ${db};`);
-  }
+  });
 }
 
 test(

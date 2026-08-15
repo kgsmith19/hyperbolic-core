@@ -11,6 +11,10 @@ services:
     image: ${LLM_HANDLER_IMAGE:?recorded in ./.env by every deploy (deploy.yml's deploy-llm-handler job)}
     restart: unless-stopped
     env_file: .env
+    # Matches the Dockerfile's own USER, the same way services/brain's
+    # compose pins `user: brain`. Stated here too so a stale image without
+    # the USER directive still cannot come up as root.
+    user: handler
     ports:
       - "127.0.0.1:8200:8200"
     healthcheck:

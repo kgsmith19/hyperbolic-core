@@ -260,7 +260,10 @@ test("a corrupt last-start.json does not break pacing — treated as no prior st
   fs.mkdirSync(LANE, { recursive: true });
   fs.writeFileSync(path.join(LANE, "last-start.json"), "not json");
   setPolicy({ slots: 1, minGapMs: 50, pollMs: 20 });
-  const s = await acquireSlot("after-corrupt-stamp"); // must not throw or hang despite the corrupt stamp
+  // The corrupt stamp must read as "no prior start": the slot is granted and
+  // usable, rather than the call throwing or pacing off a garbage timestamp.
+  const s = await acquireSlot("after-corrupt-stamp");
+  assert.equal(typeof s.release, "function", "a corrupt stamp must still yield a usable slot");
   s.release();
   setPolicy(BASELINE);
 });

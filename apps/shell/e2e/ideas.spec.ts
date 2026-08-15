@@ -158,7 +158,7 @@ test.describe("The draft -> idea -> submitted flow, against the real schema and 
     await page.getByTestId("idea-notes-field").fill("Some notes");
     await page.getByTestId("save-idea-button").click();
 
-    await page.waitForURL((url) => /^\/ideas\/[0-9a-f-]{36}$/.test(url.pathname));
+    await expect(page).toHaveURL((url) => /^\/ideas\/[0-9a-f-]{36}$/.test(url.pathname));
     const ideaId = page.url().split("/ideas/")[1]!;
     expect(intake.readIdeaRow(ideaId)).toMatchObject({ status: "draft", title: "E2E flow idea" });
 
@@ -238,12 +238,12 @@ test.describe("Deleting a draft (II-1: only draft/idea rows are deletable)", () 
     await signInAndGoTo(page, "/ideas/new");
     await page.getByTestId("idea-title-field").fill("Idea to delete");
     await page.getByTestId("save-idea-button").click();
-    await page.waitForURL((url) => /^\/ideas\/[0-9a-f-]{36}$/.test(url.pathname));
+    await expect(page).toHaveURL((url) => /^\/ideas\/[0-9a-f-]{36}$/.test(url.pathname));
     const ideaId = page.url().split("/ideas/")[1]!;
     expect(intake.readIdeaRow(ideaId)).not.toBeNull();
 
     await page.getByTestId("delete-idea-button").click();
-    await page.waitForURL((url) => url.pathname === "/ideas");
+    await expect(page).toHaveURL((url) => url.pathname === "/ideas");
     expect(intake.readIdeaRow(ideaId)).toBeNull();
   });
 });

@@ -37,6 +37,7 @@
 // -- this suite needs only that file's core.event_monthly_agg table and
 // core.purge_old_events() function, neither pg_cron-related).
 import { test } from "node:test";
+import { createPostgresHarness, psqlSpawnSpec, supabaseHarnessSql } from "./postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -64,34 +65,10 @@ function coreEventRetentionWithoutCron() {
 // defaults to auth.uid(), while the baseline migrations grant privileges
 // to Supabase's cluster-wide API roles. Each role creation handles its own
 // duplicate so concurrent scratch-database suites can safely share a cluster.
-const HARNESS_SQL = `
-create schema if not exists auth;
-create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid()
-);
-create or replace function auth.uid() returns uuid
-language sql stable
-as $$ select null::uuid $$;
+const { psql, psqlOk, freshDatabaseName: freshDbName, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f33_core_retention");
+const psqlAllowError = psql;
 
-do $$
-begin
-  create role anon nologin;
-exception when duplicate_object then null;
-end
-$$;
-do $$
-begin
-  create role authenticated nologin;
-exception when duplicate_object then null;
-end
-$$;
-do $$
-begin
-  create role service_role nologin;
-exception when duplicate_object then null;
-end
-$$;
-`;
+const HARNESS_SQL = supabaseHarnessSql([]);
 
 const RUN_ID = "55555555-5555-5555-5555-555555555555";
 const FIXTURE_SQL = `
@@ -112,50 +89,13 @@ function insertOldEventsSql(n, label) {
   return `insert into core.event (run_id, at, kind, name) values\n    ${values};`;
 }
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], { encoding: "utf8", timeout: 5000 });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-if (process.env.TOOLBELT_REQUIRE_POSTGRES === "1" && !RUNNER) {
-  throw new Error("TOOLBELT_REQUIRE_POSTGRES=1 but no local PostgreSQL server is reachable");
-}
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); " +
-    "this suite proves real concurrent behavior against an actual engine and has nothing honest to assert without one";
-
-function psql(dbName, sqlText) {
-  return spawnSync(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
-    encoding: "utf8",
-    input: sqlText,
-    timeout: 20000,
-  });
-}
-
-function psqlOk(dbName, sqlText) {
-  const result = psql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
 
 // Async (non-blocking) psql invocation: needed for the real two-session
 // concurrency proof below, since spawnSync would serialize what must run
 // in parallel.
 function psqlAsync(dbName, sqlText) {
   return new Promise((resolve) => {
-    const child = spawn(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
+    const child = spawn(...psqlSpawnSpec(dbName), {
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -177,23 +117,15 @@ async function waitFor(predicate, timeoutMs) {
   return false;
 }
 
-function freshDbName() {
-  return `f33_core_retention_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
-
 function withDb(applyFix, fn) {
-  const db = freshDbName();
-  psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
-  try {
+  return withDatabase((db) => {
     psqlOk(db, HARNESS_SQL);
     psqlOk(db, readFileSync(CORE_CREATE_SCHEMA_UP, "utf8"));
     psqlOk(db, coreEventRetentionWithoutCron());
     if (applyFix) psqlOk(db, readFileSync(FIX_UP, "utf8"));
     psqlOk(db, FIXTURE_SQL);
     return fn(db);
-  } finally {
-    psqlOk("postgres", `drop database if exists ${db};`);
-  }
+  });
 }
 
 test(
@@ -274,7 +206,7 @@ test(
       // will target, forcing both concurrent purge calls below to
       // genuinely block on real Postgres row-lock contention rather than
       // racing on timing luck.
-      const locker = spawn(RUNNER.cmd, [...RUNNER.args, "-d", db, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
+      const locker = spawn(...psqlSpawnSpec(db), {
         stdio: ["pipe", "pipe", "pipe"],
       });
       let lockerOut = "";

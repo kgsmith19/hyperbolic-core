@@ -29,6 +29,8 @@ test("stub adapters: start/resume always throw, never silently no-op", async () 
 });
 
 test("stub adapters: cancel is a no-op (nothing was ever started)", async () => {
-  await codexAdapter.cancel("s", 1000);
-  await geminiAdapter.cancel("s", 1000);
+  // The contract is "does not reject": cancelling a session that was never
+  // started must be safe, since the scheduler cancels defensively.
+  await assert.doesNotReject(() => codexAdapter.cancel("s", 1000));
+  await assert.doesNotReject(() => geminiAdapter.cancel("s", 1000));
 });

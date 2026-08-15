@@ -67,7 +67,7 @@ test.describe("TB-2: registry-driven discovery, zero hardcoded tool lists", () =
   test("clicking the fixture's nav entry navigates to its registered route", async ({ page }) => {
     await signInAndGoTo(page, "/tools");
     await page.locator(`[data-testid="tool-nav-entry"][data-tool-id="${fixture.fixtureId}"]`).click();
-    await page.waitForURL((url) => url.pathname === fixture.fixtureRoute);
+    await expect(page).toHaveURL((url) => url.pathname === fixture.fixtureRoute);
   });
 
   test("a real routeless tool (network-checker, kind=cli) renders on the status list, never as a navigation entry", async ({
@@ -195,7 +195,7 @@ test.describe("Latency budgets (05-c section 10)", () => {
 
       const start = performance.now();
       await page.getByTestId("login-submit").click();
-      await page.waitForURL((url) => url.pathname === "/");
+      await expect(page).toHaveURL((url) => url.pathname === "/");
       await page.getByTestId("platform-nav").waitFor({ state: "visible" });
       samples.push(performance.now() - start);
 
@@ -203,7 +203,7 @@ test.describe("Latency budgets (05-c section 10)", () => {
       // clean signed-out state -- session-menu's sign-out button, present
       // once Chrome renders.
       await page.locator('[data-slot="sign-out-button"]').click();
-      await page.waitForURL((url) => url.pathname === "/login");
+      await expect(page).toHaveURL((url) => url.pathname === "/login");
     }
 
     samples.sort((a, b) => a - b);

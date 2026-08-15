@@ -32,8 +32,8 @@
 // technique registry-migrations-idempotency.test.mjs's own control test
 // already uses on a different file for an analogous reason.
 import { test } from "node:test";
+import { createPostgresHarness, supabaseHarnessSql, asRole } from "./postgres-harness.mjs";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,93 +68,20 @@ const STRANGER_UUID = "22222222-2222-2222-2222-222222222222";
 // anon/authenticated/service_role/authenticator roles). auth.uid() reads a
 // session GUC (app.test_uid) instead of GoTrue's JWT claim -- unset means
 // null, exactly like an anonymous PostgREST request.
-const HARNESS_SQL = `
-create schema if not exists auth;
-create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid()
-);
-create or replace function auth.uid() returns uuid
-language sql stable
-as $$ select nullif(current_setting('app.test_uid', true), '')::uuid $$;
+const { psql, psqlOk, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f1_log_run_guard");
+const psqlAllowError = psql;
 
-do $$
-begin
-  if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticator') then create role authenticator nologin; end if;
-end
-$$;
-
-insert into auth.users (id) values ('${OWNER_UUID}'), ('${STRANGER_UUID}');
-`;
+const HARNESS_SQL = supabaseHarnessSql([OWNER_UUID, STRANGER_UUID]);
 
 const APP_FIXTURE_SQL = `insert into core.app (id, name, schema_name) values ('log-run-guard-test-app', 'Test App', 'test');`;
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], {
-      encoding: "utf8",
-      timeout: 5000,
-    });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); " +
-    "this suite proves real grant/guard behavior against an actual engine and has nothing honest to " +
-    "assert without one";
-
-function psql(dbName, sqlText) {
-  return spawnSync(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
-    encoding: "utf8",
-    input: sqlText,
-    timeout: 20000,
-  });
-}
-
-// Same as psql() (ON_ERROR_STOP=1, so a failing statement gives a nonzero
-// exit code we can assert on) -- named separately at call sites to signal
-// "this call's whole point is to fail; assert on the failure", vs. plain
-// psqlOk() call sites that assert success.
-const psqlAllowError = psql;
-
-function psqlOk(dbName, sqlText) {
-  const result = psql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-
-function freshDbName() {
-  return `f1_log_run_guard_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
-
-function asRole(role, uuidOrNull, sqlText) {
-  const setUid = uuidOrNull
-    ? `do $$ begin perform set_config('app.test_uid', '${uuidOrNull}', false); end $$;\n`
-    : "";
-  return `set role ${role};\n${setUid}${sqlText}`;
-}
 
 // Builds the schema up through 20260812160000_core_idea_owner_pin.sql
 // (the pre-Finding-1-fix state -- the buggy IS DISTINCT FROM guard, PUBLIC
 // EXECUTE never revoked) on a fresh scratch database. Optionally applies
 // FIX_UP on top when `applyFix` is true.
 function withDb(applyFix, fn) {
-  const db = freshDbName();
-  psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
-  try {
+  return withDatabase((db) => {
     psqlOk(db, HARNESS_SQL);
     psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
     psqlOk(db, readFileSync(CORE_CREATE_SCHEMA_UP, "utf8"));
@@ -166,9 +93,7 @@ function withDb(applyFix, fn) {
     if (applyFix) psqlOk(db, readFileSync(FIX_UP, "utf8"));
     psqlOk(db, APP_FIXTURE_SQL);
     return fn(db);
-  } finally {
-    psqlOk("postgres", `drop database if exists ${db};`);
-  }
+  });
 }
 
 test(

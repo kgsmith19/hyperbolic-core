@@ -19,6 +19,7 @@
 // need and exercises the CLI exactly as an operator would run it against a
 // real project (service/superuser connection bypassing PostgREST grants).
 import { after, test } from "node:test";
+import { createPostgresHarness, runnerUsesSudo, supabaseHarnessSql } from "../../../tests/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { copyFileSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, statSync, readdirSync } from "node:fs";
@@ -68,53 +69,13 @@ const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
 // entirely) but the schema migration itself still references auth.users via
 // intake.idea's user_id foreign key, so that piece of the stub is required
 // here too.
-const HARNESS_SQL = `
-create schema if not exists auth;
-create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid()
-);
-create or replace function auth.uid() returns uuid
-language sql stable
-as $$ select nullif(current_setting('app.test_uid', true), '')::uuid $$;
+const { psql, psqlOk, applyMigrationWithRetry, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("m3_08_forgepad_test");
+const psqlAllowError = psql;
 
-do $$
-begin
-  if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticator') then create role authenticator nologin; end if;
-end
-$$;
-
-insert into auth.users (id) values ('${OWNER_UUID}');
-`;
+const HARNESS_SQL = supabaseHarnessSql([OWNER_UUID]);
 
 const OWNER_BOOTSTRAP_SQL = `insert into platform.config (owner_uuid) values ('${OWNER_UUID}');`;
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], { encoding: "utf8", timeout: 5000 });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-if (process.env.TOOLBELT_REQUIRE_POSTGRES === "1" && !RUNNER) {
-  throw new Error("TOOLBELT_REQUIRE_POSTGRES=1 but no local PostgreSQL server is reachable");
-}
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); this suite proves the real " +
-    "migrate-forgepad.mjs CLI end-to-end against an actual engine and has nothing honest to assert without one -- " +
-    "see the m3-08 implementation report for the interactive proof run where a local engine was available";
 
 // GitHub-hosted checkouts can live beneath an owner-only runner directory.
 // When peer auth requires the postgres OS user, Node then reports the real
@@ -124,7 +85,7 @@ const SKIP_REASON = RUNNER
 // the committed path. The subprocess still executes the real CLI source.
 let SUBPROCESS_CLI_PATH = CLI_PATH;
 let stagedCliDir;
-if (RUNNER?.cmd === "sudo") {
+if (runnerUsesSudo) {
   stagedCliDir = mkdtempSync(join(os.tmpdir(), "m3-08-forgepad-cli-"));
   chmodSync(stagedCliDir, 0o755);
   SUBPROCESS_CLI_PATH = join(stagedCliDir, "migrate-forgepad.mjs");
@@ -133,59 +94,8 @@ if (RUNNER?.cmd === "sudo") {
   after(() => rmSync(stagedCliDir, { recursive: true, force: true }));
 }
 
-function psql(dbName, sqlText) {
-  return spawnSync(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
-    encoding: "utf8",
-    input: sqlText,
-    timeout: 20000,
-  });
-}
-
-function psqlOk(dbName, sqlText) {
-  const result = psql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-
-// Applies a migration file with a bounded retry on Postgres's transient
-// "tuple concurrently updated" error -- a real race this review found (not
-// hypothetical: reproduced via repeated real runs), caused by
-// 20260813002605_intake_create_schema.sql's `alter role authenticator set
-// pgrst.db_schemas = ...`, which -- like the same pattern in
-// 20260812150000_test_create_fence.sql and
-// apps/prompt-organizer/supabase/migrations/20260807020000_prompt_create_prompt.sql
-// -- is unscoped (no `IN DATABASE`), so it writes one role-wide row in the
-// shared pg_db_role_setting catalog. Every scratch database in this test
-// suite applies the identical statement, so two concurrent test files (this
-// one and intake-guards.test.mjs both call withMigratedDb) can race to
-// UPDATE that same catalog row and one loses with this exact error.
-// Wrapping the whole migration in one explicit transaction makes a retry
-// safe and idempotent -- Postgres DDL is transactional, so a failure here
-// rolls back every earlier statement in the same script too, and the retry
-// starts from a clean slate rather than re-running `create schema`/`create
-// table` (neither idempotent) against partially-applied state. This is a
-// test-harness fix only; the real Supabase project only ever applies this
-// migration once, so the race never manifests there.
-function applyMigrationWithRetry(dbName, sqlText, attempts = 5) {
-  const wrapped = `begin;\n${sqlText}\ncommit;\n`;
-  let lastResult;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    lastResult = psql(dbName, wrapped);
-    if (lastResult.status === 0) return lastResult.stdout;
-    if (!/tuple concurrently updated/.test(lastResult.stderr || "")) break;
-  }
-  assert.equal(lastResult.status, 0, `psql failed against ${dbName}: ${lastResult.stderr || lastResult.stdout}`);
-  return lastResult.stdout;
-}
-
-function freshDbName() {
-  return `m3_08_forgepad_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
-
 function withMigratedDb(fn) {
-  const db = freshDbName();
-  psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
-  try {
+  return withDatabase((db) => {
     psqlOk(db, HARNESS_SQL);
     psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
     psqlOk(db, OWNER_BOOTSTRAP_SQL);
@@ -197,9 +107,7 @@ function withMigratedDb(fn) {
     applyMigrationWithRetry(db, readFileSync(INTAKE_HARDENING_UP, "utf8"));
     applyMigrationWithRetry(db, readFileSync(INTAKE_IDEMPOTENCY_UP, "utf8"));
     return fn(db);
-  } finally {
-    psqlOk("postgres", `drop database if exists ${db};`);
-  }
+  });
 }
 
 // Recursively opens permissions so the `postgres` OS user (a different
@@ -221,7 +129,7 @@ function chmodOpenRecursive(p) {
 // through, so the CLI's own psql calls land on the identical peer-auth
 // identity.
 function runCli(dbName, args) {
-  if (RUNNER.cmd === "sudo") {
+  if (runnerUsesSudo) {
     return spawnSync("sudo", ["-n", "-u", "postgres", "env", `DATABASE_URL=${dbName}`, "node", SUBPROCESS_CLI_PATH, ...args], {
       encoding: "utf8",
       timeout: 20000,

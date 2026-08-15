@@ -31,8 +31,8 @@
 // manual/CI-operator verification, not something this REST/psql-only
 // harness fakes.
 import { test } from "node:test";
+import { createPostgresHarness, supabaseHarnessSql } from "./postgres-harness.mjs";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,24 +58,10 @@ function coreEventRetentionWithoutCron() {
   return full.slice(0, idx);
 }
 
-const HARNESS_SQL = `
-create schema if not exists auth;
-create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid()
-);
-create or replace function auth.uid() returns uuid
-language sql stable
-as $$ select nullif(current_setting('app.test_uid', true), '')::uuid $$;
+const { psql, psqlOk, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f2a_purge_events");
+const psqlAllowError = psql;
 
-do $$
-begin
-  if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticator') then create role authenticator nologin; end if;
-end
-$$;
-`;
+const HARNESS_SQL = supabaseHarnessSql([]);
 
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const FIXTURE_SQL = `
@@ -87,58 +73,12 @@ function insertOldEventSql(name) {
   return `insert into core.event (run_id, at, kind, name) values ('${RUN_ID}', now() - interval '100 days', 'tool_call', '${name}');`;
 }
 
-function tryRunner(cmd, args) {
-  try {
-    const result = spawnSync(cmd, [...args, "-d", "postgres", "-tAc", "select 1;"], {
-      encoding: "utf8",
-      timeout: 5000,
-    });
-    return result.status === 0 && result.stdout.trim() === "1";
-  } catch {
-    return false;
-  }
-}
-
-function detectRunner() {
-  if (tryRunner("psql", [])) return { cmd: "psql", args: [] };
-  if (tryRunner("sudo", ["-n", "-u", "postgres", "psql"])) return { cmd: "sudo", args: ["-n", "-u", "postgres", "psql"] };
-  return null;
-}
-
-const RUNNER = detectRunner();
-const SKIP_REASON = RUNNER
-  ? false
-  : "no local Postgres reachable (tried direct `psql` and `sudo -n -u postgres psql`); " +
-    "this suite proves real grant behavior against an actual engine and has nothing honest to assert without one";
-
-function psql(dbName, sqlText) {
-  return spawnSync(RUNNER.cmd, [...RUNNER.args, "-d", dbName, "-v", "ON_ERROR_STOP=1", "-tA", "-q"], {
-    encoding: "utf8",
-    input: sqlText,
-    timeout: 20000,
-  });
-}
-
-const psqlAllowError = psql;
-
-function psqlOk(dbName, sqlText) {
-  const result = psql(dbName, sqlText);
-  assert.equal(result.status, 0, `psql failed against ${dbName}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-
-function freshDbName() {
-  return `f2a_purge_events_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-}
-
 function asAnon(sqlText) {
   return `set role anon;\n${sqlText}`;
 }
 
 function withDb(applyFix, fn) {
-  const db = freshDbName();
-  psqlOk("postgres", `drop database if exists ${db}; create database ${db};`);
-  try {
+  return withDatabase((db) => {
     psqlOk(db, HARNESS_SQL);
     psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
     psqlOk(db, readFileSync(CORE_CREATE_SCHEMA_UP, "utf8"));
@@ -149,9 +89,7 @@ function withDb(applyFix, fn) {
     if (applyFix) psqlOk(db, readFileSync(FIX_UP, "utf8"));
     psqlOk(db, FIXTURE_SQL);
     return fn(db);
-  } finally {
-    psqlOk("postgres", `drop database if exists ${db};`);
-  }
+  });
 }
 
 test(

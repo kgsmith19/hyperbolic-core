@@ -14,17 +14,17 @@
 import { randomUUID } from "node:crypto";
 import type { TaskContractV1 } from "./contracts.ts";
 
-export const DEFAULT_HARNESS_FALLBACK: string[] = ["claude-code"];
-export const DEFAULT_MAX_TURNS = 40;
-export const DEFAULT_WALL_CLOCK_MIN = 60;
-export const DEFAULT_TOKEN_BUDGET = 500_000;
-export const DEFAULT_NETWORK = "provider-only";
+const DEFAULT_HARNESS_FALLBACK: string[] = ["claude-code"];
+const DEFAULT_MAX_TURNS = 40;
+const DEFAULT_WALL_CLOCK_MIN = 60;
+const DEFAULT_TOKEN_BUDGET = 500_000;
+const DEFAULT_NETWORK = "provider-only";
 // ADR-05: the Brain holds its own dedicated, isolated Anthropic key, kept
 // in its own vault (kernel-contract.ts's allowedActions.vaultKeys), never
 // Handler A's. Every dispatched task needs the harness child to receive it
 // by name -- without this, m4-10's claude-code adapter would spawn a
 // `claude` process with no credentials at all.
-export const DEFAULT_VAULT_KEYS: string[] = ["ANTHROPIC_API_KEY"];
+const DEFAULT_VAULT_KEYS: string[] = ["ANTHROPIC_API_KEY"];
 const TITLE_MAX_LEN = 120;
 
 export interface PlanObjectiveParams {

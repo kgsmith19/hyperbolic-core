@@ -1,8 +1,20 @@
+// The one real-Postgres harness for this monorepo's suites: connection
+// discovery, a scratch database per test, the stubbed `auth` schema Supabase
+// migrations expect, and role/JWT assumption. Every suite that applies real
+// committed migrations to a throwaway database uses this -- previously each
+// one carried its own ~50-line copy of the same primitives.
+//
+// Two env-var prefixes because the Toolbelt PR Gate has always set a
+// different one per step (TOOLBELT_* at the root and for Idea Intake,
+// PROMPT_* for Prompt Organizer). Honouring both keeps that contract intact
+// while the implementation is shared.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 
-const DATABASE_URL = process.env.PROMPT_TEST_DATABASE_URL?.trim();
-const REQUIRE_POSTGRES = process.env.PROMPT_REQUIRE_POSTGRES === "1";
+const URL_VAR = process.env.TOOLBELT_TEST_DATABASE_URL?.trim() ? "TOOLBELT_TEST_DATABASE_URL" : "PROMPT_TEST_DATABASE_URL";
+const DATABASE_URL = process.env.TOOLBELT_TEST_DATABASE_URL?.trim() || process.env.PROMPT_TEST_DATABASE_URL?.trim();
+const REQUIRE_POSTGRES =
+  process.env.TOOLBELT_REQUIRE_POSTGRES === "1" || process.env.PROMPT_REQUIRE_POSTGRES === "1";
 
 function databaseUrl(dbName) {
   const url = new URL(DATABASE_URL);
@@ -42,8 +54,8 @@ const RUNNER = detectRunner();
 
 if (REQUIRE_POSTGRES && !RUNNER) {
   throw new Error(
-    "PROMPT_REQUIRE_POSTGRES=1 but no PostgreSQL server is reachable" +
-      (DATABASE_URL ? " through PROMPT_TEST_DATABASE_URL" : " (PROMPT_TEST_DATABASE_URL is unset)"),
+    "TOOLBELT_REQUIRE_POSTGRES/PROMPT_REQUIRE_POSTGRES=1 but no PostgreSQL server is reachable" +
+      (DATABASE_URL ? ` through ${URL_VAR}` : ` (${URL_VAR} is unset)`),
   );
 }
 
@@ -51,8 +63,30 @@ function assertIdentifier(value) {
   assert.match(value, /^[a-z][a-z0-9_]{0,62}$/, `unsafe PostgreSQL identifier: ${value}`);
 }
 
+// `userIds` may be empty: suites that only assert GRANT/REVOKE behavior need
+// the roles and the auth.uid() stub but seed no users, and an INSERT with an
+// empty VALUES list is a syntax error rather than a no-op.
+// The detected psql invocation for a given database, as [cmd, args]. Suites
+// that must drive a SECOND concurrent session -- proving row-lock or advisory-
+// lock behavior needs two live connections, which the synchronous helpers
+// cannot express -- spawn it themselves from this rather than re-implementing
+// detection. null when no server is reachable. Routing through runnerArgs()
+// also means those suites honour a *_TEST_DATABASE_URL connection, which the
+// hand-rolled `-d <db>` forms they replaced silently ignored.
+export function psqlSpawnSpec(dbName, extraArgs = ["-q"]) {
+  if (!RUNNER) return null;
+  assertIdentifier(dbName);
+  return [RUNNER.cmd, [...runnerArgs(RUNNER, dbName), "-v", "ON_ERROR_STOP=1", "-tA", ...extraArgs]];
+}
+
+/** True when the detected runner shells out through `sudo -u postgres`, which
+ *  a few suites must know to make fixture files readable by that user. */
+export const runnerUsesSudo = RUNNER?.cmd === "sudo";
+
 export function supabaseHarnessSql(userIds) {
-  const values = userIds.map((id) => `('${id}'::uuid)`).join(", ");
+  const seed = userIds.length
+    ? `\ninsert into auth.users (id) values ${userIds.map((id) => `('${id}'::uuid)`).join(", ")};\n`
+    : "";
   return `
 create schema if not exists auth;
 create table if not exists auth.users (
@@ -61,6 +95,14 @@ create table if not exists auth.users (
 create or replace function auth.uid() returns uuid
 language sql stable
 as $$ select nullif(current_setting('app.test_uid', true), '')::uuid $$;
+-- auth.role() resolves to the ambient SET ROLE, a fair stand-in for what real
+-- Supabase resolves from the JWT's own role claim, because this harness's
+-- whole convention IS "SET ROLE anon/authenticated/service_role before the
+-- call" (see asRole/asAuthenticated). Suites gating on service_role need it;
+-- it is inert for the rest.
+create or replace function auth.role() returns text
+language sql stable
+as $$ select current_setting('role') $$;
 
 do $$
 begin
@@ -70,9 +112,7 @@ begin
   if not exists (select 1 from pg_roles where rolname = 'authenticator') then create role authenticator nologin; end if;
 end
 $$;
-
-insert into auth.users (id) values ${values};
-`;
+${seed}`;
 }
 
 export function asAuthenticated(uuid, sqlText) {
@@ -83,6 +123,18 @@ do $$ begin
   perform set_config('request.jwt.claims', '${claims}', false);
 end $$;
 ${sqlText}`;
+}
+
+// The narrower sibling of asAuthenticated: assumes a role and sets only
+// app.test_uid (what auth.uid() reads), with no request.jwt.claims. Suites
+// asserting pure GRANT/REVOKE behavior use this -- a policy that consulted
+// the JWT would be a different assertion than the one they mean to make.
+export function asRole(role, uuidOrNull, sqlText) {
+  assertIdentifier(role);
+  const setUid = uuidOrNull
+    ? `do $$ begin perform set_config('app.test_uid', '${uuidOrNull}', false); end $$;\n`
+    : "";
+  return `set role ${role};\n${setUid}${sqlText}`;
 }
 
 export function asJwtRole(role, claims, sqlText) {
@@ -155,7 +207,9 @@ export function createPostgresHarness(prefix, { timeout = 20000 } = {}) {
     available: Boolean(RUNNER),
     skipReason: RUNNER
       ? false
-      : "no PostgreSQL server reachable; set PROMPT_TEST_DATABASE_URL, or set PROMPT_REQUIRE_POSTGRES=1 in CI to fail instead of skip",
+      : "no PostgreSQL server reachable (tried direct `psql` and `sudo -n -u postgres psql`); this suite " +
+        "proves real grant/RLS behavior against an actual engine and has nothing honest to assert without " +
+        `one. Set ${URL_VAR}, or TOOLBELT_REQUIRE_POSTGRES=1 in CI to fail instead of skip`,
     psql,
     psqlOk,
     applyMigrationWithRetry,

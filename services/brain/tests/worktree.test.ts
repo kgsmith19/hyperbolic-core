@@ -87,7 +87,9 @@ test("createWorktree: refuses to reuse an already-existing task worktree path", 
 test("removeWorktree: a never-created worktree is a silent no-op, not an error", async () => {
   const repo = initSourceRepo();
   const workspacesRoot = tmpWorkspacesRoot();
-  await removeWorktree({ workspacesRoot, repoUrl: repo, taskId: "never-existed" });
+  // Removal is called on every task teardown, including tasks that never got
+  // far enough to create one, so absence must not be an error.
+  await assert.doesNotReject(() => removeWorktree({ workspacesRoot, repoUrl: repo, taskId: "never-existed" }));
 });
 
 test("removeWorktree: force removes even a worktree with uncommitted changes", async () => {
