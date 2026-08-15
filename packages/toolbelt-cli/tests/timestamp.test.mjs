@@ -31,3 +31,20 @@ test("nextTimestamp only consults the leading digit run before the first undersc
   // spuriously collide.
   assert.equal(nextTimestamp(["README.md", "notes.sql"], from), "20260812120000");
 });
+
+// A version whose digit run is not 14 wide is still a collision candidate
+// (validate-migrations.mjs counts any /^\d+$/ run, and this repo carries real
+// 4-digit ones like 0001_init.sql), but it is NOT a timestamp and must never
+// reach nextTimestamp's fixed-width slicing. Before this was separated, a
+// digit run that sorted above the clock fed that arithmetic and produced a
+// version of the wrong width entirely -- "999" yielded "9981130000001" (13
+// digits, year 998) and a 16-digit run yielded 15 digits. Both slipped
+// through because a malformed version collides with nothing.
+test("nextTimestamp always emits a 14-digit version, whatever width the existing versions are", () => {
+  const from = new Date(Date.UTC(2020, 0, 1));
+  for (const existing of [["999_x.sql"], ["9999999999999999_x.sql"], ["0001_init.sql", "0002_inventory.sql"]]) {
+    const ts = nextTimestamp(existing, from);
+    assert.match(ts, /^\d{14}$/, `${existing} produced a non-14-digit version: ${ts}`);
+    assert.equal(ts, "20200101000000");
+  }
+});
