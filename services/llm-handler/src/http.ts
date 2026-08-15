@@ -25,19 +25,19 @@ export function send(res: ServerResponse, code: number, body: unknown): void {
 export function readJsonBody(req: IncomingMessage, cap: number): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let data = "";
-    let overCap = false;
     req.on("data", (chunk: Buffer) => {
       data += chunk;
       if (data.length > cap) {
-        overCap = true;
+        // Reject HERE, not from the `end` handler. destroy() emits neither
+        // `end` nor `error` (it emits `close`), so an over-cap body used to
+        // settle this promise on no path at all: the await never returned,
+        // the route never answered, and the handler stayed alive holding the
+        // socket. Verified against a real node:http server before the fix.
         req.destroy();
+        reject(new Error("request body too large"));
       }
     });
     req.on("end", () => {
-      if (overCap) {
-        reject(new Error("request body too large"));
-        return;
-      }
       try {
         resolve(data.length ? JSON.parse(data) : {});
       } catch {
@@ -45,5 +45,9 @@ export function readJsonBody(req: IncomingMessage, cap: number): Promise<unknown
       }
     });
     req.on("error", reject);
+    // Backstop for the other way this stream can finish without `end`: a
+    // client that aborts mid-upload. Harmless on the normal path, where `end`
+    // has already settled the promise and a later reject is a no-op.
+    req.on("close", () => reject(new Error("request aborted before the body was received")));
   });
 }
