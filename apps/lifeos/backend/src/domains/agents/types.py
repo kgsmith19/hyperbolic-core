@@ -80,6 +80,13 @@ AGENT_ACTION_PROPOSAL_SCHEMA: dict[str, Any] = {
         "proposed_at": {"type": "string", "format": "date-time"},
         "proposed_by": {"type": "string", "minLength": 1, "maxLength": 128},
         "decided_at": {"type": "string", "format": "date-time"},
+        # Written by approve_agent_proposal alongside decided_at. Absent
+        # here until now, and with additionalProperties False that made
+        # approving an agent proposal impossible: the write validated as
+        # "Additional properties are not allowed ('approved_by' was
+        # unexpected)" and surfaced as a 422. Bounded like proposed_by,
+        # its counterpart on the other end of the decision.
+        "approved_by": {"type": "string", "minLength": 1, "maxLength": 128},
     },
 }
 
