@@ -79,9 +79,18 @@ export function laneConfig() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // EPERM means "alive but not ours" — on Windows and POSIX both.
-function pidAlive(pid) {
-  if (!pid) return false;
-  try { process.kill(Number(pid), 0); return true; } catch (e) { return e.code === "EPERM"; }
+//
+// Exported because "is the process that claimed this file still alive" is the
+// same question for a lane slot's owner.json and for runner.mjs's pid-file
+// singleton, which had its own copy. The Number() coercion is load-bearing for
+// the pid-FILE caller, which reads a string: Number("0") is 0 and rejected,
+// where a bare `!pid` test lets "0" through to process.kill(0, 0) — a probe of
+// the caller's OWN process group, which succeeds and reports a bogus holder as
+// alive, wedging the lane on a slot nobody holds.
+export function pidAlive(pid) {
+  const n = Number(pid || 0);
+  if (!n) return false;
+  try { process.kill(n, 0); return true; } catch (e) { return e.code === "EPERM"; }
 }
 
 function ownerOf(slotDir) {
