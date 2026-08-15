@@ -1,28 +1,24 @@
 """SNMPv2c GET: the hand-rolled BER encode/decode, and modem_snmp() which
 composes it with remote.py's LAN-only guard.
 
-parse_response() is tested against packets built by an independent, test-only
-encoder below rather than snmp.py's own -- so a bug shared by both sides
-cannot cancel itself out the way it would if the test re-used the module's
-own _get_request().
+parse_response() is tested against packets built by a test-only encoder below
+rather than snmp.py's own _get_request() -- so a bug shared by both sides
+cannot cancel itself out.
+
+That independence stops at _oid(). This file used to carry a byte-identical
+copy of it, which bought nothing: two identical implementations cannot
+disagree, so the copy only made the encoder look covered while nothing
+verified it at all. Instead, OidEncodingTest below pins snmp._oid against
+encodings taken from the BER spec -- an external source of truth, which a
+second copy of our own arithmetic never was -- and the packet builders then
+use the real, now-verified function.
 """
 import unittest
 from unittest.mock import patch
 
 from netcheck import snmp
 
-
-def _oid_bytes(dotted):
-    parts = [int(p) for p in dotted.split(".")]
-    out = [parts[0] * 40 + parts[1]]
-    for p in parts[2:]:
-        chunk = [p & 0x7F]
-        p >>= 7
-        while p:
-            chunk.insert(0, (p & 0x7F) | 0x80)
-            p >>= 7
-        out.extend(chunk)
-    return bytes(out)
+_oid_bytes = snmp._oid
 
 
 def _tlv(tag, payload):
@@ -39,6 +35,28 @@ def _response_packet(oid, value_tag, value_bytes, header=(1, 0)):
                      + _tlv(0x02, b"\x00") + varbind_list)
     message = _tlv(0x02, b"\x01") + _tlv(0x04, b"public") + pdu
     return _tlv(0x30, message)
+
+
+class OidEncodingTest(unittest.TestCase):
+    """_oid against encodings from the BER spec, not from our own arithmetic.
+
+    Every other test in this file builds packets rather than asserting on the
+    encoder, so without these two vectors a wrong OID encoding would still
+    round-trip and every test would pass.
+    """
+
+    def test_single_byte_subidentifiers(self):
+        # sysDescr.0. First two arcs collapse to 1*40+3 = 0x2b; the rest are
+        # each below 128, so each is one byte.
+        self.assertEqual(
+            snmp._oid("1.3.6.1.2.1.1.1.0"), bytes.fromhex("2b06010201010100")
+        )
+
+    def test_multi_byte_subidentifiers_use_7_bit_continuation(self):
+        # 1.2.840.113549 (RSA's arc), whose well-known DER encoding is
+        # 2a 86 48 86 f7 0d -- 840 and 113549 both exceed 127 and so exercise
+        # the continuation-bit loop that the single-byte case never reaches.
+        self.assertEqual(snmp._oid("1.2.840.113549"), bytes.fromhex("2a864886f70d"))
 
 
 class ParseResponseTest(unittest.TestCase):
