@@ -1,0 +1,43 @@
+# Repository facts and executable commands.
+
+project:
+  name: shell
+  type: react-spa
+  languages:
+    - typescript
+    - css
+  has_backend: false  # owns no schema and runs no server; see AGENTS.md
+
+commands:
+  dev: npm run dev
+  build: npm run build
+  test: npm run test
+  test_unit: npm run test:unit
+  e2e: npm run e2e
+  size_check: npm run size-check
+  healthz_check: npm run healthz-check
+
+ci:
+  # Repo-root path: CI lives outside this app's own root because apps/shell/
+  # is one component of a shared monorepo.
+  workflow: .github/workflows/shell-ci.yml
+  workflow_name: "Shell PR Gate"
+  job_name: "Shell PR Gate"
+  triggers:
+    - pull_request
+    - merge_group
+  # The gate also type-checks and unit-tests these, so this app can break it
+  # through any of them.
+  also_gates:
+    - packages/platform-client
+    - packages/ui
+    - packages/llm
+    - services/llm-handler
+
+budgets:
+  bundle_gzipped_kb: 250
+
+data:
+  owns_schema: false
+  accepted_client_key: public-anon-key
+  forbidden_client_key: service-role-key
