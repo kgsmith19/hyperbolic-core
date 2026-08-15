@@ -55,8 +55,8 @@ export function receiptsDir() {
 }
 
 const nowIso = () => new Date().toISOString();
-export const MAX_DIRECTIVE_TAGS = 16;
-export const DIRECTIVE_TAG_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+const MAX_DIRECTIVE_TAGS = 16;
+const DIRECTIVE_TAG_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const DIRECTIVE_TAG_RESERVED = new Set(["__proto__", "constructor", "prototype"]);
 
 function normalizeBudgetValue(value, { name, integer = false } = {}) {
@@ -76,7 +76,7 @@ function defaultBudget() {
   }
 }
 
-export function normalizeDirectiveBudget(budget = {}, defaults = defaultBudget()) {
+function normalizeDirectiveBudget(budget = {}, defaults = defaultBudget()) {
   return {
     wallClockMin: normalizeBudgetValue(budget.wallClockMin ?? defaults.wallClockMin, { name: "wallClockMin" }),
     turns: normalizeBudgetValue(budget.turns ?? defaults.turns, { name: "turns", integer: true }),
@@ -85,7 +85,7 @@ export function normalizeDirectiveBudget(budget = {}, defaults = defaultBudget()
   };
 }
 
-export function budgetSummary(budget = {}) {
+function budgetSummary(budget = {}) {
   const parts = [];
   if (budget.wallClockMin > 0) parts.push(`wall ${budget.wallClockMin} min`);
   if (budget.turns > 0) parts.push(`turns ${budget.turns}`);
@@ -189,7 +189,7 @@ export function listDirectives() {
   }
 }
 
-export function activeDirectives() {
+function activeDirectives() {
   return listDirectives().filter((g) => g.status === "active");
 }
 
@@ -239,7 +239,7 @@ export function createDirective({ text, doneWhen, cwd, profile, budget, tags, ro
   return directive;
 }
 
-export function normalizeDoneWhen(value) {
+function normalizeDoneWhen(value) {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw new Error("doneWhen must be a string");
   const trimmed = value.trim();
@@ -473,7 +473,7 @@ export function main() {
 
 if (isMainModule(import.meta.url)) main();
 
-export function normalizeDirectiveTag(tag) {
+function normalizeDirectiveTag(tag) {
   const t = String(tag || "").trim().toLowerCase();
   return DIRECTIVE_TAG_RE.test(t) && !DIRECTIVE_TAG_RESERVED.has(t) ? t : "";
 }
