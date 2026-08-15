@@ -71,19 +71,30 @@ verified by measurement, not argued -- 614/614 ACC tests and covgate at 98.4%
 lines / 88.9% branches, both slightly ABOVE the pre-change 98.3 / 88.8.
 
 A route table for the remaining 14 `route === "..."` branches is a different
-matter, and it is **arithmetically blocked**, not merely risky. `policy.json` floors this file at 98% lines / 88.5% branches
-against a measured 98.32 / 88.79, and names precisely which branches are
-uncovered: Windows-only ACL application, POSIX ownership-mismatch defenses no
-unprivileged portable test can reach, and the losing sides of an exclusive
-token-file race. A route table removes *covered* dispatch branches while every
-*uncovered* branch stays, so branch coverage moves toward that untestable
-remainder and falls below the floor — 87.3–88.0% depending on the true branch
-total, never above it.
+matter, and the blocker is a coverage floor. `policy.json` floors this file at
+98% lines / 88.5% branches, and names precisely which branches are uncovered:
+Windows-only ACL application, POSIX ownership-mismatch defenses no unprivileged
+portable test can reach, and the losing sides of an exclusive token-file race.
+A route table removes *covered* dispatch branches while every *uncovered*
+branch stays, so branch coverage moves toward that untestable remainder.
 
-So the refactor requires either covering branches that are structurally
-uncoverable here, or lowering a security boundary's coverage floor to buy
-readability. Do neither incidentally. If this is taken on, it is its own
-change with the coverage question settled first.
+**The margin is not what it was, and the old estimate is stale.** That
+analysis was run against a measured 98.32 lines / 88.79 branches and put a
+route table at 87.3–88.0%, below the floor on every assumption. The file now
+measures **98.6 lines / 89.3 branches** — folding out a duplicated `pidAlive`
+raised both. Re-derive the estimate before concluding anything; do not reuse
+the 87.3–88.0 figure, which was computed from a baseline half a point lower.
+
+A general caution learned the hard way while measuring that change: **the
+direction a deletion moves branch coverage is not predictable from a file's
+current percentage.** The same kind of edit raised this file and *lowered*
+`hooks/budget.mjs` (75.5 → 75.3) and `runner/runner.mjs` (90.3 → 90.1), both
+of which now sit within a third of a point of their floors. Run covgate per
+change; do not reason about it.
+
+Whatever the re-derived number says, do not lower a security boundary's
+coverage floor to buy readability, and do not take this on incidentally. If it
+is taken on, it is its own change with the coverage question settled first.
 
 ## Commands
 
