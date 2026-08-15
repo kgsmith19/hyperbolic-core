@@ -25,6 +25,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomBytes, timingSafeEqual, createHash } from "node:crypto";
 import { loadKernelPolicy, saveKernelPolicy } from "../kernel/policy.mjs";
 import { DONE_WHEN_MAX, normalizeRouteTag, validateUserDirectiveTags } from "../hooks/directive.mjs";
+// The pid-liveness predicate is lane.mjs's (it owns cross-process ownership);
+// this file and runner.mjs each used to keep their own copy of it.
+import { pidAlive } from "../hooks/lane.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BODY_CAP = 64 * 1024;
@@ -109,13 +112,6 @@ const DIRECTIVE_ID_RE = /^d-[A-Za-z0-9_-]{1,38}$/;
 const validDirectiveId = (id) => typeof id === "string" && DIRECTIVE_ID_RE.test(id);
 const LOG_TAIL_CAP = 16 * 1024;
 
-// EPERM = the pid exists but belongs to another user: alive for our purposes
-// (same reading as the runner's own singleton check).
-const pidAlive = (pid) => {
-  const n = Number(pid || 0);
-  if (!n) return false;
-  try { process.kill(n, 0); return true; } catch (e) { return e && e.code === "EPERM"; }
-};
 // Is a runner loop live for this directive? Reads the pid file the runner's
 // singleton owns (runner/state/directive-<id>.pid). Purely a status read here;
 // the runner itself is the authority (it refuses a duplicate with exit 6).
