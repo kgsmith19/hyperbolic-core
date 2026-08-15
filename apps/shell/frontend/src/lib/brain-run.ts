@@ -17,7 +17,7 @@
 // approval cards, and every unrecognized future `kind` still renders (as a
 // system row, generic but never silently dropped) so a new journal
 // producer lighting up later needs no client change to become visible.
-import type { BrainEvent, BrainRun, BrainTask } from "@hyperbolic/platform-client";
+import type { BrainEvent, BrainTask } from "@hyperbolic/platform-client";
 import type { TranscriptItem } from "@hyperbolic/ui";
 
 export interface BrainRunReducerState {
