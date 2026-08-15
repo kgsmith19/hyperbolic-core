@@ -14,13 +14,20 @@ import { readRuns, autonomyFile, withLock, sleepSync } from "./ledger.mjs";
 import { loadKernelPolicy } from "./policy.mjs";
 
 const NOT_DELIVERED = new Set(["rejected", "aborted-by-budget"]);
-const FRESH = { factor: 1, runsLeft: 0, log: [] };
+
+// A factory, not a shared constant. Spreading a constant copies the object but
+// NOT its `log` array, so any default that did not re-specify `log` handed the
+// caller one array shared process-wide. The two error paths below defended
+// against that by respelling `log: []`; the two success paths did not, an
+// asymmetry with no stated reason. Building a fresh object per call removes
+// both the hazard and the need to defend against it.
+const fresh = () => ({ factor: 1, runsLeft: 0, log: [] });
 
 export function readAutonomy() {
   try {
-    return { ...FRESH, ...JSON.parse(fs.readFileSync(autonomyFile(), "utf8")) };
+    return { ...fresh(), ...JSON.parse(fs.readFileSync(autonomyFile(), "utf8")) };
   } catch {
-    return { ...FRESH, log: [] };
+    return fresh();
   }
 }
 
@@ -33,10 +40,10 @@ export function readAutonomyStrict() {
   try {
     raw = fs.readFileSync(autonomyFile(), "utf8");
   } catch (e) {
-    if (e.code === "ENOENT") return { ...FRESH, log: [] };
+    if (e.code === "ENOENT") return fresh();
     throw e;
   }
-  return { ...FRESH, ...JSON.parse(raw) };
+  return { ...fresh(), ...JSON.parse(raw) };
 }
 
 export function writeAutonomy(state) {
