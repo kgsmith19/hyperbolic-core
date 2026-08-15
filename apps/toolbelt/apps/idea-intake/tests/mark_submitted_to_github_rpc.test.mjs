@@ -26,45 +26,29 @@
 // avoid that trap; row contents are asserted afterward with a separate,
 // plain `select ... from intake.idea where id = ...` query instead.
 import { test } from "node:test";
-import { asRole, createPostgresHarness, supabaseHarnessSql } from "../../../tests/postgres-harness.mjs";
+import { asRole, createPostgresHarness } from "../../../tests/postgres-harness.mjs";
+import {
+  asAuthenticatedOwner,
+  intakeMigration,
+  makeWithDb,
+} from "./intake-db.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const TOOL_DIR = join(__dirname, "..");
-const ROOT_MIGRATIONS_DIR = join(TOOL_DIR, "..", "..", "supabase", "migrations");
-const INTAKE_MIGRATIONS_DIR = join(TOOL_DIR, "supabase", "migrations");
 
-const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
-const INTAKE_UP = join(INTAKE_MIGRATIONS_DIR, "20260813002605_intake_create_schema.sql");
-const FIX_UP = join(INTAKE_MIGRATIONS_DIR, "20260814040000_intake_mark_submitted_to_github_rpc.sql");
-const FIX_DOWN = join(INTAKE_MIGRATIONS_DIR, "20260814040000_intake_mark_submitted_to_github_rpc_down.sql");
+const FIX_UP = intakeMigration("20260814040000_intake_mark_submitted_to_github_rpc.sql");
+const FIX_DOWN = intakeMigration("20260814040000_intake_mark_submitted_to_github_rpc_down.sql");
 
-const OWNER_UUID = "11111111-1111-1111-1111-111111111111";
 
-const { psql, psqlOk, applyMigrationWithRetry, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f8_mark_submitted");
+const PG = createPostgresHarness("f8_mark_submitted");
+const { psql, psqlOk, applyMigrationWithRetry, withDatabase, skipReason: SKIP_REASON } = PG;
 const psqlAllowError = psql;
 
-const HARNESS_SQL = supabaseHarnessSql([OWNER_UUID]);
 
-const OWNER_BOOTSTRAP_SQL = `insert into platform.config (owner_uuid) values ('${OWNER_UUID}');`;
 
-const asAuthenticatedOwner = (sqlText) => asRole("authenticated", OWNER_UUID, sqlText);
 
 const asServiceRole = (sqlText) => asRole("service_role", null, sqlText);
 
-function withDb(applyFix, fn) {
-  return withDatabase((db) => {
-    psqlOk(db, HARNESS_SQL);
-    psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
-    psqlOk(db, OWNER_BOOTSTRAP_SQL);
-    applyMigrationWithRetry(db, readFileSync(INTAKE_UP, "utf8"));
-    if (applyFix) psqlOk(db, readFileSync(FIX_UP, "utf8"));
-    return fn(db);
-  });
-}
+const withDb = makeWithDb(PG, FIX_UP);
 
 // Promotes a fresh draft idea to 'idea' (as the owner) and returns its id --
 // the shared starting point every test below forges/submits from.
