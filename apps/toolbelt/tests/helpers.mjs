@@ -1,6 +1,12 @@
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config.mjs";
-
-export { SUPABASE_URL, SUPABASE_ANON_KEY };
+// The toolbelt Supabase project's public identity. Not secret: the anon key
+// is designed for client-side exposure and RLS is the actual boundary. The
+// service-role key never appears here.
+//
+// Was its own apps/toolbelt/config.mjs -- three constants in a file at the
+// app root whose only consumer was this one.
+export const SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
+export const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
 
 // Fixed test-fixture users, pre-confirmed once (see docs/notes/2026-08-06-supabase-project-topology.md
 // and SPEC-0000 ASM-003). Not real people; email-confirmation is disabled for

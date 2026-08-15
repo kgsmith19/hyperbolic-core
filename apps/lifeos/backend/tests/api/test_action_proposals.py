@@ -36,9 +36,9 @@ from domains.bills.types import (
     define_bills_types,
 )
 from domains.bills.verify import verify_document
-from kernel import db
 from kernel.access import AccessContext
 from kernel.services import capture
+from tests.support import event_count
 
 client = TestClient(app)
 
@@ -48,13 +48,6 @@ BILLS_CTX = AccessContext.of("bills:read", "bills:write")
 @pytest.fixture(scope="module", autouse=True)
 def bills_types(seeded: object) -> None:
     define_bills_types(BILLS_CTX)
-
-
-def event_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 def a_proposal(marker: str) -> dict[str, Any]:

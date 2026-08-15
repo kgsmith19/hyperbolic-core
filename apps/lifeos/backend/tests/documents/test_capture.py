@@ -34,9 +34,9 @@ from domains.documents.types import (
     MIME_PNG,
     define_documents_types,
 )
-from kernel import db
 from kernel.access import AccessContext, ScopeError
 from kernel.services import capture, find, get_entity
+from tests.support import event_count, events_mentioning
 
 PdfFactory = Callable[[str], bytes]
 
@@ -50,23 +50,6 @@ def doc_ctx() -> AccessContext:
     ctx = AccessContext.of("documents:read", "documents:write")
     define_documents_types(ctx)
     return ctx
-
-
-def event_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
-
-
-def events_mentioning(needle: str) -> int:
-    """Events whose payload still contains a string anywhere — the erasure bar."""
-    with db.connect() as conn:
-        row = conn.execute(
-            "select count(*) as n from event where payload::text like %s", (f"%{needle}%",)
-        ).fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 def test_pdf_upload_stores_bytes_and_text_outside_the_entity(

@@ -37,35 +37,12 @@
 //   seed-migration row).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   asAuthenticated,
   createPostgresHarness,
   supabaseHarnessSql,
 } from "../../../../tests/postgres-harness.mjs";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "..", "supabase", "migrations");
-const PO_MIGRATIONS_DIR = join(__dirname, "..", "supabase", "migrations");
-
-const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
-
-const PO_MIGRATIONS_IN_ORDER = [
-  "20260807020000_prompt_create_prompt.sql",
-  "20260807041000_prompt_versions_and_unique_title.sql",
-  "20260807051000_prompt_create_tag.sql",
-  "20260807070000_prompt_create_usage.sql",
-  "20260808000000_prompt_add_is_active.sql",
-  "20260808100000_prompt_create_configuration.sql",
-  "20260808130000_prompt_create_render_function.sql",
-  "20260812180000_prompt_owner_pin.sql",
-  "20260812200000_prompt_observed_query_indexes.sql",
-  "20260813120000_prompt_create_get_prompt_function.sql",
-  "20260813140000_prompt_security_hardening.sql",
-  "20260813150000_prompt_create_get_prompt_source_function.sql",
-];
+import { makeWithMigratedDb } from "./prompt-db.mjs";
 
 const OWNER_UUID = "9a50a35a-8a1e-4f0c-8495-7f26777982d8";
 const STRANGER_UUID = "b2222222-2222-4222-8222-222222222222";
@@ -78,19 +55,10 @@ const PG = createPostgresHarness("m5_01_contract_test");
 const { psql, psqlOk, applyMigrationWithRetry } = PG;
 const SKIP_REASON = PG.skipReason;
 
-function withMigratedDb(fn) {
-  return PG.withDatabase((db) => {
-    psqlOk(db, HARNESS_SQL);
-    psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
-    psqlOk(db, OWNER_BOOTSTRAP_SQL);
-    for (const name of PO_MIGRATIONS_IN_ORDER) {
-      const sql = readFileSync(join(PO_MIGRATIONS_DIR, name), "utf8");
-      if (name === "20260807020000_prompt_create_prompt.sql") applyMigrationWithRetry(db, sql);
-      else psqlOk(db, sql);
-    }
-    return fn(db);
-  });
-}
+const withMigratedDb = makeWithMigratedDb(PG, {
+  harnessSql: HARNESS_SQL,
+  ownerBootstrapSql: OWNER_BOOTSTRAP_SQL,
+});
 
 function owner(sqlText) {
   return asAuthenticated(OWNER_UUID, sqlText);

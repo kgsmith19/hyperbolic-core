@@ -32,32 +32,18 @@
 import { test } from "node:test";
 import {
   createPostgresHarness,
-  migrationBeforeMarker,
   supabaseHarnessSql,
 } from "../../../../tests/postgres-harness.mjs";
+import { makeWithRetentionDb, poMigration } from "./prompt-db.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BACKEND_DIR = join(__dirname, "..");
-const ROOT_MIGRATIONS_DIR = join(BACKEND_DIR, "..", "..", "..", "supabase", "migrations");
-const PO_MIGRATIONS_DIR = join(BACKEND_DIR, "supabase", "migrations");
+const FIX_UP = poMigration("20260814030000_prompt_purge_old_usage_revoke_public.sql");
+const FIX_DOWN = poMigration("20260814030000_prompt_purge_old_usage_revoke_public_down.sql");
 
-const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
-const PROMPT_CREATE_PROMPT_UP = join(PO_MIGRATIONS_DIR, "20260807020000_prompt_create_prompt.sql");
-const PROMPT_VERSIONS_UP = join(PO_MIGRATIONS_DIR, "20260807041000_prompt_versions_and_unique_title.sql");
-const PROMPT_CREATE_USAGE_UP = join(PO_MIGRATIONS_DIR, "20260807070000_prompt_create_usage.sql");
-const PROMPT_USAGE_RETENTION_UP = join(PO_MIGRATIONS_DIR, "20260812210000_prompt_usage_retention.sql");
-const FIX_UP = join(PO_MIGRATIONS_DIR, "20260814030000_prompt_purge_old_usage_revoke_public.sql");
-const FIX_DOWN = join(PO_MIGRATIONS_DIR, "20260814030000_prompt_purge_old_usage_revoke_public_down.sql");
-
-const CRON_SPLIT_MARKER = "select cron.schedule(";
-
-const promptUsageRetentionWithoutCron = () => migrationBeforeMarker(PROMPT_USAGE_RETENTION_UP, CRON_SPLIT_MARKER);
-
-const { psql, psqlOk, withDatabase, skipReason: SKIP_REASON } = createPostgresHarness("f2b_purge_usage");
+const PG = createPostgresHarness("f2b_purge_usage");
+const { psql, psqlOk, withDatabase } = PG;
+const SKIP_REASON = PG.skipReason;
 const psqlAllowError = psql;
 
 const HARNESS_SQL = supabaseHarnessSql([]);
@@ -77,19 +63,11 @@ function asAnon(sqlText) {
   return `set role anon;\n${sqlText}`;
 }
 
-function withDb(applyFix, fn) {
-  return withDatabase((db) => {
-    psqlOk(db, HARNESS_SQL);
-    psqlOk(db, readFileSync(PLATFORM_BOOTSTRAP_UP, "utf8"));
-    psqlOk(db, readFileSync(PROMPT_CREATE_PROMPT_UP, "utf8"));
-    psqlOk(db, readFileSync(PROMPT_VERSIONS_UP, "utf8"));
-    psqlOk(db, readFileSync(PROMPT_CREATE_USAGE_UP, "utf8"));
-    psqlOk(db, promptUsageRetentionWithoutCron());
-    if (applyFix) psqlOk(db, readFileSync(FIX_UP, "utf8"));
-    psqlOk(db, FIXTURE_SQL);
-    return fn(db);
-  });
-}
+const withDb = makeWithRetentionDb(PG, {
+  harnessSql: HARNESS_SQL,
+  fixtureSql: FIXTURE_SQL,
+  fixUp: FIX_UP,
+});
 
 test(
   "real Postgres RED: before the fix, an anonymous caller invokes purge_old_usage and it really deletes a stale prompt.usage row (Finding 2b reproduction)",

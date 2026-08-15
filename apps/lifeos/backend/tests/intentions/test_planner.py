@@ -24,20 +24,14 @@ from domains.intentions.planner import PlannedIntention, mark_done, plan_today
 from domains.intentions.types import STATUS_CANDIDATE, TYPE_NAME, define_intention_types
 from domains.ops.receipts import JobResult, emit_receipt
 from domains.ops.types import define_ops_types
-from kernel import db, services
+from kernel import services
 from kernel.access import AccessContext, ScopeError
 from tests.intentions.test_import_priorities import FakeClient, listing
+from tests.support import event_count
 
 
 def a_title(label: str) -> str:
     return f"planner-{label}-{uuid4().hex[:12]}"
-
-
-def event_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 @pytest.fixture(scope="module")

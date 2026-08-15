@@ -25,10 +25,6 @@ function opts(overrides = {}) {
   };
 }
 
-function basenameOf(path) {
-  return basename(path);
-}
-
 // Mirrors src/scaffold.mjs's own internal safeReaddir exactly -- duplicated
 // here (not imported; it is not exported) only so the RED test below can
 // reconstruct the OLD, pre-fix per-directory-only algorithm for comparison.
@@ -138,8 +134,8 @@ test("GREEN: buildPlan allocates a registration timestamp and a schema timestamp
     const registerFile = plan.files.find((f) => /register_scratch-tool\.sql$/.test(f.path));
     const schemaFile = plan.files.find((f) => /create_schema\.sql$/.test(f.path));
     assert.ok(registerFile && schemaFile, "test assumes the default ui+schema opts() layout");
-    const registerTs = basenameOf(registerFile.path).split("_")[0];
-    const schemaTs = basenameOf(schemaFile.path).split("_")[0];
+    const registerTs = basename(registerFile.path).split("_")[0];
+    const schemaTs = basename(schemaFile.path).split("_")[0];
     assert.notEqual(
       registerTs,
       schemaTs,
@@ -171,8 +167,8 @@ test("buildPlan's timestamp allocation avoids colliding with a pre-existing migr
       const plan = buildPlan(opts(), { toolbeltRoot: root, now });
       const registerFile = plan.files.find((f) => /register_scratch-tool\.sql$/.test(f.path));
       const schemaFile = plan.files.find((f) => /create_schema\.sql$/.test(f.path));
-      const registerTs = basenameOf(registerFile.path).split("_")[0];
-      const schemaTs = basenameOf(schemaFile.path).split("_")[0];
+      const registerTs = basename(registerFile.path).split("_")[0];
+      const schemaTs = basename(schemaFile.path).split("_")[0];
       assert.notEqual(registerTs, nowTs, "must not collide with a pre-existing migration in a different app's directory");
       assert.notEqual(schemaTs, nowTs, "must not collide with a pre-existing migration in a different app's directory");
       assert.notEqual(registerTs, schemaTs, "must not collide with each other either");

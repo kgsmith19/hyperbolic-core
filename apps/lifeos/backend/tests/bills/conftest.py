@@ -9,26 +9,12 @@ tests do (tests/api/test_chat_loop.py).
 from collections.abc import Callable
 from uuid import UUID
 
-import pymupdf
 import pytest
 
 from domains.documents.capture import capture_document
 from domains.documents.storage import BlobStore
 from kernel.access import AccessContext
-
-PdfFactory = Callable[[str], bytes]
-
-
-@pytest.fixture(scope="session")
-def make_pdf() -> PdfFactory:
-    """A one-page PDF containing exactly the given text (no binary fixtures)."""
-
-    def build(text: str) -> bytes:
-        with pymupdf.open() as doc:
-            doc.new_page().insert_text((72, 72), text)
-            return bytes(doc.tobytes())
-
-    return build
+from tests.conftest import PdfFactory
 
 
 @pytest.fixture(scope="module")

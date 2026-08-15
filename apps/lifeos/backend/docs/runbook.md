@@ -85,7 +85,7 @@ candidate's fields.
 redefinition path, so an existing database still holds C2's schemas):
 
 ```bash
-docker compose run --rm --no-deps api python scripts/migrate_bill_status_verified.py
+docker compose run --rm --no-deps api python -m scripts.migrate_bill_status_verified
 ```
 
 Then:
@@ -139,7 +139,7 @@ defined automatically, but `bill`/`eob` gain a character-class bound on their
 dates and the registry has no redefinition path:
 
 ```bash
-docker compose run --rm --no-deps api python scripts/migrate_bill_date_charset.py
+docker compose run --rm --no-deps api python -m scripts.migrate_bill_date_charset
 ```
 
 Then:

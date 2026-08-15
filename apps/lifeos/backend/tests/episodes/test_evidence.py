@@ -15,9 +15,10 @@ import pytest
 from domains.episodes.capture import guard_capture
 from domains.episodes.evidence import METHOD, compute_card, evidence_card
 from domains.episodes.types import TYPE_EPISODE, define_episode_types
-from kernel import db, services
+from kernel import services
 from kernel.access import AccessContext, ScopeError
 from kernel.models import Entity
+from tests.support import event_count
 
 # --- pure fixture ledgers -------------------------------------------------
 
@@ -201,13 +202,6 @@ def seeded(ctx: AccessContext) -> dict[str, UUID]:
         ctx, {"onset_date": "2027-02-01", "perturbation_tags": ["synthetic-noise"]}
     ).entity_id
     return {"closed": closed, "open": opened}
-
-
-def event_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 def test_card_covers_every_episode_and_cites_latest_events(

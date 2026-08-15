@@ -30,11 +30,10 @@ old-composition briefing merges onto it (capture merges on identity), so the
 old keys linger harmlessly on that one entity.
 """
 
-from psycopg.types.json import Jsonb
-
 from domains.ops.types import BRIEFING_SCHEMA
 from kernel import db
-from kernel.events import append_event, tx_now
+from kernel.events import tx_now
+from scripts.type_redefinition import redefine_types
 
 ACTOR = "scripts.migrate_briefing_composition"
 _REASON = (
@@ -44,34 +43,10 @@ _REASON = (
 
 
 def migrate() -> dict[str, int]:
-    counts = {"types_updated": 0}
     with db.connect() as conn:
-        row = conn.execute(
-            "select id, json_schema from type_definition where name = 'briefing'"
-        ).fetchone()
-        if row is None:  # never defined here: define_missing will use the new schema
-            return counts
-        if row["json_schema"] == BRIEFING_SCHEMA:  # already migrated
-            return counts
         now = tx_now(conn)
-        conn.execute(
-            "update type_definition set json_schema = %s where id = %s",
-            (Jsonb(BRIEFING_SCHEMA), row["id"]),
-        )
-        append_event(
-            conn,
-            entity_id=None,
-            event_type="type.redefined",
-            payload={
-                "type": {"id": str(row["id"]), "name": "briefing", "json_schema": BRIEFING_SCHEMA},
-                "reason": _REASON,
-            },
-            valid_time=now,
-            recorded_at=now,
-            actor=ACTOR,
-        )
-        counts["types_updated"] = 1
-    return counts
+        updated = redefine_types(conn, {"briefing": BRIEFING_SCHEMA}, _REASON, ACTOR, now)
+        return {"types_updated": updated}
 
 
 if __name__ == "__main__":

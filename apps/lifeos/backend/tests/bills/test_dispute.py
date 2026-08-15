@@ -59,9 +59,10 @@ from domains.bills.types import (
     define_bills_types,
 )
 from domains.bills.verify import PromotionRefused, forget_bill, guard_capture, verify_document
-from kernel import db
 from kernel.access import AccessContext, ScopeError
 from kernel.services import capture, find, get_entity
+from tests.bills.records import bill_record, eob_record
+from tests.support import event_count, events_mentioning
 
 APPROVER = "test-owner-0001"
 
@@ -98,46 +99,6 @@ def _types(dispute_ctx: AccessContext) -> None:
 
 
 # --- building the C3 state a proposal rests on ------------------------------
-
-
-def bill_record(**overrides: Any) -> dict[str, Any]:
-    """A medical bill whose one line item comes to 128.40."""
-    record: dict[str, Any] = {
-        "category": "medical",
-        "issuer": "Mercy Clinic",
-        "account_ref": "ACCT-1",
-        "service_date": "2026-03-04",
-        "due_date": "2026-04-01",
-        "currency": "USD",
-        "total": "128.40",
-        "line_items": [{"code": "99213", "quantity": "1", "amount": "128.40"}],
-        "confidence": 0.8,
-        "low_confidence_fields": [],
-    }
-    return {**record, **overrides}
-
-
-def eob_record(**overrides: Any) -> dict[str, Any]:
-    """A clean EOB: the split is complete and the patient owes 30.00."""
-    record: dict[str, Any] = {
-        "payer": "Blue Shield",
-        "claim_no": "CLM-1",
-        "service_date": "2026-03-04",
-        "currency": "USD",
-        "line_items": [
-            {
-                "code": "99213",
-                "quantity": "1",
-                "billed": "200.00",
-                "allowed": "150.00",
-                "plan_paid": "120.00",
-                "patient_resp": "30.00",
-            }
-        ],
-        "confidence": 0.8,
-        "low_confidence_fields": [],
-    }
-    return {**record, **overrides}
 
 
 def candidate(
@@ -212,22 +173,6 @@ def a_grant(**overrides: Any) -> dict[str, Any]:
         },
     }
     return {**grant, **overrides}
-
-
-def event_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
-
-
-def events_mentioning(needle: str) -> int:
-    with db.connect() as conn:
-        row = conn.execute(
-            "select count(*) as n from event where payload::text like %s", (f"%{needle}%",)
-        ).fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 # --- proposing --------------------------------------------------------------

@@ -34,16 +34,16 @@ identity field (`ics_key`) was never PII.
 
 from typing import Any
 
-from psycopg.types.json import Jsonb
-
 from domains.calendar.types import APPOINTMENT_SCHEMA, ATTENDEE_SCHEMA, email_hash
 from kernel import db
 from kernel.events import append_event, iso, tx_now
 from kernel.projections import apply_event
 from kernel.services.common import entity_type_names
+from scripts.type_redefinition import redefine_types
 
 ACTOR = "scripts.migrate_calendar_durable_erasure"
 _SCHEMAS = {"attendee": ATTENDEE_SCHEMA, "appointment": APPOINTMENT_SCHEMA}
+_REASON = "ADR 012 durable erasure: identity fields must survive forget()"
 
 
 def migrate() -> dict[str, int]:
@@ -51,31 +51,7 @@ def migrate() -> dict[str, int]:
     with db.connect() as conn:
         now = tx_now(conn)
 
-        for name, schema in _SCHEMAS.items():
-            row = conn.execute(
-                "select id, json_schema from type_definition where name = %s", (name,)
-            ).fetchone()
-            if row is None:
-                continue  # never defined here: define_missing will use the new schema
-            if row["json_schema"] == schema:
-                continue  # already migrated
-            conn.execute(
-                "update type_definition set json_schema = %s where id = %s",
-                (Jsonb(schema), row["id"]),
-            )
-            append_event(
-                conn,
-                entity_id=None,
-                event_type="type.redefined",
-                payload={
-                    "type": {"id": str(row["id"]), "name": name, "json_schema": schema},
-                    "reason": "ADR 012 durable erasure: identity fields must survive forget()",
-                },
-                valid_time=now,
-                recorded_at=now,
-                actor=ACTOR,
-            )
-            counts["types_updated"] += 1
+        counts["types_updated"] = redefine_types(conn, _SCHEMAS, _REASON, ACTOR, now)
 
         rows = conn.execute(
             """

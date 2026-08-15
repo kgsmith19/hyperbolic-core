@@ -9,36 +9,10 @@ import { extractBearerToken, verifyOwnerSession } from "./auth.ts";
 import { ConcurrencyGate } from "./concurrency.ts";
 import { submitIdea, type SubmitDeps } from "./intake-submit.ts";
 import { llmRoutes } from "./llm-routes.ts";
-import { send } from "./http.ts";
+import { readJsonBody, send } from "./http.ts";
 import type { HandlerConfig } from "./types.ts";
 
 const BODY_CAP = 16 * 1024;
-
-function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    let overCap = false;
-    req.on("data", (chunk: Buffer) => {
-      data += chunk;
-      if (data.length > BODY_CAP) {
-        overCap = true;
-        req.destroy();
-      }
-    });
-    req.on("end", () => {
-      if (overCap) {
-        reject(new Error("request body too large"));
-        return;
-      }
-      try {
-        resolve(data.length ? JSON.parse(data) : {});
-      } catch {
-        reject(new Error("request body is not valid JSON"));
-      }
-    });
-    req.on("error", reject);
-  });
-}
 
 async function handleIntakeSubmit(
   req: http.IncomingMessage,
@@ -63,7 +37,7 @@ async function handleIntakeSubmit(
 
   let body: unknown;
   try {
-    body = await readJsonBody(req);
+    body = await readJsonBody(req, BODY_CAP);
   } catch (err) {
     send(res, 400, { error: err instanceof Error ? err.message : "invalid request body" });
     return;

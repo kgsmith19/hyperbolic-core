@@ -26,6 +26,7 @@ from domains.cpap.sleephq_client import SleepHQError
 from domains.cpap.types import define_cpap_types
 from kernel.access import AccessContext
 from kernel.services import find, forget, get_entity, redacted_fields
+from tests.support import event_count
 
 WINDOW_START = date(2026, 8, 1)
 WINDOW_END = date(2026, 8, 5)
@@ -125,15 +126,6 @@ def test_ingest_creates_sessions_linked_to_a_receipt(cpap_ctx: AccessContext) ->
     assert derived and derived[0].to_entity == report.receipt_id
     assert derived[0].attributes["method"] == METHOD
     assert derived[0].attributes["confidence"] == 1.0
-
-
-def event_count() -> int:
-    from kernel import db
-
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 def test_replaying_the_identical_response_emits_nothing(cpap_ctx: AccessContext) -> None:

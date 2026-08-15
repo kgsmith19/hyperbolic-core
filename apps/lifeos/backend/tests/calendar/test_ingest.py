@@ -26,9 +26,9 @@ from domains.calendar.ingest import (
     main,
 )
 from domains.calendar.types import define_calendar_types
-from kernel import db
 from kernel.access import AccessContext, ScopeError
 from kernel.services import find, forget, get_entity, history
+from tests.support import event_count, events_mentioning
 
 FIXTURES = Path(__file__).parent / "fixtures"
 WINDOW_START = datetime(2026, 7, 1, tzinfo=UTC)
@@ -72,23 +72,6 @@ def cal_ctx() -> AccessContext:
 
 def ingest(ctx: AccessContext, content: bytes, url: str) -> FeedReport:
     return ingest_content(ctx, content, url, window_start=WINDOW_START, window_end=WINDOW_END)
-
-
-def event_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
-
-
-def events_mentioning(needle: str) -> int:
-    """Events whose payload still contains a string anywhere — the erasure bar."""
-    with db.connect() as conn:
-        row = conn.execute(
-            "select count(*) as n from event where payload::text like %s", (f"%{needle}%",)
-        ).fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 def test_ingest_creates_appointments_linked_to_receipt(cal_ctx: AccessContext) -> None:

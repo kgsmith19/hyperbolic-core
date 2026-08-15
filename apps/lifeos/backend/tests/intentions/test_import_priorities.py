@@ -29,9 +29,9 @@ from domains.intentions.types import (
     TYPE_NAME,
     define_intention_types,
 )
-from kernel import db
 from kernel.access import AccessContext
 from kernel.services import find
+from tests.support import event_count
 
 
 class FakeClient:
@@ -69,13 +69,6 @@ def listing(tmp_path: Path, text: str) -> Path:
     path = tmp_path / "priorities.txt"
     path.write_text(text, encoding="utf-8")
     return path
-
-
-def event_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 def by_title(ctx: AccessContext, title: str) -> Any:

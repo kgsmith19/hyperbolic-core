@@ -17,7 +17,7 @@
 // approval cards, and every unrecognized future `kind` still renders (as a
 // system row, generic but never silently dropped) so a new journal
 // producer lighting up later needs no client change to become visible.
-import type { BrainEvent, BrainRun, BrainTask } from "@hyperbolic/platform-client";
+import type { BrainEvent, BrainTask } from "@hyperbolic/platform-client";
 import type { TranscriptItem } from "@hyperbolic/ui";
 
 export interface BrainRunReducerState {
@@ -154,10 +154,6 @@ export function applyLocalApprovalResolution(
 export function taskTitleLookup(tasks: readonly BrainTask[]): (taskId: string) => string | undefined {
   const byId = new Map(tasks.map((t) => [t.id, t.title] as const));
   return (taskId) => byId.get(taskId);
-}
-
-export function deriveRunStateLabel(run: BrainRun | undefined): string | undefined {
-  return run?.status;
 }
 
 // --- Connection state (09 section 7.3: reconnect UX) ------------------

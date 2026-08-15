@@ -3,30 +3,18 @@ _upsert_device()'s synced=0 reset on update (62), MAC normalization's
 device-dedup effect and record_inventory()'s transactional atomicity (63).
 Split out of test_inventory.py for the same file-budget reason
 test_change_key.py etc. are already split out of test_change.py."""
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from netcheck import inventory, store, topology
 
-from tests.test_inventory import TS, fixture_payload
+from tests.test_inventory import TS, InventoryTestCase, fixture_payload
 
 
-class InventorySecurityTestCase(unittest.TestCase):
-    """Same on-disk-store setUp as test_inventory.py's InventoryTestCase."""
-
-    def setUp(self):
-        self.dir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.dir.cleanup)
-        self.conn = store.open_db(Path(self.dir.name) / "t.db")
-        self.addCleanup(self.conn.close)
-        self.host = store.host_id(self.conn, "surface", "Windows")
-
-    def counts(self):
-        c = self.conn
-        return {t: c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                for t in ("device", "interface", "config_item")}
+# Same on-disk store and one host as the inventory suite -- inherited rather
+# than restated, which is what the duplicated copy's own docstring claimed it
+# was doing.
+InventorySecurityTestCase = InventoryTestCase
 
 
 class SyncedResetOnUpdateTest(InventorySecurityTestCase):

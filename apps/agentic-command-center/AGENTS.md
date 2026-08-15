@@ -56,6 +56,35 @@ decision record; historical rationale otherwise lives in git history.
 - Do not weaken or delete a regression test unless the behavior it protects
   has intentionally been removed and the change explains why.
 
+### `backend/gui/server.mjs`'s `handler` — how far the refactor can go
+
+`handler` is the most complex function in this repository by a wide margin
+(143 decision points; the next highest anywhere is 68): a security preamble —
+Host, then Origin, preflight, CORS, the `X-ACC` header, then the token —
+followed by 14 `route === "/api/..."` branches and 17 method checks.
+
+The security preamble is now its own `enforceRequestSecurity`, so "these run
+ONCE and a future route cannot forget them" is structural rather than a matter
+of where someone pastes the next `if`. That cost 23 lines rather than saving
+any, and it was kept because the property is worth more than the lines; it was
+verified by measurement, not argued -- 614/614 ACC tests and covgate at 98.4%
+lines / 88.9% branches, both slightly ABOVE the pre-change 98.3 / 88.8.
+
+A route table for the remaining 14 `route === "..."` branches is a different
+matter, and it is **arithmetically blocked**, not merely risky. `policy.json` floors this file at 98% lines / 88.5% branches
+against a measured 98.32 / 88.79, and names precisely which branches are
+uncovered: Windows-only ACL application, POSIX ownership-mismatch defenses no
+unprivileged portable test can reach, and the losing sides of an exclusive
+token-file race. A route table removes *covered* dispatch branches while every
+*uncovered* branch stays, so branch coverage moves toward that untestable
+remainder and falls below the floor — 87.3–88.0% depending on the true branch
+total, never above it.
+
+So the refactor requires either covering branches that are structurally
+uncoverable here, or lowering a security boundary's coverage floor to buy
+readability. Do neither incidentally. If this is taken on, it is its own
+change with the coverage question settled first.
+
 ## Commands
 
 ```bash

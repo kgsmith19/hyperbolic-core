@@ -22,6 +22,7 @@ from domains.money.csv_import import (
 from domains.money.types import define_money_types
 from kernel.access import AccessContext
 from kernel.services import find, forget, get_entity, redacted_fields
+from tests.support import event_count
 
 AK = account_key("csv", "checking")
 
@@ -138,15 +139,6 @@ def test_import_creates_account_and_transactions_linked_to_a_receipt(
     derived = [e for e in edges if e.relation == DERIVED_FROM]
     assert derived and derived[0].to_entity == report.write.receipt_id
     assert derived[0].attributes["method"] == METHOD
-
-
-def event_count() -> int:
-    from kernel import db
-
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 def test_reimporting_an_identical_file_emits_nothing(money_ctx: AccessContext) -> None:

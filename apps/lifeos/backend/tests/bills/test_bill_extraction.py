@@ -39,9 +39,9 @@ from domains.bills.types import (
 )
 from domains.documents.capture import DocumentErased, capture_document, forget_document
 from domains.documents.storage import BlobStore
-from kernel import db
 from kernel.access import AccessContext, ScopeError
 from kernel.services import capture, find, forget, get_entity, history
+from tests.support import event_count, events_mentioning
 
 DocumentFactory = Callable[[str], UUID]
 
@@ -123,23 +123,6 @@ def payload(marker: str, confidence: float = 0.8) -> dict[str, Any]:
 
 
 EMPTY_PAYLOAD: dict[str, Any] = {"bills": [], "eobs": []}
-
-
-def event_count() -> int:
-    with db.connect() as conn:
-        row = conn.execute("select count(*) as n from event").fetchone()
-        assert row is not None
-        return int(row["n"])
-
-
-def events_mentioning(needle: str) -> int:
-    """Events whose payload still contains a string anywhere — the erasure bar."""
-    with db.connect() as conn:
-        row = conn.execute(
-            "select count(*) as n from event where payload::text like %s", (f"%{needle}%",)
-        ).fetchone()
-        assert row is not None
-        return int(row["n"])
 
 
 def only(entities: list[Any]) -> Any:

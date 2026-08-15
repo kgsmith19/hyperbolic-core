@@ -8,10 +8,11 @@ action available only here; application code can never do this.
 import os
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from uuid import UUID
 
+import pymupdf
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,6 +95,28 @@ def clean_database(exclusive_database: int) -> None:
         conn.execute("delete from type_definition")
         conn.execute("alter table event enable trigger event_append_only_row")
         conn.execute("alter table event enable trigger event_append_only_stmt")
+
+
+PdfFactory = Callable[[str], bytes]
+
+
+@pytest.fixture(scope="session")
+def make_pdf() -> PdfFactory:
+    """A one-page PDF containing exactly the given text.
+
+    Lives here because the bills and documents tiers each defined it
+    identically. No binary fixture is ever committed and no real medical
+    document enters this repo: every PDF is built in-process, so each test's
+    bytes -- and therefore its sha256 identity -- are unique to the marker text
+    it embeds.
+    """
+
+    def build(text: str) -> bytes:
+        with pymupdf.open() as doc:
+            doc.new_page().insert_text((72, 72), text)
+            return bytes(doc.tobytes())
+
+    return build
 
 
 @pytest.fixture(scope="session")
