@@ -107,7 +107,7 @@ jobs:
           import sys
 
           version = sys.argv[1]
-          text = open("apps/toolbelt/apps/network-checker/CHANGELOG.md", encoding="utf-8").read()
+          text = open("docs/archived/2026-08-16/network-checker-CHANGELOG.md", encoding="utf-8").read()
           pattern = rf"## \[{re.escape(version)}\].*?\n(.*?)(?=\n## \[|\Z)"
           match = re.search(pattern, text, re.DOTALL)
           print(match.group(1).strip() if match else f"See CHANGELOG.md for {version}.")

@@ -25,7 +25,7 @@ Tests can erase the database configured in `.env`. Use only an isolated test dat
 
 ## 📚 Documentation
 
-Operational procedures are in `docs/runbook.md`; architecture decisions are in `docs/adr/`.
+Operational procedures are in `docs/runbook.md`; architecture decisions are archived at `docs/archived/2026-08-16/lifeos-backend-adr/` in the monorepo root.
 
 ## 🔒 Collaboration Boundary
 

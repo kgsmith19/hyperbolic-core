@@ -312,7 +312,7 @@ only way to read backups and must never enter the repo or CI.
 
 `docs/planning/issues/m2-08-feat-lifeos-shell-integration.md` /
 `docs/planning/05-e-lifeos.md` section 4 / ADR-03 (`hyperbolic-core`'s
-`docs/planning/04-adrs.md`): LifeOS stops being its own login surface and
+`docs/archived/2026-08-16/planning-04-adrs.md`): LifeOS stops being its own login surface and
 starts reading the session the `hyperbolic-core` Shell establishes. The
 prod project referenced throughout this file (`vhbzblllaohuljtareza`) is
 retired as the **auth** source — it keeps owning the LifeOS `Postgres`

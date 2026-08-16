@@ -7,7 +7,7 @@ Evidence date: 2026-08-12. Names per `00-canonical-names.md`. Realizes LO-1 thro
 LifeOS is the strongest component in the system and V1 treats it as a foundation to extend, not repair:
 
 - Architecture: typed entity graph + append-only bitemporal event log kernel with 9 life domains (bills, calendar, cpap, documents, episodes, health_connect, intentions, money, ops) [VERIFIED: lifeos backend pyproject description; src/domains listing].
-- Governance: 19 ADRs, 10 invariants, 11 domain constitution cells [VERIFIED: backend/docs/adr listing; invariants.md].
+- Governance: 19 ADRs, 10 invariants, 11 domain constitution cells [VERIFIED: docs/archived/2026-08-16/lifeos-backend-adr listing; invariants.md].
 - Deployed: single VPS `api` container + static frontend, tailnet-only via `tailscale serve`, nightly age-encrypted backups, the system's only working production pipeline [VERIFIED: 01-inventory.md section 5].
 - Tested: backend pytest + frontend vitest/Playwright in the standalone repo's `PR Gate`; suites deliberately not run in this sandbox (they erase their Postgres) [VERIFIED: 01-inventory.md section 6; apps/lifeos/AGENTS.md warning].
 - Auth posture is the system's baseline pattern: ES256-only local JWKS verification, subject must equal the single owner id, fail closed, RLS deny-all on kernel tables, scoped read-only MCP agent tokens [VERIFIED: 02-health-audit.md SEC-06; src/api/auth.py].

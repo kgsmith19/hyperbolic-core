@@ -15,7 +15,7 @@ From the Phase 2 deep dive [VERIFIED: docs/planning/02-health-audit.md section 6
 - Parser and test discipline is strong: parsers are pure functions over captured fixtures; every module has a dedicated `test_<module>.py` except `watch.py` (defect D-03) and the frontend JS (defect D-04) [VERIFIED: tests/ listing; scratchpad toolbelt report].
 - The diagnostic model is data-driven: `rank._SCAN_RULES` is a tuple of (cause, scan section, confidence, evidence lambda) entries and `rank._FIXES` maps every cause to actionable prose; `test_rank.py` cross-checks `_SCRIPTS` entries against the filesystem in both directions [VERIFIED: netcheck/rank.py:89-94,140-192].
 - The lifecycle gap: measurement and diagnosis are mature, but "know every property" exists only as deep-tier scans (topology, exposure, remote, snmp, ssdp) with no persistent device or configuration inventory, and remediation exists only as three human-run shell scripts with no propose / dry-run / approve / verify / rollback structure [VERIFIED: 02-health-audit.md section 6 closing paragraph; tools/fix_*.sh].
-- Deployment posture: operator-local only (CLI + loopback dashboard on 127.0.0.1:8787); this plan keeps it there per the ADR deployment table [VERIFIED: docs/planning/04-adrs.md ADR-06, "netcheck dashboard (stays operator-local)"].
+- Deployment posture: operator-local only (CLI + loopback dashboard on 127.0.0.1:8787); this plan keeps it there per the ADR deployment table [VERIFIED: docs/archived/2026-08-16/planning-04-adrs.md ADR-06, "netcheck dashboard (stays operator-local)"].
 - Scan tiers and budgets: quick 10 s, standard 60 s, deep 120 s, enforced by a bounded child process [VERIFIED: netcheck/__main__.py:28,94-104].
 
 ## 2. Flow-point coverage matrix

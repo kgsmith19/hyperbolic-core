@@ -4,7 +4,7 @@ Evidence date: 2026-08-12. Names per `00-canonical-names.md`. Labels: `[VERIFIED
 
 ## 1. Scope
 
-This artifact governs exactly one database: the **platform project**, Supabase `woltgcggxaehtuypkxqk` (toolbelt), which ADR-03 promotes to platform IdP and ADR-04 designates the platform database [VERIFIED: docs/planning/04-adrs.md ADR-03 decision; ADR-04 resource table]. It fronts the `core`, `idea`, and `prompt` schemas today [VERIFIED: docs/planning/01-inventory.md section 3] and gains `intake`, `platform`, and `test` in V1.
+This artifact governs exactly one database: the **platform project**, Supabase `woltgcggxaehtuypkxqk` (toolbelt), which ADR-03 promotes to platform IdP and ADR-04 designates the platform database [VERIFIED: docs/archived/2026-08-16/planning-04-adrs.md ADR-03 decision; ADR-04 resource table]. It fronts the `core`, `idea`, and `prompt` schemas today [VERIFIED: docs/planning/01-inventory.md section 3] and gains `intake`, `platform`, and `test` in V1.
 
 Out of scope, stated exactly:
 
@@ -258,7 +258,7 @@ Options considered:
 | B. `platform.owner()` reading a single-row `platform.config` table | Migrations stay environment-free and authorable today; the UUID is injected exactly once at IdP setup; fail-closed by construction (empty config means `owner()` returns null and every comparison is false, so zero access); one extra schema and one function call per statement |
 | C. Postgres custom GUC (`app.owner_uuid`) set on the authenticator role | No table, but the value hides in role settings invisible to migrations and backups, and a typo fails open to null-vs-null comparisons being false anyway; harder to audit than a row |
 
-**Decision: Option B.** Cost stated plainly: one function call per statement on every policied query (mitigated to an InitPlan, Section 5.6) and one more schema in the project. Injection answer: the owner UUID is created at IdP setup (ADR-03 owner-user creation [VERIFIED: docs/planning/04-adrs.md ADR-03]) and inserted by a documented one-time operator step (SQL editor or psql as the table owner), never by a committed migration and never through PostgREST. Migrations contain no UUID anywhere.
+**Decision: Option B.** Cost stated plainly: one function call per statement on every policied query (mitigated to an InitPlan, Section 5.6) and one more schema in the project. Injection answer: the owner UUID is created at IdP setup (ADR-03 owner-user creation [VERIFIED: docs/archived/2026-08-16/planning-04-adrs.md ADR-03]) and inserted by a documented one-time operator step (SQL editor or psql as the table owner), never by a committed migration and never through PostgREST. Migrations contain no UUID anywhere.
 
 ### 5.2 DDL: `platform` schema
 
@@ -335,7 +335,7 @@ The problem, stated honestly: CI's suites write to live `core`, `idea`, and `pro
 | 2. Tests move wholesale to the `test` schema | Requires cloning 19 tables, 5 triggers, and 3 RPCs into `test` and keeping the clones in lockstep forever; the suites would then verify the clones, not the schemas that serve production. Divergence is guaranteed and silent |
 | 3. Transitional policies allowing owner + fixture subjects | Keeps SEC-03 alive for the whole transition window and creates a policy state that someone must remember to remove; the window becomes the permanent state |
 
-**Decision: Option 1.** CI switches its positive-path suites to an owner credential injected per ADR-05 mechanics; fixture tokens are retained for exactly two jobs: negative-path assertions against production schemas (must see zero rows, PO-1b pattern [VERIFIED: docs/planning/05-d-prompt-organizer.md section 11]) and `test.scratch` liveness writes. Cost accepted and stated: owner-credential management in CI (one Infisical machine identity scoped to `/toolbelt/`, per ADR-05 [VERIFIED: docs/planning/04-adrs.md ADR-05]) and owner-namespaced test debris in live tables, cleaned per run.
+**Decision: Option 1.** CI switches its positive-path suites to an owner credential injected per ADR-05 mechanics; fixture tokens are retained for exactly two jobs: negative-path assertions against production schemas (must see zero rows, PO-1b pattern [VERIFIED: docs/planning/05-d-prompt-organizer.md section 11]) and `test.scratch` liveness writes. Cost accepted and stated: owner-credential management in CI (one Infisical machine identity scoped to `/toolbelt/`, per ADR-05 [VERIFIED: docs/archived/2026-08-16/planning-04-adrs.md ADR-05]) and owner-namespaced test debris in live tables, cleaned per run.
 
 Refinement this forces on 05-d: its D-12 layer-2 sentence gives e2e "a dedicated account whose data set is empty at run start". Under Option 1 the e2e account IS the owner (the Shell session the real UI uses), and the empty-dataset property comes from per-run namespacing (05-d layer 1), not from a separate account. Flagged as gate question 1.
 
@@ -352,7 +352,7 @@ Migration sequence that never breaks CI:
 
 ### 5.5 Policy DDL pattern and enumeration
 
-The exact pattern, in ADR-03's terms (`user_id = '<owner>' and auth.uid() = '<owner>'` [VERIFIED: docs/planning/04-adrs.md ADR-03 single-principal simplification]), with both sides wrapped in scalar subqueries for InitPlan caching (Section 5.6):
+The exact pattern, in ADR-03's terms (`user_id = '<owner>' and auth.uid() = '<owner>'` [VERIFIED: docs/archived/2026-08-16/planning-04-adrs.md ADR-03 single-principal simplification]), with both sides wrapped in scalar subqueries for InitPlan caching (Section 5.6):
 
 ```sql
 -- Pattern A: tables carrying a user_id column
@@ -584,7 +584,7 @@ All three are additive: registry row, manifest, optional indexes. None alters an
 
 ### 9.3 The `brain` reservation, concretely
 
-If Phase 7 places the Brain's state in the platform project, the absorption is the same checklist: `create schema brain` (first migration to legally do so, lifting the CI lint), pinned policies from Section 5.5, a `core.app` row (`kind: headless`), `core.run`/`core.cost` telemetry per dispatch, and the Section 8 reserved retention row. If Phase 7 instead picks a store outside this project, the name simply stays reserved so no tool squats on it. Either way, no table designed here changes, and the complexity budget's zero-new-database ceiling constrains Phase 7's choice [VERIFIED: docs/planning/04-adrs.md complexity budget].
+If Phase 7 places the Brain's state in the platform project, the absorption is the same checklist: `create schema brain` (first migration to legally do so, lifting the CI lint), pinned policies from Section 5.5, a `core.app` row (`kind: headless`), `core.run`/`core.cost` telemetry per dispatch, and the Section 8 reserved retention row. If Phase 7 instead picks a store outside this project, the name simply stays reserved so no tool squats on it. Either way, no table designed here changes, and the complexity budget's zero-new-database ceiling constrains Phase 7's choice [VERIFIED: docs/archived/2026-08-16/planning-04-adrs.md complexity budget].
 
 ## 10. Boundary position: relational vs object vs vector
 
@@ -598,7 +598,7 @@ Where each storage class lives today:
 
 **V1 rule for the platform project: relational only.** No storage buckets, no pgvector, no blob tables. Vector or object needs arrive WITH the future sub-app that needs them, as part of that app's absorption checklist and its own justification, never speculatively. Prompt search stays lexical in V1: the store is O(100s) of prompts with a unique `(user_id, lower(title))` index and client-side ranked search already shipped and tested [VERIFIED: scratchpad toolbelt report, search suite 9 tests]; embedding-based search would add an embedding job, a model dependency, and a vector column for a corpus small enough that lexical retrieval is effectively exhaustive. Revisit trigger: prompt count exceeding roughly 2,000 or a consumer that needs semantic retrieval across bodies.
 
-LifeOS boundary statement: its project keeps its kernel schema, its blobs, and its dormant pgvector column untouched by this artifact; the only LifeOS change in the whole Phase 6 area is identity re-pointing, owned by ADR-03, which touches env vars, not schema [VERIFIED: docs/planning/04-adrs.md ADR-03 cost paragraph].
+LifeOS boundary statement: its project keeps its kernel schema, its blobs, and its dormant pgvector column untouched by this artifact; the only LifeOS change in the whole Phase 6 area is identity re-pointing, owned by ADR-03, which touches env vars, not schema [VERIFIED: docs/archived/2026-08-16/planning-04-adrs.md ADR-03 cost paragraph].
 
 ## 11. DDL/LOC delta, deletion list, and budget check
 
@@ -625,7 +625,7 @@ Deletion list (replaced or retired, with down migrations restoring each):
 - The by-hand `apply_migration` procedure in `apps/toolbelt/project.yaml:25`: superseded by the CI workflow.
 - One filename: `20260808120000_prompt_create_render_function.sql` renamed to a unique version (content unchanged).
 
-Complexity budget: zero new database systems (all additions are schemas in the incumbent project), zero new deployable units, zero new runtimes, zero new auth flows; the owner credential in CI is the ADR-03 flow, not a new one [VERIFIED: docs/planning/04-adrs.md budget table]. Lock-in and maturity: everything here is stock Postgres (RLS, pg_cron, plpgsql) on the already-committed Supabase project; the only new tooling is the supabase CLI in CI, which LifeOS already runs in production [VERIFIED: apps/lifeos/.github/workflows/ci.yml:174].
+Complexity budget: zero new database systems (all additions are schemas in the incumbent project), zero new deployable units, zero new runtimes, zero new auth flows; the owner credential in CI is the ADR-03 flow, not a new one [VERIFIED: docs/archived/2026-08-16/planning-04-adrs.md budget table]. Lock-in and maturity: everything here is stock Postgres (RLS, pg_cron, plpgsql) on the already-committed Supabase project; the only new tooling is the supabase CLI in CI, which LifeOS already runs in production [VERIFIED: apps/lifeos/.github/workflows/ci.yml:174].
 
 ## Gate questions (batched, non-blocking)
 

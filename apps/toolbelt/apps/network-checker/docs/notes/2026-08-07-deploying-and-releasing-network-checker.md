@@ -114,7 +114,7 @@ To cut a release:
 
 ```bash
 python tools/release.py bump patch   # or minor / major
-python tools/release.py changelog    # draft entries; paste into CHANGELOG.md under [Unreleased]
+python tools/release.py changelog    # draft entries; paste into docs/archived/2026-08-16/network-checker-CHANGELOG.md under [Unreleased]
 # move the [Unreleased] section to a new ## [X.Y.Z] heading, commit
 git tag network-checker-vX.Y.Z
 git push origin network-checker-vX.Y.Z
@@ -151,5 +151,5 @@ rather than editing `0001` in place.
 **No breaking config format changes to date.** `.env` keys, the CLI's
 subcommands, and `NETWORK_CHECKER_DB`/`NETWORK_CHECKER_TARGET` have been additive-only
 since the original design (`docs/notes/2026-08-04-network-checker-design.md`).
-If that ever changes, it belongs in `CHANGELOG.md` under a `### Changed`
+If that ever changes, it belongs in `docs/archived/2026-08-16/network-checker-CHANGELOG.md` under a `### Changed`
 heading with an explicit migration note, not silently.

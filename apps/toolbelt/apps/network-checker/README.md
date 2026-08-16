@@ -70,7 +70,7 @@ the real network stack and runs only on CI or an unrestricted host. See
 
 - `AGENTS.md` — repository facts, commands, product invariants, and delivery guidance
 - `docs/notes/` — runbooks and design notes, including deployment and releases
-- `CHANGELOG.md` — what changed, by version
+- `docs/archived/2026-08-16/network-checker-CHANGELOG.md` (repo root) — what changed, by version
 - `TEST_LEDGER.md` — this app's own test suites
 
 There is deliberately no hand-written API reference — the docstrings are the

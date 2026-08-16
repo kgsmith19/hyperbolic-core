@@ -2,7 +2,7 @@
  * Public type contract for `@hyperbolic/platform-client`.
  *
  * Verbatim from docs/planning/05-a-hyperbolic-core.md section 6, itself
- * mandated by ADR-03 (docs/planning/04-adrs.md). This is a frozen interface:
+ * mandated by ADR-03 (docs/archived/2026-08-16/planning-04-adrs.md). This is a frozen interface:
  * every zone that will later consume this package depends on this exact
  * shape, so changes here are cross-cutting and must update the binding
  * interface doc first.
