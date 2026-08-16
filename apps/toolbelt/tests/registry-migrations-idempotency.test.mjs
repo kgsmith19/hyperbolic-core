@@ -41,6 +41,8 @@ const IDEA_UP = join(MIGRATIONS_DIR, "20260813003000_register_idea-intake.sql");
 const IDEA_DOWN = join(MIGRATIONS_DIR, "20260813003000_register_idea-intake_down.sql");
 const NC_V1_UP = join(MIGRATIONS_DIR, "20260813173000_register_network-checker-v1.sql");
 const NC_V1_DOWN = join(MIGRATIONS_DIR, "20260813173000_register_network-checker-v1_down.sql");
+const NC_V2_UP = join(MIGRATIONS_DIR, "20260816020000_register_network-checker-v2.sql");
+const NC_V2_DOWN = join(MIGRATIONS_DIR, "20260816020000_register_network-checker-v2_down.sql");
 const ROOT_BASE_UP = join(MIGRATIONS_DIR, "20260814110000_register_toolbelt.sql");
 const ROOT_BASE_DOWN = join(MIGRATIONS_DIR, "20260814110000_register_toolbelt_down.sql");
 const ROOT_UP = join(MIGRATIONS_DIR, "20260814130000_register_toolbelt-v0.1.1.sql");
@@ -50,7 +52,7 @@ const PO_V1_DOWN = join(MIGRATIONS_DIR, "20260814130100_register_prompt-organize
 const IDEA_V1_UP = join(MIGRATIONS_DIR, "20260814130200_register_idea-intake-v0.1.1.sql");
 const IDEA_V1_DOWN = join(MIGRATIONS_DIR, "20260814130200_register_idea-intake-v0.1.1_down.sql");
 
-const REGISTRATION_UPS = [PO_UP, NC_UP, IDEA_UP, NC_V1_UP, ROOT_BASE_UP, ROOT_UP, PO_V1_UP, IDEA_V1_UP];
+const REGISTRATION_UPS = [PO_UP, NC_UP, IDEA_UP, NC_V1_UP, ROOT_BASE_UP, ROOT_UP, PO_V1_UP, IDEA_V1_UP, NC_V2_UP];
 const MANIFEST_PATHS = [
   join(__dirname, "..", "tool.json"),
   join(__dirname, "..", "apps", "idea-intake", "tool.json"),
@@ -193,6 +195,16 @@ test(
       assert.equal(psqlOk(db, "select count(*) from core.app;").trim(), "4");
 
       // Down-cascade in reverse chronological order.
+      psqlOk(db, readFileSync(NC_V2_DOWN, "utf8"));
+      const restoredNcV1 = psqlOk(
+        db,
+        "select version, manifest_hash from core.app where id = 'network-checker';",
+      ).trim();
+      assert.equal(
+        restoredNcV1,
+        "1.0.0|c91d77d5817cf77e535bccc17f34033ac942387555af669be2120b46eda3f21a",
+        "network-checker v2 down did not restore the immediately preceding registration",
+      );
       psqlOk(db, readFileSync(IDEA_V1_DOWN, "utf8"));
       psqlOk(db, readFileSync(PO_V1_DOWN, "utf8"));
       psqlOk(db, readFileSync(ROOT_DOWN, "utf8"));
