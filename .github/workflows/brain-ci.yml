@@ -8,7 +8,7 @@ name: "Brain PR Gate"
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
     paths:
       - "services/brain/**"
       - "package.json"
@@ -16,6 +16,9 @@ on:
       - ".github/workflows/brain-ci.yml"
   merge_group:
     types: [checks_requested]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
@@ -25,33 +28,35 @@ permissions:
   contents: read
 
 jobs:
-  pr-gate:
-    name: Brain PR Gate
+  checks:
+    name: Checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Setup · Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-      - name: Install root workspace dependencies
+      - name: Setup · Install root workspace dependencies
         run: npm ci
-      - name: Type-check services/brain
+      - name: Build · Type-check services/brain
         working-directory: services/brain
         run: npm run typecheck
-      - name: Run services/brain tests
+      - name: Test · Run services/brain tests
         working-directory: services/brain
         run: npm test
-      - name: "ADR-05 isolation check (m4-18, BR-3/II-4): this runner is a real non-Brain process context -- no Brain secret file is ever mounted here"
+      - name: "Security · ADR-05 isolation check (m4-18, BR-3/II-4): this runner is a real non-Brain process context -- no Brain secret file is ever mounted here"
         run: |
           if node services/brain/scripts/isolation-check.mjs; then
             echo "isolation-check exited 0 (secret readable) from a non-Brain CI runner -- this must never happen" >&2
             exit 1
           fi
           echo "isolation-check correctly exited non-zero: the Brain secret is not readable from this context"
-      - name: "Eval corpus gate (m4-19, 07 section 7.11): brain eval run over services/brain/evals/cases/*.case.json"
+      - name: "Test · Eval corpus gate (m4-19, 07 section 7.11): brain eval run over services/brain/evals/cases/*.case.json"
         working-directory: services/brain
         env:
           # Scratch state, never the production /data or /workspaces
@@ -66,10 +71,55 @@ jobs:
           BRAIN_DATA_DIR: ${{ runner.temp }}/brain-eval-data
           BRAIN_WORKSPACES_ROOT: ${{ runner.temp }}/brain-eval-workspaces
         run: node bin/brain.mjs eval run --json
-      - name: Build the Brain image (verification only, never pushed from CI)
+      - name: Docker · Build the Brain image (verification only, never pushed from CI)
         run: docker build -f services/brain/Dockerfile -t brain:pr-gate .
-      - name: Smoke-run the built image (brain status --offline, no live daemon required)
+      - name: Docker · Smoke-run the built image (brain status --offline, no live daemon required)
         run: |
           out="$(docker run --rm --entrypoint node brain:pr-gate services/brain/bin/brain.mjs status --offline)"
           echo "$out"
           echo "$out" | grep -q '"status":"ok"'
+
+  pr-gate:
+    name: Brain PR Gate
+    needs: [checks]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Gate · Confirm every required job passed
+        shell: bash
+        run: |
+          test "${{ needs.checks.result }}" = "success"
+      - name: Gate · Confirm tested SHA matches the live PR head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          live_sha="$(curl --fail --silent \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
+          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
+            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
+            exit 1
+          fi
+          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
+      - name: Gate · Publish step summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Brain PR Gate"
+            echo ""
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            echo "| checks | ${{ needs.checks.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
