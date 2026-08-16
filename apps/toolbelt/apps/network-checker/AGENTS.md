@@ -114,7 +114,7 @@ and shell syntax checks.
   `network_checker/__init__.py`, never restated. Adds no runtime dependency
   and no required build step; `python -m network_checker` never needs it.
 - `docs/notes/` — runbooks and design notes, including deployment and releases
-- `CHANGELOG.md` — what changed, by version (consumed by the release
+- `docs/archived/2026-08-16/network-checker-CHANGELOG.md` (repo root) — what changed, by version (consumed by the release
   workflow's release-notes extraction)
 - `TEST_LEDGER.md` — this app's own test suites
 - The hyperbolic-core root's `.github/workflows/toolbelt-ci.yml` runs

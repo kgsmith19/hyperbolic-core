@@ -1,5 +1,5 @@
 // Session ownership after m2-08 (docs/planning/issues/m2-08-feat-lifeos-shell-integration.md;
-// docs/planning/05-e-lifeos.md section 4; ADR-03 in docs/planning/04-adrs.md):
+// docs/planning/05-e-lifeos.md section 4; ADR-03 in docs/archived/2026-08-16/planning-04-adrs.md):
 // LifeOS is no longer its own login surface. The Shell is the ONLY place
 // that ever performs a password sign-in (LO-2b's grep contract -- see this
 // issue's report for the exact command; deliberately not spelled out

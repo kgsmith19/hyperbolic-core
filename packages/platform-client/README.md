@@ -52,7 +52,7 @@ src/brain.ts         createBrainClient — runs/tasks/SSE events/cost summaries
   from `docs/planning/05-a-hyperbolic-core.md` section 6 and
   `docs/planning/05-c-toolbelt.md` section 4.3, respectively; treat changes
   to their shapes as cross-cutting.
-- ADR-03 (`docs/planning/04-adrs.md`) is the source of the one-IdP,
+- ADR-03 (`docs/archived/2026-08-16/planning-04-adrs.md`) is the source of the one-IdP,
   owner-only session posture this package enforces.
 - `src/index.ts`'s `authedFetch`/`isOwnerSession` doc comments record two
   security findings fixed here: Finding #47 (a merely-authenticated Supabase

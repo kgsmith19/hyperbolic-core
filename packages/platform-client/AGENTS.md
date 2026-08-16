@@ -6,7 +6,7 @@
 
 ## 📋 Product Boundaries
 
-- `src/types.ts` is a frozen interface mandated by ADR-03 (`docs/planning/04-adrs.md`). Changing it is a contract change, not a refactor.
+- `src/types.ts` is a frozen interface mandated by ADR-03 (`docs/archived/2026-08-16/planning-04-adrs.md`). Changing it is a contract change, not a refactor.
 - `src/registry.ts` holds one of the six hardcoded copies of the platform publishable key. The key is public by design — RLS is the authorization boundary — but rotating it means editing all six copies. See the repo-root `AGENTS.md`.
 - This package is the natural single owner if those six copies are ever consolidated. Consolidation is not free; the root `AGENTS.md` records why.
 - Make the smallest clear change that completely resolves its linked GitHub Issue.
