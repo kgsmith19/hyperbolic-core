@@ -194,7 +194,7 @@ jobs:
         run: python3 -m network_checker serve --no-open >network-checker.log 2>&1 &
         working-directory: apps/toolbelt/apps/network-checker/backend
         env:
-          NETCHECK_DB: ${{ github.workspace }}/apps/toolbelt/apps/network-checker/backend/tests/e2e/dashboard-fixture.db
+          NETWORK_CHECKER_DB: ${{ github.workspace }}/apps/toolbelt/apps/network-checker/backend/tests/e2e/dashboard-fixture.db
       - name: Wait for Network Checker dashboard
         shell: bash
         run: |

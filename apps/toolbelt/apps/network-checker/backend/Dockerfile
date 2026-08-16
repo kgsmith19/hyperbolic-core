@@ -20,7 +20,7 @@ COPY AGENTS.md README.md ./
 
 # SQLite is the source of truth (see README.md); keep it on a mountable
 # volume so a container restart doesn't lose history.
-ENV NETWORK_CHECKER_DB=/data/network_checker.db
+ENV NETWORK_CHECKER_DB=/data/network-checker.db
 VOLUME ["/data"]
 EXPOSE 8787
 
