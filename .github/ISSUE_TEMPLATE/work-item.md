@@ -1,3 +1,8 @@
+---
+name: Work item
+about: "A FEAT: or BUG: work item"
+---
+
 ## 🏷️ Classification
 
 Prefix the Issue title with one:

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## Purpose
+## 🎯 Purpose
 
 `services/llm-handler` is Handler A: the deployed, general-purpose LLM
 service (08-llm-handlers.md forced decisions 5/7). It wraps
@@ -10,7 +10,7 @@ owner-session-authenticated HTTP surface (`/api/v1/complete`,
 submit API (`/api/intake/submit`). It is a real deployable container, not
 a library -- distinct from the small shared packages under `packages/`.
 
-## Product boundaries / invariants
+## 📋 Product Boundaries / Invariants
 
 - Never hold or use `SUPABASE_SERVICE_ROLE_KEY` for anything but calling
   `intake.mark_submitted_to_github()`. Every other database read/write
@@ -43,7 +43,7 @@ a library -- distinct from the small shared packages under `packages/`.
   request actually resolves to (the full incoming path forwards
   unchanged, it does not strip `/api/`).
 
-## Layout
+## 📂 Layout
 
 ```
 src/index.ts           entrypoint: load config, start server
@@ -61,7 +61,7 @@ src/config.ts            env var contract
 tests/                   node --test suite
 ```
 
-## Commands
+## ⚙️ Commands
 
 ```bash
 npm test --workspace=@hyperbolic/llm-handler
@@ -70,13 +70,13 @@ node src/index.ts
 docker build -f services/llm-handler/Dockerfile .   # context is the monorepo root
 ```
 
-## Documentation
+## 📚 Documentation
 
 `docs/ops/runbook.md`'s "Handler A deployment" section covers the deploy
 pipeline, required Infisical secrets (`/platform/llm-handler/`), and
 manual rollback.
 
-## Completion
+## ✅ Completion
 
 A change is ready when its acceptance criteria are satisfied, affected
 documentation is accurate, the commands above pass locally, and the
@@ -85,7 +85,7 @@ that workflow, not a dedicated `llm-handler-ci.yml`, is what
 type-checks and unit-tests this service on every PR. State any
 unverified item explicitly.
 
-## Collaboration boundary
+## 🔒 Collaboration Boundary
 
 When explicitly assigned, an AI coding agent may create an Issue, branch,
 commit, or pull request, and may answer a direct question after an explicit

@@ -1,10 +1,10 @@
 # AGENTS.md
 
-## Purpose
+## 🎯 Purpose
 
 Prompt Organizer stores reusable AI prompts, substitutes variables, and copies rendered text. It owns the `prompt` schema in the shared `toolbelt` Supabase project.
 
-## Working model
+## 🧭 Working Model
 
 Use this lean lifecycle:
 
@@ -16,7 +16,7 @@ Use this lean lifecycle:
 
 This app does not keep committed specs or ADRs — see `TEST_LEDGER.md` for the current, lean test-tracking convention. Future work is tracked in GitHub Issues.
 
-## Product boundaries
+## 📋 Product Boundaries
 
 - Write only to the `prompt` schema. Cross-schema write behavior belongs to the repository that owns the target schema.
 - Use the public anon key in clients and tests. Never commit or use a service-role key in this repository.
@@ -25,7 +25,7 @@ This app does not keep committed specs or ADRs — see `TEST_LEDGER.md` for the 
 - Keep every migration paired with a down migration that reverses the same change.
 - Preserve product schema, migrations, tests, and existing security invariants unless the linked Issue explicitly changes them.
 
-## Layout
+## 📂 Layout
 
 ```
 tool.json                     the app manifest, read by the Toolbelt validators
@@ -37,7 +37,7 @@ frontend/e2e/                 the Playwright critical journey
 frontend/playwright.config.mjs
 ```
 
-## Commands
+## ⚙️ Commands
 
 ```bash
 node --test "backend/tests/*.test.mjs" "frontend/tests/*.test.mjs"
@@ -49,19 +49,19 @@ PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config frontend/
 
 The Node and browser suites call the live Supabase project using the public anon key. Report network or rate-limit failures accurately; do not relabel them as passing.
 
-## Documentation
+## 📚 Documentation
 
 - `TEST_LEDGER.md` tracks this app's own test suites.
 - The root `project.yaml` contains repository commands and facts.
 - The root `standard.lock` is informational and non-enforcing.
 
-## Completion
+## ✅ Completion
 
 A change is ready when its acceptance criteria are satisfied, relevant
 documentation is accurate, applicable local checks pass, and the
 hyperbolic-core root's `Toolbelt PR Gate` reports success. State any
 unverified item explicitly.
 
-## Collaboration boundary
+## 🔒 Collaboration Boundary
 
 When explicitly assigned, an AI coding agent may create an Issue, branch, commit, or pull request. It may respond in an existing Issue or pull-request conversation only when it is explicitly tagged with a direct question. An AI agent must not submit a review, request reviewers, approve or block a pull request, change repository protections, or post unsolicited Issue or pull-request comments.
