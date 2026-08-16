@@ -4,6 +4,7 @@ reading as a broken resolver.
 The router-vs-public comparison is the highest-value rule in the whole tool,
 so a false `fail` on either side is the expensive mistake here.
 """
+import socket
 import struct
 import unittest
 from unittest.mock import patch
@@ -128,6 +129,48 @@ class QueryIdentityTest(unittest.TestCase):
         """Two queries in a row must not be interchangeable."""
         ids = {self.resolve_with(self.reply_for)[1][:2] for _ in range(12)}
         self.assertGreater(len(ids), 1, "query id is constant across queries")
+
+    def reply_with_cname_then_a(self, query):
+        """A GetResponse carrying a CNAME record ahead of the A record --
+        the exact shape _a_records()'s own docstring says it must not
+        derail on, walking each record by its own RDLENGTH rather than
+        assuming the first answer is the one it wants."""
+        ident = query[:2]
+        cname_rr = (b"\xc0\x0c" + struct.pack("!HHI", 5, 1, 60)
+                    + struct.pack("!H", 2) + b"\xc0\x0c")
+        a_rr = (b"\xc0\x0c" + struct.pack("!HHI", 1, 1, 60)
+                + struct.pack("!H", 4) + bytes([93, 184, 216, 34]))
+        return (ident + b"\x81\x80" + query[4:6] + b"\x00\x02" + query[8:12]
+                + query[12:] + cname_rr + a_rr)
+
+    def test_a_cname_record_ahead_of_the_a_record_is_skipped_not_derailed(self):
+        addrs, _ = self.resolve_with(self.reply_with_cname_then_a)
+        self.assertEqual(addrs, ["93.184.216.34"])
+
+
+class NoServerResolutionTest(unittest.TestCase):
+    """resolve() with no `server` given -- every caller except the
+    router-vs-public comparison -- uses socket.getaddrinfo, not the DNS/UDP
+    client, since it does not need a specific resolver."""
+
+    def test_no_server_resolves_via_getaddrinfo_not_the_udp_client(self):
+        infos = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+                 (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.35", 443))]
+        with patch.object(resolver.socket, "getaddrinfo", return_value=infos) as mock_gai, \
+             patch.object(resolver, "_resolve_via") as mock_via:
+            result = resolver.resolve("example.test")
+
+        self.assertEqual(result["state"], "ok")
+        self.assertEqual(result["addrs"], ["93.184.216.34", "93.184.216.35"])
+        mock_via.assert_not_called()
+        mock_gai.assert_called_with("example.test", 443)
+
+    def test_getaddrinfo_failure_reports_fail_after_the_retry(self):
+        with patch.object(resolver.socket, "getaddrinfo",
+                          side_effect=socket.gaierror("nodename nor servname provided")), \
+             patch.object(resolver.time, "sleep"):
+            result = resolver.resolve("nonexistent.example.test")
+        self.assertEqual(result["state"], "fail")
 
 
 if __name__ == "__main__":

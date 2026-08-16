@@ -65,13 +65,28 @@ def parse_ipconfig_gateway(text):
     return None
 
 
+def parse_ip_route_gateway(text):
+    """The IPv4 default gateway from Linux `ip route` output."""
+    m = re.search(r"default via ([\d.]+)", text)
+    return m.group(1) if m else None
+
+
+def parse_route_get_default_gateway(text):
+    """The IPv4 default gateway from BSD/macOS `route -n get default`
+    output -- the fallback `gateway()` uses when `ip` itself is not on the
+    machine (there is no Linux `ip` on macOS, so the first command always
+    misses there)."""
+    m = re.search(r"gateway:\s*([\d.]+)", text)
+    return m.group(1) if m else None
+
+
 def gateway():
     if WINDOWS:
         text, _ = _run(["ipconfig"])
         return parse_ipconfig_gateway(text)
     text, _ = _run(["ip", "route"])
-    m = re.search(r"default via ([\d.]+)", text)
-    if not m:
-        text, _ = _run(["route", "-n", "get", "default"])
-        m = re.search(r"gateway:\s*([\d.]+)", text)
-    return m.group(1) if m else None
+    found = parse_ip_route_gateway(text)
+    if found:
+        return found
+    text, _ = _run(["route", "-n", "get", "default"])
+    return parse_route_get_default_gateway(text)

@@ -78,6 +78,17 @@ class ParseResponseTest(unittest.TestCase):
         packet = _response_packet(snmp.SYS_DESCR, 0x04, b"x", header=(1, 2))
         self.assertIsNone(snmp.parse_response(packet, 1))
 
+    def test_a_truncated_packet_is_none_not_a_crash(self):
+        """A UDP reply on port 161 is not guaranteed to be well-formed BER --
+        it could be cut short, or come from something else entirely answering
+        on that port. `_read_tlv` indexes straight into the buffer with no
+        bounds checking, so this must be caught, not left to raise IndexError
+        out of a probe that promises to degrade to a state, never crash."""
+        self.assertIsNone(snmp.parse_response(b"\x30\x7f\x02\x01", 1))
+
+    def test_empty_data_is_none_not_a_crash(self):
+        self.assertIsNone(snmp.parse_response(b"", 1))
+
     def test_a_request_pdu_is_not_accepted_as_a_response(self):
         varbind_list = _tlv(0x30, _tlv(0x30, _tlv(0x06, _oid_bytes(snmp.SYS_DESCR))
                                              + _tlv(0x05, b"")))

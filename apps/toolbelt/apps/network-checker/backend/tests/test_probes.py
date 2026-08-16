@@ -5,10 +5,12 @@ change breaks a test rather than silently producing null metrics — with SSID,
 BSSID, MAC and GUID replaced by placeholders. A BSSID is enough to locate a
 house through Wi-Fi geolocation databases, so it does not belong in a repo.
 """
+import subprocess
 import unittest
 import unittest.mock
+from unittest.mock import patch
 
-from network_checker import probes
+from network_checker import linux_adapter_probes as lap, probes
 
 from tests import fixture
 
@@ -51,6 +53,82 @@ class ParsePingTest(unittest.TestCase):
         got = probes.parse_ping("Destination host unreachable.")
         self.assertEqual(got["state"], "fail")
         self.assertIsNone(got["rtt_avg_ms"])
+
+
+class RunTest(unittest.TestCase):
+    """_run()'s own docstring promises 'Never raises': every subprocess.run
+    failure mode, not just a missing binary, must degrade to a state."""
+
+    def test_missing_binary_is_unavailable(self):
+        with patch.object(probes.subprocess, "run", side_effect=FileNotFoundError()):
+            text, state = probes._run(["nonexistent-binary"])
+        self.assertEqual((text, state), ("", "unavailable"))
+
+    def test_unexecutable_binary_is_unavailable_not_a_crash(self):
+        """PermissionError is a different OSError than FileNotFoundError but
+        the same verdict -- and, unfixed, the same crash risk."""
+        with patch.object(probes.subprocess, "run", side_effect=PermissionError()):
+            _, state = probes._run(["ping"])
+        self.assertEqual(state, "unavailable")
+
+    def test_timeout_is_fail_not_unavailable(self):
+        """A hanging binary is a real symptom, not a missing tool."""
+        with patch.object(probes.subprocess, "run",
+                          side_effect=subprocess.TimeoutExpired(cmd=["ping"], timeout=1)):
+            _, state = probes._run(["ping"], timeout=1)
+        self.assertEqual(state, "fail")
+
+    def test_success_concatenates_stdout_and_stderr(self):
+        with patch.object(probes.subprocess, "run",
+                          return_value=unittest.mock.MagicMock(stdout="out", stderr="err")):
+            text, state = probes._run(["ping"])
+        self.assertEqual((text, state), ("outerr", "ok"))
+
+
+class SampleTest(unittest.TestCase):
+    """sample() flattens every layer into one row under the fixed field
+    names watch.py's stored rows and diagnose.py's evidence correlation key
+    off of -- the one place that mapping is exercised end to end."""
+
+    def test_assembles_one_row_under_the_documented_field_names(self):
+        with patch.object(probes, "ping", side_effect=[
+                 {"state": "ok", "rtt_avg_ms": 5.0, "loss_pct": 0.0},
+                 {"state": "ok", "rtt_avg_ms": 12.0, "loss_pct": 0.0},
+                 {"state": "ok", "rtt_avg_ms": 8.0, "loss_pct": 0.0}]), \
+             patch.object(probes.resolver, "resolve",
+                          side_effect=[{"state": "ok", "ms": 3.0}, {"state": "ok", "ms": 4.0}]), \
+             patch.object(probes, "tls_connect", return_value={"state": "ok", "ms": 30.0}), \
+             patch.object(probes, "http_check",
+                          return_value={"state": "ok", "ms": 40.0, "code": 401}), \
+             patch.object(lap, "wifi_txpower", return_value={"state": "ok"}), \
+             patch.object(lap, "adapter_power", return_value={"state": "unavailable"}):
+            row = probes.sample(
+                target="api.anthropic.com", gw="192.168.1.1", hop="172.16.1.1",
+                wifi={"state": "ok", "rssi_dbm": -41, "bssid": "aa:bb:cc:dd:ee:ff"})
+
+        expected = {"gw_state": "ok", "gw_ms": 5.0, "hop_state": "ok", "hop_ms": 12.0,
+                    "inet_state": "ok", "inet_ms": 8.0, "dns_router_ms": 3.0,
+                    "dns_public_ms": 4.0, "tls_state": "ok", "http_code": 401,
+                    "wifi_signal": -41, "wifi_bssid": "aa:bb:cc:dd:ee:ff",
+                    "wifi_txpower_state": "ok", "adapter_power_state": "unavailable"}
+        self.assertEqual({k: row[k] for k in expected}, expected)
+        self.assertIn("ts", row)
+
+    def test_no_gateway_or_hop_address_pings_neither_and_reports_unavailable(self):
+        """No gw/hop to test against must not silently ping nothing and call
+        it measured."""
+        with patch.object(probes, "ping") as mock_ping, \
+             patch.object(probes.resolver, "resolve", return_value={"state": "ok", "ms": 1.0}), \
+             patch.object(probes, "tls_connect", return_value={"state": "ok"}), \
+             patch.object(probes, "http_check", return_value={"state": "ok"}), \
+             patch.object(lap, "wifi_txpower", return_value={"state": "unavailable"}), \
+             patch.object(lap, "adapter_power", return_value={"state": "unavailable"}):
+            row = probes.sample(target="api.anthropic.com")
+
+        self.assertEqual(row["gw_state"], "unavailable")
+        self.assertIsNone(row["gw_ms"])
+        self.assertEqual(row["hop_state"], "unavailable")
+        mock_ping.assert_called_once()          # only the fixed PUBLIC_DNS ping
 
 
 class _PlainCtx:
