@@ -26,6 +26,9 @@ ci:
   # filter blocks forever on any PR that never triggers it, which is
   # exactly what happened live on PRs #118 and #120 before this file's own
   # required: values were corrected to match the intended design.
+  # Canary #117: this line is a throwaway control-plane-path touch used to
+  # verify CODEOWNERS live-effectiveness and merge-policy draft-promotion;
+  # the PR that adds it is never merged.
   workflows:
     - path: .github/workflows/toolbelt-ci.yml
       gate: Toolbelt PR Gate
