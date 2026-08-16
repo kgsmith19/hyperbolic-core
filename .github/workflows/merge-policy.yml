@@ -1,0 +1,494 @@
+# Operational metadata automation: reconciles ready-PR state (draft
+# policy, owner:hold-merge, branch updates, native squash auto-merge) and
+# maintains the managed Work State and Evidence Index comments. This
+# workflow is NOT a required status check — the six path-scoped PR Gates
+# (Toolbelt/ACC/Brain/Shell/LifeOS PR Gate, Secret Scan) are the sole gates.
+#
+# This workflow is privileged: pull_request_target runs from the BASE
+# branch with repository secrets and a write token, even for a pull
+# request opened from a fork. Every action below reads only
+# context.payload / GitHub API response data inside actions/github-script
+# — there is no checkout step, no download-artifact step, and no shell
+# run: block anywhere in this file, so there is nothing for PR-controlled
+# content to reach. Keep it that way: never add one.
+#
+# Keep actions/github-script pinned to a full commit SHA with a trailing
+# "# vX.Y.Z" comment.
+#
+# The owner-label provenance logic below (ownerLabelAuthorized) mirrors
+# the reference implementation (owner_label_authorized) in the pinned
+# standard's tools/standardctl.py — kgsmith19/agent-engineering-standard,
+# see standard.lock. This repo does not vendor that file locally
+# (standard.vendored: false in project.yaml); the two must be kept in
+# sync by hand whenever the pinned standard commit is bumped and its
+# reference implementation has changed.
+name: Hyperbolic Core Merge Policy
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, converted_to_draft, ready_for_review, auto_merge_disabled, labeled, unlabeled]
+  workflow_run:
+    workflows: ["Toolbelt PR Gate", "ACC PR Gate", "Brain PR Gate", "Shell PR Gate", "LifeOS PR Gate", "Secret Scan"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+# Serializes overlapping events for the same pull request (e.g. a
+# synchronize and a labeled event arriving close together) so two runs
+# never race the find-then-create comment upsert into a duplicate
+# comment. This "group:" value is consumed by the Actions scheduler to
+# decide queueing — it is never passed to a shell or into the
+# github-script body, so it carries none of the injection risk a run:
+# interpolation would. cancel-in-progress is false so each event is
+# still fully reconciled, in order, rather than dropped mid-run.
+concurrency:
+  group: merge-policy-${{ github.event.pull_request.number || github.event.workflow_run.head_branch || github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Hyperbolic Core Merge Policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge Policy · Reconcile pull request state
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+              const { owner, repo } = context.repo;
+              const ownerLogin =
+                (context.payload.repository &&
+                  context.payload.repository.owner &&
+                  context.payload.repository.owner.login) ||
+                null;
+              const defaultBranch =
+                (context.payload.repository &&
+                  context.payload.repository.default_branch) ||
+                null;
+
+              const WORK_STATE_MARKER =
+                "<!-- agent-engineering-standard:work-state:v1 -->";
+              const EVIDENCE_INDEX_MARKER =
+                "<!-- agent-engineering-standard:evidence-index:v1 -->";
+              const DRAFT_LABEL = "owner:allow-draft";
+              const HOLD_LABEL = "owner:hold-merge";
+
+              const summaryLines = [];
+
+              // Mirrors the pinned standard's owner_label_authorized exactly: walk
+              // timeline events in chronological order and track whether the label
+              // is currently trustworthy. A "labeled" event for the target label
+              // sets authorization to (actor === ownerLogin); an "unlabeled" event
+              // for the same label always clears it. The value after the full
+              // history answers: was the label applied by the owner, and never
+              // since removed (or removed and re-applied by someone else)?
+              function ownerLabelAuthorized(events, label, ownerLoginValue) {
+                let authorized = false;
+                for (const event of events) {
+                  const labelObj = event.label || {};
+                  const name = labelObj.name || event.label_name;
+                  if (name !== label) continue;
+                  if (event.event === "labeled") {
+                    const actor = event.actor || {};
+                    const login = actor.login || event.actor_login;
+                    authorized = login === ownerLoginValue;
+                  } else if (event.event === "unlabeled") {
+                    authorized = false;
+                  }
+                }
+                return authorized;
+              }
+
+              async function isLabelAuthorizedByOwner(prNumber, label) {
+                if (!ownerLogin) return false;
+                const events = await github.paginate(
+                  github.rest.issues.listEventsForTimeline,
+                  { owner, repo, issue_number: prNumber, per_page: 100 }
+                );
+                return ownerLabelAuthorized(events, label, ownerLogin);
+              }
+
+              function hasLabel(pr, label) {
+                return (pr.labels || []).some((entry) => entry && entry.name === label);
+              }
+
+              async function removeUnauthorizedLabel(pr, label) {
+                if (!hasLabel(pr, label)) return;
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner,
+                    repo,
+                    issue_number: pr.number,
+                    name: label,
+                  });
+                  summaryLines.push(
+                    `- Label \`${label}\`: present without owner provenance; removed (no public comment, per AGENTS.md).`
+                  );
+                } catch (error) {
+                  summaryLines.push(
+                    `- Label \`${label}\`: present without owner provenance; could not be removed: ${error.message}`
+                  );
+                }
+              }
+
+              function parseLinkedIssue(body) {
+                const match = /^closes\s+#(\d+)/im.exec(body || "");
+                return match ? Number(match[1]) : null;
+              }
+
+              async function findCommentByMarker(issueNumber, marker) {
+                const comments = await github.paginate(github.rest.issues.listComments, {
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  per_page: 100,
+                });
+                return comments.find((entry) => (entry.body || "").startsWith(marker)) || null;
+              }
+
+              async function upsertComment(issueNumber, marker, body) {
+                const existing = await findCommentByMarker(issueNumber, marker);
+                if (existing) {
+                  await github.rest.issues.updateComment({
+                    owner,
+                    repo,
+                    comment_id: existing.id,
+                    body,
+                  });
+                } else {
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    body,
+                  });
+                }
+              }
+
+              async function resolvePullRequest() {
+                let number = null;
+                if (context.eventName === "pull_request_target") {
+                  number =
+                    context.payload.pull_request && context.payload.pull_request.number;
+                } else if (context.eventName === "workflow_run") {
+                  const headSha = context.payload.workflow_run.head_sha;
+                  const { data: candidates } =
+                    await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                      owner,
+                      repo,
+                      commit_sha: headSha,
+                    });
+                  const open = (candidates || []).find(
+                    (candidate) => candidate.state === "open"
+                  );
+                  number = open ? open.number : null;
+                }
+                if (!number) return null;
+                // Always re-fetch the single pull request: it is the only shape that
+                // carries mergeable_state, and it is never stale the way
+                // workflow_run.pull_requests or an old payload can be after a
+                // force-push.
+                const { data: pr } = await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: number,
+                });
+                return pr;
+              }
+
+              async function reconcileReadyState(pr) {
+                if (pr.mergeable_state === "behind") {
+                  try {
+                    await github.rest.pulls.updateBranch({
+                      owner,
+                      repo,
+                      pull_number: pr.number,
+                    });
+                    summaryLines.push("- Branch update: requested (base moved ahead).");
+                  } catch (error) {
+                    summaryLines.push(
+                      `- Branch update: not applied, left untouched (likely a real conflict): ${error.message}`
+                    );
+                  }
+                }
+
+                try {
+                  await github.graphql(
+                    `mutation($id: ID!, $sha: GitObjectID!) {
+                      enablePullRequestAutoMerge(input: {
+                        pullRequestId: $id
+                        mergeMethod: SQUASH
+                        expectedHeadOid: $sha
+                      }) {
+                        pullRequest { id }
+                      }
+                    }`,
+                    { id: pr.node_id, sha: pr.head.sha }
+                  );
+                  summaryLines.push(
+                    `- Auto-merge: armed (squash, expected head \`${pr.head.sha}\`).`
+                  );
+                } catch (error) {
+                  const message = (error && error.message) || String(error);
+                  if (/auto.?merge is not allowed|auto.?merge is disabled|not enabled for this repository/i.test(message)) {
+                    summaryLines.push(
+                      "- Auto-merge: disabled at the repository level; nothing to arm."
+                    );
+                  } else if (/clean status|you can merge directly|already.*(clean|mergeable)/i.test(message)) {
+                    summaryLines.push(
+                      "- Auto-merge: PR already in a mergeable/clean state; GitHub refused arming (expected)."
+                    );
+                  } else if (/already.*enabled/i.test(message)) {
+                    summaryLines.push("- Auto-merge: already enabled.");
+                  } else {
+                    core.warning(
+                      `Merge Policy: unexpected error arming auto-merge for PR #${pr.number}, continuing without failing the run: ${message}`
+                    );
+                    summaryLines.push(
+                      `- Auto-merge: unexpected error, not failing the run: ${message}`
+                    );
+                  }
+                }
+              }
+
+              function deriveStatus(pr, stillDraft, holdAuthorized) {
+                if (stillDraft) return "draft (owner:allow-draft honored)";
+                if (holdAuthorized) return "held (owner:hold-merge honored)";
+                if (pr.mergeable_state === "dirty") return "blocked: merge conflict against base";
+                if (pr.mergeable_state === "behind") return "branch update requested";
+                if (pr.mergeable_state === "blocked") return "waiting on required checks";
+                return "ready";
+              }
+
+              function deriveBlocker(pr, stillDraft, holdAuthorized) {
+                if (holdAuthorized) return "owner:hold-merge is in effect";
+                if (pr.mergeable_state === "dirty") {
+                  return "merge conflict against base; resolve manually, this workflow never resolves conflicts";
+                }
+                if (stillDraft) return "PR is a draft (owner:allow-draft honored)";
+                return "none";
+              }
+
+              function buildWorkStateBody(pr, linkedIssue, stillDraft, holdAuthorized) {
+                return [
+                  WORK_STATE_MARKER,
+                  "## Work State",
+                  "",
+                  `- Issue: ${linkedIssue ? "#" + linkedIssue : "unknown"}`,
+                  "- Milestone: vNext",
+                  `- Branch: \`${pr.head.ref}\``,
+                  `- Base SHA: \`${pr.base.sha}\``,
+                  `- Current head: \`${pr.head.sha}\``,
+                  "- Controller: anthropic",
+                  "- Builder: anthropic",
+                  `- Pull request: #${pr.number}`,
+                  `- Status: ${deriveStatus(pr, stillDraft, holdAuthorized)}`,
+                  `- Blocker: ${deriveBlocker(pr, stillDraft, holdAuthorized)}`,
+                ].join("\n");
+              }
+
+              try {
+                const pr = await resolvePullRequest();
+                if (!pr) {
+                  core.info(
+                    "Merge Policy: no open pull request resolved for this event; nothing to do."
+                  );
+                  return;
+                }
+
+                summaryLines.push(`### PR #${pr.number}: ${pr.title}`);
+
+                const targetsDefaultBranch =
+                  Boolean(defaultBranch) && pr.base.ref === defaultBranch;
+                if (!targetsDefaultBranch) {
+                  summaryLines.push(
+                    `- Target: PR targets \`${pr.base.ref}\`, not the default branch \`${defaultBranch}\`; no policy actions taken.`
+                  );
+                  return;
+                }
+
+                const sameRepo = Boolean(
+                  pr.head &&
+                    pr.head.repo &&
+                    pr.base &&
+                    pr.base.repo &&
+                    pr.head.repo.full_name === pr.base.repo.full_name
+                );
+                const eligible = sameRepo && targetsDefaultBranch;
+
+                // C. Draft policy — REST cannot un-draft a PR; GraphQL only.
+                let stillDraft = Boolean(pr.draft);
+                if (pr.draft) {
+                  const draftAuthorized = await isLabelAuthorizedByOwner(
+                    pr.number,
+                    DRAFT_LABEL
+                  );
+                  if (!draftAuthorized) {
+                    await removeUnauthorizedLabel(pr, DRAFT_LABEL);
+                    try {
+                      await github.graphql(
+                        `mutation($id: ID!) {
+                          markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+                            pullRequest { id }
+                          }
+                        }`,
+                        { id: pr.node_id }
+                      );
+                      stillDraft = false;
+                      summaryLines.push(
+                        "- Draft: unauthorized draft state cleared (marked ready for review)."
+                      );
+                    } catch (error) {
+                      core.warning(
+                        `Merge Policy: failed to clear unauthorized draft state on PR #${pr.number}: ${error.message}`
+                      );
+                      summaryLines.push(
+                        `- Draft: failed to clear unauthorized draft state: ${error.message}`
+                      );
+                    }
+                  } else {
+                    summaryLines.push(
+                      "- Draft: preserved (owner:allow-draft is authorized)."
+                    );
+                  }
+                }
+
+                // D. Hold policy.
+                const holdAuthorized = await isLabelAuthorizedByOwner(
+                  pr.number,
+                  HOLD_LABEL
+                );
+                if (!holdAuthorized) {
+                  await removeUnauthorizedLabel(pr, HOLD_LABEL);
+                }
+                if (holdAuthorized) {
+                  try {
+                    await github.graphql(
+                      `mutation($id: ID!) {
+                        disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
+                          pullRequest { id }
+                        }
+                      }`,
+                      { id: pr.node_id }
+                    );
+                    summaryLines.push(
+                      "- Hold: owner:hold-merge is authorized; auto-merge disabled."
+                    );
+                  } catch (error) {
+                    const message = (error && error.message) || String(error);
+                    if (/not enabled/i.test(message)) {
+                      summaryLines.push(
+                        "- Hold: owner:hold-merge is authorized; auto-merge was already off."
+                      );
+                    } else {
+                      core.warning(
+                        `Merge Policy: owner:hold-merge honored for PR #${pr.number} but disabling auto-merge failed: ${message}`
+                      );
+                      summaryLines.push(
+                        `- Hold: owner:hold-merge is authorized, but disabling auto-merge failed: ${message}`
+                      );
+                    }
+                  }
+                }
+
+                // E / F. Ready, same-repo, non-held, non-draft PRs targeting the
+                // default branch. This also naturally re-arms auto-merge after an
+                // auto_merge_disabled event: that event type reaches this same path
+                // whenever the hold is not authorized.
+                if (!eligible) {
+                  summaryLines.push(
+                    "- Eligibility: fork pull request (head repository differs from base repository); branch-update and auto-merge arming are skipped by directive — same-repository PRs only."
+                  );
+                } else if (holdAuthorized) {
+                  summaryLines.push(
+                    "- Ready-state actions: skipped while owner:hold-merge is authorized."
+                  );
+                } else if (stillDraft) {
+                  summaryLines.push(
+                    "- Ready-state actions: skipped while the PR remains a draft."
+                  );
+                } else {
+                  await reconcileReadyState(pr);
+                }
+
+                // G. Managed comments.
+                const linkedIssue = parseLinkedIssue(pr.body);
+                const workStateBody = buildWorkStateBody(
+                  pr,
+                  linkedIssue,
+                  stillDraft,
+                  holdAuthorized
+                );
+                await upsertComment(pr.number, WORK_STATE_MARKER, workStateBody);
+                if (linkedIssue) {
+                  await upsertComment(linkedIssue, WORK_STATE_MARKER, workStateBody);
+                }
+
+                if (context.eventName === "workflow_run") {
+                  const run = context.payload.workflow_run;
+                  try {
+                    const { data: artifactsResponse } =
+                      await github.rest.actions.listWorkflowRunArtifacts({
+                        owner,
+                        repo,
+                        run_id: run.id,
+                        per_page: 100,
+                      });
+                    const artifact = (artifactsResponse.artifacts || []).find((entry) =>
+                      /evidence/i.test(entry.name)
+                    );
+                    if (artifact) {
+                      const evidenceBody = [
+                        EVIDENCE_INDEX_MARKER,
+                        "## Evidence Index",
+                        "",
+                        `- Workflow run: [${run.name || "PR Gate"} #${run.run_number}](${run.html_url})`,
+                        `- Artifact: \`${artifact.name}\` (id ${artifact.id}, ${artifact.expired ? "expired" : "available"})`,
+                        `- Head: \`${run.head_sha}\``,
+                        "",
+                        "_Link only — this workflow never downloads artifact content._",
+                      ].join("\n");
+                      await upsertComment(pr.number, EVIDENCE_INDEX_MARKER, evidenceBody);
+                      if (linkedIssue) {
+                        await upsertComment(
+                          linkedIssue,
+                          EVIDENCE_INDEX_MARKER,
+                          evidenceBody
+                        );
+                      }
+                    } else {
+                      summaryLines.push(
+                        "- Evidence Index: no evidence artifact found on this run; comment skipped."
+                      );
+                    }
+                  } catch (error) {
+                    core.warning(
+                      `Merge Policy: failed to index evidence artifacts for PR #${pr.number}: ${error.message}`
+                    );
+                    summaryLines.push(
+                      `- Evidence Index: failed to list run artifacts: ${error.message}`
+                    );
+                  }
+                }
+              } catch (error) {
+                core.error(
+                  `Merge Policy: unhandled error, not failing the run: ${error.message}`
+                );
+                summaryLines.push(`- Unhandled error: ${error.message}`);
+              } finally {
+                try {
+                  core.summary.addHeading("Hyperbolic Core Merge Policy");
+                  core.summary.addRaw(
+                    summaryLines.join("\n") || "_No actions recorded._",
+                    true
+                  );
+                  await core.summary.write();
+                } catch (summaryError) {
+                  core.warning(
+                    `Merge Policy: failed to write job summary: ${summaryError.message}`
+                  );
+                }
+              }
