@@ -1,36 +1,51 @@
 # hyperbolic-core
-A suite of all of my agentic work.
 
-This repository follows the [Agent Engineering Standard](https://github.com/kgsmith19/agent-engineering-standard)
-(pinned in `standard.lock`); see `AGENTS.md` for operational rules and `project.yaml` for exact
-component and CI-gate facts.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Gitleaks](https://github.com/kgsmith19/hyperbolic-core/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/kgsmith19/hyperbolic-core/actions/workflows/secret-scan.yml)
+[![Agent Engineering Standard](https://img.shields.io/badge/standard-Agent%20Engineering%20Standard-6f42c1)](https://github.com/kgsmith19/agent-engineering-standard)
 
-## Components
+A monorepo of agentic tools, apps, and the platform behind them — a local coding-agent guard
+rail, a life-management system, a portfolio toolbelt, and the shared services and UI that tie
+them together. Built and operated under the [Agent Engineering
+Standard](https://github.com/kgsmith19/agent-engineering-standard).
 
-- `apps/toolbelt/` — a monorepo of small portfolio tools (a prompt-library
-  client and a local-first network diagnostic CLI/dashboard). Imported via
-  `git subtree add --prefix=apps/toolbelt` from
-  `https://github.com/kgsmith19/toolbelt.git` (merge commit `8af33c8`). See
-  `apps/toolbelt/README.md` and `apps/toolbelt/AGENTS.md` for details.
+## 📦 What's inside
 
-- `apps/lifeos/` — a personal life-management system (FastAPI backend +
-  React/TypeScript frontend: calendar, bills, health tracking). Imported via
-  `git subtree add --prefix=apps/lifeos` from
-  `https://github.com/kgsmith19/lifeos.git` (merge commit `a740c6e`).
-  **Its CI (`apps/lifeos/.github/workflows/`: `ci.yml`, `backup.yml`,
-  `ops.yml`, `release-smoke.yml`) is intentionally inert here** — those
-  workflows include real production deploy/backup/ops automation and
-  continue running from the standalone `lifeos` repo, not from this one.
-  See `apps/lifeos/README.md` and `apps/lifeos/AGENTS.md` for details.
+| Component | What it is | Gate |
+| --- | --- | --- |
+| [`apps/agentic-command-center`](apps/agentic-command-center) | Local coding-agent guard rail, control panel, and bounded task runner | `ACC PR Gate` |
+| [`apps/lifeos`](apps/lifeos) | Personal life-management system — typed entity graph, append-only event log | `LifeOS PR Gate` |
+| [`apps/shell`](apps/shell) | Unified React/Vite front end composing every zone behind one owner login | `Shell PR Gate` |
+| [`apps/toolbelt`](apps/toolbelt) | Small portfolio tools — a prompt-library client, local-first network diagnostics | `Toolbelt PR Gate` |
+| [`services/brain`](services/brain) | Long-lived autonomous-coding orchestrator — daemon, DAG scheduler, task/result contracts | `Brain PR Gate` |
+| [`services/llm-handler`](services/llm-handler) | Deployed general-purpose LLM service behind the Shell | covered by `Shell PR Gate` |
+| [`packages/*`](packages) | Shared TypeScript packages — `platform-client`, `ui`, `llm`, `toolbelt-cli` | covered by each consumer |
 
-- `apps/agentic-command-center/` — the local coding-agent guard rail,
-  control panel, and bounded task runner (Node.js core, no runtime
-  dependencies, React UI). Imported via `git subtree
-  add --prefix=apps/agentic-command-center` from
-  `https://github.com/kgsmith19/agentic-command-center`. Unlike `lifeos`,
-  its CI is **not** meant to stay inert: a root-level, path-scoped
-  `acc-ci.yml` (mirroring `toolbelt-ci.yml`'s pattern) makes it a real,
-  active check here. See `apps/agentic-command-center/README.md` and
-  `apps/agentic-command-center/AGENTS.md` for details, and
-  `docs/archived/2026-08-12/acc-migration-design-spec.md` for the
-  migration record.
+Every `apps/<name>/` was imported via `git subtree` and still carries its own upstream
+`README.md`/`AGENTS.md` — read those before working inside an app. `services/` and `packages/`
+are native to this repo.
+
+> ⚠️ **`apps/lifeos`'s own nested `.github/workflows/`** ship real production deploy, backup, and
+> ops automation and are **intentionally inert here** — GitHub only ever runs workflows from a
+> repository's root, and these must never be copied there. Full rationale in
+> [`AGENTS.md`](./AGENTS.md)'s Workflow Safety Invariant section.
+
+## 🚦 CI & merge gates
+
+Eight workflows gate this repo: six independent, path-scoped app gates (the table above) plus
+two repo-wide checks — `Gitleaks` (secret scanning) and `Repo Policy`/`Template Lint` (structural
+and template conformance). Only the repo-wide checks are required by the branch ruleset; a
+path-filtered check marked required would block forever on any PR that never triggers it. Full
+topology and required-check status live in [`project.yaml`](./project.yaml) and [`AGENTS.md`](./AGENTS.md)'s
+"PR Gate and merge behavior" section.
+
+## 📜 Policy
+
+This repository follows the [Agent Engineering
+Standard](https://github.com/kgsmith19/agent-engineering-standard), pinned to an exact commit in
+[`standard.lock`](./standard.lock). [`AGENTS.md`](./AGENTS.md) is the source of truth for agent
+and engineering rules; [`project.yaml`](./project.yaml) for exact repository facts and commands.
+
+## 📄 License
+
+[MIT](./LICENSE)
