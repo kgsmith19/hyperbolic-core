@@ -34,10 +34,11 @@ are native to this repo.
 
 Eight workflows gate this repo: six independent, path-scoped app gates (the table above) plus
 two repo-wide checks — `Gitleaks` (secret scanning) and `Repo Policy`/`Template Lint` (structural
-and template conformance). Only the repo-wide checks are required by the branch ruleset; a
-path-filtered check marked required would block forever on any PR that never triggers it. Full
-topology and required-check status live in [`project.yaml`](./project.yaml) and [`AGENTS.md`](./AGENTS.md)'s
-"PR Gate and merge behavior" section.
+and template conformance). Only the repo-wide checks are *intended* to be required by the branch
+ruleset — a path-filtered check marked required would block forever on any PR that never
+triggers it — but applying that to the live ruleset is a manual step; see
+[`AGENTS.md`](./AGENTS.md)'s "PR Gate and merge behavior" section for what's actually enforced
+right now versus the intended target, and [`project.yaml`](./project.yaml) for the full topology.
 
 ## 📜 Policy
 
