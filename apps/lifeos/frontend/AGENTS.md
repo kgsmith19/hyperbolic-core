@@ -1,14 +1,10 @@
 # lifeos-ui
 
-React single-page application for the LifeOS FastAPI backend. The deployed
-service is tailnet-only and authenticates with Supabase Auth JWTs.
+## Purpose
 
-Stack: React 19, strict TypeScript, Vite, Tailwind v4, TanStack Query, React
-Router, Vitest with Testing Library, Playwright, oxlint, and Prettier.
+React single-page application for the LifeOS FastAPI backend. The deployed service is tailnet-only and authenticates with Supabase Auth JWTs. Stack: React 19, strict TypeScript, Vite, Tailwind v4, TanStack Query, React Router, Vitest with Testing Library, Playwright, oxlint, and Prettier.
 
-Repository-wide guidance and delivery boundaries are in `../AGENTS.md`.
-
-## Product facts
+## Product boundaries
 
 - `../backend/` owns product and architecture decisions.
 - `src/api/types.gen.ts` is generated from the backend API and must not be
@@ -19,35 +15,32 @@ Repository-wide guidance and delivery boundaries are in `../AGENTS.md`.
   `src/components/`.
 - Every `VITE_` value is compiled into the browser bundle. Never put a secret
   in a client environment variable.
+- Add behavior-focused Vitest/component tests and Playwright coverage where
+  user-visible flows change.
 
 ## Commands
 
-- Install: `npm ci`
-- Develop: `npm run dev`
-- Format: `npm run format`
-- Lint: `npm run lint`
-- Type-check: `npx tsc -b`
-- Unit tests: `npm run test`
-- Browser tests: `npm run e2e`
-- Build: `npm run build`
-- Regenerate API types: `npm run gen:api`
+```bash
+npm ci        # install
+npm run dev   # develop
+npm run format
+npm run lint
+npx tsc -b    # type-check
+npm run test  # unit tests
+npm run e2e   # browser tests
+npm run build
+npm run gen:api  # regenerate API types
+```
 
 Playwright request mocks must be scoped to the configured API host; do not use
 a bare `**/path` pattern that can intercept unrelated traffic.
 
-## Engineering guidance
+## Completion criteria
 
-- Prefer the smallest clear change that fully satisfies the linked Issue.
-- Reuse existing components and utilities before adding dependencies or layers.
-- Delete code made obsolete by the change.
-- Add behavior-focused Vitest/component tests and Playwright coverage where
-  user-visible flows change.
-- Preserve unrelated work and do not weaken tests to make a change pass.
+The merge gate is the repository root's `.github/workflows/lifeos-ci.yml`,
+whose frontend job runs lint, type checks, unit tests, browser tests, and the
+production build.
 
-## Work and delivery
+## Collaboration boundary
 
-GitHub Issues are the durable source for requested work. The merge gate is the
-REPOSITORY ROOT's `.github/workflows/lifeos-ci.yml`, whose frontend job runs
-lint, type checks, unit tests, browser tests, and the production build. The
-`.github/` directory beside this app is inert and gates nothing -- see
-`../AGENTS.md`. Follow the delivery and AI contribution boundaries there.
+Repository-wide delivery and AI contribution boundaries are defined in `../AGENTS.md`.

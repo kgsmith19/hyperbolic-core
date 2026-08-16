@@ -3,7 +3,7 @@
 Status: approved design, not yet implemented.
 
 Second of the three-part consolidation described in
-`docs/superpowers/specs/2026-08-11-toolbelt-migration-design.md` (toolbelt,
+`docs/archived/2026-08-11/toolbelt-migration-design-spec.md` (toolbelt,
 already merged). That document's "Consolidation context" section (layout,
 history strategy, tooling independence, migration order, original-repo
 fate) applies unchanged here. This document covers what's specific to

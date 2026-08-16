@@ -3,10 +3,10 @@
 **Goal:** Fold the standalone `agentic-command-center` repository into
 `hyperbolic-core` at `apps/agentic-command-center/`, preserving its full git
 history, without breaking its CI or test suites — the third and final
-component migration per `docs/superpowers/specs/2026-08-11-toolbelt-
-migration-design.md`'s consolidation context.
+component migration per `docs/archived/2026-08-11/toolbelt-migration-design-spec.md`'s
+consolidation context.
 
-See `docs/superpowers/specs/2026-08-12-acc-migration-design.md` for the full
+See `docs/archived/2026-08-12/acc-migration-design-spec.md` for the full
 design. This record is retrospective (the migration was executed directly,
 not handed off task-by-task).
 

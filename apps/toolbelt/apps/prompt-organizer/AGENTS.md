@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## Application purpose
+## Purpose
 
 Prompt Organizer stores reusable AI prompts, substitutes variables, and copies rendered text. It owns the `prompt` schema in the shared `toolbelt` Supabase project.
 
@@ -15,10 +15,6 @@ Use this lean lifecycle:
 5. Successful pull requests may complete through native squash auto-merge.
 
 This app does not keep committed specs or ADRs — see `TEST_LEDGER.md` for the current, lean test-tracking convention. Future work is tracked in GitHub Issues.
-
-## Agent permissions
-
-When explicitly assigned, an AI coding agent may create an Issue, branch, commit, or pull request. It may respond in an existing Issue or pull-request conversation only when it is explicitly tagged with a direct question. An AI agent must not submit a review, request reviewers, approve or block a pull request, change repository protections, or post unsolicited Issue or pull-request comments.
 
 ## Product boundaries
 
@@ -65,3 +61,7 @@ A change is ready when its acceptance criteria are satisfied, relevant
 documentation is accurate, applicable local checks pass, and the
 hyperbolic-core root's `Toolbelt PR Gate` reports success. State any
 unverified item explicitly.
+
+## Collaboration boundary
+
+When explicitly assigned, an AI coding agent may create an Issue, branch, commit, or pull request. It may respond in an existing Issue or pull-request conversation only when it is explicitly tagged with a direct question. An AI agent must not submit a review, request reviewers, approve or block a pull request, change repository protections, or post unsolicited Issue or pull-request comments.

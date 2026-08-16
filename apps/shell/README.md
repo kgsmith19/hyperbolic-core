@@ -3,6 +3,8 @@
 hyperbolic-core's unified web front end: one React/Vite SPA composing every
 zone behind a single owner login.
 
+## Commands
+
 ```bash
 npm run dev            # Vite dev server (proxies /api to ACC)
 npm run build          # builds packages/ui, then this app

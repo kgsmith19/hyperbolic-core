@@ -13,7 +13,7 @@ There is no package manifest, application server, framework, or build step.
 ## Run locally
 
 ```bash
-python3 -m http.server 8812 --directory web
+python3 -m http.server 8812 --directory frontend
 ```
 
 Open `http://localhost:8812`, sign in to the `toolbelt` Supabase project, and use the prompt library.
@@ -23,7 +23,7 @@ Open `http://localhost:8812`, sign in to the `toolbelt` Supabase project, and us
 Run the Node suite:
 
 ```bash
-node --test "tests/*.test.mjs"
+node --test "backend/tests/*.test.mjs" "frontend/tests/*.test.mjs"
 ```
 
 Run the critical browser journey:
@@ -31,8 +31,8 @@ Run the critical browser journey:
 ```bash
 npm install --no-save --no-package-lock @playwright/test@1.52.0
 npx playwright install --with-deps chromium
-python3 -m http.server 8812 --directory web &
-PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config playwright.config.mjs
+python3 -m http.server 8812 --directory frontend &
+PLAYWRIGHT_BASE_URL=http://localhost:8812 npx playwright test --config frontend/playwright.config.mjs
 ```
 
 Both suites use the live Supabase project and its public anon key. A service-role key is neither required nor accepted.

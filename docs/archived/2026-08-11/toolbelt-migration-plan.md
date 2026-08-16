@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-(From `docs/superpowers/specs/2026-08-11-toolbelt-migration-design.md`)
+(From `docs/archived/2026-08-11/toolbelt-migration-design-spec.md`)
 
 - History must be preserved via `git subtree add --prefix=apps/toolbelt <remote> main` — no squash, no flat copy.
 - The original `toolbelt` repo and its GitHub remote (`https://github.com/kgsmith19/toolbelt.git`) must not be modified.

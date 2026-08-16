@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-(From `docs/superpowers/specs/2026-08-11-lifeos-migration-design.md` and the toolbelt spec's still-applicable consolidation context)
+(From `docs/archived/2026-08-11/lifeos-migration-design-spec.md` and the toolbelt spec's still-applicable consolidation context)
 
 - History must be preserved via `git subtree add --prefix=apps/lifeos <remote> main` — no squash, no flat copy.
 - The original `lifeos` repo and its GitHub remote (`https://github.com/kgsmith19/lifeos.git`) must not be modified.

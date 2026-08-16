@@ -5,7 +5,7 @@ Status: implemented.
 ## Background
 
 This is the third and final component migration referenced by
-`docs/superpowers/specs/2026-08-11-toolbelt-migration-design.md`'s
+`docs/archived/2026-08-11/toolbelt-migration-design-spec.md`'s
 consolidation context: toolbelt → lifeos → agentic-command-center (ACC),
 in that stated order, with ACC deliberately last because it's the
 guard-rail/vault system and the subtree/CI-reconciliation pattern needed to
