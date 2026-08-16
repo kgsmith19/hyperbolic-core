@@ -9,8 +9,9 @@
 # `deploy-backend` jobs, and `build-backend` has no repository-variable gate:
 # moving that file to this directory would publish a Docker image to
 # ghcr.io on every push to main. So this workflow contains the two TEST jobs
-# only, and triggers on pull_request/merge_group only -- there is no `push`
-# trigger here for a build job to key off, and no build or deploy job to run.
+# only. It does trigger on `push` to main (re-running the same test jobs as a
+# post-merge freshness check, matching the other five PR Gates), but there is
+# no build or deploy job anywhere in this file for that trigger to key off.
 name: "LifeOS PR Gate"
 
 on:
