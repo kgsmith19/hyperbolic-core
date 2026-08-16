@@ -2,7 +2,7 @@ name: "Brain PR Gate"
 
 # 10-cicd-deployment.md section 1.3: checkout, setup-node, npm ci, lint,
 # type-check, unit+integration tests, then a Docker build-and-smoke of the
-# section 3 image (netcheck release workflow's own build-and-smoke pattern,
+# section 3 image (network-checker release workflow's own build-and-smoke pattern,
 # toolbelt-network-checker-release.yml) -- built for verification only,
 # never pushed from CI.
 

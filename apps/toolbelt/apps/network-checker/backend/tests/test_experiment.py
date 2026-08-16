@@ -6,7 +6,7 @@ never a fabricated comparison value.
 """
 import unittest
 
-from netcheck import experiment
+from network_checker import experiment
 
 
 def _row(gw_state="ok", gw_ms=10.0):

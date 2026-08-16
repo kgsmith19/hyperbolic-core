@@ -191,7 +191,7 @@ jobs:
         run: python3 backend/tests/e2e/seed_dashboard_fixture.py
         working-directory: apps/toolbelt/apps/network-checker
       - name: Start Network Checker dashboard
-        run: python3 -m netcheck serve --no-open >network-checker.log 2>&1 &
+        run: python3 -m network_checker serve --no-open >network-checker.log 2>&1 &
         working-directory: apps/toolbelt/apps/network-checker/backend
         env:
           NETCHECK_DB: ${{ github.workspace }}/apps/toolbelt/apps/network-checker/backend/tests/e2e/dashboard-fixture.db

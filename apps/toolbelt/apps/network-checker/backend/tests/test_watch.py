@@ -1,4 +1,4 @@
-"""Hermetic tests for the `netcheck watch` tick loop (D-03).
+"""Hermetic tests for the `network-checker watch` tick loop (D-03).
 
 watch.py is the one module in this codebase with no dedicated test
 (docs/planning/05-f-network-checker.md section 5) despite being the
@@ -6,7 +6,7 @@ long-running loop every other measurement feeds. Every seam watch.py
 imports -- probes.sample, probes.idle_hold, route_mod.gateway,
 route_mod.first_hop, environ.wifi, environ.scan, llmlog.ingest,
 store.mirror, and time.sleep -- is patched here at its point of use in
-netcheck.watch, so nothing below opens a real socket, shells out, or waits
+network_checker.watch, so nothing below opens a real socket, shells out, or waits
 on a real clock. store itself is real (an in-memory SQLite database), the
 same way test_store.py and test_server.py exercise it, so a stored row is
 proof of behavior rather than proof a mock was configured correctly.
@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from netcheck import store, watch
+from network_checker import store, watch
 
 
 def _healthy_row(ts, **overrides):
@@ -38,7 +38,7 @@ def _healthy_row(ts, **overrides):
 
 
 def _args(**overrides):
-    """A minimal `netcheck watch` argparse.Namespace, the same shape
+    """A minimal `network-checker watch` argparse.Namespace, the same shape
     __main__.py's watch subparser builds."""
     base = {"target": "api.anthropic.com", "interval": 20,
             "idle_every": 1000, "idle_seconds": 5}

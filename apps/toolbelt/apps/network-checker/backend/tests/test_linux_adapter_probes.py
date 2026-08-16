@@ -1,4 +1,4 @@
-"""Linux `iw`/`ethtool` adapter-state probes (netcheck/linux_adapter_probes.py;
+"""Linux `iw`/`ethtool` adapter-state probes (network_checker/linux_adapter_probes.py;
 05-f section 4.5's Finding 18): pure parsers over hand-built command text --
 this sandbox has neither `iw` nor `ethtool` nor a real wireless adapter to
 capture fixtures from, so the text below is built to match `iw`'s and
@@ -11,7 +11,7 @@ tests/test_environ.py's `WifiPlatformDispatchTest` convention.
 import unittest
 from unittest.mock import patch
 
-from netcheck import linux_adapter_probes as lap
+from network_checker import linux_adapter_probes as lap
 
 IW_DEV_INFO_5GHZ = (
     "Interface wlan0\n"
@@ -93,21 +93,21 @@ class ParseEthtoolWolTest(unittest.TestCase):
 
 class FindAdapterTest(unittest.TestCase):
     def test_matches_primary_pattern_first(self):
-        with patch("netcheck.linux_adapter_probes.os.listdir",
+        with patch("network_checker.linux_adapter_probes.os.listdir",
                    return_value=["lo", "eth0", "wlan0"]):
             self.assertEqual(lap.find_adapter(r"wlan|wifi", r"eth|eno|enp"), "wlan0")
 
     def test_falls_back_when_primary_pattern_absent(self):
-        with patch("netcheck.linux_adapter_probes.os.listdir",
+        with patch("network_checker.linux_adapter_probes.os.listdir",
                    return_value=["lo", "eth0"]):
             self.assertEqual(lap.find_adapter(r"wlan|wifi", r"eth|eno|enp"), "eth0")
 
     def test_no_match_anywhere_is_none(self):
-        with patch("netcheck.linux_adapter_probes.os.listdir", return_value=["lo"]):
+        with patch("network_checker.linux_adapter_probes.os.listdir", return_value=["lo"]):
             self.assertIsNone(lap.find_adapter(r"wlan|wifi", r"eth|eno|enp"))
 
     def test_unreadable_sysfs_is_none_not_a_raise(self):
-        with patch("netcheck.linux_adapter_probes.os.listdir", side_effect=OSError):
+        with patch("network_checker.linux_adapter_probes.os.listdir", side_effect=OSError):
             self.assertIsNone(lap.find_adapter(r"wlan|wifi"))
 
 
@@ -122,8 +122,8 @@ class WifiTxpowerDiscriminationTest(unittest.TestCase):
     def test_at_ceiling_is_ok(self):
         """State DOES match expected: live txpower equals this channel's
         own regulatory ceiling."""
-        with patch("netcheck.linux_adapter_probes.LINUX", True), \
-             patch("netcheck.linux_adapter_probes._run") as mock_run:
+        with patch("network_checker.linux_adapter_probes.LINUX", True), \
+             patch("network_checker.linux_adapter_probes._run") as mock_run:
             mock_run.side_effect = [
                 (IW_DEV_INFO_5GHZ.format("23.00"), "ok"),
                 (IW_PHY_INFO_5GHZ, "ok"),
@@ -136,8 +136,8 @@ class WifiTxpowerDiscriminationTest(unittest.TestCase):
     def test_pinned_below_ceiling_is_fail(self):
         """State does NOT match expected: the exact wifi_mode_pinned fault
         this template exists to fix."""
-        with patch("netcheck.linux_adapter_probes.LINUX", True), \
-             patch("netcheck.linux_adapter_probes._run") as mock_run:
+        with patch("network_checker.linux_adapter_probes.LINUX", True), \
+             patch("network_checker.linux_adapter_probes._run") as mock_run:
             mock_run.side_effect = [
                 (IW_DEV_INFO_5GHZ.format("1.00"), "ok"),
                 (IW_PHY_INFO_5GHZ, "ok"),
@@ -147,21 +147,21 @@ class WifiTxpowerDiscriminationTest(unittest.TestCase):
         self.assertEqual(got["txpower_dbm"], 1.0)
 
     def test_no_adapter_is_unavailable_not_fail(self):
-        with patch("netcheck.linux_adapter_probes.LINUX", True), \
-             patch("netcheck.linux_adapter_probes.find_adapter", return_value=None):
+        with patch("network_checker.linux_adapter_probes.LINUX", True), \
+             patch("network_checker.linux_adapter_probes.find_adapter", return_value=None):
             got = lap.wifi_txpower()
         self.assertEqual(got["state"], "unavailable")
 
     def test_non_linux_is_unavailable_even_with_an_adapter_name(self):
-        with patch("netcheck.linux_adapter_probes.LINUX", False):
+        with patch("network_checker.linux_adapter_probes.LINUX", False):
             got = self._run()
         self.assertEqual(got["state"], "unavailable")
 
     def test_unmatched_channel_ceiling_is_unavailable_not_a_guess(self):
         """A channel this phy's info text does not list at all -- must not
         be scored fail/ok against a fabricated ceiling."""
-        with patch("netcheck.linux_adapter_probes.LINUX", True), \
-             patch("netcheck.linux_adapter_probes._run") as mock_run:
+        with patch("network_checker.linux_adapter_probes.LINUX", True), \
+             patch("network_checker.linux_adapter_probes._run") as mock_run:
             mock_run.side_effect = [
                 (IW_DEV_INFO_5GHZ.format("20.00").replace("5180", "5745"), "ok"),
                 (IW_PHY_INFO_5GHZ, "ok"),
@@ -177,8 +177,8 @@ class AdapterPowerDiscriminationTest(unittest.TestCase):
 
     def test_optimal_state_is_ok(self):
         """State DOES match expected."""
-        with patch("netcheck.linux_adapter_probes.LINUX", True), \
-             patch("netcheck.linux_adapter_probes._run") as mock_run:
+        with patch("network_checker.linux_adapter_probes.LINUX", True), \
+             patch("network_checker.linux_adapter_probes._run") as mock_run:
             mock_run.side_effect = [
                 ("Power save: off\n", "ok"),
                 ("Settings for wlan0:\n\tWake-on: g\n", "ok"),
@@ -191,8 +191,8 @@ class AdapterPowerDiscriminationTest(unittest.TestCase):
     def test_power_save_still_on_is_fail(self):
         """State does NOT match expected: power management never got
         disabled, even though WoL happens to be armed."""
-        with patch("netcheck.linux_adapter_probes.LINUX", True), \
-             patch("netcheck.linux_adapter_probes._run") as mock_run:
+        with patch("network_checker.linux_adapter_probes.LINUX", True), \
+             patch("network_checker.linux_adapter_probes._run") as mock_run:
             mock_run.side_effect = [
                 ("Power save: on\n", "ok"),
                 ("Settings for wlan0:\n\tWake-on: g\n", "ok"),
@@ -202,8 +202,8 @@ class AdapterPowerDiscriminationTest(unittest.TestCase):
 
     def test_wol_still_disabled_is_fail(self):
         """State does NOT match expected: the other half of the pair."""
-        with patch("netcheck.linux_adapter_probes.LINUX", True), \
-             patch("netcheck.linux_adapter_probes._run") as mock_run:
+        with patch("network_checker.linux_adapter_probes.LINUX", True), \
+             patch("network_checker.linux_adapter_probes._run") as mock_run:
             mock_run.side_effect = [
                 ("Power save: off\n", "ok"),
                 ("Settings for wlan0:\n\tWake-on: d\n", "ok"),
@@ -212,14 +212,14 @@ class AdapterPowerDiscriminationTest(unittest.TestCase):
         self.assertEqual(got["state"], "fail")
 
     def test_no_adapter_at_all_is_unavailable(self):
-        with patch("netcheck.linux_adapter_probes.LINUX", True), \
-             patch("netcheck.linux_adapter_probes.find_adapter", return_value=None):
+        with patch("network_checker.linux_adapter_probes.LINUX", True), \
+             patch("network_checker.linux_adapter_probes.find_adapter", return_value=None):
             got = lap.adapter_power()
         self.assertEqual(got["state"], "unavailable")
 
     def test_ethtool_missing_is_unavailable_not_fail(self):
-        with patch("netcheck.linux_adapter_probes.LINUX", True), \
-             patch("netcheck.linux_adapter_probes._run") as mock_run:
+        with patch("network_checker.linux_adapter_probes.LINUX", True), \
+             patch("network_checker.linux_adapter_probes._run") as mock_run:
             mock_run.side_effect = [
                 ("Power save: off\n", "ok"),
                 ("", "unavailable"),

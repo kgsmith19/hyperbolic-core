@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from netcheck import inventory, store
+from network_checker import inventory, store
 from tests.test_inventory import TS, fixture_payload
 
 

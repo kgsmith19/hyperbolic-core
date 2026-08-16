@@ -1,4 +1,4 @@
-"""netcheck CLI entry point. `--version` is the one piece of __main__.py
+"""network-checker CLI entry point. `--version` is the one piece of __main__.py
 with no coverage anywhere else -- everything else is exercised indirectly
 through the modules each subcommand calls, except FR-018/NFR-009 scan routing
 and hard tier budgets below."""
@@ -12,8 +12,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import netcheck
-from netcheck import __main__ as cli
+import network_checker
+from network_checker import __main__ as cli
 
 
 class VersionFlagTest(unittest.TestCase):
@@ -23,10 +23,10 @@ class VersionFlagTest(unittest.TestCase):
             with self.assertRaises(SystemExit) as cm:
                 cli.main(["--version"])
         self.assertEqual(cm.exception.code, 0)
-        self.assertIn(netcheck.__version__, out.getvalue())
+        self.assertIn(network_checker.__version__, out.getvalue())
 
     def test_dunder_version_is_a_dotted_string(self):
-        self.assertRegex(netcheck.__version__, r"^\d+\.\d+\.\d+$")
+        self.assertRegex(network_checker.__version__, r"^\d+\.\d+\.\d+$")
 
 
 class ScanTierCliTest(unittest.TestCase):
@@ -74,12 +74,12 @@ class ScanBudgetTest(unittest.TestCase):
         command = run.call_args.args[0]
         kwargs = run.call_args.kwargs
         self.assertEqual(command,
-                         [cli.sys.executable, "-m", "netcheck", "--target", "example.test",
+                         [cli.sys.executable, "-m", "network_checker", "--target", "example.test",
                           "scan", "--tier", tier])
         self.assertEqual(kwargs["timeout"], budget)
         self.assertFalse(kwargs.get("shell", False))
         self.assertEqual(kwargs["env"][cli.SCAN_WORKER_ENV], "1")
-        self.assertEqual(kwargs["env"]["NETCHECK_TARGET"], "example.test")
+        self.assertEqual(kwargs["env"]["NETWORK_CHECKER_TARGET"], "example.test")
 
     def test_each_tier_runs_in_a_child_with_its_hard_budget(self):
         fake = argparse.Namespace(returncode=0, stdout="{}\n", stderr="")
@@ -88,7 +88,7 @@ class ScanBudgetTest(unittest.TestCase):
                 self._assert_tier_budget(tier, budget, run)
 
     def test_budget_timeout_exits_124_with_a_clear_message(self):
-        timeout = subprocess.TimeoutExpired(["python", "-m", "netcheck"], 10)
+        timeout = subprocess.TimeoutExpired(["python", "-m", "network_checker"], 10)
         err = io.StringIO()
         with patch.object(cli.subprocess, "run", side_effect=timeout), \
              contextlib.redirect_stderr(err):
@@ -206,7 +206,7 @@ class WatchTimingValidationTest(unittest.TestCase):
 
 
 class ExportCliTest(unittest.TestCase):
-    """FR-074: `netcheck export` writes one redacted artifact and never
+    """FR-074: `network-checker export` writes one redacted artifact and never
     touches the network or mutates the store to produce it."""
 
     def _run(self, tmp_path, fmt="markdown"):

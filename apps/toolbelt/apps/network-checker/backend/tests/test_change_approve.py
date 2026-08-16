@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from netcheck import change, change_cli, store
+from network_checker import change, change_cli, store
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -35,7 +35,7 @@ def _seed_approvable_change(db_path):
     `change approve 1` returned non-zero via `_missing()` regardless of
     whether the TTY check existed at all -- removing that check entirely
     still passed both tests below. Every subprocess launched against the
-    same NETCHECK_DB sees this same row."""
+    same NETWORK_CHECKER_DB sees this same row."""
     conn = store.open_db(db_path)
     try:
         host = store.host_id(conn, "tty-test-host", "Linux")
@@ -50,7 +50,7 @@ def _seed_approvable_change(db_path):
 
 
 class RealSubprocessTTYRefusalTest(unittest.TestCase):
-    """NC-4.2, run for real: `echo 1 | python -m netcheck change approve 1`
+    """NC-4.2, run for real: `echo 1 | python -m network_checker change approve 1`
     must exit non-zero. The exact command the issue specifies, piped stdin
     so it is provably not a TTY. Runs against a real, otherwise-approvable
     row (see _seed_approvable_change) so a passing test actually proves the
@@ -58,11 +58,11 @@ class RealSubprocessTTYRefusalTest(unittest.TestCase):
 
     def test_piped_stdin_is_refused_with_a_nonzero_exit(self):
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = str(Path(tmp) / "netcheck.db")
+            db_path = str(Path(tmp) / "network_checker.db")
             cid, _host = _seed_approvable_change(db_path)
-            env = dict(os.environ, NETCHECK_DB=db_path)
+            env = dict(os.environ, NETWORK_CHECKER_DB=db_path)
             proc = subprocess.run(
-                [sys.executable, "-m", "netcheck", "change", "approve", str(cid)],
+                [sys.executable, "-m", "network_checker", "change", "approve", str(cid)],
                 input=f"{cid}\n", capture_output=True, text=True, cwd=REPO,
                 env=env, timeout=30)
             self.assertNotEqual(proc.returncode, 0)
@@ -78,12 +78,12 @@ class RealSubprocessTTYRefusalTest(unittest.TestCase):
         """/dev/null is not a pipe or a TTY either -- the same non-zero
         guarantee must hold for any non-interactive stdin, not just a pipe."""
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = str(Path(tmp) / "netcheck.db")
+            db_path = str(Path(tmp) / "network_checker.db")
             cid, _host = _seed_approvable_change(db_path)
-            env = dict(os.environ, NETCHECK_DB=db_path)
+            env = dict(os.environ, NETWORK_CHECKER_DB=db_path)
             with open(os.devnull) as devnull:
                 proc = subprocess.run(
-                    [sys.executable, "-m", "netcheck", "change", "approve", str(cid)],
+                    [sys.executable, "-m", "network_checker", "change", "approve", str(cid)],
                     stdin=devnull, capture_output=True, text=True, cwd=REPO,
                     env=env, timeout=30)
             self.assertNotEqual(proc.returncode, 0)

@@ -1,6 +1,6 @@
 """SSDP (UPnP) device discovery: the multicast query, the document it leads
 to, and identify_gateway(), which composes both into the LAN gateway
-manufacturer/model netcheck reports.
+manufacturer/model network-checker reports.
 
 Split from remote.py for the same reason docsis.py is: a self-contained
 protocol implementation its caller does not need to know the inside of, and

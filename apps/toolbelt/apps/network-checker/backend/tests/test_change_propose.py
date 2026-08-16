@@ -3,7 +3,7 @@ import contextlib
 import io
 import unittest
 
-from netcheck import change, store
+from network_checker import change, store
 from tests.test_change import ChangeTestCase, _args
 
 

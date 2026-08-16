@@ -7,7 +7,7 @@ always off.
 """
 import unittest
 
-from netcheck import rank
+from network_checker import rank
 
 from tests.test_diagnose import row
 

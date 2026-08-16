@@ -16,7 +16,7 @@ use the real, now-verified function.
 import unittest
 from unittest.mock import patch
 
-from netcheck import snmp
+from network_checker import snmp
 
 _oid_bytes = snmp._oid
 

@@ -11,11 +11,11 @@ VERBOSE=${VERBOSE:-0}
 # change's own first attempted fix" were identical, so a rollback never
 # restored whatever tx-power setting was actually there before. capture_state
 # below records that real prior value; restore_state re-pins to it instead
-# of re-running the forward fix. PHY/NETCHECK_STATE_DIR are overridable so
+# of re-running the forward fix. PHY/NETWORK_CHECKER_STATE_DIR are overridable so
 # tests can exercise the real branching logic without a real radio -- see
 # tests/test_fix_scripts.py.
-PHY="${NETCHECK_WIFI_PHY:-phy0}"
-STATE_DIR="${NETCHECK_STATE_DIR:-$HOME/.netcheck/change_state}"
+PHY="${NETWORK_CHECKER_WIFI_PHY:-phy0}"
+STATE_DIR="${NETWORK_CHECKER_STATE_DIR:-$HOME/.network-checker/change_state}"
 STATE_FILE="$STATE_DIR/wifi_mode.state"
 
 log() {

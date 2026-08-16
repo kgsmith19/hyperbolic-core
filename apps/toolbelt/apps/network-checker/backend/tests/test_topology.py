@@ -11,7 +11,7 @@ discovered device.
 import unittest
 from unittest.mock import patch
 
-from netcheck import ssdp, topology
+from network_checker import ssdp, topology
 
 from tests import fixture
 

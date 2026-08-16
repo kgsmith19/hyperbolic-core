@@ -6,7 +6,7 @@ need credentials must go quiet, not loud, when they have none.
 import unittest
 from unittest.mock import patch, MagicMock
 
-from netcheck import environ, rank
+from network_checker import environ, rank
 
 
 class WifiPlatformDispatchTest(unittest.TestCase):
@@ -15,8 +15,8 @@ class WifiPlatformDispatchTest(unittest.TestCase):
     the right tool gets called and its output reaches the right parser."""
 
     def test_macos_uses_airport_and_the_airport_parser(self):
-        with patch("netcheck.environ.MACOS", True), \
-             patch("netcheck.probes._run", return_value=("state: running\nSSID: x\nchannel: 44,80\n", "ok")) as mock_run:
+        with patch("network_checker.environ.MACOS", True), \
+             patch("network_checker.probes._run", return_value=("state: running\nSSID: x\nchannel: 44,80\n", "ok")) as mock_run:
             result = environ.wifi()
 
         self.assertEqual(result["state"], "ok")
@@ -24,15 +24,15 @@ class WifiPlatformDispatchTest(unittest.TestCase):
         self.assertIn("airport", mock_run.call_args[0][0][0])
 
     def test_macos_missing_airport_binary_is_unavailable_not_fail(self):
-        with patch("netcheck.environ.MACOS", True), \
-             patch("netcheck.probes._run", return_value=("", "unavailable")):
+        with patch("network_checker.environ.MACOS", True), \
+             patch("network_checker.probes._run", return_value=("", "unavailable")):
             result = environ.wifi()
 
         self.assertEqual(result["state"], "unavailable")
 
     def test_non_macos_still_uses_netsh(self):
-        with patch("netcheck.environ.MACOS", False), \
-             patch("netcheck.probes._run", return_value=("State : disconnected\n", "ok")) as mock_run:
+        with patch("network_checker.environ.MACOS", False), \
+             patch("network_checker.probes._run", return_value=("State : disconnected\n", "ok")) as mock_run:
             environ.wifi()
 
         self.assertEqual(mock_run.call_args[0][0][0], "netsh")
@@ -49,8 +49,8 @@ class PowerShellArgumentSafetyTest(unittest.TestCase):
     through."""
 
     def _run_with_mocked_powershell(self, fn, malicious):
-        with patch("netcheck.environ.WINDOWS", True), \
-             patch("netcheck.environ.subprocess.run") as mock_run:
+        with patch("network_checker.environ.WINDOWS", True), \
+             patch("network_checker.environ.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
             fn(malicious)
         return mock_run.call_args[0][0]

@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from netcheck import server, store
+from network_checker import server, store
 
 FRONTEND_FILES = list(server.FRONTEND.rglob("*"))
 TEXT_SUFFIXES = {".html", ".css", ".js", ".webmanifest"}
@@ -140,7 +140,7 @@ class ApiTest(unittest.TestCase):
     def test_index_serves_the_dashboard(self):
         status, body, headers = self.get("/")
         self.assertEqual(status, 200)
-        self.assertIn(b"netcheck", body)
+        self.assertIn(b"network-checker", body)
         self.assertIn("text/html", headers["Content-Type"])
 
     def test_static_assets_are_served_generically(self):
@@ -159,7 +159,7 @@ class ApiTest(unittest.TestCase):
 
     def test_static_route_cannot_escape_the_frontend_directory(self):
         with self.assertRaises(urllib.error.HTTPError) as cm:
-            self.get("/../netcheck/server.py")
+            self.get("/../network_checker/server.py")
         self.assertEqual(cm.exception.code, 404)
 
     def test_data_route_returns_everything_the_page_needs(self):

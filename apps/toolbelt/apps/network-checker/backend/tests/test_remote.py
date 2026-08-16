@@ -1,4 +1,4 @@
-"""Devices and services netcheck reaches over the network.
+"""Devices and services network-checker reaches over the network.
 
 The load-bearing behaviour is the three-state split. A section that needs
 credentials it does not have must report `unavailable` -- we could not
@@ -8,7 +8,7 @@ be cited as a fault by the ranking engine.
 import unittest
 from unittest.mock import patch
 
-from netcheck import rank, remote
+from network_checker import rank, remote
 
 
 class CredentialGateTest(unittest.TestCase):

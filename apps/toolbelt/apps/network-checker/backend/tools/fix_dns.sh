@@ -10,12 +10,12 @@ RESOLVERS="${RESOLVERS:-1.1.1.1 8.8.8.8}"
 # 05-f section 4.5's Finding 18: the systemd-resolved branch used to
 # unconditionally `rm -f` this drop-in on rollback, which destroys an
 # operator's own pre-existing file just as readily as one this script wrote
-# itself. NETCHECK_STATE_DIR/NETCHECK_DNS_DROPIN are overridable so tests can
+# itself. NETWORK_CHECKER_STATE_DIR/NETWORK_CHECKER_DNS_DROPIN are overridable so tests can
 # point both at a throwaway temp tree instead of real /etc paths -- see
 # tests/test_fix_scripts.py.
-STATE_DIR="${NETCHECK_STATE_DIR:-$HOME/.netcheck/change_state}"
+STATE_DIR="${NETWORK_CHECKER_STATE_DIR:-$HOME/.network-checker/change_state}"
 STATE_FILE="$STATE_DIR/dns.state"
-DROP_IN="${NETCHECK_DNS_DROPIN:-/etc/systemd/resolved.conf.d/network-checker.conf}"
+DROP_IN="${NETWORK_CHECKER_DNS_DROPIN:-/etc/systemd/resolved.conf.d/network-checker.conf}"
 
 log() {
     if [ "$VERBOSE" -eq 1 ]; then

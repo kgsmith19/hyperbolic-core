@@ -4,7 +4,7 @@ import unittest
 import unittest.mock
 from unittest.mock import patch
 
-from netcheck import dualstack
+from network_checker import dualstack
 
 
 class DualStackTest(unittest.TestCase):

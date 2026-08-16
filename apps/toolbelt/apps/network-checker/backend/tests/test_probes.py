@@ -8,7 +8,7 @@ house through Wi-Fi geolocation databases, so it does not belong in a repo.
 import unittest
 import unittest.mock
 
-from netcheck import probes
+from network_checker import probes
 
 from tests import fixture
 

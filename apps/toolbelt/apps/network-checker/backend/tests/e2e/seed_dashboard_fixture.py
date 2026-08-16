@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Seed (or append to) the fixture SQLite database the D-04 Playwright
-dashboard smoke spec drives `python -m netcheck serve` against.
+dashboard smoke spec drives `python -m network_checker serve` against.
 
 Stdlib only, matching this app's hard rule (AGENTS.md) -- this script is
 test-time tooling, not shipped product, but there is no reason for it to
@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from netcheck import diagnose, store  # noqa: E402  (path must be set up first)
+from network_checker import diagnose, store  # noqa: E402  (path must be set up first)
 
 DB_PATH = Path(__file__).resolve().parent / "dashboard-fixture.db"
 HOST_NAME = "dashboard-fixture-host"
@@ -43,7 +43,7 @@ def _row(ts, ms_value, **overrides):
 
 # Five ticks' worth of history; the last one fails the gateway probe, so the
 # fixture has a real, non-"ok" culprit for the smoke spec to look for -- the
-# same shape a real `netcheck watch` run leaves behind.
+# same shape a real `network-checker watch` run leaves behind.
 FIXTURE_ROWS = (
     _row("2026-08-01T12:00:00+00:00", 11.0),
     _row("2026-08-01T12:00:20+00:00", 12.0),

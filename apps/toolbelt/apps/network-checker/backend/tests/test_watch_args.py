@@ -3,7 +3,7 @@ import contextlib
 import io
 import unittest
 
-from netcheck import __main__ as cli
+from network_checker import __main__ as cli
 
 
 class WatchArgumentTest(unittest.TestCase):

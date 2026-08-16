@@ -7,7 +7,7 @@ changed mid-run.
 """
 import unittest
 
-from netcheck import route
+from network_checker import route
 
 from tests import fixture
 
@@ -56,7 +56,7 @@ class ParseTracerouteTest(unittest.TestCase):
 
 
 class ParseIpconfigGatewayTest(unittest.TestCase):
-    """route.gateway() reads this on every `netcheck watch` tick to know
+    """route.gateway() reads this on every `network-checker watch` tick to know
     which IP to ping as "the router" -- getting it wrong silently makes a
     real network change (DHCP renewal, AP roam) look like a LAN outage for
     the rest of the run."""

@@ -6,7 +6,7 @@ test_change_key.py etc. are already split out of test_change.py."""
 import unittest
 from unittest.mock import patch
 
-from netcheck import inventory, store, topology
+from network_checker import inventory, store, topology
 
 from tests.test_inventory import TS, InventoryTestCase, fixture_payload
 

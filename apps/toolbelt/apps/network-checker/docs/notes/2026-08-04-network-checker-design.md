@@ -1,5 +1,5 @@
 ---
-title: netcheck design
+title: network-checker design
 status: active
 scope: repo
 created: 2026-08-04
@@ -8,7 +8,7 @@ owner: Kyle Smith
 traces: [FR-001, FR-002, FR-003]
 ---
 
-# netcheck — design
+# network-checker — design
 
 Date: 2026-08-04
 Status: awaiting approval
@@ -86,7 +86,7 @@ waste this tool exists to prevent.
 Seven files. Each has one job and is readable in a single sitting.
 
 ```
-netcheck/
+network_checker/
   __main__.py   CLI dispatch: probe | watch | scan | diagnose | serve   ~60
   probes.py     per-tick network measurements                          ~180
   environ.py    wifi / driver / modem / router / event log             ~140
@@ -136,7 +136,7 @@ killing it. This reproduces the exact Claude Code failure shape — a long
 streaming response dying mid-flight — which no ping-based probe can detect.
 Records `held_seconds` and `result`.
 
-### Environment scan (`netcheck scan`)
+### Environment scan (`network-checker scan`)
 
 On demand, and once when `watch` starts:
 

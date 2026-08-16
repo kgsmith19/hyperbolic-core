@@ -9,7 +9,7 @@ unreachable API IS the signal.
 import unittest
 from unittest.mock import patch
 
-from netcheck import geoip
+from network_checker import geoip
 
 
 class LocateTest(unittest.TestCase):

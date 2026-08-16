@@ -6,7 +6,7 @@ import json
 import unittest
 from datetime import datetime, timezone
 
-from netcheck import bundle
+from network_checker import bundle
 
 NOW = datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -14,9 +14,9 @@ _FAKE_TOKEN = "Bearer " + "x" * 24
 _SENSITIVE_STRINGS = [
     "203.0.113.7",
     "AA:BB:CC:DD:EE:FF",
-    r"C:\Users\kyleg\.netcheck",
-    "/home/kyleg/.netcheck",
-    "/Users/kyleg/.netcheck",
+    r"C:\Users\kyleg\.network-checker",
+    "/home/kyleg/.network-checker",
+    "/Users/kyleg/.network-checker",
     _FAKE_TOKEN,
     "password=hunter2",
     "2001:db8:85a3::8a2e:370:7334",
@@ -126,7 +126,7 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(out["collection"]["sample_count"], 2)
         self.assertGreaterEqual(len(out["causes"]), 1)
         self.assertEqual(out["probe_summary"]["count"], 2)
-        self.assertEqual(out["netcheck_version"], bundle.__version__)
+        self.assertEqual(out["network_checker_version"], bundle.__version__)
         self.assertEqual(out["generated_at"], "2026-08-10T12:00:00+00:00")
 
     def test_deep_tier_detected_from_topology_key(self):
@@ -158,7 +158,7 @@ class RenderTest(unittest.TestCase):
     def test_render_markdown_includes_key_sections(self):
         data = bundle.build([_sample("2026-08-10T11:59:00+00:00")], [], {}, {"os_name": "Windows", "now": NOW})
         text = bundle.render_markdown(data)
-        for heading in ("# netcheck evidence bundle", "## Commands used",
+        for heading in ("# network-checker evidence bundle", "## Commands used",
                         "## Network summary", "## Probe summary",
                         "## LLM error summary", "## Ranked causes",
                         "## Controlled comparison"):

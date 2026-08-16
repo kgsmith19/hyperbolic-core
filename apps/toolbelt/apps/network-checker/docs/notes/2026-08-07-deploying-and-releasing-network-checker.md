@@ -1,5 +1,5 @@
 ---
-title: Deploying and releasing netcheck
+title: Deploying and releasing network-checker
 status: active
 scope: repo
 created: 2026-08-07
@@ -8,35 +8,45 @@ owner: Kyle Smith
 traces: [NFR-001, FR-011]
 ---
 
-# Deploying and releasing netcheck
+# Deploying and releasing network-checker
 
-## Why there's no `pip install netcheck`
+## Zero-install by default; `pip install -e .` is optional, not required
 
-This project is Python standard library only — no pip, no npm, no build
-step, a hard constraint (`AGENTS.md`). That means there's also no
-`setup.py`/`pyproject.toml` and nothing to publish to PyPI or a Homebrew
-formula: both require a build step this project deliberately doesn't have.
-Packaging here means: clone it, run it.
+This project is Python standard library only — no runtime dependencies, a
+hard constraint (`AGENTS.md`). The primary way to run it stays a plain clone:
 
 ```bash
 git clone https://github.com/kgsmith19/hyperbolic-core
 cd hyperbolic-core/apps/toolbelt/apps/network-checker
-python -m netcheck scan
+python -m network_checker scan
 ```
 
-That's the entire "install." See `README.md` for day-to-day usage.
+That's the entire "install" — nothing to publish to PyPI or a Homebrew
+formula, no build step required for day-to-day use. See `README.md` for
+day-to-day usage.
+
+`backend/pyproject.toml` exists only so the `network-checker` command is
+discoverable the standard way, if you want it:
+
+```bash
+cd backend && pip install -e .
+network-checker scan   # same CLI, no `python -m` or module name to remember
+```
+
+This adds no runtime dependency and no required build step — `python -m
+network_checker` above keeps working with or without this install.
 
 ## Local deployment
 
-The intended use: `netcheck watch` running on the same machine whose network
-you're diagnosing, writing to `~/.netcheck/netcheck.db` (override with
-`NETCHECK_DB`). Most of what makes this tool useful — Wi-Fi driver settings,
+The intended use: `network-checker watch` running on the same machine whose network
+you're diagnosing, writing to `~/.network-checker/network-checker.db` (override with
+`NETWORK_CHECKER_DB`). Most of what makes this tool useful — Wi-Fi driver settings,
 the Windows event log, modem/router credentials in a local `.env` — is
 inherently host-specific and doesn't cross a network boundary meaningfully.
 Run it directly on the machine you care about, not through a wrapper.
 
-For a headless box you want to check on remotely, pair `netcheck watch` with
-`netcheck serve` and reach the dashboard over SSH port-forwarding
+For a headless box you want to check on remotely, pair `network-checker watch` with
+`network-checker serve` and reach the dashboard over SSH port-forwarding
 (`ssh -L 8787:localhost:8787 host`) rather than exposing it — `server.py`
 binds to `127.0.0.1` only and has no auth, on purpose (see its module
 docstring).
@@ -44,9 +54,9 @@ docstring).
 ## Container deployment
 
 ```bash
-docker build -t netcheck .
-docker run --rm -v netcheck-data:/data netcheck scan
-docker run --rm -v netcheck-data:/data -p 8787:8787 netcheck serve --no-open
+docker build -t network-checker .
+docker run --rm -v network-checker-data:/data network-checker scan
+docker run --rm -v network-checker-data:/data -p 8787:8787 network-checker serve --no-open
 ```
 
 **What actually works in a container, and what doesn't.** `environ.py`'s
@@ -57,10 +67,10 @@ container those sections report `unavailable`, same as they would on any
 Linux host missing those binaries — not a fabricated `ok`, per the
 three-state model in `AGENTS.md`. What does work fully in a container:
 
-- `netcheck scan`'s WAN/provider-status/modem/router sections (pure
+- `network-checker scan`'s WAN/provider-status/modem/router sections (pure
   HTTP/socket work)
-- `netcheck probe`/`diagnose`'s gateway/ISP-hop/internet/DNS/TLS/HTTP layers
-- `netcheck serve` reading an existing `netcheck.db` (mount it read-only to
+- `network-checker probe`/`diagnose`'s gateway/ISP-hop/internet/DNS/TLS/HTTP layers
+- `network-checker serve` reading an existing `network_checker.db` (mount it read-only to
   view history collected elsewhere)
 
 In short: containerizing this tool makes most sense for the far-side and
@@ -74,7 +84,7 @@ There's no server-side component to deploy — the whole design point is that
 SQLite on the local disk is the only thing that can record an outage while
 it's happening (`README.md`). The one cloud-shaped piece is the **optional**
 Supabase mirror (`SUPABASE_URL`/`SUPABASE_KEY` in `.env`), which exists
-purely to let `netcheck serve` on a second machine see history from the
+purely to let `network-checker serve` on a second machine see history from the
 first. Setting it up:
 
 1. A Supabase (or self-hosted PostgREST) project running the schema in
@@ -83,11 +93,11 @@ first. Setting it up:
    is on with no policies, so the publishable key deliberately cannot write.
    Keep this key wherever your `.env` already lives; it never belongs in the
    image or a committed file.
-3. `netcheck sync` (or `watch`'s automatic per-tick mirror) pushes unsynced
+3. `network-checker sync` (or `watch`'s automatic per-tick mirror) pushes unsynced
    rows. A push that fails leaves rows unsynced for retry — it never marks
    a row done that didn't actually make it (`store.mirror`).
 
-Running `netcheck watch` itself on a cloud VM only makes sense if that VM's
+Running `network-checker watch` itself on a cloud VM only makes sense if that VM's
 network path *is* the thing you're diagnosing (e.g. an origin server's
 outbound connectivity) — it cannot tell you about a laptop's Wi-Fi from a
 data center.
@@ -111,9 +121,9 @@ git push origin network-checker-vX.Y.Z
 bash tools/deploy.sh                 # local checks + build + smoke-test + save the image
 ```
 
-`tools/deploy.sh` runs `tools/check.sh` first, builds `netcheck:vX.Y.Z`,
+`tools/deploy.sh` runs `tools/check.sh` first, builds `network-checker:vX.Y.Z`,
 smoke-tests it (`--version` and a real `scan`), and saves it as
-`netcheck-image-vX.Y.Z.tar.gz`. It prints the `git tag`/`gh release create`
+`network-checker-image-vX.Y.Z.tar.gz`. It prints the `git tag`/`gh release create`
 commands to publish from there if you want a GitHub Release; or dispatch
 the "Network Checker Release" workflow manually from the Actions tab (picking
 the `network-checker-vX.Y.Z` tag in "Use workflow from") to have CI build the
@@ -139,7 +149,7 @@ under `supabase/migrations/`, applied in order — there is currently only
 rather than editing `0001` in place.
 
 **No breaking config format changes to date.** `.env` keys, the CLI's
-subcommands, and `NETCHECK_DB`/`NETCHECK_TARGET` have been additive-only
-since the original design (`docs/notes/2026-08-04-netcheck-design.md`).
+subcommands, and `NETWORK_CHECKER_DB`/`NETWORK_CHECKER_TARGET` have been additive-only
+since the original design (`docs/notes/2026-08-04-network-checker-design.md`).
 If that ever changes, it belongs in `CHANGELOG.md` under a `### Changed`
 heading with an explicit migration note, not silently.

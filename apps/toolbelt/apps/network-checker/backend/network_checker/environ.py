@@ -24,7 +24,7 @@ _AIRPORT = ("/System/Library/PrivateFrameworks/Apple80211.framework/"
 
 # The endpoint the target-dependent sections measure against. Read from the
 # environment so `scan` and `probe` never disagree about what they diagnosed.
-TARGET = os.environ.get("NETCHECK_TARGET", "api.anthropic.com")
+TARGET = os.environ.get("NETWORK_CHECKER_TARGET", "api.anthropic.com")
 
 
 def _ps(script, timeout=25, args=()):

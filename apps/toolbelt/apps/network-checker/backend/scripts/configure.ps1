@@ -1,4 +1,4 @@
-# netcheck — local credential setup.
+# network-checker — local credential setup.
 #
 # Prompts for the optional credentials and writes them to .env (gitignored).
 # Nothing typed here is echoed to the screen, kept in shell history, or passed
@@ -7,7 +7,7 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\configure.ps1
 #
 # Every value is optional. Skip any of them and the matching feature reports
-# `unavailable` rather than failing — netcheck runs fully without all of it.
+# `unavailable` rather than failing — network-checker runs fully without all of it.
 #
 # The Supabase value must be the SERVICE ROLE key, not the publishable one:
 # every table has RLS enabled with no policies, so anon deliberately cannot
@@ -77,7 +77,7 @@ $vals['ROUTER_PASS'] = Read-Secret 'ROUTER_PASS (hidden)' (Cur 'ROUTER_PASS')
 
 # ------------------------------------------------------------------ write ---
 
-$out = @('# netcheck credentials. Gitignored. Written by scripts/configure.ps1.',
+$out = @('# network-checker credentials. Gitignored. Written by scripts/configure.ps1.',
          '# Re-run that script to change anything; do not edit by hand if you can',
          '# avoid it, so the file permissions below stay correct.',
          '')
@@ -103,14 +103,14 @@ Write-Host "`nVerifying (no secret is printed):"
 Push-Location $repo
 try {
     if ((Cur 'SUPABASE_KEY')) {
-        python -m netcheck sync
+        python -m network_checker sync
     } else {
         Write-Host '  SUPABASE_KEY not set - skipping sync check.'
     }
     if ((Cur 'MODEM_USER') -or (Cur 'ROUTER_USER')) {
         python -c @"
-from netcheck.__main__ import load_env
-from netcheck import environ
+from network_checker.__main__ import load_env
+from network_checker import environ
 load_env()
 for name in ('modem', 'router'):
     r = getattr(environ, name)()
@@ -119,4 +119,4 @@ for name in ('modem', 'router'):
     }
 } finally { Pop-Location }
 
-Write-Host "`nDone. Next: python -m netcheck watch"
+Write-Host "`nDone. Next: python -m network_checker watch"

@@ -1,7 +1,7 @@
 # tools/
 
 Two unrelated things live here: the quality gate that runs before a merge, and
-the OS-level fix scripts for the problems `netcheck diagnose` can already name.
+the OS-level fix scripts for the problems `network-checker diagnose` can already name.
 
 Every claim below was checked against the scripts. Where a capability is
 partial, it says so — this file previously promised rollback for all three
@@ -34,7 +34,7 @@ found anything and 0 if it did not.
 exploration and is not part of the Toolbelt PR Gate.
 
 ```bash
-python tools/code_simplification.py netcheck -i medium
+python tools/code_simplification.py network-checker -i medium
 python tools/security_review.py . -i high
 python tools/documentation_check.py . -i high -f json
 ```
@@ -42,7 +42,7 @@ python tools/documentation_check.py . -i high -f json
 ## The fix scripts
 
 The scripts below are executors now, not entry points. Run them only through
-the change lifecycle (`netcheck/change.py`, docs/planning/05-f-network-checker.md
+the change lifecycle (`network_checker/change.py`, docs/planning/05-f-network-checker.md
 section 4): every device write needs a recorded dry run and an explicit,
 interactive approval, and a failed post-apply verification triggers an
 automatic rollback to the pre-approved inverse. There is no more unattended
@@ -50,14 +50,14 @@ automatic rollback to the pre-approved inverse. There is no more unattended
 `change test` and per-change records.
 
 ```bash
-python -m netcheck change propose --title <t> --cmd <script> --inverse <inverse> --verify <probe-expr>
-python -m netcheck change test <id>       # dry-run: measures verify_probe, never mutates
-python -m netcheck change show <id>       # review the exact commands and dry-run evidence
-python -m netcheck change approve <id>    # interactive only; refuses if stdin is not a TTY
-python -m netcheck change apply <id> --token <token>
+python -m network_checker change propose --title <t> --cmd <script> --inverse <inverse> --verify <probe-expr>
+python -m network_checker change test <id>       # dry-run: measures verify_probe, never mutates
+python -m network_checker change show <id>       # review the exact commands and dry-run evidence
+python -m network_checker change approve <id>    # interactive only; refuses if stdin is not a TTY
+python -m network_checker change apply <id> --token <token>
 ```
 
-`netcheck/change_templates.py` seeds three ready-to-propose templates, one
+`network_checker/change_templates.py` seeds three ready-to-propose templates, one
 per script below; `rank._fix()` recommends the matching template's exact
 `change propose` invocation whenever a ranked cause has one.
 
@@ -71,14 +71,14 @@ Each script's own `capture_state`/`--capture-state` records the concrete
 pre-change value the first time its forward path runs on a host (kept
 until explicitly re-captured with `--force`, since `change apply` only
 ever calls it once per approved change); `restore_state`/`--restore` is
-what `netcheck/change_templates.py`'s `inverse_cmd` now invokes. 05-f
+what `network_checker/change_templates.py`'s `inverse_cmd` now invokes. 05-f
 section 4.5's Finding 18 has the full accounting of what this closed and
 what it didn't -- specifically that `change test`'s dry-run still has no
 way to surface the captured value as evidence before approval, a `change.py`
 change out of this script-level fix's scope.
 
 Post-apply verification for `wifi_mode` and `adapter_power` no longer
-reuses a bare gateway ping: `netcheck/linux_adapter_probes.py` measures the
+reuses a bare gateway ping: `network_checker/linux_adapter_probes.py` measures the
 actual property each change claims to modify (tx power vs. this radio's own
 ceiling; `power_save`/WoL together) and change_templates.py's `verify_probe`
 reads that measurement directly.
@@ -104,5 +104,5 @@ problem, and no config write from this machine addresses it.
 | `release.py` | `bump major|minor|patch` and `changelog` (drafts entries from git log) |
 | `scan_cli.py` | Shared argparse/output plumbing the three scanners above import -- not run directly |
 
-See `docs/notes/2026-08-07-deploying-and-releasing-netcheck.md` for the
+See `docs/notes/2026-08-07-deploying-and-releasing-network-checker.md` for the
 release procedure these two are part of.

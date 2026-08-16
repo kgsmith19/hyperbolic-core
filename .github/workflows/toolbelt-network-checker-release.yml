@@ -60,19 +60,19 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           version="${RELEASE_TAG#network-checker-v}"
-          docker build -t "netcheck:$version" apps/toolbelt/apps/network-checker
-          [[ "$(docker run --rm "netcheck:$version" --version)" == "netcheck $version" ]]
-          docker run --rm "netcheck:$version" --help >/dev/null
+          docker build -t "network-checker:$version" apps/toolbelt/apps/network-checker
+          [[ "$(docker run --rm "network-checker:$version" --version)" == "network-checker $version" ]]
+          docker run --rm "network-checker:$version" --help >/dev/null
       - name: Save image
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           version="${RELEASE_TAG#network-checker-v}"
-          docker save "netcheck:$version" | gzip > "netcheck-image-v${version}.tar.gz"
+          docker save "network-checker:$version" | gzip > "network-checker-image-v${version}.tar.gz"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: network-checker-image
-          path: netcheck-image-v*.tar.gz
+          path: network-checker-image-v*.tar.gz
           if-no-files-found: error
           retention-days: 14
 
@@ -122,4 +122,4 @@ jobs:
             --draft \
             --title "Network Checker $RELEASE_TAG" \
             --notes-file network-checker-release-notes.md \
-            netcheck-image-v*.tar.gz
+            network-checker-image-v*.tar.gz

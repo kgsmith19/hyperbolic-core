@@ -44,7 +44,7 @@ def _check_open_ports(host, ports=_MANAGEMENT_PORTS, timeout=1.0):
 def _find_login_endpoint(hostport, timeout=2):
     for path in _LOGIN_PATHS:
         req = urllib.request.Request(f"http://{hostport}{path}",
-                                     headers={"User-Agent": "netcheck"})
+                                     headers={"User-Agent": "network-checker"})
         _body, err = remote._fetch(req, timeout)
         if err in ("HTTP 401", "HTTP 403") or err is None:
             return path
@@ -54,7 +54,7 @@ def _find_login_endpoint(hostport, timeout=2):
 def _credential_match(hostport, path, timeout=2):
     for entry in _DEFAULT_CREDENTIALS:
         req = urllib.request.Request(f"http://{hostport}{path}",
-                                     headers={"User-Agent": "netcheck"})
+                                     headers={"User-Agent": "network-checker"})
         token = base64.b64encode(
             f"{entry['user']}:{entry['password']}".encode()).decode()
         req.add_header("Authorization", f"Basic {token}")

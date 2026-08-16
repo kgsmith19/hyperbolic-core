@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import diagnose, rank, store
 
-# netcheck/ -> backend/ -> the app root, where frontend/ sits beside it.
+# network_checker/ -> backend/ -> the app root, where frontend/ sits beside it.
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 INDEX = FRONTEND / "index.html"
 

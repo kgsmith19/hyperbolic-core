@@ -36,7 +36,7 @@ function evidenceTable(samples, cause) {
 
 export function renderCauses(node, causes, samples, expanded, onToggle) {
   if (!causes?.length) {
-    replaceChildren(node, [el("p", { class: "empty", text: "Nothing identified yet — that is a good sign, but it also means nothing has been caught in the act. Leave netcheck watch running so the next failure lands beside a measured sample." })]);
+    replaceChildren(node, [el("p", { class: "empty", text: "Nothing identified yet — that is a good sign, but it also means nothing has been caught in the act. Leave network-checker watch running so the next failure lands beside a measured sample." })]);
     return;
   }
   replaceChildren(node, causes.map((c) => {
@@ -113,7 +113,7 @@ export function envRows(scan) {
 export function renderEnv(node, scan) {
   const rows = envRows(scan);
   if (!scan?.wifi || !rows.length) {
-    replaceChildren(node, [el("p", { class: "empty" }, [document.createTextNode("Run "), el("code", { text: "netcheck scan" }), document.createTextNode(".")])]);
+    replaceChildren(node, [el("p", { class: "empty" }, [document.createTextNode("Run "), el("code", { text: "network-checker scan" }), document.createTextNode(".")])]);
     return;
   }
   replaceChildren(node, [el("table", {}, [el("tbody", {}, rows.map(([k, v]) => el("tr", {}, [

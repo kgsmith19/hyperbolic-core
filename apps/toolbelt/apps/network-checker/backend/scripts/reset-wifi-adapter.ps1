@@ -1,4 +1,4 @@
-# netcheck — reset Wi-Fi adapter to apply 802.11ax mode.
+# network-checker — reset Wi-Fi adapter to apply 802.11ax mode.
 #
 # The Wi-Fi adapter's wireless mode property can be changed in the driver,
 # but a profile-level disconnect/reconnect does not force the radio to
@@ -82,5 +82,5 @@ if ($wlanBeforeMode -and $wlanAfterMode) {
 }
 
 Write-Host "`nAdapter reset complete. You can now run:"
-Write-Host "  python -m netcheck watch"
-Write-Host "  python -m netcheck diagnose"
+Write-Host "  python -m network_checker watch"
+Write-Host "  python -m network_checker diagnose"

@@ -1,4 +1,4 @@
-# netcheck
+# AGENTS.md
 
 ## Purpose
 
@@ -62,29 +62,29 @@ The table below maps each backend module to what it owns.
 
 | Path | Responsibility |
 |---|---|
-| `backend/netcheck/probes.py` | Per-tick reachability, latency, TLS, HTTP, and idle-hold measurements |
-| `backend/netcheck/resolver.py` | Name resolution, including DNS over UDP |
-| `backend/netcheck/dualstack.py` | Separate IPv4 and IPv6 reachability |
-| `backend/netcheck/route.py` | Default gateway and first ISP hop |
-| `backend/netcheck/wlan_probes.py` | Windows and macOS Wi-Fi output parsers |
-| `backend/netcheck/linux_adapter_probes.py` | Read-only Linux adapter power and transmit-power probes |
-| `backend/netcheck/docsis.py` | DOCSIS status parsing |
-| `backend/netcheck/ssdp.py` | SSDP/UPnP gateway discovery |
-| `backend/netcheck/snmp.py` | Scoped SNMPv2c scalar reads |
-| `backend/netcheck/topology.py` | LAN device map: the address-resolution table (`arp -a`/`ip neigh`) parsed into IP/MAC pairs, with the SSDP-identified gateway named |
-| `backend/netcheck/exposure.py` | Deep-tier, detection-only LAN exposure checks: open management ports and default-credential acceptance, read requests only |
-| `backend/netcheck/environ.py` | Local system and network snapshot |
-| `backend/netcheck/remote.py` | Modem, router, WAN, and provider status |
-| `backend/netcheck/geoip.py` | Coarse WAN geolocation; failures remain `unavailable` |
-| `backend/netcheck/llmlog.py` | Transcript error extraction and classification |
-| `backend/netcheck/watch.py` | Continuous sampling loop |
-| `backend/netcheck/store.py` | SQLite persistence and optional mirror |
-| `backend/netcheck/inventory.py` | Device, interface, and configuration-item rows mapped from a collected scan payload, plus their queries |
-| `backend/netcheck/change*.py` | Consent-gated change lifecycle, protected approval capabilities, bounded verification, and restricted process execution; no write template is enabled until it has an exact verified inverse |
-| `backend/netcheck/diagnose.py`, `netcheck/rank.py` | Evidence correlation and ranked causes |
-| `backend/netcheck/experiment.py` | Two labeled probe runs compared: per-layer median latency and state mix |
-| `backend/netcheck/bundle.py` | Redacted evidence bundle assembled from stored data for export |
-| `backend/netcheck/server.py` | Loopback dashboard server: JSON API, SSE push, static files |
+| `backend/network_checker/probes.py` | Per-tick reachability, latency, TLS, HTTP, and idle-hold measurements |
+| `backend/network_checker/resolver.py` | Name resolution, including DNS over UDP |
+| `backend/network_checker/dualstack.py` | Separate IPv4 and IPv6 reachability |
+| `backend/network_checker/route.py` | Default gateway and first ISP hop |
+| `backend/network_checker/wlan_probes.py` | Windows and macOS Wi-Fi output parsers |
+| `backend/network_checker/linux_adapter_probes.py` | Read-only Linux adapter power and transmit-power probes |
+| `backend/network_checker/docsis.py` | DOCSIS status parsing |
+| `backend/network_checker/ssdp.py` | SSDP/UPnP gateway discovery |
+| `backend/network_checker/snmp.py` | Scoped SNMPv2c scalar reads |
+| `backend/network_checker/topology.py` | LAN device map: the address-resolution table (`arp -a`/`ip neigh`) parsed into IP/MAC pairs, with the SSDP-identified gateway named |
+| `backend/network_checker/exposure.py` | Deep-tier, detection-only LAN exposure checks: open management ports and default-credential acceptance, read requests only |
+| `backend/network_checker/environ.py` | Local system and network snapshot |
+| `backend/network_checker/remote.py` | Modem, router, WAN, and provider status |
+| `backend/network_checker/geoip.py` | Coarse WAN geolocation; failures remain `unavailable` |
+| `backend/network_checker/llmlog.py` | Transcript error extraction and classification |
+| `backend/network_checker/watch.py` | Continuous sampling loop |
+| `backend/network_checker/store.py` | SQLite persistence and optional mirror |
+| `backend/network_checker/inventory.py` | Device, interface, and configuration-item rows mapped from a collected scan payload, plus their queries |
+| `backend/network_checker/change*.py` | Consent-gated change lifecycle, protected approval capabilities, bounded verification, and restricted process execution; no write template is enabled until it has an exact verified inverse |
+| `backend/network_checker/diagnose.py`, `network_checker/rank.py` | Evidence correlation and ranked causes |
+| `backend/network_checker/experiment.py` | Two labeled probe runs compared: per-layer median latency and state mix |
+| `backend/network_checker/bundle.py` | Redacted evidence bundle assembled from stored data for export |
+| `backend/network_checker/server.py` | Loopback dashboard server: JSON API, SSE push, static files |
 | `frontend/` | Dashboard UI — HTML/CSS/JS, no backend logic, no dependencies |
 
 ## Commands
@@ -94,12 +94,12 @@ Run from `apps/toolbelt/apps/network-checker/`.
 ```bash
 python -m unittest discover -s tests -t .
 bash backend/tools/check.sh
-python -m netcheck watch
-python -m netcheck probe
-python -m netcheck scan
-python -m netcheck diagnose
-python -m netcheck serve
-python -m netcheck sync
+python -m network_checker watch
+python -m network_checker probe
+python -m network_checker scan
+python -m network_checker diagnose
+python -m network_checker serve
+python -m network_checker sync
 ```
 
 `bash backend/tools/check.sh` is the local equivalent of CI. It runs the test suite,
@@ -109,6 +109,10 @@ and shell syntax checks.
 ## Documentation
 
 - `README.md` — user-facing quick start and commands
+- `backend/pyproject.toml` — build metadata only, so `pip install -e .` gives
+  a discoverable `network-checker` console command; version is sourced from
+  `network_checker/__init__.py`, never restated. Adds no runtime dependency
+  and no required build step; `python -m network_checker` never needs it.
 - `docs/notes/` — runbooks and design notes, including deployment and releases
 - `CHANGELOG.md` — what changed, by version (consumed by the release
   workflow's release-notes extraction)

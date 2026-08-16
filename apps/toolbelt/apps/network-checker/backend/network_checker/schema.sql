@@ -1,4 +1,4 @@
--- netcheck local store. SQLite is the source of truth: it must accept writes
+-- network-checker local store. SQLite is the source of truth: it must accept writes
 -- while the network is down, which is precisely when the data matters.
 -- Postgres mirror of this schema: supabase/migrations/0001_init.sql
 
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS env_scans (
   UNIQUE (host_id, ts)
 );
 
--- Device and configuration inventory (netcheck/inventory.py). Postgres
+-- Device and configuration inventory (network_checker/inventory.py). Postgres
 -- mirror of these four objects: supabase/migrations/0002_inventory.sql
 
 -- One row per distinct device ever seen on the LAN (or this host itself).
@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS change_request (
   title          TEXT NOT NULL,
   change_cmd     TEXT NOT NULL,       -- exact command that applies the change
   inverse_cmd    TEXT NOT NULL,       -- exact command that reverses it; REQUIRED at propose time
-  verify_probe   TEXT NOT NULL,       -- netcheck probe expression that must pass post-apply
+  verify_probe   TEXT NOT NULL,       -- network-checker probe expression that must pass post-apply
   dry_run_output TEXT,                -- captured evidence from change test
   dry_run_at     TEXT,
   approval_token TEXT,                -- SHA-256 digest of the operator-held raw capability.

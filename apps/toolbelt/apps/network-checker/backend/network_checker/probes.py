@@ -114,7 +114,7 @@ def http_check(host, path="/v1/models", timeout=10):
     import urllib.error, urllib.request
     t0 = time.perf_counter()
     req = urllib.request.Request(f"https://{host}{path}", method="GET",
-                                 headers={"User-Agent": "netcheck"})
+                                 headers={"User-Agent": "network-checker"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             code = r.status

@@ -16,8 +16,8 @@ def _argv(command):
     if not parts or parts[0] not in _EXECUTABLES:
         raise ValueError("change command is not allow-listed")
     parts[0] = _EXECUTABLES[parts[0]]
-    if parts[1:3] != ["-m", "netcheck"] or parts[3:] != ["--version"]:
-        raise ValueError("only the non-mutating netcheck version operation is enabled")
+    if parts[1:3] != ["-m", "network_checker"] or parts[3:] != ["--version"]:
+        raise ValueError("only the non-mutating network-checker version operation is enabled")
     return parts
 
 

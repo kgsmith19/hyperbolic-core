@@ -53,7 +53,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["command"],
-          "properties": { "command": { "type": "string", "description": "Documented invocation, e.g. python3 -m netcheck" } }
+          "properties": { "command": { "type": "string", "description": "Documented invocation, e.g. python3 -m network_checker" } }
         },
         "headless": {
           "type": "object",

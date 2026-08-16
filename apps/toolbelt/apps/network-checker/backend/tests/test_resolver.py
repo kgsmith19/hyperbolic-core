@@ -8,7 +8,7 @@ import struct
 import unittest
 from unittest.mock import patch
 
-from netcheck import resolver
+from network_checker import resolver
 
 
 class ResolveRetryTest(unittest.TestCase):
@@ -17,8 +17,8 @@ class ResolveRetryTest(unittest.TestCase):
     up. time.sleep is patched so the retry backoff costs nothing in tests."""
 
     def test_succeeds_first_try_without_retrying(self):
-        with patch("netcheck.resolver._resolve_via", return_value=["1.2.3.4"]) as mock_via, \
-             patch("netcheck.resolver.time.sleep") as mock_sleep:
+        with patch("network_checker.resolver._resolve_via", return_value=["1.2.3.4"]) as mock_via, \
+             patch("network_checker.resolver.time.sleep") as mock_sleep:
             result = resolver.resolve("api.anthropic.com", server="192.168.1.1")
 
         self.assertEqual(result["state"], "ok")
@@ -27,9 +27,9 @@ class ResolveRetryTest(unittest.TestCase):
         mock_sleep.assert_not_called()
 
     def test_retries_once_after_a_transient_failure_then_succeeds(self):
-        with patch("netcheck.resolver._resolve_via",
+        with patch("network_checker.resolver._resolve_via",
                    side_effect=[TimeoutError("timed out"), ["1.2.3.4"]]) as mock_via, \
-             patch("netcheck.resolver.time.sleep") as mock_sleep:
+             patch("network_checker.resolver.time.sleep") as mock_sleep:
             result = resolver.resolve("api.anthropic.com", server="192.168.1.1")
 
         self.assertEqual(result["state"], "ok")
@@ -37,9 +37,9 @@ class ResolveRetryTest(unittest.TestCase):
         mock_sleep.assert_called_once()
 
     def test_gives_up_and_reports_fail_after_exhausting_retries(self):
-        with patch("netcheck.resolver._resolve_via",
+        with patch("network_checker.resolver._resolve_via",
                    side_effect=TimeoutError("timed out")) as mock_via, \
-             patch("netcheck.resolver.time.sleep"):
+             patch("network_checker.resolver.time.sleep"):
             result = resolver.resolve("api.anthropic.com", server="192.168.1.1")
 
         self.assertEqual(result["state"], "fail")

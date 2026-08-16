@@ -11,7 +11,7 @@ from unittest import TestCase, mock
 
 
 _PATH = Path(__file__).resolve().parents[1] / "tools" / "release.py"
-_SPEC = importlib.util.spec_from_file_location("netcheck_release", _PATH)
+_SPEC = importlib.util.spec_from_file_location("network_checker_release", _PATH)
 release = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(release)
 
@@ -74,11 +74,11 @@ class VersionSourceOfTruthTest(TestCase):
         text = down.read_text().lower()
         self.assertNotIn("delete from core.app", text)
         self.assertNotRegex(text, r"\bstatus\s*=")
-        self.assertIn("version       = '0.1.0'", text)
+        self.assertIn("version       = '1.0.0'", text)
         self.assertIn(
-            '"networkegress":["ipapi.co","api.ipify.org","status.anthropic.com",'
-            '"api.anthropic.com","1.1.1.1"]', text)
-        self.assertIn("146e208e509e124d6ca4a74cb0e6f7139acd2fd94c1516078e28c55e5fad2a87", text)
+            '"networkegress":["1.1.1.1","192.168.50.1","192.168.100.1","239.255.255.250",'
+            '"api.anthropic.com","api.ipify.org","ipapi.co","status.anthropic.com"]', text)
+        self.assertIn("c91d77d5817cf77e535bccc17f34033ac942387555af669be2120b46eda3f21a", text)
 
     def test_bump_fails_closed_without_rewriting_applied_migration(self):
         stderr = io.StringIO()
@@ -126,8 +126,8 @@ class ManualWorkflowContractTest(TestCase):
         self.assertIn("network-checker-v${version}", self.text)
 
     def test_image_smoke_is_hermetic_and_permissions_are_least_privilege(self):
-        self.assertNotIn('"netcheck:$version" scan', self.text)
-        self.assertIn('"netcheck:$version" --help', self.text)
+        self.assertNotIn('"network-checker:$version" scan', self.text)
+        self.assertIn('"network-checker:$version" --help', self.text)
         self.assertRegex(self.text, r"(?m)^permissions:\n\s+contents:\s+read\s*$")
         self.assertRegex(
             self.text,

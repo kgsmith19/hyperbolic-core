@@ -1,6 +1,6 @@
 -- Additive mirror upgrade for clients that already applied 0001/0002.
 -- Keep numbered migrations immutable: this file brings both old projects and
--- fresh installs to the natural-key contract used by netcheck/store.py.
+-- fresh installs to the natural-key contract used by network_checker/store.py.
 
 alter table samples add column if not exists label text;
 

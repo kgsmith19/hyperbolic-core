@@ -1,4 +1,4 @@
-"""Device and configuration inventory: promotes facts netcheck's scan already
+"""Device and configuration inventory: promotes facts network-checker's scan already
 collects into first-class, queryable device / interface / config_item rows,
 instead of leaving them trapped inside env_scans.payload JSON blobs
 (schema.sql). record_inventory() is a pure mapping over an already-collected

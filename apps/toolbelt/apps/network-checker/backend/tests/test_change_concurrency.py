@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from netcheck import change, change_cli, store
+from network_checker import change, change_cli, store
 from tests.test_change import _args
 from tests.test_change_key import _propose_tested_approved
 
@@ -65,7 +65,7 @@ class ConcurrentApplyClaimTest(unittest.TestCase):
 
     def test_two_concurrent_applies_on_the_same_row_only_one_executes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = str(Path(tmp) / "netcheck.db")
+            db_path = str(Path(tmp) / "network_checker.db")
             seed = store.open_db(db_path)
             host = store.host_id(seed, "race-host", "Linux")
             cid, token = _propose_tested_approved(seed)

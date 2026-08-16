@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from netcheck import llmlog
+from network_checker import llmlog
 
 
 def entry(text, ts="2026-08-05T00:00:00.000Z", **kw):

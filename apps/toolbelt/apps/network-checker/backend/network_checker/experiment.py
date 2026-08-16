@@ -50,7 +50,7 @@ def _median(values):
 
 def format_report(label_a, label_b, result):
     """Plain-ASCII side-by-side report, in cmd_diagnose's print style."""
-    lines = [f"\nnetcheck experiment - comparing {label_a!r} vs {label_b!r}\n",
+    lines = [f"\nnetwork-checker experiment - comparing {label_a!r} vs {label_b!r}\n",
              _side_summary(label_a, result["a"]), _side_summary(label_b, result["b"])]
     if not (result["a"]["has_data"] and result["b"]["has_data"]):
         lines.append("\n  No comparison numbers for a label with no data.\n")

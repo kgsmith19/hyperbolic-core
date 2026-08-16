@@ -6,7 +6,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from netcheck import change, change_exec, change_verify
+from network_checker import change, change_exec, change_verify
 
 
 class _Process:
@@ -35,11 +35,11 @@ class ExecuteHardeningTest(unittest.TestCase):
         completed = argparse.Namespace(returncode=0, stdout="ok", stderr="")
         with patch.object(change_exec.subprocess, "Popen",
                           return_value=_Process(completed)) as popen:
-            self.assertEqual(change.execute(["python", "-m", "netcheck", "--version"]),
+            self.assertEqual(change.execute(["python", "-m", "network_checker", "--version"]),
                              (0, "ok", ""))
         argv = popen.call_args.args[0]
         self.assertEqual(argv[0], sys.executable)
-        self.assertEqual(argv[1:], ["-m", "netcheck", "--version"])
+        self.assertEqual(argv[1:], ["-m", "network_checker", "--version"])
         self.assertEqual(popen.call_args.kwargs["cwd"], change._APP_ROOT)
         self.assertNotIn("shell", popen.call_args.kwargs)
 
@@ -47,7 +47,7 @@ class ExecuteHardeningTest(unittest.TestCase):
         with patch.object(change_exec.subprocess, "Popen", return_value=_Process()) as popen:
             for command in (["bash", "-c", "echo unsafe"], ["rm", "-rf", "/"],
                             "test -f tools/check.sh",
-                            "python -m netcheck --version; rm -rf /"):
+                            "python -m network_checker --version; rm -rf /"):
                 with self.subTest(command=command), self.assertRaises(ValueError):
                     change.execute(command)
         popen.assert_not_called()
@@ -58,7 +58,7 @@ class ExecuteHardeningTest(unittest.TestCase):
         with patch.object(change_exec.subprocess, "Popen", return_value=proc), \
              patch.object(change_exec.os, "killpg") as killpg:
             rc, _out, err = change.execute(
-                ["python", "-m", "netcheck", "--version"], timeout=0.01)
+                ["python", "-m", "network_checker", "--version"], timeout=0.01)
         self.assertEqual(rc, 124)
         self.assertIn("timed out", err)
         killpg.assert_called_once_with(proc.pid, change_exec.signal.SIGKILL)
@@ -70,7 +70,7 @@ class ExecuteHardeningTest(unittest.TestCase):
         with patch.object(change_exec.subprocess, "Popen", return_value=proc), \
              patch.object(change_exec.os, "killpg", side_effect=ProcessLookupError):
             rc, _out, err = change.execute(
-                ["python", "-m", "netcheck", "--version"], timeout=0.01)
+                ["python", "-m", "network_checker", "--version"], timeout=0.01)
         self.assertEqual(rc, 124)
         self.assertIn("timed out", err)
         self.assertEqual(proc.communicate_calls, 2)
@@ -80,7 +80,7 @@ class ExecuteHardeningTest(unittest.TestCase):
         with patch.object(change_exec.subprocess, "Popen", return_value=proc), \
              patch.object(change_exec, "_stop_tree"):
             rc, out, err = change.execute(
-                ["python", "-m", "netcheck", "--version"], timeout=0.01)
+                ["python", "-m", "network_checker", "--version"], timeout=0.01)
         self.assertEqual((rc, out), (124, "partial-out"))
         self.assertIn("partial-err", err)
         self.assertIn("timed out", err)

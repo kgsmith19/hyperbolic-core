@@ -3,7 +3,7 @@ import inspect
 import unittest
 from unittest.mock import patch
 
-from netcheck import change_security, change_verify
+from network_checker import change_security, change_verify
 
 
 class ReturnsPromptlyOnSuccessTest(unittest.TestCase):

@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 
-from netcheck import exposure
+from network_checker import exposure
 
 
 class ExposureScanTest(unittest.TestCase):

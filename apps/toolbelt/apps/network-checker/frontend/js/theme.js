@@ -1,6 +1,6 @@
 // light / dark / system, persisted, applied before first paint by the inline
 // bootstrap in index.html so there is never a flash of the wrong theme.
-const KEY = "netcheck:theme";
+const KEY = "network-checker:theme";
 const ORDER = ["system", "light", "dark"];
 
 export function currentTheme() {

@@ -90,7 +90,7 @@ def _fix(cause):
     if name:
         t = change_templates.TEMPLATES[name]
         text += (f" A proposable '{name}' change template exists for this: "
-                 f"`python -m netcheck change propose --title \"{t['title']}\" "
+                 f"`python -m network_checker change propose --title \"{t['title']}\" "
                  f"--cmd \"{t['change_cmd']}\" --inverse \"{t['inverse_cmd']}\" "
                  f"--verify \"{t['verify_probe']}\"`, then `change test <id>` to "
                  f"dry-run it and `change show <id>` to review the evidence "

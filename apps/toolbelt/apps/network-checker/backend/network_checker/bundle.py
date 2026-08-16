@@ -1,6 +1,6 @@
 """Evidence bundle export (Issue #74).
 
-Packages what netcheck already collected -- probes, environment scans, LLM
+Packages what network-checker already collected -- probes, environment scans, LLM
 error correlation, ranked diagnoses, labeled experiments -- into one
 shareable artifact, safe to hand to an AI, ISP, router vendor, or engineer.
 
@@ -141,12 +141,12 @@ def build(samples, raw_errors, latest_scan, meta=None):
 
     out = {
         "generated_at": now.isoformat(timespec="seconds"),
-        "netcheck_version": __version__,
+        "network_checker_version": __version__,
         "platform": {"os": os_name},
         "collection": {
-            "commands": ["netcheck probe",
-                        f"netcheck scan --tier {tier or 'standard'}",
-                        "netcheck diagnose"],
+            "commands": ["network-checker probe",
+                        f"network-checker scan --tier {tier or 'standard'}",
+                        "network-checker diagnose"],
             "scan_tier": tier,
             "sample_count": len(samples),
             "llm_error_count": len(raw_errors),
@@ -170,9 +170,9 @@ def render_json(data):
 
 def render_markdown(data):
     lines = [
-        "# netcheck evidence bundle", "",
+        "# network-checker evidence bundle", "",
         f"- generated: {data['generated_at']}",
-        f"- netcheck version: {data['netcheck_version']}",
+        f"- network-checker version: {data['network_checker_version']}",
         f"- platform: {data['platform']['os']}",
         f"- scan tier: {data['collection']['scan_tier']}",
         f"- samples: {data['collection']['sample_count']}",

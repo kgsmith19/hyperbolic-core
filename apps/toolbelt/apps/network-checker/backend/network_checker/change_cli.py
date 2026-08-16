@@ -1,4 +1,4 @@
-"""CLI presentation and argparse wiring for `netcheck change ...`, split out
+"""CLI presentation and argparse wiring for `network-checker change ...`, split out
 of change.py to keep that file's line budget free for the security-relevant
 lifecycle engine (propose/test/approve/apply/verify/rollback all live
 there; this file is show/list/reject plus dispatch and parser setup).
@@ -79,7 +79,7 @@ def reject(conn, host_id, args=None):
 
 
 def cli(conn, host_id, args):
-    """netcheck change: propose/test/show/approve/apply/verify/list/reject."""
+    """network-checker change: propose/test/show/approve/apply/verify/list/reject."""
     if args.action == "propose":
         return change.propose(conn, host_id, args)
     if args.action == "test":
@@ -108,7 +108,7 @@ def _add_propose_parser(acts):
 
 
 def add_subparser(sub):
-    """Register `netcheck change ...` on `sub`, the top-level subparsers
+    """Register `network-checker change ...` on `sub`, the top-level subparsers
     object -- built here rather than in __main__.py so that file's own
     line budget stays free for everything else it already owns (the same
     reason watch.py was split out of it)."""
