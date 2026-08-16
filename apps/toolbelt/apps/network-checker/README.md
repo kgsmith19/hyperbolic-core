@@ -1,12 +1,12 @@
-# netcheck
+# Network Checker
 
 Finds out **which layer** is breaking your LLM API connections — Wi-Fi,
 router, ISP, or the far end — by recording every layer (gateway, DNS, TLS,
 HTTP, Wi-Fi) in one row per tick and reading across the row for which probes
 failed together. It also reads Claude Code's own error logs and reports which
 of your past API errors were network trouble on your side versus the far
-side. Pure Python 3 standard library — nothing to install, no `pip`, no build
-step.
+side. Pure Python 3 standard library, zero runtime dependencies — nothing to
+install to run it (see Quick start).
 
 `state` has three values: `ok` (measured, healthy), `fail` (measured,
 broken), and `unavailable` (could not measure — never treated as evidence).
@@ -17,18 +17,23 @@ Errors are grouped into bursts so a single dropout isn't counted as several.
 ```bash
 git clone https://github.com/kgsmith19/hyperbolic-core
 cd hyperbolic-core/apps/toolbelt/apps/network-checker
-python -m netcheck scan        # one-shot snapshot of every environment section
-python -m netcheck probe       # one measured tick across every network layer
+python -m network_checker scan        # one-shot snapshot of every environment section
+python -m network_checker probe       # one measured tick across every network layer
 ```
 
 For a problem that comes and goes, leave a monitor running so the *next*
 failure gets caught with data next to it:
 
 ```bash
-python -m netcheck watch      # leave running in a terminal, tmux pane, etc.
-python -m netcheck diagnose   # ranked causes, once watch has a few samples
-python -m netcheck serve      # dashboard at http://127.0.0.1:8787
+python -m network_checker watch      # leave running in a terminal, tmux pane, etc.
+python -m network_checker diagnose   # ranked causes, once watch has a few samples
+python -m network_checker serve      # dashboard at http://127.0.0.1:8787
 ```
+
+Prefer a shorter command? `cd backend && pip install -e .` installs a
+`network-checker` executable (`network-checker scan`, `network-checker
+watch`, ...) — optional, adds no dependency, and `python -m network_checker`
+above keeps working either way.
 
 The dashboard (`frontend/`) pushes new samples over Server-Sent Events and
 installs as an offline-capable app (a Service Worker caches the shell and the
@@ -37,7 +42,7 @@ diagnosing). It is zero dependencies and zero build step: hand-written
 HTML/CSS/JS, nothing vendored.
 
 Running in a container, or cutting a release? See
-`docs/notes/2026-08-07-deploying-and-releasing-netcheck.md`.
+`docs/notes/2026-08-07-deploying-and-releasing-network-checker.md`.
 
 ## Optional device credentials
 

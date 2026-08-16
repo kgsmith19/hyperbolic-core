@@ -12,7 +12,7 @@ import time
 import unittest
 from pathlib import Path
 
-from netcheck import docsis, inventory, store, topology
+from network_checker import docsis, inventory, store, topology
 
 from tests import fixture
 
@@ -183,7 +183,7 @@ class ConfigHistoryAndViewTest(InventoryTestCase):
 
 
 class QueryHelperTest(InventoryTestCase):
-    """The read side backing `netcheck inventory`'s three modes."""
+    """The read side backing `network-checker inventory`'s three modes."""
 
     def setUp(self):
         super().setUp()

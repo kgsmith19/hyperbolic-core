@@ -35,7 +35,7 @@ def _http_get(url, timeout=6):
     A private near-duplicate of remote._http_get, not a reuse of it -- see
     the module docstring for why this module cannot import remote.py.
     """
-    req = urllib.request.Request(url, headers={"User-Agent": "netcheck"})
+    req = urllib.request.Request(url, headers={"User-Agent": "network-checker"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read().decode("utf-8", "replace"), None

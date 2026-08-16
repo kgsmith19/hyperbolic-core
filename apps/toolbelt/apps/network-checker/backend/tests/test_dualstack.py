@@ -4,7 +4,7 @@ import unittest
 import unittest.mock
 from unittest.mock import patch
 
-from netcheck import dualstack
+from network_checker import dualstack
 
 
 class DualStackTest(unittest.TestCase):
@@ -118,6 +118,35 @@ class DualStackTest(unittest.TestCase):
 
     def test_an_unreachable_family_reports_no_latency(self):
         self.assertIsNone(self.probe(v4="refused", v6="ok")["ipv4"]["ms"])
+
+    def test_one_dead_address_in_a_rotation_does_not_fail_the_family(self):
+        """'Every address, not just the first' (module docstring): one dead
+        server in a DNS-load-balanced rotation is not a broken address
+        family, so a second address that connects must still report ok.
+        Exercised on _family_probe() directly, isolated from the sibling
+        family's own connection attempts."""
+        addrs = [("203.0.113.1", 443), ("203.0.113.2", 443)]
+        attempted = []
+
+        def getaddrinfo(*args, **_kwargs):
+            family = args[2]
+            return [(family, socket.SOCK_STREAM, 6, "", addr) for addr in addrs]
+
+        class FakeSocket:
+            def __init__(self, family, socktype, proto): pass
+            def settimeout(self, _t): pass
+            def close(self): pass
+            def connect(self, sockaddr):
+                attempted.append(sockaddr)
+                if sockaddr == addrs[0]:
+                    raise ConnectionRefusedError("Connection refused")
+
+        with patch.object(dualstack.socket, "getaddrinfo", getaddrinfo), \
+             patch.object(dualstack.socket, "socket", FakeSocket):
+            got = dualstack._family_probe("example.test", socket.AF_INET, 443, 4)
+
+        self.assertEqual(attempted, addrs)          # both were tried, in order
+        self.assertEqual(got["state"], "ok")
 
 
 if __name__ == "__main__":

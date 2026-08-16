@@ -10,7 +10,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from netcheck import change, store
+from network_checker import change, store
 from tests.test_change import _args
 from tests.test_change_key import _propose_tested_approved
 

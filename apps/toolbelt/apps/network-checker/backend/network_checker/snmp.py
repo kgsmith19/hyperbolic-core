@@ -76,22 +76,34 @@ def _read_tlv(data, i):
 
 def parse_response(data, expected_request_id):
     """The value of the single varbind in an SNMPv2c GetResponse, or None if
-    the packet is not a matching, error-free response to our own request."""
-    _, message, _ = _read_tlv(data, 0)
-    _, _version, i = _read_tlv(message, 0)
-    _, _community, i = _read_tlv(message, i)
-    tag, pdu, _ = _read_tlv(message, i)
-    if tag != _GET_RESPONSE:
+    the packet is not a matching, error-free response to our own request.
+
+    A UDP reply on the SNMP port is not guaranteed to be well-formed BER --
+    it could be truncated, or come from something else entirely answering on
+    161 -- and `_read_tlv` indexes straight into `data` with no bounds
+    checking of its own, so a short or malformed packet is a plain
+    IndexError, not a graceful mismatch. Caught here rather than in `get()`,
+    so this function keeps its documented contract of degrading to None
+    for *any* non-matching packet, not just well-formed ones.
+    """
+    try:
+        _, message, _ = _read_tlv(data, 0)
+        _, _version, i = _read_tlv(message, 0)
+        _, _community, i = _read_tlv(message, i)
+        tag, pdu, _ = _read_tlv(message, i)
+        if tag != _GET_RESPONSE:
+            return None
+        _, request_id, j = _read_tlv(pdu, 0)
+        _, error_status, j = _read_tlv(pdu, j)
+        _, _error_index, j = _read_tlv(pdu, j)
+        if int.from_bytes(request_id, "big") != expected_request_id or any(error_status):
+            return None
+        _, varbind_list, _ = _read_tlv(pdu, j)
+        _, varbind, _ = _read_tlv(varbind_list, 0)
+        _, _oid_bytes, k = _read_tlv(varbind, 0)
+        value_tag, value_bytes, _ = _read_tlv(varbind, k)
+    except (IndexError, ValueError):
         return None
-    _, request_id, j = _read_tlv(pdu, 0)
-    _, error_status, j = _read_tlv(pdu, j)
-    _, _error_index, j = _read_tlv(pdu, j)
-    if int.from_bytes(request_id, "big") != expected_request_id or any(error_status):
-        return None
-    _, varbind_list, _ = _read_tlv(pdu, j)
-    _, varbind, _ = _read_tlv(varbind_list, 0)
-    _, _oid_bytes, k = _read_tlv(varbind, 0)
-    value_tag, value_bytes, _ = _read_tlv(varbind, k)
     if value_tag == _OCTET_STRING:
         return value_bytes.decode("utf-8", "replace")
     if value_tag == _TIMETICKS:

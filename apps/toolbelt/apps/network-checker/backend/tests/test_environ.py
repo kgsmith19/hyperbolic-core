@@ -6,7 +6,7 @@ need credentials must go quiet, not loud, when they have none.
 import unittest
 from unittest.mock import patch, MagicMock
 
-from netcheck import environ, rank
+from network_checker import environ, rank
 
 
 class WifiPlatformDispatchTest(unittest.TestCase):
@@ -15,8 +15,8 @@ class WifiPlatformDispatchTest(unittest.TestCase):
     the right tool gets called and its output reaches the right parser."""
 
     def test_macos_uses_airport_and_the_airport_parser(self):
-        with patch("netcheck.environ.MACOS", True), \
-             patch("netcheck.probes._run", return_value=("state: running\nSSID: x\nchannel: 44,80\n", "ok")) as mock_run:
+        with patch("network_checker.environ.MACOS", True), \
+             patch("network_checker.probes._run", return_value=("state: running\nSSID: x\nchannel: 44,80\n", "ok")) as mock_run:
             result = environ.wifi()
 
         self.assertEqual(result["state"], "ok")
@@ -24,15 +24,15 @@ class WifiPlatformDispatchTest(unittest.TestCase):
         self.assertIn("airport", mock_run.call_args[0][0][0])
 
     def test_macos_missing_airport_binary_is_unavailable_not_fail(self):
-        with patch("netcheck.environ.MACOS", True), \
-             patch("netcheck.probes._run", return_value=("", "unavailable")):
+        with patch("network_checker.environ.MACOS", True), \
+             patch("network_checker.probes._run", return_value=("", "unavailable")):
             result = environ.wifi()
 
         self.assertEqual(result["state"], "unavailable")
 
     def test_non_macos_still_uses_netsh(self):
-        with patch("netcheck.environ.MACOS", False), \
-             patch("netcheck.probes._run", return_value=("State : disconnected\n", "ok")) as mock_run:
+        with patch("network_checker.environ.MACOS", False), \
+             patch("network_checker.probes._run", return_value=("State : disconnected\n", "ok")) as mock_run:
             environ.wifi()
 
         self.assertEqual(mock_run.call_args[0][0][0], "netsh")
@@ -49,8 +49,8 @@ class PowerShellArgumentSafetyTest(unittest.TestCase):
     through."""
 
     def _run_with_mocked_powershell(self, fn, malicious):
-        with patch("netcheck.environ.WINDOWS", True), \
-             patch("netcheck.environ.subprocess.run") as mock_run:
+        with patch("network_checker.environ.WINDOWS", True), \
+             patch("network_checker.environ.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
             fn(malicious)
         return mock_run.call_args[0][0]
@@ -150,44 +150,40 @@ class MtuWalkTest(unittest.TestCase):
 
 
 class ScanShapeTest(unittest.TestCase):
-    def test_every_section_reports_a_state(self):
-        """A section that returns bare data cannot be told apart from one that
-        failed, so the shape is enforced rather than trusted.
+    def test_every_scan_section_reports_a_valid_state_hermetically(self):
+        """Verified against the real environ.scan() return value -- not a
+        hand-built stand-in, which would pass no matter what scan() did.
+        Every network- and subprocess-touching call is mocked, so this
+        exercises scan()'s real composition with no live egress."""
+        with patch.object(environ, "wifi", return_value={"state": "ok", "channel": 44, "bssid": "aa:bb:cc:dd:ee:ff"}), \
+             patch.object(environ, "congestion", return_value={"state": "unavailable", "reason": "mocked"}), \
+             patch.object(environ, "driver", return_value={"state": "unavailable", "reason": "mocked"}), \
+             patch.object(environ, "events", return_value={"state": "unavailable", "reason": "mocked"}), \
+             patch.object(environ, "tcp_globals", return_value={"state": "ok", "autotuning": "normal"}), \
+             patch.object(environ, "mtu", return_value={"state": "fail", "reason": "mocked"}), \
+             patch.object(environ, "tailscale", return_value={"state": "ok", "installed": False}), \
+             patch.object(environ.dualstack, "dual_stack", return_value={"state": "unavailable"}), \
+             patch.object(environ.remote, "modem", return_value={"state": "unavailable", "reason": "no credentials"}), \
+             patch.object(environ.snmp, "modem_snmp", return_value={"state": "unavailable"}), \
+             patch.object(environ.remote, "router", return_value={"state": "fail", "reason": "unreachable"}), \
+             patch.object(environ.ssdp, "identify_gateway", return_value={"state": "unavailable"}), \
+             patch.object(environ.remote, "wan", return_value={"state": "ok", "ip": "203.0.113.7",
+                                                               "double_nat": False, "cgnat": False}), \
+             patch.object(environ.remote, "anthropic", return_value={"state": "ok", "indicator": "none",
+                                                                      "degraded": False}):
+            got = environ.scan(deep=False)
 
-        This test uses mock data (not live environ.scan() which needs network
-        and credentials) to verify the shape contract hermetically."""
-        # Simulate what scan() returns: every section must have a state field
-        mock_scan = {
-            "ts": "2026-08-05T00:00:00Z",
-            "wifi": {"state": "ok", "channel": 44},
-            "modem": {"state": "unavailable", "reason": "no credentials"},
-            "router": {"state": "fail", "reason": "unreachable"},
-            "driver": {"state": "ok", "adapter": "test"},
-            "tcp": {"state": "ok", "autotuning": "normal"},
-            "mtu": {"state": "fail", "reason": "blocked"},
-            "events": {"state": "unavailable", "reason": "permission denied"},
-            "tailscale": {"state": "ok", "installed": False},
-            "congestion": {"state": "ok", "total_bssids": 3},
-        }
-
-        for name, section in mock_scan.items():
+        for name, section in got.items():
             if name == "ts":
                 continue
             self.assertIn("state", section, f"section {name!r} has no state field")
             self.assertIn(section["state"], ("ok", "fail", "unavailable"),
                          f"section {name!r} has invalid state: {section['state']}")
-
-    def test_scan_without_credentials_never_crashes(self):
-        """environ.scan() is safe to call with no credentials set.
-
-        All credential-gated sections must return unavailable, not fail or crash.
-        This test DOES access network (for sections that don't need credentials),
-        but verifies the contract: missing creds = unavailable state, not error."""
-        got = environ.scan()
-        # These sections don't need credentials and must always have a state
-        for name in ("wifi", "driver", "tcp", "events"):
-            self.assertIn("state", got[name])
-            # If we reach here without exception, the test passed
+        # Spot-check that each mock actually threads through to its own named
+        # key, not merely that *some* section somewhere has a valid state.
+        self.assertEqual(got["router"]["state"], "fail")
+        self.assertEqual(got["modem"]["state"], "unavailable")
+        self.assertEqual(got["wan"]["state"], "ok")
 
 
 class ScanTierTest(unittest.TestCase):
@@ -237,6 +233,14 @@ class ScanTierTest(unittest.TestCase):
         with patch.object(environ.remote, "wan") as mock_wan:
             environ.scan(deep=True)
         mock_wan.assert_called_once_with(include_geo=True)
+
+    def test_scan_passes_target_to_tailscale_so_scan_and_probe_agree(self):
+        """tailscale() must be checked against environ.TARGET, not a second
+        hardcoded default that silently ignores a NETWORK_CHECKER_TARGET
+        override."""
+        with patch.object(environ, "tailscale") as mock_tailscale:
+            environ.scan(deep=False)
+        mock_tailscale.assert_called_once_with(environ.TARGET)
 
 
 if __name__ == "__main__":

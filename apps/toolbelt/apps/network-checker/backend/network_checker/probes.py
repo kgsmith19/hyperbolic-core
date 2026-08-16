@@ -67,11 +67,17 @@ def parse_ping(text):
 # --------------------------------------------------------------------------
 
 def _run(cmd, timeout=15):
-    """Run a command, returning (text, state). Never raises."""
+    """Run a command, returning (text, state). Never raises.
+
+    OSError, not just FileNotFoundError: a missing binary is the common case,
+    but the same "could not measure" verdict applies to a present-but-not-
+    executable one (bad permissions, exec-format mismatch) -- and either
+    still crashing a probe would violate the "never raises" this promises.
+    """
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         return p.stdout + p.stderr, "ok"
-    except FileNotFoundError:
+    except OSError:
         return "", "unavailable"
     except subprocess.TimeoutExpired:
         return "", "fail"
@@ -81,7 +87,7 @@ def ping(host, count=2):
     flag = "-n" if WINDOWS else "-c"
     text, state = _run(["ping", flag, str(count), host], timeout=count * 4 + 8)
     if state != "ok":
-        reason = "ping binary not found" if state == "unavailable" else "timed out"
+        reason = "ping unavailable" if state == "unavailable" else "timed out"
         return {"state": state, "reason": reason, "loss_pct": None,
                 "rtt_avg_ms": None, "host": host}
     return dict(parse_ping(text), host=host)
@@ -114,7 +120,7 @@ def http_check(host, path="/v1/models", timeout=10):
     import urllib.error, urllib.request
     t0 = time.perf_counter()
     req = urllib.request.Request(f"https://{host}{path}", method="GET",
-                                 headers={"User-Agent": "netcheck"})
+                                 headers={"User-Agent": "network-checker"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             code = r.status

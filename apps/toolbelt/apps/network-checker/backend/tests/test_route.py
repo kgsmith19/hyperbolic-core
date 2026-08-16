@@ -7,7 +7,7 @@ changed mid-run.
 """
 import unittest
 
-from netcheck import route
+from network_checker import route
 
 from tests import fixture
 
@@ -56,7 +56,7 @@ class ParseTracerouteTest(unittest.TestCase):
 
 
 class ParseIpconfigGatewayTest(unittest.TestCase):
-    """route.gateway() reads this on every `netcheck watch` tick to know
+    """route.gateway() reads this on every `network-checker watch` tick to know
     which IP to ping as "the router" -- getting it wrong silently makes a
     real network change (DHCP renewal, AP roam) look like a LAN outage for
     the rest of the run."""
@@ -75,7 +75,7 @@ class ParseIpconfigGatewayTest(unittest.TestCase):
         with no value at all, before the real Wi-Fi one -- the first
         occurrence must not shadow a real one that comes later."""
         text = fixture("ipconfig_dual_stack_gateway.txt")
-        self.assertNotEqual(route.parse_ipconfig_gateway(text), None)
+        self.assertEqual(route.parse_ipconfig_gateway(text), "10.215.141.84")
 
     def test_simple_single_line_gateway_still_works(self):
         """Most machines have exactly one gateway line, IPv4 only -- the
@@ -88,6 +88,35 @@ class ParseIpconfigGatewayTest(unittest.TestCase):
         text = ("Ethernet adapter Ethernet:\n\n"
                 "   Media State . . . . . . . . . . . : Media disconnected\n")
         self.assertIsNone(route.parse_ipconfig_gateway(text))
+
+
+class ParseIpRouteGatewayTest(unittest.TestCase):
+    """`gateway()`'s Linux path: `ip route` output."""
+
+    def test_default_via_line_is_extracted(self):
+        text = "default via 192.168.1.1 dev eth0 proto dhcp metric 100\n"
+        self.assertEqual(route.parse_ip_route_gateway(text), "192.168.1.1")
+
+    def test_no_default_route_is_none(self):
+        text = "192.168.1.0/24 dev eth0 proto kernel scope link src 192.168.1.50\n"
+        self.assertIsNone(route.parse_ip_route_gateway(text))
+
+
+class ParseRouteGetDefaultGatewayTest(unittest.TestCase):
+    """`gateway()`'s BSD/macOS fallback: `route -n get default` output,
+    used only because macOS has no `ip` binary for the Linux path above to
+    find anything with."""
+
+    def test_gateway_line_is_extracted(self):
+        text = ("   route to: default\n"
+                "destination: default\n"
+                "    gateway: 192.168.1.1\n"
+                "  interface: en0\n")
+        self.assertEqual(route.parse_route_get_default_gateway(text), "192.168.1.1")
+
+    def test_no_gateway_line_is_none(self):
+        self.assertIsNone(route.parse_route_get_default_gateway(
+            "route to: default\ndestination: default\n"))
 
 
 if __name__ == "__main__":

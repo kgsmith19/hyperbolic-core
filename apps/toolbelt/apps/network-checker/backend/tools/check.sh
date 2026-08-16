@@ -25,7 +25,7 @@ run "tests" python3 -m unittest discover -s tests -v
 # The medium profile checks 40-line functions, 4 parameters, cyclomatic
 # complexity 8, and nesting depth 3. All three source trees use the same
 # explicit profile so local and hosted checks stay aligned.
-run "code simplification (netcheck)" python3 tools/code_simplification.py netcheck -i medium
+run "code simplification (network_checker)" python3 tools/code_simplification.py network_checker -i medium
 run "code simplification (tools)" python3 tools/code_simplification.py tools -i medium
 run "code simplification (tests)" python3 tools/code_simplification.py tests -i medium
 run "security review (high)" python3 tools/security_review.py . -i high

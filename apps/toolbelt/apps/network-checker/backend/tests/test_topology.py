@@ -11,7 +11,7 @@ discovered device.
 import unittest
 from unittest.mock import patch
 
-from netcheck import ssdp, topology
+from network_checker import ssdp, topology
 
 from tests import fixture
 
@@ -93,6 +93,21 @@ class MapDevicesTest(unittest.TestCase):
 
         self.assertEqual(got["state"], "ok")
         self.assertEqual(len(got["devices"]), 5)
+        self.assertTrue(all(d["name"] is None for d in got["devices"]))
+
+    def test_a_named_gateway_whose_ip_is_not_in_the_table_names_nobody(self):
+        """A computed name is only ever attached by IP match. If SSDP names a
+        gateway whose LOCATION IP never shows up in the address-resolution
+        table, no row may borrow that name -- naming the wrong device would
+        be worse than naming none."""
+        with patch.object(topology.probes, "_run",
+                          return_value=(fixture("arp_windows.txt"), "ok")), \
+             patch.object(ssdp, "identify_gateway",
+                          return_value={"state": "ok", "manufacturer": "ASUSTeK Computer Inc.",
+                                        "model": "RT-AX88U", "ip": "192.168.1.254"}):
+            got = topology.map_devices()
+
+        self.assertEqual(got["state"], "ok")
         self.assertTrue(all(d["name"] is None for d in got["devices"]))
 
     def test_neighbor_command_unavailable_is_unavailable_not_fail(self):

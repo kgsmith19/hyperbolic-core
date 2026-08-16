@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import diagnose, rank, store
 
-# netcheck/ -> backend/ -> the app root, where frontend/ sits beside it.
+# network_checker/ -> backend/ -> the app root, where frontend/ sits beside it.
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
 INDEX = FRONTEND / "index.html"
 
@@ -87,6 +87,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             limit = int(parse_qs(query).get("limit", ["500"])[0])
         except (ValueError, TypeError):
+            return self._send(b"invalid limit parameter", "text/plain", 400)
+        # SQLite's `LIMIT -1` means "no limit at all" -- forwarding a
+        # negative value straight through would silently bypass the 5000
+        # cap below instead of being bounded by it.
+        if limit < 0:
             return self._send(b"invalid limit parameter", "text/plain", 400)
         body = json.dumps(payload(self.db, min(limit, 5000)), default=str).encode()
         self._send(body, "application/json")

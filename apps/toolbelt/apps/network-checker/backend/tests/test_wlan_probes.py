@@ -8,7 +8,7 @@ house through Wi-Fi geolocation databases, so it does not belong in a repo.
 """
 import unittest
 
-from netcheck import wlan_probes
+from network_checker import wlan_probes
 
 from tests import fixture
 
@@ -127,6 +127,13 @@ class ParseAirportInfoTest(unittest.TestCase):
     def test_2ghz_channel_reports_2point4_band(self):
         result = wlan_probes.parse_airport_info("state: running\nSSID: x\nchannel: 6\n")
         self.assertEqual(result["band"], "2.4 GHz")
+
+    def test_unii3_channel_still_reports_5ghz_band_not_6ghz(self):
+        """Channels 149-165 (UNII-3, the same range _block() groups as block
+        9) are still 5 GHz -- `airport` predates 6 GHz Wi-Fi entirely, so a
+        higher channel number here must never be read as a higher band."""
+        result = wlan_probes.parse_airport_info("state: running\nSSID: x\nchannel: 157\n")
+        self.assertEqual(result["band"], "5 GHz")
 
     def test_not_associated_is_fail_not_unavailable(self):
         """Radio is on and working, just not joined to a network -- a real

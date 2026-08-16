@@ -1,5 +1,5 @@
 import { el, replaceChildren } from "./dom.js";
-import { ms, when, label, tone, titleCase } from "./format.js";
+import { ms, when, label, tone, humanize } from "./format.js";
 import { buildChart, polyline, bandsPath, nearestIndex } from "./charts.js";
 
 export const LAYERS = [
@@ -36,14 +36,14 @@ function evidenceTable(samples, cause) {
 
 export function renderCauses(node, causes, samples, expanded, onToggle) {
   if (!causes?.length) {
-    replaceChildren(node, [el("p", { class: "empty", text: "Nothing identified yet — that is a good sign, but it also means nothing has been caught in the act. Leave netcheck watch running so the next failure lands beside a measured sample." })]);
+    replaceChildren(node, [el("p", { class: "empty", text: "Nothing identified yet — that is a good sign, but it also means nothing has been caught in the act. Leave network-checker watch running so the next failure lands beside a measured sample." })]);
     return;
   }
   replaceChildren(node, causes.map((c) => {
     const isOpen = expanded === c.cause;
     const card = el("div", { class: "cause", role: "button", tabindex: "0", "aria-expanded": String(isOpen) }, [
       el("h3", {}, [
-        el("span", { text: titleCase(c.cause) }),
+        el("span", { text: humanize(c.cause) }),
         el("span", { class: `tag ${c.confidence}`, text: c.confidence }),
         el("span", { class: "hint", text: isOpen ? "hide samples ▲" : "view evidence ▼" }),
       ]),
@@ -71,7 +71,7 @@ export function renderErrors(node, errors) {
     el("td", { text: when(e.ts) }),
     el("td", { class: "muted", text: e.source }),
     el("td", {}, [el("span", { class: `tag ${e.kind}`, text: e.kind })]),
-    el("td", { class: e.verdict === "not_local" ? "muted" : "", text: titleCase(e.verdict) }),
+    el("td", { class: e.verdict === "not_local" ? "muted" : "", text: humanize(e.verdict) }),
     el("td", { class: "muted", text: e.detail }),
   ]));
   replaceChildren(node, [el("div", { class: "scroll" }, [
@@ -85,7 +85,7 @@ export function renderErrors(node, errors) {
 export function renderSamples(node, samples) {
   const rows = (samples || []).slice(0, 60).map((s) => el("tr", {}, [
     el("td", { text: when(s.ts) }),
-    el("td", { class: s.culprit ? "" : "muted", text: s.culprit || "ok" }),
+    el("td", { class: s.culprit ? "" : "muted", text: s.culprit ? humanize(s.culprit) : "ok" }),
     el("td", { text: ms(s.gw_ms) }), el("td", { text: ms(s.inet_ms) }),
     el("td", { text: ms(s.dns_router_ms) }), el("td", { text: ms(s.tls_ms) }),
   ]));
@@ -113,7 +113,7 @@ export function envRows(scan) {
 export function renderEnv(node, scan) {
   const rows = envRows(scan);
   if (!scan?.wifi || !rows.length) {
-    replaceChildren(node, [el("p", { class: "empty" }, [document.createTextNode("Run "), el("code", { text: "netcheck scan" }), document.createTextNode(".")])]);
+    replaceChildren(node, [el("p", { class: "empty" }, [document.createTextNode("Run "), el("code", { text: "network-checker scan" }), document.createTextNode(".")])]);
     return;
   }
   replaceChildren(node, [el("table", {}, [el("tbody", {}, rows.map(([k, v]) => el("tr", {}, [

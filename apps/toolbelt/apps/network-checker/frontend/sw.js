@@ -2,7 +2,7 @@
 // shell must paint instantly from cache and the last-known-good report must
 // still render with zero network at all. Bump CACHE on any shell file change
 // -- that is what forces stale entries out.
-const CACHE = "netcheck-shell-v4";
+const CACHE = "network-checker-shell-v4";
 const SHELL = [
   "/", "/index.html", "/manifest.webmanifest",
   "/css/tokens.css", "/css/base.css", "/css/components.css",
@@ -29,7 +29,7 @@ async function staleResponse(request) {
   const cached = await caches.match(request);
   if (!cached) return Response.error();
   const headers = new Headers(cached.headers);
-  headers.set("X-Netcheck-Cache", "stale");
+  headers.set("X-Network-Checker-Cache", "stale");
   return new Response(await cached.blob(), { status: cached.status, headers });
 }
 

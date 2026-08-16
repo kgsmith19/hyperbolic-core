@@ -11,7 +11,7 @@ from base64 import urlsafe_b64encode
 from pathlib import Path
 from unittest.mock import patch
 
-from netcheck import change, store
+from network_checker import change, store
 from tests.test_change import _args
 
 
@@ -39,7 +39,7 @@ class KeyProvisioningTest(unittest.TestCase):
     def test_absent_file_mints_a_fresh_32_byte_key_with_mode_0600(self):
         with tempfile.TemporaryDirectory() as tmp:
             key_file = Path(tmp) / "key"
-            with patch.dict(os.environ, {"NETCHECK_CHANGE_KEY_FILE": str(key_file)}):
+            with patch.dict(os.environ, {"NETWORK_CHECKER_CHANGE_KEY_FILE": str(key_file)}):
                 key = change._load_or_create_key()
             self.assertTrue(key_file.exists())
             self.assertEqual(len(key), 32)
@@ -49,7 +49,7 @@ class KeyProvisioningTest(unittest.TestCase):
     def test_an_existing_0600_file_is_trusted_and_reused_verbatim(self):
         with tempfile.TemporaryDirectory() as tmp:
             key_file = Path(tmp) / "key"
-            with patch.dict(os.environ, {"NETCHECK_CHANGE_KEY_FILE": str(key_file)}):
+            with patch.dict(os.environ, {"NETWORK_CHECKER_CHANGE_KEY_FILE": str(key_file)}):
                 first = change._load_or_create_key()
                 second = change._load_or_create_key()
             self.assertEqual(first, second)
@@ -60,7 +60,7 @@ class KeyProvisioningTest(unittest.TestCase):
             key_file.write_text(urlsafe_b64encode(b"x").decode() + "\n")
             if sys.platform != "win32":
                 os.chmod(key_file, 0o600)
-            with patch.dict(os.environ, {"NETCHECK_CHANGE_KEY_FILE": str(key_file)}):
+            with patch.dict(os.environ, {"NETWORK_CHECKER_CHANGE_KEY_FILE": str(key_file)}):
                 key = change._load_or_create_key()
             self.assertEqual(len(key), 32)
             self.assertNotEqual(key, b"x")
@@ -73,7 +73,7 @@ class KeyProvisioningTest(unittest.TestCase):
             planted = b"x" * 32
             key_file.write_text(urlsafe_b64encode(planted).decode() + "\n")
             os.chmod(key_file, 0o644)
-            with patch.dict(os.environ, {"NETCHECK_CHANGE_KEY_FILE": str(key_file)}):
+            with patch.dict(os.environ, {"NETWORK_CHECKER_CHANGE_KEY_FILE": str(key_file)}):
                 key = change._load_or_create_key()
             self.assertNotEqual(key, planted)
             self.assertEqual(stat.S_IMODE(key_file.stat().st_mode), 0o600,
@@ -84,15 +84,15 @@ class KeyProvisioningTest(unittest.TestCase):
         row = {"id": 1, "change_cmd": "true", "inverse_cmd": "true", "dry_run_output": "x"}
         with tempfile.TemporaryDirectory() as tmp:
             f1, f2 = Path(tmp) / "k1", Path(tmp) / "k2"
-            with patch.dict(os.environ, {"NETCHECK_CHANGE_KEY_FILE": str(f1)}):
+            with patch.dict(os.environ, {"NETWORK_CHECKER_CHANGE_KEY_FILE": str(f1)}):
                 t1 = change._token(row, "2026-01-01T00:00:00+00:00", "tester")
-            with patch.dict(os.environ, {"NETCHECK_CHANGE_KEY_FILE": str(f2)}):
+            with patch.dict(os.environ, {"NETWORK_CHECKER_CHANGE_KEY_FILE": str(f2)}):
                 t2 = change._token(row, "2026-01-01T00:00:00+00:00", "tester")
         self.assertNotEqual(t1, t2)
 
     def test_default_key_file_is_outside_the_default_db_directory(self):
         """Keep the key out of the default database directory."""
-        self.assertNotEqual(change._key_file().parent, Path.home() / ".netcheck")
+        self.assertNotEqual(change._key_file().parent, Path.home() / ".network-checker")
 
 
 class TokenMaterialBindingTest(unittest.TestCase):
@@ -103,8 +103,8 @@ class TokenMaterialBindingTest(unittest.TestCase):
             "device_id": 3,
             "cause": "router_dns",
             "title": "Fix DNS",
-            "change_cmd": "python -m netcheck --version",
-            "inverse_cmd": "python3 -m netcheck --version",
+            "change_cmd": "python -m network_checker --version",
+            "inverse_cmd": "python3 -m network_checker --version",
             "verify_probe": "dns_public:ok",
             "dry_run_output": "evidence",
         }
@@ -114,8 +114,8 @@ class TokenMaterialBindingTest(unittest.TestCase):
             "device_id": 5,
             "cause": "dns",
             "title": "Different title",
-            "change_cmd": "python3 -m netcheck --version",
-            "inverse_cmd": "python -m netcheck --version",
+            "change_cmd": "python3 -m network_checker --version",
+            "inverse_cmd": "python -m network_checker --version",
             "verify_probe": "gw:ok",
             "dry_run_output": "different evidence",
         }
@@ -129,8 +129,8 @@ class TokenMaterialBindingTest(unittest.TestCase):
     def test_null_and_text_values_have_distinct_hmac_material(self):
         row = {
             "id": 7, "host_id": 2, "device_id": None, "cause": None,
-            "title": "Fix DNS", "change_cmd": "python -m netcheck --version",
-            "inverse_cmd": "python3 -m netcheck --version",
+            "title": "Fix DNS", "change_cmd": "python -m network_checker --version",
+            "inverse_cmd": "python3 -m network_checker --version",
             "verify_probe": "dns_public:ok", "dry_run_output": "evidence",
         }
         baseline = change._token(row, "2026-01-01T00:00:00+00:00", "tester")
@@ -145,8 +145,8 @@ class TokenMaterialBindingTest(unittest.TestCase):
     def test_null_evidence_and_verifier_do_not_alias_empty_text(self):
         row = {
             "id": 7, "host_id": 2, "device_id": None, "cause": None,
-            "title": "Fix DNS", "change_cmd": "python -m netcheck --version",
-            "inverse_cmd": "python3 -m netcheck --version",
+            "title": "Fix DNS", "change_cmd": "python -m network_checker --version",
+            "inverse_cmd": "python3 -m network_checker --version",
             "verify_probe": "dns_public:ok", "dry_run_output": None,
         }
         approved_at = "2026-01-01T00:00:00+00:00"

@@ -10,7 +10,7 @@
   },
   "entry": {
     "cli": {
-      "command": "python3 -m netcheck"
+      "command": "python3 -m network_checker"
     }
   },
   "schemas": [],
@@ -36,6 +36,6 @@
   "lifecycle": {
     "migrate": "supabase db push",
     "health": "bash tools/check.sh",
-    "register": "20260813173000_register_network-checker-v1.sql"
+    "register": "20260816020000_register_network-checker-v2.sql"
   }
 }

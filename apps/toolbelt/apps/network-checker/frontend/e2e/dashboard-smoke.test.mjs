@@ -22,7 +22,7 @@
  * throwaway SQLite fixture, and one local `python3` subprocess to append
  * the live-update row -- no real probe, no live network call anywhere.
  *
- * Run (after the fixture is seeded and `python -m netcheck serve` is
+ * Run (after the fixture is seeded and `python -m network_checker serve` is
  * already up against it -- see the CI wiring notes for the exact steps):
  *   npx playwright test --config playwright.config.mjs
  *
@@ -60,7 +60,7 @@ const LIVE_UPDATE_CULPRIT = "internet";
 test("dashboard_smoke__fixture_rows_live_update_and_export__D_04", async ({ page }) => {
   // ---- Step 1: load the dashboard against the seeded fixture -------------
   await page.goto("/");
-  await expect(page.locator("h1")).toContainText("netcheck");
+  await expect(page.locator("h1")).toContainText("Network Checker");
 
   // ---- Step 2: the sample table renders every fixture row ----------------
   const samplesTable = page.locator("#samples-table");
@@ -80,7 +80,7 @@ test("dashboard_smoke__fixture_rows_live_update_and_export__D_04", async ({ page
   const downloadPromise = page.waitForEvent("download");
   await page.click("#btn-export-json");
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe("netcheck-report.json");
+  expect(download.suggestedFilename()).toBe("network-checker-report.json");
 
   const downloadedPath = await download.path();
   const bundle = JSON.parse(fs.readFileSync(downloadedPath, "utf8"));

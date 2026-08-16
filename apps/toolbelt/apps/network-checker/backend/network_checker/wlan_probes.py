@@ -66,9 +66,12 @@ def parse_airport_info(text):
 
     f = _fields(text)
     channel = _num((f.get("channel") or "").split(",")[0], int)
+    # `airport` predates 6 GHz Wi-Fi entirely, and channels 149-165 (UNII-3,
+    # see _block()'s docstring below) are still 5 GHz, not a higher band --
+    # so this is a plain 2.4/5 GHz split, not a three-way one.
     band = None
     if channel is not None:
-        band = "2.4 GHz" if channel <= 14 else "5 GHz" if channel < 149 else "6 GHz"
+        band = "2.4 GHz" if channel <= 14 else "5 GHz"
 
     connected = f.get("state") == "running" and bool(f.get("SSID"))
     return {

@@ -3,7 +3,7 @@ import contextlib
 import io
 import unittest
 
-from netcheck import change, store
+from network_checker import change, store
 from tests.test_change import ChangeTestCase, _args
 
 
@@ -35,7 +35,13 @@ class ProposeValidationTest(ChangeTestCase):
         rc, err = self._rejected(cause="   ")
         self.assertEqual(rc, 1)
         self.assertIn("--cause must not be blank", err)
-        self.assertIsNotNone(self.propose(cause=None))
+        # A missing (None) cause must clear the blank-value check itself --
+        # it may still fail downstream at the frozen-template gate (rc 2,
+        # covered by test_an_owned_device_reaches_the_frozen_template_gate),
+        # but never via the blank-cause rejection this test is about.
+        rc2, err2 = self._rejected(cause=None)
+        self.assertNotEqual(rc2, 1)
+        self.assertNotIn("--cause must not be blank", err2)
 
     def test_a_device_id_not_belonging_to_this_host_is_rejected(self):
         other_host = store.host_id(self.conn, "other-host", "Linux")

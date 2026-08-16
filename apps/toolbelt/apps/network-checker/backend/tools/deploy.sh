@@ -5,14 +5,14 @@
 # GitHub Release and downloadable artifact.
 #
 # Usage: bash tools/deploy.sh [version]
-#   version defaults to the current netcheck/__init__.py __version__,
+#   version defaults to the current network_checker/__init__.py __version__,
 #   prefixed with 'v' (e.g. v1.4.0). Git tags add `network-checker-` so they
 #   cannot collide with another Toolbelt application.
 set -eu
 cd "$(dirname "$0")/.."
 
-VERSION="${1:-v$(python3 -c "import re; print(re.search(r'__version__ = \"(.+)\"', open('netcheck/__init__.py').read()).group(1))")}"
-IMAGE="netcheck:${VERSION}"
+VERSION="${1:-v$(python3 -c "import re; print(re.search(r'__version__ = \"(.+)\"', open('network_checker/__init__.py').read()).group(1))")}"
+IMAGE="network-checker:${VERSION}"
 
 echo "=== Running local checks first (tools/check.sh) ==="
 bash tools/check.sh
@@ -26,7 +26,7 @@ docker run --rm "$IMAGE" --version
 echo "=== Smoke test: scan ==="
 docker run --rm "$IMAGE" scan
 
-ARTIFACT="netcheck-image-${VERSION}.tar.gz"
+ARTIFACT="network-checker-image-${VERSION}.tar.gz"
 TAG="network-checker-${VERSION}"
 echo "=== Saving image to $ARTIFACT ==="
 docker save "$IMAGE" | gzip > "$ARTIFACT"

@@ -27,7 +27,7 @@ from pathlib import Path
 # app-level and sits one directory further up, beside frontend/.
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 APP_ROOT = BACKEND_ROOT.parent
-INIT_PY = BACKEND_ROOT / "netcheck" / "__init__.py"
+INIT_PY = BACKEND_ROOT / "network_checker" / "__init__.py"
 MANIFEST = APP_ROOT / "tool.json"
 REGISTRY = (APP_ROOT.parents[1] / "supabase" / "migrations"
             / json.loads(MANIFEST.read_text())["lifecycle"]["register"])
@@ -40,7 +40,7 @@ REGISTRY_HASH_RE = re.compile(r"(?m)^(\s*)'([0-9a-f]{64})',\s*$")
 
 
 def current_version(text):
-    """Read the __version__ string out of netcheck/__init__.py's text."""
+    """Read the __version__ string out of network_checker/__init__.py's text."""
     m = VERSION_RE.search(text)
     if not m:
         raise ValueError("no __version__ = \"X.Y.Z\" line found")

@@ -28,7 +28,7 @@ export function connectLive({ onData, onStatus }) {
       onData(data);
       // The service worker sets this when the network was unreachable and it
       // fell back to the last cached response -- that is not "live".
-      if (res.headers.get("X-Netcheck-Cache")) onStatus("offline");
+      if (res.headers.get("X-Network-Checker-Cache")) onStatus("offline");
       else { onStatus("live"); cacheForOffline(data); }
       consecutiveErrors = 0;
     } catch {

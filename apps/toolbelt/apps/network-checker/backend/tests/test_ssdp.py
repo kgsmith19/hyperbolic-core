@@ -4,7 +4,7 @@ and device-description document the same way docsis.py's parser is."""
 import unittest
 from unittest.mock import patch
 
-from netcheck import remote, ssdp
+from network_checker import remote, ssdp
 
 from tests import fixture
 

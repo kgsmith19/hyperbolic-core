@@ -11,7 +11,7 @@ from unittest import TestCase, mock
 
 
 _PATH = Path(__file__).resolve().parents[1] / "tools" / "release.py"
-_SPEC = importlib.util.spec_from_file_location("netcheck_release", _PATH)
+_SPEC = importlib.util.spec_from_file_location("network_checker_release", _PATH)
 release = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(release)
 
@@ -74,11 +74,11 @@ class VersionSourceOfTruthTest(TestCase):
         text = down.read_text().lower()
         self.assertNotIn("delete from core.app", text)
         self.assertNotRegex(text, r"\bstatus\s*=")
-        self.assertIn("version       = '0.1.0'", text)
+        self.assertIn("version       = '1.0.0'", text)
         self.assertIn(
-            '"networkegress":["ipapi.co","api.ipify.org","status.anthropic.com",'
-            '"api.anthropic.com","1.1.1.1"]', text)
-        self.assertIn("146e208e509e124d6ca4a74cb0e6f7139acd2fd94c1516078e28c55e5fad2a87", text)
+            '"networkegress":["1.1.1.1","192.168.50.1","192.168.100.1","239.255.255.250",'
+            '"api.anthropic.com","api.ipify.org","ipapi.co","status.anthropic.com"]', text)
+        self.assertIn("c91d77d5817cf77e535bccc17f34033ac942387555af669be2120b46eda3f21a", text)
 
     def test_bump_fails_closed_without_rewriting_applied_migration(self):
         stderr = io.StringIO()
@@ -101,6 +101,46 @@ class VersionSourceOfTruthTest(TestCase):
             registry.write_text(release.REGISTRY.read_text())
 
             with self.assertRaisesRegex(ValueError, "version mismatch"):
+                release.check_version_files(init, manifest, registry)
+
+    def test_check_rejects_a_registered_manifest_that_drifted_from_tool_json(self):
+        """Same version everywhere, but the registered manifest's own content
+        no longer matches tool.json (e.g. a field edited in one place and
+        not the other) -- must fail on that mismatch specifically, not pass
+        because the version parity check alone was satisfied."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init = root / "__init__.py"
+            manifest = root / "tool.json"
+            registry = root / release.REGISTRY.name
+            init.write_text(release.INIT_PY.read_text())
+            manifest.write_text(release.MANIFEST.read_text())
+            tampered = release.REGISTRY.read_text().replace(
+                '"description":"Local-first', '"description":"TAMPERED Local-first', 1)
+            self.assertNotEqual(tampered, release.REGISTRY.read_text(),
+                            "fixture setup must actually change the registered manifest")
+            registry.write_text(tampered)
+
+            with self.assertRaisesRegex(ValueError, "registered manifest does not match tool.json"):
+                release.check_version_files(init, manifest, registry)
+
+    def test_check_rejects_a_registered_hash_that_does_not_match_the_manifest(self):
+        """The registered hash must be independently regenerated and
+        compared, not merely present -- a stale/wrong hash next to an
+        otherwise-correct manifest must still fail closed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init = root / "__init__.py"
+            manifest = root / "tool.json"
+            registry = root / release.REGISTRY.name
+            init.write_text(release.INIT_PY.read_text())
+            manifest.write_text(release.MANIFEST.read_text())
+            original = release.REGISTRY.read_text()
+            real_hash = re.search(r"(?m)^\s*'([0-9a-f]{64})',\s*$", original).group(1)
+            bad_hash = ("0" if real_hash[0] != "0" else "1") + real_hash[1:]
+            registry.write_text(original.replace(real_hash, bad_hash, 1))
+
+            with self.assertRaisesRegex(ValueError, r"registered manifest hash \w+ does not match"):
                 release.check_version_files(init, manifest, registry)
 
 
@@ -126,8 +166,8 @@ class ManualWorkflowContractTest(TestCase):
         self.assertIn("network-checker-v${version}", self.text)
 
     def test_image_smoke_is_hermetic_and_permissions_are_least_privilege(self):
-        self.assertNotIn('"netcheck:$version" scan', self.text)
-        self.assertIn('"netcheck:$version" --help', self.text)
+        self.assertNotIn('"network-checker:$version" scan', self.text)
+        self.assertIn('"network-checker:$version" --help', self.text)
         self.assertRegex(self.text, r"(?m)^permissions:\n\s+contents:\s+read\s*$")
         self.assertRegex(
             self.text,

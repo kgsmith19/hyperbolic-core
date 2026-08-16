@@ -90,7 +90,7 @@ def _fix(cause):
     if name:
         t = change_templates.TEMPLATES[name]
         text += (f" A proposable '{name}' change template exists for this: "
-                 f"`python -m netcheck change propose --title \"{t['title']}\" "
+                 f"`python -m network_checker change propose --title \"{t['title']}\" "
                  f"--cmd \"{t['change_cmd']}\" --inverse \"{t['inverse_cmd']}\" "
                  f"--verify \"{t['verify_probe']}\"`, then `change test <id>` to "
                  f"dry-run it and `change show <id>` to review the evidence "
@@ -104,14 +104,14 @@ def _one_family_broken(section, broken, working):
     return (section.get(broken, {}).get("state") == "fail"
             and section.get(working, {}).get("state") == "ok")
 
-def _exposure_open_port(scan):
-    names = [f"{f.get('ip')}:{f.get('port')}" for f in (scan.get("findings") or [])
+def _exposure_open_port(section):
+    names = [f"{f.get('ip')}:{f.get('port')}" for f in (section.get("findings") or [])
              if f.get("kind") == "open_port"]
     return ("open management ports detected: " + ", ".join(names)) if names else None
 
-def _exposure_default_credential(scan):
+def _exposure_default_credential(section):
     names = [f"{f.get('ip')} matched credential list entry {f.get('entry')}"
-             for f in (scan.get("findings") or [])
+             for f in (section.get("findings") or [])
              if f.get("kind") == "default_credential"]
     return "; ".join(names) if names else None
 

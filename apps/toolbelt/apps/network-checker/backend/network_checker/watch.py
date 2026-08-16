@@ -1,4 +1,4 @@
-"""The `netcheck watch` loop: one probe per interval, re-resolving the
+"""The `network-checker watch` loop: one probe per interval, re-resolving the
 route each tick so a network switch is detected, not misread as an outage.
 
 Split out of __main__.py to keep that file under the length budget as CLI
@@ -56,10 +56,10 @@ def _tick(db, args, route, tick):
 
 
 def run(db, args, db_path):
-    """netcheck watch: leave running, one sample per interval."""
+    """network-checker watch: leave running, one sample per interval."""
     gateway = route_mod.gateway()
     route = (gateway, route_mod.first_hop(gateway_ip=gateway))
-    print(f"[netcheck] watching {args.target} every {args.interval}s "
+    print(f"[network-checker] watching {args.target} every {args.interval}s "
           f"(gateway {route[0]}, isp hop {route[1]}). Ctrl+C to stop.")
     snapshot = environ.scan()
     store.add_scan(db[0], db[1], {"ts": snapshot["ts"], "payload": json.dumps(snapshot)})
@@ -71,5 +71,5 @@ def run(db, args, db_path):
             route = _tick(db, args, route, tick)
             time.sleep(max(0, args.interval - (time.monotonic() - t0)))
     except KeyboardInterrupt:
-        print(f"\n[netcheck] stopped after {tick} samples. Database: {db_path}")
+        print(f"\n[network-checker] stopped after {tick} samples. Database: {db_path}")
     return 0

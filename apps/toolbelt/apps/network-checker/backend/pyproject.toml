@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "network-checker"
+description = "Local-first network diagnostics that identify which layer failed: Wi-Fi, router, modem, ISP, target service, or a specific device."
+requires-python = ">=3.12"
+dependencies = []
+dynamic = ["version"]
+
+# Purely additive: `python3 -m network_checker <cmd>` (the app's own zero-install,
+# stdlib-only design -- see docs/notes/2026-08-07-deploying-and-releasing-network-checker.md)
+# keeps working with no install step. This file exists only so `pip install -e .`
+# also gives the standard, discoverable `network-checker` console command --
+# the conventional Python signal that this package is a CLI tool, without adding
+# a runtime dependency or a required build step.
+[project.scripts]
+network-checker = "network_checker.__main__:main"
+
+[tool.setuptools]
+packages = ["network_checker"]
+
+[tool.setuptools.dynamic]
+# Single source of truth stays network_checker/__init__.py -- tools/release.py's
+# own check_version_files() already guards against the manifest and the
+# registered migration drifting from it; sourcing the version dynamically here
+# means this file can never become a fourth place that drifts.
+version = { attr = "network_checker.__version__" }

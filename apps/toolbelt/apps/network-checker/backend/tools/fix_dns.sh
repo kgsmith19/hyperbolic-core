@@ -10,12 +10,12 @@ RESOLVERS="${RESOLVERS:-1.1.1.1 8.8.8.8}"
 # 05-f section 4.5's Finding 18: the systemd-resolved branch used to
 # unconditionally `rm -f` this drop-in on rollback, which destroys an
 # operator's own pre-existing file just as readily as one this script wrote
-# itself. NETCHECK_STATE_DIR/NETCHECK_DNS_DROPIN are overridable so tests can
+# itself. NETWORK_CHECKER_STATE_DIR/NETWORK_CHECKER_DNS_DROPIN are overridable so tests can
 # point both at a throwaway temp tree instead of real /etc paths -- see
 # tests/test_fix_scripts.py.
-STATE_DIR="${NETCHECK_STATE_DIR:-$HOME/.netcheck/change_state}"
+STATE_DIR="${NETWORK_CHECKER_STATE_DIR:-$HOME/.network-checker/change_state}"
 STATE_FILE="$STATE_DIR/dns.state"
-DROP_IN="${NETCHECK_DNS_DROPIN:-/etc/systemd/resolved.conf.d/network-checker.conf}"
+DROP_IN="${NETWORK_CHECKER_DNS_DROPIN:-/etc/systemd/resolved.conf.d/network-checker.conf}"
 
 log() {
     if [ "$VERBOSE" -eq 1 ]; then
@@ -26,13 +26,6 @@ log() {
 # Test DNS resolution
 test_dns() {
     nslookup google.com &>/dev/null && return 0 || return 1
-}
-
-# Get current DNS
-get_current_dns() {
-    if [ -f /etc/resolv.conf ]; then
-        grep '^nameserver' /etc/resolv.conf | awk '{print $2}'
-    fi
 }
 
 # Backup current DNS
@@ -161,17 +154,6 @@ fix_with_resolv_conf() {
     } | sudo tee /etc/resolv.conf > /dev/null
 
     log "Updated /etc/resolv.conf"
-}
-
-# Fix using Windows netsh (if running under WSL or native Windows)
-fix_with_windows() {
-    log "Using Windows netsh"
-
-    for resolver in $RESOLVERS; do
-        netsh interface ip add dns name="Ethernet" "$resolver" &>/dev/null || true
-    done
-
-    log "Updated Windows DNS settings"
 }
 
 # Validate fix

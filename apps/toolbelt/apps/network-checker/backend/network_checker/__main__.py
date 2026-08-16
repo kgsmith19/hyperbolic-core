@@ -1,15 +1,15 @@
-"""netcheck CLI.
+"""network-checker CLI.
 
-  netcheck watch      leave running; one sample per interval  <- the useful one
-  netcheck probe      one sample, printed
-  netcheck scan       environment snapshot (--tier quick/standard/deep)
-  netcheck diagnose   ranked causes from everything collected so far
-  netcheck inventory  device table, one device's config, or a config diff
-  netcheck change     propose/approve/apply a gated device change
-  netcheck serve      dashboard at http://127.0.0.1:8787
-  netcheck sync       push unsynced rows to Supabase
-  netcheck experiment tag or compare labeled probe runs (--label / --compare)
-  netcheck export     write a redacted evidence bundle (--format json/markdown)
+  network-checker watch      leave running; one sample per interval  <- the useful one
+  network-checker probe      one sample, printed
+  network-checker scan       environment snapshot (--tier quick/standard/deep)
+  network-checker diagnose   ranked causes from everything collected so far
+  network-checker inventory  device table, one device's config, or a config diff
+  network-checker change     propose/approve/apply a gated device change
+  network-checker serve      dashboard at http://127.0.0.1:8787
+  network-checker sync       push unsynced rows to Supabase
+  network-checker experiment tag or compare labeled probe runs (--label / --compare)
+  network-checker export     write a redacted evidence bundle (--format json/markdown)
 """
 import argparse
 import json
@@ -26,10 +26,10 @@ from . import (bundle, change_cli, diagnose, environ, experiment, inventory,
 from . import __version__
 from .cli_types import positive_int
 
-DB = Path(os.environ.get("NETCHECK_DB", Path.home() / ".netcheck" / "netcheck.db"))
+DB = Path(os.environ.get("NETWORK_CHECKER_DB", Path.home() / ".network-checker" / "network-checker.db"))
 TARGET = environ.TARGET  # single definition in environ.py; scan and probe must never disagree
 SCAN_BUDGET_SECONDS = {"quick": 10, "standard": 60, "deep": 120}
-SCAN_WORKER_ENV = "NETCHECK_SCAN_WORKER"
+SCAN_WORKER_ENV = "NETWORK_CHECKER_SCAN_WORKER"
 
 def load_env(path=Path(".env")):
     """Minimal .env reader. Credentials never belong in the repo or in argv."""
@@ -94,14 +94,14 @@ def cmd_scan(args):
     budget = SCAN_BUDGET_SECONDS[args.tier]
     env = os.environ.copy()
     env[SCAN_WORKER_ENV] = "1"
-    env["NETCHECK_TARGET"] = args.target
-    command = [sys.executable, "-m", "netcheck", "--target", args.target,
+    env["NETWORK_CHECKER_TARGET"] = args.target
+    command = [sys.executable, "-m", "network_checker", "--target", args.target,
                "scan", "--tier", args.tier]
     try:
         result = subprocess.run(command, capture_output=True, text=True,
                                 timeout=budget, env=env)
     except subprocess.TimeoutExpired:
-        print(f"[netcheck] {args.tier} scan exceeded {budget}s budget", file=sys.stderr)
+        print(f"[network-checker] {args.tier} scan exceeded {budget}s budget", file=sys.stderr)
         return 124
 
     if result.stdout:
@@ -121,9 +121,9 @@ def cmd_diagnose(args):
     errors = diagnose.correlate(raw, samples)
     causes = rank.rank(samples, errors, latest)
     # ASCII only: the Windows console codepage mangles anything else.
-    print(f"\nnetcheck - {len(samples)} samples, {len(raw)} LLM errors\n")
+    print(f"\nnetwork-checker - {len(samples)} samples, {len(raw)} LLM errors\n")
     if not causes:
-        print("  No causes identified yet. Leave `netcheck watch` running so the "
+        print("  No causes identified yet. Leave `network-checker watch` running so the "
               "next failure lands beside a measured sample.\n")
     for n, c in enumerate(causes, 1):
         print(f"  {n}. {c['cause']}  [{c['confidence']}]")
@@ -148,7 +148,7 @@ def cmd_serve(args):
     llmlog.ingest(db)
     httpd = server.serve(conn, args.port)
     url = f"http://127.0.0.1:{args.port}"
-    print(f"[netcheck] dashboard at {url}  (Ctrl+C to stop)")
+    print(f"[network-checker] dashboard at {url}  (Ctrl+C to stop)")
     if not args.no_open:
         webbrowser.open(url)
     try:
@@ -177,7 +177,7 @@ def cmd_experiment(args):
         print(experiment.format_report(label_a, label_b, result))
         return 0
     store.add_sample(conn, host, _one_probe_row(args), label=args.label)
-    print(f"[netcheck] stored 1 sample labeled {args.label!r}")
+    print(f"[network-checker] stored 1 sample labeled {args.label!r}")
     return 0
 
 
@@ -213,9 +213,9 @@ def _add_experiment_and_export_parsers(sub):
 
 def main(argv=None):
     load_env()
-    p = argparse.ArgumentParser(prog="netcheck", description=__doc__,
+    p = argparse.ArgumentParser(prog="network-checker", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--version", action="version", version=f"netcheck {__version__}")
+    p.add_argument("--version", action="version", version=f"network-checker {__version__}")
     p.add_argument("--target", default=TARGET)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("probe", help="one sample").set_defaults(fn=cmd_probe)

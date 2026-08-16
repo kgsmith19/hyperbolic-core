@@ -10,9 +10,9 @@ function download(filename, mime, text) {
 }
 
 export function exportJson(data) {
-  download("netcheck-report.json", "application/json", JSON.stringify(data, null, 2));
+  download("network-checker-report.json", "application/json", JSON.stringify(data, null, 2));
 }
 
 export function exportCsv(samples) {
-  download("netcheck-samples.csv", "text/csv", toCsv(samples || []));
+  download("network-checker-samples.csv", "text/csv", toCsv(samples || []));
 }

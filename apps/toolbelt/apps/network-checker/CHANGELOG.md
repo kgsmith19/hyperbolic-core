@@ -3,7 +3,7 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [SemVer](https://semver.org/): `MAJOR.MINOR.PATCH`. Future bumps
 are fail-closed until a forward/down registry-migration generator exists (see
-`docs/notes/2026-08-07-deploying-and-releasing-netcheck.md` for the full release process). Draft entries for a new
+`docs/notes/2026-08-07-deploying-and-releasing-network-checker.md` for the full release process). Draft entries for a new
 release with `python tools/release.py changelog`, which lists commit
 subjects since the last tag — the entry itself still gets a human editorial
 pass, not full automation.
@@ -11,6 +11,29 @@ pass, not full automation.
 ## [Unreleased]
 
 ### Changed
+- **Breaking:** the `netcheck` package/CLI is renamed `network_checker`,
+  matching this app's own folder name (`network-checker`) instead of a
+  second, different name. Update anything that invokes it directly:
+  - CLI: `python -m netcheck` → `python -m network_checker` (or, now
+    optionally, `pip install -e backend && network-checker <cmd>` — see
+    `backend/pyproject.toml`).
+  - Default local database moved from `~/.netcheck/netcheck.db` to
+    `~/.network-checker/network-checker.db`; copy the old file across if you
+    want to keep history (`sync`/`export` still work against the new path
+    either way, they just start from empty until you do).
+  - Environment variables: `NETCHECK_DB`, `NETCHECK_TARGET`,
+    `NETCHECK_CHANGE_KEY_FILE`, `NETCHECK_STATE_DIR`, `NETCHECK_DNS_DROPIN`,
+    and `NETCHECK_WIFI_PHY` are now `NETWORK_CHECKER_DB`,
+    `NETWORK_CHECKER_TARGET`, `NETWORK_CHECKER_CHANGE_KEY_FILE`,
+    `NETWORK_CHECKER_STATE_DIR`, `NETWORK_CHECKER_DNS_DROPIN`, and
+    `NETWORK_CHECKER_WIFI_PHY`.
+  - The evidence bundle's `netcheck_version` field is now
+    `network_checker_version`.
+  - The Docker image tag is `network-checker:$version`, not `netcheck:$version`.
+  - The dashboard's PWA name/title and the browser storage keys it uses
+    changed to match (`network-checker:theme` in place of `netcheck:theme`);
+    an existing installed PWA re-registers under the new name and its saved
+    theme preference resets once.
 - Change approvals now print a raw one-use HMAC capability once while SQLite
   stores only its SHA-256 digest. Length-framed material binds the row id, host
   id, device id, cause, title, exact command and inverse, verification probe,

@@ -5,7 +5,7 @@ same instant, so 'which things failed together' is the whole diagnostic.
 """
 import unittest
 
-from netcheck import diagnose
+from network_checker import diagnose
 
 
 def row(**kw):

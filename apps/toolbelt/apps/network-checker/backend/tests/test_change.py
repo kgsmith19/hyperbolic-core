@@ -1,4 +1,4 @@
-"""Hermetic tests for the change lifecycle engine (netcheck/change.py; NC-4;
+"""Hermetic tests for the change lifecycle engine (network_checker/change.py; NC-4;
 05-f section 4). Real in-memory SQLite, patch.object at every real seam,
 exactly tests/test_watch.py's convention -- no real subprocess/network call
 here. The one deliberately real subprocess test (TTY refusal, NC-4.2) lives
@@ -11,7 +11,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from netcheck import change, store
+from network_checker import change, store
 
 
 def _args(action="propose", **overrides):

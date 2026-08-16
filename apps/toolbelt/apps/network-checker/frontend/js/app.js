@@ -4,7 +4,7 @@ import { cycleTheme, currentTheme } from "./theme.js";
 import { exportJson, exportCsv } from "./export.js";
 import { initPalette } from "./palette.js";
 import { renderPills, renderCauses, renderErrors, renderSamples, renderEnv, renderChart } from "./render.js";
-import { titleCase } from "./format.js";
+import { humanize } from "./format.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -43,7 +43,7 @@ function render() {
   });
 
   $("subtitle").textContent = !d.live ? "no data yet"
-    : d.live.culprit ? `last sample blamed: ${titleCase(d.live.culprit)}` : "last sample healthy";
+    : d.live.culprit ? `last sample blamed: ${humanize(d.live.culprit)}` : "last sample healthy";
   const bursts = d.bursts || [];
   $("burst-note").textContent = bursts.length ? `— ${d.errors.length} errors in ${bursts.length} bursts` : "";
   $("sample-count").textContent = `${d.samples?.length || 0} samples`;
@@ -52,7 +52,7 @@ function render() {
   if (culprit !== lastCulprit) {
     lastCulprit = culprit;
     $("live-region").textContent = culprit
-      ? `Layer status changed: ${titleCase(culprit)} is the likely cause.`
+      ? `Layer status changed: ${humanize(culprit)} is the likely cause.`
       : "Layer status changed: all layers healthy.";
   }
 }

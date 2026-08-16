@@ -9,7 +9,7 @@ something the user can act on.
 import unittest
 from pathlib import Path
 
-from netcheck import change_templates, rank
+from network_checker import change_templates, rank
 
 from tests.test_diagnose import row
 
@@ -50,13 +50,13 @@ class ScriptedFixTest(unittest.TestCase):
 
     def test_a_dns_cause_does_not_offer_an_unreversible_template(self):
         fix = self.fix_for("router_dns")
-        self.assertNotIn("netcheck change propose", fix)
+        self.assertNotIn("network-checker change propose", fix)
         self.assertIn("1.1.1.1", fix)
 
     def test_a_radio_cause_keeps_a_manual_remedy_only(self):
         fix = {c["cause"]: c for c in rank.rank(
             [row()], [], {"events": {"state": "ok", "radio_off": 3}})}["radio_drops"]["fix"]
-        self.assertNotIn("netcheck change propose", fix)
+        self.assertNotIn("network-checker change propose", fix)
         self.assertIn("Device Manager", fix)
 
     def test_no_template_is_exposed_without_exact_prestate_restore(self):
@@ -67,7 +67,7 @@ class ScriptedFixTest(unittest.TestCase):
         fix = {c["cause"]: c for c in rank.rank([row()], [], {
             "wan": {"state": "ok", "ip": "100.90.1.2",
                     "double_nat": False, "cgnat": True}})}["cgnat"]["fix"]
-        self.assertNotIn("netcheck change propose", fix)
+        self.assertNotIn("network-checker change propose", fix)
 
     def test_every_named_template_script_exists_on_disk(self):
         """A fix naming a template whose script was deleted is worse than no fix."""

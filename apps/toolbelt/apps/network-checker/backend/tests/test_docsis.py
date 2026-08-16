@@ -1,7 +1,7 @@
 """The NETGEAR DOCSIS status page: a pure parser over a real capture."""
 import unittest
 
-from netcheck import docsis
+from network_checker import docsis
 
 from tests import fixture
 

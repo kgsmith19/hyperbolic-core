@@ -11,11 +11,11 @@ VERBOSE=${VERBOSE:-0}
 # change's own first attempted fix" were identical, so a rollback never
 # restored whatever tx-power setting was actually there before. capture_state
 # below records that real prior value; restore_state re-pins to it instead
-# of re-running the forward fix. PHY/NETCHECK_STATE_DIR are overridable so
+# of re-running the forward fix. PHY/NETWORK_CHECKER_STATE_DIR are overridable so
 # tests can exercise the real branching logic without a real radio -- see
 # tests/test_fix_scripts.py.
-PHY="${NETCHECK_WIFI_PHY:-phy0}"
-STATE_DIR="${NETCHECK_STATE_DIR:-$HOME/.netcheck/change_state}"
+PHY="${NETWORK_CHECKER_WIFI_PHY:-phy0}"
+STATE_DIR="${NETWORK_CHECKER_STATE_DIR:-$HOME/.network-checker/change_state}"
 STATE_FILE="$STATE_DIR/wifi_mode.state"
 
 log() {
@@ -39,8 +39,8 @@ detect_wifi_state() {
 
     # Get current mode
     local current_mode
-    if iw "$wlan_adapter" link &>/dev/null; then
-        current_mode=$(iw "$wlan_adapter" link | grep -oP '802\.11[a-z]+' | head -1)
+    if iw dev "$wlan_adapter" link &>/dev/null; then
+        current_mode=$(iw dev "$wlan_adapter" link | grep -oP '802\.11[a-z]+' | head -1)
     fi
 
     # Get capabilities
@@ -69,7 +69,7 @@ capture_state() {
         echo "error: no WiFi adapter found; nothing to capture" >&2
         return 1
     fi
-    txpower=$(iw "$adapter" info 2>/dev/null | grep -oP 'txpower \K[\d.]+')
+    txpower=$(iw dev "$adapter" info 2>/dev/null | grep -oP 'txpower \K[\d.]+')
     mkdir -p "$STATE_DIR"
     {
         echo "ADAPTER=$adapter"
@@ -142,8 +142,8 @@ validate_fix() {
     sleep 2  # Wait for changes to take effect
 
     local new_mode
-    if iw "$adapter" link &>/dev/null; then
-        new_mode=$(iw "$adapter" link | grep -oP '802\.11[a-z]+' | head -1)
+    if iw dev "$adapter" link &>/dev/null; then
+        new_mode=$(iw dev "$adapter" link | grep -oP '802\.11[a-z]+' | head -1)
     fi
 
     log "New mode after fix: ${new_mode:-unknown}"

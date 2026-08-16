@@ -1,4 +1,4 @@
-"""Everything netcheck reaches over the network rather than by asking this host.
+"""Everything network-checker reaches over the network rather than by asking this host.
 
 Split from environ.py because the two halves fail differently and are tested
 differently: a section in there goes `unavailable` when a binary or a platform
@@ -49,7 +49,7 @@ def _fetch(req, timeout=6):
 
 
 def _http_get(url, user=None, password=None, timeout=6):
-    req = urllib.request.Request(url, headers={"User-Agent": "netcheck"})
+    req = urllib.request.Request(url, headers={"User-Agent": "network-checker"})
     if user:
         token = base64.b64encode(f"{user}:{password or ''}".encode()).decode()
         req.add_header("Authorization", f"Basic {token}")

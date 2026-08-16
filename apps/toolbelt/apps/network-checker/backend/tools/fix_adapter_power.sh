@@ -10,9 +10,9 @@ VERBOSE=${VERBOSE:-0}
 # change the inverse in change_templates.py only ever turned power_save
 # back on -- WoL stayed enabled forever, even after a "rollback". capture_state
 # below records both real prior values; restore_state puts both back.
-# NETCHECK_STATE_DIR is overridable so tests can exercise the real
+# NETWORK_CHECKER_STATE_DIR is overridable so tests can exercise the real
 # branching logic without a real adapter -- see tests/test_fix_scripts.py.
-STATE_DIR="${NETCHECK_STATE_DIR:-$HOME/.netcheck/change_state}"
+STATE_DIR="${NETWORK_CHECKER_STATE_DIR:-$HOME/.network-checker/change_state}"
 STATE_FILE="$STATE_DIR/adapter_power.state"
 
 log() {
@@ -123,13 +123,6 @@ disable_power_management() {
     # Enable wake-on-lan (keeps adapter responsive)
     if sudo ethtool -s "$adapter" wol g &>/dev/null; then
         log "Enabled wake-on-lan"
-    fi
-
-    # For WiFi, disable power save in driver
-    if [[ "$adapter" == wlan* ]]; then
-        if sudo iw "$adapter" set power_save off &>/dev/null; then
-            log "Disabled WiFi power save"
-        fi
     fi
 }
 

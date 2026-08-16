@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from netcheck import change, change_cli, store
+from network_checker import change, change_cli, store
 from tests.test_change import _args
 from tests.test_change_key import _propose_tested_approved
 
@@ -65,7 +65,7 @@ class ConcurrentApplyClaimTest(unittest.TestCase):
 
     def test_two_concurrent_applies_on_the_same_row_only_one_executes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = str(Path(tmp) / "netcheck.db")
+            db_path = str(Path(tmp) / "network_checker.db")
             seed = store.open_db(db_path)
             host = store.host_id(seed, "race-host", "Linux")
             cid, token = _propose_tested_approved(seed)
@@ -84,6 +84,35 @@ class ConcurrentApplyClaimTest(unittest.TestCase):
                 self.assertEqual(change._get(conn, cid)["status"], "verified")
             finally:
                 conn.close()
+
+
+class SequentialReplayTest(unittest.TestCase):
+    """Finding 16's single-use guarantee, outside of a race: a capability
+    that has already been consumed by one successful apply() must be
+    rejected on a second, purely sequential presentation -- not just when
+    two applies race each other (ConcurrentApplyClaimTest above)."""
+
+    def setUp(self):
+        self.conn = store.open_db(":memory:")
+        self.addCleanup(self.conn.close)
+        self.host = store.host_id(self.conn, "replay-test-host", "Linux")
+
+    def test_a_capability_that_already_applied_successfully_cannot_be_replayed(self):
+        cid, token = _propose_tested_approved(self.conn)
+        with patch.object(change, "execute", return_value=(0, "ok", "")) as executor, \
+             patch.object(change, "_verify_with_retry", return_value=(True, [])), \
+             contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()):
+            first_rc = change.apply(
+                self.conn, self.host, _args(action="apply", id=cid, token=token))
+            second_rc = change.apply(
+                self.conn, self.host, _args(action="apply", id=cid, token=token))
+        self.assertEqual(first_rc, 0)
+        self.assertNotEqual(second_rc, 0)
+        self.assertEqual(executor.call_count, 1,
+                         "the change command must run at most once for a single capability")
+        self.assertEqual(change._get(self.conn, cid)["status"], "verified",
+                         "the replayed apply must not disturb the already-terminal row")
 
 
 class StatusGuardTest(unittest.TestCase):

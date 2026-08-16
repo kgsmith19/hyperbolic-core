@@ -1,6 +1,6 @@
 {
-  "name": "netcheck",
-  "short_name": "netcheck",
+  "name": "Network Checker",
+  "short_name": "Network Checker",
   "description": "Which network layer is broken, proven with data.",
   "start_url": "/",
   "display": "standalone",

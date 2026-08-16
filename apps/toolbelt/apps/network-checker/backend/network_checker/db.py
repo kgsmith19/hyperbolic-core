@@ -87,7 +87,7 @@ def _insert(conn, table, host, row):
 
 def add_sample(conn, host, row, label=None):
     """Insert one sample. `label` tags the row for FR-021's controlled-
-    comparison mode (`netcheck experiment --label`); ordinary probe/watch
+    comparison mode (`network-checker experiment --label`); ordinary probe/watch
     runs leave it unset, so they store NULL exactly as before."""
     if label is not None:
         row = dict(row, label=label)

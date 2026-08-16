@@ -5,7 +5,7 @@ import io
 import unittest
 from unittest.mock import patch
 
-from netcheck import change, change_cli, store
+from network_checker import change, change_cli, store
 
 
 def _args(action, change_id=None, **extra):

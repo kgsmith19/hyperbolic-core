@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from netcheck import inventory, store
+from network_checker import inventory, store
 from tests.test_inventory import TS, fixture_payload
 
 
@@ -81,6 +81,30 @@ class InventoryMirrorSafetyTest(unittest.TestCase):
                         request.full_url,
                         f"https://example.test/rest/v1/{table}?on_conflict={target}",
                     )
+
+
+class MirrorRetryTest(unittest.TestCase):
+    """Criterion 11 continued: leaving rows unsynced after a failed push is
+    only half the retry contract -- the next mirror() call must actually
+    re-send them, not just refrain from marking them done. Without this, an
+    outage-then-recovery would strand rows forever even though unsynced()
+    correctly still lists them."""
+
+    def test_rows_left_pending_by_a_failed_push_are_sent_on_the_next_mirror_call(self):
+        conn = store.open_db(":memory:")
+        self.addCleanup(conn.close)
+        host = store.host_id(conn, "surface", "Windows")
+        store.add_sample(conn, host, {"ts": "t1", "gw_state": "ok"})
+
+        with patch.object(store, "_push", side_effect=["offline", None]):
+            first = store.mirror(conn, "https://example.test", "key", "surface")
+            self.assertEqual(first["state"], "fail")
+            self.assertEqual(len(store.unsynced(conn, "samples")), 1)
+
+            second = store.mirror(conn, "https://example.test", "key", "surface")
+        self.assertEqual(second["state"], "ok")
+        self.assertEqual(second["pushed"]["samples"], 1)
+        self.assertEqual(len(store.unsynced(conn, "samples")), 0)
 
 
 class RemoteMigrationContractTest(unittest.TestCase):

@@ -6,8 +6,8 @@ runs the unmodified bash scripts with only the external tools on PATH
 replaced by stand-ins that log their call and answer from a fixture (a
 `sudo` stand-in is included too: this container's real `sudo` reads a
 locked-down `secure_path` that ignores our temp PATH entirely, verified
-empirically before writing this file). NETCHECK_STATE_DIR and (DNS only)
-NETCHECK_DNS_DROPIN point the scripts at a temp directory instead of real
+empirically before writing this file). NETWORK_CHECKER_STATE_DIR and (DNS only)
+NETWORK_CHECKER_DNS_DROPIN point the scripts at a temp directory instead of real
 /etc paths -- both are the scripts' own overridable variables already, not
 a test-only patch. Every real branch these scripts now have --
 capture-once-keep, drop-in existed vs. did not, tx-power restored to a real
@@ -73,7 +73,7 @@ def _stub_bin(tmp):
 def _run_script(script, args, tmp, extra_env=None):
     env = dict(os.environ)
     env["PATH"] = f"{_stub_bin(tmp)}:{env['PATH']}"
-    env["NETCHECK_STATE_DIR"] = str(Path(tmp) / "state")
+    env["NETWORK_CHECKER_STATE_DIR"] = str(Path(tmp) / "state")
     env.update(extra_env or {})
     return subprocess.run(
         ["bash", str(REPO / "tools" / script), *args],
@@ -82,14 +82,14 @@ def _run_script(script, args, tmp, extra_env=None):
 
 class DnsDropInCaptureRestoreTest(unittest.TestCase):
     """fix_dns.sh's drop-in half: capture_state/restore_state, real bash,
-    real files -- only NETCHECK_DNS_DROPIN points away from /etc."""
+    real files -- only NETWORK_CHECKER_DNS_DROPIN points away from /etc."""
 
     def test_capture_then_restore_when_no_dropin_existed_removes_it(self):
         """No pre-existing file: the change writes one, restore must
         remove it -- never `rm -f` something that was never captured."""
         with tempfile.TemporaryDirectory() as tmp:
             dropin = Path(tmp) / "network-checker.conf"
-            env = {"NETCHECK_DNS_DROPIN": str(dropin)}
+            env = {"NETWORK_CHECKER_DNS_DROPIN": str(dropin)}
 
             cap = _run_script("fix_dns.sh", ["--capture-state"], tmp, env)
             self.assertEqual(cap.returncode, 0, cap.stderr)
@@ -109,7 +109,7 @@ class DnsDropInCaptureRestoreTest(unittest.TestCase):
             dropin = Path(tmp) / "network-checker.conf"
             original = "[Resolve]\nDNS=10.0.0.53\n# operator's own config\n"
             dropin.write_text(original)
-            env = {"NETCHECK_DNS_DROPIN": str(dropin)}
+            env = {"NETWORK_CHECKER_DNS_DROPIN": str(dropin)}
 
             cap = _run_script("fix_dns.sh", ["--capture-state"], tmp, env)
             self.assertEqual(cap.returncode, 0, cap.stderr)
@@ -128,7 +128,7 @@ class DnsDropInCaptureRestoreTest(unittest.TestCase):
             dropin = Path(tmp) / "network-checker.conf"
             original = "[Resolve]\nDNS=10.0.0.53\n"
             dropin.write_text(original)
-            env = {"NETCHECK_DNS_DROPIN": str(dropin)}
+            env = {"NETWORK_CHECKER_DNS_DROPIN": str(dropin)}
 
             _run_script("fix_dns.sh", ["--capture-state"], tmp, env)
             dropin.write_text("[Resolve]\nDNS=1.1.1.1 8.8.8.8\n")
@@ -145,7 +145,7 @@ class DnsDropInCaptureRestoreTest(unittest.TestCase):
         """No .bak, no captured state, no netsh on Linux: must refuse, not
         silently do nothing or delete something unrelated."""
         with tempfile.TemporaryDirectory() as tmp:
-            env = {"NETCHECK_DNS_DROPIN": str(Path(tmp) / "network-checker.conf")}
+            env = {"NETWORK_CHECKER_DNS_DROPIN": str(Path(tmp) / "network-checker.conf")}
             res = _run_script("fix_dns.sh", ["--restore"], tmp, env)
             self.assertNotEqual(res.returncode, 0)
             self.assertIn("nothing to restore", res.stderr)
@@ -171,8 +171,8 @@ class WifiTxpowerCaptureRestoreTest(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stderr)
 
             calls = log.read_text()
-            self.assertIn("set txpower fixed 500", calls,
-                         "5.00 dBm must restore as 500 mBm, not 'auto'")
+            self.assertIn("iw dev wlan0 info", calls, "capture must use `iw dev`, not a bare ifname")
+            self.assertIn("set txpower fixed 500", calls, "5.00 dBm must restore as 500 mBm")
             self.assertNotIn("set txpower auto", calls)
 
     def test_restore_with_no_capture_falls_back_to_auto_not_a_crash(self):

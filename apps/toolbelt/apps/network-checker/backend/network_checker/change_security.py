@@ -47,12 +47,12 @@ def _verify_with_retry(expr, attempts=3, budget_s=90):
 
 
 def _key_file():
-    """NETCHECK_CHANGE_KEY_FILE overrides the path (same convention
-    NETCHECK_DB uses in __main__.py). Default is deliberately NOT under
-    ~/.netcheck/ (NETCHECK_DB's own directory), so the key shares neither a
+    """NETWORK_CHECKER_CHANGE_KEY_FILE overrides the path (same convention
+    NETWORK_CHECKER_DB uses in __main__.py). Default is deliberately NOT under
+    ~/.network-checker/ (NETWORK_CHECKER_DB's own directory), so the key shares neither a
     directory nor a trust boundary with the file it protects."""
     return Path(os.environ.get(
-        "NETCHECK_CHANGE_KEY_FILE", str(Path.home() / ".netcheck-change-key")))
+        "NETWORK_CHECKER_CHANGE_KEY_FILE", str(Path.home() / ".network-checker-change-key")))
 
 
 def _owner_only(path):
@@ -108,9 +108,9 @@ def _load_or_create_key():
     OS account out, not another process running as the SAME account, which
     can already read the SQLite DB this closes Finding 15 against (an
     unkeyed sha256 anyone with DB access could recompute, no secret at
-    all). Not cached at module scope: every `netcheck change ...`
+    all). Not cached at module scope: every `network-checker change ...`
     invocation is already its own fresh process, so a per-call re-read
-    keeps NETCHECK_CHANGE_KEY_FILE a live per-test seam like NETCHECK_DB.
+    keeps NETWORK_CHECKER_CHANGE_KEY_FILE a live per-test seam like NETWORK_CHECKER_DB.
     """
     path = _key_file()
     try:

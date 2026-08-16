@@ -1,4 +1,4 @@
-"""CLI presentation and argparse wiring for `netcheck change ...`, split out
+"""CLI presentation and argparse wiring for `network-checker change ...`, split out
 of change.py to keep that file's line budget free for the security-relevant
 lifecycle engine (propose/test/approve/apply/verify/rollback all live
 there; this file is show/list/reject plus dispatch and parser setup).
@@ -57,19 +57,16 @@ def reject(conn, host_id, args=None):
     under its real, already-decided outcome. Before this guard, reject()
     unconditionally overwrote status on any row, including one already
     verified/rolled back/applied."""
-    if args is None:  # backward-compatible direct API; CLI always supplies host_id
+    if args is None:  # backward-compatible direct API; the CLI always passes host_id
         args, host_id = host_id, None
-        unscoped = change._get(conn, args.id)
-        if unscoped is not None:
-            host_id = unscoped.get("host_id") or conn.execute(
-                "SELECT min(id) FROM hosts HAVING count(*)=1").fetchone()[0]
     row = change._get(conn, args.id, host_id)
     if row is None:
         return change._missing(args.id)
     cur = conn.execute(
         f"UPDATE change_request SET status='rejected'"
-        f" WHERE id=? AND {change._HOST_SQL} AND status NOT IN {change._LOCKED_SQL}",
-        (args.id, host_id, host_id))
+        f" WHERE id=? AND (? IS NULL OR {change._HOST_SQL})"
+        f" AND status NOT IN {change._LOCKED_SQL}",
+        (args.id, host_id, host_id, host_id))
     if cur.rowcount == 0:
         print(f"change {args.id} is '{row['status']}'; cannot be rejected",
               file=sys.stderr)
@@ -79,7 +76,7 @@ def reject(conn, host_id, args=None):
 
 
 def cli(conn, host_id, args):
-    """netcheck change: propose/test/show/approve/apply/verify/list/reject."""
+    """network-checker change: propose/test/show/approve/apply/verify/list/reject."""
     if args.action == "propose":
         return change.propose(conn, host_id, args)
     if args.action == "test":
@@ -108,7 +105,7 @@ def _add_propose_parser(acts):
 
 
 def add_subparser(sub):
-    """Register `netcheck change ...` on `sub`, the top-level subparsers
+    """Register `network-checker change ...` on `sub`, the top-level subparsers
     object -- built here rather than in __main__.py so that file's own
     line budget stays free for everything else it already owns (the same
     reason watch.py was split out of it)."""

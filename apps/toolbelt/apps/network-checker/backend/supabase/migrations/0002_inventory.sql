@@ -1,4 +1,4 @@
--- Device and configuration inventory: Postgres mirror of netcheck/schema.sql's
+-- Device and configuration inventory: Postgres mirror of network_checker/schema.sql's
 -- device / interface / config_item / config_current. See that file for the
 -- SQLite source of truth and its column-level comments; only where the
 -- Postgres shape deliberately differs is explained here.
@@ -68,7 +68,7 @@ create index if not exists config_item_device_key_idx
 
 -- Latest value per (host, device, key): the Postgres-side equivalent of
 -- SQLite's config_current. IS NOT DISTINCT FROM, not `=`: device_mac is
--- NULL for a device netcheck never resolved a hardware address for (the
+-- NULL for a device network-checker never resolved a hardware address for (the
 -- same FR-017 case schema.sql's device.mac comment documents), and plain
 -- `=` never matches a NULL against anything, including another NULL.
 --

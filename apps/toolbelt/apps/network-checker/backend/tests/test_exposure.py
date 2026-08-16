@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 
-from netcheck import exposure
+from network_checker import exposure
 
 
 class ExposureScanTest(unittest.TestCase):
@@ -23,6 +23,23 @@ class ExposureScanTest(unittest.TestCase):
                       findings)
         self.assertIn({"ip": "192.168.1.7", "name": "router", "kind": "default_credential",
                        "entry": "DC02", "endpoint": "http://192.168.1.7/login"}, findings)
+
+    def test_a_device_open_only_on_8080_is_probed_on_its_alternate_port(self):
+        """Port 80 closed, 8080 open: the login/credential probe must target
+        `host:8080`, not silently skip the device because 80 was the only
+        port ever hardcoded."""
+        mapped = {"state": "ok", "devices": [{"ip": "192.168.1.9", "mac": None, "name": None}]}
+        with patch.object(exposure.remote, "_on_lan", return_value=True), \
+             patch.object(exposure, "_check_open_ports", return_value=[8080]), \
+             patch.object(exposure, "_find_login_endpoint", return_value="/login") as mock_find, \
+             patch.object(exposure, "_credential_match", return_value="DC01") as mock_match:
+            got = exposure.scan(mapped)
+
+        mock_find.assert_called_once_with("192.168.1.9:8080")
+        mock_match.assert_called_once_with("192.168.1.9:8080", "/login")
+        self.assertIn({"ip": "192.168.1.9", "name": None, "kind": "default_credential",
+                       "entry": "DC01", "endpoint": "http://192.168.1.9:8080/login"},
+                      got["findings"])
 
     def test_off_lan_device_is_unavailable_and_no_connections_are_attempted(self):
         mapped = {"state": "ok", "devices": [{"ip": "8.8.8.8", "mac": None, "name": None}]}

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from netcheck import store
+from network_checker import store
 
 
 class StoreTest(unittest.TestCase):

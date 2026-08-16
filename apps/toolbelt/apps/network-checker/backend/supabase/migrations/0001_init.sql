@@ -1,4 +1,4 @@
--- netcheck remote mirror.
+-- network-checker remote mirror.
 --
 -- This is a mirror, never the source of truth: a cloud database cannot record
 -- an outage while the outage is happening. SQLite captures, this receives.
