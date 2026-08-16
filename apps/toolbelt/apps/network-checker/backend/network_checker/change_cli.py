@@ -57,19 +57,16 @@ def reject(conn, host_id, args=None):
     under its real, already-decided outcome. Before this guard, reject()
     unconditionally overwrote status on any row, including one already
     verified/rolled back/applied."""
-    if args is None:  # backward-compatible direct API; CLI always supplies host_id
+    if args is None:  # backward-compatible direct API; the CLI always passes host_id
         args, host_id = host_id, None
-        unscoped = change._get(conn, args.id)
-        if unscoped is not None:
-            host_id = unscoped.get("host_id") or conn.execute(
-                "SELECT min(id) FROM hosts HAVING count(*)=1").fetchone()[0]
     row = change._get(conn, args.id, host_id)
     if row is None:
         return change._missing(args.id)
     cur = conn.execute(
         f"UPDATE change_request SET status='rejected'"
-        f" WHERE id=? AND {change._HOST_SQL} AND status NOT IN {change._LOCKED_SQL}",
-        (args.id, host_id, host_id))
+        f" WHERE id=? AND (? IS NULL OR {change._HOST_SQL})"
+        f" AND status NOT IN {change._LOCKED_SQL}",
+        (args.id, host_id, host_id, host_id))
     if cur.rowcount == 0:
         print(f"change {args.id} is '{row['status']}'; cannot be rejected",
               file=sys.stderr)

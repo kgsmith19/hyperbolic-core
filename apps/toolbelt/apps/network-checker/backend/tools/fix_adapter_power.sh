@@ -124,13 +124,6 @@ disable_power_management() {
     if sudo ethtool -s "$adapter" wol g &>/dev/null; then
         log "Enabled wake-on-lan"
     fi
-
-    # For WiFi, disable power save in driver
-    if [[ "$adapter" == wlan* ]]; then
-        if sudo iw "$adapter" set power_save off &>/dev/null; then
-            log "Disabled WiFi power save"
-        fi
-    fi
 }
 
 # Verify power management is disabled

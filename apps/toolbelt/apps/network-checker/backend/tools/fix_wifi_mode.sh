@@ -39,8 +39,8 @@ detect_wifi_state() {
 
     # Get current mode
     local current_mode
-    if iw "$wlan_adapter" link &>/dev/null; then
-        current_mode=$(iw "$wlan_adapter" link | grep -oP '802\.11[a-z]+' | head -1)
+    if iw dev "$wlan_adapter" link &>/dev/null; then
+        current_mode=$(iw dev "$wlan_adapter" link | grep -oP '802\.11[a-z]+' | head -1)
     fi
 
     # Get capabilities
@@ -69,7 +69,7 @@ capture_state() {
         echo "error: no WiFi adapter found; nothing to capture" >&2
         return 1
     fi
-    txpower=$(iw "$adapter" info 2>/dev/null | grep -oP 'txpower \K[\d.]+')
+    txpower=$(iw dev "$adapter" info 2>/dev/null | grep -oP 'txpower \K[\d.]+')
     mkdir -p "$STATE_DIR"
     {
         echo "ADAPTER=$adapter"
@@ -142,8 +142,8 @@ validate_fix() {
     sleep 2  # Wait for changes to take effect
 
     local new_mode
-    if iw "$adapter" link &>/dev/null; then
-        new_mode=$(iw "$adapter" link | grep -oP '802\.11[a-z]+' | head -1)
+    if iw dev "$adapter" link &>/dev/null; then
+        new_mode=$(iw dev "$adapter" link | grep -oP '802\.11[a-z]+' | head -1)
     fi
 
     log "New mode after fix: ${new_mode:-unknown}"

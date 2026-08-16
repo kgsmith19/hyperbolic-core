@@ -171,8 +171,8 @@ class WifiTxpowerCaptureRestoreTest(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stderr)
 
             calls = log.read_text()
-            self.assertIn("set txpower fixed 500", calls,
-                         "5.00 dBm must restore as 500 mBm, not 'auto'")
+            self.assertIn("iw dev wlan0 info", calls, "capture must use `iw dev`, not a bare ifname")
+            self.assertIn("set txpower fixed 500", calls, "5.00 dBm must restore as 500 mBm")
             self.assertNotIn("set txpower auto", calls)
 
     def test_restore_with_no_capture_falls_back_to_auto_not_a_crash(self):

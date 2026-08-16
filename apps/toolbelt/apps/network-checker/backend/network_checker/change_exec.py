@@ -21,11 +21,6 @@ def _argv(command):
     return parts
 
 
-def validate(command):
-    """Raise unless `command` resolves to an enabled argv operation."""
-    _argv(command)
-
-
 def _text(value):
     return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
 

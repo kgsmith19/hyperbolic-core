@@ -28,13 +28,6 @@ test_dns() {
     nslookup google.com &>/dev/null && return 0 || return 1
 }
 
-# Get current DNS
-get_current_dns() {
-    if [ -f /etc/resolv.conf ]; then
-        grep '^nameserver' /etc/resolv.conf | awk '{print $2}'
-    fi
-}
-
 # Backup current DNS
 backup_dns() {
     [ -f /etc/resolv.conf ] && cp /etc/resolv.conf /etc/resolv.conf.bak
@@ -161,17 +154,6 @@ fix_with_resolv_conf() {
     } | sudo tee /etc/resolv.conf > /dev/null
 
     log "Updated /etc/resolv.conf"
-}
-
-# Fix using Windows netsh (if running under WSL or native Windows)
-fix_with_windows() {
-    log "Using Windows netsh"
-
-    for resolver in $RESOLVERS; do
-        netsh interface ip add dns name="Ethernet" "$resolver" &>/dev/null || true
-    done
-
-    log "Updated Windows DNS settings"
 }
 
 # Validate fix
