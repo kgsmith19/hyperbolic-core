@@ -1,9 +1,8 @@
 """Devices and services network-checker reaches over the network.
 
-The load-bearing behaviour is the three-state split. A section that needs
-credentials it does not have must report `unavailable` -- we could not
-measure -- while a query that ran and broke reports `fail`. Neither may ever
-be cited as a fault by the ranking engine.
+The load-bearing behaviour is the three-state split: a section that needs
+credentials it does not have reports `unavailable`, a query that ran and
+broke reports `fail`, and neither may ever be cited as a fault.
 """
 import unittest
 from unittest.mock import patch
@@ -30,6 +29,38 @@ class CredentialGateTest(unittest.TestCase):
         self.assertEqual(rank.rank([], [], scan), [])
 
 
+class RouterAndModemQueryTest(unittest.TestCase):
+    """router()'s and modem()'s query paths, past the credential/_on_lan
+    gates covered elsewhere."""
+
+    def _fake_asus_fetch(self, nvram_body, login_body='{"asus_token": "tok123"}'):
+        return lambda req, timeout=6: (
+            (login_body, None) if req.get_method() == "POST" else (nvram_body, None))
+
+    def test_router_success_path_reports_aiprotection_enabled(self):
+        with patch.object(remote, "_fetch",
+                          side_effect=self._fake_asus_fetch("nvram_get(wrs_protect_enable)=1\n")):
+            got = remote.router(host="192.168.50.1", user="admin", password="hunter2")
+        self.assertTrue(got["aiprotection_enabled"])
+
+    def test_router_success_path_reports_aiprotection_disabled(self):
+        """Not merely 'truthy' -- the exact nvram value '0' must read False."""
+        with patch.object(remote, "_fetch",
+                          side_effect=self._fake_asus_fetch("nvram_get(wrs_protect_enable)=0\n")):
+            got = remote.router(host="192.168.50.1", user="admin", password="hunter2")
+        self.assertFalse(got["aiprotection_enabled"])
+
+    def test_router_login_failure_is_a_fail_not_unavailable(self):
+        with patch.object(remote, "_fetch", return_value=(None, "HTTP 401")):
+            got = remote.router(host="192.168.50.1", user="admin", password="wrong")
+        self.assertEqual(got, {"state": "fail", "reason": "HTTP 401"})
+
+    def test_modem_network_failure_is_a_fail_not_unavailable(self):
+        with patch.object(remote, "_fetch", return_value=(None, "URLError: no route to host")):
+            got = remote.modem(host="192.168.100.1", user="admin", password="hunter2")
+        self.assertEqual(got, {"state": "fail", "reason": "URLError: no route to host"})
+
+
 class ClassifyWanTest(unittest.TestCase):
     """What a WAN address says about the NAT in front of us. Pure function
     over a string, so the classification is tested without a network."""
@@ -41,9 +72,7 @@ class ClassifyWanTest(unittest.TestCase):
         self.assertFalse(got["cgnat"])
 
     def test_carrier_nat_range_is_cgnat_and_not_double_nat(self):
-        """100.64.0.0/10 is RFC 6598 carrier space. ipaddress.is_private
-        counts it as private on older Pythons, which would misreport the
-        ISP's own NAT as the user's modem misconfigured."""
+        """100.64.0.0/10 is RFC 6598 carrier space, not the user's own NAT."""
         got = remote.classify_wan("100.90.1.2")
         self.assertTrue(got["cgnat"])
         self.assertFalse(got["double_nat"])
@@ -62,8 +91,7 @@ class ClassifyWanTest(unittest.TestCase):
         self.assertFalse(got["cgnat"])
 
     def test_loopback_is_not_reported_as_double_nat(self):
-        """Deliberately narrower than ipaddress.is_private: only RFC 1918
-        means 'something is NATing us'."""
+        """Narrower than ipaddress.is_private: only RFC 1918 means NAT."""
         self.assertFalse(remote.classify_wan("127.0.0.1")["double_nat"])
 
     def test_a_non_address_is_unavailable_not_a_fault(self):
@@ -106,9 +134,8 @@ class RemoteSectionTest(unittest.TestCase):
             self.assertFalse(remote.anthropic()["degraded"])
 
     def test_an_unreachable_status_page_is_never_read_as_healthy(self):
-        """The dangerous default: if we cannot reach status.anthropic.com we
-        must not conclude the service is fine, because being unable to reach
-        it is itself consistent with the outage we are diagnosing."""
+        """Unable to reach status.anthropic.com is consistent with an
+        outage, not evidence the service is fine."""
         with patch.object(remote, "_http_get", return_value=(None, "URLError: timeout")):
             got = remote.anthropic()
         self.assertEqual(got["state"], "fail")
@@ -116,26 +143,19 @@ class RemoteSectionTest(unittest.TestCase):
 
 
 class WanGeolocationTest(unittest.TestCase):
-    """wan()'s composition of geoip.locate() (FR-020). Geolocation is
-    enrichment attached under "geo": its failure must never leak into or
-    downgrade wan()'s own state/double_nat/cgnat fields."""
+    """wan()'s composition of geoip.locate() (FR-020): geolocation failure
+    must never leak into or downgrade wan()'s own state/double_nat/cgnat."""
 
     def test_a_successful_wan_lookup_attaches_geo_on_success(self):
-        with patch.object(remote, "_http_get",
-                          return_value=('{"ip": "203.0.113.7"}', None)), \
-             patch.object(remote.geoip, "locate",
-                          return_value={"state": "ok", "city": "Springfield",
-                                        "region": "Oregon",
-                                        "country": "United States"}):
+        geo = {"state": "ok", "city": "Springfield", "region": "Oregon", "country": "United States"}
+        with patch.object(remote, "_http_get", return_value=('{"ip": "203.0.113.7"}', None)), \
+             patch.object(remote.geoip, "locate", return_value=geo):
             got = remote.wan()
         self.assertEqual(got["state"], "ok")
-        self.assertEqual(got["geo"], {"state": "ok", "city": "Springfield",
-                                       "region": "Oregon",
-                                       "country": "United States"})
+        self.assertEqual(got["geo"], geo)
 
     def test_a_failing_geolocation_does_not_affect_wans_own_state(self):
-        """The contract this class exists to pin down: a geolocation
-        failure degrades only "geo", never wan()'s own verdict."""
+        """A geolocation failure degrades only "geo", never wan()'s verdict."""
         with patch.object(remote, "_http_get",
                           return_value=('{"ip": "203.0.113.7"}', None)), \
              patch.object(remote.geoip, "locate",
@@ -149,8 +169,7 @@ class WanGeolocationTest(unittest.TestCase):
         self.assertEqual(got["geo"]["state"], "unavailable")
 
     def test_include_geo_false_skips_the_geolocation_lookup(self):
-        """FR-018: standard-tier scans ask wan() not to bother -- geoip is
-        deep-tier-only surface area."""
+        """FR-018: standard-tier scans ask wan() not to bother."""
         with patch.object(remote, "_http_get",
                           return_value=('{"ip": "203.0.113.7"}', None)), \
              patch.object(remote.geoip, "locate") as mock_locate:
@@ -160,14 +179,10 @@ class WanGeolocationTest(unittest.TestCase):
 
 
 class CredentialDestinationTest(unittest.TestCase):
-    """Credentials reach these devices as HTTP Basic and as a plaintext
-    login header, over `http://`, because that is all a modem or a consumer
-    router speaks on the LAN. That is an accepted risk *on the LAN* (#30).
-
-    Off it, it is not a risk anyone accepted. A typo in MODEM_HOST is enough
-    to post the modem password to a stranger, in the clear, every scan. The
-    address is checked before anything is sent.
-    """
+    """Credentials reach these devices as HTTP Basic over plain `http://`,
+    an accepted risk *on the LAN* (#30) but not off it -- a typo in
+    MODEM_HOST is enough to post the password to a stranger, in the clear,
+    every scan. The address is checked before anything is sent."""
 
     def sent_to(self, host, section):
         """Run a credentialed section and report whether anything was sent."""
@@ -187,12 +202,9 @@ class CredentialDestinationTest(unittest.TestCase):
         self.assertTrue(calls)
 
     def test_a_public_address_sends_nothing(self):
-        """The failure this exists to prevent: one wrong digit in .env and the
-        password goes to a stranger in the clear.
-
-        A real routable address, not 203.0.113.x -- the documentation ranges
-        are reserved, so `is_private` reports them private, correctly.
-        """
+        """One wrong digit in .env must not post the password in the clear.
+        A real routable address, not 203.0.113.x -- `is_private` reports
+        that documentation range as private, which would defeat this test."""
         got, calls = self.sent_to("1.1.1.1", remote.modem)
         self.assertEqual(calls, [], "no request may be made at all")
         self.assertEqual(got["state"], "unavailable")
@@ -204,8 +216,7 @@ class CredentialDestinationTest(unittest.TestCase):
         self.assertEqual(got["state"], "unavailable")
 
     def test_a_name_that_resolves_off_lan_sends_nothing(self):
-        """The check is on the address, not the spelling -- a hostname that
-        resolves to a public address is the same mistake."""
+        """The check is on the address, not the spelling."""
         with patch.object(remote.socket, "getaddrinfo",
                           return_value=[(2, 1, 6, "", ("93.184.216.34", 80))]):
             got, calls = self.sent_to("modem.example.com", remote.modem)
@@ -213,10 +224,8 @@ class CredentialDestinationTest(unittest.TestCase):
         self.assertEqual(got["state"], "unavailable")
 
     def test_a_name_resolving_to_both_lan_and_public_sends_nothing(self):
-        """Every address must be local, not merely one of them. A name that
-        answers with both a LAN address and a public one is the shape of DNS
-        rebinding, and picking the LAN answer out of it would send the
-        password to whoever controls the other."""
+        """Every address must be local, not merely one -- a name answering
+        with both is the shape of DNS rebinding."""
         with patch.object(remote.socket, "getaddrinfo", return_value=[
                 (2, 1, 6, "", ("192.168.1.1", 80)),
                 (2, 1, 6, "", ("93.184.216.34", 80))]):

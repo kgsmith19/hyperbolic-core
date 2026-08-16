@@ -72,9 +72,8 @@ def _device_exposure(device):
             f"host {host!r} failed _on_lan(); no exposure checks were attempted")
 
     open_ports = _check_open_ports(host)
-    http_hostports = [host] if 80 in open_ports else []
-    if 8080 in open_ports:
-        http_hostports.append(f"{host}:8080")
+    http_hostports = [host if port == 80 else f"{host}:{port}"
+                      for port in _HTTP_PORTS if port in open_ports]
 
     endpoint = None
     matched = None

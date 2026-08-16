@@ -203,7 +203,7 @@ def scan(deep=False):
         "events": events(),
         "tcp": tcp_globals(),
         "mtu": mtu(),
-        "tailscale": tailscale(),
+        "tailscale": tailscale(TARGET),
         "dual_stack": dualstack.dual_stack(TARGET),
         "modem": remote.modem(),
         "modem_snmp": snmp.modem_snmp(),
