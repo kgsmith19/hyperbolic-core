@@ -16,7 +16,7 @@ services:
   - services/llm-handler
 
 ci:
-  # Eight workflows total: six independent, path-scoped app gates plus two
+  # Nine workflows total: the independent, path-scoped app gates plus the
   # repo-wide checks. `required:` below states the INTENDED branch-ruleset
   # configuration (only the repo-wide, no-paths:-filter checks should be
   # required) -- it is a specification, not a live read of the ruleset,
@@ -62,6 +62,11 @@ ci:
       gate: Template Lint
       covers: whole repo, every PR — no path filter; PR body vs
         PULL_REQUEST_TEMPLATE.md's required sections
+      required: true
+    - path: .github/workflows/llm-review.yml
+      gate: LLM Review
+      covers: whole repo, every PR — no path filter; adversarial LLM review
+        of the diff against the Issue and AGENTS.md
       required: true
   note: apps/lifeos's own nested workflows (apps/lifeos/.github/workflows/)
     are intentionally inert here (see AGENTS.md's Workflow Safety

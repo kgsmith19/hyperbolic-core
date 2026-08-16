@@ -1,0 +1,23 @@
+{
+  "name": "@hyperbolic/review",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Adversarial LLM PR-review gate. Sends a PR's diff and context to a model from a DIFFERENT provider family than the one that wrote the code, forces a structured verdict through a single tool, and exits non-zero only on valid blocking findings. Mechanically enforces AGENTS.md's R2/R3 provider-separation rule.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.ts",
+    "typecheck": "tsc -b . && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@hyperbolic/llm": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.9.3"
+  }
+}

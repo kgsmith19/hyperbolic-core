@@ -1,0 +1,221 @@
+name: "LLM Review"
+
+# Adversarial LLM review of the diff against the linked Issue and AGENTS.md.
+# Runs packages/review's CLI, which fails closed: exit 1 on a valid blocking
+# finding, exit 2 when the review could not be performed at all.
+#
+# NO paths: filter, deliberately. Same reasoning as repo-policy.yml and
+# secret-scan.yml, and the same failure this repo already hit live on PRs
+# #118 and #120: a required status check tied to a paths: filter never
+# reports on a pull request that does not touch those paths, and a required
+# check that never reports blocks that pull request forever. This gate is
+# required, so it must run on every pull request without exception.
+#
+# The model gets a structured-output tool and nothing else. It has no shell,
+# no filesystem, no network, and no ability to alter the verdict's shape:
+# packages/review forces a single `submit_review` tool call via toolChoice and
+# recomputes the block/pass decision itself from the findings, ignoring the
+# model's own `verdict` field. Repository content reaches the model as fenced
+# DATA with an explicit instruction that it is never to be obeyed -- see
+# packages/review/src/prompt.ts, whose injection-resistance clause is pinned
+# by a test.
+#
+# Provider separation is mechanically enforced, not merely intended:
+# packages/review/src/config.ts REFUSES to run when REVIEW_PROVIDER equals
+# REVIEW_BUILDER_PROVIDER, so this gate cannot degrade into one model family
+# grading its own work (AGENTS.md > Risk classification, R2/R3).
+#
+# OWNER-PROVISIONED PREREQUISITES. This workflow cannot run until the owner
+# has created all of the following; none of them is agent-settable:
+#   - vars.REVIEW_PROVIDER              reviewer family: anthropic|openai|gemini
+#   - vars.REVIEW_MODEL                 exact model id served by that family
+#   - vars.REVIEW_BUILDER_PROVIDER      family that writes code here (optional;
+#                                       packages/review defaults to anthropic)
+#   - vars.INFISICAL_REVIEW_IDENTITY_ID Infisical machine identity for OIDC
+#   - vars.INFISICAL_PROJECT_SLUG       (already used by deploy.yml)
+#   - Infisical secrets at path /review/ (env prod), named exactly
+#     REVIEW_ANTHROPIC_API_KEY / REVIEW_OPENAI_API_KEY / REVIEW_GEMINI_API_KEY.
+#     Only the key for vars.REVIEW_PROVIDER is required; the CLI reads that one
+#     and no other.
+# Until they exist this gate fails closed (exit 2, "the review did not run"),
+# which is the intended behavior for an unprovisioned required check -- it must
+# never report green by default.
+#
+# TRUST NOTE: this is `pull_request`, not `pull_request_target`. Fork pull
+# requests therefore get a read-only token and no OIDC identity, so the
+# Infisical step cannot mint credentials for them and this gate fails closed
+# on forks rather than exposing a key to fork-authored code. For same-repo
+# branches -- the only kind this standard's agents push -- the reviewer CLI
+# does run from the PR's own checkout, the same posture as every other CI job
+# in this repo.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup · Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup · Install workspace dependencies
+        run: npm ci
+
+      - name: Setup · Pull reviewer credentials from Infisical
+        if: github.event_name == 'pull_request'
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_REVIEW_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/review/"
+          domain: https://app.infisical.com
+
+      - name: Context · Write the linked Issue body to a file
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require("node:fs");
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+
+            // The Issue number is derived from data only -- the deterministic
+            // branch name this standard mandates (issue/<n>-<slug>), then the
+            // PR body's closing keyword as a fallback. Both values are used as
+            // a NUMBER, never interpolated into a shell command, and the body
+            // is written straight to a file rather than echoed.
+            let issueNumber = null;
+            const fromBranch = /^issue\/(\d+)-/.exec(pr.head.ref ?? "");
+            if (fromBranch) {
+              issueNumber = Number(fromBranch[1]);
+            } else {
+              const fromBody = /\b(?:closes|fixes|resolves)\s+#(\d+)\b/i.exec(pr.body ?? "");
+              if (fromBody) {
+                issueNumber = Number(fromBody[1]);
+              }
+            }
+
+            let body =
+              "(no linked Issue could be identified from the branch name or the pull request body; " +
+              "judge acceptance criteria from the pull request description below instead)\n\n" +
+              (pr.body ?? "");
+
+            if (issueNumber !== null) {
+              try {
+                const issue = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                body = `Issue #${issueNumber}: ${issue.data.title}\n\n${issue.data.body ?? "(empty body)"}`;
+              } catch (error) {
+                core.warning(`Could not read issue #${issueNumber}: ${error.message}`);
+              }
+            }
+
+            fs.mkdirSync(process.env.RUNNER_TEMP, { recursive: true });
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/issue-body.md`, body, "utf8");
+            core.info(`Wrote ${body.length} chars of Issue context for the reviewer.`);
+
+      - name: Review · Run the adversarial LLM reviewer
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          REVIEW_PROVIDER: ${{ vars.REVIEW_PROVIDER }}
+          REVIEW_MODEL: ${{ vars.REVIEW_MODEL }}
+          REVIEW_BUILDER_PROVIDER: ${{ vars.REVIEW_BUILDER_PROVIDER }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          node packages/review/bin/review.mjs \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --issue-body-file "$RUNNER_TEMP/issue-body.md" \
+            --out "$RUNNER_TEMP/review-verdict.json"
+
+      - name: Review · Publish the verdict to the run summary
+        if: always() && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### LLM Review"
+            echo ""
+            if [ -f "$RUNNER_TEMP/review-verdict.json" ]; then
+              echo '```json'
+              cat "$RUNNER_TEMP/review-verdict.json"
+              echo '```'
+            else
+              echo "No verdict file was produced -- the review did not complete. See the reviewer step's log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  pr-gate:
+    name: LLM Review
+    needs: [checks]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Gate · Confirm every required job passed
+        shell: bash
+        run: |
+          test "${{ needs.checks.result }}" = "success"
+      - name: Gate · Confirm tested SHA matches the live PR head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          live_sha="$(curl --fail --silent \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
+          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
+            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
+            exit 1
+          fi
+          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
+      - name: Gate · Publish step summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### LLM Review"
+            echo ""
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            echo "| checks | ${{ needs.checks.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

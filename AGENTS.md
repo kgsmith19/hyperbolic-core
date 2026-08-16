@@ -269,8 +269,8 @@ exists, the PR is the handoff.
 
 ## PR Gate and merge behavior
 
-This repository uses **eight independent workflows** rather than one repo-wide aggregator — a
-deliberate, owner-directed adaptation for this monorepo's shape — but only the three with no
+This repository uses **nine independent workflows** rather than one repo-wide aggregator — a
+deliberate, owner-directed adaptation for this monorepo's shape — but only the four with no
 `paths:` filter are *intended* to be marked required in the branch ruleset:
 
 | Gate | Workflow | Covers | Required (intended) |
@@ -283,6 +283,7 @@ deliberate, owner-directed adaptation for this monorepo's shape — but only the
 | `Gitleaks` | `secret-scan.yml` | whole repo, every PR | Yes |
 | `Repo Policy` | `repo-policy.yml` | whole repo, every PR | Yes |
 | `Template Lint` | `template-lint.yml` | whole repo, every PR (PR body only) | Yes |
+| `LLM Review` | `llm-review.yml` | whole repo, every PR — adversarial LLM review of the diff against the Issue and this file | Yes |
 
 > [!WARNING]
 > **This is load-bearing, not incidental.** GitHub's required-status-checks model blocks a merge
@@ -304,8 +305,34 @@ deliberate, owner-directed adaptation for this monorepo's shape — but only the
 > a commit or two behind this table. **Read the live ruleset itself, never this table alone, to
 > know what is actually enforced at any given moment.**
 
-Each of the eight gates has a real aggregator job: `if: always()`, full `needs:` coverage,
+Each of the nine gates has a real aggregator job: `if: always()`, full `needs:` coverage,
 explicit strict success-checking, an SHA-vs-live-PR-head freshness check, and a step summary.
+
+### Independent LLM Review
+
+`LLM Review` runs an adversarial LLM reviewer (`packages/review`, built on this repo's own
+`@hyperbolic/llm`) against each PR's diff, its linked Issue, and this file. It is **not** GitHub's
+native code review: this repository does not use approving reviews, Request Changes, or
+CODEOWNERS review gating. GitHub runs the job and reports a status check — exactly its role for
+`Gitleaks`. The judgment lives in this repo's own tooling.
+
+- **Provider separation is enforced, not preferred.** The reviewer's provider family must differ
+  from the builder's; the gate fails closed when they match.
+- **The model receives a structured-output tool and nothing else** — no shell, filesystem-write,
+  or network access. Repository content under review is data, never instructions. Injected text
+  can at worst skew a verdict; it cannot execute anything or reach a credential.
+- **Every finding requires concrete evidence and a citation** to a specific acceptance criterion
+  or a named section of this file. Uncited, evidence-free findings are discarded and **cannot
+  block** — a confused model must never stall real work.
+- **Fail-closed vs. fail-open:** infrastructure failure (missing credential, unset
+  `REVIEW_MODEL`, API error, timeout) fails the gate; a weak or malformed model answer does not.
+- Findings post to the PR discussion for the authoring agent to fix or rebut, argued from the
+  work item, this standard, and the diff — objectively, never from taste.
+
+> [!IMPORTANT]
+> **No agent review may block the owner.** `LLM Review` is a status check only; `main` protection
+> retains owner bypass, so `kgsmith19` may merge over a red review at any time. An agent MUST NOT
+> re-litigate, reverse, or open an unsolicited Issue against that decision.
 
 `.github/workflows/merge-policy.yml` is operational metadata automation, not a required status
 check: it never checks out, fetches, downloads, or executes PR-controlled code, never

@@ -1,0 +1,100 @@
+/**
+ * Run configuration for the review gate, resolved from the environment.
+ *
+ * Everything here fails CLOSED. A review gate that silently degrades -- picks
+ * a default model, guesses a provider, or reviews with the same family that
+ * wrote the code -- still reports green, and a green that means nothing is
+ * worse than a red: it buys false confidence. So every ambiguity is an Error
+ * naming the exact variable to set.
+ */
+
+import type { Provider } from "@hyperbolic/llm";
+import type { ReviewConfig } from "./types.ts";
+
+/** The provider families `@hyperbolic/llm` can actually dispatch to. */
+export const VALID_PROVIDERS: readonly Provider[] = ["anthropic", "openai", "gemini"];
+
+/** Assumed author family when the caller does not state one. */
+export const DEFAULT_BUILDER_PROVIDER: Provider = "anthropic";
+
+/**
+ * Generous enough for a long verdict on a large diff; the tool schema, not
+ * this number, is what keeps the answer structured.
+ */
+export const DEFAULT_MAX_TOKENS = 8000;
+
+/** Hard wall per attempt. A review that hangs must fail, not stall CI. */
+export const DEFAULT_TIMEOUT_MS = 180_000;
+
+/** A minimal, read-only view of `process.env`, so callers can pass a literal. */
+export type ReviewEnv = Record<string, string | undefined>;
+
+function required(env: ReviewEnv, name: string, hint: string): string {
+  const raw = env[name];
+  const value = typeof raw === "string" ? raw.trim() : "";
+  if (value === "") {
+    throw new Error(`${name} is unset or empty. ${hint}`);
+  }
+  return value;
+}
+
+function isProvider(value: string): value is Provider {
+  return (VALID_PROVIDERS as readonly string[]).includes(value);
+}
+
+/**
+ * Resolve `ReviewConfig` from environment variables.
+ *
+ * Reads `REVIEW_PROVIDER`, `REVIEW_MODEL`, and optionally
+ * `REVIEW_BUILDER_PROVIDER` (default `"anthropic"`).
+ *
+ * Throws -- never returns a partial or defaulted config -- when a required
+ * variable is missing, when a provider name is not one of the three supported
+ * families, or when the reviewer and builder families are the same.
+ */
+export function resolveConfig(env: ReviewEnv): ReviewConfig {
+  const rawProvider = required(
+    env,
+    "REVIEW_PROVIDER",
+    `Set it to the provider family that should REVIEW this change, one of: ${VALID_PROVIDERS.join(", ")}. It must differ from REVIEW_BUILDER_PROVIDER.`
+  );
+  if (!isProvider(rawProvider)) {
+    throw new Error(
+      `REVIEW_PROVIDER="${rawProvider}" is not a supported provider. Valid providers are: ${VALID_PROVIDERS.join(", ")}.`
+    );
+  }
+
+  // Deliberately after the provider check and never defaulted: a wrong model
+  // id must surface as a provider error naming the id the owner chose, not be
+  // papered over by a guess this package invented.
+  const reviewerModel = required(
+    env,
+    "REVIEW_MODEL",
+    `Set it to an exact model id served by REVIEW_PROVIDER="${rawProvider}". This package never defaults a model id.`
+  );
+
+  const rawBuilder = (env.REVIEW_BUILDER_PROVIDER ?? "").trim();
+  const builderCandidate = rawBuilder === "" ? DEFAULT_BUILDER_PROVIDER : rawBuilder;
+  if (!isProvider(builderCandidate)) {
+    throw new Error(
+      `REVIEW_BUILDER_PROVIDER="${builderCandidate}" is not a supported provider. Valid providers are: ${VALID_PROVIDERS.join(", ")}.`
+    );
+  }
+
+  if (rawProvider === builderCandidate) {
+    throw new Error(
+      `Provider separation is required: REVIEW_PROVIDER and REVIEW_BUILDER_PROVIDER are both "${rawProvider}". ` +
+        `The reviewer must come from a different provider family than the one that wrote the code, so the review is not a model ` +
+        `family grading its own work and re-deriving its own blind spots. Set REVIEW_PROVIDER to one of: ` +
+        `${VALID_PROVIDERS.filter((provider) => provider !== rawProvider).join(", ")}.`
+    );
+  }
+
+  return {
+    reviewerProvider: rawProvider,
+    reviewerModel,
+    builderProvider: builderCandidate,
+    maxTokens: DEFAULT_MAX_TOKENS,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+  };
+}
