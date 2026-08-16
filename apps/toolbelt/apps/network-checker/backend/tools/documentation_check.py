@@ -127,23 +127,19 @@ class DocChecker:
                     )
 
     def check_docs_directory(self):
-        """Verify docs directory exists and isn't empty."""
+        """Flag an empty docs/ directory. docs/ itself is recommended, not
+        required, so a missing directory is not an issue at any intensity."""
         docs_dir = self.root / "docs"
-        if docs_dir.exists():
-            md_files = list(docs_dir.glob("*.md"))
-            if not md_files:
-                self.issues.append(
-                    Issue(
-                        file="docs/",
-                        line=0,
-                        severity="medium",
-                        rule="empty_docs_dir",
-                        message="docs/ directory is empty",
-                    )
+        if docs_dir.exists() and not list(docs_dir.glob("*.md")):
+            self.issues.append(
+                Issue(
+                    file="docs/",
+                    line=0,
+                    severity="medium",
+                    rule="empty_docs_dir",
+                    message="docs/ directory is empty",
                 )
-        elif self.intensity in ("medium", "high"):
-            # docs/ is recommended but not required
-            pass
+            )
 
     def run(self) -> List[Issue]:
         """Run all checks."""

@@ -101,7 +101,6 @@
     display: inline-flex; align-items: center; gap: .4rem;
   }
   button:hover, .btn:hover { border-color: var(--accent); color: var(--accent); }
-  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 
   .toolbar { display: flex; gap: .5rem; flex-wrap: wrap; }
 
@@ -121,14 +120,6 @@
   .chart-tooltip dt { color: var(--muted); }
   .chart-tooltip dt::after { content: ":"; }
   .chart-tooltip dd { margin: 0; }
-
-  /* Skeleton loading state for the first paint before any data has arrived. */
-  .skeleton {
-    background: linear-gradient(90deg, var(--surface-2) 25%, var(--line) 37%, var(--surface-2) 63%);
-    background-size: 400% 100%; animation: shimmer 1.4s ease infinite;
-    border-radius: var(--radius-sm); height: 1em; display: block;
-  }
-  @keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 
   /* Command palette */
   dialog.palette {

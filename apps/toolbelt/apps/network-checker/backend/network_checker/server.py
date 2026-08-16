@@ -88,6 +88,11 @@ class Handler(BaseHTTPRequestHandler):
             limit = int(parse_qs(query).get("limit", ["500"])[0])
         except (ValueError, TypeError):
             return self._send(b"invalid limit parameter", "text/plain", 400)
+        # SQLite's `LIMIT -1` means "no limit at all" -- forwarding a
+        # negative value straight through would silently bypass the 5000
+        # cap below instead of being bounded by it.
+        if limit < 0:
+            return self._send(b"invalid limit parameter", "text/plain", 400)
         body = json.dumps(payload(self.db, min(limit, 5000)), default=str).encode()
         self._send(body, "application/json")
 

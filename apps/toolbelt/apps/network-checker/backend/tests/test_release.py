@@ -103,6 +103,46 @@ class VersionSourceOfTruthTest(TestCase):
             with self.assertRaisesRegex(ValueError, "version mismatch"):
                 release.check_version_files(init, manifest, registry)
 
+    def test_check_rejects_a_registered_manifest_that_drifted_from_tool_json(self):
+        """Same version everywhere, but the registered manifest's own content
+        no longer matches tool.json (e.g. a field edited in one place and
+        not the other) -- must fail on that mismatch specifically, not pass
+        because the version parity check alone was satisfied."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init = root / "__init__.py"
+            manifest = root / "tool.json"
+            registry = root / release.REGISTRY.name
+            init.write_text(release.INIT_PY.read_text())
+            manifest.write_text(release.MANIFEST.read_text())
+            tampered = release.REGISTRY.read_text().replace(
+                '"description":"Local-first', '"description":"TAMPERED Local-first', 1)
+            self.assertNotEqual(tampered, release.REGISTRY.read_text(),
+                            "fixture setup must actually change the registered manifest")
+            registry.write_text(tampered)
+
+            with self.assertRaisesRegex(ValueError, "registered manifest does not match tool.json"):
+                release.check_version_files(init, manifest, registry)
+
+    def test_check_rejects_a_registered_hash_that_does_not_match_the_manifest(self):
+        """The registered hash must be independently regenerated and
+        compared, not merely present -- a stale/wrong hash next to an
+        otherwise-correct manifest must still fail closed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init = root / "__init__.py"
+            manifest = root / "tool.json"
+            registry = root / release.REGISTRY.name
+            init.write_text(release.INIT_PY.read_text())
+            manifest.write_text(release.MANIFEST.read_text())
+            original = release.REGISTRY.read_text()
+            real_hash = re.search(r"(?m)^\s*'([0-9a-f]{64})',\s*$", original).group(1)
+            bad_hash = ("0" if real_hash[0] != "0" else "1") + real_hash[1:]
+            registry.write_text(original.replace(real_hash, bad_hash, 1))
+
+            with self.assertRaisesRegex(ValueError, r"registered manifest hash \w+ does not match"):
+                release.check_version_files(init, manifest, registry)
+
 
 class ManualWorkflowContractTest(TestCase):
     def setUp(self):

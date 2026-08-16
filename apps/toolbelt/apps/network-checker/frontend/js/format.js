@@ -20,7 +20,9 @@ export function tone(state) {
   return state === "ok" ? "t-ok" : state === "fail" ? "t-fail" : "t-una";
 }
 
-export function titleCase(s) {
+// Not an actual title-case (no capitalization) -- just makes an
+// underscored verdict/cause id ("router_dns") readable as prose.
+export function humanize(s) {
   return (s || "").replace(/_/g, " ");
 }
 

@@ -158,9 +158,12 @@ class ApiTest(unittest.TestCase):
             self.assertTrue(body, f"{path} served empty body")
 
     def test_static_route_cannot_escape_the_frontend_directory(self):
-        with self.assertRaises(urllib.error.HTTPError) as cm:
-            self.get("/../network_checker/server.py")
-        self.assertEqual(cm.exception.code, 404)
+        """A literal '..' and its percent-encoded form (never unquoted, so
+        it must not decode into one either) both stay inside frontend/."""
+        for path in ("/../network_checker/server.py", "/%2e%2e/%2e%2e/network_checker/server.py"):
+            with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as cm:
+                self.get(path)
+            self.assertEqual(cm.exception.code, 404, path)
 
     def test_data_route_returns_everything_the_page_needs(self):
         """Criterion 13: data exists and is correct, not just keys present."""
@@ -178,12 +181,20 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(data["errors"][0]["verdict"], "internet",
                         "error not correlated with sample")
 
-    def test_stored_error_is_correlated_against_the_stored_sample(self):
-        """End to end: an error 30s after a failing sample inherits its verdict."""
+    def test_uncorrelated_error_gets_unmonitored_not_a_borrowed_verdict(self):
+        """An error far outside the correlation window must read
+        'unmonitored' over the real API, not inherit a nearby sample's verdict."""
+        host = store.host_id(self.conn, "test", "Windows")
+        store.add_error(self.conn, host, {
+            "ts": "2026-08-05T02:00:00Z", "source": "claude-code",
+            "kind": "network", "detail": "API Error: ETIMEDOUT"})
+
         _, body, _ = self.get("/api/data")
         errors = json.loads(body)["errors"]
-        self.assertEqual(len(errors), 1)
-        self.assertEqual(errors[0]["verdict"], "internet")
+        self.assertEqual(len(errors), 2)
+        far = next(e for e in errors if e["detail"] == "API Error: ETIMEDOUT")
+        self.assertEqual(far["verdict"], "unmonitored",
+                        "error far outside the correlation window must not inherit a nearby sample's verdict")
 
     def test_stream_route_pushes_the_first_payload_immediately(self):
         """The SSE endpoint must not make a fresh browser tab wait out a
@@ -197,23 +208,41 @@ class ApiTest(unittest.TestCase):
         payload = json.loads(data_line[len("data: "):])
         self.assertEqual(len(payload["samples"]), 1)
 
-    def test_unknown_route_is_404(self):
-        with self.assertRaises(urllib.error.HTTPError) as cm:
-            self.get("/nope")
-        self.assertEqual(cm.exception.code, 404)
+    def test_stream_route_pushes_a_second_event_after_a_new_sample_lands(self):
+        """Not a push-once channel: a sample written after the client is
+        already connected must arrive as a fresh event on that connection."""
+        host = store.host_id(self.conn, "test", "Windows")
+        with urllib.request.urlopen(self.base + "/api/stream", timeout=5) as r:
+            for _ in range(3):
+                r.readline()  # "event: data", its "data: ...", blank separator
+            store.add_sample(self.conn, host, {
+                "ts": "2026-08-05T00:05:00Z", "gw_state": "ok", "gw_ms": 3.0,
+                "hop_state": "ok", "inet_state": "ok", "inet_loss": 0.0,
+                "dns_router_state": "ok", "dns_public_state": "ok",
+                "tls_state": "ok", "http_state": "ok", "culprit": None})
+            event_line = r.readline().decode()
+            data_line = r.readline().decode()
+        self.assertEqual(event_line.strip(), "event: data")
+        payload = json.loads(data_line[len("data: "):])
+        self.assertEqual(len(payload["samples"]), 2,
+                        "a sample written after connecting should trigger a fresh SSE push")
 
-    def test_unknown_api_route_is_404_not_a_static_file_lookup(self):
-        with self.assertRaises(urllib.error.HTTPError) as cm:
-            self.get("/api/nope")
-        self.assertEqual(cm.exception.code, 404)
+    def test_unknown_routes_are_404(self):
+        """A plain unknown path and an unknown /api/ path both 404 -- the
+        latter must not fall through to the static-file lookup."""
+        for path in ("/nope", "/api/nope"):
+            with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as cm:
+                self.get(path)
+            self.assertEqual(cm.exception.code, 404, path)
 
-    def test_invalid_limit_parameter_returns_400_not_crash(self):
-        """Criterion 6: client input must not crash the server.
-        Malformed limit parameter should return 400, not 500."""
-        with self.assertRaises(urllib.error.HTTPError) as cm:
-            self.get("/api/data?limit=abc")
-        self.assertEqual(cm.exception.code, 400,
-                        "malformed limit should be client error, not server crash")
+    def test_bad_limit_parameter_returns_400_not_crash_or_unbounded(self):
+        """Criterion 6: malformed input must not crash the server (500), and
+        SQLite's `LIMIT -1` ("no limit") must not let a negative value
+        silently bypass the 5000-row cap -- both are client errors."""
+        for bad in ("abc", "-1"):
+            with self.subTest(limit=bad), self.assertRaises(urllib.error.HTTPError) as cm:
+                self.get(f"/api/data?limit={bad}")
+            self.assertEqual(cm.exception.code, 400, f"limit={bad}")
 
 
 if __name__ == "__main__":
