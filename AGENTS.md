@@ -280,19 +280,25 @@ repo-wide aggregator — a deliberate, owner-directed adaptation for this monore
 | `Gitleaks` | `secret-scan.yml` | whole repo, every PR (deliberate exception: no path filter, generic name) |
 
 A PR is required to pass only the gates whose paths its diff touches (GitHub's own required-check
-semantics: a check not triggered for a PR is not required for that PR). Each gate is, within
-itself, fail-closed: a real aggregator job with `if: always()`, full `needs:` coverage, and
-explicit strict success-checking.
+semantics: a check not triggered for a PR is not required for that PR). Each gate's internal
+structure — a real aggregator job with `if: always()`, full `needs:` coverage, explicit strict
+success-checking, an SHA-freshness check, and a step summary — is tracked to full compliance by
+a dedicated Issue; not every gate has reached that bar yet. Check each workflow file directly for
+its current internal structure rather than assuming this table describes it.
 
-`merge-policy.yml` is operational metadata automation, not a required status check: it never
-checks out, fetches, or executes PR-controlled code, never direct-merges, and maintains only the
-managed Work State and Evidence Index comments. For ready same-repository PRs to `main` it
-enables native squash auto-merge bound to the expected head, re-arms it when disabled without an
-owner hold, and never bypasses any gate.
+Two pieces of automation described by the pinned standard are **not yet present in this repo**
+and must not be assumed to exist until their own tracking Issue lands and this section is
+updated:
 
-`main` protection: pull request required, squash only, linear history, no force push, no
-deletion, code-owner approval required for control-plane files (see `.github/CODEOWNERS`), owner
-bypass.
+- A `merge-policy.yml` operational-metadata workflow (auto-merge arming/re-arming, managed
+  Work State / Evidence Index comments) — no such file exists yet in `.github/workflows/`.
+- A `.github/CODEOWNERS` file requiring code-owner approval for control-plane paths — no such
+  file exists yet.
+
+Until both land, `main` protection (pull request required, squash only, linear history, no force
+push, no deletion, owner bypass) applies without a code-owner-approval requirement, and PRs are
+merged without automated re-arming — the owner merges manually if `enable_pr_auto_merge` cannot
+be armed.
 
 Agents create ready PRs — never drafts, never converting to draft; incomplete work remains on the
 branch until ready.
