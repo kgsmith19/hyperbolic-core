@@ -2,13 +2,16 @@ name: "ACC PR Gate"
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
     paths:
       - "apps/agentic-command-center/**"
       - "apps/toolbelt/guards/**"
       - ".github/workflows/acc-ci.yml"
   merge_group:
     types: [checks_requested]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,17 +29,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout · Fetch repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Setup · Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
-      - name: Portable test suite
+      - name: Test · Portable test suite
         run: npm test
         working-directory: apps/agentic-command-center
-      - name: Expose the integration diff to covgate
+      - name: Coverage · Expose the integration diff to covgate
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -45,7 +50,7 @@ jobs:
           elif [ "${{ github.event_name }}" = "merge_group" ]; then
             git reset --soft "${{ github.event.merge_group.base_sha }}"
           fi
-      - name: Changed-file coverage
+      - name: Coverage · Changed-file coverage
         run: npm run covgate
         working-directory: apps/agentic-command-center
 
@@ -54,24 +59,26 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout · Fetch repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Setup · Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
-      - name: Native test suite
+      - name: Test · Native test suite
         run: npm run test:windows
         working-directory: apps/agentic-command-center
-      - name: Launch-shim tests
+      - name: Test · Launch-shim tests
         shell: pwsh
         run: powershell -File backend/shim/claude.test.ps1
         working-directory: apps/agentic-command-center
-      - name: Cap-watcher tests
+      - name: Test · Cap-watcher tests
         shell: pwsh
         run: powershell -File backend/watcher/claude-cap-watch.test.ps1
         working-directory: apps/agentic-command-center
-      - name: Cap-watcher installer tests
+      - name: Test · Cap-watcher installer tests
         shell: pwsh
         run: powershell -File backend/watcher/install-cap-watch-task.test.ps1
         working-directory: apps/agentic-command-center
@@ -81,31 +88,36 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout · Fetch repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Setup · Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: apps/agentic-command-center/frontend/package-lock.json
-      - run: npm ci
+      - name: Setup · Install frontend dependencies
+        run: npm ci
         working-directory: apps/agentic-command-center/frontend
-      - run: npm run build
+      - name: Build · Build frontend
+        run: npm run build
         working-directory: apps/agentic-command-center/frontend
-      - name: Cache Playwright Chromium
+      - name: Setup · Cache Playwright Chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: acc-ui-playwright-chromium-${{ runner.os }}-${{ hashFiles('apps/agentic-command-center/frontend/package-lock.json') }}
-      - run: npx playwright install --with-deps chromium
+      - name: Setup · Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
         working-directory: apps/agentic-command-center/frontend
-      - name: Contract end-to-end against the monorepo ACC server
+      - name: E2E · Contract end-to-end against the monorepo ACC server
         run: npm run e2e
         working-directory: apps/agentic-command-center/frontend
         env:
           ACC_DIR: ${{ github.workspace }}/apps/agentic-command-center
-      - name: Upload UI Playwright failure evidence
+      - name: Evidence · Upload UI Playwright failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -122,11 +134,45 @@ jobs:
     needs: [portable, windows-integration, ui]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      pull-requests: read
     steps:
-      - name: Confirm every correctness job passed
+      - name: Gate · Confirm every correctness job passed
         shell: bash
         run: |
           test "${{ needs.portable.result }}" = "success"
           test "${{ needs.windows-integration.result }}" = "success"
           test "${{ needs.ui.result }}" = "success"
+      - name: Gate · Confirm tested SHA matches the live PR head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          live_sha="$(curl --fail --silent \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
+          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
+            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
+            exit 1
+          fi
+          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
+      - name: Gate · Publish step summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### ACC PR Gate"
+            echo ""
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            echo "| portable | ${{ needs.portable.result }} |"
+            echo "| windows-integration | ${{ needs.windows-integration.result }} |"
+            echo "| ui | ${{ needs.ui.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
