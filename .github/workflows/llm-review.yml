@@ -56,10 +56,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least privilege at the top; each job widens only to what it actually uses.
+# Nothing here writes to a pull request today, so no job gets
+# pull-requests: write -- the "checks" job installs and runs repository code
+# while holding a provider credential, and must not also carry a token that
+# could speak on the PR's behalf.
 permissions:
   contents: read
-  pull-requests: write
-  id-token: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -70,6 +73,13 @@ jobs:
     name: Checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # id-token: write is required for Infisical's OIDC exchange, and is the
+    # only widening this job needs. Note the step order below: npm ci runs
+    # BEFORE credentials are pulled, so install lifecycle scripts never
+    # execute with a provider key in the environment.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

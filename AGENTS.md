@@ -326,8 +326,10 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   block** — a confused model must never stall real work.
 - **Fail-closed vs. fail-open:** infrastructure failure (missing credential, unset
   `REVIEW_MODEL`, API error, timeout) fails the gate; a weak or malformed model answer does not.
-- Findings post to the PR discussion for the authoring agent to fix or rebut, argued from the
-  work item, this standard, and the diff — objectively, never from taste.
+- Findings are published to the run's job summary, and the authoring agent fixes or rebuts them
+  argued from the work item, this standard, and the diff — objectively, never from taste.
+  Posting findings into the PR discussion itself, with a round counter and owner escalation after
+  repeated unresolved rounds, is tracked separately and is **not** yet implemented.
 
 > [!IMPORTANT]
 > **No agent review may block the owner.** `LLM Review` is a status check only; `main` protection
