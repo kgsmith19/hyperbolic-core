@@ -44,7 +44,14 @@ class InventorySafetyTest(unittest.TestCase):
                   for table in ("device", "interface", "config_item")]
         self.assertEqual(counts, [0, 0, 0])
 
-    def test_changed_device_or_config_resets_synced_for_retry(self):
+    def test_a_rescan_resets_an_updated_devices_sync_flag_and_appends_new_unsynced_config(self):
+        """Integration-level companion to SyncedResetOnUpdateTest (which
+        calls _upsert_device() directly): via the full record_inventory()
+        pipeline, an already-mirrored device that changes must be requeued
+        (synced->0), and the changed key's new observation must land as a
+        fresh, unsynced config_item row -- config_item is append-only so
+        this is never a reset of an existing row, only new rows starting
+        unsynced as always."""
         inventory.record_inventory(self.conn, self.host, fixture_payload(), TS)
         self.conn.execute("UPDATE device SET synced=1")
         self.conn.execute("UPDATE config_item SET synced=1")
@@ -53,10 +60,10 @@ class InventorySafetyTest(unittest.TestCase):
         inventory.record_inventory(self.conn, self.host, later, "2026-08-06T00:00:00Z")
         gateway = self.conn.execute(
             "SELECT synced FROM device WHERE ip='192.168.1.1'").fetchone()[0]
-        pending = self.conn.execute(
-            "SELECT COUNT(*) FROM config_item WHERE synced=0").fetchone()[0]
-        self.assertEqual(gateway, 0)
-        self.assertGreater(pending, 0)
+        new_channel_row = self.conn.execute(
+            "SELECT synced FROM config_item WHERE key='wifi.channel' AND value='149'").fetchone()[0]
+        self.assertEqual(gateway, 0, "an updated device must be requeued for re-sync")
+        self.assertEqual(new_channel_row, 0, "the new observation must start unsynced")
 
 
 class InventoryMirrorTest(unittest.TestCase):

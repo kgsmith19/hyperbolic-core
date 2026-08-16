@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from network_checker import inventory, store, topology
 
-from tests.test_inventory import TS, InventoryTestCase, fixture_payload
+from tests.test_inventory import TS, InventoryTestCase, _neighbor_devices, fixture_payload
 
 
 # Same on-disk store and one host as the inventory suite -- inherited rather
@@ -63,11 +63,26 @@ class MacNormalizationDedupeTest(InventorySecurityTestCase):
         self.assertEqual(rows["mac"], "aa:bb:cc:dd:ee:ff")
 
 
+class NoDuplicateDeviceRowsTest(InventorySecurityTestCase):
+    """Exact set-and-count, not subset containment: a duplicate-row bug
+    (e.g. a broken upsert lookup) would still pass a mere subset check but
+    must fail this one. Split from test_inventory.py for file budget."""
+
+    def test_one_device_row_per_neighbor_table_entry(self):
+        inventory.record_inventory(self.conn, self.host, fixture_payload(), TS)
+        ips = [r["ip"] for r in self.conn.execute(
+            "SELECT ip FROM device WHERE ip NOT IN ('self','modem','router')")]
+        expected = {d["ip"] for d in _neighbor_devices()}
+        self.assertEqual(set(ips), expected)
+        self.assertEqual(len(ips), len(expected), "duplicate row for one neighbor-table ip")
+
+
 class RecordInventoryTransactionTest(InventorySecurityTestCase):
-    """Finding 63: record_inventory()'s _map_* calls now share one
-    store.transaction() -- store.open_db() uses isolation_level=None (real
-    autocommit), so without this a mid-call exception used to leave
-    whichever calls already ran permanently committed."""
+    """Finding 63: record_inventory()'s _map_* calls now share one SAVEPOINT
+    (record_inventory() itself, rolled back on any exception) -- store.
+    open_db() uses isolation_level=None (real autocommit), so without this a
+    mid-call exception used to leave whichever calls already ran permanently
+    committed."""
 
     def test_a_mid_scan_exception_leaves_the_database_completely_unchanged(self):
         before = self.counts()
