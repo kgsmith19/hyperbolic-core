@@ -12,7 +12,7 @@ name: "Shell PR Gate"
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
     paths:
       - "apps/shell/**"
       - "packages/**"
@@ -22,6 +22,9 @@ on:
       - ".github/workflows/shell-ci.yml"
   merge_group:
     types: [checks_requested]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
@@ -31,22 +34,24 @@ permissions:
   contents: read
 
 jobs:
-  pr-gate:
-    name: Shell PR Gate
+  checks:
+    name: Checks
     runs-on: ubuntu-latest
     timeout-minutes: 16 # ~2x the 8-minute budget (10-cicd-deployment.md section 10.3)
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Setup · Configure Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install workspace dependencies
+      - name: Setup · Install workspace dependencies
         run: npm ci
 
       # No lint step: neither apps/shell nor any packages/* workspace
@@ -55,78 +60,78 @@ jobs:
       # for this CI chore; noted honestly here rather than inventing a script
       # that doesn't exist.
 
-      - name: Build packages/ui dependency
+      - name: Build · Build packages/ui dependency
         run: npm run build --workspace=packages/ui
 
-      - name: Type-check apps/shell
+      - name: Type-check · apps/shell
         run: npx tsc -b apps/shell/frontend
 
-      - name: Type-check packages/platform-client
+      - name: Type-check · packages/platform-client
         run: npm run typecheck --workspace=packages/platform-client
 
-      - name: Type-check packages/llm
+      - name: Type-check · packages/llm
         run: npm run typecheck --workspace=packages/llm
 
-      - name: Type-check services/llm-handler
+      - name: Type-check · services/llm-handler
         run: npm run typecheck --workspace=@hyperbolic/llm-handler
 
-      - name: Type-check packages/ui
+      - name: Type-check · packages/ui
         # The dependency build above already emitted the clean-checkout
         # declarations Shell consumes; this re-runs the compiler explicitly.
         run: npx tsc -b packages/ui
 
-      - name: "Unit tests: apps/shell (vitest)"
+      - name: Test · apps/shell (vitest)
         run: npm run test:unit --workspace=apps/shell
 
-      - name: "Unit tests: packages/platform-client (node --test)"
+      - name: Test · packages/platform-client (node --test)
         run: npm test --workspace=packages/platform-client
 
-      - name: "Unit tests: packages/ui (node --test)"
+      - name: Test · packages/ui (node --test)
         run: npm test --workspace=packages/ui
 
-      - name: "Unit tests: packages/llm (node --test)"
+      - name: Test · packages/llm (node --test)
         run: npm test --workspace=packages/llm
 
-      - name: "Unit tests: services/llm-handler (node --test)"
+      - name: Test · services/llm-handler (node --test)
         run: npm test --workspace=@hyperbolic/llm-handler
 
-      - name: Test deployment operator tooling
+      - name: Test · deployment operator tooling
         run: node --test docs/ops/*.test.mjs
 
-      - name: Cache Playwright Chromium
+      - name: E2E · Cache Playwright Chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: shell-playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
-      - name: Install Playwright Chromium
+      - name: E2E · Install Playwright Chromium
         run: npx playwright install --with-deps chromium
         working-directory: apps/shell
 
-      - name: Start PostgreSQL for the registry-backed browser journey
+      - name: E2E · Start PostgreSQL for the registry-backed browser journey
         run: |
           sudo systemctl start postgresql.service
           sudo -n -u postgres psql -v ON_ERROR_STOP=1 -tAc "select 1"
 
-      - name: Run every Shell e2e suite
+      - name: E2E · Run every Shell e2e suite
         run: npx playwright test
         # playwright.config.ts moved into frontend/ with the rest of the
         # frontend tree; Playwright resolves it from the working directory.
         working-directory: apps/shell/frontend
 
-      - name: Production build
+      - name: Build · Production build
         run: npm run build:app --workspace=apps/shell
 
-      - name: Verify the static health endpoint
+      - name: Build · Verify the static health endpoint
         run: npm run healthz-check --workspace=apps/shell
 
-      - name: Enforce UI size budget
+      - name: Size · Enforce UI size budget
         run: node packages/ui/test/size-check.mjs
 
-      - name: Enforce Shell size budget
+      - name: Size · Enforce Shell size budget
         run: npm run size-check --workspace=apps/shell
 
-      - name: Upload Playwright failure evidence
+      - name: E2E · Upload Playwright failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -136,3 +141,48 @@ jobs:
             apps/shell/frontend/test-results/
           if-no-files-found: ignore
           retention-days: 14
+
+  pr-gate:
+    name: Shell PR Gate
+    needs: [checks]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Gate · Confirm every required job passed
+        shell: bash
+        run: |
+          test "${{ needs.checks.result }}" = "success"
+      - name: Gate · Confirm tested SHA matches the live PR head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          live_sha="$(curl --fail --silent \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
+          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
+            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
+            exit 1
+          fi
+          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
+      - name: Gate · Publish step summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Shell PR Gate"
+            echo ""
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            echo "| checks | ${{ needs.checks.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

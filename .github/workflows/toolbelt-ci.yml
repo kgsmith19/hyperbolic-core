@@ -2,7 +2,7 @@ name: "Toolbelt PR Gate"
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
     paths:
       - "apps/toolbelt/**"
       - "packages/toolbelt-cli/**"
@@ -11,6 +11,9 @@ on:
       - ".github/workflows/toolbelt-ci.yml"
   merge_group:
     types: [checks_requested]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
@@ -20,40 +23,43 @@ permissions:
   contents: read
 
 jobs:
-  pr-gate:
-    name: Toolbelt PR Gate
+  checks:
+    name: Checks
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout · Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Setup · Configure Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Setup · Configure Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Start disposable PostgreSQL for migration E2E tests
+      - name: Database · Start disposable PostgreSQL for migration E2E tests
         shell: bash
         run: |
           sudo systemctl start postgresql.service
           sudo -u postgres psql -v ON_ERROR_STOP=1 -tAc "select 1"
-      - name: Install root workspace dependencies
+      - name: Dependencies · Install root workspace dependencies
         run: npm ci
-      - name: Check Toolbelt manifests
+      - name: Toolbelt · Check manifests
         run: npm run manifests:check -- --registry
         working-directory: apps/toolbelt
-      - name: Validate and stage the unified migration ledger
+      - name: Migrations · Validate and stage the unified migration ledger
         run: |
           npm run migrations:check
           stage_dir="${RUNNER_TEMP}/platform-migration-stage"
           npm run migrations:stage -- "${stage_dir}"
           test -n "$(find "${stage_dir}/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -print -quit)"
         working-directory: apps/toolbelt
-      - name: Run Toolbelt CLI tests
+      - name: Test · Run Toolbelt CLI tests
         run: npm test --workspace=@hyperbolic/toolbelt-cli
-      - name: Run hermetic Toolbelt tests
+      - name: Test · Run hermetic Toolbelt tests
         run: |
           node --test \
             tests/core-rpc-migration.test.mjs \
@@ -69,7 +75,7 @@ jobs:
         working-directory: apps/toolbelt
         env:
           TOOLBELT_REQUIRE_POSTGRES: "1"
-      - name: Run Guards tests
+      - name: Test · Run Guards tests
         run: node --test *.test.mjs
         working-directory: apps/toolbelt/guards
       # Enumerated, not globbed, and the distinction is load-bearing: this
@@ -81,7 +87,7 @@ jobs:
       # hosted project. Since m1-08 pinned prompt.* RLS to the owner UUID they
       # cannot pass on a fixture identity at all, so they are owner-only
       # manual proofs -- a glob here would fail the gate outright.
-      - name: Run Prompt Organizer tests
+      - name: Test · Run Prompt Organizer tests
         run: |
           node --test --test-concurrency=1 \
             backend/tests/contract.test.mjs \
@@ -101,22 +107,22 @@ jobs:
         working-directory: apps/toolbelt/apps/prompt-organizer
         env:
           PROMPT_REQUIRE_POSTGRES: "1"
-      - name: Run Idea Intake tests
+      - name: Test · Run Idea Intake tests
         run: node --test --test-concurrency=1 "tests/*.test.mjs"
         working-directory: apps/toolbelt/apps/idea-intake
         env:
           TOOLBELT_REQUIRE_POSTGRES: "1"
-      - name: Cache Playwright Chromium
+      - name: Dependencies · Cache Playwright Chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: toolbelt-playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-      - name: Install Playwright Chromium
+      - name: Dependencies · Install Playwright Chromium
         run: ./node_modules/.bin/playwright install --with-deps chromium
-      - name: Start Prompt Organizer
+      - name: E2E · Start Prompt Organizer
         run: python3 -m http.server 8812 --directory frontend >/tmp/prompt-organizer.log 2>&1 &
         working-directory: apps/toolbelt/apps/prompt-organizer
-      - name: Wait for Prompt Organizer
+      - name: E2E · Wait for Prompt Organizer
         shell: bash
         run: |
           for attempt in $(seq 1 20); do
@@ -158,12 +164,12 @@ jobs:
       # inside its window. If no refresh token is configured the step fails
       # closed with "TOOLBELT_OWNER_REFRESH_TOKEN is required", which is the
       # honest outcome.
-      - name: Exchange and verify the owner session
+      - name: E2E · Exchange and verify the owner session
         run: node backend/tests/export-owner-session.mjs
         working-directory: apps/toolbelt/apps/prompt-organizer
         env:
           TOOLBELT_OWNER_REFRESH_TOKEN: ${{ secrets.TOOLBELT_OWNER_REFRESH_TOKEN }}
-      - name: Run Prompt Organizer critical browser journey
+      - name: E2E · Run Prompt Organizer critical browser journey
         run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/prompt-organizer/frontend/playwright.config.mjs
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:8812
@@ -174,7 +180,7 @@ jobs:
           # reintroducing the very expiry problem the exchange step removes.
           # critical-flow.test.mjs reads the same variable either way (see its
           # own "Owner-credential threading" header comment).
-      - name: Upload Prompt Organizer browser evidence
+      - name: Evidence · Upload Prompt Organizer browser evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -184,18 +190,18 @@ jobs:
             apps/toolbelt/apps/prompt-organizer/frontend/test-results/
           if-no-files-found: ignore
           retention-days: 14
-      - name: Run Network Checker tests and deterministic scanners
+      - name: Test · Run Network Checker tests and deterministic scanners
         run: bash backend/tools/check.sh
         working-directory: apps/toolbelt/apps/network-checker
-      - name: Prepare Network Checker dashboard fixture
+      - name: E2E · Prepare Network Checker dashboard fixture
         run: python3 backend/tests/e2e/seed_dashboard_fixture.py
         working-directory: apps/toolbelt/apps/network-checker
-      - name: Start Network Checker dashboard
+      - name: E2E · Start Network Checker dashboard
         run: python3 -m network_checker serve --no-open >network-checker.log 2>&1 &
         working-directory: apps/toolbelt/apps/network-checker/backend
         env:
           NETWORK_CHECKER_DB: ${{ github.workspace }}/apps/toolbelt/apps/network-checker/backend/tests/e2e/dashboard-fixture.db
-      - name: Wait for Network Checker dashboard
+      - name: E2E · Wait for Network Checker dashboard
         shell: bash
         run: |
           for attempt in $(seq 1 20); do
@@ -207,11 +213,11 @@ jobs:
           cat apps/toolbelt/apps/network-checker/backend/network-checker.log
           echo "Network Checker did not become ready." >&2
           exit 1
-      - name: Run Network Checker critical browser journey
+      - name: E2E · Run Network Checker critical browser journey
         run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/network-checker/frontend/playwright.config.mjs
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:8787
-      - name: Upload Network Checker browser evidence
+      - name: Evidence · Upload Network Checker browser evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -222,3 +228,48 @@ jobs:
             apps/toolbelt/apps/network-checker/backend/network-checker.log
           if-no-files-found: ignore
           retention-days: 14
+
+  pr-gate:
+    name: Toolbelt PR Gate
+    needs: [checks]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Gate · Confirm every required job passed
+        shell: bash
+        run: |
+          test "${{ needs.checks.result }}" = "success"
+      - name: Gate · Confirm tested SHA matches the live PR head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          live_sha="$(curl --fail --silent \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
+          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
+            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
+            exit 1
+          fi
+          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
+      - name: Gate · Publish step summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Toolbelt PR Gate"
+            echo ""
+            echo "| Job | Result |"
+            echo "| --- | --- |"
+            echo "| checks | ${{ needs.checks.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
