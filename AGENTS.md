@@ -61,22 +61,20 @@ as a known hazard to fix deliberately, and if you rotate the key before then, ch
 
 ## Owner authority
 
-The OWNER is `kgsmith19`, or an explicit instruction authenticated as coming from the owner. The
-standard governs agents by default. The owner governs the standard.
+The **OWNER** is `kgsmith19`, or an explicit instruction authenticated as coming from the owner.
+The standard governs agents by default. **The owner governs the standard.**
 
-Precedence order:
+**Precedence order:** (1) current explicit owner instruction, (2) owner-authorized GitHub Issue
+and its acceptance criteria, (3) this `AGENTS.md`, (4) `project.yaml`, (5) pinned shared standard
+from `standard.lock`, (6) harness and provider defaults.
 
-1. Current explicit owner instruction
-2. Owner-authorized GitHub Issue and its acceptance criteria
-3. This `AGENTS.md`
-4. `project.yaml`
-5. Pinned shared standard from `standard.lock`
-6. Harness and provider defaults
+The owner **may override, replace, suspend, or delete any part of this document at any time.** An
+agent **must not** lecture, argue with, reverse, or repeatedly warn about an explicit owner
+decision; technical risks may be stated once, concretely, without obstruction.
 
-The owner may override, replace, suspend, or delete any part of this document at any time. An
-agent MUST NOT lecture, argue with, reverse, or repeatedly warn about an explicit owner decision;
-technical risks may be stated once, concretely, without obstruction. When a check is waived by
-owner instruction, report it once as: "Not run by owner instruction."
+> [!IMPORTANT]
+> When a check is waived by owner instruction, report it once as: **"Not run by owner
+> instruction."**
 
 ## Sources of truth
 
@@ -120,13 +118,14 @@ Local plans, briefs, and ledgers live only in gitignored workspaces (`.superpowe
 
 ## Provider-neutral roles
 
-- Owner — controls intent and may override anything.
-- Controller — coordinates the Issue, worktree, tasks, subagents, evidence, and recovery state.
-- Builder — implements one bounded task or slice.
-- Test Designer — challenges acceptance criteria and designs defect-sensitive evidence.
-- Verifier — independently challenges intent interpretation, tests, implementation, security,
-  structure, and exact-head evidence.
-- Investigator — researches, reproduces, traces, or measures without implementation authority.
+| Role | Responsibility |
+| --- | --- |
+| **Owner** | Controls intent and may override anything. |
+| **Controller** | Coordinates the Issue, worktree, tasks, subagents, evidence, and recovery state. |
+| **Builder** | Implements one bounded task or slice. |
+| **Test Designer** | Challenges acceptance criteria and designs defect-sensitive evidence. |
+| **Verifier** | Independently challenges intent interpretation, tests, implementation, security, structure, and exact-head evidence. |
+| **Investigator** | Researches, reproduces, traces, or measures without implementation authority. |
 
 For R2/R3 work: prefer a different provider family for verifier versus builder, require
 exact-head verification, and record the provider family and model. The owner may waive provider
@@ -195,14 +194,17 @@ model recollection.
 
 Every Issue carries exactly one tier:
 
-- R0 — mechanical.
-- R1 — local and reversible.
-- R2 — shared, integrated, or stateful.
-- R3 — critical, privileged, destructive, financial, security-sensitive, concurrent, or
-  irreversible. A change to any root `.github/workflows/*.yml`, `deploy.yml`,
-  `platform-*.yml`, `CODEOWNERS`, or the Supabase publishable-key hazard's six files is at
-  minimum R2, and R3 when it touches gate aggregation, merge automation, or deploy/migration
-  behavior directly.
+| Tier | Meaning |
+| --- | --- |
+| **R0** | Mechanical |
+| **R1** | Local and reversible |
+| **R2** | Shared, integrated, or stateful |
+| **R3** | Critical, privileged, destructive, financial, security-sensitive, concurrent, or irreversible |
+
+> [!NOTE]
+> A change to any root `.github/workflows/*.yml`, `deploy.yml`, `platform-*.yml`, `CODEOWNERS`,
+> or the Supabase publishable-key hazard's six files is **at minimum R2**, and **R3** when it
+> touches gate aggregation, merge automation, or deploy/migration behavior directly.
 
 Verification scales with tier per the pinned standard's own Risk classification section. The
 owner may override any tier or mechanism.
@@ -269,12 +271,7 @@ exists, the PR is the handoff.
 
 This repository uses **eight independent workflows** rather than one repo-wide aggregator — a
 deliberate, owner-directed adaptation for this monorepo's shape — but only the three with no
-`paths:` filter are *intended* to be marked required in the branch ruleset. The "Required" column
-below is this document's specification of the intended, correct configuration; applying it to the
-live ruleset is a manual owner action outside this repository's files (no ruleset-write API is
-available to an agent in this harness) and may lag a commit or two behind this table. Read the
-live ruleset itself, never this table alone, to know what is actually enforced at any given
-moment:
+`paths:` filter are *intended* to be marked required in the branch ruleset:
 
 | Gate | Workflow | Covers | Required (intended) |
 | --- | --- | --- | --- |
@@ -287,18 +284,25 @@ moment:
 | `Repo Policy` | `repo-policy.yml` | whole repo, every PR | Yes |
 | `Template Lint` | `template-lint.yml` | whole repo, every PR (PR body only) | Yes |
 
-**This is load-bearing, not incidental:** GitHub's required-status-checks model blocks a merge on
-any required check name that never reports, and a `paths:` filter does **not** make an unreported
-required check "not applicable" — it stays pending forever. This hit live: PRs #118 and #120 (root
-docs and new workflow files, touching none of the five app gates' paths) got stuck in
-`mergeable_state: "blocked"` permanently when the ruleset required all six app gates by name, and
-needed an owner administrative bypass to merge. Only a check with no `paths:` filter — or one
-restructured to always report, with an internal skip when its own paths did not change — is safe
-to mark required. The five app-scoped gates therefore stay **non-required**: they still run and
-report on every PR whose paths they cover, and remain real evidence for review, but the branch
-ruleset only enforces `Gitleaks`, `Repo Policy`, and `Template Lint`, which fire on every PR
-unconditionally. See the pinned standard's own "Path-scoped gates in monorepo topologies" note for
-the general pattern this follows.
+> [!WARNING]
+> **This is load-bearing, not incidental.** GitHub's required-status-checks model blocks a merge
+> on any required check name that never reports, and a `paths:` filter does **not** make an
+> unreported required check "not applicable" — it stays pending forever. This hit live: PRs #118
+> and #120 (root docs and new workflow files, touching none of the five app gates' paths) got
+> stuck in `mergeable_state: "blocked"` permanently when the ruleset required all six app gates
+> by name, and needed an owner administrative bypass to merge. Only a check with no `paths:`
+> filter — or one restructured to always report, with an internal skip when its own paths did not
+> change — is safe to mark required. The five app-scoped gates therefore stay **non-required**:
+> they still run and report on every PR whose paths they cover, and remain real evidence for
+> review, but the branch ruleset only enforces `Gitleaks`, `Repo Policy`, and `Template Lint`,
+> which fire on every PR unconditionally. See the pinned standard's own "Path-scoped gates in
+> monorepo topologies" note for the general pattern this follows.
+>
+> The "Required (intended)" column above is this document's specification of the correct
+> configuration — applying it to the live ruleset is a manual owner action outside this
+> repository's files (no ruleset-write API is available to an agent in this harness) and may lag
+> a commit or two behind this table. **Read the live ruleset itself, never this table alone, to
+> know what is actually enforced at any given moment.**
 
 Each of the eight gates has a real aggregator job: `if: always()`, full `needs:` coverage,
 explicit strict success-checking, an SHA-vs-live-PR-head freshness check, and a step summary.
@@ -319,10 +323,10 @@ branch until ready.
 
 ## Agent boundaries
 
-Agents may, only when the task explicitly authorizes them: create work artifacts — Issues,
+Agents **may**, only when the task explicitly authorizes them: create work artifacts — Issues,
 branches, commits, pull requests, descriptions, code, tests, and documentation.
 
-Agents must not: submit reviews, request reviewers, approve changes, block a pipeline, post
+Agents **must not:** submit reviews, request reviewers, approve changes, block a pipeline, post
 unsolicited comments, push implementation directly to `main`, bypass a failing PR Gate, weaken a
 test or oracle merely to obtain green status, use administrative bypass without explicit owner
 authorization, store credentials in the repository, or claim completion without fresh
