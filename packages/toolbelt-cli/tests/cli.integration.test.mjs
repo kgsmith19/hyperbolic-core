@@ -52,9 +52,16 @@ async function withFixtureToolbeltRootAsync(layout, fn) {
 // invocations can be started back-to-back and actually overlap in wall-clock
 // time, which is the only way to exercise a REAL cross-process race rather
 // than a simulated one. Resolves once the child has exited.
-function runCliAsync(args) {
+//
+// The optional `env` is merged over process.env, not replacing it -- used
+// only by the SAME-id race test below to set src/scaffold.mjs's
+// TOOLBELT_CLI_TEST_LOCK_HOLD_MS on both children; every other caller omits
+// it and gets ordinary inherited-environment behavior.
+function runCliAsync(args, { env } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [BIN, ...args]);
+    const child = spawn(process.execPath, [BIN, ...args], {
+      env: env ? { ...process.env, ...env } : process.env,
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => (stdout += chunk));
@@ -178,7 +185,16 @@ test("a real scaffold invocation completes within the 10-second budget", () => {
 test("two REAL concurrent child processes racing for the SAME id: exactly one completes, the other is cleanly refused (locked), and the winner's output is fully intact", async () => {
   await withFixtureToolbeltRootAsync({ "tool.json": rootManifest() }, async (root) => {
     const args = ["--toolbelt-root", root, "--id", "race-tool", "--name", "Race Tool", "--kind", "cli"];
-    const [first, second] = await Promise.all([runCliAsync(args), runCliAsync(args)]);
+    // Both children get the same hold: neither process is the winner until
+    // acquireLock actually resolves that at runtime, so both must be willing
+    // to hold if they turn out to be the one that wins. See
+    // src/scaffold.mjs's holdLockForTesting for why this exists: without it,
+    // a fast winner can finish its whole write pipeline and release before a
+    // slow-to-spawn loser ever attempts the lock, so the loser's refusal
+    // becomes an ordinary collision instead of the lock contention this test
+    // means to prove -- correct behavior, wrong assertion, intermittently.
+    const env = { TOOLBELT_CLI_TEST_LOCK_HOLD_MS: "500" };
+    const [first, second] = await Promise.all([runCliAsync(args, { env }), runCliAsync(args, { env })]);
 
     const results = [first, second];
     const succeeded = results.filter((r) => r.status === 0);
