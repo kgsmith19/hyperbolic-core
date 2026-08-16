@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## Repository purpose
+## Purpose
 
 `toolbelt` is the monorepo for small portfolio tools. The root owns the shared
 Supabase `core` schema for runs, costs, outcomes, metrics, and events plus the
@@ -25,10 +25,6 @@ Use this lean lifecycle:
 5. Successful pull requests may complete through native squash auto-merge.
 
 This repository does not keep committed specs or ADRs — see `TEST_LEDGER.md` for the current, lean test-tracking convention. Future work is tracked in GitHub Issues.
-
-## Agent permissions
-
-When explicitly assigned, an AI coding agent may create an Issue, branch, commit, or pull request. It may respond in an existing Issue or pull-request conversation only when it is explicitly tagged with a direct question. An AI agent must not submit a review, request reviewers, approve or block a pull request, change repository protections, or post unsolicited Issue or pull-request comments.
 
 ## Product boundaries
 
@@ -73,3 +69,7 @@ The root has no browser client of its own to check (m3-09: the static idea-list 
 ## Completion
 
 A change is ready when its acceptance criteria are satisfied, relevant documentation is accurate, applicable local checks pass, and the pull request's `Toolbelt PR Gate` reports success. State any unverified item explicitly.
+
+## Collaboration boundary
+
+When explicitly assigned, an AI coding agent may create an Issue, branch, commit, or pull request. It may respond in an existing Issue or pull-request conversation only when it is explicitly tagged with a direct question. An AI agent must not submit a review, request reviewers, approve or block a pull request, change repository protections, or post unsolicited Issue or pull-request comments.

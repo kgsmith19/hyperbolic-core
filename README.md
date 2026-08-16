@@ -28,5 +28,5 @@ A suite of all of my agentic work.
   `acc-ci.yml` (mirroring `toolbelt-ci.yml`'s pattern) makes it a real,
   active check here. See `apps/agentic-command-center/README.md` and
   `apps/agentic-command-center/AGENTS.md` for details, and
-  `docs/superpowers/specs/2026-08-12-acc-migration-design.md` for the
+  `docs/archived/2026-08-12/acc-migration-design-spec.md` for the
   migration record.

@@ -2,8 +2,8 @@
 
 Living document — the canonical slice queue and historical record. Every slice
 PR updates its status line here. ADRs win on conflict. Background:
-`docs/research/lifeos-research-final.md` (v2 synthesis, point-in-time) and
-`docs/research/lifeos-research-2026-07-29.md` (v3 synthesis — the second
+`docs/archived/2026-07-27/lifeos-research-v2-synthesis.md` (v2 synthesis, point-in-time) and
+`docs/archived/2026-07-29/lifeos-research-v3-synthesis.md` (v3 synthesis — the second
 research pass behind the 2026-07-29 queue revision). The full evidence base
 behind v3 lives in working files outside git, in the ecosystem `notes/` folder
 (`notes/NEXT-DIRECTION-RESEARCH-2026-07-29.md`,

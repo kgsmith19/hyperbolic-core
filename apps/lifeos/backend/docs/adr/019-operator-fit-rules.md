@@ -8,7 +8,7 @@ Accepted, 2026-07-29.
 
 The 2026-07-29 roadmap revision queues the first surfaces that touch health
 adherence, episodes, and other wellbeing-adjacent data (INT1, H1/H2, EP1, D1).
-The research behind that revision (`docs/research/lifeos-research-2026-07-29.md`,
+The research behind that revision (`docs/archived/2026-07-29/lifeos-research-v3-synthesis.md`,
 §2.3-2.7 and §2.10) is consistent and in places blunt: for these surfaces,
 visibility of one's own record is the evidenced intervention; push prompts
 about feelings measurably reduce adherence; streak mechanics drive abandonment;

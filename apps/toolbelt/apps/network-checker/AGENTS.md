@@ -1,20 +1,19 @@
 # netcheck
 
+## Purpose
+
 Local-first network diagnostics that identify which layer failed: Wi-Fi,
 router, modem, ISP, target service, or a specific device. The tool correlates
-multi-layer probes and can compare them with errors already recorded in Claude
-Code transcripts.
+multi-layer probes and can compare them with errors already recorded in
+Claude Code transcripts. Python 3.12 standard library only, no build step;
+the dashboard (`frontend/`) is hand-written HTML/CSS/JS with zero
+dependencies.
 
-Stack: Python 3.12 standard library only. There is no package install or build
-step. Tests use `unittest`; the dashboard (`frontend/`) is hand-written
-HTML/CSS/JS with zero dependencies, vendored or otherwise — native ES
-modules, Server-Sent Events, and a Service Worker cover what a small
-framework used to.
+This application follows the Toolbelt root delivery workflow. Its
+implementation choices and product safeguards remain local to this
+directory.
 
-This application follows the Toolbelt root delivery workflow. Its implementation
-choices and product safeguards remain local to this directory.
-
-## Product invariants
+## Product boundaries
 
 - Every probe returns `state` as `ok`, `fail`, or `unavailable`.
   `unavailable` means the measurement could not be made and is never fault
@@ -29,39 +28,26 @@ choices and product safeguards remain local to this directory.
   confirmed private.
 - Every write requires a recorded dry run and an explicit interactive
   approval, and the only automatic write permitted is the pre-recorded
-  rollback of a change that just failed verification.
-
-## Network egress
-
-`tool.json` enumerates every static destination used by the application:
-the public DNS control (`1.1.1.1`), default router/modem addresses
-(`192.168.50.1`, `192.168.100.1`), SSDP multicast (`239.255.255.250`),
-Anthropic API/status, public-IP lookup, and coarse geolocation endpoints.
-
-Two destinations are necessarily dynamic and cannot be represented by the
-manifest's fixed-hostname array: the runtime-discovered or operator-overridden
-local router/modem address, and the optional per-deployment Supabase mirror
-from `SUPABASE_URL`. This is a documented limitation of the static manifest
-shape, not permission for unlisted fixed egress.
-
-## Commands
-
-Run from `apps/toolbelt/apps/network-checker/`.
-
-```bash
-python -m unittest discover -s tests -t .
-bash backend/tools/check.sh
-python -m netcheck watch
-python -m netcheck probe
-python -m netcheck scan
-python -m netcheck diagnose
-python -m netcheck serve
-python -m netcheck sync
-```
-
-`bash backend/tools/check.sh` is the local equivalent of CI. It runs the test suite,
-complexity checks, the deterministic security scanner, documentation checks,
-and shell syntax checks.
+  rollback of a change that just failed verification. Config-changing scripts
+  and templates stay disabled (fail-closed) until they have an exact, verified
+  inverse. Approval capabilities are single-use HMAC tokens; SQLite stores
+  only their digest, and apply reads one from a real TTY, never argv or the
+  environment.
+- New diagnoses are added as data in `rank._SCAN_RULES` when the existing
+  model can express them (positive and healthy counterexample tests plus an
+  actionable `_FIXES` entry); avoid a new module without a concrete need.
+- The runtime stays dependency-free (Python standard library only) unless a
+  linked Issue establishes a concrete need.
+- Add hermetic behavior tests before or with any behavior change. Preserve
+  unrelated work and do not weaken checks or diagnostics to make a change
+  pass.
+- **Network egress**: `tool.json` enumerates every static destination the
+  application uses (public DNS control, default router/modem addresses, SSDP
+  multicast, Anthropic API/status, public-IP and geolocation lookups). The
+  runtime-discovered/overridden local router or modem address and the optional
+  per-deployment Supabase mirror (`SUPABASE_URL`) are the only destinations
+  not fixed in the manifest — that is a documented limitation of the static
+  shape, not permission for other unlisted egress.
 
 ## Layout
 
@@ -101,40 +87,54 @@ The table below maps each backend module to what it owns.
 | `backend/netcheck/server.py` | Loopback dashboard server: JSON API, SSE push, static files |
 | `frontend/` | Dashboard UI — HTML/CSS/JS, no backend logic, no dependencies |
 
-## Engineering guidance
+## Commands
 
-- Prefer the smallest clear change that fully satisfies the linked Issue.
-- Preserve the standard-library-only constraint.
-- Add hermetic behavior tests before or with behavior changes.
-- Add a diagnostic as data in `rank._SCAN_RULES` when the existing model can
-  express it; do not add a module without a concrete need.
-- Each new cause needs positive and healthy counterexample tests plus an
-  actionable `_FIXES` entry.
-- Preserve unrelated work and do not weaken checks to make a change pass.
+Run from `apps/toolbelt/apps/network-checker/`.
 
-## Work and delivery
+```bash
+python -m unittest discover -s tests -t .
+bash backend/tools/check.sh
+python -m netcheck watch
+python -m netcheck probe
+python -m netcheck scan
+python -m netcheck diagnose
+python -m netcheck serve
+python -m netcheck sync
+```
 
-GitHub Issues are the durable source for requested work. Implement one focused
-slice on a short-lived branch, run `bash backend/tools/check.sh`, and open a pull
-request that links the Issue and states the evidence.
+`bash backend/tools/check.sh` is the local equivalent of CI. It runs the test suite,
+complexity checks, the deterministic security scanner, documentation checks,
+and shell syntax checks.
 
-The hyperbolic-core root's `.github/workflows/toolbelt-ci.yml` runs
-automatically for pull requests (this project now lives at `apps/toolbelt/`
-inside the hyperbolic-core monorepo, so the workflow file is no longer under
-this project's own root). Its workflow and required check are both named
-`Toolbelt PR Gate`; it executes the same `backend/tools/check.sh` command used
-locally.
+## Documentation
 
-The hyperbolic-core root's `.github/workflows/toolbelt-network-checker-release.yml`
-is a separate manual workflow that validates this application, builds and
-smoke-tests the container, and creates a draft release.
-
-AI coding agents may create branches, commits, Issues, and pull requests only
-when explicitly assigned that work. They must not submit code reviews, approve
-or block a pull request, request reviewers, or post unsolicited comments. They
-may answer in an Issue or pull request only when explicitly mentioned and
-asked a direct question.
+- `README.md` — user-facing quick start and commands
+- `docs/notes/` — runbooks and design notes, including deployment and releases
+- `CHANGELOG.md` — what changed, by version (consumed by the release
+  workflow's release-notes extraction)
+- `TEST_LEDGER.md` — this app's own test suites
+- The hyperbolic-core root's `.github/workflows/toolbelt-ci.yml` runs
+  automatically for pull requests; its workflow and required check are both
+  named `Toolbelt PR Gate` and it executes `backend/tools/check.sh`.
+- The hyperbolic-core root's `.github/workflows/toolbelt-network-checker-release.yml`
+  is a separate manual workflow that validates this application, builds and
+  smoke-tests the container, and creates a draft release.
 
 This app does not keep committed requirements/data-flow documents. Known
 problems, decisions under investigation, and future work belong in GitHub
 Issues.
+
+## Completion
+
+GitHub Issues are the durable source for requested work. Implement one
+focused slice on a short-lived branch, run `bash backend/tools/check.sh`, and
+open a pull request that links the Issue and states the evidence. A change is
+ready when the hyperbolic-core root's `Toolbelt PR Gate` reports success.
+
+## Collaboration boundary
+
+AI coding agents may create branches, commits, Issues, and pull requests only
+when explicitly assigned that work. They must not submit code reviews,
+approve or block a pull request, request reviewers, or post unsolicited
+comments. They may answer in an Issue or pull request only when explicitly
+mentioned and asked a direct question.

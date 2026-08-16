@@ -9,7 +9,7 @@ drafts, and erase PII (`forget`).
 Stack: React 19, TypeScript strict, Vite, Tailwind v4, TanStack Query,
 React Router, Vitest + Testing Library, Playwright, oxlint + prettier.
 
-## Quickstart
+## Quick start
 
 Run commands from `frontend/`. Node 24+. Copy `.env.example` to `.env`; it holds only public-by-design values (`VITE_` vars are baked
 into the client bundle — never put a secret here):
@@ -25,5 +25,7 @@ npm ci
 npm run dev    # http://localhost:5173, sign in with the owner account
 npm run lint && npm run test && npm run e2e && npm run build   # full gate
 ```
+
+## Documentation
 
 See [AGENTS.md](AGENTS.md) for application guidance and `../AGENTS.md` for the root PR Gate and delivery flow.

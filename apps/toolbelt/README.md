@@ -9,12 +9,6 @@ m3-09). `apps/prompt-organizer/`
 owns the `prompt` schema and prompt-library client. `apps/network-checker/`
 owns the standard-library-only network diagnostic CLI and offline dashboard.
 
-## Applications
-
-- `apps/prompt-organizer/` - store, search, render, and copy reusable prompts.
-- `apps/network-checker/` - diagnose Wi-Fi, router, ISP, and endpoint failures.
-- `apps/idea-intake/` - intentionally absent until implementation begins.
-
 ## Prerequisites
 
 - Node.js 22 or newer for the built-in test runner and native `fetch`.
@@ -23,7 +17,7 @@ owns the standard-library-only network diagnostic CLI and offline dashboard.
 There is no package manifest, framework, dependency installation, or application
 compilation step. Network Checker can optionally be packaged as a Docker image.
 
-## Verify
+## Commands
 
 ```bash
 node --test "tests/*.test.mjs"
@@ -35,9 +29,13 @@ The suites use the live `toolbelt` Supabase project and its public anon key. A
 service-role key is neither required nor accepted. The `Toolbelt PR Gate`
 workflow also runs Prompt Organizer's critical browser journey.
 
-## Migrations
-
 Apply `supabase/migrations/*.sql` through the Supabase API. Each up migration has a matching `_down.sql` migration that reverses the same change.
+
+## Layout
+
+- `apps/prompt-organizer/` - store, search, render, and copy reusable prompts.
+- `apps/network-checker/` - diagnose Wi-Fi, router, ISP, and endpoint failures.
+- `apps/idea-intake/` - intentionally absent until implementation begins.
 
 ## Documentation
 

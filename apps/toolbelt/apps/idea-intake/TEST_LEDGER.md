@@ -2,8 +2,6 @@
 
 A running record of this app's test suites: what exists, what it covers, and the result of its most recent run. Historical context for contributors, not a merge gate — `Toolbelt PR Gate` is the gate.
 
-Independent security review, Finding 39 (re-verified against current HEAD): this file did not exist before this batch. `.github/workflows/toolbelt-ci.yml` never ran this app's test suite at all and provisioned no PostgreSQL service, so every real-Postgres suite below has only ever run locally by hand, never in CI, until this batch added a `postgres:` service container and a dedicated "Run Idea Intake tests" step (which also fails the job outright if any suite below reports a skip — see that step's own comment).
-
 | Suite | Covers | Command | Last run | Result |
 | --- | --- | --- | --- | --- |
 | `backend/tests/*.test.mjs` | The full suite below, run together | `node --test "backend/tests/*.test.mjs"` | 2026-08-13 | pass; real-Postgres suites now also gated by `Toolbelt PR Gate`'s `postgres:` service container (Finding 39), no longer local-only |

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## Application purpose
+## Purpose
 
 Idea Intake is the Toolbelt-owned system of record for capturing, refining,
 and submitting ideas. It owns the `intake` schema and the one-shot migration
