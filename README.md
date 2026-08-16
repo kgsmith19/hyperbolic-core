@@ -1,6 +1,10 @@
 # hyperbolic-core
 A suite of all of my agentic work.
 
+This repository follows the [Agent Engineering Standard](https://github.com/kgsmith19/agent-engineering-standard)
+(pinned in `standard.lock`); see `AGENTS.md` for operational rules and `project.yaml` for exact
+component and CI-gate facts.
+
 ## Components
 
 - `apps/toolbelt/` — a monorepo of small portfolio tools (a prompt-library

@@ -1,21 +1,50 @@
 project:
   name: hyperbolic-core
-  type: monorepo — each apps/<name>/ is independently built, tested, and
-    gated; see that app's own project.yaml for its facts.
+  type: monorepo — each apps/<name>/ and services/<name>/ is independently
+    built, tested, and gated by its own PR Gate; see that component's own
+    project.yaml/AGENTS.md for its facts.
 
 apps:
   - apps/toolbelt
   - apps/toolbelt/guards
   - apps/lifeos
   - apps/agentic-command-center
+  - apps/shell
+
+services:
+  - services/brain
+  - services/llm-handler
 
 ci:
+  # Six independent, path-scoped required checks — see AGENTS.md's "PR Gate
+  # and merge behavior" section for why this repo does not use one
+  # repo-wide aggregator.
   workflows:
-    - .github/workflows/toolbelt-ci.yml
-    - .github/workflows/acc-ci.yml
-  note: apps/lifeos's own workflows are intentionally inert here (see
-    AGENTS.md's workflow safety invariant) — its CI runs from the standalone
-    lifeos repo.
+    - path: .github/workflows/toolbelt-ci.yml
+      gate: Toolbelt PR Gate
+      covers: apps/toolbelt/** (root tools, guards/, prompt-organizer,
+        idea-intake, network-checker)
+    - path: .github/workflows/acc-ci.yml
+      gate: ACC PR Gate
+      covers: apps/agentic-command-center/**, apps/toolbelt/guards/**
+    - path: .github/workflows/brain-ci.yml
+      gate: Brain PR Gate
+      covers: services/brain/**
+    - path: .github/workflows/shell-ci.yml
+      gate: Shell PR Gate
+      covers: apps/shell/**, packages/**, services/llm-handler/**,
+        docs/ops/**
+    - path: .github/workflows/lifeos-ci.yml
+      gate: LifeOS PR Gate
+      covers: apps/lifeos/**
+    - path: .github/workflows/secret-scan.yml
+      gate: Gitleaks
+      covers: whole repo, every PR — deliberate exception, no path filter
+  note: apps/lifeos's own nested workflows (apps/lifeos/.github/workflows/)
+    are intentionally inert here (see AGENTS.md's Workflow Safety
+    Invariant) — its authoritative CI runs from the standalone lifeos repo;
+    lifeos-ci.yml above is written fresh for this monorepo and is the real
+    gate here.
 
 work_tracking:
   system: github-issues
@@ -23,3 +52,6 @@ work_tracking:
 standard:
   repo: kgsmith19/agent-engineering-standard
   lock_file: standard.lock
+  vendored: false  # tools/standardctl.py and TEMPLATES/ are not carried in
+    this repo; verification commands live directly in this file and in
+    each component's own project.yaml.
