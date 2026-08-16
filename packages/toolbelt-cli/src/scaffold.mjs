@@ -218,6 +218,36 @@ export function acquireLock(lockPath) {
   };
 }
 
+// Test-only synchronization hook for
+// tests/cli.integration.test.mjs's "two REAL concurrent child processes
+// racing for the SAME id" test. That test spawns two real OS processes
+// racing for one lock (deliberately real processes, not simulated
+// interleaving -- see that test's own comment for why). Without this hook,
+// the test asserted the LOSER's exact refusal reason (lock contention) but
+// had no way to guarantee the loser's process-spawn-to-first-lock-attempt
+// latency lands before the winner's remaining critical section finishes and
+// releases: under CI scheduler jitter, the winner can occasionally acquire,
+// run to completion, and release before the loser's process has even
+// started far enough to attempt the lock once -- at which point the loser
+// hits an ordinary collision instead of lock contention, which is a correct
+// but different refusal, and the assertion flaked.
+//
+// This closes that gap by having whichever process wins the lock hold it
+// for a fixed, generous duration -- far longer than Node process-spawn
+// overhead even on a loaded runner -- so the loser's attempt is guaranteed
+// to land while the winner still holds it. Reads an internal, undocumented
+// environment variable that only that one test's own spawned children ever
+// set; absent (every real invocation, including every other test), it is
+// fully inert. Blocking rather than async because runScaffold itself is
+// synchronous end-to-end; Atomics.wait on a throwaway SharedArrayBuffer is
+// Node's own documented portable synchronous-sleep primitive, safe to call
+// on the main thread (unlike browser JS, where this would be disallowed).
+function holdLockForTesting() {
+  const ms = Number(process.env.TOOLBELT_CLI_TEST_LOCK_HOLD_MS);
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 // ---- Finding 28: invocation-owned staging + atomic reveal, owned-only rollback --
 //
 // The OLD writePlan wrote every file directly to its FINAL path, in order,
@@ -372,6 +402,7 @@ export function runScaffold(options, { toolbeltRoot, dryRun = false, fsImpl, now
       ],
     };
   }
+  holdLockForTesting();
 
   try {
     // Reject ordinary id/schema collisions before migration discovery. A
