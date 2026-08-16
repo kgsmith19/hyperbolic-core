@@ -8,6 +8,8 @@ import {
   TOOLBELT_ROOT,
   SCHEMA_PATH,
   findManifestPaths,
+  checkManifestCoverage,
+  isStagingDir,
   checkManifestShape,
   checkSchemaOwnershipUniqueness,
   validateAll,
@@ -141,6 +143,46 @@ test("findManifestPaths ignores an apps/<id> directory with no tool.json", () =>
       assert.equal(findManifestPaths(dir).length, 2);
     },
   );
+});
+
+// A concurrent `tool:new` stages at `apps/<id>.tmp-<token>` and renames it into
+// place only once every file is written. Its tool.json lands before
+// backend/supabase/migrations exists, so a validator that discovers the staging
+// directory demands a migration directory that is still being created -- which
+// failed an unrelated tool's scaffold whenever the two overlapped.
+test("findManifestPaths ignores an in-flight apps/<id>.tmp-<token> staging directory", () => {
+  withFixtureRoot(
+    {
+      "tool.json": rootManifest(),
+      "apps/tool-a/tool.json": baseManifest({ id: "tool-a" }),
+      "apps/tool-b.tmp-7e70cead28e5/tool.json": baseManifest({ id: "tool-b" }),
+    },
+    (dir) => {
+      const paths = findManifestPaths(dir);
+      assert.equal(paths.length, 2);
+      assert.ok(!paths.some((p) => p.includes(".tmp-")));
+    },
+  );
+});
+
+test("checkManifestCoverage does not report an in-flight staging directory as missing tool.json", () => {
+  withFixtureRoot(
+    {
+      "tool.json": rootManifest(),
+      "apps/tool-a/tool.json": baseManifest({ id: "tool-a" }),
+      "apps/tool-b.tmp-7e70cead28e5/placeholder": "staged, manifest not written yet",
+    },
+    (dir) => {
+      assert.deepEqual(checkManifestCoverage(dir), []);
+    },
+  );
+});
+
+test("isStagingDir matches only the scaffold's staging suffix", () => {
+  assert.ok(isStagingDir("tool-b.tmp-7e70cead28e5"));
+  assert.ok(!isStagingDir("tool-b"));
+  assert.ok(!isStagingDir("tmp-tool"));
+  assert.ok(!isStagingDir("my.tmp-tool"));
 });
 
 test("CLI rejects a toolbelt tree whose root spine manifest is missing", () => {

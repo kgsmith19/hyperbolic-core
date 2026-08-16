@@ -43,10 +43,31 @@ export const SCHEMA_PATH = join(TOOLBELT_ROOT, "tool.schema.json");
 // `root` is the real TOOLBELT_ROOT.
 export const SERVICES_ROOT = join(TOOLBELT_ROOT, "..", "..", "services");
 
+// A scaffold in flight stages its tool at `<toolDir>.tmp-<token>` and only
+// renames it into place once every file is written (packages/toolbelt-cli's
+// scaffold.mjs `writePlan`). A concurrent validator must not treat that
+// half-built directory as a tool: its tool.json is written before
+// backend/supabase/migrations exists, so discovering it makes
+// validate-migrations.mjs demand a directory that is still being created.
+//
+// scaffold.mjs notes that `.tmp-*` names are excluded from every scanner "by
+// construction" because the collision regexes require a leading digit run.
+// That holds for the staged *files* (`.tmp-<token>-<basename>`), which do
+// start with `.tmp-`. It does not hold for the staging *directory*, whose
+// name is `<id>.tmp-<token>` — hence this explicit filter.
+const STAGING_DIR_RE = /\.tmp-[0-9a-f]+$/;
+
+export function isStagingDir(name) {
+  return STAGING_DIR_RE.test(name);
+}
+
 function findServiceManifestPaths(servicesRoot) {
   const paths = [];
   if (servicesRoot && existsSync(servicesRoot)) {
     for (const name of readdirSync(servicesRoot).sort()) {
+      // Skipped before statSync: a staging directory can be renamed away
+      // mid-walk, and stat-ing it would throw ENOENT.
+      if (isStagingDir(name)) continue;
       const dir = join(servicesRoot, name);
       if (!statSync(dir).isDirectory()) continue;
       const candidate = join(dir, "tool.json");
@@ -67,6 +88,7 @@ export function findManifestPaths(root = TOOLBELT_ROOT, { servicesRoot = root ==
   const appsDir = join(root, "apps");
   if (existsSync(appsDir)) {
     for (const name of readdirSync(appsDir).sort()) {
+      if (isStagingDir(name)) continue;
       const dir = join(appsDir, name);
       if (!statSync(dir).isDirectory()) continue;
       const candidate = join(dir, "tool.json");
@@ -92,6 +114,7 @@ export function checkManifestCoverage(root = TOOLBELT_ROOT, { servicesRoot = roo
       failures.push(`${appsDir}: expected the apps path to be a directory`);
     } else {
       for (const name of readdirSync(appsDir).sort()) {
+        if (isStagingDir(name)) continue;
         const appDir = join(appsDir, name);
         if (!statSync(appDir).isDirectory()) continue;
         const manifestPath = join(appDir, "tool.json");
