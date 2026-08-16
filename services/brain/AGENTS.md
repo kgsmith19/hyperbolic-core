@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## Purpose
+## 🎯 Purpose
 
 `services/brain` is the Brain daemon: a long-lived autonomous-coding
 orchestrator (07-brain-architecture.md). It owns run/task state (SQLite
@@ -12,7 +12,7 @@ distinct from the small shared packages under `packages/`, and from
 `services/llm-handler`, which it never calls (it links `@hyperbolic/llm`
 in-process instead, per 08's forced decision 5).
 
-## Product boundaries / invariants
+## 📋 Product Boundaries / Invariants
 
 - ADR-05 key isolation: the Brain's own Anthropic key is rendered once,
   at deploy time, to a file only the `brain` container/OS user can read
@@ -59,7 +59,7 @@ in-process instead, per 08's forced decision 5).
 - Every S1/S2 Brain failure must produce a new case in `evals/cases/`
   before its fix merges (07 section 7.11).
 
-## Layout
+## 📂 Layout
 
 ```
 bin/brain.mjs           CLI entrypoint: argv parsing/dispatch only
@@ -84,7 +84,7 @@ scripts/isolation-check.mjs ADR-05 secret-isolation check
 tests/                      node --test suite
 ```
 
-## Commands
+## ⚙️ Commands
 
 ```bash
 npm run test --workspace=@hyperbolic/brain
@@ -96,13 +96,13 @@ node scripts/isolation-check.mjs
 docker build -f services/brain/Dockerfile .   # context is the monorepo root
 ```
 
-## Documentation
+## 📚 Documentation
 
 `docs/ops/runbook.md`'s "Brain deployment" section covers the deploy
 pipeline, required Infisical secrets (`/brain/`), manual rollback, and a
 documented known gap in `/brain/stream` external tailscale routing.
 
-## Completion
+## ✅ Completion
 
 A change is ready when its acceptance criteria are satisfied, affected
 documentation is accurate, the commands above pass locally, and the
@@ -110,7 +110,7 @@ documentation is accurate, the commands above pass locally, and the
 that gate also runs the eval corpus and the isolation check, and builds
 and smoke-runs the Docker image. State any unverified item explicitly.
 
-## Collaboration boundary
+## 🔒 Collaboration Boundary
 
 When explicitly assigned, an AI coding agent may create an Issue, branch,
 commit, or pull request, and may answer a direct question after an explicit

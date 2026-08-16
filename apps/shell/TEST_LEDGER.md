@@ -10,7 +10,7 @@ The Shell's suites. All of them run in the `Shell PR Gate`
 | `test/size-check.mjs` | The 250 KB gzipped bundle budget. | `npm run size-check` |
 | `test/healthz-check.mjs` | The deployed health endpoint. Not a PR gate — it targets a running deployment. | `npm run healthz-check` |
 
-## Parity suites
+## 🧪 Parity Suites
 
 Two `src/lib/` modules are deliberate ports of Prompt Organizer's browser
 sources rather than imports, because importing `packages/llm` would pull three
@@ -24,7 +24,7 @@ that silently diverges fails a test rather than a code review:
 `packages/llm/tests/prompt-render-parity.test.mjs` proves the same original
 against `packages/llm`'s own separate copy.
 
-## Performance budgets
+## 📊 Performance Budgets
 
 Three specs assert documented p95 budgets rather than correctness. They
 measure inside the page (`page.evaluate`) or in-process against a local
@@ -38,7 +38,7 @@ Playwright's own round-trip reports the harness, not the app.
 | Command palette open-to-interactive, p95 ≤ 100 ms | `e2e/palette-and-theme.spec.ts` |
 | Theme flip, p95 ≤ 50 ms | `e2e/palette-and-theme.spec.ts` |
 
-## Cross-package coupling
+## 🔗 Cross-Package Coupling
 
 The `Shell PR Gate` also type-checks and unit-tests `packages/platform-client`,
 `packages/ui`, `packages/llm`, and `services/llm-handler`. A change in this

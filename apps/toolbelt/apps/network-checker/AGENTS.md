@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## Purpose
+## 🎯 Purpose
 
 Local-first network diagnostics that identify which layer failed: Wi-Fi,
 router, modem, ISP, target service, or a specific device. The tool correlates
@@ -13,7 +13,7 @@ This application follows the Toolbelt root delivery workflow. Its
 implementation choices and product safeguards remain local to this
 directory.
 
-## Product boundaries
+## 📋 Product Boundaries
 
 - Every probe returns `state` as `ok`, `fail`, or `unavailable`.
   `unavailable` means the measurement could not be made and is never fault
@@ -49,7 +49,7 @@ directory.
   not fixed in the manifest — that is a documented limitation of the static
   shape, not permission for other unlisted egress.
 
-## Layout
+## 📂 Layout
 
 ```
 tool.json          the app manifest, read by the Toolbelt validators
@@ -87,7 +87,7 @@ The table below maps each backend module to what it owns.
 | `backend/network_checker/server.py` | Loopback dashboard server: JSON API, SSE push, static files |
 | `frontend/` | Dashboard UI — HTML/CSS/JS, no backend logic, no dependencies |
 
-## Commands
+## ⚙️ Commands
 
 Run from `apps/toolbelt/apps/network-checker/`.
 
@@ -106,7 +106,7 @@ python -m network_checker sync
 complexity checks, the deterministic security scanner, documentation checks,
 and shell syntax checks.
 
-## Documentation
+## 📚 Documentation
 
 - `README.md` — user-facing quick start and commands
 - `backend/pyproject.toml` — build metadata only, so `pip install -e .` gives
@@ -128,14 +128,14 @@ This app does not keep committed requirements/data-flow documents. Known
 problems, decisions under investigation, and future work belong in GitHub
 Issues.
 
-## Completion
+## ✅ Completion
 
 GitHub Issues are the durable source for requested work. Implement one
 focused slice on a short-lived branch, run `bash backend/tools/check.sh`, and
 open a pull request that links the Issue and states the evidence. A change is
 ready when the hyperbolic-core root's `Toolbelt PR Gate` reports success.
 
-## Collaboration boundary
+## 🔒 Collaboration Boundary
 
 AI coding agents may create branches, commits, Issues, and pull requests only
 when explicitly assigned that work. They must not submit code reviews,

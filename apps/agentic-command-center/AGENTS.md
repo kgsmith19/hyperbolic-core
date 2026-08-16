@@ -1,12 +1,12 @@
 # Agentic Command Center
 
-## Purpose
+## 🎯 Purpose
 
 Agentic Command Center (ACC) is an adapter-driven local coding-agent service,
 guard rail, control panel, and bounded task runner. Claude Code is the current
 harness integration; generic kernel code must remain harness-neutral.
 
-## Product map
+## 📂 Product Map
 
 - The `PreToolUse` guard and its config mutations (enable/disable, secret
   globs, protected paths) live in `apps/toolbelt/guards` — a standalone
@@ -55,7 +55,7 @@ or SPEC documents — architectural rationale that matters operationally lives
 in the code and docs it governs (e.g. `backend/gui/README.md`), not in a separate
 decision record; historical rationale otherwise lives in git history.
 
-## Safety boundaries
+## ⚠️ Safety Boundaries
 
 - Never place a secret value in a commit, command argument, log, response, or
   conversation. The vault is consumed by key name; vault imports use stdin.
@@ -85,7 +85,7 @@ decision record; historical rationale otherwise lives in git history.
   predictable from a file's current percentage. Never lower a security
   boundary's coverage floor to buy readability.
 
-## Commands
+## ⚙️ Commands
 
 ```bash
 npm install
@@ -109,7 +109,7 @@ powershell -File backend/watcher/install-cap-watch-task.test.ps1
 Real-token proof commands are intentionally manual. Read the relevant
 subsystem documentation before running them.
 
-## Delivery workflow
+## 🧭 Delivery Workflow
 
 1. Start from a GitHub Issue with a concrete outcome and acceptance criteria.
 2. Implement the smallest coherent change.
@@ -126,7 +126,7 @@ The reference in the root `standard.lock` is informational and non-enforcing.
 Repository code, product documentation, tests, and the local `PR Gate` remain
 the sources for implementation decisions.
 
-## Collaboration boundary
+## 🔒 Collaboration Boundary
 
 When explicitly assigned, an AI coding agent may create an Issue, branch,
 commit, or pull request and may answer a direct question after an explicit

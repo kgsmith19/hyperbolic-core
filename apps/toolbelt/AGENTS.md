@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## Purpose
+## 🎯 Purpose
 
 `toolbelt` is the monorepo for small portfolio tools. The root owns the shared
 Supabase `core` schema for runs, costs, outcomes, metrics, and events plus the
@@ -14,7 +14,7 @@ Claude Code `PreToolUse` security hook (secret-file blocking, protected-path
 blocking, per-repo cell ownership) with no dependency on any particular
 caller — extracted from `agentic-command-center`; see `guards/README.md`.
 
-## Working model
+## 🧭 Working Model
 
 Use this lean lifecycle:
 
@@ -26,7 +26,7 @@ Use this lean lifecycle:
 
 This repository does not keep committed specs or ADRs — see `TEST_LEDGER.md` for the current, lean test-tracking convention. Future work is tracked in GitHub Issues.
 
-## Product boundaries
+## 📋 Product Boundaries
 
 - Write portfolio database data only within this monorepo's `core`, `idea`,
   and `prompt` schemas. Follow the narrower instructions under each application.
@@ -38,7 +38,7 @@ This repository does not keep committed specs or ADRs — see `TEST_LEDGER.md` f
 - Keep every migration paired with a down migration that reverses the same change.
 - Keep the runtime dependency-free unless a linked Issue establishes a concrete need.
 
-## Commands
+## ⚙️ Commands
 
 ```bash
 node --test "tests/*.test.mjs"
@@ -54,7 +54,7 @@ cd apps/network-checker && bash backend/tools/check.sh
 
 The root has no browser client of its own to check (m3-09: the static idea-list client was deleted once the Shell's registry-driven tools list and Idea Intake list surfaces were both live); a manual browser check for root-schema changes now means the Shell's `/tools` or `/ideas` pages. The Node suite calls the live Supabase project using the public anon key. Report network or rate-limit failures accurately; do not relabel them as passing.
 
-## Documentation
+## 📚 Documentation
 
 - `docs/notes/2026-08-06-supabase-project-topology.md` records the shared project topology.
 - `TEST_LEDGER.md` tracks this app's own test suites.
@@ -66,10 +66,10 @@ The root has no browser client of its own to check (m3-09: the static idea-list 
 - `project.yaml` contains root commands and repository facts.
 - The root `standard.lock` is an informational reference only and does not impose policy.
 
-## Completion
+## ✅ Completion
 
 A change is ready when its acceptance criteria are satisfied, relevant documentation is accurate, applicable local checks pass, and the pull request's `Toolbelt PR Gate` reports success. State any unverified item explicitly.
 
-## Collaboration boundary
+## 🔒 Collaboration Boundary
 
 When explicitly assigned, an AI coding agent may create an Issue, branch, commit, or pull request. It may respond in an existing Issue or pull-request conversation only when it is explicitly tagged with a direct question. An AI agent must not submit a review, request reviewers, approve or block a pull request, change repository protections, or post unsolicited Issue or pull-request comments.

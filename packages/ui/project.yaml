@@ -1,0 +1,24 @@
+# Repository-specific facts for tools and contributors. The external standard
+# reference is informational; this repository owns its workflow and settings.
+
+project:
+  name: "@hyperbolic/ui"
+  type: node-ui-library
+
+runtime:
+  package_manager: npm
+  workspace: true
+
+commands:
+  build: npm run build
+  test: npm test
+
+ci:
+  # Repo-root path: this package is gated from the monorepo root, not from
+  # its own directory.
+  workflow: .github/workflows/shell-ci.yml
+  required_check: "Shell PR Gate"
+  triggers: [pull_request, merge_group]
+
+work_tracking:
+  system: github-issues

@@ -1,10 +1,10 @@
 # lifeos-ui
 
-## Purpose
+## 🎯 Purpose
 
 React single-page application for the LifeOS FastAPI backend. The deployed service is tailnet-only and authenticates with Supabase Auth JWTs. Stack: React 19, strict TypeScript, Vite, Tailwind v4, TanStack Query, React Router, Vitest with Testing Library, Playwright, oxlint, and Prettier.
 
-## Product boundaries
+## 📋 Product Boundaries
 
 - `../backend/` owns product and architecture decisions.
 - `src/api/types.gen.ts` is generated from the backend API and must not be
@@ -18,7 +18,7 @@ React single-page application for the LifeOS FastAPI backend. The deployed servi
 - Add behavior-focused Vitest/component tests and Playwright coverage where
   user-visible flows change.
 
-## Commands
+## ⚙️ Commands
 
 ```bash
 npm ci        # install
@@ -35,12 +35,12 @@ npm run gen:api  # regenerate API types
 Playwright request mocks must be scoped to the configured API host; do not use
 a bare `**/path` pattern that can intercept unrelated traffic.
 
-## Completion criteria
+## ✅ Completion Criteria
 
 The merge gate is the repository root's `.github/workflows/lifeos-ci.yml`,
 whose frontend job runs lint, type checks, unit tests, browser tests, and the
 production build.
 
-## Collaboration boundary
+## 🔒 Collaboration Boundary
 
 Repository-wide delivery and AI contribution boundaries are defined in `../AGENTS.md`.

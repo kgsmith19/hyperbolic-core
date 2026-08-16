@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## Application purpose
+## 🎯 Application Purpose
 
 The Shell is hyperbolic-core's unified web front end: one React/Vite SPA that
 composes every zone (Tools, Ideas, Prompt Organizer, the ACC area, the Brain
@@ -22,7 +22,7 @@ this one carries only the half it has. `package.json` stays at the app root
 because it is the npm workspace member, not a frontend file — the same shape
 ACC uses.
 
-## Product boundaries
+## 📋 Product Boundaries
 
 - Never hold or generate a real owner-identity credential. The Shell
   authenticates the owner through Supabase; tests use fixtures and route
@@ -36,7 +36,7 @@ ACC uses.
   parity-tested copy rather than an import of `packages/llm`, whose barrel
   pulls in three provider SDKs.
 
-## Layout
+## 📂 Layout
 
 ```
 package.json                 workspace member; all scripts live here
@@ -51,7 +51,7 @@ frontend/test/               standalone check scripts (bundle size, healthz)
 frontend/vite.config.ts      pins `root` to frontend/, so dist/ lands there
 ```
 
-## Commands
+## ⚙️ Commands
 
 ```bash
 npm run dev                    # Vite dev server, proxies /api to ACC
@@ -63,7 +63,7 @@ npm run size-check             # 250 KB gzipped budget
 npm run healthz-check
 ```
 
-## Completion
+## ✅ Completion
 
 A change is ready when its acceptance criteria are satisfied, affected
 documentation is accurate, the local checks above pass, and the
@@ -72,7 +72,7 @@ also type-checks and unit-tests `packages/platform-client`, `packages/ui`,
 `packages/llm`, and `services/llm-handler`, so a change here can break it via
 any of those. State any unverified item explicitly.
 
-## Collaboration boundary
+## 🔒 Collaboration Boundary
 
 When explicitly assigned, an AI coding agent may create an Issue, branch,
 commit, or pull request, and may answer a direct question after an explicit
