@@ -267,38 +267,52 @@ exists, the PR is the handoff.
 
 ## PR Gate and merge behavior
 
-This repository uses **six independent, path-scoped required checks** rather than one
-repo-wide aggregator — a deliberate, owner-directed adaptation for this monorepo's shape:
+This repository uses **eight independent workflows** rather than one repo-wide aggregator — a
+deliberate, owner-directed adaptation for this monorepo's shape — but only the three with no
+`paths:` filter are *intended* to be marked required in the branch ruleset. The "Required" column
+below is this document's specification of the intended, correct configuration; applying it to the
+live ruleset is a manual owner action outside this repository's files (no ruleset-write API is
+available to an agent in this harness) and may lag a commit or two behind this table. Read the
+live ruleset itself, never this table alone, to know what is actually enforced at any given
+moment:
 
-| Gate | Workflow | Covers |
-| --- | --- | --- |
-| `Toolbelt PR Gate` | `toolbelt-ci.yml` | `apps/toolbelt/**` |
-| `ACC PR Gate` | `acc-ci.yml` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` |
-| `Brain PR Gate` | `brain-ci.yml` | `services/brain/**` |
-| `Shell PR Gate` | `shell-ci.yml` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `docs/ops/**` |
-| `LifeOS PR Gate` | `lifeos-ci.yml` | `apps/lifeos/**` |
-| `Gitleaks` | `secret-scan.yml` | whole repo, every PR (deliberate exception: no path filter, generic name) |
+| Gate | Workflow | Covers | Required (intended) |
+| --- | --- | --- | --- |
+| `Toolbelt PR Gate` | `toolbelt-ci.yml` | `apps/toolbelt/**` | No |
+| `ACC PR Gate` | `acc-ci.yml` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` | No |
+| `Brain PR Gate` | `brain-ci.yml` | `services/brain/**` | No |
+| `Shell PR Gate` | `shell-ci.yml` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `docs/ops/**` | No |
+| `LifeOS PR Gate` | `lifeos-ci.yml` | `apps/lifeos/**` | No |
+| `Gitleaks` | `secret-scan.yml` | whole repo, every PR | Yes |
+| `Repo Policy` | `repo-policy.yml` | whole repo, every PR | Yes |
+| `Template Lint` | `template-lint.yml` | whole repo, every PR (PR body only) | Yes |
 
-A PR is required to pass only the gates whose paths its diff touches (GitHub's own required-check
-semantics: a check not triggered for a PR is not required for that PR). Each gate's internal
-structure — a real aggregator job with `if: always()`, full `needs:` coverage, explicit strict
-success-checking, an SHA-freshness check, and a step summary — is tracked to full compliance by
-a dedicated Issue; not every gate has reached that bar yet. Check each workflow file directly for
-its current internal structure rather than assuming this table describes it.
+**This is load-bearing, not incidental:** GitHub's required-status-checks model blocks a merge on
+any required check name that never reports, and a `paths:` filter does **not** make an unreported
+required check "not applicable" — it stays pending forever. This hit live: PRs #118 and #120 (root
+docs and new workflow files, touching none of the five app gates' paths) got stuck in
+`mergeable_state: "blocked"` permanently when the ruleset required all six app gates by name, and
+needed an owner administrative bypass to merge. Only a check with no `paths:` filter — or one
+restructured to always report, with an internal skip when its own paths did not change — is safe
+to mark required. The five app-scoped gates therefore stay **non-required**: they still run and
+report on every PR whose paths they cover, and remain real evidence for review, but the branch
+ruleset only enforces `Gitleaks`, `Repo Policy`, and `Template Lint`, which fire on every PR
+unconditionally. See the pinned standard's own "Path-scoped gates in monorepo topologies" note for
+the general pattern this follows.
 
-Two pieces of automation described by the pinned standard are **not yet present in this repo**
-and must not be assumed to exist until their own tracking Issue lands and this section is
-updated:
+Each of the eight gates has a real aggregator job: `if: always()`, full `needs:` coverage,
+explicit strict success-checking, an SHA-vs-live-PR-head freshness check, and a step summary.
 
-- A `merge-policy.yml` operational-metadata workflow (auto-merge arming/re-arming, managed
-  Work State / Evidence Index comments) — no such file exists yet in `.github/workflows/`.
-- A `.github/CODEOWNERS` file requiring code-owner approval for control-plane paths — no such
-  file exists yet.
+`.github/workflows/merge-policy.yml` is operational metadata automation, not a required status
+check: it never checks out, fetches, downloads, or executes PR-controlled code, never
+direct-merges, and maintains only the managed Work State and Evidence Index comments. For ready
+same-repository PRs to `main` it enables native squash auto-merge bound to the expected head and
+re-arms it when disabled without an owner hold.
 
-Until both land, `main` protection (pull request required, squash only, linear history, no force
-push, no deletion, owner bypass) applies without a code-owner-approval requirement, and PRs are
-merged without automated re-arming — the owner merges manually if `enable_pr_auto_merge` cannot
-be armed.
+`.github/CODEOWNERS` requires `@kgsmith19` review for this repo's control-plane paths
+(`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`). `main` protection: pull request
+required, squash only, linear history, no force push, no deletion, code-owner approval required
+for those paths, owner bypass.
 
 Agents create ready PRs — never drafts, never converting to draft; incomplete work remains on the
 branch until ready.
