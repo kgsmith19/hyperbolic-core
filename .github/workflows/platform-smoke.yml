@@ -1,0 +1,127 @@
+name: "Platform Smoke"
+
+# Post-deploy smoke verdict against the LIVE one-origin surface, from a
+# tailnet-joined runner -- the root-owned answer to gap G-1 (the docs promised
+# a post-deploy smoke suite; none existed; the standalone repo's
+# release-smoke.yml is superseded). Read-only by design: every probe is a GET
+# against a health endpoint or a static index; nothing mutates state.
+#
+# Called with `secrets: inherit`-free workflow_call from the tail of
+# deploy.yml and lifeos-deploy.yml (a red smoke fails the calling run), and
+# directly dispatchable for on-demand verification.
+#
+# Probe map (docs/ops/runbook.md, "Single-origin Tailscale Serve routes"):
+#   /healthz            Shell static health asset ({"status":"ok"})
+#   /                   Shell index (must reference a /assets/*.js bundle)
+#   /api/healthz        Handler A through the /api/ mount (full-path forward;
+#                       server.ts handles /api/healthz for exactly this probe)
+#   /api/brain/health   the Brain through the /api/brain/ mount
+#   /life/              LifeOS UI index (only once LIFEOS_DEPLOY_ENABLED --
+#                       before cutover the route serves the standalone layout,
+#                       which this repo must not assert about)
+#   /life/api/healthz   LifeOS API through the /life/api/ mount (same gate)
+#
+# Credentials: only the tailnet OAuth client (shell-deploy Infisical path).
+# No SSH at all -- the box is probed exactly the way a user's browser
+# reaches it, over the tailnet HTTPS origin.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Probe the live origin
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secrets · Pull the tailnet OAuth client from Infisical
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_SHELL_DEPLOY_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/shell-deploy/"
+          domain: https://app.infisical.com
+
+      - name: Network · Join tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
+
+      - name: Smoke · Probe every live unit through the shared origin
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          LIFEOS_LIVE: ${{ vars.LIFEOS_DEPLOY_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}[A-Za-z0-9]$ ]]; then
+            echo "DEPLOY_HOST must be a non-empty DNS name or IPv4 address." >&2
+            exit 1
+          fi
+          origin="https://$DEPLOY_HOST"
+          failures=0
+          results=()
+
+          probe() {
+            local label="$1" path="$2" expect="$3"
+            local body
+            if ! body="$(curl --fail --silent --show-error --max-time 15 "$origin$path" 2>&1)"; then
+              results+=("| $label | \`$path\` | ❌ unreachable |")
+              echo "FAIL $label ($path): $body" >&2
+              failures=$((failures + 1))
+              return 0
+            fi
+            if [[ -n "$expect" ]] && ! grep -qE "$expect" <<<"$body"; then
+              results+=("| $label | \`$path\` | ❌ unexpected body |")
+              echo "FAIL $label ($path): body did not match /$expect/" >&2
+              failures=$((failures + 1))
+              return 0
+            fi
+            results+=("| $label | \`$path\` | ✅ |")
+            echo "ok   $label ($path)"
+          }
+
+          probe "Shell health" "/healthz" '\{"status":"ok"\}'
+          probe "Shell index" "/" '/assets/[A-Za-z0-9_.-]+\.js'
+          probe "Handler A" "/api/healthz" ''
+          probe "Brain" "/api/brain/health" ''
+
+          if [[ "${LIFEOS_LIVE:-}" == "true" ]]; then
+            probe "LifeOS UI" "/life/" '/life/assets/[A-Za-z0-9_.-]+\.js'
+            probe "LifeOS API" "/life/api/healthz" ''
+          else
+            results+=("| LifeOS UI | \`/life/\` | ⏭️ skipped (pre-cutover) |")
+            results+=("| LifeOS API | \`/life/api/healthz\` | ⏭️ skipped (pre-cutover) |")
+            echo "skip LifeOS probes: LIFEOS_DEPLOY_ENABLED != 'true' (pre-cutover; the route serves the standalone layout)"
+          fi
+
+          {
+            echo "### Platform Smoke"
+            echo ""
+            echo "| Unit | Path | Result |"
+            echo "| --- | --- | --- |"
+            printf '%s\n' "${results[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$failures" -gt 0 ]]; then
+            echo "::error::Platform smoke failed: $failures probe(s) red. The deploy that triggered this is NOT verified." >&2
+            exit 1
+          fi
+          echo "All probes green."
