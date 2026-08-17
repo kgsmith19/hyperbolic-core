@@ -71,6 +71,16 @@ test("proxyRequest: rejects every field that would otherwise reach node:http's r
   const cases: [string, Record<string, unknown>][] = [
     ["header name with a space", { ...base, headers: { "bad name": "x" } }],
     ["header value with embedded CRLF (header injection)", { ...base, headers: { "x-a": "a\r\nX-Injected: 1" } }],
+    // Round-2 independent review's finding: a CRLF-only check on header
+    // VALUES (this file's own first fix) missed every other C0 control and
+    // every code point above 0xFF -- a bare non-Latin-1 character or a NUL
+    // byte still reached node:http unvalidated and threw its own internal
+    // TypeError. Exhaustively fuzzed 0x0-0x2FF against this exact field by
+    // that review; these four are representative, not exhaustive.
+    ["header value containing a non-Latin-1 character (e.g. euro sign)", { ...base, headers: { "x-a": "€" } }],
+    ["header value containing a NUL byte", { ...base, headers: { "x-a": "a\x00b" } }],
+    ["header value containing a vertical-tab control character", { ...base, headers: { "x-a": "a\x0bb" } }],
+    ["header value containing a lone UTF-16 surrogate", { ...base, headers: { "x-a": "a\ud800b" } }],
     ["headers as an array, not an object", { ...base, headers: ["a"] }],
     ["method containing a space (request-line injection)", { ...base, method: "GET /evil HTTP/1.1" }],
     ["method as a number", { ...base, method: 42 }],
@@ -88,6 +98,30 @@ test("proxyRequest: rejects every field that would otherwise reach node:http's r
     const parsed = bodyJSON(result) as { error: string };
     assert.equal(parsed.error, "invalid broker request", `${label}: must be refused as a broker-request validation error, not an upstream failure`);
   }
+});
+
+test("proxyRequest: legitimate header values (a real bearer token, a tab, latin-1 bytes) are forwarded, not rejected -- the fix is not overly broad", async () => {
+  await withFakeUpstream(
+    (req, res) => {
+      assert.equal(req.headers.authorization, "Bearer sk-ant-api03-xyz_-ABC.123");
+      assert.equal(req.headers["x-with-tab"], "a\tb");
+      res.writeHead(200, {});
+      res.end();
+    },
+    async (port) => {
+      const result = await proxyRequest(
+        {
+          caller: "llm-handler",
+          token: "t",
+          targetHost: `127.0.0.1:${port}`,
+          protocol: "http",
+          headers: { authorization: "Bearer sk-ant-api03-xyz_-ABC.123", "x-with-tab": "a\tb" },
+        },
+        KNOWN_CALLER_POLICY,
+      );
+      assert.equal(result.status, 200);
+    },
+  );
 });
 
 test("proxyRequest: a targetHost's port is parsed exactly, never silently coerced -- the logged host:port is what was actually contacted", async () => {

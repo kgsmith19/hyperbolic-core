@@ -84,6 +84,17 @@ function normalize(value: unknown): Record<string, unknown> {
 // same grammar -- validating it here first means that throw never happens.
 const HTTP_TOKEN_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
+// RFC 7230 3.2 field-content: tab, printable ASCII, and the obs-text octet
+// range (0x80-0xFF) -- exactly what node:http's own checkInvalidHeaderChar
+// accepts. A CRLF-only check (this file's own first draft) misses every
+// other C0 control and every code point above 0xFF (a bare non-Latin-1
+// character, e.g. "€", or a NUL byte): those still reached node:http
+// unvalidated and threw its own internal TypeError -- caught by independent
+// review's second pass, which fuzzed all 768 code points 0x0-0x2FF against
+// every field and found 542 of them broke exactly this way through the
+// header-value path alone.
+const HEADER_VALUE_RE = /^[\t\x20-\x7e\x80-\xff]*$/;
+
 // A request-target's path+query, RFC 7230 3.1.1 / RFC 3986: no control
 // characters (CR/LF header-injection into the request line included) and no
 // literal whitespace -- a caller that needs either must percent-encode it,
@@ -140,7 +151,7 @@ function isPlainHeadersRecord(value: unknown): value is Record<string, string> {
   if (value === undefined) return true;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   return Object.entries(value).every(
-    ([name, headerValue]) => HTTP_TOKEN_RE.test(name) && typeof headerValue === "string" && !/[\r\n]/.test(headerValue),
+    ([name, headerValue]) => HTTP_TOKEN_RE.test(name) && typeof headerValue === "string" && HEADER_VALUE_RE.test(headerValue),
   );
 }
 
@@ -161,7 +172,7 @@ function validateForwarding(request: ProxyRequestBody): string | null {
     return "path must start with / and contain no control characters or whitespace";
   }
   if (!isPlainHeadersRecord(request.headers)) {
-    return "headers must be a plain object of valid header-name -> single-line string-value pairs";
+    return "headers must be a plain object of valid header-name -> valid header-value string pairs (tab, printable ASCII, or 0x80-0xFF only; no control characters)";
   }
   if (request.body !== undefined && typeof request.body !== "string") {
     return "body must be a string when present";
@@ -253,6 +264,7 @@ function forward(request: ProxyRequestBody, target: ParsedTarget): Promise<Proxy
         finish({ status: upstreamRes.statusCode ?? 502, headers, body: Buffer.concat(chunks) });
       });
       upstreamRes.on("error", (err) => {
+        upstreamReq.destroy();
         finish(jsonResult(502, { error: "broker upstream response failed", message: (err as Error).message }));
       });
     });
