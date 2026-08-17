@@ -182,6 +182,28 @@ test("the on-box restic script trusts the Storage Box on first connection and re
   assert.doesNotMatch(backup, /--repos=platform/);
 });
 
+test("remote credentials are cleaned up even if scp or the second ssh session never reaches the heredoc's own trap", () => {
+  // Independent verification found: the heredoc's own `trap rm -rf
+  // restic-backup-tmp` only exists once that heredoc's ssh session
+  // actually starts. If the scp before it fails partway, or that second
+  // ssh never connects, the credential files (the SSH key, RESTIC_PASSWORD)
+  // are left on the box with nothing to remove them. An outer trap,
+  // registered before the first byte is written to $tmp, is the fallback
+  // that still attempts a remote cleanup on every exit path -- a no-op if
+  // the heredoc already cleaned up, the only defense if it never got the
+  // chance to.
+  const backup = stepBlock("- name: Restic · Back up the dump and live blobs volume on the box", [
+    "- name: Restic · Fail the job",
+  ]);
+  const cleanupFn = backup.indexOf("cleanup_remote()");
+  const outerTrap = backup.indexOf("trap 'cleanup_remote; rm -rf \"$tmp\"' EXIT");
+  const firstWrite = backup.indexOf('printf \'%s\\n\' "$STORAGEBOX_SSH_KEY"');
+  assert.ok(cleanupFn > -1 && outerTrap > -1 && firstWrite > -1);
+  assert.ok(cleanupFn < outerTrap, "cleanup_remote must be defined before the trap registers it");
+  assert.ok(outerTrap < firstWrite, "the trap must be registered before any credential file is written");
+  assert.match(backup, /rm -rf \\"\$remote_dir\\"/);
+});
+
 test("the blob volume is discovered from Docker, never assumed from Compose's naming convention", () => {
   // The named volume Compose actually creates (project-name-prefixed) is
   // not the literal string "lifeos-blobs" from compose.yaml's own

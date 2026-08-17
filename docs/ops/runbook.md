@@ -461,8 +461,9 @@ What differs from the platform restore path above:
   never travels to the box) *and* the live document blob volume (`/app/var/blobs`, a named Docker
   volume from `apps/lifeos/backend/compose.yaml`).
 - **Where it runs.** The platform restic step runs entirely inside the ephemeral GitHub Actions
-  runner. The LifeOS restic step runs on the box itself, over the same Tailscale SSH session the
-  blob-tar step already uses: the volume's real (Compose-project-prefixed) name is discovered via
+  runner. The LifeOS restic step runs on the box itself, over a fresh Tailscale SSH connection (not
+  the blob-tar step's own session -- each step opens and closes its own): the volume's real
+  (Compose-project-prefixed) name is discovered via
   `docker inspect` first (never assumed from Compose's own naming convention -- a bare
   `docker run -v lifeos-blobs:...` would silently create or reference a *different*, empty volume),
   then copied locally into a plain directory restic walks, the same way it already walks the platform

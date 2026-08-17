@@ -182,14 +182,27 @@ jobs:
           fi
 
           tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
+          remote_dir="restic-backup-tmp"
+          # Two independent cleanups, not one: the heredoc below registers
+          # its own trap for the normal path, but that trap only exists once
+          # the heredoc's ssh session actually starts. If the scp above it
+          # fails partway, or that second ssh never connects at all, the
+          # heredoc's trap never runs -- so this outer trap is the fallback
+          # that removes the remote credential files regardless of exactly
+          # where this step fails. `|| true`: a fallback cleanup must never
+          # itself turn a real failure into a confusing second one, and if
+          # the box is genuinely unreachable there is nothing more to do.
+          cleanup_remote() {
+            ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+              "deploy@$DEPLOY_HOST" "rm -rf \"$remote_dir\"" 2>/dev/null || true
+          }
+          trap 'cleanup_remote; rm -rf "$tmp"' EXIT
           umask 077
           printf '%s\n' "$STORAGEBOX_SSH_KEY" > "$tmp/storagebox-key"
           printf '%s' "$RESTIC_PASSWORD" > "$tmp/restic-password"
           cp docs/ops/restic-setup.sh "$tmp/restic-setup.sh"
           cp "$RUNNER_TEMP/lifeos.dump" "$tmp/lifeos.dump"
 
-          remote_dir="restic-backup-tmp"
           ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
             "deploy@$DEPLOY_HOST" "mkdir -p -m 700 \"$remote_dir\""
           scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
