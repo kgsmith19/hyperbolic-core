@@ -8,9 +8,11 @@
   "scripts": {
     "manifests:check": "node scripts/validate-manifests.mjs",
     "migrations:check": "node scripts/validate-migrations.mjs",
-    "migrations:stage": "node scripts/stage-migrations.mjs"
+    "migrations:stage": "node scripts/stage-migrations.mjs",
+    "broker-policy:generate": "node scripts/generate-broker-policy.mjs"
   },
   "dependencies": {
+    "@hyperbolic/broker-contract": "*",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1"
   }

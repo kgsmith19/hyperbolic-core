@@ -102,6 +102,12 @@
           "uniqueItems": true,
           "description": "Exact hosts the tool contacts beyond the platform Supabase project. Empty array means no egress."
         },
+        "vaultKeys": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "uniqueItems": true,
+          "description": "Names (never values) of third-party credentials this tool needs injected via the guards broker (Epic #182). Optional and empty by default -- a tool declares a key here only once it actually calls the broker for it (see issue #186's llm-handler migration); an absent or empty array means the broker grants this caller no credentials at all."
+        },
         "llmHandler": {
           "type": "object",
           "additionalProperties": false,
