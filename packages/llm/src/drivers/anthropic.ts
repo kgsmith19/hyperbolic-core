@@ -167,9 +167,18 @@ export function fromAnthropicMessage(message: Anthropic.Message, latencyMs: numb
   if (!Array.isArray(message.content) || !message.usage || typeof message.model !== "string") {
     throw createLlmError("provider_bug", "anthropic driver: malformed successful response", { cause: message });
   }
-  const textBlocks = message.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
+  // `b != null` guards (issue #186 round-2 independent review's finding):
+  // the official SDK's own client never produces a null content-block
+  // entry, but this function is now also reachable with a JSON body relayed
+  // verbatim through services/broker's /proxy envelope
+  // (anthropic-via-broker.ts) -- a shape neither this SDK nor this file's
+  // own top-level guard above validates element-by-element. Without this,
+  // a content array containing `null` threw a raw, unclassified TypeError
+  // on `b.type` instead of this function's own "malformed successful
+  // response" provider_bug.
+  const textBlocks = message.content.filter((b): b is Anthropic.TextBlock => b != null && b.type === "text");
   const toolCalls: ToolCall[] = message.content
-    .filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
+    .filter((b): b is Anthropic.ToolUseBlock => b != null && b.type === "tool_use")
     .map((b) => ({ id: b.id, name: b.name, input: b.input }));
   return {
     text: textBlocks.length > 0 ? textBlocks.map((b) => b.text).join("") : null,

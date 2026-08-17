@@ -21,6 +21,7 @@ import * as https from "node:https";
 import { validateRequest } from "@hyperbolic/broker-contract";
 import { isKnownCaller, type PolicyDocument } from "./policy.ts";
 import type { CredentialMap } from "./credentials.ts";
+import { verifyCallerToken, type CallerTokenMap } from "./caller-tokens.ts";
 
 export interface ProxyRequestBody {
   caller: string;
@@ -50,6 +51,12 @@ export interface ProxyLogEntry {
   caller: string;
   targetHost: string;
   knownCaller: boolean;
+  // Present only for a request that named a credential (issue #186 round-2
+  // independent review's finding): distinguishes a refused credential
+  // request from a granted one, and from the original #185 log-only shape
+  // (both fields absent) where no credential was ever requested at all.
+  credentialRequested?: string;
+  credentialGranted?: boolean;
   timestamp: string;
 }
 
@@ -210,17 +217,56 @@ export interface CredentialError {
 // credentials its own manifest never declared is a real vulnerability the
 // instant it happens, not something safe to observe first and lock down
 // later. Returns the error to refuse with, or null when the caller is
-// authorized for exactly the vault key it named.
-function authorizeCredential(request: ProxyRequestBody, policy: PolicyDocument, credentials: CredentialMap): CredentialError | null {
+// authenticated AND authorized for exactly the vault key it named, AND the
+// forwarding destination is one that caller's manifest actually declares.
+//
+// Two round-2 independent-review findings closed here, both load-bearing
+// for the "the real secret never has to leave the broker unsupervised"
+// claim the whole feature rests on:
+//   - `request.token` was previously shape-checked (non-empty string) but
+//     never verified against anything -- any process could self-assert
+//     `caller: "llm-handler"` and receive its credentials. verifyCallerToken
+//     closes that.
+//   - `request.targetHost` was never checked against the caller's own
+//     `allowedHosts` for a CREDENTIAL-bearing request specifically -- a
+//     caller could name any host it wanted and have the real secret
+//     injected into a request sent there. That is not the same risk #187's
+//     general egress soak covers (this is the destination check the
+//     credential gate's own safety depends on, not a generic allowlist);
+//     it is enforced here, always, never log-only.
+//
+// The "unknown caller" and "bad token" cases are folded into one identical
+// 403 message deliberately, so a caller cannot use the error text to probe
+// which caller ids are even registered.
+function authorizeCredential(
+  request: ProxyRequestBody,
+  policy: PolicyDocument,
+  credentials: CredentialMap,
+  callerTokens: CallerTokenMap,
+  targetHost: string,
+): CredentialError | null {
   const entry = policy[request.caller];
-  if (!isKnownCaller(request.caller, policy) || !entry?.vaultKeys?.includes(request.credential!)) {
+  const knownAndDeclared = isKnownCaller(request.caller, policy) && !!entry?.vaultKeys?.includes(request.credential!);
+  const tokenOk = verifyCallerToken(callerTokens, request.caller, request.token);
+  if (!knownAndDeclared || !tokenOk) {
     return { status: 403, reason: `caller "${request.caller}" is not authorized for vault key "${request.credential}"` };
+  }
+  const targetLower = targetHost.toLowerCase();
+  if (!(entry!.allowedHosts ?? []).some((host) => host.toLowerCase() === targetLower)) {
+    return { status: 403, reason: `caller "${request.caller}" is not authorized to reach host "${targetHost}" with a credential` };
   }
   if (!Object.prototype.hasOwnProperty.call(credentials, request.credential!)) {
     // Fail closed, never silently proxy without the credential the caller
     // explicitly asked for -- an unprovisioned key must be visibly broken,
     // not a mysteriously-unauthenticated call to the real provider.
     return { status: 502, reason: `vault key "${request.credential}" is not provisioned on this broker` };
+  }
+  if (!HEADER_VALUE_RE.test(credentials[request.credential!]!)) {
+    // A malformed provisioned value (e.g. a trailing newline, a common
+    // secret-manager copy/paste artifact) must fail as a clear, attributable
+    // 502 here -- not reach node:http's own header-write path and throw
+    // there, which would violate this module's own "never throws" contract.
+    return { status: 502, reason: `vault key "${request.credential}" is provisioned with a value that is not a valid HTTP header value` };
   }
   return null;
 }
@@ -230,8 +276,18 @@ function authorizeCredential(request: ProxyRequestBody, policy: PolicyDocument, 
 // header name -- case-insensitively, since HTTP header names are: a
 // caller naming `Authorization` while credentialHeader is `authorization`
 // must not leak its own value through under the differently-cased key.
+//
+// Object.create(null), not a `{}` literal (round-2 independent review's
+// finding): a plain object's `__proto__` key is an accessor on
+// Object.prototype that silently ignores a string assignment rather than
+// creating an own property, so `credentialHeader === "__proto__"` (a valid
+// HTTP_TOKEN_RE token) previously vanished the injection entirely --
+// exactly the "silently proxy without the credential" failure mode this
+// file's own header comment already promises never happens. A null-
+// prototype object has no such accessor: every assignment here is a plain
+// own data property, regardless of its key.
 function injectCredential(headers: Record<string, string> | undefined, credentialHeader: string, value: string): Record<string, string> {
-  const merged: Record<string, string> = {};
+  const merged: Record<string, string> = Object.create(null);
   const targetLower = credentialHeader.toLowerCase();
   for (const [name, headerValue] of Object.entries(headers ?? {})) {
     if (name.toLowerCase() !== targetLower) merged[name] = headerValue;
@@ -242,11 +298,12 @@ function injectCredential(headers: Record<string, string> | undefined, credentia
 
 export interface ProxyContext {
   credentials?: CredentialMap;
+  callerTokens?: CallerTokenMap;
   log?: LogFn;
 }
 
 export async function proxyRequest(input: unknown, policy: PolicyDocument, context: ProxyContext = {}): Promise<ProxyResult> {
-  const { credentials = {}, log = defaultLog } = context;
+  const { credentials = {}, callerTokens = {}, log = defaultLog } = context;
   const candidate = normalize(input);
   const validation = validateRequest(candidate);
   if (!validation.ok) {
@@ -270,12 +327,27 @@ export async function proxyRequest(input: unknown, policy: PolicyDocument, conte
   // truthful record of where the request went, and parseTargetHost is the
   // only thing in this module allowed to decide that.
   const loggedTarget = target.port !== undefined ? `${target.host}:${target.port}` : target.host;
-  log({ caller: request.caller, targetHost: loggedTarget, knownCaller, timestamp: new Date().toISOString() });
 
+  // The credential decision runs BEFORE the log entry is emitted (round-2
+  // independent review's finding): logging first meant a 403-refused
+  // credential request logged identically to a successful proxy, recording
+  // a targetHost the request never actually reached -- an audit trail that
+  // cannot distinguish "granted" from "refused" has no value for exactly
+  // the hard-gate decision it most needs to record.
   let forwardRequest = request;
+  let credentialGranted: boolean | undefined;
   if (request.credential !== undefined) {
-    const authError = authorizeCredential(request, policy, credentials);
+    const authError = authorizeCredential(request, policy, credentials, callerTokens, target.host);
+    credentialGranted = authError === null;
     if (authError !== null) {
+      log({
+        caller: request.caller,
+        targetHost: loggedTarget,
+        knownCaller,
+        credentialRequested: request.credential,
+        credentialGranted: false,
+        timestamp: new Date().toISOString(),
+      });
       return jsonResult(authError.status, { error: "credential request refused", reason: authError.reason });
     }
     forwardRequest = {
@@ -283,6 +355,15 @@ export async function proxyRequest(input: unknown, policy: PolicyDocument, conte
       headers: injectCredential(request.headers, request.credentialHeader!, credentials[request.credential]!),
     };
   }
+
+  log({
+    caller: request.caller,
+    targetHost: loggedTarget,
+    knownCaller,
+    credentialRequested: request.credential,
+    credentialGranted,
+    timestamp: new Date().toISOString(),
+  });
 
   return forward(forwardRequest, target);
 }

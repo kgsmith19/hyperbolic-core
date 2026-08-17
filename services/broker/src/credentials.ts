@@ -27,8 +27,16 @@ export function loadCredentials(env: NodeJS.ProcessEnv, policy: PolicyDocument):
   }
   const credentials: CredentialMap = {};
   for (const name of knownNames) {
+    // hasOwnProperty + typeof guards (round-2 independent review's finding):
+    // a bare `env[name]` reads through the prototype chain too, so a vault
+    // key literally named e.g. "CONSTRUCTOR" or "TOSTRING" would otherwise
+    // resolve to a function from Object.prototype (truthy) and get injected
+    // into a real outgoing header as its string coercion -- never a real
+    // secret, but a broken injection this module's own "fail closed" design
+    // must not produce silently.
+    if (!Object.prototype.hasOwnProperty.call(env, name)) continue;
     const value = env[name];
-    if (value) credentials[name] = value;
+    if (typeof value === "string" && value.length > 0) credentials[name] = value;
   }
   return credentials;
 }

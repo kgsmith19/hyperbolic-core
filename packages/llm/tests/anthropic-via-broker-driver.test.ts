@@ -1,9 +1,37 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as http from "node:http";
 import { anthropicViaBrokerDriver } from "../src/drivers/anthropic-via-broker.ts";
 import { isLlmError } from "../src/errors.ts";
 import type { LlmRequest } from "../src/types.ts";
 import { jsonResponse, withPatchedFetch } from "./driver-harness.ts";
+
+// A real local HTTP server standing in for the broker, for the two cases
+// below where a fetch-mocked in-memory Response cannot faithfully reproduce
+// the bug (round-2 independent review's finding: every prior test in this
+// file replaced globalThis.fetch with an in-memory stub, which silently
+// masked a real timeout-enforcement bug -- a pre-buffered Response never
+// exercises a stalled body read at all).
+function withRealUpstream(
+  handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
+  fn: (port: number) => Promise<void>,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer(handler);
+    server.listen(0, "127.0.0.1", async () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      try {
+        await fn(port);
+        resolve();
+      } catch (err) {
+        reject(err);
+      } finally {
+        server.close();
+      }
+    });
+  });
+}
 
 // This driver never talks to a provider directly -- every fetch below is
 // asserted to go to the BROKER's own /proxy endpoint, and the fake
@@ -200,6 +228,106 @@ test("anthropicViaBrokerDriver.complete: a network-level fetch failure (broker i
       );
     },
   );
+});
+
+test("anthropicViaBrokerDriver.complete: timeoutMs is enforced against the FULL response including the body read, not just until headers arrive -- a broker that stalls mid-body does not hang past timeoutMs", async () => {
+  await withRealUpstream(
+    (_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.write('{"id":"msg_'); // headers + partial body sent, then stalls forever
+    },
+    async (port) => {
+      const request: LlmRequest = { ...BASE_REQUEST, timeoutMs: 200 };
+      const startedAt = Date.now();
+      await assert.rejects(
+        () => anthropicViaBrokerDriver.complete(request, { apiKey: "t", baseUrl: `http://127.0.0.1:${port}` }),
+        (err: unknown) => {
+          assert.ok(isLlmError(err));
+          assert.equal(err.class, "transport");
+          return true;
+        },
+      );
+      const elapsedMs = Date.now() - startedAt;
+      assert.ok(elapsedMs < 3000, `expected rejection near timeoutMs (200ms); took ${elapsedMs}ms -- the body read was not actually bounded by the timer`);
+    },
+  );
+});
+
+test("anthropicViaBrokerDriver.complete: a broker-relayed 2xx response with an EMPTY body raises a clean LlmError (provider_bug), never a raw unclassified TypeError", async () => {
+  await withRealUpstream(
+    (_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(); // 2xx, genuinely zero-length body
+    },
+    async (port) => {
+      await assert.rejects(
+        () => anthropicViaBrokerDriver.complete(BASE_REQUEST, { apiKey: "t", baseUrl: `http://127.0.0.1:${port}` }),
+        (err: unknown) => {
+          assert.ok(isLlmError(err), `expected a classified LlmError, got ${err instanceof Error ? err.constructor.name : typeof err}: ${err}`);
+          assert.equal(err.class, "provider_bug");
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("anthropicViaBrokerDriver.complete: a broker-relayed 2xx response whose body is the JSON literal `null` raises a clean LlmError, never a raw TypeError", async () => {
+  await withRealUpstream(
+    (_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end("null");
+    },
+    async (port) => {
+      await assert.rejects(
+        () => anthropicViaBrokerDriver.complete(BASE_REQUEST, { apiKey: "t", baseUrl: `http://127.0.0.1:${port}` }),
+        (err: unknown) => {
+          assert.ok(isLlmError(err));
+          assert.equal(err.class, "provider_bug");
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("anthropicViaBrokerDriver.complete: a non-JSON error body on a 5xx (e.g. an HTML page from a reverse proxy in front of the broker) classifies as transport (retryable), not hardcoded provider_bug", async () => {
+  await withPatchedFetch(
+    async () => new Response("<html>502 Bad Gateway</html>", { status: 502, headers: { "content-type": "text/html" } }),
+    async () => {
+      await assert.rejects(
+        () => anthropicViaBrokerDriver.complete(BASE_REQUEST, BROKER_CREDENTIALS),
+        (err: unknown) => {
+          assert.ok(isLlmError(err));
+          assert.equal(err.class, "transport");
+          assert.equal(err.retryable, true);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test("anthropicViaBrokerDriver.complete: a malformed credentials.baseUrl is refused synchronously as invalid_request (non-retryable), before any fetch, not misclassified as a retryable transport failure", async () => {
+  let fetchCalled = false;
+  await withPatchedFetch(
+    async () => {
+      fetchCalled = true;
+      return jsonResponse(fixtureMessage());
+    },
+    async () => {
+      await assert.rejects(
+        () => anthropicViaBrokerDriver.complete(BASE_REQUEST, { apiKey: "t", baseUrl: "not a url at all" }),
+        (err: unknown) => {
+          assert.ok(isLlmError(err));
+          assert.equal(err.class, "invalid_request");
+          assert.equal(err.retryable, false);
+          return true;
+        },
+      );
+    },
+  );
+  assert.equal(fetchCalled, false);
 });
 
 test("anthropicViaBrokerDriver.stream: throws a clear, disclosed 'not yet supported' error and never yields -- honest about the broker's own buffering limitation", async () => {

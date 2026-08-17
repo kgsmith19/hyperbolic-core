@@ -79,6 +79,13 @@ function buildEnvelope(request: LlmRequest, brokerToken: string): Record<string,
   };
 }
 
+// `new URL("/proxy", baseUrl)` resolves an absolute-path reference against
+// baseUrl per the URL spec, which REPLACES baseUrl's own path entirely (not
+// appends to it) -- credentials.baseUrl must therefore be the broker's bare
+// origin (e.g. "http://127.0.0.1:8300"), never a URL with its own path
+// prefix; a reverse-proxy path prefix in front of the broker is not
+// supported today and would need explicit handling here if that topology
+// is ever introduced.
 function brokerProxyUrl(baseUrl: string): string {
   return new URL(BROKER_PROXY_PATH, baseUrl).toString();
 }
@@ -105,6 +112,22 @@ function classifyTransportError(err: unknown, wasAborted: boolean): LlmError {
 // misconfiguration (e.g. an unprovisioned credential) as, say, an
 // Anthropic-side auth failure -- distinguished by matching the broker's own
 // literal error strings, which Anthropic's error responses never contain.
+//
+// Known, accepted limitation (round-2 independent review's finding, not
+// closed in this PR): this is body-content sniffing, not a cryptographic or
+// out-of-band signal, so a malicious/compromised UPSTREAM could in
+// principle send a 4xx body containing one of BROKER_OWN_ERROR_MESSAGES
+// verbatim and have it misclassified as a broker-level refusal instead of
+// a real provider error. The practical exploitability is low here: this
+// driver's own targetHost is a hardcoded constant
+// (ANTHROPIC_TARGET_HOST) and authorizeCredential's own allowedHosts check
+// (services/broker/src/proxy.ts) means only requests actually destined for
+// that declared host ever reach injectCredential at all, so an attacker
+// would need to already control api.anthropic.com's own responses. A
+// robust fix (an out-of-band broker-refusal signal, e.g. a dedicated
+// response header the broker sets on ITS OWN refusals and server.ts never
+// relays from an upstream response) is deferred as a follow-up given that
+// low severity.
 function classifyBrokerFailure(status: number, parsed: unknown): LlmError {
   const body = parsed && typeof parsed === "object" ? (parsed as BrokerErrorBody) : {};
   if (typeof body.error === "string" && BROKER_OWN_ERROR_MESSAGES.has(body.error)) {
@@ -131,16 +154,39 @@ async function completeImpl(request: LlmRequest, credentials: Credentials): Prom
     throw createLlmError("invalid_request", "anthropic-via-broker driver: no broker caller-auth token supplied in credentials.apiKey");
   }
 
+  let proxyUrl: string;
+  try {
+    proxyUrl = brokerProxyUrl(credentials.baseUrl);
+  } catch {
+    // A malformed baseUrl is a configuration mistake, not a network failure
+    // -- round-2 independent review's finding: this used to be caught by
+    // the same catch as fetch()'s own errors and misclassified "transport"
+    // (retryable), so a permanently bad config would be retried pointlessly
+    // instead of surfacing as the non-retryable invalid_request it is.
+    throw createLlmError("invalid_request", `anthropic-via-broker driver: credentials.baseUrl is not a valid URL: "${credentials.baseUrl}"`);
+  }
+
   const { controller, hardTimer, cleanup } = createAttemptController(request);
   const startedAt = Date.now();
   let response: Response;
+  let text: string;
   try {
-    response = await fetch(brokerProxyUrl(credentials.baseUrl), {
+    response = await fetch(proxyUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(buildEnvelope(request, credentials.apiKey)),
       signal: controller.signal,
     });
+    // Reading the body inside the SAME try/finally as fetch() itself
+    // (round-2 independent review's finding): the previous version cleared
+    // hardTimer/cleanup() the moment fetch() resolved -- i.e. once
+    // response HEADERS arrived -- so request.timeoutMs stopped being
+    // enforced for the remainder of the body read. A broker that sent
+    // headers immediately but stalled mid-body left this call hanging
+    // indefinitely regardless of timeoutMs. Reading the body here keeps
+    // the same AbortController (and its still-armed hardTimer) covering
+    // the read too, so an abort mid-body-read now actually aborts it.
+    text = await response.text();
   } catch (err) {
     throw classifyTransportError(err, controller.signal.aborted);
   } finally {
@@ -148,19 +194,40 @@ async function completeImpl(request: LlmRequest, credentials: Credentials): Prom
     cleanup();
   }
 
-  const text = await response.text();
   let parsed: unknown;
   try {
     parsed = text.length > 0 ? JSON.parse(text) : undefined;
   } catch {
+    // Classified by the actual HTTP status, not hardcoded provider_bug
+    // (round-2 independent review's finding): a non-JSON body on a 5xx
+    // (e.g. an HTML error page from a reverse proxy in front of the
+    // broker) is a genuine transport-level failure and should retry like
+    // any other 5xx; only a non-JSON body on a 2xx is truly "the broker
+    // said success but sent garbage", which classifyByStatus's own
+    // fallback already maps to provider_bug.
     throw createLlmError(
-      "provider_bug",
+      classifyByStatus(response.status),
       `anthropic-via-broker driver: broker response body was not valid JSON (status ${response.status})`,
     );
   }
 
   if (!response.ok) {
     throw classifyBrokerFailure(response.status, parsed);
+  }
+
+  // A 2xx response body that isn't a usable JSON object must never reach
+  // fromAnthropicMessage as `undefined`/`null` (round-2 independent
+  // review's finding): fromAnthropicMessage's own malformed-response guard
+  // dereferences `message.content` before it can run, so an empty or
+  // literal-`null` body threw a raw, unclassified TypeError that bypassed
+  // this driver's entire LlmError taxonomy -- reachable in practice,
+  // since the broker's own test suite already produces a bodiless
+  // relayed 200.
+  if (typeof parsed !== "object" || parsed === null) {
+    throw createLlmError(
+      "provider_bug",
+      `anthropic-via-broker driver: broker returned HTTP ${response.status} with no usable JSON body`,
+    );
   }
 
   return fromAnthropicMessage(parsed as Anthropic.Message, Date.now() - startedAt);

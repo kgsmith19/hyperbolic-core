@@ -10,7 +10,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.ts tests/*.test.mjs",
     "typecheck": "tsc -b . && tsc -p tsconfig.test.json"
   },
   "dependencies": {
