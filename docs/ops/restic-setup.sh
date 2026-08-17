@@ -138,6 +138,12 @@ fi
 # sftp backend shells out to the system `ssh`, which only reads the port from
 # an ssh_config Host entry (or -p, which the sftp backend does not expose) --
 # so an alias is the documented, supported way to reach it.
+#
+# StrictHostKeyChecking accept-new (trust-on-first-connection): every other
+# ssh/scp call already in this repo's workflows uses the same setting, and
+# without it a non-interactive caller (CI, a cron job) hangs or fails outright
+# the first time it ever reaches a host with no existing known_hosts entry --
+# which every Storage Box necessarily is, the first time this script runs.
 ssh_config_file="$ssh_config_dir/config"
 alias_name="hetzner-storagebox"
 config_block=$(
@@ -148,6 +154,7 @@ Host ${alias_name}
   Port 23
   IdentityFile ${ssh_key_file}
   IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
 EOF
 )
 

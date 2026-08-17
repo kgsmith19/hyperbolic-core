@@ -143,8 +143,18 @@ jobs:
       # -- a compromised restic credential must not also unlock the
       # database, and vice versa), scoped to exactly the restic
       # credentials, never SUPABASE_DB_URL.
+      #
+      # continue-on-error on both restic steps, plus the final gate step
+      # below (after the run-id step): a Storage Box/SSH/Infisical hiccup
+      # here must never fail the whole job or skip recording the run id --
+      # the age backup above already succeeded and uploaded by this point,
+      # and the destructive-migration rule needs that id regardless of
+      # whether restic also worked tonight. The job still goes red on a
+      # real restic failure, just after the age path's own signal is safe.
       - name: Storage Box restic credentials
         if: vars.RESTIC_BACKUP_ENABLED == 'true'
+        id: restic-credentials
+        continue-on-error: true
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
@@ -156,6 +166,8 @@ jobs:
 
       - name: Back up the platform dump to the Hetzner Storage Box (restic)
         if: vars.RESTIC_BACKUP_ENABLED == 'true'
+        id: restic-backup
+        continue-on-error: true
         run: |
           set -euo pipefail
           if [ ! -s "$RUNNER_TEMP/platform.dump" ]; then
@@ -201,3 +213,9 @@ jobs:
             echo "A destructive platform migration PR must cite this run id (see"
             echo "docs/ops/runbook.md, \"Platform project backup and restore\")."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail the job if the restic backup did not succeed
+        if: vars.RESTIC_BACKUP_ENABLED == 'true' && (steps.restic-credentials.outcome != 'success' || steps.restic-backup.outcome != 'success')
+        run: |
+          echo "::error::Restic backup to the Hetzner Storage Box failed this run. The age->artifact backup above succeeded and uploaded normally; only the restic leg failed -- see the 'Storage Box restic credentials' / 'Back up the platform dump...' step logs above." >&2
+          exit 1

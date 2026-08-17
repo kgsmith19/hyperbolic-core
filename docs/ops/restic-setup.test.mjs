@@ -232,6 +232,13 @@ test("the SSH config alias is idempotent: re-running replaces, never duplicates,
   assert.doesNotMatch(second, /u123456\.your-storagebox\.de/);
 });
 
+test("the SSH config alias trusts the Storage Box on first connection (non-interactive callers cannot answer a host-key prompt)", () => {
+  const env = fakeEnv();
+  runApply(env);
+  const config = readFileSync(path.join(env.root, "ssh", "config"), "utf8");
+  assert.match(config, /StrictHostKeyChecking accept-new/);
+});
+
 test("the ssh config file and directory are created owner-only", () => {
   const env = fakeEnv();
   runApply(env);
