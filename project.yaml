@@ -134,6 +134,53 @@ ci:
     become its own required check later, alongside "Verify: Tests", if a
     specific app needs a stronger guarantee than the shared umbrella.
 
+vendors:
+  # Full detail (auth, secret paths, cost, rotation) lives in
+  # docs/ops/vendors.md; this block is the machine-declared summary.
+  - name: Hetzner
+    purpose: VPS hosting every deployed unit; a Storage Box (planned) for
+      restic backups
+    cost_eur_month: 5.50
+    auth: SSH via Tailscale (no Hetzner API automation in this repo)
+    docs: docs/ops/vendors.md#hetzner
+  - name: Tailscale
+    purpose: private network fabric — deploy transport, TLS termination,
+      authorization boundary, CI identity
+    cost_eur_month: 0
+    auth: OAuth client (auth_keys scope), injected per pipeline via Infisical
+    docs: docs/ops/vendors.md#tailscale
+  - name: Infisical
+    purpose: sole secret store for every pipeline; one machine identity per
+      pipeline, each scoped to exactly one secret path
+    cost_eur_month: 0
+    auth: OIDC (GitHub Actions identity token exchange) — no static API key
+    docs: docs/ops/vendors.md#infisical
+  - name: Cloudflare
+    purpose: public-internet edge (Tunnel + Access) for selected paths;
+      additive to the tailnet-only private path
+    cost_eur_month: 0
+    auth: tunnel token (Infisical); Access policies configured in dashboard
+    docs: docs/ops/vendors.md#cloudflare-planned--168170
+  - name: Supabase
+    purpose: hosted Postgres + PostgREST + Auth across three projects
+      (toolbelt/platform, lifeos prod, lifeos test)
+    cost_eur_month: 0
+    auth: publishable key (public) + service-role/table-owner secrets
+      (Infisical, pipeline-scoped)
+    docs: docs/ops/vendors.md#supabase
+  - name: GitHub
+    purpose: source of truth, CI/CD, container registry (ghcr.io) for the
+      Brain and Handler A images
+    cost_eur_month: 0
+    auth: built-in GITHUB_TOKEN, minted per-run
+    docs: docs/ops/vendors.md#github
+  - name: age
+    purpose: asymmetric encryption for every backup bundle before it
+      leaves CI
+    cost_eur_month: 0
+    auth: public-key encryption; CI holds only the public recipient key
+    docs: docs/ops/vendors.md#age
+
 work_tracking:
   system: github-issues
 
