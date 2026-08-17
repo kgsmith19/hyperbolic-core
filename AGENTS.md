@@ -269,43 +269,54 @@ exists, the PR is the handoff.
 
 ## PR Gate and merge behavior
 
-Every PR-time verification gate runs as **one strict sequential chain**, driven by
-`.github/workflows/pr-verify.yml` ("PR Verification"). Each stage is a `workflow_call` reusable
-workflow, `needs:`-chained so stage *N* only starts once stage *N − 1* has succeeded — not nine
-independent, parallel workflows. That is a deliberate, owner-directed correction of an earlier
-design (independent parallel gates): merge cannot be triggered by anything before the *last*
-required stage finishes, because nothing downstream of it starts before it does.
+Every PR-time verification gate runs from one entry point, `.github/workflows/pr-verify.yml`
+("PR Verification"). The **required surface is deliberately small** — four required checks plus
+one deliberately non-required LLM review — even though nine gate files still do the underlying
+work. That is a deliberate, owner-directed correction of two earlier designs in turn: first nine
+independent parallel workflows, then a nine-stage fully sequential chain; both produced more
+required checks than the actual review process needs.
 
 | Order | Gate | Covers | Required |
 | --- | --- | --- | --- |
 | 1 | `Verify: Secrets` | whole repo, every PR — leaked-credential scan | Yes |
 | 2 | `Verify: Repo Policy` | whole repo, every PR | Yes |
 | 3 | `Verify: PR Description` | whole repo, every PR (PR body only) | Yes |
-| 4 | `Verify: Toolbelt` | `apps/toolbelt/**` | Yes |
-| 5 | `Verify: ACC` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` | Yes |
-| 6 | `Verify: Brain` | `services/brain/**` | Yes |
-| 7 | `Verify: Shell` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `docs/ops/**` | Yes |
-| 8 | `Verify: LifeOS` | `apps/lifeos/**` | Yes |
-| 9 | `Verify: LLM Review` | whole repo — adversarial LLM review of the diff against the Issue and this file | **No** (pending credentials) |
+| 4a–4e | `Verify: Toolbelt` / `ACC` / `Brain` / `Shell` / `LifeOS` | each app's own paths | No (see `Verify: Tests`) |
+| 5 | `Verify: Tests` | umbrella over 4a–4e — passes only when all five did | Yes |
+| 6 | `Verify: LLM Review` | whole repo — adversarial LLM review of the diff against the Issue and this file | **No** (pending credentials) |
+
+Stages 1–3 are `needs:`-chained in strict sequence (each starts only once the previous
+succeeded), so nothing runs — and no compute is spent — on a PR with a leaked secret or a
+malformed description. The five app gates in stage 4 then run in **parallel** with each other
+(all depend only on stage 3): none of them individually gates merge anymore, so there is no
+correctness reason to serialize them, only a wall-clock cost. `Verify: Tests` (stage 5) is a
+native job in `pr-verify.yml` itself — not a `workflow_call` — that `needs:` all five and passes
+only when every one of them reports success. `Verify: LLM Review` (stage 6) runs last, after
+`Verify: Tests`, so no reviewer tokens are spent on a PR that would fail everything else anyway.
 
 > [!WARNING]
 > **This is load-bearing, not incidental.** GitHub's required-status-checks model blocks a merge
 > on any required check name that never reports, and a `paths:` filter does **not** make an
 > unreported required check "not applicable" — it stays pending forever. This hit live: PRs #118
 > and #120 (root docs and new workflow files, touching none of the five app gates' paths) got
-> stuck in `mergeable_state: "blocked"` permanently when the ruleset required all five app gates
-> by name, and needed an owner administrative bypass to merge. The fix applied here is the one
-> this warning used to describe as the alternative: gates 4–8 above are restructured so they
-> always report — a leading `detect-changes` job replaces the old top-level `paths:` filter, and
-> the gate's own aggregator runs unconditionally (`if: always()`), reporting a trivial pass when
-> its app's paths weren't touched. That makes every one of the eight non-LLM-Review gates safe to
-> require. See the pinned standard's own "Path-scoped gates in monorepo topologies" note for the
-> general pattern this follows.
+> stuck in `mergeable_state: "blocked"` permanently when an earlier ruleset required all five app
+> gates by name, and needed an owner administrative bypass to merge. Two things make the current
+> design safe: each of the five app gates still carries its own leading `detect-changes` job
+> (replacing the old top-level `paths:` filter) whose aggregator runs unconditionally
+> (`if: always()`) and reports a trivial pass when its app's paths weren't touched — so every one
+> of them still always reports something — and none of the five is itself required; only the
+> `Verify: Tests` umbrella is, and it only depends on jobs that are themselves guaranteed to
+> report. See the pinned standard's own "Path-scoped gates in monorepo topologies" note for the
+> general pattern the per-app always-report behavior follows.
+>
+> None of the five app gates being individually required is the default, not a hard rule: a
+> specific app can still gain its own dedicated required check later — alongside, not instead of,
+> `Verify: Tests` — if a scenario needs a stronger guarantee than the shared umbrella (e.g. a
+> security-sensitive check within one app's own gate). Add it deliberately and document why here.
 >
 > `Verify: LLM Review` stays **non-required** until the owner provisions the reviewer credentials
 > `llm-review.yml` documents — an unprovisioned run fails closed by design and must never block
-> merge while unrequired. It also runs *last* in the chain, after every other gate has succeeded,
-> so no reviewer tokens are spent on a PR that would fail lint, policy, or tests anyway.
+> merge while unrequired.
 >
 > The "Required" column above is this document's specification of the correct configuration —
 > applying it to the live ruleset is a manual owner action outside this repository's files (no
@@ -315,16 +326,18 @@ required stage finishes, because nothing downstream of it starts before it does.
 > `workflow_call`-chained job's reported check name is the COMPOUND form
 > `"<pr-verify.yml job name> / <called workflow's own job name>"`, not the bare `Verify: X` name
 > in the table above — e.g. the real required-status-check context for `Verify: Secrets` is
-> `"Verify: Secrets / Verify: Secrets"`. `docs/ops/bootstrap-github.sh` already uses the correct
-> compound form; if entering the ruleset by hand instead, use the exact string from a real PR's
-> Checks tab, not the short name.
+> `"Verify: Secrets / Verify: Secrets"`. `Verify: Tests` is a native job, not a `workflow_call`, so
+> it reports as the plain `Verify: Tests` with no compound prefix — the same pattern already
+> confirmed for `Hyperbolic Core Merge Policy`. `docs/ops/bootstrap-github.sh` already uses the
+> correct forms; if entering the ruleset by hand instead, use the exact string from a real PR's
+> Checks tab, not a guess.
 
-Each of the nine gates still has a real aggregator job inside its own reusable workflow file:
-`if: always()`, full `needs:` coverage, explicit strict success-checking, an SHA-vs-live-PR-head
-freshness check, and a step summary — unchanged from before, just invoked as a stage of the chain
-instead of triggered directly by `pull_request`. `pr-verify.yml` passes each stage the PR's
-number, head SHA, and base SHA as explicit `workflow_call` inputs rather than relying on
-`github.event.pull_request`, which is not reliably available across a `workflow_call` boundary.
+Each of the eight `workflow_call` gates (everything except `Verify: Tests`) still has a real
+aggregator job inside its own reusable workflow file: `if: always()`, full `needs:` coverage,
+explicit strict success-checking, an SHA-vs-live-PR-head freshness check, and a step summary.
+`pr-verify.yml` passes each stage the PR's number, head SHA, and base SHA as explicit
+`workflow_call` inputs rather than relying on `github.event.pull_request`, which is not reliably
+available across a `workflow_call` boundary.
 
 ### Independent LLM Review
 

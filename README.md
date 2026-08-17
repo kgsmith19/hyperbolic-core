@@ -32,12 +32,15 @@ are native to this repo.
 
 ## 🚦 CI & merge gates
 
-`.github/workflows/pr-verify.yml` runs nine `Verify: *` gates as **one strict sequential chain**
-on every pull request — three repo-wide checks, the five app gates from the table above, and an
-adversarial LLM review, in that order, each stage starting only once the previous succeeded. See
-[`AGENTS.md`](./AGENTS.md)'s "PR Gate and merge behavior" section for the full order, which gates
-are (intended to be) required by the branch ruleset, and what's actually enforced right now versus
-the intended target — and [`project.yaml`](./project.yaml) for the full topology.
+`.github/workflows/pr-verify.yml` runs every `Verify: *` gate on every pull request, but keeps
+the *required* surface small: `Verify: Secrets` → `Verify: Repo Policy` → `Verify: PR Description`
+run in strict sequence first, then the five app gates from the table above run in parallel, then
+`Verify: Tests` — a single umbrella check, not five separate required ones — passes only once all
+five have. `Verify: LLM Review` runs last and stays non-required until reviewer credentials are
+provisioned. See [`AGENTS.md`](./AGENTS.md)'s "PR Gate and merge behavior" section for the full
+order, which gates are (intended to be) required by the branch ruleset, and what's actually
+enforced right now versus the intended target — and [`project.yaml`](./project.yaml) for the full
+topology.
 
 ## 📜 Policy
 

@@ -149,13 +149,18 @@ if ((branch_protection)); then
   # sensitive policy decision than this script's scope -- flip it by hand
   # if the owner wants it enforced at the ruleset level.
   #
-  # Context strings below are the COMPOUND form GitHub actually reports for
-  # a workflow_call-chained job -- "<pr-verify.yml job name> / <called
-  # workflow's own job name>" -- not each gate's bare "Verify: X" name.
-  # Confirmed empirically against PR #160's own first real run (every stage
-  # from Verify: Secrets through Verify: Brain reported this way); do not
-  # simplify these back to the short form, a required check that never
-  # matches the real reported context blocks every PR forever.
+  # Context strings for the three workflow_call-chained gates below are the
+  # COMPOUND form GitHub actually reports for that kind of job --
+  # "<pr-verify.yml job name> / <called workflow's own job name>" -- not
+  # each gate's bare "Verify: X" name. Confirmed empirically against PR
+  # #160's own first real run. "Verify: Tests" is a native job in
+  # pr-verify.yml (no workflow_call involved), so it reports as the plain
+  # "Verify: Tests" with no compound prefix -- the same pattern already
+  # confirmed for "Hyperbolic Core Merge Policy". Do not simplify the first
+  # three back to the short form: a required check that never matches the
+  # real reported context blocks every PR forever. The five app gates
+  # (Toolbelt/ACC/Brain/Shell/LifeOS) are deliberately NOT required
+  # individually -- only the "Verify: Tests" umbrella that needs all five is.
   protection_body=$(cat <<'JSON'
 {
   "name": "main",
@@ -187,11 +192,7 @@ if ((branch_protection)); then
           { "context": "Verify: Secrets / Verify: Secrets" },
           { "context": "Verify: Repo Policy / Verify: Repo Policy" },
           { "context": "Verify: PR Description / Verify: PR Description" },
-          { "context": "Verify: Toolbelt / Verify: Toolbelt" },
-          { "context": "Verify: ACC / Verify: ACC" },
-          { "context": "Verify: Brain / Verify: Brain" },
-          { "context": "Verify: Shell / Verify: Shell" },
-          { "context": "Verify: LifeOS / Verify: LifeOS" }
+          { "context": "Verify: Tests" }
         ]
       }
     }

@@ -1,30 +1,38 @@
 name: "PR Verification"
 
-# Sequential entry point for every PR-time verification gate. Each stage
-# below is a separate reusable workflow (workflow_call), chained with
-# needs: so stage N only starts once stage N-1 has succeeded -- a strict
-# pipeline, not the parallel/independent gates this repo ran previously.
-# That guarantees merge cannot be triggered by anything before the LAST
-# stage in the chain finishes; there is no required check that can race
-# ahead of it. See AGENTS.md's "PR Gate and merge behavior" section for
-# the full design rationale and the required-checks list this maps to.
+# Entry point for every PR-time verification gate. The required surface is
+# deliberately small: Secrets, Repo Policy, PR Description, and one combined
+# Tests gate -- five app-scoped CI files run underneath Tests, but only the
+# umbrella is required, not each of them individually. LLM Review runs last
+# and stays non-required until reviewer credentials are provisioned. See
+# AGENTS.md's "PR Gate and merge behavior" section for the full rationale
+# and the required-checks list this maps to.
 #
 # Order, and why:
-#   1. Verify: Secrets       -- fail fast; no point running anything else
-#                                if a secret was just committed.
-#   2. Verify: Repo Policy
-#   3. Verify: PR Description
-#   4. Verify: Toolbelt      -- each always reports (a trivial pass when
-#   5. Verify: ACC              its own app's paths weren't touched), so
-#   6. Verify: Brain            it's safe to require without the
-#   7. Verify: Shell            forever-pending risk PRs #118/#120 hit.
-#   8. Verify: LifeOS
-#   9. Verify: LLM Review    -- LAST, deliberately: only spend reviewer
-#                                tokens on a PR that already passed
-#                                everything else. NOT a required check
-#                                yet (no reviewer credentials provisioned);
-#                                its own fail-closed design must never
-#                                block merge while unrequired.
+#   1. Verify: Secrets        -- fail fast; no point running anything else
+#                                 if a secret was just committed. REQUIRED.
+#   2. Verify: Repo Policy                                          REQUIRED.
+#   3. Verify: PR Description                                       REQUIRED.
+#   4. The five app gates (Toolbelt/ACC/Brain/Shell/LifeOS) run in
+#      PARALLEL once PR Description passes -- each always reports (a
+#      trivial pass when its own app's paths weren't touched, via its own
+#      leading detect-changes job), so none of them individually risks the
+#      forever-pending failure PRs #118/#120 hit. None of them is required
+#      on its own; they remain real, visibly-named evidence for review, and
+#      any one of them CAN be promoted to its own required check later for
+#      an app that needs a stronger guarantee than the shared umbrella.
+#   5. Verify: Tests           -- REQUIRED umbrella; needs all five app
+#                                  gates and passes only when every one of
+#                                  them did (whether by really running or by
+#                                  correctly skipping as not-relevant). This
+#                                  is the single required "test flow" gate
+#                                  instead of five separate required checks.
+#   6. Verify: LLM Review     -- LAST, deliberately: only spend reviewer
+#                                 tokens on a PR that already passed
+#                                 everything else. NOT a required check yet
+#                                 (no reviewer credentials provisioned); its
+#                                 own fail-closed design must never block
+#                                 merge while unrequired.
 #
 # No paths: filter here, deliberately -- see repo-policy.yml's header
 # comment. Every called gate receives the PR's number/head/base SHA as
@@ -93,6 +101,11 @@ jobs:
       pr_head_sha: ${{ github.event.pull_request.head.sha }}
       pr_base_sha: ${{ github.event.pull_request.base.sha }}
 
+  # The five app gates below all depend only on verify-pr-description, so
+  # they run in parallel with each other -- not chained -- since none of
+  # them individually gates merge anymore. Only verify-tests, which needs
+  # all five, does.
+
   verify-toolbelt:
     name: "Verify: Toolbelt"
     needs: [verify-pr-description]
@@ -108,7 +121,7 @@ jobs:
 
   verify-acc:
     name: "Verify: ACC"
-    needs: [verify-toolbelt]
+    needs: [verify-pr-description]
     uses: ./.github/workflows/acc-ci.yml
     secrets: inherit
     permissions:
@@ -121,7 +134,7 @@ jobs:
 
   verify-brain:
     name: "Verify: Brain"
-    needs: [verify-acc]
+    needs: [verify-pr-description]
     uses: ./.github/workflows/brain-ci.yml
     secrets: inherit
     permissions:
@@ -134,7 +147,7 @@ jobs:
 
   verify-shell:
     name: "Verify: Shell"
-    needs: [verify-brain]
+    needs: [verify-pr-description]
     uses: ./.github/workflows/shell-ci.yml
     secrets: inherit
     permissions:
@@ -147,7 +160,7 @@ jobs:
 
   verify-lifeos:
     name: "Verify: LifeOS"
-    needs: [verify-shell]
+    needs: [verify-pr-description]
     uses: ./.github/workflows/lifeos-ci.yml
     secrets: inherit
     permissions:
@@ -158,9 +171,40 @@ jobs:
       pr_head_sha: ${{ github.event.pull_request.head.sha }}
       pr_base_sha: ${{ github.event.pull_request.base.sha }}
 
+  verify-tests:
+    name: "Verify: Tests"
+    needs: [verify-toolbelt, verify-acc, verify-brain, verify-shell, verify-lifeos]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Gate · Confirm every app gate passed
+        shell: bash
+        run: |
+          test "${{ needs.verify-toolbelt.result }}" = "success"
+          test "${{ needs.verify-acc.result }}" = "success"
+          test "${{ needs.verify-brain.result }}" = "success"
+          test "${{ needs.verify-shell.result }}" = "success"
+          test "${{ needs.verify-lifeos.result }}" = "success"
+      - name: Gate · Publish step summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Verify: Tests"
+            echo ""
+            echo "| App gate | Result |"
+            echo "| --- | --- |"
+            echo "| Toolbelt | ${{ needs.verify-toolbelt.result }} |"
+            echo "| ACC | ${{ needs.verify-acc.result }} |"
+            echo "| Brain | ${{ needs.verify-brain.result }} |"
+            echo "| Shell | ${{ needs.verify-shell.result }} |"
+            echo "| LifeOS | ${{ needs.verify-lifeos.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   verify-llm-review:
     name: "Verify: LLM Review"
-    needs: [verify-lifeos]
+    needs: [verify-tests]
     uses: ./.github/workflows/llm-review.yml
     secrets: inherit
     permissions:
