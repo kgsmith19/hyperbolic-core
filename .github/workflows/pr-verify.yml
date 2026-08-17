@@ -31,6 +31,16 @@ name: "PR Verification"
 # explicit workflow_call inputs rather than reading github.event.pull_request
 # itself, since that context is not reliably available across a
 # workflow_call boundary.
+#
+# secrets: inherit on every job below is required, not incidental:
+# repository secrets are NOT automatically visible inside a called
+# reusable workflow -- without this, toolbelt-ci.yml's owner-session
+# exchange (secrets.TOOLBELT_OWNER_REFRESH_TOKEN) fails closed with
+# "required" even though the secret exists at the repository level.
+# Applied uniformly so any gate that starts using a secret later doesn't
+# silently hit the same gap. Configuration variables (vars.*, used by
+# llm-review.yml) don't need this -- vars are visible across the
+# workflow_call boundary without an explicit passthrough.
 
 on:
   pull_request:
@@ -49,6 +59,7 @@ jobs:
   verify-secrets:
     name: "Verify: Secrets"
     uses: ./.github/workflows/secret-scan.yml
+    secrets: inherit
     permissions:
       contents: read
       pull-requests: read
@@ -61,6 +72,7 @@ jobs:
     name: "Verify: Repo Policy"
     needs: [verify-secrets]
     uses: ./.github/workflows/repo-policy.yml
+    secrets: inherit
     permissions:
       contents: read
       pull-requests: read
@@ -73,6 +85,7 @@ jobs:
     name: "Verify: PR Description"
     needs: [verify-repo-policy]
     uses: ./.github/workflows/template-lint.yml
+    secrets: inherit
     permissions:
       pull-requests: read
     with:
@@ -84,6 +97,7 @@ jobs:
     name: "Verify: Toolbelt"
     needs: [verify-pr-description]
     uses: ./.github/workflows/toolbelt-ci.yml
+    secrets: inherit
     permissions:
       contents: read
       pull-requests: read
@@ -96,6 +110,7 @@ jobs:
     name: "Verify: ACC"
     needs: [verify-toolbelt]
     uses: ./.github/workflows/acc-ci.yml
+    secrets: inherit
     permissions:
       contents: read
       pull-requests: read
@@ -108,6 +123,7 @@ jobs:
     name: "Verify: Brain"
     needs: [verify-acc]
     uses: ./.github/workflows/brain-ci.yml
+    secrets: inherit
     permissions:
       contents: read
       pull-requests: read
@@ -120,6 +136,7 @@ jobs:
     name: "Verify: Shell"
     needs: [verify-brain]
     uses: ./.github/workflows/shell-ci.yml
+    secrets: inherit
     permissions:
       contents: read
       pull-requests: read
@@ -132,6 +149,7 @@ jobs:
     name: "Verify: LifeOS"
     needs: [verify-shell]
     uses: ./.github/workflows/lifeos-ci.yml
+    secrets: inherit
     permissions:
       contents: read
       pull-requests: read
@@ -144,6 +162,7 @@ jobs:
     name: "Verify: LLM Review"
     needs: [verify-lifeos]
     uses: ./.github/workflows/llm-review.yml
+    secrets: inherit
     permissions:
       contents: read
       pull-requests: read
