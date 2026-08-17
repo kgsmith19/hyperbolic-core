@@ -131,3 +131,29 @@ test("both deploy jobs validate DEPLOY_HOST before first use", () => {
   const validations = workflow.match(/DEPLOY_HOST must be a non-empty DNS name/g) ?? [];
   assert.equal(validations.length, 2);
 });
+
+// --- ops-serve-apply.yml (issue #142): the serve route transport ---
+
+const serveApply = readFileSync(path.join(root, ".github/workflows/ops-serve-apply.yml"), "utf8");
+
+test("serve-apply is dispatch-only, production-gated, and ships the checked-in script verbatim", () => {
+  const onBlock = serveApply.slice(serveApply.indexOf("\non:"), serveApply.indexOf("\npermissions:"));
+  assert.match(onBlock, /workflow_dispatch:/);
+  assert.doesNotMatch(onBlock, /push:|schedule:|pull_request/);
+  assert.match(serveApply, /if: vars\.DEPLOY_ENABLED == 'true'/);
+  // Transport-only: the workflow must scp the tested script, never inline a
+  // second copy of the route map that could drift from the tested one.
+  assert.match(serveApply, /scp .* docs\/ops\/tailscale-serve-apply\.sh/);
+  assert.doesNotMatch(serveApply, /--set-path/);
+  assert.match(serveApply, /--apply/);
+  assert.doesNotMatch(serveApply, /serve reset/);
+});
+
+test("serve-apply is keyless, secretless, strict-moded, and publishes before/after status", () => {
+  assert.doesNotMatch(serveApply, /\$\{\{ secrets\./);
+  assert.doesNotMatch(serveApply, /SSH_KEY|id_ed25519/);
+  assert.match(serveApply, /<<'REMOTE'\n\s+set -euo pipefail/);
+  assert.match(serveApply, /serve status BEFORE/);
+  assert.match(serveApply, /serve status AFTER/);
+  assert.match(serveApply, />> "\$GITHUB_STEP_SUMMARY"/);
+});
