@@ -183,3 +183,30 @@ test("the production Shell build bakes a Brain API base that reaches the shared 
   );
   assert.match(buildJob, /VITE_BRAIN_API: \$\{\{ vars\.VITE_BRAIN_API \|\| '\/' \}\}/);
 });
+
+test("both container deploys record the running image, then roll back to it on failure", () => {
+  // Shell has had activate->verify->rollback since m2-07; the two container
+  // units had NO rollback (gap G-2): a failed compose up --wait left the
+  // broken image live. Each job must record the box's current image BEFORE
+  // shipping, and repoint .env back to it under failure() -- degrading
+  // gracefully (no rollback attempt) on a first-ever deploy (__none__).
+  for (const [recordName, job, envkey] of [
+    ["Handler A", "Handler A", "LLM_HANDLER_IMAGE"],
+    ["Brain", "the Brain", "BRAIN_IMAGE"],
+  ]) {
+    const record = workflow.indexOf(`- name: Record the running ${recordName} image for rollback`);
+    const deploy = workflow.indexOf(`- name: Deploy ${job}\n`, record);
+    const rollback = workflow.indexOf(`- name: Roll back ${job} to the previous image`, deploy);
+    assert.ok(record > -1 && deploy > record && rollback > deploy, `${job}: record -> deploy -> rollback order`);
+    const rollbackBlock = workflow.slice(rollback, rollback + 400);
+    assert.match(
+      rollbackBlock,
+      /if: failure\(\) && steps\.previous\.outputs\.image != '' && steps\.previous\.outputs\.image != '__none__'/,
+    );
+    assert.ok(workflow.includes(`grep -m1 '^${envkey}='`), `${job}: reads ${envkey} from the box .env`);
+  }
+  // The recorded reference is validated before reuse -- an unexpected value
+  // must abort rather than be sed'd into .env.
+  const guards = workflow.match(/Refusing to trust an unexpected running-image reference/g) ?? [];
+  assert.equal(guards.length, 2);
+});
