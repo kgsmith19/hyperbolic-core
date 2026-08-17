@@ -31,7 +31,7 @@ case "$mode" in
     ;;
 esac
 
-mounts=("/" "/life/" "/life/api/" "/api/" "/brain/stream")
+mounts=("/" "/life/" "/life/api/" "/api/" "/api/brain/")
 deploy_root="/home/deploy"
 if [[ -n "${NODE_TEST_CONTEXT:-}" && -n "${TAILSCALE_SERVE_TEST_ROOT:-}" ]]; then
   deploy_root="$TAILSCALE_SERVE_TEST_ROOT"
