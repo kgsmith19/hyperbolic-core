@@ -94,6 +94,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # A LOCAL composite action's own action.yml must already be on disk
+      # before it can be resolved, so the calling job needs its own
+      # checkout first -- the composite action's internal checkout (with
+      # its specific fetch-depth) then runs again for real.
+      - name: Setup · Checkout repository (so the local action is resolvable)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/verify-secrets
         with:
           base_sha: ${{ github.event.pull_request.base.sha }}
@@ -149,6 +157,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Setup · Checkout repository (so the local action is resolvable)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/verify-repo-policy
         with:
           base_sha: ${{ github.event.pull_request.base.sha }}
@@ -205,6 +217,10 @@ jobs:
     permissions:
       pull-requests: read
     steps:
+      - name: Setup · Checkout repository (so the local action is resolvable)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/verify-pr-description
         with:
           pr_number: ${{ github.event.pull_request.number }}
@@ -294,6 +310,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Setup · Checkout repository (so the local action is resolvable)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/verify-linting
 
   verify-linting:
