@@ -120,3 +120,13 @@ test("build-brain and deploy-brain each carry the same production-gate and succe
   assert.match(deployBrain, /group: deploy-brain-production/);
   assert.match(deployBrain, /cancel-in-progress: false/);
 });
+
+test("the Brain's rendered .env uses the env names the daemon actually reads", () => {
+  // services/brain/src/config.ts reads BRAIN_LIFEOS_API_URL / BRAIN_LIFEOS_AGENT_TOKEN.
+  // Any other rendered name is silently discarded by the daemon, so the deploy
+  // must pass these exact names through from Infisical (/brain/) to .env.
+  assert.match(workflow, /BRAIN_LIFEOS_API_URL=/);
+  assert.match(workflow, /BRAIN_LIFEOS_AGENT_TOKEN=/);
+  assert.doesNotMatch(workflow, /\bLIFEOS_API_BASE_URL\b/);
+  assert.doesNotMatch(workflow, /\bLIFEOS_AGENT_TOKEN\b/);
+});
