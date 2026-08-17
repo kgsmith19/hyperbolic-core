@@ -493,3 +493,9 @@ apart), so copy the block as written rather than retyping it. There is currently
 deploys this compose service -- that wiring, and the Cloudflare tunnel itself, is #168-#170; today
 this can only be run by hand from a checkout on the box (`docker compose -f
 docs/ops/edge-origin/compose.yml up -d`).
+
+`nginx.conf` sets `access_log off;` -- deliberate for now, since with nothing exposed there is
+nothing worth logging. Once a path is actually uncommented and this becomes cloudflared's real
+public origin, revisit that line: Cloudflare Access/Tunnel logs the request at the edge, but if
+nginx-side request logging is wanted too (e.g. to correlate against `docker logs` on the origin
+containers), turn `access_log` back on at that point -- an explicit owner call, not made here.

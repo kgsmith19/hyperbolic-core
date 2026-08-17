@@ -90,9 +90,22 @@ function withoutTrailingSlash(value) {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
-test("nothing is public by default: every location in the checked-in public_paths.conf is commented out", () => {
-  const activeLocations = parseLocationBodies(publicPathsConf);
-  assert.deepEqual([...activeLocations.keys()], []);
+test("nothing is public by default: no active (non-comment) line in public_paths.conf mentions `location`", () => {
+  // Deliberately format-agnostic, unlike parseLocationBodies above: that
+  // parser only recognizes a block whose opening line ends in a lone `{`
+  // and whose closing `}` sits alone on its own line. A single-line block
+  // -- `location /x/ { return 200 "x"; }` -- is syntactically valid nginx
+  // (confirmed against a real nginx container during review) and would
+  // actually serve traffic, but is invisible to that parser, which would
+  // report zero active locations while a route was actually live. This
+  // check can't be fooled by an unexpected block shape because it doesn't
+  // try to understand block shape at all: any non-comment line merely
+  // containing the word "location" fails it.
+  for (const rawLine of publicPathsConf.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    assert.ok(!/\blocation\b/.test(line), `active (uncommented) line mentions location: ${rawLine}`);
+  }
 });
 
 test("the commented-out template covers every private route, not a subset", () => {
