@@ -410,6 +410,25 @@ jobs:
           oauth-secret: ${{ env.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: ${{ vars.DEPLOY_HOST }}
+      - name: Record the running Handler A image for rollback
+        id: previous
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          # The image reference the box is running now, from the compose .env
+          # this workflow itself renders on every deploy. First-ever deploy
+          # (no .env yet) records __none__ and rollback degrades gracefully.
+          previous="$(ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            "grep -m1 '^LLM_HANDLER_IMAGE=' llm-handler/.env 2>/dev/null | cut -d= -f2- || true")"
+          if [[ -n "$previous" && ! "$previous" =~ ^ghcr\.io/[A-Za-z0-9_./-]+:sha-[0-9a-f]{40}$ ]]; then
+            echo "Refusing to trust an unexpected running-image reference: $previous" >&2
+            exit 1
+          fi
+          echo "image=${previous:-__none__}" >> "$GITHUB_OUTPUT"
+
       - name: Deploy Handler A
         # Mirrors apps/lifeos/.github/workflows/ci.yml's deploy-backend job
         # shape exactly (docker pull the just-pushed image back to the
@@ -447,6 +466,28 @@ jobs:
           scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.prod" "deploy@$DEPLOY_HOST:llm-handler/.env"
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
             "cd llm-handler && chmod 600 .env && LLM_HANDLER_IMAGE=$IMAGE docker compose up -d --wait && curl -fsS http://127.0.0.1:8200/healthz"
+
+      - name: Roll back Handler A to the previous image
+        if: failure() && steps.previous.outputs.image != '' && steps.previous.outputs.image != '__none__'
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          PREVIOUS: ${{ steps.previous.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          echo "Deploy failed; rolling llm-handler back to $PREVIOUS" >&2
+          if ! ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "
+            set -euo pipefail
+            cd llm-handler
+            sed -i \"s|^LLM_HANDLER_IMAGE=.*|LLM_HANDLER_IMAGE=$PREVIOUS|\" .env
+            LLM_HANDLER_IMAGE='$PREVIOUS' docker compose up -d --wait
+            curl -fsS http://127.0.0.1:8200/healthz
+          "; then
+            echo "::error::ROLLBACK FAILED for llm-handler: the previous image ($PREVIOUS) did not come back healthy -- the service needs manual attention NOW (runbook: manual rollback section)." >&2
+            exit 1
+          fi
+          echo "Rolled back: llm-handler is serving $PREVIOUS again."
       - name: Prune superseded Handler A images (10-cicd-deployment.md section 8.3b, keep newest 3)
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
@@ -559,6 +600,25 @@ jobs:
           oauth-secret: ${{ env.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: ${{ vars.DEPLOY_HOST }}
+      - name: Record the running the Brain image for rollback
+        id: previous
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          # The image reference the box is running now, from the compose .env
+          # this workflow itself renders on every deploy. First-ever deploy
+          # (no .env yet) records __none__ and rollback degrades gracefully.
+          previous="$(ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            "grep -m1 '^BRAIN_IMAGE=' brain/.env 2>/dev/null | cut -d= -f2- || true")"
+          if [[ -n "$previous" && ! "$previous" =~ ^ghcr\.io/[A-Za-z0-9_./-]+:sha-[0-9a-f]{40}$ ]]; then
+            echo "Refusing to trust an unexpected running-image reference: $previous" >&2
+            exit 1
+          fi
+          echo "image=${previous:-__none__}" >> "$GITHUB_OUTPUT"
+
       - name: Deploy the Brain
         # Same shape as deploy-llm-handler above; the one addition is the
         # ADR-05 secrets-mount file (compose.yaml's own `secrets:` block,
@@ -601,6 +661,28 @@ jobs:
           scp "${ssh_options[@]}" "$RUNNER_TEMP/anthropic-api-key" "deploy@$DEPLOY_HOST:brain/anthropic-api-key"
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
             "cd brain && chmod 600 .env anthropic-api-key && BRAIN_IMAGE=$IMAGE docker compose up -d --wait && curl -fsS http://127.0.0.1:8100/healthz"
+
+      - name: Roll back the Brain to the previous image
+        if: failure() && steps.previous.outputs.image != '' && steps.previous.outputs.image != '__none__'
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          PREVIOUS: ${{ steps.previous.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          echo "Deploy failed; rolling brain back to $PREVIOUS" >&2
+          if ! ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "
+            set -euo pipefail
+            cd brain
+            sed -i \"s|^BRAIN_IMAGE=.*|BRAIN_IMAGE=$PREVIOUS|\" .env
+            BRAIN_IMAGE='$PREVIOUS' docker compose up -d --wait
+            curl -fsS http://127.0.0.1:8100/healthz
+          "; then
+            echo "::error::ROLLBACK FAILED for brain: the previous image ($PREVIOUS) did not come back healthy -- the service needs manual attention NOW (runbook: manual rollback section)." >&2
+            exit 1
+          fi
+          echo "Rolled back: brain is serving $PREVIOUS again."
       - name: Prune superseded Brain images (10-cicd-deployment.md section 8.3, keep newest 3)
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
