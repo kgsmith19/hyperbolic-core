@@ -1,0 +1,192 @@
+name: Ops Restore Drill
+
+# Closes gap G-17 from the deployment research: neither the age-encrypted
+# GitHub-artifact backups nor the LifeOS standalone pipeline's documented
+# drill have ever executed against a real artifact. A backup that has never
+# been restored is a hope, not a backup. This workflow proves a real restore
+# from the Hetzner Storage Box monthly, against both restic repositories
+# platform-backup.yml (#166) and lifeos-backup.yml (#167) write to.
+#
+# Runs entirely in the GitHub Actions runner, over SFTP straight to the
+# Storage Box -- no Tailscale join, no SSH to the VPS. Both restic
+# repositories are reachable directly; nothing this workflow does touches
+# production, only the encrypted backups already sitting in the Storage Box.
+#
+# Gated on the same RESTIC_BACKUP_ENABLED var as the two backup pipelines:
+# there is nothing to drill until they are live.
+
+on:
+  schedule:
+    - cron: "15 10 1 * *" # monthly, 1st of the month, off-peak UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ops-restore-drill
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  drill:
+    if: vars.RESTIC_BACKUP_ENABLED == 'true'
+    name: Monthly restic check + real restore proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    # A real, throwaway Postgres 17 server for the restored dumps -- torn
+    # down with the runner at the end of the job. Pinned to the same major
+    # version platform-backup.yml/lifeos-backup.yml's own pg_dump containers
+    # use, for the same reason their own comments give: pg_restore across a
+    # major-version gap is exactly the failure this drill exists to catch
+    # for real, not paper over with a mismatched client.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same identity/path as both backup pipelines' own restic steps
+      # (#166, #167) -- one credential set for every restic consumer,
+      # restic-setup.sh's own design (docs/ops/restic-setup.sh header).
+      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PLATFORM_RESTIC_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/backup/"
+          domain: https://app.infisical.com
+
+      - name: Check both repositories, restore the latest snapshot of each, and verify
+        run: |
+          set -euo pipefail
+          if [ -z "${RESTIC_PASSWORD:-}" ] || [ -z "${STORAGEBOX_SSH_KEY:-}" ]; then
+            echo "RESTIC_PASSWORD/STORAGEBOX_SSH_KEY were not supplied by Infisical (/platform/backup/)." >&2
+            exit 1
+          fi
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          umask 077
+          key_file="$tmp/storagebox-key"
+          printf '%s\n' "$STORAGEBOX_SSH_KEY" > "$key_file"
+
+          # Installs restic and writes the Storage Box SSH config alias;
+          # idempotently a no-op against already-initialized repositories
+          # (docs/ops/restic-setup.sh, #164). Both repos, since this drill
+          # covers both.
+          ./docs/ops/restic-setup.sh --apply \
+            --storagebox-host="${{ vars.STORAGEBOX_HOST }}" \
+            --storagebox-user="${{ vars.STORAGEBOX_USER }}" \
+            --ssh-key-file="$key_file" \
+            --repos=platform,lifeos
+
+          pg() {
+            docker run --rm --network host -e PGPASSWORD=postgres "$@"
+          }
+
+          latest_snapshot() {
+            local repository="$1"
+            restic -r "$repository" snapshots --latest 1 --json \
+              | python3 -c 'import json, sys; snaps = json.load(sys.stdin); print(snaps[0]["short_id"] if snaps else "")'
+          }
+
+          summary="$tmp/summary.md"
+          {
+            echo "### Restore drill results"
+            echo
+            echo "| Repository | check | snapshot | assertions |"
+            echo "| --- | --- | --- | --- |"
+          } > "$summary"
+          overall_status=0
+
+          drill_platform() {
+            local repository="sftp:hetzner-storagebox:/platform"
+            restic -r "$repository" check --read-data-subset=10%
+
+            local snapshot_id
+            snapshot_id="$(latest_snapshot "$repository")"
+            test -n "$snapshot_id"
+
+            local restore_dir="$tmp/restore-platform"
+            mkdir -p "$restore_dir"
+            restic -r "$repository" restore "$snapshot_id" --target "$restore_dir"
+
+            local dump_file
+            dump_file="$(find "$restore_dir" -name 'platform.dump' -type f | head -1)"
+            test -n "$dump_file"
+
+            docker run --rm -i postgres:17 pg_restore --list < "$dump_file" > /dev/null
+
+            pg postgres:17 createdb -h 127.0.0.1 -U postgres platform_restore_drill
+            pg -v "$dump_file:/tmp/platform.dump:ro" postgres:17 \
+              pg_restore -h 127.0.0.1 -U postgres --no-owner --no-privileges \
+                --dbname platform_restore_drill /tmp/platform.dump
+
+            local counts=""
+            for t in platform.config core.app core.run core.cost prompt.prompt idea.idea intake.idea; do
+              local n
+              n="$(pg postgres:17 psql -h 127.0.0.1 -U postgres platform_restore_drill -X -At -c "select count(*) from $t")"
+              counts="$counts $t=$n"
+            done
+            echo "| \`platform\` | pass | \`$snapshot_id\` |$counts |" >> "$summary"
+          }
+
+          drill_lifeos() {
+            local repository="sftp:hetzner-storagebox:/lifeos"
+            restic -r "$repository" check --read-data-subset=10%
+
+            local snapshot_id
+            snapshot_id="$(latest_snapshot "$repository")"
+            test -n "$snapshot_id"
+
+            local restore_dir="$tmp/restore-lifeos"
+            mkdir -p "$restore_dir"
+            restic -r "$repository" restore "$snapshot_id" --target "$restore_dir"
+
+            local dump_file blobs_dir
+            dump_file="$(find "$restore_dir" -name 'lifeos.dump' -type f | head -1)"
+            blobs_dir="$(find "$restore_dir" -type d -name 'blobs' | head -1)"
+            test -n "$dump_file"
+            test -n "$blobs_dir"
+
+            docker run --rm -i postgres:17 pg_restore --list < "$dump_file" > /dev/null
+
+            local blob_file_count
+            blob_file_count="$(find "$blobs_dir" -type f | wc -l)"
+            test "$blob_file_count" -gt 0
+
+            pg postgres:17 createdb -h 127.0.0.1 -U postgres lifeos_restore_drill
+            pg -v "$dump_file:/tmp/lifeos.dump:ro" postgres:17 \
+              pg_restore -h 127.0.0.1 -U postgres --no-owner --no-privileges \
+                --dbname lifeos_restore_drill /tmp/lifeos.dump
+
+            local counts=""
+            for t in entity type_definition event entity_type; do
+              local n
+              n="$(pg postgres:17 psql -h 127.0.0.1 -U postgres lifeos_restore_drill -X -At -c "select count(*) from $t")"
+              counts="$counts $t=$n"
+            done
+            echo "| \`lifeos\` | pass | \`$snapshot_id\` |$counts, blob_files=$blob_file_count |" >> "$summary"
+          }
+
+          drill_platform || { echo "| \`platform\` | **FAIL** | | see job log |" >> "$summary"; overall_status=1; }
+          drill_lifeos || { echo "| \`lifeos\` | **FAIL** | | see job log |" >> "$summary"; overall_status=1; }
+
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "See docs/ops/runbook.md's restore-drill section for how to read this table." >> "$GITHUB_STEP_SUMMARY"
+          exit "$overall_status"

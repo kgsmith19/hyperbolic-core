@@ -407,7 +407,11 @@ Recency matters more than existence here: a backup from before the base commit d
 
 ### Restore drill
 
-Run this against a scratch database, never the platform project. Record the date, the backup run id, and the row counts in the table below on each drill.
+This is the manual procedure for the age-encrypted GitHub-artifact backup above. Once restic is live
+(`RESTIC_BACKUP_ENABLED`), `ops-restore-drill.yml` (issue #168) runs an equivalent drill against both
+restic repositories automatically, monthly and on demand -- see
+["Restic restore drill (automated)"](#restic-restore-drill-automated) below. Run this manual
+procedure against a scratch database, never the platform project. Record the date, the backup run id, and the row counts in the table below on each drill.
 
 ```bash
 # 1. Download the artifact from the backup run, then decrypt with the offline identity.
@@ -445,6 +449,33 @@ dropdb platform_restore_drill
 - All scratch databases and the local age key pair were dropped/deleted immediately after; nothing from this drill was retained.
 
 Executing the first drill against a real `platform-backup.yml` artifact and filling in the table above is an operator action requiring the offline age identity and live platform credentials, neither of which exists in a CI or agent environment by design -- it is the one acceptance criterion of m6-03 that repository changes cannot satisfy.
+
+## Restic restore drill (automated)
+
+`ops-restore-drill.yml` (issue #168, closes gap G-17 from the deployment research) runs monthly and
+on demand once `RESTIC_BACKUP_ENABLED` is on. Unlike the manual age-based drill above, it needs no
+operator: it runs entirely in the GitHub Actions runner, over SFTP straight to the Hetzner Storage
+Box (no Tailscale join, no SSH to the VPS -- both restic repositories are reachable directly).
+
+For each repository (`platform`, `lifeos`), in order:
+
+1. `restic check --read-data-subset=10%` -- catches silent repository corruption before a real
+   restore would ever need to find out the hard way.
+2. Restore the latest snapshot into a scratch directory.
+3. `pg_restore --list` verifies the restored dump archive is well-formed, then it is loaded into a
+   throwaway Postgres 17 service container (the same job-level `services:` container both
+   repositories share, torn down with the runner).
+4. Row counts are asserted non-zero on a small set of real tables -- `platform.config`, `core.app`,
+   `core.run`, `core.cost`, `prompt.prompt`, `idea.idea`, `intake.idea` for `platform` (the same set
+   the manual drill above checks); `entity`, `type_definition`, `event`, `entity_type` for `lifeos`
+   (the actual kernel tables from `apps/lifeos/backend/supabase/migrations/`, every domain record and
+   event passes through `entity`/`event` -- there is no per-domain table to check instead).
+5. For `lifeos` only: the restored blob directory's file count is asserted non-zero (a database-only
+   check would miss a backup that silently stopped covering `/app/var/blobs`).
+
+Results (pass/fail, snapshot id, every count) are written to the run's job summary regardless of
+outcome. A failure in one repository's drill does not prevent the other's from running or from being
+reported -- both are always attempted, and the job only fails at the very end if either one did.
 
 ## Hetzner Storage Box bootstrap (restic)
 
