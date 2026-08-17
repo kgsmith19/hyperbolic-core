@@ -79,15 +79,58 @@ signup, same as any other SaaS org. Everything after that is scriptable.
 1. Create a project for this repo (distinct from the standalone
    `kgsmith19/lifeos` repo's own separate Infisical project).
 2. Create environment `prod`.
-3. Create three GitHub-OIDC machine identities, one per pipeline that needs
-   one beyond Shell/Handler A/Brain deploy (`shell-deploy`,
-   `llm-handler-deploy`, `brain-deploy` already covered by the VPS keys
-   above; add `platform-migrations` and `platform-backup`), each trusting
-   this repo's OIDC subject (`repo:kgsmith19/hyperbolic-core:*`, or narrower
-   per-environment/per-ref if the console offers it) and scoped by ACL to
-   read only its own secret path below -- confirm that scoping in the
-   console; it cannot be verified from this repository (see "Operator
-   evidence still required" under Brain deployment).
+3. Create one GitHub-OIDC machine identity per pipeline that needs one
+   (`shell-deploy`, `llm-handler-deploy`, `brain-deploy`, `broker-deploy`,
+   `platform-migrations`, `platform-backup`, `lifeos-backend-deploy`,
+   `lifeos-ui-deploy`, `lifeos-backup`, `ops-edge`, `ops-serve-apply`, and
+   `review-gate`), each scoped by ACL to read only its own secret path
+   below -- confirm that scoping in the console; it cannot be verified from
+   this repository (see "Operator evidence still required" under Brain
+   deployment).
+
+   Every identity uses the same three connection values:
+
+   | Field | Value |
+   | --- | --- |
+   | OIDC Discovery URL | `https://token.actions.githubusercontent.com` |
+   | Issuer | `https://token.actions.githubusercontent.com` |
+   | Audience | `https://github.com/kgsmith19` (the repository owner's URL -- GitHub's default audience; if an existing working identity here uses a different value, that one is authoritative) |
+
+   The **subject** is the one field that differs per identity, and the one
+   that has repeatedly been set wrong. It carries GitHub's immutable numeric
+   owner and repository IDs -- which is what makes it survive an owner or
+   repository rename -- then a trailing segment naming the triggering
+   context:
+
+   ```
+   repo:<owner>@<owner_id>/<repo>@<repo_id>:<context>
+   repo:kgsmith19@64936641/hyperbolic-core@1331401739:<context>
+   ```
+
+   `<context>` is decided by the workflow job, not by preference, and a
+   subject whose context does not match what that job's token actually
+   presents authenticates on zero real runs:
+
+   | The job... | `<context>` is | Example |
+   | --- | --- | --- |
+   | declares `environment: <name>` | `environment:<name>` | `...:environment:platform-migrations-production` |
+   | is `pull_request`-triggered with no environment | `pull_request` | `...:pull_request` |
+
+   Every OIDC job in this repository takes the first row -- each declares its
+   own `<pipeline>-production` environment -- **except** `verify-llm-review`
+   in `pr-verify.yml`, which takes the second. Do not "fix" that asymmetry by
+   giving the review gate an environment: an environment on a
+   `pull_request`-triggered job inherits that environment's protection rules,
+   so a required-reviewer rule would stall every pull request awaiting manual
+   approval before the gate could run, and a deployment-branch policy pinned
+   to `main` would block pull-request branches outright. The review gate is
+   not prod-touching and deliberately carries none of that machinery.
+
+   Note also that `llm-review.yml`'s own `push`/`workflow_dispatch` triggers
+   pass no PR number, and the composite action guards its Infisical step on
+   `if: inputs.pr_number != ''` -- so those triggers never exchange an OIDC
+   token at all. Dispatching that workflow cannot test the `review-gate`
+   identity; only a real pull request exercises it.
 4. Create the secret paths and set the non-VPS-key values by hand (PATs, the
    DB connection string, OAuth secrets -- material only you hold, that no
    script here can generate):
@@ -99,6 +142,7 @@ signup, same as any other SaaS org. Everything after that is scriptable.
    | `/brain/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `BRAIN_DEPLOY_SSH_KEY` (from the VPS script's output), `BRAIN_ANTHROPIC_API_KEY` |
    | `/platform/` | `SUPABASE_DB_URL` (table-owner Postgres connection string -- read by `platform-migrations.yml`, which sets `secret-path: "/platform/"`) |
    | `/toolbelt/` | `SUPABASE_DB_URL` (same connection string, a second copy -- read by `platform-backup.yml`, which sets `secret-path: "/toolbelt/"`; the two pipelines deliberately read different paths so their identities' grants stay disjoint) |
+   | `/review/` | Exactly one of `REVIEW_ANTHROPIC_API_KEY` / `REVIEW_OPENAI_API_KEY` / `REVIEW_GEMINI_API_KEY` -- the reviewer credential for the LLM Review gate (#128). Only the key matching `vars.REVIEW_PROVIDER` is read; the others need not exist. Because `packages/review/src/config.ts` refuses to run when `REVIEW_PROVIDER` equals `REVIEW_BUILDER_PROVIDER` (default `anthropic`), the reviewer family here must be `openai` or `gemini` -- provider separation on R2/R3 work is enforced in code, not by convention. Kept off `/platform/llm-handler/` deliberately: that path's `LLM_KEYS_*` are the *product's* provider keys, and the gate that judges a change must not share a grant with the service under change. |
 
 **One script**, run once locally with `gh auth login` already done as an
 account holding admin on the repo, sets every repository variable this
