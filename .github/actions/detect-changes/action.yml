@@ -1,0 +1,87 @@
+name: Detect Changes
+description: >-
+  Decide which app suites this pull request actually needs to run, as job
+  outputs. Extracted so the Linux and Windows verification jobs can each
+  answer the question for themselves and still run in parallel -- the
+  Windows job must not have to wait on the (much longer) Linux job just to
+  learn whether ACC was touched.
+
+  The CALLER must have already checked out the repository with enough
+  history to reach the pull request's base commit (fetch-depth: 0). This
+  action does not check out.
+
+inputs:
+  base_sha:
+    description: The pull request's base commit SHA to diff against.
+    required: true
+
+outputs:
+  toolbelt:
+    description: "true when apps/toolbelt/** or packages/toolbelt-cli/** is relevant"
+    value: ${{ steps.detect.outputs.toolbelt }}
+  acc:
+    description: "true when apps/agentic-command-center/** or apps/toolbelt/guards/** is relevant"
+    value: ${{ steps.detect.outputs.acc }}
+  brain:
+    description: "true when services/brain/** is relevant"
+    value: ${{ steps.detect.outputs.brain }}
+  shell:
+    description: "true when apps/shell/**, packages/**, services/llm-handler/**, services/broker/** or docs/ops/** is relevant"
+    value: ${{ steps.detect.outputs.shell }}
+  lifeos:
+    description: "true when apps/lifeos/** is relevant"
+    value: ${{ steps.detect.outputs.lifeos }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect · Which apps does this change touch?
+      id: detect
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base_sha }}
+      run: |
+        set -euo pipefail
+
+        # Fail OPEN, never closed: if the base commit isn't reachable we
+        # cannot tell what changed, so every suite runs. A wrong "nothing
+        # changed" here would silently skip real verification.
+        if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+          echo "Base commit ${BASE_SHA} not available locally; running every suite to be safe."
+          for app in toolbelt acc brain shell lifeos; do
+            echo "${app}=true" >> "$GITHUB_OUTPUT"
+          done
+          exit 0
+        fi
+
+        changed="$(git diff --name-only "${BASE_SHA}...HEAD")"
+        echo "Changed files:"
+        echo "${changed}" | sed 's/^/  /'
+
+        # A change to the CI plumbing itself makes EVERY suite relevant,
+        # so a workflow/composite-action edit is exercised end to end
+        # rather than trivially passing against untouched apps.
+        if grep -qE '^\.github/(workflows/|actions/)' <<< "${changed}"; then
+          echo "CI plumbing changed; running every suite."
+          for app in toolbelt acc brain shell lifeos; do
+            echo "${app}=true" >> "$GITHUB_OUTPUT"
+          done
+          exit 0
+        fi
+
+        relevant() {
+          if grep -qE "$2" <<< "${changed}"; then
+            echo "$1=true" >> "$GITHUB_OUTPUT"
+            echo "  $1: relevant"
+          else
+            echo "$1=false" >> "$GITHUB_OUTPUT"
+            echo "  $1: not touched"
+          fi
+        }
+
+        echo "Relevance:"
+        relevant toolbelt '^(apps/toolbelt/|packages/toolbelt-cli/|package\.json$|package-lock\.json$)'
+        relevant acc      '^(apps/agentic-command-center/|apps/toolbelt/guards/)'
+        relevant brain    '^(services/brain/|package\.json$|package-lock\.json$)'
+        relevant shell    '^(apps/shell/|packages/|services/llm-handler/|services/broker/|docs/ops/)'
+        relevant lifeos   '^apps/lifeos/'

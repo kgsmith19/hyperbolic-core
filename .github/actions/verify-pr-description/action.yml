@@ -3,7 +3,7 @@ description: >-
   Confirms a pull request's body includes every required
   PULL_REQUEST_TEMPLATE.md section and a closing-issue reference. A no-op
   when there is no pull request context. Shared by pr-verify.yml's
-  "Verify: Standards" job and template-lint.yml's own
+  "Verify: Tests (Linux)" job and template-lint.yml's own
   merge_group/push/workflow_dispatch triggers, so the actual check has
   exactly one source. Reads the PR body from the API, so it needs no
   checkout of its own.

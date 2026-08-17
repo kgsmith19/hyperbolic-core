@@ -54,7 +54,10 @@ before(async () => {
   };
 });
 beforeEach(resetPolicy);
-after(() => { globalThis.fetch = REAL_FETCH; srv.close(); fs.rmSync(BASE, { recursive: true, force: true }); });
+// maxRetries for the same Windows reason as resetLaunch below: BASE is the
+// parent of LAUNCH_DIR, so it holds every file the fake runner's children
+// touched, and a lingering handle makes this throw EBUSY without a retry.
+after(() => { globalThis.fetch = REAL_FETCH; srv.close(); fs.rmSync(BASE, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 const good = () => ({ ...KERNEL, budget: { ...KERNEL.budget, toolCalls: 150 } });
 // One JSON-POST helper for every group; each group aliases it for readability.
@@ -746,8 +749,18 @@ fs.writeFileSync(ROUTING_MD, "# routes\n```json\n" + JSON.stringify({
 }) + "\n```\n");
 
 function resetLaunch() {
-  fs.rmSync(LAUNCH_DIR, { recursive: true, force: true });
-  fs.rmSync(RUNNER_LOG, { force: true });
+  // maxRetries is required on Windows, and `force: true` does not cover it:
+  // force only suppresses ENOENT. LAUNCH_DIR is where the fake runner's child
+  // processes execute, and Windows keeps a directory handle open briefly after
+  // a child exits, so an immediate rmSync races that handle and throws EBUSY.
+  // Node retries EBUSY/ENOTEMPTY/EPERM with linear backoff ONLY when
+  // maxRetries > 0, and it defaults to 0 -- so the default is a guaranteed
+  // intermittent failure here rather than a slow one. This is teardown, not an
+  // assertion: retrying weakens no oracle, it stops a lock race from being
+  // reported as a product failure. Observed as three AC-11x failures on
+  // windows-latest, all "EBUSY: resource busy or locked, rmdir ...\\launch".
+  fs.rmSync(LAUNCH_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  fs.rmSync(RUNNER_LOG, { force: true, maxRetries: 10, retryDelay: 100 });
   fs.mkdirSync(LAUNCH_DIR, { recursive: true });
   process.env.ACC_ROOT = LAUNCH_DIR;
   process.env.ACC_ROUTING_MD = ROUTING_MD;

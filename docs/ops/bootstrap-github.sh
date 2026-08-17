@@ -158,26 +158,30 @@ if ((branch_protection)); then
   # ruleset would create a required check that NEVER reports and blocks
   # every PR forever (confirmed empirically against PR #160's own runs).
   #
-  # "Verify: All Gates" is a rollup job: needs: on "Verify: Standards" and
-  # all six "Verify: Tests (<App>)" jobs, if: always() so it still reports
-  # when a dependency failed. Its one step fails if any of those seven
-  # results is anything but success. Those seven jobs still run, still
-  # report individually, and are still real gates in substance -- they are
-  # just no longer each separately typed into this ruleset, which is what
-  # keeps this list from drifting out of sync with pr-verify.yml the way it
-  # already has three times (PRs #118, #120, #160). Every one of the seven
-  # ALWAYS runs and always reports: when its app's paths were not touched
-  # it reports a trivial pass in seconds rather than running the suite,
-  # which is what makes folding a path-scoped check into the rollup safe.
-  # ACC contributes two of the seven because its PowerShell suites need a
-  # windows-latest runner and one job cannot span two runner images.
+  # "Verify: All Gates" is a rollup job: needs: on "Verify: Tests (Linux)"
+  # and "Verify: Tests (Windows)", if: always() so it still reports when a
+  # dependency failed. Its verdict comes from the workflow's own
+  # needs.*.result, so anything that is not exactly success -- including
+  # skipped or cancelled -- fails it. Those test jobs still run and still
+  # report individually, and are still real gates in substance; they are
+  # just no longer separately typed into this ruleset, which is what keeps
+  # this list from drifting out of sync with pr-verify.yml the way it
+  # already has three times (PRs #118, #120, #160). Each app suite ALWAYS
+  # runs and always reports: when its paths were not touched it passes in
+  # seconds rather than running, which is what makes folding a path-scoped
+  # check into the rollup safe. Windows is its own row because ACC's
+  # PowerShell suites need a windows-latest runner and one job cannot span
+  # two runner images.
+  #
+  # "Verify: All Gates" is also where merge is armed: merge-policy.yml was
+  # deleted and its orchestration moved into that same job, after the
+  # verdict is computed. There is no separate merge-policy check to
+  # consider here any more.
   #
   # NOT required, deliberately: "Verify: LLM Review" (fails closed until the
-  # owner provisions reviewer credentials -- see llm-review.yml) and
-  # "Verify: Merge Policy" (merge-policy.yml: orchestration, not
-  # verification; it arms auto-merge and maintains the Work State/Evidence
-  # Index comments, and is built to never fail, so requiring it would add a
-  # rubber stamp rather than a check).
+  # owner provisions reviewer credentials -- see llm-review.yml). While it
+  # reports failure the pull request stays "unstable" and GitHub's own
+  # auto-merge will not fire even though the required check passes.
   protection_body=$(cat <<'JSON'
 {
   "name": "main",

@@ -4,7 +4,7 @@
 // committed migrations to a throwaway database uses this -- previously each
 // one carried its own ~50-line copy of the same primitives.
 //
-// Two env-var prefixes because the Toolbelt PR Gate has always set a
+// Two env-var prefixes because the Toolbelt CI gate has always set a
 // different one per step (TOOLBELT_* at the root and for Idea Intake,
 // PROMPT_* for Prompt Organizer). Honouring both keeps that contract intact
 // while the implementation is shared.

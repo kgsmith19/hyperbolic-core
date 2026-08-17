@@ -80,7 +80,7 @@ manual rollback.
 
 A change is ready when its acceptance criteria are satisfied, affected
 documentation is accurate, the commands above pass locally, and the
-`Shell PR Gate` (`.github/workflows/shell-ci.yml`) reports success --
+`Verify: Tests (Linux)` reports success --
 that workflow, not a dedicated `llm-handler-ci.yml`, is what
 type-checks and unit-tests this service on every PR. State any
 unverified item explicitly.

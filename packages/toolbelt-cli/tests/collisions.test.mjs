@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { readdirSync } from "node:fs";
+import { readdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { withFixtureToolbeltRoot, rootManifest } from "./helpers.mjs";
 import {
@@ -121,10 +121,37 @@ test("findSchemaCollisions returns [] for a --no-schema candidate (empty schemas
 
 test("findSchemaCollisions leaves no temp file behind (its own temp dir is always cleaned up)", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    const before = readdirSync(tmpdir()).filter((n) => n.startsWith("toolbelt-cli-schema-check-"));
-    findSchemaCollisions(root, candidate());
-    const after = readdirSync(tmpdir()).filter((n) => n.startsWith("toolbelt-cli-schema-check-"));
-    assert.deepEqual(after, before);
+    // Point os.tmpdir() at a directory only this test uses, rather than
+    // snapshotting the SHARED system temp dir before and after the call.
+    // The shared form raced cli.integration.test.mjs: node --test runs test
+    // FILES in parallel, that file spawns the real CLI (twice concurrently,
+    // by design), and the CLI calls findSchemaCollisions itself -- so a
+    // directory created by that other process landed in `after` but not
+    // `before` and failed this test even though the code under test had
+    // cleaned up correctly. Seen in CI as a stray
+    // 'toolbelt-cli-schema-check-Z4rAon'.
+    //
+    // Isolating makes the assertion exact instead of merely lucky: anything
+    // left in privateTmp was put there by this call and nothing else, so
+    // this now detects a real leak that the old form could also MISS (a
+    // genuine leak plus a concurrent cleanup could leave the two snapshots
+    // equal). os.tmpdir() re-reads these variables on every call -- TMPDIR
+    // on POSIX, TEMP/TMP on Windows -- so all three are set.
+    const privateTmp = mkdtempSync(join(tmpdir(), "toolbelt-cli-leakcheck-"));
+    const saved = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+    process.env.TMPDIR = privateTmp;
+    process.env.TMP = privateTmp;
+    process.env.TEMP = privateTmp;
+    try {
+      findSchemaCollisions(root, candidate());
+      assert.deepEqual(readdirSync(privateTmp), [], "findSchemaCollisions left a temp entry behind");
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      rmSync(privateTmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
   });
 });
 
