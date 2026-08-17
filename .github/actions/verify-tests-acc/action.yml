@@ -1,0 +1,97 @@
+name: Verify Tests ACC
+description: >-
+  ACC's Linux test suite: the UI build and contract e2e, then the portable
+  suite and its changed-file coverage gate. Shared by pr-verify.yml's native
+  "Verify: Tests (ACC)" job and acc-ci.yml's own
+  merge_group/push/workflow_dispatch triggers, so the suite has exactly one
+  source. ACC's Windows suite lives in verify-tests-acc-windows -- it needs
+  a windows-latest runner and so cannot share a job with these steps.
+  Assumes the caller already checked out the repository with full history
+  (the coverage gate below rewrites HEAD to expose the integration diff).
+
+  Step ORDER is load-bearing: the UI steps run BEFORE the portable suite,
+  because the coverage gate's `git reset --soft` moves HEAD and anything
+  after it would run against a rewritten ref.
+
+inputs:
+  base_sha:
+    description: Base commit SHA the changed-file coverage gate diffs against. Empty skips the reset (full-tree coverage).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Setup · Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: apps/agentic-command-center/frontend/package-lock.json
+
+    - name: Setup · Install frontend dependencies
+      shell: bash
+      working-directory: apps/agentic-command-center/frontend
+      run: npm ci
+
+    - name: Build · Build frontend
+      shell: bash
+      working-directory: apps/agentic-command-center/frontend
+      run: npm run build
+
+    - name: Setup · Cache Playwright Chromium
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: acc-ui-playwright-chromium-${{ runner.os }}-${{ hashFiles('apps/agentic-command-center/frontend/package-lock.json') }}
+
+    - name: Setup · Install Playwright Chromium
+      shell: bash
+      working-directory: apps/agentic-command-center/frontend
+      run: npx playwright install --with-deps chromium
+
+    - name: E2E · Contract end-to-end against the monorepo ACC server
+      shell: bash
+      working-directory: apps/agentic-command-center/frontend
+      env:
+        ACC_DIR: ${{ github.workspace }}/apps/agentic-command-center
+        ACC_ROUTING_MD: ${{ github.workspace }}/apps/agentic-command-center/backend/hooks/fixtures/ROUTING.md
+      run: npm run e2e
+
+    - name: Evidence · Upload UI Playwright failure evidence
+      if: failure()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: acc-ui-playwright-failure-evidence
+        path: |
+          apps/agentic-command-center/frontend/playwright-report/
+          apps/agentic-command-center/frontend/test-results/
+        if-no-files-found: ignore
+        retention-days: 14
+
+    - name: Test · Portable test suite
+      shell: bash
+      working-directory: apps/agentic-command-center
+      env:
+        ACC_ROUTING_MD: ${{ github.workspace }}/apps/agentic-command-center/backend/hooks/fixtures/ROUTING.md
+      run: npm test
+
+    - name: Coverage · Expose the integration diff to covgate
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base_sha }}
+      run: |
+        set -euo pipefail
+        if [ -z "${BASE_SHA}" ]; then
+          echo "No base SHA provided; leaving HEAD alone and letting covgate see the full tree."
+          exit 0
+        fi
+        merge_base="$(git merge-base "${BASE_SHA}" HEAD)"
+        git reset --soft "${merge_base}"
+
+    - name: Coverage · Changed-file coverage
+      shell: bash
+      working-directory: apps/agentic-command-center
+      env:
+        ACC_ROUTING_MD: ${{ github.workspace }}/apps/agentic-command-center/backend/hooks/fixtures/ROUTING.md
+      run: npm run covgate

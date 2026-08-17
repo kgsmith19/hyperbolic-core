@@ -1,8 +1,11 @@
 # Operational metadata automation: reconciles ready-PR state (draft
 # policy, owner:hold-merge, branch updates, native squash auto-merge) and
 # maintains the managed Work State and Evidence Index comments. This
-# workflow is NOT a required status check — the six path-scoped PR Gates
-# (Toolbelt/ACC/Brain/Shell/LifeOS PR Gate, Secret Scan) are the sole gates.
+# workflow is NOT a required status check — the "Verify: *" chain run by
+# pr-verify.yml's "PR Verification" workflow is the sole gate. (It was
+# briefly misconfigured as required in the live ruleset; see AGENTS.md's
+# "PR Gate and merge behavior" section for why that was wrong and has been
+# corrected.)
 #
 # This workflow is privileged: pull_request_target runs from the BASE
 # branch with repository secrets and a write token, even for a pull
@@ -22,13 +25,13 @@
 # (standard.vendored: false in project.yaml); the two must be kept in
 # sync by hand whenever the pinned standard commit is bumped and its
 # reference implementation has changed.
-name: Hyperbolic Core Merge Policy
+name: "Verify: Merge Policy"
 
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, converted_to_draft, ready_for_review, auto_merge_disabled, labeled, unlabeled]
   workflow_run:
-    workflows: ["Toolbelt PR Gate", "ACC PR Gate", "Brain PR Gate", "Shell PR Gate", "LifeOS PR Gate", "Secret Scan"]
+    workflows: ["PR Verification"]
     types: [completed]
 
 permissions:
@@ -51,7 +54,7 @@ concurrency:
 
 jobs:
   reconcile:
-    name: Hyperbolic Core Merge Policy
+    name: "Verify: Merge Policy"
     runs-on: ubuntu-latest
     steps:
       - name: Merge Policy · Reconcile pull request state
@@ -480,7 +483,7 @@ jobs:
                 summaryLines.push(`- Unhandled error: ${error.message}`);
               } finally {
                 try {
-                  core.summary.addHeading("Hyperbolic Core Merge Policy");
+                  core.summary.addHeading("Verify: Merge Policy");
                   core.summary.addRaw(
                     summaryLines.join("\n") || "_No actions recorded._",
                     true

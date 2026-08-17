@@ -29,7 +29,7 @@ Tests use the configured database and may erase its contents. Use only an isolat
 
 ## ✅ Completion Criteria
 
-GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `.github/workflows/lifeos-ci.yml` terminal check `LifeOS PR Gate` succeeds, running this app's backend and frontend suites. Deployment is driven by the root's own `deploy.yml`, not from here.
+GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `.github/workflows/lifeos-ci.yml` terminal check `Verify: Tests (LifeOS)` succeeds, running this app's backend and frontend suites as a stage of the root's `pr-verify.yml` chain. LifeOS is also the only app in the repo with `ruff check`/`npm run lint` wired into a dedicated, required root check, `Verify: Linting` (`.github/actions/verify-linting`) — a fast, separate signal from the full test suite above. Deployment is driven by the root's own `deploy.yml`, not from here.
 
 ## 🔒 Collaboration Boundary
 

@@ -13,12 +13,12 @@ Standard](https://github.com/kgsmith19/agent-engineering-standard).
 
 | Component | What it is | Gate |
 | --- | --- | --- |
-| [`apps/agentic-command-center`](apps/agentic-command-center) | Local coding-agent guard rail, control panel, and bounded task runner | `ACC PR Gate` |
-| [`apps/lifeos`](apps/lifeos) | Personal life-management system — typed entity graph, append-only event log | `LifeOS PR Gate` |
-| [`apps/shell`](apps/shell) | Unified React/Vite front end composing every zone behind one owner login | `Shell PR Gate` |
-| [`apps/toolbelt`](apps/toolbelt) | Small portfolio tools — a prompt-library client, local-first network diagnostics | `Toolbelt PR Gate` |
-| [`services/brain`](services/brain) | Long-lived autonomous-coding orchestrator — daemon, DAG scheduler, task/result contracts | `Brain PR Gate` |
-| [`services/llm-handler`](services/llm-handler) | Deployed general-purpose LLM service behind the Shell | covered by `Shell PR Gate` |
+| [`apps/agentic-command-center`](apps/agentic-command-center) | Local coding-agent guard rail, control panel, and bounded task runner | `Verify: Tests (ACC)` + `Verify: Tests (ACC Windows)` |
+| [`apps/lifeos`](apps/lifeos) | Personal life-management system — typed entity graph, append-only event log | `Verify: Tests (LifeOS)` + `Verify: Linting` |
+| [`apps/shell`](apps/shell) | Unified React/Vite front end composing every zone behind one owner login | `Verify: Tests (Shell)` |
+| [`apps/toolbelt`](apps/toolbelt) | Small portfolio tools — a prompt-library client, local-first network diagnostics | `Verify: Tests (Toolbelt)` |
+| [`services/brain`](services/brain) | Long-lived autonomous-coding orchestrator — daemon, DAG scheduler, task/result contracts | `Verify: Tests (Brain)` |
+| [`services/llm-handler`](services/llm-handler) | Deployed general-purpose LLM service behind the Shell | covered by `Verify: Tests (Shell)` |
 | [`packages/*`](packages) | Shared TypeScript packages — `platform-client`, `ui`, `llm`, `toolbelt-cli` | covered by each consumer |
 
 Every `apps/<name>/` was imported via `git subtree` and still carries its own upstream
@@ -32,13 +32,23 @@ are native to this repo.
 
 ## 🚦 CI & merge gates
 
-Eight workflows gate this repo: six independent, path-scoped app gates (the table above) plus
-two repo-wide checks — `Gitleaks` (secret scanning) and `Repo Policy`/`Template Lint` (structural
-and template conformance). Only the repo-wide checks are *intended* to be required by the branch
-ruleset — a path-filtered check marked required would block forever on any PR that never
-triggers it — but applying that to the live ruleset is a manual step; see
-[`AGENTS.md`](./AGENTS.md)'s "PR Gate and merge behavior" section for what's actually enforced
-right now versus the intended target, and [`project.yaml`](./project.yaml) for the full topology.
+`.github/workflows/pr-verify.yml` runs every gate on every pull request. Each one is a native job
+named `Verify: <what>`, producing exactly one check row under that bare name — eight rows total,
+seven of them required.
+
+`Verify: Standards` runs first: one job carrying every repo-wide conformance check (which apps
+changed, leaked-credential scan, repo structure, PR description, lint). Then the six
+`Verify: Tests (<App>)` gates run in parallel, then `Verify: LLM Review` last.
+
+**Every test gate always runs and always reports** — when its app wasn't touched it reports a
+trivial pass in seconds instead of running the suite, using `Verify: Standards`'s job outputs
+rather than a `paths:` filter. That's what makes a path-scoped check safe to require. Only
+`Verify: LLM Review` (no reviewer credentials yet) and `Verify: Merge Policy` (orchestration, not
+verification — it's what arms auto-merge) are deliberately *not* required.
+
+See [`AGENTS.md`](./AGENTS.md)'s "PR Gate and merge behavior" section for the full order, which
+gates are (intended to be) required by the branch ruleset, and what's actually enforced right now
+versus the intended target — and [`project.yaml`](./project.yaml) for the full topology.
 
 ## 📜 Policy
 

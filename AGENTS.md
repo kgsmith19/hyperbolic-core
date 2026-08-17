@@ -269,52 +269,105 @@ exists, the PR is the handoff.
 
 ## PR Gate and merge behavior
 
-This repository uses **nine independent workflows** rather than one repo-wide aggregator — a
-deliberate, owner-directed adaptation for this monorepo's shape — but only the four with no
-`paths:` filter are *intended* to be marked required in the branch ruleset:
+Every PR-time verification gate runs from one entry point, `.github/workflows/pr-verify.yml`
+("PR Verification"). **Every job in it is a native job whose name starts with `Verify: `, and each
+produces exactly one check row with that exact bare name.** Nothing there uses `workflow_call`;
+the real work lives in composite actions under `.github/actions/`, which run *inside* the calling
+job and so add no rows of their own. Eight rows total, seven of them required.
 
-| Gate | Workflow | Covers | Required (intended) |
+| Order | Gate | Covers | Required |
 | --- | --- | --- | --- |
-| `Toolbelt PR Gate` | `toolbelt-ci.yml` | `apps/toolbelt/**` | No |
-| `ACC PR Gate` | `acc-ci.yml` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` | No |
-| `Brain PR Gate` | `brain-ci.yml` | `services/brain/**` | No |
-| `Shell PR Gate` | `shell-ci.yml` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `docs/ops/**` | No |
-| `LifeOS PR Gate` | `lifeos-ci.yml` | `apps/lifeos/**` | No |
-| `Gitleaks` | `secret-scan.yml` | whole repo, every PR | Yes |
-| `Repo Policy` | `repo-policy.yml` | whole repo, every PR | Yes |
-| `Template Lint` | `template-lint.yml` | whole repo, every PR (PR body only) | Yes |
-| `LLM Review` | `llm-review.yml` | whole repo, every PR — adversarial LLM review of the diff against the Issue and this file | Yes |
+| 1 | `Verify: Standards` | whole repo, every PR — which apps changed, leaked-credential scan, repo structure, PR description, and lint | Yes |
+| 2 | `Verify: Tests (Toolbelt)` | `apps/toolbelt/**`, `packages/toolbelt-cli/**` | Yes |
+| 2 | `Verify: Tests (ACC)` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` (Linux suites) | Yes |
+| 2 | `Verify: Tests (ACC Windows)` | same paths, PowerShell/native suites on `windows-latest` | Yes |
+| 2 | `Verify: Tests (Brain)` | `services/brain/**` | Yes |
+| 2 | `Verify: Tests (Shell)` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `docs/ops/**` | Yes |
+| 2 | `Verify: Tests (LifeOS)` | `apps/lifeos/**` | Yes |
+| 3 | `Verify: LLM Review` | whole repo — adversarial LLM review of the diff against the Issue and this file | **No** (pending credentials) |
+| — | `Verify: Merge Policy` | `merge-policy.yml` — orchestration, not verification | **No** (see below) |
+
+`Verify: Standards` is **one job** carrying every repo-wide conformance check — change detection,
+the secret scan, the repo-structure checks, the PR-description check, and lint. They are all fast,
+strictly sequential, and share a single checkout on a single runner, so splitting them into five
+jobs bought nothing and cost roughly a minute of pure runner startup per PR. A failing step stops
+the job, so fail-fast ordering is preserved exactly as before: nothing below runs on a PR with a
+leaked secret. The tradeoff is that a failure shows as one row — open the job log to see which
+step broke.
+
+The six order-2 test gates then run in **parallel** with each other, all depending only on
+`Verify: Standards`. They are deliberately *not* merged into one row: parallel wall-clock is the
+slowest single app rather than the sum of all six, and a failing row names the app directly.
+`Verify: LLM Review` runs last, after every test gate, so no reviewer tokens are spent on a PR
+that would fail everything else anyway.
+
+**Every order-2 gate always runs and always reports.** When its app's paths weren't touched it
+reports a trivial pass in seconds instead of running the suite — the relevance decision comes from
+`Verify: Standards`'s job outputs, not from a `paths:` filter on the workflow. That is precisely
+what makes a path-scoped check safe to mark required: it can never become the check that never
+reports. A change to `.github/workflows/**` or `.github/actions/**` marks **every** app relevant,
+so a CI edit is exercised end to end rather than trivially passing against untouched apps.
+
+ACC reports **two** rows (`Verify: Tests (ACC)` and `Verify: Tests (ACC Windows)`) and that is a
+hard platform constraint, not an oversight: its PowerShell shim and cap-watcher suites need a
+`windows-latest` runner, and a single job cannot span two runner images.
+
+The lint step inside `Verify: Standards` runs only LifeOS's own lint commands (`ruff check` for
+the backend, `npm run lint` for the frontend) today, because LifeOS is the only app in this repo
+with a lint command configured — see `apps/lifeos/AGENTS.md`. Extend
+`.github/actions/verify-linting/action.yml` in place, not a second gate, when another app adopts a
+linter.
 
 > [!WARNING]
-> **This is load-bearing, not incidental.** GitHub's required-status-checks model blocks a merge
-> on any required check name that never reports, and a `paths:` filter does **not** make an
-> unreported required check "not applicable" — it stays pending forever. This hit live: PRs #118
-> and #120 (root docs and new workflow files, touching none of the five app gates' paths) got
-> stuck in `mergeable_state: "blocked"` permanently when the ruleset required all six app gates
-> by name, and needed an owner administrative bypass to merge. Only a check with no `paths:`
-> filter — or one restructured to always report, with an internal skip when its own paths did not
-> change — is safe to mark required. The five app-scoped gates therefore stay **non-required**:
-> they still run and report on every PR whose paths they cover, and remain real evidence for
-> review, but the branch ruleset only enforces `Gitleaks`, `Repo Policy`, and `Template Lint`,
-> which fire on every PR unconditionally. See the pinned standard's own "Path-scoped gates in
-> monorepo topologies" note for the general pattern this follows.
+> **The bare-name requirement is load-bearing, not cosmetic.** A required status check is matched
+> by its literal reported name, and a `workflow_call`-invoked job is *always* reported as
+> `"<caller job name> / <callee job name>"` for every job the called workflow has, no matter how
+> few — there is no way to get a bare name through that boundary. Typing the bare name into the
+> ruleset then silently creates a required check that **never reports**, which blocks every PR
+> forever. This repo hit the same class of failure from the other direction on PRs #118 and #120
+> (root docs and new workflow files, touching none of the app gates' paths) — they stuck in
+> `mergeable_state: "blocked"` permanently and needed an owner administrative bypass to merge.
+> Both hazards are why `pr-verify.yml` uses native jobs plus composite actions, and why relevance
+> is decided inside the job rather than by a `paths:` filter. See the pinned standard's own
+> "Path-scoped gates in monorepo topologies" note for the general pattern.
 >
-> The "Required (intended)" column above is this document's specification of the correct
-> configuration — applying it to the live ruleset is a manual owner action outside this
-> repository's files (no ruleset-write API is available to an agent in this harness) and may lag
-> a commit or two behind this table. **Read the live ruleset itself, never this table alone, to
-> know what is actually enforced at any given moment.**
+> `Verify: LLM Review` stays **non-required** until the owner provisions the reviewer credentials
+> `llm-review.yml` documents — an unprovisioned run fails closed by design and must never block
+> merge while unrequired.
+>
+> `Verify: Merge Policy` (`merge-policy.yml`) is **not required and must not be**: it is
+> orchestration, not verification — it arms native squash auto-merge and maintains the managed
+> Work State and Evidence Index comments — and it is deliberately built never to fail (every error
+> is caught and logged, never thrown). Requiring it would add a rubber stamp that is almost always
+> green, and would block every PR repo-wide, hotfixes included, on the rare occasion it broke. It
+> cannot be removed from the Checks tab, though: any workflow that runs on a PR reports a row, and
+> there is no suppression — the row is expected, it simply must never gate merge.
+>
+> The "Required" column above is this document's specification of the correct configuration —
+> applying it to the live ruleset is a manual owner action outside this repository's files (no
+> ruleset-write API is available to an agent in this harness) and may lag a commit or two behind
+> this table. **Read the live ruleset itself, never this table alone, to know what is actually
+> enforced at any given moment**, and confirm any name against a real PR's Checks tab before
+> entering it.
 
-Each of the nine gates has a real aggregator job: `if: always()`, full `needs:` coverage,
-explicit strict success-checking, an SHA-vs-live-PR-head freshness check, and a step summary.
+Each gate's real work lives in a composite action under `.github/actions/` — `verify-secrets`,
+`verify-repo-policy`, `verify-pr-description`, `verify-linting`, `verify-tests-toolbelt`,
+`verify-tests-acc`, `verify-tests-acc-windows`, `verify-tests-brain`, `verify-tests-shell`,
+`verify-tests-lifeos`, `verify-llm-review`. Each is also reused by the matching standalone
+workflow file (`secret-scan.yml`, `repo-policy.yml`, `template-lint.yml`, `toolbelt-ci.yml`,
+`acc-ci.yml`, `brain-ci.yml`, `shell-ci.yml`, `lifeos-ci.yml`, `llm-review.yml`) for that file's
+own `merge_group`/`push`/`workflow_dispatch` triggers, so every check has exactly one source of
+logic despite two trigger paths. A composite action's own `action.yml` must be on disk before it
+can be resolved, so **every job referencing one checks out the repository first** — omitting that
+fails with "Can't find 'action.yml' … Did you forget to run actions/checkout?".
 
 ### Independent LLM Review
 
-`LLM Review` runs an adversarial LLM reviewer (`packages/review`, built on this repo's own
+`Verify: LLM Review` runs an adversarial LLM reviewer (`packages/review`, built on this repo's own
 `@hyperbolic/llm`) against each PR's diff, its linked Issue, and this file. It is **not** GitHub's
 native code review: this repository does not use approving reviews, Request Changes, or
 CODEOWNERS review gating. GitHub runs the job and reports a status check — exactly its role for
-`Gitleaks`. The judgment lives in this repo's own tooling.
+`Verify: Secrets`. The judgment lives in this repo's own tooling.
 
 - **Provider separation is enforced, not preferred.** The reviewer's provider family must differ
   from the builder's; the gate fails closed when they match.
@@ -332,15 +385,20 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   repeated unresolved rounds, is tracked separately and is **not** yet implemented.
 
 > [!IMPORTANT]
-> **No agent review may block the owner.** `LLM Review` is a status check only; `main` protection
-> retains owner bypass, so `kgsmith19` may merge over a red review at any time. An agent MUST NOT
-> re-litigate, reverse, or open an unsolicited Issue against that decision.
+> **No agent review may block the owner.** `Verify: LLM Review` is a status check only, and is not
+> even required yet; `main` protection also retains owner bypass, so `kgsmith19` may merge over a
+> red review at any time. An agent MUST NOT re-litigate, reverse, or open an unsolicited Issue
+> against that decision.
 
-`.github/workflows/merge-policy.yml` is operational metadata automation, not a required status
-check: it never checks out, fetches, downloads, or executes PR-controlled code, never
-direct-merges, and maintains only the managed Work State and Evidence Index comments. For ready
-same-repository PRs to `main` it enables native squash auto-merge bound to the expected head and
-re-arms it when disabled without an owner hold.
+`.github/workflows/merge-policy.yml` (reported as `Verify: Merge Policy`) is operational metadata
+automation, **not** a required status check and never to be made one: it never checks out,
+fetches, downloads, or executes PR-controlled code, never direct-merges, and maintains only the
+managed Work State and Evidence Index comments. For ready same-repository PRs to `main` it enables
+native squash auto-merge bound to the expected head and re-arms it when disabled without an owner
+hold — deleting it would disable auto-merge for the whole repository. It watches `pr-verify.yml`'s
+"PR Verification" `workflow_run` completion (the individual `Verify: *` stages no longer produce
+their own top-level runs to watch on a pull request, since `pull_request` was removed from every
+one of their own `on:` blocks).
 
 `.github/CODEOWNERS` requires `@kgsmith19` review for this repo's control-plane paths
 (`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`). `main` protection: pull request

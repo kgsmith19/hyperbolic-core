@@ -1,0 +1,38 @@
+name: Verify Tests ACC Windows
+description: >-
+  ACC's Windows-native suite: the native test run plus the PowerShell
+  launch-shim, cap-watcher, and cap-watcher-installer tests. Separate from
+  verify-tests-acc ONLY because these require a windows-latest runner and a
+  single job cannot span two runner images -- that is why ACC reports two
+  check rows rather than one. Shared by pr-verify.yml's native
+  "Verify: Tests (ACC Windows)" job and acc-ci.yml's own
+  merge_group/push/workflow_dispatch triggers. Assumes the caller already
+  checked out the repository.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup · Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: '22'
+
+    - name: Test · Native test suite
+      shell: bash
+      working-directory: apps/agentic-command-center
+      run: npm run test:windows
+
+    - name: Test · Launch-shim tests
+      shell: pwsh
+      working-directory: apps/agentic-command-center
+      run: powershell -File backend/shim/claude.test.ps1
+
+    - name: Test · Cap-watcher tests
+      shell: pwsh
+      working-directory: apps/agentic-command-center
+      run: powershell -File backend/watcher/claude-cap-watch.test.ps1
+
+    - name: Test · Cap-watcher installer tests
+      shell: pwsh
+      working-directory: apps/agentic-command-center
+      run: powershell -File backend/watcher/install-cap-watch-task.test.ps1
