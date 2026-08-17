@@ -32,17 +32,24 @@ these two just flip the gates deploy.yml/platform-backup.yml check):
   --enable-backup      also sets PLATFORM_BACKUP_ENABLED=true
 
 Optional:
-  --branch-protection  also require Toolbelt/ACC/Shell PR Gate on main
-                        (runbook.md's own acceptance criterion for this issue)
-  --dry-run            Print every `gh` call this script would make. Default.
-  --apply               Run for real.
+  --branch-protection    also set the required-status-checks rule on main's
+                          Ruleset to the seven "Verify: *" gates (requires
+                          --main-ruleset-id; see AGENTS.md's "PR Gate and
+                          merge behavior" section). main is governed by the
+                          Repository Rulesets feature here, not the
+                          deprecated classic branch-protection API -- find
+                          the id with `gh api repos/OWNER/REPO/rulesets`, or
+                          in the Rules page URL (.../rules/<id>).
+  --main-ruleset-id=ID    required together with --branch-protection.
+  --dry-run              Print every `gh` call this script would make. Default.
+  --apply                Run for real.
 EOF
 }
 
 mode="--dry-run"
 repo="" deploy_host="" project_slug=""
 shell_id="" llm_handler_id="" brain_id="" migrations_id="" backup_id=""
-age_key=""
+age_key="" main_ruleset_id=""
 enable_deploy=0 enable_backup=0 branch_protection=0
 
 for arg in "$@"; do
@@ -60,6 +67,7 @@ for arg in "$@"; do
     --enable-deploy) enable_deploy=1 ;;
     --enable-backup) enable_backup=1 ;;
     --branch-protection) branch_protection=1 ;;
+    --main-ruleset-id=*) main_ruleset_id="${arg#--main-ruleset-id=}" ;;
     -h | --help)
       usage
       exit 0
@@ -81,6 +89,9 @@ missing=()
 [[ -n "$migrations_id" ]] || missing+=(--infisical-platform-migrations-identity)
 [[ -n "$backup_id" ]] || missing+=(--infisical-platform-backup-identity)
 [[ -n "$age_key" ]] || missing+=(--platform-age-public-key)
+if ((branch_protection)) && [[ -z "$main_ruleset_id" ]]; then
+  missing+=(--main-ruleset-id)
+fi
 if ((${#missing[@]} > 0)); then
   printf 'error: missing required flags:%s\n' "$(printf ' %s' "${missing[@]}")" >&2
   usage
@@ -124,23 +135,87 @@ if ((enable_backup)); then
 fi
 
 if ((branch_protection)); then
+  # main is governed by the Repository Rulesets feature (Settings > Rules),
+  # not the deprecated classic branch-protection API the previous version
+  # of this script called -- that mismatch is why re-running the old
+  # version could never have matched what GitHub was actually enforcing.
+  # A ruleset PUT replaces the WHOLE ruleset in one call, so every rule it
+  # should carry is spelled out below, not just required_status_checks --
+  # the same full-replacement semantics the old classic-protection body
+  # already had, just correctly targeting the API this repo actually uses.
+  # require_code_owner_review is left at its current live value (false):
+  # AGENTS.md's "PR Gate and merge behavior" section describes code-owner
+  # review as required for control-plane paths, which is a separate, more
+  # sensitive policy decision than this script's scope -- flip it by hand
+  # if the owner wants it enforced at the ruleset level.
+  #
+  # Every context below is a NATIVE job in pr-verify.yml -- nothing in that
+  # file uses workflow_call any more -- so each reports its bare
+  # "Verify: X" name with no compound prefix. That is exactly why the
+  # refactor happened: a workflow_call-invoked job is always reported as
+  # "<caller job name> / <callee job name>", so a bare name typed into the
+  # ruleset would create a required check that NEVER reports and blocks
+  # every PR forever (confirmed empirically against PR #160's own runs).
+  #
+  # Every "Verify: Tests (<App>)" job ALWAYS runs and always reports: when
+  # its app's paths were not touched it reports a trivial pass in seconds
+  # rather than running the suite, which is what makes a path-scoped check
+  # safe to require. ACC has two contexts because its PowerShell suites
+  # need a windows-latest runner and one job cannot span two runner images.
+  #
+  # NOT required, deliberately: "Verify: LLM Review" (fails closed until the
+  # owner provisions reviewer credentials -- see llm-review.yml) and
+  # "Verify: Merge Policy" (merge-policy.yml: orchestration, not
+  # verification; it arms auto-merge and maintains the Work State/Evidence
+  # Index comments, and is built to never fail, so requiring it would add a
+  # rubber stamp rather than a check).
   protection_body=$(cat <<'JSON'
 {
-  "required_status_checks": {
-    "strict": true,
-    "contexts": ["Toolbelt PR Gate", "ACC PR Gate", "Shell PR Gate"]
-  },
-  "enforce_admins": false,
-  "required_pull_request_reviews": null,
-  "restrictions": null
+  "name": "main",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "required_linear_history" },
+    { "type": "non_fast_forward" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": true,
+        "required_reviewers": [],
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "allowed_merge_methods": ["squash"]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": true,
+        "required_status_checks": [
+          { "context": "Verify: Standards" },
+          { "context": "Verify: Tests (Toolbelt)" },
+          { "context": "Verify: Tests (ACC)" },
+          { "context": "Verify: Tests (ACC Windows)" },
+          { "context": "Verify: Tests (Brain)" },
+          { "context": "Verify: Tests (Shell)" },
+          { "context": "Verify: Tests (LifeOS)" }
+        ]
+      }
+    }
+  ]
 }
 JSON
   )
   if [[ "$mode" == "--dry-run" ]]; then
-    print_cmd gh api --method PUT "repos/$repo/branches/main/protection" --input -
+    print_cmd gh api --method PUT "repos/$repo/rulesets/$main_ruleset_id" --input -
     echo "$protection_body"
   else
-    print_cmd gh api --method PUT "repos/$repo/branches/main/protection" --input -
-    echo "$protection_body" | gh api --method PUT "repos/$repo/branches/main/protection" --input -
+    print_cmd gh api --method PUT "repos/$repo/rulesets/$main_ruleset_id" --input -
+    echo "$protection_body" | gh api --method PUT "repos/$repo/rulesets/$main_ruleset_id" --input -
   fi
 fi
