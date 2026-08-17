@@ -381,6 +381,22 @@ Setup, one time. Configure these repository variables before enabling it:
 
 CI can create a bundle and can never open one; that asymmetry is deliberate, so a compromised runner cannot read the data it just backed up.
 
+**restic primary (issue #166), gated separately from the age path above.** The age->GitHub-artifact
+path is unconditional and always runs once `PLATFORM_BACKUP_ENABLED` is on; restic backup to the
+Hetzner Storage Box is an additional, independently gated step using the same dump. Configure these
+before flipping the gate:
+
+| Variable | Purpose |
+| --- | --- |
+| `INFISICAL_PLATFORM_RESTIC_IDENTITY_ID` | A second, dedicated OIDC identity reading `/platform/backup/` -- never `INFISICAL_PLATFORM_BACKUP_IDENTITY_ID` above, which reads `/toolbelt/`'s `SUPABASE_DB_URL`. A compromised restic credential must not also unlock the database, and vice versa. `/platform/backup/` must contain `RESTIC_PASSWORD` and `STORAGEBOX_SSH_KEY` (see [`docs/ops/vendors.md`](vendors.md#infisical)). |
+| `STORAGEBOX_HOST` / `STORAGEBOX_USER` | The Storage Box hostname and the `platform` repository's sub-account username (not secret -- same non-sensitive-fact pattern as `DEPLOY_HOST`). |
+| `RESTIC_BACKUP_ENABLED` | Set to `true` once the Storage Box exists, the `platform` repository has been initialized (`docs/ops/restic-setup.sh`, [above](#hetzner-storage-box-bootstrap-restic)), and the identity/variables above are provisioned. Off by default; the age path is completely unaffected either way. |
+
+The restic step reuses `docs/ops/restic-setup.sh --apply --repos=platform` to install/configure
+before every run (idempotent -- a no-op once the repository already exists), then runs `restic
+backup` against the same dump the age path just encrypted, `restic forget --keep-daily 7
+--keep-weekly 4 --keep-monthly 6 --prune`, and asserts the new snapshot is listed before finishing.
+
 The workflow verifies before it encrypts: the dump must be non-empty and must survive `pg_restore --list`, the `PLATFORM_AGE_PUBLIC_KEY` value must look like an `age1...` recipient (never an identity file), and the finished artifact's header must identify as `age-encryption.org`. A corrupt bundle fails the run rather than sitting in artifact storage looking like protection. Each bundle also carries `MIGRATION_LEDGER.txt`, the applied migration versions at snapshot time, because a restore has to know which migrations the snapshot already contains.
 
 ### The destructive-migration rule (referenced from `docs/planning/10-cicd-deployment.md` section 8.4)
