@@ -33,13 +33,14 @@ these two just flip the gates deploy.yml/platform-backup.yml check):
 
 Optional:
   --branch-protection    also set the required-status-checks rule on main's
-                          Ruleset to the seven "Verify: *" gates (requires
-                          --main-ruleset-id; see AGENTS.md's "PR Gate and
-                          merge behavior" section). main is governed by the
-                          Repository Rulesets feature here, not the
-                          deprecated classic branch-protection API -- find
-                          the id with `gh api repos/OWNER/REPO/rulesets`, or
-                          in the Rules page URL (.../rules/<id>).
+                          Ruleset to the single "Verify: All Gates" rollup
+                          check (requires --main-ruleset-id; see AGENTS.md's
+                          "PR Gate and merge behavior" section). main is
+                          governed by the Repository Rulesets feature here,
+                          not the deprecated classic branch-protection API
+                          -- find the id with
+                          `gh api repos/OWNER/REPO/rulesets`, or in the
+                          Rules page URL (.../rules/<id>).
   --main-ruleset-id=ID    required together with --branch-protection.
   --dry-run              Print every `gh` call this script would make. Default.
   --apply                Run for real.
@@ -149,19 +150,27 @@ if ((branch_protection)); then
   # sensitive policy decision than this script's scope -- flip it by hand
   # if the owner wants it enforced at the ruleset level.
   #
-  # Every context below is a NATIVE job in pr-verify.yml -- nothing in that
-  # file uses workflow_call any more -- so each reports its bare
+  # The one context below is a NATIVE job in pr-verify.yml -- nothing in
+  # that file uses workflow_call any more -- so it reports its bare
   # "Verify: X" name with no compound prefix. That is exactly why the
   # refactor happened: a workflow_call-invoked job is always reported as
   # "<caller job name> / <callee job name>", so a bare name typed into the
   # ruleset would create a required check that NEVER reports and blocks
   # every PR forever (confirmed empirically against PR #160's own runs).
   #
-  # Every "Verify: Tests (<App>)" job ALWAYS runs and always reports: when
-  # its app's paths were not touched it reports a trivial pass in seconds
-  # rather than running the suite, which is what makes a path-scoped check
-  # safe to require. ACC has two contexts because its PowerShell suites
-  # need a windows-latest runner and one job cannot span two runner images.
+  # "Verify: All Gates" is a rollup job: needs: on "Verify: Standards" and
+  # all six "Verify: Tests (<App>)" jobs, if: always() so it still reports
+  # when a dependency failed. Its one step fails if any of those seven
+  # results is anything but success. Those seven jobs still run, still
+  # report individually, and are still real gates in substance -- they are
+  # just no longer each separately typed into this ruleset, which is what
+  # keeps this list from drifting out of sync with pr-verify.yml the way it
+  # already has three times (PRs #118, #120, #160). Every one of the seven
+  # ALWAYS runs and always reports: when its app's paths were not touched
+  # it reports a trivial pass in seconds rather than running the suite,
+  # which is what makes folding a path-scoped check into the rollup safe.
+  # ACC contributes two of the seven because its PowerShell suites need a
+  # windows-latest runner and one job cannot span two runner images.
   #
   # NOT required, deliberately: "Verify: LLM Review" (fails closed until the
   # owner provisions reviewer credentials -- see llm-review.yml) and
@@ -197,13 +206,7 @@ if ((branch_protection)); then
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": true,
         "required_status_checks": [
-          { "context": "Verify: Standards" },
-          { "context": "Verify: Tests (Toolbelt)" },
-          { "context": "Verify: Tests (ACC)" },
-          { "context": "Verify: Tests (ACC Windows)" },
-          { "context": "Verify: Tests (Brain)" },
-          { "context": "Verify: Tests (Shell)" },
-          { "context": "Verify: Tests (LifeOS)" }
+          { "context": "Verify: All Gates" }
         ]
       }
     }

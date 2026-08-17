@@ -40,11 +40,34 @@ name: "PR Verification"
 #                                seconds instead of running the suite,
 #                                deciding relevance from stage 1's outputs
 #                                rather than a paths: filter. That is what
-#                                makes a path-scoped check safe to mark
-#                                required -- it can never be the
-#                                forever-pending check that blocks a PR.
-#   3. Verify: LLM Review     -- LAST, so no reviewer tokens are spent on a
+#                                makes each one safe to have counted toward
+#                                a required check in the first place --
+#                                none of them can ever be the
+#                                forever-pending job that blocks a PR.
+#   3. Verify: All Gates      -- a rollup job, needs: on Standards + all six
+#                                Tests jobs, if: always() so it reports even
+#                                when a dependency failed. Its own single
+#                                step fails if `needs.*.result` contains
+#                                anything other than success. THIS is the
+#                                only name that goes in the branch ruleset's
+#                                required-status-checks list -- one entry
+#                                instead of seven, so there is one fewer
+#                                thing to type correctly and one fewer thing
+#                                to drift out of sync with this file (the
+#                                exact failure mode that stranded PRs #118,
+#                                #120, and #160 on stale required-check
+#                                lists before). The 7 rows above still run
+#                                and still report individually -- this job
+#                                does not replace them, it only rolls them
+#                                up. merge-policy.yml's own
+#                                requiredGatesGreen check reads this same
+#                                job's conclusion for the same reason.
+#   4. Verify: LLM Review     -- LAST, so no reviewer tokens are spent on a
 #                                PR that would fail everything else anyway.
+#                                needs: [verify-all-gates], so it inherits
+#                                the same "runs only once every required
+#                                gate has succeeded" guarantee without
+#                                re-listing all six test jobs a second time.
 #                                NOT required (no reviewer credentials
 #                                provisioned yet); its own fail-closed
 #                                design must never block merge while
@@ -56,7 +79,10 @@ name: "PR Verification"
 # windows-latest runner, and a single job cannot span two runner images.
 # That is also why the six test gates are not merged into one row: they run
 # in parallel, so wall-clock is the slowest single app rather than the sum
-# of all of them.
+# of all of them. Verify: All Gates rolling them up for the REQUIRED-checks
+# list is a different thing from merging their execution -- the six still
+# run concurrently; only the one name that has to be typed into the ruleset
+# changed.
 #
 # No paths: filter anywhere in this file, deliberately. Path scoping is done
 # INSIDE the jobs via Verify: Standards's outputs, precisely so every
@@ -313,17 +339,39 @@ jobs:
         run: echo "LifeOS was not touched by this change; nothing to verify."
 
   # =====================================================================
-  # 3. Verify: LLM Review (last, non-required)
+  # 3. Verify: All Gates -- single required rollup of the 7 jobs above
   # =====================================================================
-  verify-llm-review:
-    name: "Verify: LLM Review"
+  verify-all-gates:
+    name: "Verify: All Gates"
     needs:
+      - verify-standards
       - verify-tests-toolbelt
       - verify-tests-acc
       - verify-tests-acc-windows
       - verify-tests-brain
       - verify-tests-shell
       - verify-tests-lifeos
+    # always(), not the default: the default skips this job the moment any
+    # needs: job fails, which would leave THIS row -- the one row the
+    # ruleset actually requires -- permanently absent on exactly the PRs
+    # that most need it to report failure.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Gate · Confirm every required job succeeded
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        shell: bash
+        run: |
+          echo "::error::One or more required gates did not succeed. See the individual Verify: * rows on this PR for which one."
+          exit 1
+
+  # =====================================================================
+  # 4. Verify: LLM Review (last, non-required)
+  # =====================================================================
+  verify-llm-review:
+    name: "Verify: LLM Review"
+    needs: [verify-all-gates]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

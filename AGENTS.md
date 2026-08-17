@@ -273,18 +273,20 @@ Every PR-time verification gate runs from one entry point, `.github/workflows/pr
 ("PR Verification"). **Every job in it is a native job whose name starts with `Verify: `, and each
 produces exactly one check row with that exact bare name.** Nothing there uses `workflow_call`;
 the real work lives in composite actions under `.github/actions/`, which run *inside* the calling
-job and so add no rows of their own. Eight rows total, seven of them required.
+job and so add no rows of their own. Nine rows total across the two workflows (`pr-verify.yml`
+plus `merge-policy.yml`), only **one required**: `Verify: All Gates`.
 
 | Order | Gate | Covers | Required |
 | --- | --- | --- | --- |
-| 1 | `Verify: Standards` | whole repo, every PR — which apps changed, leaked-credential scan, repo structure, PR description, and lint | Yes |
-| 2 | `Verify: Tests (Toolbelt)` | `apps/toolbelt/**`, `packages/toolbelt-cli/**` | Yes |
-| 2 | `Verify: Tests (ACC)` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` (Linux suites) | Yes |
-| 2 | `Verify: Tests (ACC Windows)` | same paths, PowerShell/native suites on `windows-latest` | Yes |
-| 2 | `Verify: Tests (Brain)` | `services/brain/**` | Yes |
-| 2 | `Verify: Tests (Shell)` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `docs/ops/**` | Yes |
-| 2 | `Verify: Tests (LifeOS)` | `apps/lifeos/**` | Yes |
-| 3 | `Verify: LLM Review` | whole repo — adversarial LLM review of the diff against the Issue and this file | **No** (pending credentials) |
+| 1 | `Verify: Standards` | whole repo, every PR — which apps changed, leaked-credential scan, repo structure, PR description, and lint | No — rolled into `Verify: All Gates` |
+| 2 | `Verify: Tests (Toolbelt)` | `apps/toolbelt/**`, `packages/toolbelt-cli/**` | No — rolled into `Verify: All Gates` |
+| 2 | `Verify: Tests (ACC)` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` (Linux suites) | No — rolled into `Verify: All Gates` |
+| 2 | `Verify: Tests (ACC Windows)` | same paths, PowerShell/native suites on `windows-latest` | No — rolled into `Verify: All Gates` |
+| 2 | `Verify: Tests (Brain)` | `services/brain/**` | No — rolled into `Verify: All Gates` |
+| 2 | `Verify: Tests (Shell)` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `docs/ops/**` | No — rolled into `Verify: All Gates` |
+| 2 | `Verify: Tests (LifeOS)` | `apps/lifeos/**` | No — rolled into `Verify: All Gates` |
+| 3 | `Verify: All Gates` | rollup: `needs:` on `Verify: Standards` and all six `Verify: Tests (<App>)` jobs above, `if: always()` | **Yes** |
+| 4 | `Verify: LLM Review` | whole repo — adversarial LLM review of the diff against the Issue and this file | **No** (pending credentials) |
 | — | `Verify: Merge Policy` | `merge-policy.yml` — orchestration, not verification | **No** (see below) |
 
 `Verify: Standards` is **one job** carrying every repo-wide conformance check — change detection,
@@ -296,17 +298,33 @@ leaked secret. The tradeoff is that a failure shows as one row — open the job 
 step broke.
 
 The six order-2 test gates then run in **parallel** with each other, all depending only on
-`Verify: Standards`. They are deliberately *not* merged into one row: parallel wall-clock is the
-slowest single app rather than the sum of all six, and a failing row names the app directly.
-`Verify: LLM Review` runs last, after every test gate, so no reviewer tokens are spent on a PR
-that would fail everything else anyway.
+`Verify: Standards`. They are deliberately *not merged in execution* into one row: parallel
+wall-clock is the slowest single app rather than the sum of all six, and a failing row names the
+app directly by opening the Checks tab. What *is* merged is **requiredness**: `Verify: All Gates`
+is a rollup job — `needs:` on `Verify: Standards` and all six `Verify: Tests (<App>)` jobs,
+`if: always()` so it still reports when a dependency failed rather than being skipped — whose
+single step fails if any of those seven results is anything but `success`. That is the **only**
+name that goes in the branch ruleset's required-status-checks list. The seven underlying rows
+still run and still report individually and are still visible on every PR; they are just no
+longer each separately typed into the ruleset. One name instead of seven is one fewer thing to
+type correctly and one fewer thing to drift out of sync with this file — the exact failure mode
+that stranded PRs #118, #120, and #160 on stale required-check lists before.
+`merge-policy.yml`'s own gate-check (below) reads this same rollup job's conclusion for the same
+reason: one source of "did verification pass," not seven.
+
+`Verify: LLM Review` runs last, needing only `Verify: All Gates` rather than re-listing the six
+test jobs a second time, so no reviewer tokens are spent on a PR that would fail everything else
+anyway.
 
 **Every order-2 gate always runs and always reports.** When its app's paths weren't touched it
 reports a trivial pass in seconds instead of running the suite — the relevance decision comes from
 `Verify: Standards`'s job outputs, not from a `paths:` filter on the workflow. That is precisely
-what makes a path-scoped check safe to mark required: it can never become the check that never
-reports. A change to `.github/workflows/**` or `.github/actions/**` marks **every** app relevant,
-so a CI edit is exercised end to end rather than trivially passing against untouched apps.
+what makes a path-scoped check safe to fold into a required rollup: it can never become the job
+that silently sits `skipped` and gets treated by `Verify: All Gates` as a pass — `if: always()`
+plus checking for `skipped` explicitly means a job that mistakenly stops reporting turns the
+rollup red, not green. A change to `.github/workflows/**` or `.github/actions/**` marks **every**
+app relevant, so a CI edit is exercised end to end rather than trivially passing against untouched
+apps.
 
 ACC reports **two** rows (`Verify: Tests (ACC)` and `Verify: Tests (ACC Windows)`) and that is a
 hard platform constraint, not an oversight: its PowerShell shim and cap-watcher suites need a
@@ -335,13 +353,17 @@ linter.
 > `llm-review.yml` documents — an unprovisioned run fails closed by design and must never block
 > merge while unrequired.
 >
-> `Verify: Merge Policy` (`merge-policy.yml`) is **not required and must not be**: it is
-> orchestration, not verification — it arms native squash auto-merge and maintains the managed
-> Work State and Evidence Index comments — and it is deliberately built never to fail (every error
-> is caught and logged, never thrown). Requiring it would add a rubber stamp that is almost always
-> green, and would block every PR repo-wide, hotfixes included, on the rare occasion it broke. It
-> cannot be removed from the Checks tab, though: any workflow that runs on a PR reports a row, and
-> there is no suppression — the row is expected, it simply must never gate merge.
+> `Verify: Merge Policy` (`merge-policy.yml`, whose own *workflow*-level name is the distinct
+> `"Merge Automation"` — only the job's own name is `Verify: Merge Policy`, deliberately different
+> from the outer label so the PR checks list reads `Merge Automation / Verify: Merge Policy`
+> instead of a confusing doubled `Verify: Merge Policy / Verify: Merge Policy` sitting next to
+> `PR Verification / Verify: <gate>`) is **not required and must not be**: it is orchestration, not
+> verification — it arms native squash auto-merge and maintains the managed Work State and
+> Evidence Index comments — and it is deliberately built never to fail (every error is caught and
+> logged, never thrown). Requiring it would add a rubber stamp that is almost always green, and
+> would block every PR repo-wide, hotfixes included, on the rare occasion it broke. It cannot be
+> removed from the Checks tab, though: any workflow that runs on a PR reports a row, and there is
+> no suppression — the row is expected, it simply must never gate merge.
 >
 > It also runs early, not last: `pull_request_target` fires it immediately on every push, well
 > before `pr-verify.yml`'s own `Verify: *` jobs even start, because reacting promptly to
@@ -350,8 +372,8 @@ linter.
 > itself, is what actually lets a PR merge — so `reconcileReadyState` never arms auto-merge without
 > first calling `requiredGatesGreen`, which reads the real check-run conclusions for the PR's own
 > head SHA directly (not `pr.mergeable_state`, and not whatever the live branch ruleset happens to
-> require, since that list has drifted from what this document specifies before) and requires every
-> `Verify: Standards` / `Verify: Tests (<App>)` row to be a fresh success. `Verify: LLM Review` is
+> require, since that list has drifted from what this document specifies before) and requires
+> `Verify: All Gates` to be a fresh success. `Verify: LLM Review` is
 > excluded from that check, matching its non-required status. This is what makes "the last real
 > gate finishing is the only thing that can enable a merge" true in practice and not just in the
 > required-checks list.
