@@ -104,6 +104,14 @@ pipeline in `runbook.md`.
 inbound ports on the VPS) + Cloudflare Access (SSO in front of whichever paths are explicitly
 exposed). Additive to Tailscale — the private tailnet path is unaffected.
 
+**Access policy model (#170):** one Access application per public hostname
+(`vars.CLOUDFLARE_PUBLIC_HOSTNAME`), each bound to an owner-chosen identity provider (SSO) and a
+policy naming who may authenticate plus a session duration — configured entirely in the Cloudflare
+dashboard, never in code. `platform-smoke.yml`'s public-edge probe only asserts the *shape* of the
+boundary (an unauthenticated request gets a 3xx redirect toward Access, never a 2xx from the app
+or a 5xx from a broken edge) — it does not and cannot assert *who* a policy admits. See
+`runbook.md`'s "Cloudflare Access setup" section for the exact owner dashboard steps.
+
 **Auth:** a tunnel token (Infisical `/platform/edge/`) authorizes `cloudflared` to establish the
 outbound connection; Access policies are configured in the Cloudflare dashboard, not in code.
 

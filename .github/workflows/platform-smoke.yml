@@ -125,3 +125,45 @@ jobs:
             exit 1
           fi
           echo "All probes green."
+
+      # Additive and independently gated (issue #170): the tailnet-private
+      # probes above are entirely unaffected by this step's presence, state,
+      # or outcome -- it only runs at all once the owner has both enabled
+      # the edge and set the public hostname it answers on.
+      - name: Smoke · Public edge — unauthenticated request must redirect toward Access, never reach the app
+        if: vars.CLOUDFLARE_EDGE_ENABLED == 'true'
+        shell: bash
+        env:
+          CLOUDFLARE_PUBLIC_HOSTNAME: ${{ vars.CLOUDFLARE_PUBLIC_HOSTNAME }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_PUBLIC_HOSTNAME:-}" ]]; then
+            echo "::error::CLOUDFLARE_EDGE_ENABLED is true but CLOUDFLARE_PUBLIC_HOSTNAME is not set -- cannot run the public-edge probe." >&2
+            exit 1
+          fi
+          public_origin="https://$CLOUDFLARE_PUBLIC_HOSTNAME"
+          # -o /dev/null -w '%{http_code}': the status code alone is the
+          # assertion here, deliberately without --fail or -L -- --fail
+          # only flags >=400 (a 3xx redirect toward Access would pass
+          # silently), and -L would follow the redirect into Access's own
+          # login page instead of confirming the redirect itself happened.
+          status="$(curl --silent --show-error --max-time 15 -o /dev/null -w '%{http_code}' "$public_origin/")"
+          if (( status < 300 || status >= 400 )); then
+            echo "::error::Public edge probe expected a 3xx redirect toward Cloudflare Access, got HTTP $status from $public_origin/ instead -- either the app is reachable unauthenticated (2xx) or the edge is broken (5xx)." >&2
+            {
+              echo "### Public edge probe"
+              echo ""
+              echo "| Path | Result |"
+              echo "| --- | --- |"
+              echo "| \`$public_origin/\` | ❌ HTTP $status (expected 3xx) |"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          {
+            echo "### Public edge probe"
+            echo ""
+            echo "| Path | Result |"
+            echo "| --- | --- |"
+            echo "| \`$public_origin/\` | ✅ HTTP $status (redirected toward Access) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Public edge probe green: HTTP $status (redirect toward Access)."
