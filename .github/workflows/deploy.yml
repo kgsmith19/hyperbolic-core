@@ -111,6 +111,7 @@ jobs:
     needs: changes
     if: >-
       needs.changes.outputs.migrations == 'true' &&
+      vars.DEPLOY_ENABLED == 'true' &&
       github.ref == 'refs/heads/main'
     permissions:
       contents: read
@@ -424,8 +425,17 @@ jobs:
           test -n "${TOOLBELT_GITHUB_INTAKE_PAT:-}"
           test -n "${SUPABASE_SERVICE_ROLE_KEY:-}"
           umask 077
-          printf 'SUPABASE_URL=%s\nSUPABASE_PUBLISHABLE_KEY=%s\nTOOLBELT_GITHUB_INTAKE_PAT=%s\nSUPABASE_SERVICE_ROLE_KEY=%s\nLLM_HANDLER_IMAGE=%s\n' \
-            "$SUPABASE_URL" "$SUPABASE_PUBLISHABLE_KEY" "$TOOLBELT_GITHUB_INTAKE_PAT" "$SUPABASE_SERVICE_ROLE_KEY" "$IMAGE" > "$RUNNER_TEMP/.env.prod"
+          {
+            printf 'SUPABASE_URL=%s\nSUPABASE_PUBLISHABLE_KEY=%s\nTOOLBELT_GITHUB_INTAKE_PAT=%s\nSUPABASE_SERVICE_ROLE_KEY=%s\nLLM_HANDLER_IMAGE=%s\n' \
+              "$SUPABASE_URL" "$SUPABASE_PUBLISHABLE_KEY" "$TOOLBELT_GITHUB_INTAKE_PAT" "$SUPABASE_SERVICE_ROLE_KEY" "$IMAGE"
+            # Provider keys for the service's /api/v1/* LLM routes, from Infisical
+            # /platform/llm-handler/. Optional at daemon boot (config.ts), so an
+            # unprovisioned key is omitted from .env rather than rendered empty --
+            # the same optional-var shape deploy-brain uses.
+            [ -n "${LLM_KEYS_ANTHROPIC:-}" ] && printf 'LLM_KEYS_ANTHROPIC=%s\n' "$LLM_KEYS_ANTHROPIC"
+            [ -n "${LLM_KEYS_OPENAI:-}" ] && printf 'LLM_KEYS_OPENAI=%s\n' "$LLM_KEYS_OPENAI"
+            [ -n "${LLM_KEYS_GEMINI:-}" ] && printf 'LLM_KEYS_GEMINI=%s\n' "$LLM_KEYS_GEMINI"
+          } > "$RUNNER_TEMP/.env.prod"
           docker pull --quiet "$IMAGE"
           docker save "$IMAGE" | gzip | ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'gunzip | docker load'
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'mkdir -p llm-handler'
