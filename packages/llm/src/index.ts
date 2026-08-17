@@ -45,6 +45,12 @@ export { MAX_RETRIES, RETRY_BASE_MS, RETRY_CAP_MS, STREAM_STALL_MS, computeBacko
 
 export type { LlmDriver } from "./drivers/types.ts";
 export { anthropicDriver } from "./drivers/anthropic.ts";
+// Additive (issue #186): a caller opts into routing Anthropic calls through
+// services/broker via OrchestrationOptions.drivers -- never the default
+// (see anthropic-via-broker.ts's own header for the full rationale). Not
+// referenced by anthropicDriver, complete()'s DEFAULT_DRIVERS, or any other
+// existing export above.
+export { anthropicViaBrokerDriver } from "./drivers/anthropic-via-broker.ts";
 export { geminiDriver } from "./drivers/gemini.ts";
 export { openaiDriver } from "./drivers/openai.ts";
 
