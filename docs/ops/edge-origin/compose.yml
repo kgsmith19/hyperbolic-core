@@ -1,8 +1,10 @@
-# Local-only HTTP origin cloudflared (#168) points at. Loopback-bound, same
-# posture as every other unit's compose file on this box (services/llm-handler,
-# services/brain, apps/lifeos/backend): the only way in is a route another
-# layer explicitly opens, and here that layer is public_paths.conf, which
-# opens nothing until the owner edits it.
+# Local-only HTTP origin cloudflared (#169) points at, plus the tunnel
+# itself. Loopback-bound edge-origin, same posture as every other unit's
+# compose file on this box (services/llm-handler, services/brain,
+# apps/lifeos/backend): the only way in is a route another layer explicitly
+# opens, and here that layer is public_paths.conf, which opens nothing until
+# the owner edits it. cloudflared adds the only other way in -- an
+# outbound-only tunnel, never a listening socket of its own.
 services:
   edge-origin:
     image: nginx:1.27-alpine
@@ -25,6 +27,33 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Outbound-only tunnel to Cloudflare's edge (#169). No `ports:` -- it
+  # never listens on anything, it only dials out. Ingress is a single
+  # blanket rule pointed at edge-origin, configured in the Cloudflare
+  # dashboard when the owner creates the tunnel (a token-based,
+  # remotely-managed tunnel needs no local ingress config file); all
+  # per-path routing intelligence lives in edge-origin's own
+  # public_paths.conf, never duplicated here.
+  cloudflared:
+    # Version pin unverified against the live registry in this environment
+    # (no network access to confirm the tag exists) -- docs/ops/runbook.md's
+    # Cloudflare edge section flags this for the owner to confirm/bump at
+    # cutover. A wrong tag fails loudly at `docker compose pull`, not
+    # silently, unlike a wrong checksum would.
+    image: cloudflare/cloudflared:2025.6.1
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:?recorded in ./.env by every deploy (ops-edge.yml)}
+    depends_on:
+      edge-origin:
+        condition: service_healthy
     logging:
       driver: json-file
       options:
