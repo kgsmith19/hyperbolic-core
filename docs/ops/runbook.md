@@ -381,6 +381,22 @@ Setup, one time. Configure these repository variables before enabling it:
 
 CI can create a bundle and can never open one; that asymmetry is deliberate, so a compromised runner cannot read the data it just backed up.
 
+**restic primary (issue #166), gated separately from the age path above.** The age->GitHub-artifact
+path is unconditional and always runs once `PLATFORM_BACKUP_ENABLED` is on; restic backup to the
+Hetzner Storage Box is an additional, independently gated step using the same dump. Configure these
+before flipping the gate:
+
+| Variable | Purpose |
+| --- | --- |
+| `INFISICAL_PLATFORM_RESTIC_IDENTITY_ID` | A second, dedicated OIDC identity reading `/platform/backup/` -- never `INFISICAL_PLATFORM_BACKUP_IDENTITY_ID` above, which reads `/toolbelt/`'s `SUPABASE_DB_URL`. A compromised restic credential must not also unlock the database, and vice versa. `/platform/backup/` must contain `RESTIC_PASSWORD` and `STORAGEBOX_SSH_KEY` (see [`docs/ops/vendors.md`](vendors.md#infisical)). |
+| `STORAGEBOX_HOST` / `STORAGEBOX_USER` | The Storage Box hostname and the `platform` repository's sub-account username (not secret -- same non-sensitive-fact pattern as `DEPLOY_HOST`). |
+| `RESTIC_BACKUP_ENABLED` | Set to `true` once the Storage Box exists, the `platform` repository has been initialized (`docs/ops/restic-setup.sh`, [above](#hetzner-storage-box-bootstrap-restic)), and the identity/variables above are provisioned. Off by default; the age path is completely unaffected either way. |
+
+The restic step reuses `docs/ops/restic-setup.sh --apply --repos=platform` to install/configure
+before every run (idempotent -- a no-op once the repository already exists), then runs `restic
+backup` against the same dump the age path just encrypted, `restic forget --keep-daily 7
+--keep-weekly 4 --keep-monthly 6 --prune`, and asserts the new snapshot is listed before finishing.
+
 The workflow verifies before it encrypts: the dump must be non-empty and must survive `pg_restore --list`, the `PLATFORM_AGE_PUBLIC_KEY` value must look like an `age1...` recipient (never an identity file), and the finished artifact's header must identify as `age-encryption.org`. A corrupt bundle fails the run rather than sitting in artifact storage looking like protection. Each bundle also carries `MIGRATION_LEDGER.txt`, the applied migration versions at snapshot time, because a restore has to know which migrations the snapshot already contains.
 
 ### The destructive-migration rule (referenced from `docs/planning/10-cicd-deployment.md` section 8.4)
@@ -429,3 +445,73 @@ dropdb platform_restore_drill
 - All scratch databases and the local age key pair were dropped/deleted immediately after; nothing from this drill was retained.
 
 Executing the first drill against a real `platform-backup.yml` artifact and filling in the table above is an operator action requiring the offline age identity and live platform credentials, neither of which exists in a CI or agent environment by design -- it is the one acceptance criterion of m6-03 that repository changes cannot satisfy.
+
+## Hetzner Storage Box bootstrap (restic)
+
+`docs/ops/restic-setup.sh` (issue #164) prepares the VPS to back up onto a Hetzner Storage Box via
+restic. It is setup machinery only -- it installs a checksum-verified restic binary, writes the SSH
+config alias the Storage Box's non-standard SFTP port needs, and idempotently `restic init`s the
+`platform` and `lifeos` repositories. It does not run on a schedule and is not wired into any
+workflow yet; `platform-backup.yml`/`lifeos-backup.yml` gain restic backup steps in #166/#167.
+
+Owner steps, one time, before running it:
+
+1. In the Hetzner Cloud console, purchase a Storage Box (BX11, ~€3.81/mo -- see
+   [`docs/ops/vendors.md`](vendors.md#hetzner)).
+2. Create two SFTP sub-accounts on the box, one per restic repository (`platform`, `lifeos`), each
+   with its own home directory and its own SSH public key. Sub-account isolation means a compromised
+   backup identity for one app cannot read or overwrite the other's snapshots.
+3. Generate an SSH keypair per sub-account (or reuse one if the owner prefers a single credential --
+   `restic-setup.sh --ssh-key-file=` accepts one key path per invocation). Store each private key and
+   the shared `RESTIC_PASSWORD` (restic's own repository-encryption password, independent of the SSH
+   key) under Infisical `/platform/backup/`, the path `platform-backup.yml`'s restic steps read from
+   (see [`vendors.md`](vendors.md#infisical)'s Infisical path table).
+4. Run the script once per box, from a host that already holds the SSH private key at 0600
+   permissions:
+
+   ```bash
+   # Preview every command it would run -- no mutation.
+   docs/ops/restic-setup.sh --storagebox-host=u123456.your-storagebox.de \
+     --storagebox-user=u123456-sub1 --ssh-key-file=/path/to/key
+
+   # Run for real once the plan looks right. RESTIC_PASSWORD must be set first.
+   RESTIC_PASSWORD=... docs/ops/restic-setup.sh --apply \
+     --storagebox-host=u123456.your-storagebox.de \
+     --storagebox-user=u123456-sub1 --ssh-key-file=/path/to/key
+   ```
+
+   Re-running is safe: an already-installed matching restic version and an already-initialized
+   repository are both detected and skipped rather than re-done.
+
+Neither the SSH private key nor `RESTIC_PASSWORD` is ever written to disk by this script beyond the
+key file the caller already placed -- both are read from the environment/an existing file and never
+echoed or logged. The script has not been run against a real Storage Box yet: no box exists, so no
+credentials exist for it to use. This is expected until the owner completes steps 1-3 above.
+
+## Cloudflare edge origin (nginx)
+
+`docs/ops/edge-origin/` (issue #165) is the local HTTP origin `cloudflared` (#168, not yet built)
+will point at once the owner sets up Cloudflare Tunnel + Access. It is a second, deliberately
+narrower front door onto the same box: `tailscale-serve-apply.sh`'s private route table is
+untouched and keeps working exactly as before over the tailnet.
+
+**Nothing is public by default.** `docs/ops/edge-origin/public_paths.conf` is the only place a path
+can become reachable through this origin, and every line in the checked-in file is commented out --
+`docs/ops/edge-origin.test.mjs` asserts this on every commit. With the file in that state, nginx has
+no location block for any of the five private routes, so every request 404s; only `GET /healthz`
+(defined directly in `nginx.conf`, not in `public_paths.conf`) ever answers, and it exists purely so
+the container's own healthcheck has something stable to poll.
+
+To expose a path: uncomment its `location` block in `public_paths.conf` and redeploy the
+`edge-origin` compose service. Each block's target must mirror `tailscale-serve-apply.sh`'s mount ->
+target mapping exactly (`edge-origin.test.mjs`'s sync test fails the build if they ever drift
+apart), so copy the block as written rather than retyping it. There is currently no workflow that
+deploys this compose service -- that wiring, and the Cloudflare tunnel itself, is #168-#170; today
+this can only be run by hand from a checkout on the box (`docker compose -f
+docs/ops/edge-origin/compose.yml up -d`).
+
+`nginx.conf` sets `access_log off;` -- deliberate for now, since with nothing exposed there is
+nothing worth logging. Once a path is actually uncommented and this becomes cloudflared's real
+public origin, revisit that line: Cloudflare Access/Tunnel logs the request at the edge, but if
+nginx-side request logging is wanted too (e.g. to correlate against `docker logs` on the origin
+containers), turn `access_log` back on at that point -- an explicit owner call, not made here.
