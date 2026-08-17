@@ -45,6 +45,66 @@ test("LifeOS probes are gated on the cutover switch, not skipped forever", () =>
   assert.match(smoke, /skipped \(pre-cutover\)/);
 });
 
+test("the public-edge probe is independently gated behind CLOUDFLARE_EDGE_ENABLED (issue #170)", () => {
+  const publicStep = smoke.slice(smoke.indexOf("- name: Smoke · Public edge"));
+  assert.match(publicStep, /if: \(success\(\) \|\| failure\(\)\) && vars\.CLOUDFLARE_EDGE_ENABLED == 'true'/);
+});
+
+test("the public-edge probe still runs even if the private-probe step above it failed -- not an implicit success()-AND (verification finding, issue #170)", () => {
+  // A plausible wrong implementation: a bare `if: vars.CLOUDFLARE_EDGE_ENABLED == 'true'`
+  // is implicitly ANDed with success() by GitHub Actions, so a failure in the private
+  // probe step above silently skips this one -- exactly the run where the public edge
+  // might ALSO be broken and nothing would report it. success()||failure(), not always()
+  // (which would also fire on a cancelled run), is what actually decouples the two.
+  const publicStep = smoke.slice(smoke.indexOf("- name: Smoke · Public edge"));
+  assert.match(publicStep, /if: \(success\(\) \|\| failure\(\)\)/);
+  assert.doesNotMatch(publicStep, /if: always\(\)/);
+});
+
+test("the public-edge probe runs with set -euo pipefail, so a curl transport failure can't fall through to the range check with a garbage status", () => {
+  const publicStep = smoke.slice(smoke.indexOf("- name: Smoke · Public edge"));
+  assert.match(publicStep, /set -euo pipefail/);
+});
+
+test("the private probes carry no CLOUDFLARE_EDGE_ENABLED gate of their own -- additive, not intertwined", () => {
+  const privateStep = smoke.slice(
+    smoke.indexOf("- name: Smoke · Probe every live unit"),
+    smoke.indexOf("- name: Smoke · Public edge"),
+  );
+  assert.ok(privateStep.length > 10);
+  assert.doesNotMatch(privateStep, /CLOUDFLARE_EDGE_ENABLED/);
+});
+
+test("the public-edge probe requires CLOUDFLARE_PUBLIC_HOSTNAME and fails loudly if it's missing", () => {
+  const publicStep = smoke.slice(smoke.indexOf("- name: Smoke · Public edge"));
+  assert.match(publicStep, /CLOUDFLARE_PUBLIC_HOSTNAME: \$\{\{ vars\.CLOUDFLARE_PUBLIC_HOSTNAME \}\}/);
+  assert.match(publicStep, /if \[\[ -z "\$\{CLOUDFLARE_PUBLIC_HOSTNAME:-\}" \]\]; then/);
+});
+
+test("the public-edge probe rejects both 2xx (unauthenticated app access) and 5xx (broken edge), only accepts 3xx", () => {
+  // A plausible wrong implementation: using `curl --fail`, which only
+  // flags >=400 and would treat a 200 (Access is not actually in front of
+  // the app) as a passing probe -- the one thing this check exists to
+  // catch. Assert the real status-code range check is present instead.
+  const publicStep = smoke.slice(smoke.indexOf("- name: Smoke · Public edge"));
+  assert.doesNotMatch(publicStep, /curl --fail/);
+  assert.match(publicStep, /-o \/dev\/null -w '%\{http_code\}'/);
+  assert.match(publicStep, /status < 300 \|\| status >= 400/);
+});
+
+test("the public-edge probe never follows the redirect -- it asserts the redirect happened, not what Access's login page contains", () => {
+  // Line-based, skipping comments: the step's own header comment
+  // legitimately explains *why* -L isn't used, which would otherwise
+  // false-positive a substring check run against the whole step text.
+  const publicStep = smoke.slice(smoke.indexOf("- name: Smoke · Public edge"));
+  const nonCommentLines = publicStep
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("#"))
+    .join("\n");
+  assert.doesNotMatch(nonCommentLines, /\bcurl\b[^\n]* -L\b/);
+  assert.doesNotMatch(nonCommentLines, /--location/);
+});
+
 test("both deploy workflows call smoke after their deploy jobs, red-on-red", () => {
   for (const [wf, name, anySuccess] of [
     [deploy, "deploy.yml", /needs\.deploy-shell\.result == 'success' \|\|/],

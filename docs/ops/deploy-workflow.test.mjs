@@ -12,11 +12,12 @@ test("deploy discovery covers every manifest-owned migration directory", () => {
   assert.match(workflow, /\^apps\/toolbelt\/\(\.\*\/\)\?supabase\/migrations\//);
 });
 
-test("all six deploy jobs plus the migrations call and the smoke call retain the explicit production gate", () => {
+test("all six deploy jobs plus the migrations call, the smoke call, and the tag-release job retain the explicit production gate", () => {
   // 6 build/deploy jobs + migrate-platform (issue #135) + the post-deploy
-  // smoke call (issue #143): every prod-touching job carries the gate.
+  // smoke call (issue #143) + tag-release (issue #189): every prod-touching
+  // job carries the gate.
   const occurrences = workflow.match(/vars\.DEPLOY_ENABLED == 'true'/g) ?? [];
-  assert.equal(occurrences.length, 8);
+  assert.equal(occurrences.length, 9);
 });
 
 test("production migrations cannot be dispatched from a feature ref", () => {
@@ -108,7 +109,7 @@ test("a services/brain-only change classifies as the brain unit alone, not Shell
 test("checkout credentials are never persisted in deploy jobs", () => {
   const checkouts = workflow.match(/uses: actions\/checkout@[0-9a-f]{40}/g) ?? [];
   const disabled = workflow.match(/persist-credentials: false/g) ?? [];
-  assert.equal(checkouts.length, 7);
+  assert.equal(checkouts.length, 8);
   assert.equal(disabled.length, checkouts.length);
 });
 
@@ -209,4 +210,36 @@ test("both container deploys record the running image, then roll back to it on f
   // must abort rather than be sed'd into .env.
   const guards = workflow.match(/Refusing to trust an unexpected running-image reference/g) ?? [];
   assert.equal(guards.length, 2);
+});
+
+test("tag-release (issue #189): contents: write is scoped to that job alone, nowhere else in the file", () => {
+  const writeOccurrences = workflow.match(/contents: write/g) ?? [];
+  assert.equal(writeOccurrences.length, 1, "exactly one contents: write in the whole file");
+  const tagJob = workflow.slice(workflow.indexOf("  tag-release:"));
+  assert.match(tagJob, /contents: write/);
+});
+
+test("tag-release only fires once the run's overall smoke verdict succeeded, not merely because a deploy job did", () => {
+  const tagJob = workflow.slice(workflow.indexOf("  tag-release:"));
+  assert.match(tagJob, /needs\.smoke\.result == 'success'/);
+  // Deliberately NOT an OR-of-individual-deploy-results shape (that's the
+  // smoke job's own gate, one level up) -- a red smoke must withhold every
+  // tag this run, even for a unit whose own deploy job reported success.
+  assert.doesNotMatch(tagJob, /needs\.deploy-shell\.result == 'success' \|\|/);
+});
+
+test("tag-release calls tag-release.sh once per unit, passing that unit's own deploy result and the exact deployed sha", () => {
+  const tagJob = workflow.slice(workflow.indexOf("  tag-release:"));
+  assert.match(tagJob, /SHELL_RESULT: \$\{\{ needs\.deploy-shell\.result \}\}/);
+  assert.match(tagJob, /LLM_HANDLER_RESULT: \$\{\{ needs\.deploy-llm-handler\.result \}\}/);
+  assert.match(tagJob, /BRAIN_RESULT: \$\{\{ needs\.deploy-brain\.result \}\}/);
+  assert.match(tagJob, /docs\/ops\/tag-release\.sh shell "\$SHELL_RESULT" "\$SHA"/);
+  assert.match(tagJob, /docs\/ops\/tag-release\.sh llm-handler "\$LLM_HANDLER_RESULT" "\$SHA"/);
+  assert.match(tagJob, /docs\/ops\/tag-release\.sh brain "\$BRAIN_RESULT" "\$SHA"/);
+  assert.match(tagJob, /SHA: \$\{\{ github\.sha \}\}/);
+});
+
+test("tag-release checks out with credentials not persisted, matching every other job in this file", () => {
+  const tagJob = workflow.slice(workflow.indexOf("  tag-release:"));
+  assert.match(tagJob, /persist-credentials: false/);
 });

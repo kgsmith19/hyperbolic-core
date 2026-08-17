@@ -1,0 +1,102 @@
+name: Ops Edge
+
+# Deploys the edge-origin nginx + cloudflared tunnel stack
+# (docs/ops/edge-origin/, #165/#169) to the box. Dark behind
+# CLOUDFLARE_EDGE_ENABLED until the owner has a Cloudflare account, a
+# domain, and a tunnel token -- landing this now, gated off, proves the
+# pipeline shape without touching production. Nothing this workflow ships
+# is public until the owner separately uncomments a path in
+# public_paths.conf (docs/ops/edge-origin/public_paths.conf) and configures
+# Access (#170) -- this workflow only gets the stack running, loopback- and
+# outbound-only.
+#
+# Keyless Tailscale SSH (ADR 008, same as lifeos-deploy.yml): no SSH key
+# material, no GitHub Actions secrets.
+#
+# No custom-built image: nginx and cloudflared are both pulled directly on
+# the box from their public registries by `docker compose pull`, unlike the
+# app units this repo ships via docker save|ssh|load -- neither image is
+# proprietary, so there is no registry credential to protect here.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/ops/edge-origin/**"
+      - ".github/workflows/ops-edge.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-edge-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: vars.CLOUDFLARE_EDGE_ENABLED == 'true'
+    name: Deploy the edge-origin + cloudflared stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A new identity/path, distinct from every other pipeline's (ADR-05):
+      # a compromised edge-deploy identity should be able to do nothing but
+      # redeploy this one loopback+outbound-only stack.
+      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PLATFORM_EDGE_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/edge/"
+          domain: https://app.infisical.com
+
+      - name: Network · Join tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
+
+      - name: Deploy · Ship the compose stack and tunnel token
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          if [ -z "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+            echo "::error::CLOUDFLARE_TUNNEL_TOKEN was not supplied by Infisical (/platform/edge/)." >&2
+            exit 1
+          fi
+
+          umask 077
+          printf 'CLOUDFLARE_TUNNEL_TOKEN=%s\n' "$CLOUDFLARE_TUNNEL_TOKEN" > "$RUNNER_TEMP/.env.edge"
+
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'mkdir -p edge-origin'
+          scp "${ssh_options[@]}" docs/ops/edge-origin/compose.yml docs/ops/edge-origin/nginx.conf docs/ops/edge-origin/public_paths.conf \
+            "deploy@$DEPLOY_HOST:edge-origin/"
+          # chmod 600 BEFORE scp'ing content in, not after: on a box's
+          # first-ever deploy, a plain `scp` creating a brand-new .env would
+          # otherwise transiently land at whatever the deploy user's default
+          # umask produces (commonly world-readable) for the window between
+          # that scp and a later chmod. Pre-creating the file at 600 means
+          # the content-only overwrite that follows never has a
+          # wrong-permission moment to land in.
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            'touch edge-origin/.env && chmod 600 edge-origin/.env'
+          scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.edge" "deploy@$DEPLOY_HOST:edge-origin/.env"
+          # nginx.conf/public_paths.conf stay at their default, world-readable
+          # permissions: they hold no secret, and the nginx container's own
+          # worker user (not necessarily `deploy`) needs to read the
+          # bind-mounted file, which an owner-only 600 would block.
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            "cd edge-origin && chmod 600 .env && docker compose pull && docker compose up -d --wait && curl -fsS http://127.0.0.1:8081/healthz"
