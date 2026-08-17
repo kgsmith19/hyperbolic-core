@@ -20,6 +20,7 @@ import * as http from "node:http";
 import * as https from "node:https";
 import { validateRequest } from "@hyperbolic/broker-contract";
 import { isKnownCaller, type PolicyDocument } from "./policy.ts";
+import type { CredentialMap } from "./credentials.ts";
 
 export interface ProxyRequestBody {
   caller: string;
@@ -30,6 +31,13 @@ export interface ProxyRequestBody {
   path?: string;
   headers?: Record<string, string>;
   body?: string;
+  // issue #186: the vault key NAME (never a value) this request wants
+  // injected, and the header name to inject it as -- e.g.
+  // { credential: "LLM_KEYS_ANTHROPIC", credentialHeader: "x-api-key" }.
+  // Both optional; a request with neither is exactly #185's original
+  // log-only pass-through, unchanged.
+  credential?: string;
+  credentialHeader?: string;
 }
 
 export interface ProxyResult {
@@ -177,10 +185,68 @@ function validateForwarding(request: ProxyRequestBody): string | null {
   if (request.body !== undefined && typeof request.body !== "string") {
     return "body must be a string when present";
   }
+  // credential/credentialHeader are a pair: naming one without the other
+  // is always a mistake (either "inject something, but into what header?"
+  // or "here's a header name, but nothing to inject"), refused up front
+  // rather than silently doing nothing.
+  if (request.credential !== undefined || request.credentialHeader !== undefined) {
+    if (typeof request.credential !== "string" || request.credential.length === 0) {
+      return "credential must be a non-empty string when credentialHeader is present";
+    }
+    if (typeof request.credentialHeader !== "string" || !HTTP_TOKEN_RE.test(request.credentialHeader)) {
+      return "credentialHeader must be a valid header-name token when credential is present";
+    }
+  }
   return null;
 }
 
-export async function proxyRequest(input: unknown, policy: PolicyDocument, log: LogFn = defaultLog): Promise<ProxyResult> {
+export interface CredentialError {
+  status: 403 | 502;
+  reason: string;
+}
+
+// Authorization is a HARD gate, never log-only (issue #186's own design
+// rationale, unlike #187's host-allowlist soak): handing a caller
+// credentials its own manifest never declared is a real vulnerability the
+// instant it happens, not something safe to observe first and lock down
+// later. Returns the error to refuse with, or null when the caller is
+// authorized for exactly the vault key it named.
+function authorizeCredential(request: ProxyRequestBody, policy: PolicyDocument, credentials: CredentialMap): CredentialError | null {
+  const entry = policy[request.caller];
+  if (!isKnownCaller(request.caller, policy) || !entry?.vaultKeys?.includes(request.credential!)) {
+    return { status: 403, reason: `caller "${request.caller}" is not authorized for vault key "${request.credential}"` };
+  }
+  if (!Object.prototype.hasOwnProperty.call(credentials, request.credential!)) {
+    // Fail closed, never silently proxy without the credential the caller
+    // explicitly asked for -- an unprovisioned key must be visibly broken,
+    // not a mysteriously-unauthenticated call to the real provider.
+    return { status: 502, reason: `vault key "${request.credential}" is not provisioned on this broker` };
+  }
+  return null;
+}
+
+// Merges the resolved credential into the outgoing headers, overwriting
+// (never appending alongside) any caller-supplied value for the same
+// header name -- case-insensitively, since HTTP header names are: a
+// caller naming `Authorization` while credentialHeader is `authorization`
+// must not leak its own value through under the differently-cased key.
+function injectCredential(headers: Record<string, string> | undefined, credentialHeader: string, value: string): Record<string, string> {
+  const merged: Record<string, string> = {};
+  const targetLower = credentialHeader.toLowerCase();
+  for (const [name, headerValue] of Object.entries(headers ?? {})) {
+    if (name.toLowerCase() !== targetLower) merged[name] = headerValue;
+  }
+  merged[credentialHeader] = value;
+  return merged;
+}
+
+export interface ProxyContext {
+  credentials?: CredentialMap;
+  log?: LogFn;
+}
+
+export async function proxyRequest(input: unknown, policy: PolicyDocument, context: ProxyContext = {}): Promise<ProxyResult> {
+  const { credentials = {}, log = defaultLog } = context;
   const candidate = normalize(input);
   const validation = validateRequest(candidate);
   if (!validation.ok) {
@@ -206,7 +272,19 @@ export async function proxyRequest(input: unknown, policy: PolicyDocument, log: 
   const loggedTarget = target.port !== undefined ? `${target.host}:${target.port}` : target.host;
   log({ caller: request.caller, targetHost: loggedTarget, knownCaller, timestamp: new Date().toISOString() });
 
-  return forward(request, target);
+  let forwardRequest = request;
+  if (request.credential !== undefined) {
+    const authError = authorizeCredential(request, policy, credentials);
+    if (authError !== null) {
+      return jsonResult(authError.status, { error: "credential request refused", reason: authError.reason });
+    }
+    forwardRequest = {
+      ...request,
+      headers: injectCredential(request.headers, request.credentialHeader!, credentials[request.credential]!),
+    };
+  }
+
+  return forward(forwardRequest, target);
 }
 
 const UPSTREAM_TIMEOUT_MS = 15_000;

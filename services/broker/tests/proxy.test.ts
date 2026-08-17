@@ -8,6 +8,14 @@ const EMPTY_POLICY: PolicyDocument = {};
 const KNOWN_CALLER_POLICY: PolicyDocument = {
   "llm-handler": { allowedHosts: ["api.anthropic.com"], vaultKeys: [], maxUsdPerDay: null },
 };
+// A caller manifest-authorized for exactly one vault key (issue #186) --
+// distinct from KNOWN_CALLER_POLICY's empty vaultKeys, so authorization
+// failures below are genuinely exercising the vaultKeys check, not just
+// "caller unknown".
+const CREDENTIAL_POLICY: PolicyDocument = {
+  "llm-handler": { allowedHosts: ["api.anthropic.com"], vaultKeys: ["LLM_KEYS_ANTHROPIC"], maxUsdPerDay: null },
+};
+const PROVISIONED_CREDENTIALS = { LLM_KEYS_ANTHROPIC: "sk-ant-real-secret" };
 
 function bodyText(result: { body: Buffer }): string {
   return result.body.toString("utf8");
@@ -44,7 +52,7 @@ function withFakeUpstream(
 
 test("proxyRequest: missing required fields is refused with a 400 and no upstream call is ever attempted", async () => {
   const logged: ProxyLogEntry[] = [];
-  const result = await proxyRequest({ caller: "llm-handler" }, EMPTY_POLICY, (entry) => logged.push(entry));
+  const result = await proxyRequest({ caller: "llm-handler" }, EMPTY_POLICY, { log: (entry) => logged.push(entry) });
   assert.equal(result.status, 400);
   const parsed = bodyJSON(result) as { error: string; details: string[] };
   assert.equal(parsed.error, "invalid broker request");
@@ -141,7 +149,7 @@ test("proxyRequest: a targetHost's port is parsed exactly, never silently coerce
       await proxyRequest(
         { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
         KNOWN_CALLER_POLICY,
-        (entry) => logged.push(entry),
+        { log: (entry) => logged.push(entry) },
       );
       assert.equal(logged[0]!.targetHost, `127.0.0.1:${port}`);
     },
@@ -160,7 +168,7 @@ test("proxyRequest: a known caller is logged with knownCaller=true, caller, targ
       await proxyRequest(
         { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
         KNOWN_CALLER_POLICY,
-        (entry) => logged.push(entry),
+        { log: (entry) => logged.push(entry) },
       );
       assert.equal(logged.length, 1);
       assert.equal(logged[0]!.caller, "llm-handler");
@@ -187,7 +195,7 @@ test("proxyRequest: an UNKNOWN caller is logged with knownCaller=false but is st
       const result = await proxyRequest(
         { caller: "never-declared", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
         EMPTY_POLICY,
-        (entry) => logged.push(entry),
+        { log: (entry) => logged.push(entry) },
       );
       assert.equal(logged[0]!.knownCaller, false);
       assert.equal(result.status, 200);
@@ -325,4 +333,132 @@ test("proxyRequest: an unreachable target answers with 502, never throws or hang
   assert.equal(result.status, 502);
   const parsed = bodyJSON(result) as { error: string };
   assert.equal(parsed.error, "broker upstream request failed");
+});
+
+// Issue #186: credential brokering. Authorization here is a HARD gate (see
+// proxy.ts's own authorizeCredential rationale) -- unlike the log-only
+// caller-identity path above, every one of these must actually refuse, not
+// merely log a would-have-refused entry.
+
+test("proxyRequest: a caller authorized for the named vault key gets the real credential injected into the forwarded request, never the raw name", async () => {
+  await withFakeUpstream(
+    (req, res) => {
+      assert.equal(req.headers["x-api-key"], "sk-ant-real-secret");
+      res.writeHead(200, {});
+      res.end();
+    },
+    async (port) => {
+      const result = await proxyRequest(
+        {
+          caller: "llm-handler",
+          token: "t",
+          targetHost: `127.0.0.1:${port}`,
+          protocol: "http",
+          credential: "LLM_KEYS_ANTHROPIC",
+          credentialHeader: "x-api-key",
+        },
+        CREDENTIAL_POLICY,
+        { credentials: PROVISIONED_CREDENTIALS },
+      );
+      assert.equal(result.status, 200);
+    },
+  );
+});
+
+test("proxyRequest: an unknown caller naming any credential is refused with 403, and no upstream call is ever attempted", async () => {
+  const result = await proxyRequest(
+    {
+      caller: "never-declared",
+      token: "t",
+      targetHost: "127.0.0.1:1",
+      protocol: "http",
+      credential: "LLM_KEYS_ANTHROPIC",
+      credentialHeader: "x-api-key",
+    },
+    CREDENTIAL_POLICY,
+    { credentials: PROVISIONED_CREDENTIALS },
+  );
+  assert.equal(result.status, 403);
+  const parsed = bodyJSON(result) as { error: string };
+  assert.equal(parsed.error, "credential request refused");
+});
+
+test("proxyRequest: a known caller naming a vault key its own manifest never declared is refused with 403", async () => {
+  const result = await proxyRequest(
+    {
+      caller: "llm-handler",
+      token: "t",
+      targetHost: "127.0.0.1:1",
+      protocol: "http",
+      credential: "LLM_KEYS_OPENAI", // CREDENTIAL_POLICY only declares LLM_KEYS_ANTHROPIC for this caller
+      credentialHeader: "x-api-key",
+    },
+    CREDENTIAL_POLICY,
+    { credentials: { ...PROVISIONED_CREDENTIALS, LLM_KEYS_OPENAI: "sk-openai-real-secret" } },
+  );
+  assert.equal(result.status, 403);
+  const parsed = bodyJSON(result) as { error: string };
+  assert.equal(parsed.error, "credential request refused");
+});
+
+test("proxyRequest: a manifest-declared vault key that is not yet provisioned on this broker fails closed with 502, not a silently unauthenticated call", async () => {
+  const result = await proxyRequest(
+    {
+      caller: "llm-handler",
+      token: "t",
+      targetHost: "127.0.0.1:1",
+      protocol: "http",
+      credential: "LLM_KEYS_ANTHROPIC",
+      credentialHeader: "x-api-key",
+    },
+    CREDENTIAL_POLICY,
+    { credentials: {} }, // declared in policy, but never provisioned in this broker's own env
+  );
+  assert.equal(result.status, 502);
+  const parsed = bodyJSON(result) as { error: string };
+  assert.equal(parsed.error, "credential request refused");
+});
+
+test("proxyRequest: a caller-supplied value for the same header name as credentialHeader is always overwritten, never leaked through to the real forwarded request", async () => {
+  await withFakeUpstream(
+    (req, res) => {
+      assert.equal(req.headers["x-api-key"], "sk-ant-real-secret");
+      res.writeHead(200, {});
+      res.end();
+    },
+    async (port) => {
+      const result = await proxyRequest(
+        {
+          caller: "llm-handler",
+          token: "t",
+          targetHost: `127.0.0.1:${port}`,
+          protocol: "http",
+          headers: { "X-Api-Key": "caller-supplied-value-must-not-survive" },
+          credential: "LLM_KEYS_ANTHROPIC",
+          credentialHeader: "x-api-key",
+        },
+        CREDENTIAL_POLICY,
+        { credentials: PROVISIONED_CREDENTIALS },
+      );
+      assert.equal(result.status, 200);
+    },
+  );
+});
+
+test("proxyRequest: a request naming neither credential nor credentialHeader is unaffected by the credential path (log-only pass-through unchanged)", async () => {
+  await withFakeUpstream(
+    (req, res) => {
+      assert.equal(req.headers["x-api-key"], undefined);
+      res.writeHead(200, {});
+      res.end();
+    },
+    async (port) => {
+      const result = await proxyRequest(
+        { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
+        CREDENTIAL_POLICY,
+        { credentials: PROVISIONED_CREDENTIALS },
+      );
+      assert.equal(result.status, 200);
+    },
+  );
 });

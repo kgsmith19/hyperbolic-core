@@ -5,7 +5,7 @@
 
 import * as http from "node:http";
 import { send, readJsonBody } from "./http.ts";
-import { proxyRequest, type LogFn } from "./proxy.ts";
+import { proxyRequest, type ProxyContext } from "./proxy.ts";
 import type { PolicyDocument } from "./policy.ts";
 
 // 1 MiB: ample for the request metadata plus a proxied body this skeleton
@@ -14,7 +14,7 @@ import type { PolicyDocument } from "./policy.ts";
 // route here IS the proxy route.
 const PROXY_BODY_CAP_BYTES = 1024 * 1024;
 
-export function createHandler(policy: PolicyDocument, log?: LogFn) {
+export function createHandler(policy: PolicyDocument, context: ProxyContext = {}) {
   return function handler(req: http.IncomingMessage, res: http.ServerResponse): void {
     const route = (req.url ?? "/").split("?")[0] ?? "/";
 
@@ -25,7 +25,7 @@ export function createHandler(policy: PolicyDocument, log?: LogFn) {
 
     if (route === "/proxy" && req.method === "POST") {
       readJsonBody(req, PROXY_BODY_CAP_BYTES)
-        .then((parsed) => proxyRequest(parsed, policy, log))
+        .then((parsed) => proxyRequest(parsed, policy, context))
         .then((result) => {
           // The full, filtered upstream header set (proxy.ts already
           // stripped hop-by-hop headers) -- relayed as-is, not narrowed to
@@ -46,8 +46,8 @@ export function createHandler(policy: PolicyDocument, log?: LogFn) {
   };
 }
 
-export function startServer(port: number, policy: PolicyDocument, log?: LogFn): Promise<http.Server> {
-  const server = http.createServer(createHandler(policy, log));
+export function startServer(port: number, policy: PolicyDocument, context: ProxyContext = {}): Promise<http.Server> {
+  const server = http.createServer(createHandler(policy, context));
   return new Promise((resolve) => {
     server.listen(port, "127.0.0.1", () => resolve(server));
   });

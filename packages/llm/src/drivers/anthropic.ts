@@ -114,7 +114,12 @@ interface AnthropicBaseParams {
   temperature?: number;
 }
 
-function buildParams(request: LlmRequest): AnthropicBaseParams {
+// Exported (issue #186): anthropic-via-broker.ts reuses this exact wire-
+// format mapping rather than re-deriving it -- the Anthropic Messages API
+// request shape belongs in exactly one place, whether the request is sent
+// by this driver's own SDK client or relayed through the broker's /proxy
+// envelope by a sibling driver.
+export function buildParams(request: LlmRequest): AnthropicBaseParams {
   return {
     model: request.model,
     max_tokens: request.maxTokens,
@@ -153,7 +158,12 @@ function mapStopReason(stopReason: Anthropic.StopReason | null): StopReason {
   }
 }
 
-function fromAnthropicMessage(message: Anthropic.Message, latencyMs: number): LlmResponse {
+// Exported (issue #186): anthropic-via-broker.ts reuses this exact wire-
+// format mapping for the same reason buildParams above is exported -- the
+// Anthropic Messages API response shape belongs in exactly one place,
+// whether the raw JSON came back from this driver's own SDK client or from
+// a broker /proxy envelope relayed by a sibling driver.
+export function fromAnthropicMessage(message: Anthropic.Message, latencyMs: number): LlmResponse {
   if (!Array.isArray(message.content) || !message.usage || typeof message.model !== "string") {
     throw createLlmError("provider_bug", "anthropic driver: malformed successful response", { cause: message });
   }
@@ -193,7 +203,11 @@ const KNOWN_TYPE_CLASS: Record<string, LlmErrorClass> = {
   api_error: "transport", // Anthropic's own guidance: retry with backoff
 };
 
-function classifyByStatus(status: number | undefined): LlmErrorClass {
+// Exported (issue #186): anthropic-via-broker.ts reuses this exact
+// status->class mapping for the response the broker relays through
+// unmodified from api.anthropic.com -- Anthropic's 529-is-overloaded quirk
+// belongs in one place, not re-derived by a sibling driver.
+export function classifyByStatus(status: number | undefined): LlmErrorClass {
   if (status === undefined) return "transport"; // no response at all: connection-level failure
   if (status === 529) return "overloaded"; // Anthropic-specific overload signal
   return classifyHttpStatus(status);
