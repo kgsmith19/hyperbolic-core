@@ -26,7 +26,7 @@ cd apps/network-checker && bash tools/check.sh
 ```
 
 The suites use the live `toolbelt` Supabase project and its public anon key. A
-service-role key is neither required nor accepted. The `Toolbelt PR Gate`
+service-role key is neither required nor accepted. The `Verify: Toolbelt`
 workflow also runs Prompt Organizer's critical browser journey.
 
 Apply `supabase/migrations/*.sql` through the Supabase API. Each up migration has a matching `_down.sql` migration that reverses the same change.
@@ -45,4 +45,4 @@ Apply `supabase/migrations/*.sql` through the Supabase API. Each up migration ha
 - `apps/network-checker/README.md` documents the network diagnostic.
 - `guards/README.md` documents the standalone guard hook.
 
-New work starts in GitHub Issues. Pull requests are verified by the sole `.github/workflows/toolbelt-ci.yml` workflow at the hyperbolic-core repo root (this project now lives at `apps/toolbelt/` inside the hyperbolic-core monorepo), whose workflow and check names are both `Toolbelt PR Gate`. Successful pull requests use native squash auto-merge.
+New work starts in GitHub Issues. Pull requests are verified by `.github/workflows/toolbelt-ci.yml` at the hyperbolic-core repo root (this project now lives at `apps/toolbelt/` inside the hyperbolic-core monorepo), called as the `Verify: Toolbelt` stage of the root's sequential `pr-verify.yml` chain. Successful pull requests use native squash auto-merge.

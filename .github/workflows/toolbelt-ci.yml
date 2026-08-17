@@ -1,14 +1,27 @@
 name: "Toolbelt PR Gate"
 
+# Called as the "Verify: Toolbelt" stage of pr-verify.yml's sequential
+# chain. The detect-changes job replaces the old top-level pull_request
+# paths: filter: instead of the whole workflow silently never triggering
+# on a PR that doesn't touch Toolbelt (the forever-pending failure this
+# repo hit on PRs #118/#120), the gate always runs and reports a trivial
+# pass when Toolbelt's own paths weren't touched -- which is what makes it
+# safe to mark required. See repo-policy.yml's header comment for why
+# pull_request-specific data arrives via inputs rather than
+# github.event.pull_request.
+
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
-    paths:
-      - "apps/toolbelt/**"
-      - "packages/toolbelt-cli/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/toolbelt-ci.yml"
+  workflow_call:
+    inputs:
+      pr_number:
+        type: string
+        required: false
+      pr_head_sha:
+        type: string
+        required: false
+      pr_base_sha:
+        type: string
+        required: false
   merge_group:
     types: [checks_requested]
   push:
@@ -16,15 +29,58 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.pr_number || github.event.merge_group.head_sha || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  detect-changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.check.outputs.relevant }}
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect · Does this change touch Toolbelt's paths?
+        id: check
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ inputs.pr_base_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PR_BASE_SHA}" ]; then
+            base="${PR_BASE_SHA}"
+          elif [ "${{ github.event_name }}" = "merge_group" ]; then
+            base="${{ github.event.merge_group.base_sha }}"
+          else
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "No comparable base for this event; running the real checks."
+            exit 0
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Base commit not available locally; running the real checks to be safe."
+            exit 0
+          fi
+          if git diff --name-only "${base}...HEAD" | grep -qE '^(apps/toolbelt/|packages/toolbelt-cli/|package\.json$|package-lock\.json$|\.github/workflows/toolbelt-ci\.yml$|\.github/workflows/pr-verify\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Toolbelt paths changed; running the real checks."
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No Toolbelt paths changed; nothing to verify."
+          fi
+
   checks:
     name: Checks
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -230,8 +286,8 @@ jobs:
           retention-days: 14
 
   pr-gate:
-    name: Toolbelt PR Gate
-    needs: [checks]
+    name: "Verify: Toolbelt"
+    needs: [detect-changes, checks]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -241,15 +297,20 @@ jobs:
       - name: Gate · Confirm every required job passed
         shell: bash
         run: |
-          test "${{ needs.checks.result }}" = "success"
+          if [ "${{ needs.detect-changes.outputs.relevant }}" = "true" ]; then
+            test "${{ needs.checks.result }}" = "success"
+          else
+            test "${{ needs.checks.result }}" = "skipped"
+            echo "Toolbelt was not touched by this change; nothing to verify."
+          fi
       - name: Gate · Confirm tested SHA matches the live PR head
-        if: github.event_name == 'pull_request'
+        if: inputs.pr_number != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          TESTED_SHA: ${{ inputs.pr_head_sha }}
         run: |
           set -euo pipefail
           live_sha="$(curl --fail --silent \
@@ -267,9 +328,10 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### Toolbelt PR Gate"
+            echo "### Verify: Toolbelt"
             echo ""
             echo "| Job | Result |"
             echo "| --- | --- |"
+            echo "| detect-changes | relevant=${{ needs.detect-changes.outputs.relevant }} |"
             echo "| checks | ${{ needs.checks.result }} |"
           } >> "$GITHUB_STEP_SUMMARY"

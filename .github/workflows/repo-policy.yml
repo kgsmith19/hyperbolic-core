@@ -3,14 +3,27 @@ name: "Repo Policy"
 # Repo-wide structural check with NO paths: filter, deliberately. See
 # AGENTS.md's "Path-scoped gates in monorepo topologies" note (mirrored
 # from the pinned standard): a required status check tied to a paths:
-# filter blocks forever on any PR that never triggers it. This check --
-# and Gitleaks -- are the two checks safe to mark required in this repo's
-# ruleset; the six app-scoped PR Gates stay real and visible but are not
-# themselves marked required.
+# filter blocks forever on any PR that never triggers it.
+#
+# Called as the "Verify: Repo Policy" stage of pr-verify.yml's sequential
+# chain on pull_request events; the push/merge_group/workflow_dispatch
+# triggers below remain direct so this can still run standalone outside a
+# PR. Because pull_request-specific data (PR number, head/base SHA) is not
+# reliably available through a workflow_call boundary, it is passed in
+# explicitly via inputs rather than read from github.event.pull_request.
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
+  workflow_call:
+    inputs:
+      pr_number:
+        type: string
+        required: false
+      pr_head_sha:
+        type: string
+        required: false
+      pr_base_sha:
+        type: string
+        required: false
   merge_group:
     types: [checks_requested]
   push:
@@ -21,7 +34,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.pr_number || github.event.merge_group.head_sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -132,10 +145,12 @@ jobs:
 
       - name: Policy · Confirm no trailing whitespace was introduced
         shell: bash
+        env:
+          PR_BASE_SHA: ${{ inputs.pr_base_sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
+          if [ -n "${PR_BASE_SHA}" ]; then
+            base="${PR_BASE_SHA}"
           elif [ "${{ github.event_name }}" = "merge_group" ]; then
             base="${{ github.event.merge_group.base_sha }}"
           else
@@ -148,7 +163,7 @@ jobs:
           fi
 
   pr-gate:
-    name: Repo Policy
+    name: "Verify: Repo Policy"
     needs: [checks]
     if: always()
     runs-on: ubuntu-latest
@@ -161,13 +176,13 @@ jobs:
         run: |
           test "${{ needs.checks.result }}" = "success"
       - name: Gate · Confirm tested SHA matches the live PR head
-        if: github.event_name == 'pull_request'
+        if: inputs.pr_number != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          TESTED_SHA: ${{ inputs.pr_head_sha }}
         run: |
           set -euo pipefail
           live_sha="$(curl --fail --silent \
@@ -185,7 +200,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### Repo Policy"
+            echo "### Verify: Repo Policy"
             echo ""
             echo "| Job | Result |"
             echo "| --- | --- |"

@@ -16,66 +16,82 @@ services:
   - services/llm-handler
 
 ci:
-  # Nine workflows total: the independent, path-scoped app gates plus the
-  # repo-wide checks. `required:` below states the INTENDED branch-ruleset
-  # configuration (only the repo-wide, no-paths:-filter checks should be
-  # required) -- it is a specification, not a live read of the ruleset,
-  # which an agent cannot write in this harness and which may lag behind
-  # this file. See AGENTS.md's "PR Gate and merge behavior" / "Path-scoped
-  # gates in monorepo topologies" note: a required check tied to a paths:
-  # filter blocks forever on any PR that never triggers it, which is
-  # exactly what happened live on PRs #118 and #120 before this file's own
-  # required: values were corrected to match the intended design.
+  # Nine gate stages, run as ONE strict sequential chain by
+  # .github/workflows/pr-verify.yml ("PR Verification") rather than as nine
+  # independent parallel triggers -- each stage is a workflow_call reusable
+  # workflow, needs:-chained in the `order` below. `required:` below states
+  # the INTENDED branch-ruleset configuration -- it is a specification, not
+  # a live read of the ruleset, which an agent cannot write in this harness
+  # and which may lag behind this file. See AGENTS.md's "PR Gate and merge
+  # behavior" / "Path-scoped gates in monorepo topologies" note: a required
+  # check tied to a paths: filter blocks forever on any PR that never
+  # triggers it, which is exactly what happened live on PRs #118 and #120.
+  # The five app-scoped gates (order 4-8) now carry a leading
+  # detect-changes job that replaces their old top-level paths: filter, so
+  # they always report -- a trivial pass when their app wasn't touched --
+  # which is what makes them safe to require too.
   workflows:
-    - path: .github/workflows/toolbelt-ci.yml
-      gate: Toolbelt PR Gate
-      covers: apps/toolbelt/** (root tools, guards/, prompt-organizer,
-        idea-intake, network-checker)
-      required: false
-    - path: .github/workflows/acc-ci.yml
-      gate: ACC PR Gate
-      covers: apps/agentic-command-center/**, apps/toolbelt/guards/**
-      required: false
-    - path: .github/workflows/brain-ci.yml
-      gate: Brain PR Gate
-      covers: services/brain/**
-      required: false
-    - path: .github/workflows/shell-ci.yml
-      gate: Shell PR Gate
-      covers: apps/shell/**, packages/**, services/llm-handler/**,
-        docs/ops/**
-      required: false
-    - path: .github/workflows/lifeos-ci.yml
-      gate: LifeOS PR Gate
-      covers: apps/lifeos/**
-      required: false
-    - path: .github/workflows/secret-scan.yml
-      gate: Gitleaks
-      covers: whole repo, every PR — no path filter
+    - order: 1
+      path: .github/workflows/secret-scan.yml
+      gate: "Verify: Secrets"
+      covers: whole repo, every PR — no path filter; leaked-credential scan
       required: true
-    - path: .github/workflows/repo-policy.yml
-      gate: Repo Policy
+    - order: 2
+      path: .github/workflows/repo-policy.yml
+      gate: "Verify: Repo Policy"
       covers: whole repo, every PR — no path filter; structural checks on
         CLAUDE.md/GEMINI.md/AGENTS.md/action pinning/YAML validity/whitespace
       required: true
-    - path: .github/workflows/template-lint.yml
-      gate: Template Lint
+    - order: 3
+      path: .github/workflows/template-lint.yml
+      gate: "Verify: PR Description"
       covers: whole repo, every PR — no path filter; PR body vs
         PULL_REQUEST_TEMPLATE.md's required sections
       required: true
-    - path: .github/workflows/llm-review.yml
-      gate: LLM Review
-      covers: whole repo, every PR — no path filter; adversarial LLM review
-        of the diff against the Issue and AGENTS.md
+    - order: 4
+      path: .github/workflows/toolbelt-ci.yml
+      gate: "Verify: Toolbelt"
+      covers: apps/toolbelt/** (root tools, guards/, prompt-organizer,
+        idea-intake, network-checker)
       required: true
-  note: apps/lifeos's own nested workflows (apps/lifeos/.github/workflows/)
-    are intentionally inert here (see AGENTS.md's Workflow Safety
-    Invariant) — its authoritative CI runs from the standalone lifeos repo;
-    lifeos-ci.yml above is written fresh for this monorepo and is the real
-    gate here. The six app gates are not required — they still run and
-    report on every relevant PR, but are not enforced by the branch ruleset,
-    since GitHub cannot safely require a paths:-filtered check without it
-    either never having a filter or being restructured to always report.
+    - order: 5
+      path: .github/workflows/acc-ci.yml
+      gate: "Verify: ACC"
+      covers: apps/agentic-command-center/**, apps/toolbelt/guards/**
+      required: true
+    - order: 6
+      path: .github/workflows/brain-ci.yml
+      gate: "Verify: Brain"
+      covers: services/brain/**
+      required: true
+    - order: 7
+      path: .github/workflows/shell-ci.yml
+      gate: "Verify: Shell"
+      covers: apps/shell/**, packages/**, services/llm-handler/**,
+        docs/ops/**
+      required: true
+    - order: 8
+      path: .github/workflows/lifeos-ci.yml
+      gate: "Verify: LifeOS"
+      covers: apps/lifeos/**
+      required: true
+    - order: 9
+      path: .github/workflows/llm-review.yml
+      gate: "Verify: LLM Review"
+      covers: whole repo, every PR — no path filter; adversarial LLM review
+        of the diff against the Issue and AGENTS.md. Runs LAST in the
+        chain, after every other gate has succeeded.
+      required: false # pending owner-provisioned reviewer credentials
+  orchestrator: .github/workflows/pr-verify.yml
+  note: >-
+    apps/lifeos's own nested workflows (apps/lifeos/.github/workflows/) are
+    intentionally inert here (see AGENTS.md's Workflow Safety Invariant) —
+    its authoritative CI runs from the standalone lifeos repo; lifeos-ci.yml
+    above is written fresh for this monorepo and is the real gate here. Not
+    required: "Verify: LLM Review" (pending credentials) and
+    "Hyperbolic Core Merge Policy" (merge-policy.yml — orchestration, not
+    verification; it arms auto-merge and manages the Work State/Evidence
+    Index comments but never checks out or executes PR-controlled code).
 
 work_tracking:
   system: github-issues

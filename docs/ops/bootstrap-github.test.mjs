@@ -96,18 +96,46 @@ test("apply: --enable-deploy and --enable-backup are opt-in go-live switches", (
   assert.match(log, /gh variable set PLATFORM_BACKUP_ENABLED --repo kgsmith19\/hyperbolic-core --body true/);
 });
 
-test("apply: --branch-protection requires exactly the three PR Gate checks on main", () => {
-  const env = fakeGh();
-  const result = spawnSync(script, ["--apply", ...REQUIRED_ARGS, "--branch-protection"], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin` } });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(readFileSync(env.log, "utf8"), /gh api --method PUT repos\/kgsmith19\/hyperbolic-core\/branches\/main\/protection --input -/);
-});
-
-test("dry run with --branch-protection prints the exact JSON body without sending it", () => {
+test("--branch-protection without --main-ruleset-id fails closed", () => {
   const env = fakeGh();
   const result = run(env, ...REQUIRED_ARGS, "--branch-protection");
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /--main-ruleset-id/);
+  assert.equal(readFileSync(env.log, "utf8"), "");
+});
+
+test("apply: --branch-protection targets the Rulesets API, not classic branch protection", () => {
+  const env = fakeGh();
+  const result = spawnSync(script, ["--apply", ...REQUIRED_ARGS, "--branch-protection", "--main-ruleset-id=20904976"], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin` } });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readFileSync(env.log, "utf8");
+  assert.match(log, /gh api --method PUT repos\/kgsmith19\/hyperbolic-core\/rulesets\/20904976 --input -/);
+  assert.doesNotMatch(log, /branches\/main\/protection/, "must not call the deprecated classic branch-protection endpoint");
+});
+
+test("dry run with --branch-protection prints the exact ruleset body without sending it", () => {
+  const env = fakeGh();
+  const result = run(env, ...REQUIRED_ARGS, "--branch-protection", "--main-ruleset-id=20904976");
   const body = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
-  assert.deepEqual(body.required_status_checks.contexts, ["Toolbelt PR Gate", "ACC PR Gate", "Shell PR Gate"]);
-  assert.equal(body.required_status_checks.strict, true);
+  assert.equal(body.name, "main");
+  assert.equal(body.target, "branch");
+  const requiredChecksRule = body.rules.find((rule) => rule.type === "required_status_checks");
+  assert.deepEqual(
+    requiredChecksRule.parameters.required_status_checks.map((check) => check.context),
+    [
+      "Verify: Secrets",
+      "Verify: Repo Policy",
+      "Verify: PR Description",
+      "Verify: Toolbelt",
+      "Verify: ACC",
+      "Verify: Brain",
+      "Verify: Shell",
+      "Verify: LifeOS",
+    ],
+  );
+  assert.equal(requiredChecksRule.parameters.strict_required_status_checks_policy, true);
+  for (const type of ["deletion", "required_linear_history", "non_fast_forward", "pull_request"]) {
+    assert.ok(body.rules.some((rule) => rule.type === type), `ruleset body is missing a ${type} rule`);
+  }
   assert.equal(readFileSync(env.log, "utf8"), "");
 });

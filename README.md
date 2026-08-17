@@ -13,12 +13,12 @@ Standard](https://github.com/kgsmith19/agent-engineering-standard).
 
 | Component | What it is | Gate |
 | --- | --- | --- |
-| [`apps/agentic-command-center`](apps/agentic-command-center) | Local coding-agent guard rail, control panel, and bounded task runner | `ACC PR Gate` |
-| [`apps/lifeos`](apps/lifeos) | Personal life-management system — typed entity graph, append-only event log | `LifeOS PR Gate` |
-| [`apps/shell`](apps/shell) | Unified React/Vite front end composing every zone behind one owner login | `Shell PR Gate` |
-| [`apps/toolbelt`](apps/toolbelt) | Small portfolio tools — a prompt-library client, local-first network diagnostics | `Toolbelt PR Gate` |
-| [`services/brain`](services/brain) | Long-lived autonomous-coding orchestrator — daemon, DAG scheduler, task/result contracts | `Brain PR Gate` |
-| [`services/llm-handler`](services/llm-handler) | Deployed general-purpose LLM service behind the Shell | covered by `Shell PR Gate` |
+| [`apps/agentic-command-center`](apps/agentic-command-center) | Local coding-agent guard rail, control panel, and bounded task runner | `Verify: ACC` |
+| [`apps/lifeos`](apps/lifeos) | Personal life-management system — typed entity graph, append-only event log | `Verify: LifeOS` |
+| [`apps/shell`](apps/shell) | Unified React/Vite front end composing every zone behind one owner login | `Verify: Shell` |
+| [`apps/toolbelt`](apps/toolbelt) | Small portfolio tools — a prompt-library client, local-first network diagnostics | `Verify: Toolbelt` |
+| [`services/brain`](services/brain) | Long-lived autonomous-coding orchestrator — daemon, DAG scheduler, task/result contracts | `Verify: Brain` |
+| [`services/llm-handler`](services/llm-handler) | Deployed general-purpose LLM service behind the Shell | covered by `Verify: Shell` |
 | [`packages/*`](packages) | Shared TypeScript packages — `platform-client`, `ui`, `llm`, `toolbelt-cli` | covered by each consumer |
 
 Every `apps/<name>/` was imported via `git subtree` and still carries its own upstream
@@ -32,13 +32,12 @@ are native to this repo.
 
 ## 🚦 CI & merge gates
 
-Eight workflows gate this repo: six independent, path-scoped app gates (the table above) plus
-two repo-wide checks — `Gitleaks` (secret scanning) and `Repo Policy`/`Template Lint` (structural
-and template conformance). Only the repo-wide checks are *intended* to be required by the branch
-ruleset — a path-filtered check marked required would block forever on any PR that never
-triggers it — but applying that to the live ruleset is a manual step; see
-[`AGENTS.md`](./AGENTS.md)'s "PR Gate and merge behavior" section for what's actually enforced
-right now versus the intended target, and [`project.yaml`](./project.yaml) for the full topology.
+`.github/workflows/pr-verify.yml` runs nine `Verify: *` gates as **one strict sequential chain**
+on every pull request — three repo-wide checks, the five app gates from the table above, and an
+adversarial LLM review, in that order, each stage starting only once the previous succeeded. See
+[`AGENTS.md`](./AGENTS.md)'s "PR Gate and merge behavior" section for the full order, which gates
+are (intended to be) required by the branch ruleset, and what's actually enforced right now versus
+the intended target — and [`project.yaml`](./project.yaml) for the full topology.
 
 ## 📜 Policy
 

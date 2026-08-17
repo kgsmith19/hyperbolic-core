@@ -1,0 +1,154 @@
+name: "PR Verification"
+
+# Sequential entry point for every PR-time verification gate. Each stage
+# below is a separate reusable workflow (workflow_call), chained with
+# needs: so stage N only starts once stage N-1 has succeeded -- a strict
+# pipeline, not the parallel/independent gates this repo ran previously.
+# That guarantees merge cannot be triggered by anything before the LAST
+# stage in the chain finishes; there is no required check that can race
+# ahead of it. See AGENTS.md's "PR Gate and merge behavior" section for
+# the full design rationale and the required-checks list this maps to.
+#
+# Order, and why:
+#   1. Verify: Secrets       -- fail fast; no point running anything else
+#                                if a secret was just committed.
+#   2. Verify: Repo Policy
+#   3. Verify: PR Description
+#   4. Verify: Toolbelt      -- each always reports (a trivial pass when
+#   5. Verify: ACC              its own app's paths weren't touched), so
+#   6. Verify: Brain            it's safe to require without the
+#   7. Verify: Shell            forever-pending risk PRs #118/#120 hit.
+#   8. Verify: LifeOS
+#   9. Verify: LLM Review    -- LAST, deliberately: only spend reviewer
+#                                tokens on a PR that already passed
+#                                everything else. NOT a required check
+#                                yet (no reviewer credentials provisioned);
+#                                its own fail-closed design must never
+#                                block merge while unrequired.
+#
+# No paths: filter here, deliberately -- see repo-policy.yml's header
+# comment. Every called gate receives the PR's number/head/base SHA as
+# explicit workflow_call inputs rather than reading github.event.pull_request
+# itself, since that context is not reliably available across a
+# workflow_call boundary.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+  id-token: write
+
+concurrency:
+  group: pr-verify-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify-secrets:
+    name: "Verify: Secrets"
+    uses: ./.github/workflows/secret-scan.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_base_sha: ${{ github.event.pull_request.base.sha }}
+
+  verify-repo-policy:
+    name: "Verify: Repo Policy"
+    needs: [verify-secrets]
+    uses: ./.github/workflows/repo-policy.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_base_sha: ${{ github.event.pull_request.base.sha }}
+
+  verify-pr-description:
+    name: "Verify: PR Description"
+    needs: [verify-repo-policy]
+    uses: ./.github/workflows/template-lint.yml
+    permissions:
+      pull-requests: read
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_base_sha: ${{ github.event.pull_request.base.sha }}
+
+  verify-toolbelt:
+    name: "Verify: Toolbelt"
+    needs: [verify-pr-description]
+    uses: ./.github/workflows/toolbelt-ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_base_sha: ${{ github.event.pull_request.base.sha }}
+
+  verify-acc:
+    name: "Verify: ACC"
+    needs: [verify-toolbelt]
+    uses: ./.github/workflows/acc-ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_base_sha: ${{ github.event.pull_request.base.sha }}
+
+  verify-brain:
+    name: "Verify: Brain"
+    needs: [verify-acc]
+    uses: ./.github/workflows/brain-ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_base_sha: ${{ github.event.pull_request.base.sha }}
+
+  verify-shell:
+    name: "Verify: Shell"
+    needs: [verify-brain]
+    uses: ./.github/workflows/shell-ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_base_sha: ${{ github.event.pull_request.base.sha }}
+
+  verify-lifeos:
+    name: "Verify: LifeOS"
+    needs: [verify-shell]
+    uses: ./.github/workflows/lifeos-ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_base_sha: ${{ github.event.pull_request.base.sha }}
+
+  verify-llm-review:
+    name: "Verify: LLM Review"
+    needs: [verify-lifeos]
+    uses: ./.github/workflows/llm-review.yml
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      pr_base_sha: ${{ github.event.pull_request.base.sha }}

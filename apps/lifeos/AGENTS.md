@@ -29,7 +29,7 @@ Tests use the configured database and may erase its contents. Use only an isolat
 
 ## ✅ Completion Criteria
 
-GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `.github/workflows/lifeos-ci.yml` terminal check `LifeOS PR Gate` succeeds, running this app's backend and frontend suites. Deployment is driven by the root's own `deploy.yml`, not from here.
+GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `.github/workflows/lifeos-ci.yml` terminal check `Verify: LifeOS` succeeds, running this app's backend and frontend suites as the 8th stage of the root's sequential `pr-verify.yml` chain. Deployment is driven by the root's own `deploy.yml`, not from here.
 
 ## 🔒 Collaboration Boundary
 

@@ -1,12 +1,27 @@
 name: "ACC PR Gate"
 
+# Called as the "Verify: ACC" stage of pr-verify.yml's sequential chain.
+# The detect-changes job replaces the old top-level pull_request paths:
+# filter: instead of the whole workflow silently never triggering on a PR
+# that doesn't touch ACC (the forever-pending failure this repo hit on PRs
+# #118/#120), the gate always runs and reports a trivial pass when ACC's
+# own paths weren't touched -- which is what makes it safe to mark
+# required. See repo-policy.yml's header comment for why
+# pull_request-specific data arrives via inputs rather than
+# github.event.pull_request.
+
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
-    paths:
-      - "apps/agentic-command-center/**"
-      - "apps/toolbelt/guards/**"
-      - ".github/workflows/acc-ci.yml"
+  workflow_call:
+    inputs:
+      pr_number:
+        type: string
+        required: false
+      pr_head_sha:
+        type: string
+        required: false
+      pr_base_sha:
+        type: string
+        required: false
   merge_group:
     types: [checks_requested]
   push:
@@ -17,15 +32,58 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.pr_number || github.event.merge_group.head_sha || github.ref }}
   cancel-in-progress: true
 
 env:
   ACC_ROUTING_MD: ${{ github.workspace }}/apps/agentic-command-center/backend/hooks/fixtures/ROUTING.md
 
 jobs:
+  detect-changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.check.outputs.relevant }}
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect · Does this change touch ACC's paths?
+        id: check
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ inputs.pr_base_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PR_BASE_SHA}" ]; then
+            base="${PR_BASE_SHA}"
+          elif [ "${{ github.event_name }}" = "merge_group" ]; then
+            base="${{ github.event.merge_group.base_sha }}"
+          else
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "No comparable base for this event; running the real checks."
+            exit 0
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Base commit not available locally; running the real checks to be safe."
+            exit 0
+          fi
+          if git diff --name-only "${base}...HEAD" | grep -qE '^(apps/agentic-command-center/|apps/toolbelt/guards/|\.github/workflows/acc-ci\.yml$|\.github/workflows/pr-verify\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "ACC paths changed; running the real checks."
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No ACC paths changed; nothing to verify."
+          fi
+
   portable:
     name: Portable tests and coverage
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -43,9 +101,11 @@ jobs:
         working-directory: apps/agentic-command-center
       - name: Coverage · Expose the integration diff to covgate
         shell: bash
+        env:
+          PR_BASE_SHA: ${{ inputs.pr_base_sha }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_SHA=$(git merge-base "${{ github.event.pull_request.base.sha }}" HEAD)
+          if [ -n "${PR_BASE_SHA}" ]; then
+            BASE_SHA=$(git merge-base "${PR_BASE_SHA}" HEAD)
             git reset --soft "$BASE_SHA"
           elif [ "${{ github.event_name }}" = "merge_group" ]; then
             git reset --soft "${{ github.event.merge_group.base_sha }}"
@@ -56,6 +116,8 @@ jobs:
 
   windows-integration:
     name: Windows integration
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.relevant == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -85,6 +147,8 @@ jobs:
 
   ui:
     name: UI build and ACC contract
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -129,9 +193,9 @@ jobs:
           retention-days: 14
 
   pr-gate:
-    name: ACC PR Gate
+    name: "Verify: ACC"
     if: always()
-    needs: [portable, windows-integration, ui]
+    needs: [detect-changes, portable, windows-integration, ui]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -140,17 +204,24 @@ jobs:
       - name: Gate · Confirm every correctness job passed
         shell: bash
         run: |
-          test "${{ needs.portable.result }}" = "success"
-          test "${{ needs.windows-integration.result }}" = "success"
-          test "${{ needs.ui.result }}" = "success"
+          if [ "${{ needs.detect-changes.outputs.relevant }}" = "true" ]; then
+            test "${{ needs.portable.result }}" = "success"
+            test "${{ needs.windows-integration.result }}" = "success"
+            test "${{ needs.ui.result }}" = "success"
+          else
+            test "${{ needs.portable.result }}" = "skipped"
+            test "${{ needs.windows-integration.result }}" = "skipped"
+            test "${{ needs.ui.result }}" = "skipped"
+            echo "ACC was not touched by this change; nothing to verify."
+          fi
       - name: Gate · Confirm tested SHA matches the live PR head
-        if: github.event_name == 'pull_request'
+        if: inputs.pr_number != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          TESTED_SHA: ${{ inputs.pr_head_sha }}
         run: |
           set -euo pipefail
           live_sha="$(curl --fail --silent \
@@ -168,10 +239,11 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### ACC PR Gate"
+            echo "### Verify: ACC"
             echo ""
             echo "| Job | Result |"
             echo "| --- | --- |"
+            echo "| detect-changes | relevant=${{ needs.detect-changes.outputs.relevant }} |"
             echo "| portable | ${{ needs.portable.result }} |"
             echo "| windows-integration | ${{ needs.windows-integration.result }} |"
             echo "| ui | ${{ needs.ui.result }} |"

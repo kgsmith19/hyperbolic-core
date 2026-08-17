@@ -118,7 +118,7 @@ subsystem documentation before running them.
    and the UI contract suite consistent.
 4. Open a pull request that links the Issue and reports exact verification.
 5. Let `.github/workflows/acc-ci.yml` produce this app's required check,
-   `ACC PR Gate`.
+   `Verify: ACC`, as a stage of the root's sequential `pr-verify.yml` chain.
 6. After the configured gate passes, GitHub may squash-merge the pull request
    and delete the branch.
 

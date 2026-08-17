@@ -118,8 +118,9 @@ and shell syntax checks.
   workflow's release-notes extraction)
 - `TEST_LEDGER.md` — this app's own test suites
 - The hyperbolic-core root's `.github/workflows/toolbelt-ci.yml` runs
-  automatically for pull requests; its workflow and required check are both
-  named `Toolbelt PR Gate` and it executes `backend/tools/check.sh`.
+  automatically for pull requests, called as the `Verify: Toolbelt` stage of
+  the root's sequential `pr-verify.yml` chain, and executes
+  `backend/tools/check.sh`.
 - The hyperbolic-core root's `.github/workflows/toolbelt-network-checker-release.yml`
   is a separate manual workflow that validates this application, builds and
   smoke-tests the container, and creates a draft release.
@@ -133,7 +134,7 @@ Issues.
 GitHub Issues are the durable source for requested work. Implement one
 focused slice on a short-lived branch, run `bash backend/tools/check.sh`, and
 open a pull request that links the Issue and states the evidence. A change is
-ready when the hyperbolic-core root's `Toolbelt PR Gate` reports success.
+ready when the hyperbolic-core root's `Verify: Toolbelt` reports success.
 
 ## 🔒 Collaboration Boundary
 

@@ -5,14 +5,25 @@ name: "Template Lint"
 # note for why that matters for a required status check.
 #
 # Confirms a PR's own description follows PULL_REQUEST_TEMPLATE.md's
-# required sections. There is no PR body to check outside a pull_request
-# event; the push/workflow_dispatch/merge_group triggers exist only for
-# convention consistency with the repo's other required checks and no-op
-# cleanly when there is nothing to lint.
+# required sections. Called as the "Verify: PR Description" stage of
+# pr-verify.yml's sequential chain; the push/workflow_dispatch/merge_group
+# triggers below exist only for convention consistency with the repo's
+# other required checks and no-op cleanly when there is nothing to lint.
+# The PR body is fetched live from the API using the passed-in PR number
+# rather than as a workflow_call input, since body length is unbounded.
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
+  workflow_call:
+    inputs:
+      pr_number:
+        type: string
+        required: false
+      pr_head_sha:
+        type: string
+        required: false
+      pr_base_sha:
+        type: string
+        required: false
   merge_group:
     types: [checks_requested]
   push:
@@ -23,7 +34,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.pr_number || github.event.merge_group.head_sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -33,12 +44,19 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Lint · Confirm PR body matches the required template sections
-        if: github.event_name == 'pull_request'
+        if: inputs.pr_number != ''
         shell: bash
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
+          PR_BODY="$(curl --fail --silent \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("body") or "")')"
           missing=()
           for heading in "## 📋 Summary" "## 🔗 Related Issue" "## 🔨 Changes" "## 🧪 Verification" "## ✅ Scope Check"; do
             if ! grep -qF -- "$heading" <<< "$PR_BODY"; then
@@ -56,11 +74,11 @@ jobs:
           echo "PR body includes every required template section."
 
       - name: Lint · Not applicable outside pull_request events
-        if: github.event_name != 'pull_request'
+        if: inputs.pr_number == ''
         run: echo "Template Lint only evaluates pull_request bodies; nothing to check for this event."
 
   pr-gate:
-    name: Template Lint
+    name: "Verify: PR Description"
     needs: [checks]
     if: always()
     runs-on: ubuntu-latest
@@ -73,13 +91,13 @@ jobs:
         run: |
           test "${{ needs.checks.result }}" = "success"
       - name: Gate · Confirm tested SHA matches the live PR head
-        if: github.event_name == 'pull_request'
+        if: inputs.pr_number != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          TESTED_SHA: ${{ inputs.pr_head_sha }}
         run: |
           set -euo pipefail
           live_sha="$(curl --fail --silent \
@@ -97,7 +115,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### Template Lint"
+            echo "### Verify: PR Description"
             echo ""
             echo "| Job | Result |"
             echo "| --- | --- |"
