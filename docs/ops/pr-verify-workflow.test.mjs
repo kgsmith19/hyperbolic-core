@@ -91,6 +91,22 @@ test("the four rows are the expected jobs, and only All Gates holds a write toke
   const allGates = workflow.slice(workflow.indexOf("  verify-all-gates:"));
   assert.match(allGates, /if: always\(\)/, "All Gates must report even when a dependency failed");
   assert.match(allGates, /needs: \[verify-tests-linux, verify-tests-windows\]/);
+
+  // EXPECTED_GATE_JOBS is what makes an empty needs payload fail closed
+  // rather than pass vacuously, so it only works while it names the same
+  // jobs needs: does. Deleting a job from BOTH is the one direction no
+  // runtime check can catch -- the payload would then be legitimately
+  // complete and legitimately green over a shrunken set. This ties the two
+  // lists together so that deletion has to be deliberate.
+  const needs = allGates.match(/needs: \[([^\]]+)\]/)[1].split(",").map((s) => s.trim());
+  const expected = allGates.match(/const EXPECTED_GATE_JOBS = \[([^\]]+)\]/)[1]
+    .split(",")
+    .map((s) => s.trim().replace(/^"|"$/g, ""));
+  assert.deepEqual(
+    expected.slice().sort(),
+    needs.slice().sort(),
+    "EXPECTED_GATE_JOBS and the job's needs: list must name exactly the same jobs"
+  );
   assert.match(allGates, /contents: write/);
   assert.match(allGates, /pull-requests: write/);
   assert.match(allGates, /issues: write/);
@@ -163,12 +179,18 @@ test("every doc that names a gate agrees with pr-verify.yml's actual job names",
   }
 });
 
-test("All Gates arms auto-merge only on a green verdict, and never past a hold, draft, or fork", async () => {
+test("All Gates arms auto-merge only on a green verdict, and never past a hold, draft, fork, or an empty needs payload", async () => {
   const modulePath = loadAllGatesModule();
   const allGates = (await import(`file://${modulePath}`)).default;
 
   function makeMocks({
     gates,
+    // Set to bypass JSON.stringify(gates) and hand the script a literal
+    // GATE_RESULTS -- or `null` to unset the variable entirely. Only the
+    // fail-closed cases at the bottom need it.
+    rawGateResults,
+    // Message GitHub's enablePullRequestAutoMerge mutation should reject with.
+    armError = null,
     draft = false,
     labels = [],
     timeline = [],
@@ -220,7 +242,11 @@ test("All Gates arms auto-merge only on a green verdict, and never past a hold, 
         },
       },
       graphql: async (q) => {
-        if (/enablePullRequestAutoMerge/.test(q)) return void calls.push("ARM") || {};
+        if (/enablePullRequestAutoMerge/.test(q)) {
+          calls.push("ARM-ATTEMPTED");
+          if (armError) throw new Error(armError);
+          return void calls.push("ARM") || {};
+        }
         if (/disablePullRequestAutoMerge/.test(q)) return void calls.push("DISARM") || {};
         if (/markPullRequestReadyForReview/.test(q)) return void calls.push("UNDRAFT") || {};
         throw new Error("unexpected graphql mutation in test");
@@ -252,7 +278,14 @@ test("All Gates arms auto-merge only on a green verdict, and never past a hold, 
         repository: { owner: { login: "kgsmith19" }, default_branch: "main" },
       },
     };
-    const proc = { env: { GATE_RESULTS: JSON.stringify(gates) } };
+    const proc = {
+      env:
+        rawGateResults === undefined
+          ? { GATE_RESULTS: JSON.stringify(gates) }
+          : rawGateResults === null
+            ? {}
+            : { GATE_RESULTS: rawGateResults },
+    };
     return {
       github,
       core,
@@ -326,4 +359,49 @@ test("All Gates arms auto-merge only on a green verdict, and never past a hold, 
   m = await run({ gates: GREEN, draft: true });
   assert.ok(m.calls.includes("UNDRAFT"), "an unauthorized draft must be cleared");
   assert.ok(m.calls.includes("ARM"), "a cleared draft must then arm");
+
+  // ---- an unstable PR is the steady state, not an anomaly ----------------
+  //
+  // While Verify: LLM Review reports failure the PR stays `unstable`, and
+  // GitHub REFUSES the arming mutation outright rather than arming and
+  // waiting -- observed verbatim on PR #219. That must not fail the run (it
+  // is not a verification failure) and must not be reported as an unexpected
+  // error, because it is the expected condition until reviewer credentials
+  // are provisioned.
+  m = await run({ gates: GREEN, armError: "Pull request Pull request is in unstable status" });
+  assert.ok(m.calls.includes("ARM-ATTEMPTED"), "a green verdict must still attempt to arm");
+  assert.equal(m.failed, null, "an unstable PR is not a verification failure");
+  assert.match(
+    m.core.summary._b || "",
+    /unstable/i,
+    "the summary must say the PR was unstable, not report an unexpected error"
+  );
+  assert.doesNotMatch(
+    m.core.summary._b || "",
+    /unexpected error/i,
+    "the expected steady state must not be labelled an unexpected error"
+  );
+
+  // ---- fail CLOSED when the needs payload says nothing ------------------
+  //
+  // The dangerous shape is not a red gate, it is NO gate. A "did anything
+  // fail?" test over an empty object is vacuously true, so before this was
+  // guarded, GATE_RESULTS="{}" made this job report SUCCESS and arm a merge
+  // having verified precisely nothing -- which is the exact failure class
+  // the whole required-check design exists to prevent. Each case below was
+  // observed arming auto-merge in the unguarded form.
+  //
+  // These are not hypothetical inputs: an edited-away needs: list, a
+  // renamed job id, or a truncated expression all produce one of them.
+  for (const [label, opts] of [
+    ["an empty needs object", { rawGateResults: "{}" }],
+    ["GATE_RESULTS unset entirely", { rawGateResults: null }],
+    ["a malformed GATE_RESULTS payload", { rawGateResults: "{not json" }],
+    ["a gate whose result is null", { gates: { "verify-tests-linux": { result: null }, "verify-tests-windows": { result: "success" } } }],
+    ["a renamed job id that no longer matches", { gates: { "verify-tests-linux-renamed": { result: "success" }, "verify-tests-windows": { result: "success" } } }],
+  ]) {
+    m = await run(opts);
+    assert.ok(!m.calls.includes("ARM"), `${label} must never arm auto-merge`);
+    assert.notEqual(m.failed, null, `${label} must fail this job, not pass vacuously`);
+  }
 });

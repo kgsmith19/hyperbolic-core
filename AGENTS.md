@@ -319,11 +319,21 @@ credentials are unprovisioned, and depending on it would make the one required c
 red.
 
 > [!NOTE]
-> While `Verify: LLM Review` reports failure the pull request stays `unstable`, and GitHub's own
-> auto-merge does **not** fire on an unstable pull request even when every required check passes.
-> `Verify: All Gates` still arms auto-merge; the arming simply waits. Auto-merge therefore begins
-> working the moment LLM Review stops reporting failure — either by provisioning the reviewer
-> credentials or by having it report `neutral` when uncredentialed.
+> While `Verify: LLM Review` reports failure the pull request stays `unstable`, and GitHub does not
+> merely decline to *fire* auto-merge there — it **refuses to arm it at all**. The
+> `enablePullRequestAutoMerge` mutation fails outright, verbatim on PR #219:
+>
+> ```
+> Request failed due to following response errors:
+>  - Pull request Pull request is in unstable status
+> ```
+>
+> So nothing is armed and nothing is queued waiting. `Verify: All Gates` records this in its job
+> summary and does **not** fail the run — being unstable is not a verification failure. Auto-merge
+> starts working once LLM Review stops reporting failure (provision the reviewer credentials, or
+> have it report `neutral` when uncredentialed) **and** the workflow runs again, since arming is
+> attempted during a run rather than left pending. Any later trigger — a push, a label change, an
+> edit — re-attempts it.
 
 The lint step inside `Verify: Tests (Linux)` runs only LifeOS's own lint commands (`ruff check` for
 the backend, `npm run lint` for the frontend) today, because LifeOS is the only app in this repo

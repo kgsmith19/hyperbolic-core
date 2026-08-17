@@ -388,10 +388,42 @@ jobs:
             // that stops reporting turns this red rather than silently
             // counting as a pass, because anything that is not exactly
             // "success" fails the gate.
-            const gateResults = JSON.parse(process.env.GATE_RESULTS || "{}");
-            const failedGates = Object.entries(gateResults)
-              .filter(([, value]) => (value || {}).result !== "success")
-              .map(([name, value]) => `${name} (${(value || {}).result || "no result"})`);
+            // The jobs this gate exists to roll up. Naming them explicitly is
+            // what makes an EMPTY or truncated needs payload fail closed: a
+            // bare "nothing failed" test over an empty object is vacuously
+            // true, so a needs: list that was edited away, or a GATE_RESULTS
+            // that arrived empty, would report GREEN and arm a merge having
+            // verified nothing at all. Measured: with GATE_RESULTS="{}" the
+            // unguarded form armed auto-merge and passed. Keep this list in
+            // step with the job ids above -- a job present here but missing
+            // from needs: fails the gate rather than being skipped silently.
+            const EXPECTED_GATE_JOBS = ["verify-tests-linux", "verify-tests-windows"];
+
+            let gateResults;
+            try {
+              gateResults = JSON.parse(process.env.GATE_RESULTS || "");
+            } catch (parseError) {
+              gateResults = null;
+            }
+
+            const failedGates = [];
+            if (!gateResults || typeof gateResults !== "object") {
+              failedGates.push("needs payload was missing or unparseable");
+            } else {
+              for (const jobId of EXPECTED_GATE_JOBS) {
+                const value = gateResults[jobId];
+                if (!value) failedGates.push(`${jobId} (absent from needs)`);
+                else if (value.result !== "success") failedGates.push(`${jobId} (${value.result || "no result"})`);
+              }
+              // Anything else that IS present must also have succeeded, so a
+              // newly added dependency cannot pass unnoticed by this list.
+              for (const [jobId, value] of Object.entries(gateResults)) {
+                if (EXPECTED_GATE_JOBS.includes(jobId)) continue;
+                if ((value || {}).result !== "success") {
+                  failedGates.push(`${jobId} (${(value || {}).result || "no result"})`);
+                }
+              }
+            }
             const gatesGreen = failedGates.length === 0;
 
             // Mirrors the pinned standard's owner_label_authorized exactly: walk
@@ -526,6 +558,18 @@ jobs:
                   );
                 } else if (/already.*enabled/i.test(message)) {
                   summaryLines.push("- Auto-merge: already enabled.");
+                } else if (/unstable status/i.test(message)) {
+                  // The steady state while Verify: LLM Review reports failure,
+                  // NOT an anomaly. GitHub refuses the mutation outright on an
+                  // unstable PR -- it does not arm-and-wait -- so nothing is
+                  // pending and a later run has to re-attempt this once the PR
+                  // leaves unstable. Observed verbatim on PR #219:
+                  //   "Pull request Pull request is in unstable status"
+                  summaryLines.push(
+                    "- Auto-merge: refused while the PR is `unstable` (a non-required check is red, " +
+                    "normally `Verify: LLM Review`). Nothing is armed and nothing is queued; a later " +
+                    "run of this workflow re-attempts arming once the PR leaves that state."
+                  );
                 } else {
                   core.warning(
                     `All Gates: unexpected error arming auto-merge for PR #${pr.number}, continuing without failing the run: ${message}`
