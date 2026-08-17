@@ -1,9 +1,15 @@
 // The broker's log-only pass-through path (issue #185): every well-formed
 // request is logged with caller, target host, and timestamp, then forwarded
-// to its target unmodified -- no allow/deny decision yet. isKnownCaller is
-// looked up and included in the log entry for future denial visibility
-// (issue #187), but an unknown caller is proxied exactly like a known one at
-// this phase; only #187's soak-then-approve enforcement flip may change that.
+// to its target unmodified. Two later Issues each added a HARD, always-
+// enforced gate that DOES refuse -- credential authorization (#186,
+// authorizeCredential: unauthenticated/unauthorized/unprovisioned) -- while
+// the general-purpose egress allowlist (#187, hostIsAllowed) remains
+// deliberately log-only: computed and recorded on every request's audit
+// entry, never consulted to refuse anything, until a soak period and
+// explicit owner approval flip it live in a later, separate change.
+// isKnownCaller is looked up and included in the log entry for that same
+// future denial visibility; an unknown caller is proxied exactly like a
+// known one at this phase.
 //
 // Never throws, and never reaches node:http's own request layer with
 // unvalidated input: every field that flows into `http.request()`'s options

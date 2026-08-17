@@ -295,6 +295,37 @@ test("proxyRequest: a known caller reaching a host IN its own allowedHosts is lo
   );
 });
 
+// Independent verification's finding: a full suite run against a
+// case-SENSITIVE mutant of hostIsAllowed (`host === targetHost` instead of
+// `.toLowerCase()` on both sides) still passed every other test in this
+// file -- the case-insensitivity property this Issue's own hostname
+// semantics require (DNS names are case-insensitive; api.anthropic.com and
+// API.ANTHROPIC.COM name the same host) was never actually locked in.
+test("proxyRequest: hostAllowed matches case-insensitively -- an uppercase targetHost still matches a lowercase allowedHosts entry", async () => {
+  await withFakeUpstream(
+    (_req, res) => {
+      res.writeHead(200, {});
+      res.end();
+    },
+    async (port) => {
+      const logged: ProxyLogEntry[] = [];
+      // "localhost" (not a bare IP literal) so uppercasing it actually
+      // exercises letter-casing, not a no-op on digits/dots -- resolves to
+      // the same fake upstream withFakeUpstream bound to 127.0.0.1.
+      const policy: PolicyDocument = {
+        "llm-handler": { allowedHosts: ["localhost"], vaultKeys: [], maxUsdPerDay: null },
+      };
+      await proxyRequest(
+        { caller: "llm-handler", token: "t", targetHost: `LOCALHOST:${port}`, protocol: "http" },
+        policy,
+        { log: (entry) => logged.push(entry) },
+      );
+      assert.equal(logged.length, 1);
+      assert.equal(logged[0]!.hostAllowed, true);
+    },
+  );
+});
+
 test("proxyRequest: a known caller reaching a host NOT in its own allowedHosts is logged with hostAllowed=false but is STILL proxied -- log-only means no denial yet, exactly like the unknown-caller case above", async () => {
   await withFakeUpstream(
     (_req, res) => {
