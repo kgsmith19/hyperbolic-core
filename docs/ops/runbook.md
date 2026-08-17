@@ -518,7 +518,8 @@ containers), turn `access_log` back on at that point -- an explicit owner call, 
 Dark behind `CLOUDFLARE_EDGE_ENABLED` -- ships `compose.yml`/`nginx.conf`/`public_paths.conf` and a
 rendered `.env` (holding only `CLOUDFLARE_TUNNEL_TOKEN`) to the box over keyless Tailscale SSH (ADR
 008, no SSH key material), then `docker compose pull && docker compose up -d --wait`. Triggers on
-`workflow_dispatch` or a push to `main` touching `docs/ops/edge-origin/**`.
+`workflow_dispatch` or a push to `main` touching `docs/ops/edge-origin/**` (or the workflow file
+itself, `.github/workflows/ops-edge.yml`).
 
 Owner setup, one time, before flipping the gate:
 

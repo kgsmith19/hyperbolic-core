@@ -84,8 +84,16 @@ jobs:
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'mkdir -p edge-origin'
           scp "${ssh_options[@]}" docs/ops/edge-origin/compose.yml docs/ops/edge-origin/nginx.conf docs/ops/edge-origin/public_paths.conf \
             "deploy@$DEPLOY_HOST:edge-origin/"
+          # chmod 600 BEFORE scp'ing content in, not after: on a box's
+          # first-ever deploy, a plain `scp` creating a brand-new .env would
+          # otherwise transiently land at whatever the deploy user's default
+          # umask produces (commonly world-readable) for the window between
+          # that scp and a later chmod. Pre-creating the file at 600 means
+          # the content-only overwrite that follows never has a
+          # wrong-permission moment to land in.
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            'touch edge-origin/.env && chmod 600 edge-origin/.env'
           scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.edge" "deploy@$DEPLOY_HOST:edge-origin/.env"
-          # Only .env gets chmod 600 (it holds CLOUDFLARE_TUNNEL_TOKEN) --
           # nginx.conf/public_paths.conf stay at their default, world-readable
           # permissions: they hold no secret, and the nginx container's own
           # worker user (not necessarily `deploy`) needs to read the

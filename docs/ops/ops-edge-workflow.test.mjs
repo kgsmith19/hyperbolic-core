@@ -37,15 +37,46 @@ test("the edge Infisical identity/path is distinct from every other pipeline's",
   assert.doesNotMatch(workflow, /INFISICAL_PLATFORM_BACKUP_IDENTITY_ID/);
 });
 
-test("the tunnel token is never echoed and lands only in a chmod 600 .env, never in nginx.conf/public_paths.conf", () => {
-  const joined = workflow.replace(/\\\n[ \t]*/g, " ");
-  assert.doesNotMatch(joined, /echo[^\n]*\$\{?CLOUDFLARE_TUNNEL_TOKEN/);
+test("every real expansion of the tunnel token is either a conditional test or redirected to a file, never left to print to the job log", () => {
+  // Broader than an "echo"-only check (which independent review found a
+  // mutation could slip past: printf '%s' "$CLOUDFLARE_TUNNEL_TOKEN" with no
+  // redirect, left unredirected, would print the value to stdout without
+  // ever containing the literal word "echo"). This walks every line that
+  // actually expands the variable ($CLOUDFLARE_TUNNEL_TOKEN / ${...), not
+  // just lines naming it in prose (line 77's error message), and requires
+  // each one to be either a `[ -z/-n ... ]` test (never prints the value)
+  // or to redirect its output into a file.
+  const expansionLines = workflow.split("\n").filter((line) => /\$\{?CLOUDFLARE_TUNNEL_TOKEN\b/.test(line));
+  assert.ok(expansionLines.length > 0, "expected at least one real expansion of the token to exist");
+  for (const line of expansionLines) {
+    const isConditionalTest = /\[\s*-[zn]\s/.test(line);
+    const redirectsToFile = />\s*"/.test(line);
+    assert.ok(
+      isConditionalTest || redirectsToFile,
+      `line expands the token without a file redirect or being a conditional test: ${line}`,
+    );
+  }
+});
+
+test("the tunnel token lands only in a chmod 600 .env, never in nginx.conf/public_paths.conf", () => {
   assert.match(workflow, /chmod 600 \.env/);
   // The fix for a mistake caught during review: nginx.conf/public_paths.conf
   // must NOT be chmod 600 -- they hold no secret, and an owner-only
   // permission would block the nginx container's own worker user (not
   // necessarily `deploy`) from reading the bind-mounted file.
   assert.doesNotMatch(workflow, /chmod 600 (nginx\.conf|public_paths\.conf)/);
+});
+
+test("the .env file is pre-created at 600 before its content ever lands, closing the first-deploy umask window", () => {
+  // Independent review found: a plain `scp` creating a brand-new .env on a
+  // box's first-ever deploy would transiently land at the deploy user's
+  // default umask (commonly world-readable) for the moment between that scp
+  // and a later chmod. touch+chmod BEFORE the content scp closes that
+  // window entirely, rather than narrowing it.
+  const touchChmod = workflow.indexOf("touch edge-origin/.env && chmod 600 edge-origin/.env");
+  const contentScp = workflow.indexOf('scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.edge"');
+  assert.ok(touchChmod > -1 && contentScp > -1);
+  assert.ok(touchChmod < contentScp, "the file must be created at 600 before its content is copied in");
 });
 
 test("no image is docker save|ssh|load'd -- both images are pulled directly on the box", () => {
@@ -80,11 +111,16 @@ test("ops-edge.yml parses as valid bash", () => {
   }
 });
 
-test("cloudflared has no ports: mapping -- outbound-only, never a listener", () => {
+test("cloudflared has no ports: or expose: -- outbound-only, never a listener", () => {
   const cloudflaredStart = compose.indexOf("  cloudflared:");
   assert.ok(cloudflaredStart > -1);
   const cloudflaredBlock = compose.slice(cloudflaredStart);
   assert.doesNotMatch(cloudflaredBlock, /ports:/);
+  // expose: never publishes to the host either way, but asserting it too
+  // (independent review's suggestion) keeps this test honest about the
+  // service having no network-facing directive of any kind, not just the
+  // one that would actually be dangerous.
+  assert.doesNotMatch(cloudflaredBlock, /expose:/);
 });
 
 test("cloudflared's ingress is a single blanket rule -- no per-path tunnel config duplicating public_paths.conf", () => {
