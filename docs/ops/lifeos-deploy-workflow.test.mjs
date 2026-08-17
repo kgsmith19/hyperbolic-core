@@ -101,3 +101,33 @@ test("the pinned Supabase CLI version is asserted before any database contact", 
   const push = backendJob.indexOf("supabase db push");
   assert.ok(pin > -1 && push > -1 && pin < push);
 });
+
+test("activate and rollback run under REMOTE strict mode, not ;-joined one-liners", () => {
+  // The independent verification of this issue's first head found exactly this
+  // regression: without a remote `set -euo pipefail`, a failed `test ! -e`
+  // guard or mv does not stop the remote sequence, and the ssh exit status is
+  // the LAST command's -- so a broken symlink flip reports green. The remote
+  // scripts must carry their own strict mode, like deploy.yml's proven jobs.
+  const remoteStrict = uiJob.match(/"deploy@\$DEPLOY_HOST" "\n\s+set -euo pipefail/g) ?? [];
+  assert.equal(remoteStrict.length, 2); // activate + rollback
+});
+
+test("the UI build finishes before any secret reaches the job environment", () => {
+  // Infisical exports to GITHUB_ENV; npm install lifecycle scripts must never
+  // see production credentials. Build (vars-only) must precede the pull.
+  const build = uiJob.indexOf("Build · Build the UI");
+  const secrets = uiJob.indexOf("Secrets · Pull deploy configuration");
+  assert.ok(build > -1 && secrets > -1 && build < secrets);
+});
+
+test("prune-script changes redeploy the LifeOS units that ship them", () => {
+  assert.match(workflow, /docs\/ops\/prune-dist-dirs\.sh/);
+  assert.match(workflow, /docs\/ops\/prune-docker-images\.sh/);
+  assert.match(workflow, /prune-docker-images\\\.sh\$/); // backend classify regex
+  assert.match(workflow, /prune-dist-dirs\\\.sh\$/); // ui classify regex
+});
+
+test("both deploy jobs validate DEPLOY_HOST before first use", () => {
+  const validations = workflow.match(/DEPLOY_HOST must be a non-empty DNS name/g) ?? [];
+  assert.equal(validations.length, 2);
+});

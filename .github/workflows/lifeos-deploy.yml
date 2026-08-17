@@ -13,7 +13,8 @@ name: "LifeOS Deploy"
 #   vars.LIFEOS_DEPLOY_ENABLED -- the LifeOS cutover switch (the two-writers
 #                                 race breaker: it stays unset until the owner
 #                                 flips the standalone repo's DEPLOY_ENABLED
-#                                 off, per the runbook's cutover section)
+#                                 off, per the ordered cutover -- runbook
+#                                 section lands with the cutover issue #141)
 # Until both are 'true' this workflow is provably inert: every run is a
 # visible skip.
 #
@@ -27,9 +28,10 @@ name: "LifeOS Deploy"
 #
 # NO SSH KEYS, deliberately (ADR 008): authentication is Tailscale SSH --
 # the CI runner joins the tailnet as an ephemeral tag:ci node and the
-# tailnet ACL grants tag:ci SSH to deploy@<vps>. Infisical OIDC (identity
+# tailnet ACL grants tag:ci SSH to deploy@<vps>. No SSH key material exists
+# anywhere in this pipeline (test-pinned). Infisical OIDC (identity
 # vars.INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID, secret-path /platform/lifeos-deploy/)
-# supplies only application secrets, never transport credentials.
+# supplies the application secrets and the tailnet OAuth client.
 #
 # One-origin shape: the backend is reached through the /life/api/ serve mount
 # (full-path forwarding), so LIFEOS_ROOT_PATH=/life/api is rendered into its
@@ -45,6 +47,8 @@ on:
     paths:
       - "apps/lifeos/**"
       - ".github/workflows/lifeos-deploy.yml"
+      - "docs/ops/prune-dist-dirs.sh"
+      - "docs/ops/prune-docker-images.sh"
   workflow_dispatch:
     inputs:
       deploy_backend:
@@ -55,6 +59,15 @@ on:
         description: Deploy the LifeOS UI bundle
         type: boolean
         default: true
+      skip_live_verify:
+        description: >-
+          First-cutover bootstrap only: skip the live-route UI verify (and its
+          rollback trigger) for the one deploy that must run BEFORE the /life/
+          serve route points at lifeos-ui/current. Sequence: dispatch with this
+          set, apply the serve routes, then dispatch again unset for a fully
+          verified deploy. Never needed afterwards.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -95,10 +108,10 @@ jobs:
           fi
           git diff --name-only "$BEFORE" "$GITHUB_SHA" > "$RUNNER_TEMP/changed-paths"
           backend=false; ui=false
-          if grep -Eq '^(apps/lifeos/backend/|\.github/workflows/lifeos-deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
+          if grep -Eq '^(apps/lifeos/backend/|docs/ops/prune-docker-images\.sh$|\.github/workflows/lifeos-deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
             backend=true
           fi
-          if grep -Eq '^(apps/lifeos/frontend/|\.github/workflows/lifeos-deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
+          if grep -Eq '^(apps/lifeos/frontend/|docs/ops/prune-dist-dirs\.sh$|\.github/workflows/lifeos-deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
             ui=true
           fi
           echo "backend=$backend" >> "$GITHUB_OUTPUT"
@@ -247,16 +260,6 @@ jobs:
           cache: npm
           cache-dependency-path: apps/lifeos/frontend/package-lock.json
 
-      - name: Secrets · Pull deploy configuration from Infisical
-        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
-        with:
-          method: oidc
-          identity-id: ${{ vars.INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID }}
-          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
-          env-slug: prod
-          secret-path: "/platform/lifeos-deploy/"
-          domain: https://app.infisical.com
-
       - name: Build · Build the UI with public production configuration
         shell: bash
         working-directory: apps/lifeos/frontend
@@ -271,6 +274,20 @@ jobs:
           test -n "$VITE_SUPABASE_PUBLISHABLE_KEY"
           npm ci
           npm run build
+
+      # Secrets are pulled only AFTER npm ci + build have finished: the
+      # Infisical action exports to GITHUB_ENV, and third-party npm install
+      # scripts must never run with production credentials in their
+      # environment. The build needs only public vars.* values.
+      - name: Secrets · Pull deploy configuration from Infisical
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/lifeos-deploy/"
+          domain: https://app.infisical.com
 
       - name: Network · Join tailnet
         uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
@@ -287,6 +304,10 @@ jobs:
           INCOMING: lifeos-ui/incoming-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          if [[ ! "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}[A-Za-z0-9]$ ]]; then
+            echo "DEPLOY_HOST must be a non-empty DNS name or IPv4 address." >&2
+            exit 1
+          fi
           ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "rm -rf -- '$INCOMING'; mkdir -p -- '$INCOMING' lifeos-ui"
           scp "${ssh_options[@]}" -r apps/lifeos/frontend/dist/. "deploy@$DEPLOY_HOST:$INCOMING/"
@@ -308,12 +329,19 @@ jobs:
             exit 1
           fi
           echo "previous=${previous:-__none__}" >> "$GITHUB_OUTPUT"
-          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
-            "target='lifeos-ui/$RELEASE'; test ! -e \"\$target\"; mv -- '$INCOMING' \"\$target\";
-             next='lifeos-ui/current.next-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'; rm -f -- \"\$next\";
-             ln -s '$RELEASE' \"\$next\"; mv -Tf -- \"\$next\" lifeos-ui/current"
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "
+            set -euo pipefail
+            target='lifeos-ui/$RELEASE'
+            test ! -e \"\$target\"
+            mv -- '$INCOMING' \"\$target\"
+            next='lifeos-ui/current.next-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'
+            rm -f -- \"\$next\"
+            ln -s '$RELEASE' \"\$next\"
+            mv -Tf -- \"\$next\" lifeos-ui/current
+          "
 
       - name: Verify · Live bundle serves the built assets
+        if: inputs.skip_live_verify != true
         shell: bash
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
@@ -335,8 +363,11 @@ jobs:
           if [[ "$PREVIOUS" == "__none__" ]]; then
             ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'rm -f -- lifeos-ui/current'
           else
-            ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
-              "ln -s '$PREVIOUS' lifeos-ui/current.rollback; mv -Tf -- lifeos-ui/current.rollback lifeos-ui/current"
+            ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "
+              set -euo pipefail
+              ln -s '$PREVIOUS' lifeos-ui/current.rollback
+              mv -Tf -- lifeos-ui/current.rollback lifeos-ui/current
+            "
           fi
 
       - name: Prune · Retire old releases
