@@ -7,6 +7,20 @@
 # "PR Gate and merge behavior" section for why that was wrong and has been
 # corrected.)
 #
+# pull_request_target fires this job immediately on every push -- well
+# before pr-verify.yml's own jobs even start -- because reacting promptly
+# to draft/hold-label changes needs that. Left unchecked, that same
+# immediacy would let this job arm auto-merge (and, if the live branch
+# ruleset's own required-checks list is ever empty or stale, actually let
+# GitHub merge) against a commit whose real verification hasn't run yet.
+# reconcileReadyState therefore never arms auto-merge without first calling
+# requiredGatesGreen, which reads the actual check-run conclusions for the
+# PR's own head SHA and requires every Verify: Standards / Verify: Tests
+# (<App>) row to be a fresh success -- Verify: LLM Review excluded, since
+# it is not required. This job's own draft/hold/comment-bookkeeping actions
+# are unaffected and still run immediately; only the "allow this to merge"
+# action is gated.
+#
 # This workflow is privileged: pull_request_target runs from the BASE
 # branch with repository secrets and a write token, even for a pull
 # request opened from a fork. Every action below reads only
@@ -39,6 +53,7 @@ permissions:
   pull-requests: write
   issues: write
   actions: read
+  checks: read
 
 # Serializes overlapping events for the same pull request (e.g. a
 # synchronize and a labeled event arriving close together) so two runs
@@ -78,6 +93,25 @@ jobs:
                 "<!-- agent-engineering-standard:evidence-index:v1 -->";
               const DRAFT_LABEL = "owner:allow-draft";
               const HOLD_LABEL = "owner:hold-merge";
+
+              // The gates that must report success, for THIS pull request's
+              // own head SHA, before this workflow will arm auto-merge.
+              // Verify: LLM Review is deliberately excluded -- it fails
+              // closed until reviewer credentials are provisioned and is
+              // not required. Verify: Merge Policy itself is excluded -- a
+              // job cannot gate on its own conclusion. Keep this list in
+              // sync with pr-verify.yml's job names and AGENTS.md's PR Gate
+              // table by hand; there is no single source both files could
+              // import from inside a GitHub Actions script.
+              const REQUIRED_GATE_NAMES = [
+                "Verify: Standards",
+                "Verify: Tests (Toolbelt)",
+                "Verify: Tests (ACC)",
+                "Verify: Tests (ACC Windows)",
+                "Verify: Tests (Brain)",
+                "Verify: Tests (Shell)",
+                "Verify: Tests (LifeOS)",
+              ];
 
               const summaryLines = [];
 
@@ -202,7 +236,46 @@ jobs:
                 return pr;
               }
 
-              async function reconcileReadyState(pr) {
+              // Reads the ACTUAL check-run conclusions for the PR's own
+              // head SHA, independent of whatever the live branch ruleset
+              // currently requires (that list has drifted from what this
+              // repo intends before -- see AGENTS.md's PR Gate section).
+              // pull_request_target fires immediately on push, well before
+              // pr-verify.yml's jobs even start, so without this, arming
+              // auto-merge here could -- if the ruleset's own required list
+              // is ever empty or stale, as has already happened once --
+              // let GitHub merge a commit whose real verification hasn't
+              // run yet, or has failed.
+              async function requiredGatesGreen(headSha) {
+                const runs = await github.paginate(github.rest.checks.listForRef, {
+                  owner,
+                  repo,
+                  ref: headSha,
+                  per_page: 100,
+                });
+                const latestByName = new Map();
+                for (const run of runs) {
+                  const existing = latestByName.get(run.name);
+                  if (
+                    !existing ||
+                    new Date(run.started_at || 0) >= new Date(existing.started_at || 0)
+                  ) {
+                    latestByName.set(run.name, run);
+                  }
+                }
+                const reasons = [];
+                for (const name of REQUIRED_GATE_NAMES) {
+                  const run = latestByName.get(name);
+                  if (!run) {
+                    reasons.push(`${name} (has not reported yet)`);
+                  } else if (run.status !== "completed" || run.conclusion !== "success") {
+                    reasons.push(`${name} (${run.status}/${run.conclusion || "pending"})`);
+                  }
+                }
+                return { ready: reasons.length === 0, reasons };
+              }
+
+              async function reconcileReadyState(pr, gateState) {
                 if (pr.mergeable_state === "behind") {
                   try {
                     await github.rest.pulls.updateBranch({
@@ -216,6 +289,13 @@ jobs:
                       `- Branch update: not applied, left untouched (likely a real conflict): ${error.message}`
                     );
                   }
+                }
+
+                if (!gateState.ready) {
+                  summaryLines.push(
+                    `- Auto-merge: not armed -- waiting on: ${gateState.reasons.join(", ")}.`
+                  );
+                  return;
                 }
 
                 try {
@@ -257,25 +337,27 @@ jobs:
                 }
               }
 
-              function deriveStatus(pr, stillDraft, holdAuthorized) {
+              function deriveStatus(pr, stillDraft, holdAuthorized, gateState) {
                 if (stillDraft) return "draft (owner:allow-draft honored)";
                 if (holdAuthorized) return "held (owner:hold-merge honored)";
                 if (pr.mergeable_state === "dirty") return "blocked: merge conflict against base";
                 if (pr.mergeable_state === "behind") return "branch update requested";
+                if (gateState && !gateState.ready) return "waiting on Verify: * gates (own check)";
                 if (pr.mergeable_state === "blocked") return "waiting on required checks";
                 return "ready";
               }
 
-              function deriveBlocker(pr, stillDraft, holdAuthorized) {
+              function deriveBlocker(pr, stillDraft, holdAuthorized, gateState) {
                 if (holdAuthorized) return "owner:hold-merge is in effect";
                 if (pr.mergeable_state === "dirty") {
                   return "merge conflict against base; resolve manually, this workflow never resolves conflicts";
                 }
                 if (stillDraft) return "PR is a draft (owner:allow-draft honored)";
+                if (gateState && !gateState.ready) return gateState.reasons.join("; ");
                 return "none";
               }
 
-              function buildWorkStateBody(pr, linkedIssue, stillDraft, holdAuthorized) {
+              function buildWorkStateBody(pr, linkedIssue, stillDraft, holdAuthorized, gateState) {
                 return [
                   WORK_STATE_MARKER,
                   "## Work State",
@@ -288,8 +370,8 @@ jobs:
                   "- Controller: anthropic",
                   "- Builder: anthropic",
                   `- Pull request: #${pr.number}`,
-                  `- Status: ${deriveStatus(pr, stillDraft, holdAuthorized)}`,
-                  `- Blocker: ${deriveBlocker(pr, stillDraft, holdAuthorized)}`,
+                  `- Status: ${deriveStatus(pr, stillDraft, holdAuthorized, gateState)}`,
+                  `- Blocker: ${deriveBlocker(pr, stillDraft, holdAuthorized, gateState)}`,
                 ].join("\n");
               }
 
@@ -400,7 +482,11 @@ jobs:
                 // E / F. Ready, same-repo, non-held, non-draft PRs targeting the
                 // default branch. This also naturally re-arms auto-merge after an
                 // auto_merge_disabled event: that event type reaches this same path
-                // whenever the hold is not authorized.
+                // whenever the hold is not authorized. Auto-merge is armed only once
+                // requiredGatesGreen confirms every Verify: Standards / Verify: Tests
+                // (<App>) gate has actually succeeded for this exact head SHA --
+                // Verify: LLM Review is excluded, matching its non-required status.
+                let gateState = null;
                 if (!eligible) {
                   summaryLines.push(
                     "- Eligibility: fork pull request (head repository differs from base repository); branch-update and auto-merge arming are skipped by directive — same-repository PRs only."
@@ -414,7 +500,8 @@ jobs:
                     "- Ready-state actions: skipped while the PR remains a draft."
                   );
                 } else {
-                  await reconcileReadyState(pr);
+                  gateState = await requiredGatesGreen(pr.head.sha);
+                  await reconcileReadyState(pr, gateState);
                 }
 
                 // G. Managed comments.
@@ -423,7 +510,8 @@ jobs:
                   pr,
                   linkedIssue,
                   stillDraft,
-                  holdAuthorized
+                  holdAuthorized,
+                  gateState
                 );
                 await upsertComment(pr.number, WORK_STATE_MARKER, workStateBody);
                 if (linkedIssue) {
