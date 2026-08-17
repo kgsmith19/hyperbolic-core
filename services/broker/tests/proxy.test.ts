@@ -955,3 +955,158 @@ test("proxyRequest: a request naming neither credential nor credentialHeader is 
     },
   );
 });
+
+// Issue #200 (buildable slice of #188): a log-only pre-call spend-check
+// against core.broker_call. Same soak-period posture as #187/#199's own
+// hostAllowed: computed and recorded on the audit log, never consulted to
+// refuse or delay the actual proxied request.
+
+test("proxyRequest: estimatedCostUsd with no budget config provisioned is dark -- no spend fields logged, forwarded exactly as if estimatedCostUsd were absent", async () => {
+  await withFakeUpstream(
+    (_req, res) => {
+      res.writeHead(200, {});
+      res.end();
+    },
+    async (port) => {
+      const logged: ProxyLogEntry[] = [];
+      const result = await proxyRequest(
+        { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http", estimatedCostUsd: 5 },
+        KNOWN_CALLER_POLICY,
+        { log: (entry) => logged.push(entry) }, // no budget config
+      );
+      assert.equal(result.status, 200);
+      assert.equal(logged.length, 1);
+      assert.equal(logged[0]!.estimatedCostUsd, 5, "the caller's own estimate is still recorded even when the ledger read never ran");
+      assert.equal(logged[0]!.spentTodayUsd, undefined);
+      assert.equal(logged[0]!.budgetWouldExceed, undefined);
+    },
+  );
+});
+
+test("proxyRequest: a request naming no estimatedCostUsd at all is completely unaffected by the budget path, even with a budget config provisioned", async () => {
+  await withFakeUpstream(
+    (_req, res) => {
+      res.writeHead(200, {});
+      res.end();
+    },
+    async (port) => {
+      const logged: ProxyLogEntry[] = [];
+      const result = await proxyRequest(
+        { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
+        KNOWN_CALLER_POLICY,
+        { log: (entry) => logged.push(entry), budget: { supabaseUrl: "http://127.0.0.1:1", serviceRoleKey: "k" } },
+      );
+      assert.equal(result.status, 200);
+      assert.equal(logged[0]!.estimatedCostUsd, undefined);
+      assert.equal(logged[0]!.spentTodayUsd, undefined);
+    },
+  );
+});
+
+test("proxyRequest: estimatedCostUsd with a provisioned budget config runs the spend-check and records the result, even when it WOULD exceed budget -- log-only never blocks or alters the forwarded request", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("18", { status: 200 })) as typeof fetch; // already spent $18 today
+  try {
+    await withFakeUpstream(
+      (_req, res) => {
+        res.writeHead(200, {});
+        res.end("reached the target despite exceeding budget");
+      },
+      async (port) => {
+        const logged: ProxyLogEntry[] = [];
+        const budgetedPolicy: PolicyDocument = {
+          "llm-handler": { allowedHosts: [], vaultKeys: [], maxUsdPerDay: 20 },
+        };
+        const result = await proxyRequest(
+          { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http", estimatedCostUsd: 5 }, // 18 + 5 = 23 > 20
+          budgetedPolicy,
+          { log: (entry) => logged.push(entry), budget: { supabaseUrl: "http://127.0.0.1:9999", serviceRoleKey: "k" } },
+        );
+        assert.equal(result.status, 200, "log-only: exceeding budget never blocks the actual proxied request");
+        assert.equal(bodyText(result), "reached the target despite exceeding budget");
+        assert.equal(logged.length, 1);
+        assert.equal(logged[0]!.estimatedCostUsd, 5);
+        assert.equal(logged[0]!.spentTodayUsd, 18);
+        assert.equal(logged[0]!.budgetWouldExceed, true);
+      },
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("proxyRequest: a negative or non-finite estimatedCostUsd is refused with 400, before any upstream call", async () => {
+  for (const badValue of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    const result = await proxyRequest(
+      { caller: "llm-handler", token: "t", targetHost: "127.0.0.1:1", protocol: "http", estimatedCostUsd: badValue },
+      KNOWN_CALLER_POLICY,
+    );
+    assert.equal(result.status, 400, `estimatedCostUsd=${badValue} must be refused`);
+  }
+});
+
+test("proxyRequest: a credential-refused request never triggers a spend-check network call -- there is no spend to check for a call that never happens", async () => {
+  let fetchCalled = false;
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalled = true;
+    return new Response("0", { status: 200 });
+  }) as typeof fetch;
+  try {
+    const result = await proxyRequest(
+      {
+        caller: "never-declared",
+        token: "t",
+        targetHost: "127.0.0.1:1",
+        protocol: "http",
+        credential: "LLM_KEYS_ANTHROPIC",
+        credentialHeader: "x-api-key",
+        estimatedCostUsd: 5,
+      },
+      CREDENTIAL_POLICY,
+      { credentials: PROVISIONED_CREDENTIALS, callerTokens: REAL_CALLER_TOKENS, budget: { supabaseUrl: "http://127.0.0.1:9999", serviceRoleKey: "k" } },
+    );
+    assert.equal(result.status, 403);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+  assert.equal(fetchCalled, false);
+});
+
+test("proxyRequest: after a successful forward, the estimated cost is recorded to the ledger (fire-and-forget) with the caller, the actual contacted target, and the estimate", async () => {
+  const rpcCalls: { url: string; body: unknown }[] = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    rpcCalls.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify("id"), { status: 200 });
+  }) as typeof fetch;
+  let expectedTargetHost = "";
+  try {
+    await withFakeUpstream(
+      (_req, res) => {
+        res.writeHead(200, {});
+        res.end();
+      },
+      async (port) => {
+        expectedTargetHost = `127.0.0.1:${port}`;
+        const result = await proxyRequest(
+          { caller: "llm-handler", token: "t", targetHost: expectedTargetHost, protocol: "http", estimatedCostUsd: 0.0042 },
+          KNOWN_CALLER_POLICY,
+          { budget: { supabaseUrl: "http://127.0.0.1:9999", serviceRoleKey: "k" } },
+        );
+        assert.equal(result.status, 200);
+        // logBrokerCall is fire-and-forget (never awaited by proxyRequest
+        // itself) -- the spend-check's own read call happens first and IS
+        // awaited, so by the time proxyRequest resolves there have been at
+        // least one and at most two fetch calls; give the write's own
+        // microtask a turn to run before asserting on it.
+        await new Promise((resolve) => setImmediate(resolve));
+      },
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+  const writeCall = rpcCalls.find((c) => c.url.endsWith("/rpc/log_broker_call"));
+  assert.ok(writeCall, "expected a call to log_broker_call");
+  assert.deepEqual(writeCall!.body, { p_caller: "llm-handler", p_target_host: expectedTargetHost, p_cost_usd: 0.0042 });
+});
