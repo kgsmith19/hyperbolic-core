@@ -70,6 +70,16 @@ decision record; historical rationale otherwise lives in git history.
   where applicable, `ACC_LANE_DIR` paths. Do not run hooks manually against
   live state.
 - Preserve the machine-wide launch-lane constraint in `backend/hooks/lane.mjs`.
+- The `lane.total` launch cap fails **open** by design when it cannot count
+  running processes, so anything that makes the count fail silently disables
+  it. Keep `queryClaudeProcesses`'s timeout generous and its retry in place —
+  WMI is slowest when the machine is loaded, which is when the cap matters —
+  and keep the CLI's "launch cap NOT applied" line, which is what makes an
+  inapplicable cap visible rather than indistinguishable from an under-cap
+  allow. `ACC_LANE_PROCESS_FIXTURE` supplies that process list as JSON for
+  `backend/shim/claude.test.ps1`; it is a test seam and grants nothing a
+  caller could not already do by pointing `ACC_POLICY` at a permissive
+  policy or invoking `claude.exe` without the shim.
 - Do not weaken or delete a regression test unless the behavior it protects
   has intentionally been removed and the change explains why.
 - `backend/gui/server.mjs`'s `handler` is the most complex function in this
