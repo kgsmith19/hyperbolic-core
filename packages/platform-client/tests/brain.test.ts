@@ -214,10 +214,10 @@ test("rejectTask: sends a JSON reason body when a reason is given", async () => 
   });
 });
 
-test("health: GETs /healthz unauthenticated (no bearer token required)", async () => {
+test("health: GETs /api/brain/health unauthenticated (no bearer token required)", async () => {
   const spy = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
-    assert.equal(url.pathname, "/healthz");
+    assert.equal(url.pathname, "/api/brain/health");
     assert.equal(init?.headers, undefined);
     return jsonResponse({ status: "ok" });
   };

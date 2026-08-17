@@ -145,6 +145,10 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_ACC_API: ${{ vars.VITE_ACC_API }}
           VITE_LIFEOS_API: ${{ vars.VITE_LIFEOS_API }}
+          # '/' = same-origin: the client strips the trailing slash and issues
+          # /api/brain/* requests through the shared serve route table. Without
+          # this the bundle falls back to the browser's own 127.0.0.1:8100.
+          VITE_BRAIN_API: ${{ vars.VITE_BRAIN_API || '/' }}
         shell: bash
         run: |
           set -euo pipefail

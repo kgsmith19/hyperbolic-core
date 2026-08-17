@@ -65,7 +65,7 @@ test("dry run emits the exact five fixed, private-origin routes", () => {
     "tailscale serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/dist",
     "tailscale serve --bg --yes --https=443 --set-path=/life/api/ http://127.0.0.1:8000",
     "tailscale serve --bg --yes --https=443 --set-path=/api/ http://127.0.0.1:8200",
-    "tailscale serve --bg --yes --https=443 --set-path=/brain/stream http://127.0.0.1:8100",
+    "tailscale serve --bg --yes --https=443 --set-path=/api/brain/ http://127.0.0.1:8100",
   ]);
 });
 
@@ -172,7 +172,7 @@ test("apply preflights, applies exactly five routes, and reports final status", 
     "serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/dist",
     "serve --bg --yes --https=443 --set-path=/life/api/ http://127.0.0.1:8000",
     "serve --bg --yes --https=443 --set-path=/api/ http://127.0.0.1:8200",
-    "serve --bg --yes --https=443 --set-path=/brain/stream http://127.0.0.1:8100",
+    "serve --bg --yes --https=443 --set-path=/api/brain/ http://127.0.0.1:8100",
     "serve status",
   ]);
 });

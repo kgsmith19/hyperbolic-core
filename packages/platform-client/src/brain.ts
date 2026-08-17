@@ -245,7 +245,11 @@ export function createBrainClient(baseUrl: string, getAccessToken: () => Promise
     },
 
     async health() {
-      const res = await fetch(`${base}/healthz`);
+      // /api/brain/health, not /healthz: behind the shared one-origin route
+      // table a bare /healthz is the SHELL's static health asset, so probing
+      // it would report the Brain healthy while the daemon is down. The
+      // server accepts this path unauthenticated in both deploy shapes.
+      const res = await fetch(`${base}/api/brain/health`);
       return (await res.json()) as { status: string };
     },
 

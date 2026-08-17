@@ -170,3 +170,16 @@ test("production migrations are gated by DEPLOY_ENABLED at both call sites", () 
   );
   assert.match(calledJob, /vars\.DEPLOY_ENABLED == 'true'/);
 });
+
+test("the production Shell build bakes a Brain API base that reaches the shared origin", () => {
+  // Without VITE_BRAIN_API the bundled client falls back to the BROWSER'S
+  // 127.0.0.1:8100 (apps/shell/frontend/src/lib/session.ts), so the deployed
+  // Shell could never reach the Brain. '/' means same-origin: the client
+  // strips the trailing slash and issues /api/brain/* requests, which the
+  // serve route table forwards to the daemon (issue #134).
+  const buildJob = workflow.slice(
+    workflow.indexOf("  build-shell:"),
+    workflow.indexOf("  deploy-shell:"),
+  );
+  assert.match(buildJob, /VITE_BRAIN_API: \$\{\{ vars\.VITE_BRAIN_API \|\| '\/' \}\}/);
+});
