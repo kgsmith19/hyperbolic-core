@@ -600,7 +600,7 @@ jobs:
           oauth-secret: ${{ env.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: ${{ vars.DEPLOY_HOST }}
-      - name: Record the running the Brain image for rollback
+      - name: Record the running Brain image for rollback
         id: previous
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}

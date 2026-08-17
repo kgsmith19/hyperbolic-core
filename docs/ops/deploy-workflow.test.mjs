@@ -190,11 +190,11 @@ test("both container deploys record the running image, then roll back to it on f
   // broken image live. Each job must record the box's current image BEFORE
   // shipping, and repoint .env back to it under failure() -- degrading
   // gracefully (no rollback attempt) on a first-ever deploy (__none__).
-  for (const [job, envkey] of [
-    ["Handler A", "LLM_HANDLER_IMAGE"],
-    ["the Brain", "BRAIN_IMAGE"],
+  for (const [recordName, job, envkey] of [
+    ["Handler A", "Handler A", "LLM_HANDLER_IMAGE"],
+    ["Brain", "the Brain", "BRAIN_IMAGE"],
   ]) {
-    const record = workflow.indexOf(`- name: Record the running ${job} image for rollback`);
+    const record = workflow.indexOf(`- name: Record the running ${recordName} image for rollback`);
     const deploy = workflow.indexOf(`- name: Deploy ${job}\n`, record);
     const rollback = workflow.indexOf(`- name: Roll back ${job} to the previous image`, deploy);
     assert.ok(record > -1 && deploy > record && rollback > deploy, `${job}: record -> deploy -> rollback order`);
