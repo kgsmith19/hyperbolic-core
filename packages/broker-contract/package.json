@@ -1,0 +1,10 @@
+{
+  "name": "@hyperbolic/broker-contract",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The request/policy-document contract for the guards broker (Epic #182, issue #183): shape validation only, no runtime. Lives under packages/, not services/, because apps/toolbelt's manifest registry requires every services/* directory to carry a tool.json for a real deployable unit -- this package has no entry point yet. The broker's actual runtime service (services/broker/, with its own tool.json) imports this package once it exists.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test *.test.mjs"
+  }
+}
