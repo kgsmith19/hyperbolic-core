@@ -39,13 +39,15 @@ test("the existing age->artifact path carries no RESTIC_BACKUP_ENABLED gate of i
   // The old path must be provably unaffected by the new var's state either
   // way -- a gate leaking onto it here would make it stop running the
   // moment the owner turns restic on, which is not what "primary + free
-  // secondary" means. Match the expression form only: the handoff comment
-  // in this same block legitimately NAMES the variable to explain why the
-  // copy is unconditional.
+  // secondary" means. Match the expression form only (both the bare and
+  // ${{ }}-wrapped syntaxes -- this file uses both elsewhere, e.g.
+  // `identity-id: ${{ vars.INFISICAL_PLATFORM_RESTIC_IDENTITY_ID }}`): the
+  // handoff comment in this same block legitimately NAMES the variable to
+  // explain why the copy is unconditional.
   const oldPath = stepBlock("- name: Validate backup configuration", [
     "- name: Storage Box restic credentials",
   ]);
-  assert.doesNotMatch(oldPath, /if:\s*vars\.RESTIC_BACKUP_ENABLED/);
+  assert.doesNotMatch(oldPath, /if:\s*(\$\{\{\s*)?vars\.RESTIC_BACKUP_ENABLED/);
 });
 
 test("restic reads a distinct Infisical identity and path from the SUPABASE_DB_URL step", () => {
@@ -68,8 +70,12 @@ test("no GitHub Actions secret and no key material hardcoded -- Infisical OIDC o
   // Match actual shell expansion of the secret value, not the validation
   // step's error message, which legitimately names the variable in prose
   // ("...were not supplied by Infisical") without ever printing its value.
-  assert.doesNotMatch(workflow, /echo[^\n]*\$\{?STORAGEBOX_SSH_KEY/);
-  assert.doesNotMatch(workflow, /echo[^\n]*\$\{?RESTIC_PASSWORD/);
+  // Join backslash-newline shell line continuations first, so an echo whose
+  // argument wraps onto a following line (a style already used elsewhere in
+  // this file for long commands) can't hide from a same-line-only regex.
+  const joined = workflow.replace(/\\\n[ \t]*/g, " ");
+  assert.doesNotMatch(joined, /echo[^\n]*\$\{?STORAGEBOX_SSH_KEY/);
+  assert.doesNotMatch(joined, /echo[^\n]*\$\{?RESTIC_PASSWORD/);
 });
 
 test("the dump is handed off through RUNNER_TEMP, not re-dumped a second time", () => {
@@ -117,4 +123,43 @@ test("every restic step still runs under strict mode", () => {
     "- name: Record the run id",
   ]);
   assert.match(backup, /set -euo pipefail/);
+});
+
+test("both restic steps carry continue-on-error, so a restic hiccup never fails the job directly", () => {
+  // A restic failure must not fail the whole job (which would also skip the
+  // run-id step below via GitHub Actions' default stop-on-failure) -- the
+  // age backup above already succeeded and uploaded by this point. The
+  // separate gate step below re-fails the job deliberately, but only after
+  // the run id is safely recorded.
+  const credentials = stepBlock("- name: Storage Box restic credentials", [
+    "- name: Back up the platform dump",
+  ]);
+  assert.match(credentials, /id: restic-credentials/);
+  assert.match(credentials, /continue-on-error: true/);
+
+  const backup = stepBlock("- name: Back up the platform dump to the Hetzner Storage Box (restic)", [
+    "- name: Record the run id",
+  ]);
+  assert.match(backup, /id: restic-backup/);
+  assert.match(backup, /continue-on-error: true/);
+});
+
+test("a final gate step fails the job on a restic failure, positioned after the run-id step", () => {
+  const runIdIndex = workflow.indexOf("- name: Record the run id");
+  const gateIndex = workflow.indexOf("- name: Fail the job if the restic backup did not succeed");
+  assert.ok(runIdIndex > -1 && gateIndex > -1);
+  assert.ok(runIdIndex < gateIndex, "the gate step must come after the run-id step, not before it");
+
+  const gate = stepBlock("- name: Fail the job if the restic backup did not succeed", []);
+  assert.match(gate, /if: vars\.RESTIC_BACKUP_ENABLED == 'true' && \(steps\.restic-credentials\.outcome != 'success' \|\| steps\.restic-backup\.outcome != 'success'\)/);
+  assert.match(gate, /exit 1/);
+});
+
+test("restic-setup.sh (called by the backup step above) trusts the Storage Box on first connection", () => {
+  // A missing StrictHostKeyChecking setting would hang or fail the very
+  // first real connection non-interactively -- checked here too, not only
+  // in restic-setup.test.mjs, since this workflow is what actually invokes
+  // it in production.
+  const resticSetup = readFileSync(path.join(root, "docs/ops/restic-setup.sh"), "utf8");
+  assert.match(resticSetup, /StrictHostKeyChecking accept-new/);
 });
