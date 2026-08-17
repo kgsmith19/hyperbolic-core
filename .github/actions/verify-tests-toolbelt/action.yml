@@ -66,6 +66,7 @@ runs:
         node --test \
           tests/core-rpc-migration.test.mjs \
           tests/core-event-retention-atomic.test.mjs \
+          tests/generate-broker-policy.test.mjs \
           tests/registration-toolbelt.test.mjs \
           tests/registry-manifest-hash.test.mjs \
           tests/registry-migrations-idempotency.test.mjs \
