@@ -172,6 +172,7 @@ jobs:
       needs.build-shell.result == 'success' &&
       (needs.migrate-platform.result == 'success' || needs.migrate-platform.result == 'skipped')
     runs-on: ubuntu-latest
+    environment: shell-deploy-production
     timeout-minutes: 20
     permissions:
       contents: read
@@ -360,6 +361,7 @@ jobs:
       needs.build-llm-handler.result == 'success' &&
       (needs.migrate-platform.result == 'success' || needs.migrate-platform.result == 'skipped')
     runs-on: ubuntu-latest
+    environment: llm-handler-deploy-production
     timeout-minutes: 20
     permissions:
       contents: read
@@ -550,6 +552,7 @@ jobs:
       needs.build-brain.result == 'success' &&
       (needs.migrate-platform.result == 'success' || needs.migrate-platform.result == 'skipped')
     runs-on: ubuntu-latest
+    environment: brain-deploy-production
     timeout-minutes: 20
     permissions:
       contents: read

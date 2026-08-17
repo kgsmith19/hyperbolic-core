@@ -38,6 +38,7 @@ jobs:
     if: vars.CLOUDFLARE_EDGE_ENABLED == 'true'
     name: Deploy the edge-origin + cloudflared stack
     runs-on: ubuntu-latest
+    environment: ops-edge-production
     timeout-minutes: 20
     permissions:
       contents: read

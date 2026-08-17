@@ -126,6 +126,7 @@ jobs:
       vars.LIFEOS_DEPLOY_ENABLED == 'true' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: lifeos-backend-deploy-production
     timeout-minutes: 20
     concurrency:
       group: deploy-lifeos-backend-production
@@ -239,6 +240,7 @@ jobs:
       vars.LIFEOS_DEPLOY_ENABLED == 'true' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: lifeos-ui-deploy-production
     timeout-minutes: 15
     concurrency:
       group: deploy-lifeos-ui-production
