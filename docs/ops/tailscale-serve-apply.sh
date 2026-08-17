@@ -38,7 +38,7 @@ if [[ -n "${NODE_TEST_CONTEXT:-}" && -n "${TAILSCALE_SERVE_TEST_ROOT:-}" ]]; the
 fi
 targets=(
   "${deploy_root}/shell/current"
-  "${deploy_root}/lifeos-ui/dist"
+  "${deploy_root}/lifeos-ui/current"
   "http://127.0.0.1:8000"
   "http://127.0.0.1:8200"
   "http://127.0.0.1:8100"
