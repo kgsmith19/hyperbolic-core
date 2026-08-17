@@ -12,9 +12,11 @@ test("deploy discovery covers every manifest-owned migration directory", () => {
   assert.match(workflow, /\^apps\/toolbelt\/\(\.\*\/\)\?supabase\/migrations\//);
 });
 
-test("all six Shell, Handler A, and Brain deploy jobs retain the explicit production gate", () => {
+test("all six deploy jobs plus the migrations call retain the explicit production gate", () => {
+  // 6 build/deploy jobs + migrate-platform (issue #135): every prod-touching
+  // job in this workflow carries the gate, and nothing else does.
   const occurrences = workflow.match(/vars\.DEPLOY_ENABLED == 'true'/g) ?? [];
-  assert.equal(occurrences.length, 6);
+  assert.equal(occurrences.length, 7);
 });
 
 test("production migrations cannot be dispatched from a feature ref", () => {
@@ -145,4 +147,26 @@ test("Handler A's rendered .env can deliver the LLM provider keys the service re
   // Optional-var shape, not required: an unprovisioned key must be omitted from
   // .env (the daemon treats them as optional), never rendered empty or fatal.
   assert.match(job, /\[ -n "\$\{LLM_KEYS_ANTHROPIC:-\}" \]/);
+});
+
+const migrationsWorkflow = readFileSync(
+  path.join(root, ".github/workflows/platform-migrations.yml"),
+  "utf8",
+);
+
+test("production migrations are gated by DEPLOY_ENABLED at both call sites", () => {
+  // Before issue #135 a push touching only migration paths mutated the prod
+  // schema even with deploys disabled: migrate-platform was gated on ref +
+  // changed paths only, and platform-migrations.yml's own jobs had no
+  // repository-variable gate at all (its workflow_dispatch was ungated).
+  const migrateJob = workflow.slice(
+    workflow.indexOf("  migrate-platform:"),
+    workflow.indexOf("  build-shell:"),
+  );
+  assert.match(migrateJob, /vars\.DEPLOY_ENABLED == 'true'/);
+  const calledJob = migrationsWorkflow.slice(
+    migrationsWorkflow.indexOf("  migrate:"),
+    migrationsWorkflow.indexOf("    steps:"),
+  );
+  assert.match(calledJob, /vars\.DEPLOY_ENABLED == 'true'/);
 });

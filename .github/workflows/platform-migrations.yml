@@ -39,6 +39,11 @@ permissions:
 jobs:
   migrate:
     name: Apply platform migrations
+    # Fail-closed production gate: without this, a direct workflow_dispatch (or
+    # a caller that forgot its own gate) would mutate the production schema in
+    # a clone or disabled repository. A run with the var unset is a visible
+    # skip, not a failure.
+    if: vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: platform-migrations-production
     timeout-minutes: 20
