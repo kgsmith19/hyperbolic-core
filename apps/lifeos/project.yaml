@@ -9,20 +9,29 @@ commands:
   frontend_verify: cd frontend && npm run lint && npx tsc -b && npm run test && npm run e2e && npm run build
 
 ci:
-  workflow: .github/workflows/ci.yml
-  required_check: "PR Gate"
+  # In this monorepo the merge gate is the ROOT workflow below. The app-local
+  # apps/lifeos/.github/workflows/ copies are inert here (GitHub only runs
+  # root workflows) and are kept for the standalone kgsmith19/lifeos repo;
+  # see apps/lifeos/AGENTS.md for why they must never be relocated.
+  workflow: ../../.github/workflows/lifeos-ci.yml
+  required_check: "LifeOS PR Gate"
   triggers:
     - pull_request
     - merge_group
-    - push_main
 
 operations:
+  # Inert in this repo (standalone-repo lifecycle; see ci note above).
+  # release-smoke.yml exists only in the standalone repo and is not present
+  # in this subtree.
   workflows:
     - .github/workflows/ops.yml
     - .github/workflows/backup.yml
-    - .github/workflows/release-smoke.yml
-  backup_scope: "Postgres database only; document blob storage is excluded"
+  backup_scope: "Nightly pg_dump of the public schema PLUS a tar of the
+    document blob volume (/app/var/blobs), verified, age-encrypted, uploaded
+    as a GitHub Actions artifact with 90-day retention (backup.yml)"
 
 deploy:
+  # Inert in this repo: this describes the standalone kgsmith19/lifeos
+  # pipeline, which currently owns the live deployment.
   mechanism: "push to main -> PR Gate -> backend and frontend deploy when DEPLOY_ENABLED"
   smoke: "curl -fsS http://127.0.0.1:8000/healthz"
