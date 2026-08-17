@@ -1,0 +1,131 @@
+name: Verify Repo Policy
+description: >-
+  Structural checks: CLAUDE.md/GEMINI.md are exact adapters, AGENTS.md has
+  every required section, every workflow action is SHA-pinned,
+  project.yaml/standard.lock parse as valid YAML, and no trailing
+  whitespace was introduced. Shared by pr-verify.yml's native "Verify: Repo
+  Policy" job and repo-policy.yml's own merge_group/push/workflow_dispatch
+  triggers, so the actual checks have exactly one source.
+
+inputs:
+  base_sha:
+    description: Base commit SHA to diff against for the whitespace check. Empty skips that one check only.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Setup · Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Setup · Install Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: "3.12"
+
+    - name: Setup · Install PyYAML
+      shell: bash
+      run: pip install --quiet pyyaml
+
+    - name: Policy · Confirm CLAUDE.md and GEMINI.md are exact adapters
+      shell: bash
+      run: |
+        set -euo pipefail
+        printf '# CLAUDE.md\n\n@AGENTS.md\n' > /tmp/expected-claude.md
+        printf '# GEMINI.md\n\n@AGENTS.md\n' > /tmp/expected-gemini.md
+        fail=0
+        if ! cmp -s CLAUDE.md /tmp/expected-claude.md; then
+          echo "CLAUDE.md is not the exact 2-line adapter (# CLAUDE.md / blank / @AGENTS.md)." >&2
+          fail=1
+        fi
+        if ! cmp -s GEMINI.md /tmp/expected-gemini.md; then
+          echo "GEMINI.md is not the exact 2-line adapter (# GEMINI.md / blank / @AGENTS.md)." >&2
+          fail=1
+        fi
+        exit "$fail"
+
+    - name: Policy · Confirm AGENTS.md has every required section
+      shell: bash
+      run: |
+        set -euo pipefail
+        missing=()
+        while IFS= read -r heading; do
+          [ -z "$heading" ] && continue
+          grep -qF -- "$heading" AGENTS.md || missing+=("$heading")
+        done <<'HEADINGS'
+        ## Objective
+        ## 🎯 Repository purpose
+        ## ⚠️ Workflow Safety Invariant
+        ## ⚠️ The platform publishable key has six hardcoded copies
+        ## Owner authority
+        ## Sources of truth
+        ## Session bootstrap
+        ## Provider-neutral roles
+        ## Releases and milestones
+        ## Thin Issues and work claiming
+        ## Worktrees and parallel work
+        ## Context recovery and subagent tracking
+        ## Risk classification
+        ## Intent and behavioral claims
+        ## Test quality
+        ## Verification flow
+        ## Evidence and artifacts
+        ## Lean engineering
+        ## Documentation and handoff
+        ## PR Gate and merge behavior
+        ## Agent boundaries
+        ## Completion standard
+        HEADINGS
+        if [ "${#missing[@]}" -gt 0 ]; then
+          echo "AGENTS.md is missing required sections:" >&2
+          printf '  - %s\n' "${missing[@]}" >&2
+          exit 1
+        fi
+        echo "AGENTS.md has every required section."
+
+    - name: Policy · Confirm every workflow and composite action is SHA-pinned
+      shell: bash
+      run: |
+        set -euo pipefail
+        fail=0
+        while IFS= read -r -d '' file; do
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            # Local reusable-workflow/composite-action references (uses:
+            # ./path) are pinned by definition to the calling workflow's own
+            # checkout; only external third-party actions need an explicit
+            # SHA pin.
+            if echo "$line" | grep -qE 'uses:[[:space:]]*\./'; then
+              continue
+            fi
+            if ! echo "$line" | grep -qE '@[0-9a-f]{40}[[:space:]]+# v[0-9]'; then
+              echo "Unpinned action or missing version comment in $file: $line" >&2
+              fail=1
+            fi
+          done < <(grep -E '^\s*uses:' "$file" || true)
+        done < <(find .github/workflows -maxdepth 1 -name '*.yml' -print0; find .github/actions -mindepth 2 -maxdepth 2 -name 'action.yml' -print0)
+        exit "$fail"
+
+    - name: Policy · Confirm project.yaml and standard.lock parse as valid YAML
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -c "import yaml; yaml.safe_load(open('project.yaml'))"
+        python3 -c "import yaml; yaml.safe_load(open('standard.lock'))"
+        echo "project.yaml and standard.lock parse as valid YAML."
+
+    - name: Policy · Confirm no trailing whitespace was introduced
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base_sha }}
+      run: |
+        set -euo pipefail
+        if [ -n "${BASE_SHA}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+          git diff --check "${BASE_SHA}...HEAD"
+        else
+          echo "No comparable base for this event; skipping incremental whitespace check."
+        fi

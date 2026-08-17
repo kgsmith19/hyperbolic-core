@@ -1,0 +1,61 @@
+name: Verify Linting
+description: >-
+  Runs LifeOS's own lint commands (ruff for the backend, npm run lint for
+  the frontend) as a fast, dedicated check independent of the full LifeOS
+  test suite in lifeos-ci.yml. LifeOS-only today -- no other app in this
+  repo has a lint command configured (see docs/planning/10-cicd-deployment.md
+  and shell-ci.yml's own header comment on why Shell has none). Extend this
+  action, not a second one, when another app adopts a linter.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup · Checkout repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Setup · Install Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      with:
+        python-version: "3.14"
+
+    - name: Lint · Install backend package (dev extras)
+      shell: bash
+      working-directory: apps/lifeos/backend
+      run: python -m pip install -e .[dev]
+
+    - name: Lint · ruff check (backend)
+      shell: bash
+      working-directory: apps/lifeos/backend
+      run: ruff check .
+
+    - name: Setup · Install Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 24
+        cache: npm
+        cache-dependency-path: apps/lifeos/frontend/package-lock.json
+
+    # apps/lifeos/frontend depends on @hyperbolic/ui and
+    # @hyperbolic/platform-client through file: paths; the root workspace
+    # install and a built packages/ui are needed before its own npm ci and
+    # lint can resolve those imports. lifeos-ci.yml's frontend job does the
+    # same two steps for the same reason.
+    - name: Setup · Install root workspace dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Setup · Build the packages/ui dependency
+      shell: bash
+      run: npm run build --workspace=packages/ui
+
+    - name: Setup · Install frontend dependencies
+      shell: bash
+      working-directory: apps/lifeos/frontend
+      run: npm ci
+
+    - name: Lint · npm run lint (frontend)
+      shell: bash
+      working-directory: apps/lifeos/frontend
+      run: npm run lint

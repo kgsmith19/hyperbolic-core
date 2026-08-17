@@ -34,7 +34,8 @@ are native to this repo.
 
 `.github/workflows/pr-verify.yml` runs every `Verify: *` gate on every pull request, but keeps
 the *required* surface small: `Verify: Secrets` → `Verify: Repo Policy` → `Verify: PR Description`
-run in strict sequence first, then the five app gates from the table above run in parallel, then
+→ `Verify: Linting` (LifeOS's own lint commands — the only app with one configured today) run in
+strict sequence first, then the five app gates from the table above run in parallel, then
 `Verify: Tests` — a single umbrella check, not five separate required ones — passes only once all
 five have. `Verify: LLM Review` runs last and stays non-required until reviewer credentials are
 provisioned. See [`AGENTS.md`](./AGENTS.md)'s "PR Gate and merge behavior" section for the full

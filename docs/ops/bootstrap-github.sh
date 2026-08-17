@@ -149,18 +149,18 @@ if ((branch_protection)); then
   # sensitive policy decision than this script's scope -- flip it by hand
   # if the owner wants it enforced at the ruleset level.
   #
-  # Context strings for the three workflow_call-chained gates below are the
-  # COMPOUND form GitHub actually reports for that kind of job --
-  # "<pr-verify.yml job name> / <called workflow's own job name>" -- not
-  # each gate's bare "Verify: X" name. Confirmed empirically against PR
-  # #160's own first real run. "Verify: Tests" is a native job in
-  # pr-verify.yml (no workflow_call involved), so it reports as the plain
-  # "Verify: Tests" with no compound prefix -- the same pattern already
-  # confirmed for "Hyperbolic Core Merge Policy". Do not simplify the first
-  # three back to the short form: a required check that never matches the
-  # real reported context blocks every PR forever. The five app gates
-  # (Toolbelt/ACC/Brain/Shell/LifeOS) are deliberately NOT required
-  # individually -- only the "Verify: Tests" umbrella that needs all five is.
+  # All five contexts below are NATIVE jobs in pr-verify.yml (no
+  # workflow_call involved for any of them), so each reports its bare
+  # "Verify: X" name with no compound prefix -- the same pattern already
+  # confirmed for "Hyperbolic Core Merge Policy". Do NOT use these bare
+  # names for anything that IS workflow_call-chained (the five app gates,
+  # LLM Review): those report the COMPOUND form
+  # "<pr-verify.yml job name> / <called workflow's own job name>" instead,
+  # confirmed empirically against PR #160's own first real run -- a
+  # required check that never matches the real reported context blocks
+  # every PR forever. The five app gates (Toolbelt/ACC/Brain/Shell/LifeOS)
+  # are deliberately NOT required individually -- only the "Verify: Tests"
+  # umbrella that needs all five is.
   protection_body=$(cat <<'JSON'
 {
   "name": "main",
@@ -189,9 +189,10 @@ if ((branch_protection)); then
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": true,
         "required_status_checks": [
-          { "context": "Verify: Secrets / Verify: Secrets" },
-          { "context": "Verify: Repo Policy / Verify: Repo Policy" },
-          { "context": "Verify: PR Description / Verify: PR Description" },
+          { "context": "Verify: Secrets" },
+          { "context": "Verify: Repo Policy" },
+          { "context": "Verify: PR Description" },
+          { "context": "Verify: Linting" },
           { "context": "Verify: Tests" }
         ]
       }
