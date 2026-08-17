@@ -461,6 +461,35 @@ dropdb platform_restore_drill
 
 Executing the first drill against a real `platform-backup.yml` artifact and filling in the table above is an operator action requiring the offline age identity and live platform credentials, neither of which exists in a CI or agent environment by design -- it is the one acceptance criterion of m6-03 that repository changes cannot satisfy.
 
+## LifeOS restic backup: dump + live blob volume, distinct from the platform restore path above
+
+`lifeos-backup.yml`'s restic step (issue #167) shares `RESTIC_BACKUP_ENABLED` and the
+`INFISICAL_PLATFORM_RESTIC_IDENTITY_ID` / `/platform/backup/` identity with `platform-backup.yml`'s
+own restic step above -- one switch, one credential set, for both pipelines, since both back up to
+the same Storage Box account and `restic-setup.sh` already shares one `RESTIC_PASSWORD` across every
+repository it initializes.
+
+What differs from the platform restore path above:
+
+- **Contents.** The `platform` restic repository holds a database dump only. The `lifeos` repository
+  holds the already-produced dump (handed off from the Bundle step, never re-dumped -- `DATABASE_URL`
+  never travels to the box) *and* the live document blob volume (`/app/var/blobs`, a named Docker
+  volume from `apps/lifeos/backend/compose.yaml`).
+- **Where it runs.** The platform restic step runs entirely inside the ephemeral GitHub Actions
+  runner. The LifeOS restic step runs on the box itself, over a fresh Tailscale SSH connection (not
+  the blob-tar step's own session -- each step opens and closes its own): the volume's real
+  (Compose-project-prefixed) name is discovered via
+  `docker inspect` first (never assumed from Compose's own naming convention -- a bare
+  `docker run -v lifeos-blobs:...` would silently create or reference a *different*, empty volume),
+  then copied locally into a plain directory restic walks, the same way it already walks the platform
+  pipeline's dump file. Running on the box, against the live volume, is what gets restic's real
+  incremental storage on the Storage Box side, instead of the age path's fresh tarball every night.
+- **Restoring** a LifeOS snapshot needs two `restic restore` targets, not one: the dump file
+  (`pg_restore` into a scratch database, same shape as the platform drill above) and the blobs
+  directory (extracted into a scratch location, never restored directly onto the production volume).
+  No LifeOS restic restore drill exists yet -- issue #167 is backup setup only; #168 (the restore-drill
+  workflow, depends on both #166 and #167) covers both repositories once live.
+
 ## Restic restore drill (automated)
 
 `ops-restore-drill.yml` (issue #168, closes gap G-17 from the deployment research) runs monthly and
