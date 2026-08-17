@@ -66,6 +66,63 @@ inputs:
 runs:
   using: composite
   steps:
+    # Runs first so an unprovisioned gate says WHICH knob is missing rather
+    # than dying inside Infisical/secrets-action with "Missing identity ID
+    # for OIDC auth" -- an error that names neither the GitHub variable that
+    # was empty nor the fact that a GitHub variable, not anything in
+    # Infisical, is what's absent (issue #212). Reports set/unset only,
+    # never values, so it is safe on a public repository.
+    - name: Preflight · Verify the reviewer is configured
+      if: inputs.pr_number != ''
+      shell: bash
+      env:
+        IDENTITY_ID: ${{ inputs.infisical_identity_id }}
+        PROJECT_SLUG: ${{ inputs.infisical_project_slug }}
+        REVIEW_PROVIDER: ${{ inputs.review_provider }}
+        REVIEW_MODEL: ${{ inputs.review_model }}
+        REVIEW_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
+      run: |
+        set -euo pipefail
+        missing=()
+        [ -n "$IDENTITY_ID" ]    || missing+=("vars.INFISICAL_REVIEW_IDENTITY_ID")
+        [ -n "$PROJECT_SLUG" ]   || missing+=("vars.INFISICAL_PROJECT_SLUG")
+        [ -n "$REVIEW_PROVIDER" ]|| missing+=("vars.REVIEW_PROVIDER")
+        [ -n "$REVIEW_MODEL" ]   || missing+=("vars.REVIEW_MODEL")
+
+        if [ ${#missing[@]} -gt 0 ]; then
+          {
+            echo "This gate is not fully provisioned. Empty repository variables:"
+            printf '  - %s\n' "${missing[@]}"
+            echo
+            echo "All four are read through the \`vars.\` context, so each must exist as a"
+            echo "repository VARIABLE (Settings -> Secrets and variables -> Actions -> the"
+            echo "Variables tab). Two placements look correct but are invisible here:"
+            echo "  * added under Secrets instead of Variables -- \`vars.\` cannot read secrets;"
+            echo "  * scoped to an Environment -- this job declares no \`environment:\`, so"
+            echo "    environment-scoped variables never reach it. Repository scope is required."
+            echo
+            echo "Also needed, and not checkable from here: the reviewer key at Infisical"
+            echo "path /review/ (env prod), named REVIEW_ANTHROPIC_API_KEY /"
+            echo "REVIEW_OPENAI_API_KEY / REVIEW_GEMINI_API_KEY. Only the one matching"
+            echo "REVIEW_PROVIDER is read."
+          } >&2
+          exit 1
+        fi
+
+        # packages/review/src/config.ts throws when these match, defaulting the
+        # builder to anthropic -- caught here so the reason is stated up front
+        # rather than surfacing as a reviewer crash after credentials are pulled.
+        builder="${REVIEW_BUILDER_PROVIDER:-anthropic}"
+        if [ "$REVIEW_PROVIDER" = "$builder" ]; then
+          echo "REVIEW_PROVIDER and the builder family are both \"$builder\"." >&2
+          echo "packages/review refuses to let one model family grade its own work, so the" >&2
+          echo "reviewer must be a different family (AGENTS.md, R2/R3 provider separation)." >&2
+          echo "With the builder defaulting to anthropic, set REVIEW_PROVIDER to openai or gemini." >&2
+          exit 1
+        fi
+
+        echo "Reviewer configuration present: provider=$REVIEW_PROVIDER model=$REVIEW_MODEL builder=$builder"
+
     - name: Setup · Install Node
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
