@@ -157,7 +157,7 @@ The VPS exposes one tailnet-only HTTPS origin. Tailscale provides the network bo
 | `/api/` | `http://127.0.0.1:8200` | active loopback proxy (Handler A; `/api/intake/submit` and `/api/v1/complete`\|`stream`\|`count`, m4-05) |
 | `/api/brain/` | `http://127.0.0.1:8100` | active loopback proxy (the Brain daemon; full-path forwarding matches `server.ts`'s `/api/brain/*` routes) |
 
-The command shape follows the current [Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve). Run the checked-in operator script on the VPS:
+The command shape follows the current [Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve). Apply the routes by dispatching the **`Ops Serve Apply`** workflow (`.github/workflows/ops-serve-apply.yml`) from the Actions tab -- it ships the exact checked-in script over keyless Tailscale SSH, runs it with `--apply`, and republishes `tailscale serve status` before and after to the run summary. Gated on `DEPLOY_ENABLED`, same as every prod-touching job. The script can still be run directly on the VPS when working on the box itself:
 
 Do not apply these routes until the LifeOS m2-08 base-path release and Handler A (`llm-handler`, see "Handler A deployment" below) are both deployed. The script proves the built LifeOS asset URLs use `/life/`, and that both the LifeOS and Handler A loopback `/healthz` endpoints respond, before it changes any route.
 
@@ -296,6 +296,65 @@ This repository proves, in `docs/ops/deploy-workflow.test.mjs`, that `deploy-bra
 ### Brain external reachability: `/api/brain/` mount
 
 `services/brain/src/server.ts` registers its HTTP surface under `/api/brain/*` plus a bare `/healthz` for the in-container Docker healthcheck. The serve mount is `/api/brain/` -- tailscale forwards the full incoming path unchanged (the same mechanic as `/api/` and `/life/api/`), so `https://<origin>/api/brain/<route>` reaches the container as `/api/brain/<route>`, exactly what the server handles. (The original mount was `/brain/stream`, a name that predated the server's real route shape; nothing handled that path, so it was retired when the mount was corrected -- issue #134.) The `/api/brain/` mount is more specific than `/api/`, and Tailscale Serve routes by most-specific path, so Handler A keeps everything else under `/api/`. External health probes use `/api/brain/health` (unauthenticated), never the origin's bare `/healthz`, which is the Shell's static health asset.
+## LifeOS cutover: standalone repo to monorepo
+
+The standalone `kgsmith19/lifeos` repository ran the live LifeOS pipeline
+until this cutover; the monorepo's `lifeos-deploy.yml`, `lifeos-backup.yml`,
+and `lifeos-ops.yml` land dark behind `LIFEOS_DEPLOY_ENABLED` /
+`LIFEOS_BACKUP_ENABLED` precisely so that flipping ownership is one ordered,
+reversible sequence with no window in which two pipelines write to the same
+VPS. Execute the steps in this order; do not parallelize them.
+
+**Prerequisites** (once, before step 1): Infisical machine identity for
+`lifeos-deploy` with read on `/platform/lifeos-deploy/` only, the path
+populated (`DATABASE_URL`, `LIFEOS_SUPABASE_URL`, `LIFEOS_OWNER_USER_ID`,
+`TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, plus any optional job vars:
+`ANTHROPIC_API_KEY`, `LIFEOS_ICS_URLS`, `LIFEOS_BRIEFING_TZ`, SleepHQ and
+SimpleFIN credentials); repository variable
+`INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID`; a NEW age keypair with its public
+half in repository variable `LIFEOS_AGE_PUBLIC_KEY` (never reuse the
+standalone repo's or the platform pipeline's pair); and the tailnet ACL
+granting `tag:ci` Tailscale-SSH to `deploy@<vps>` (already true if the
+platform deploys use keyless SSH; the standalone LifeOS pipeline has always
+used it).
+
+1. **Stop the standalone writers.** In `kgsmith19/lifeos`, set repository
+   variables `DEPLOY_ENABLED=false` and `BACKUP_ENABLED=false`.
+2. **Confirm quiescence.** In the standalone repo's Actions tab, confirm no
+   deploy or backup run is in flight (wait for any to finish). From this
+   point the box has exactly zero writers.
+3. **Arm the monorepo.** Here, set `LIFEOS_DEPLOY_ENABLED=true` and
+   `LIFEOS_BACKUP_ENABLED=true`.
+4. **Bootstrap deploy (one time).** Dispatch `lifeos-deploy.yml` with
+   `skip_live_verify` checked: the `/life/` serve route still points at the
+   standalone layout until the route table is re-applied, so the live-route
+   verify cannot pass yet. This run creates `lifeos-ui/current` and starts
+   the backend from the monorepo image.
+5. **Re-apply the serve routes** so `/life/` serves `lifeos-ui/current`:
+   dispatch the `Ops Serve Apply` workflow (route table above).
+6. **Fully verified deploy.** Dispatch `lifeos-deploy.yml` again with
+   defaults. Both units must go green, including the live `/life/` verify
+   and the backend's `/healthz` gate. Then confirm from a tailnet device:
+   `https://<host>/life/` renders and `https://<host>/life/api/healthz` is
+   green.
+7. **First monorepo backup.** Dispatch `lifeos-backup.yml`; download the
+   artifact and confirm it decrypts with the NEW LifeOS age key and lists
+   (`age -d -i <key> | tar -t`).
+8. **Cron ownership.** Dispatch `lifeos-ops.yml` task
+   `install-scheduled-jobs` (rewrites the wrapper to the monorepo-managed
+   text), then task `run-scheduled-jobs` once and confirm the trio passes.
+9. **Record the cutover** on the Epic: run links for steps 4-8 and the
+   owner's attestation that step 1's flips are in place.
+
+**Rollback to the standalone pipeline** (if anything above fails and cannot
+be fixed forward): set this repo's two `LIFEOS_*_ENABLED` vars back to
+unset/false, re-point the `/life/` serve route at `lifeos-ui/dist`, and
+restore `DEPLOY_ENABLED`/`BACKUP_ENABLED` in `kgsmith19/lifeos`. The
+standalone pipeline's next deploy rebuilds its own layout; nothing the
+monorepo shipped blocks it. Leave the standalone repository intact as
+history in either outcome -- it is the archive of record for the pre-cutover
+era, never deleted.
+
 ## One-time platform migration adoption
 
 `platform-migrations.yml` authenticates to Infisical the same way `deploy.yml` does, via a dedicated OIDC identity: set repository variables `INFISICAL_PROJECT_SLUG` (shared with the Shell deploy pipeline) and `INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID` (its own identity, scoped to `/platform/` only -- the path `platform-migrations.yml` actually sets as `secret-path` -- per ADR-05's one-identity-per-pipeline rule; never the same identity `shell-deploy` uses). Its `/platform/` secret path must contain `SUPABASE_DB_URL`, a table-owner-privileged Postgres connection string for the platform project; this is the single most powerful credential in either pipeline, since it bypasses RLS entirely. Without these two variables set, every dispatch fails immediately at the Infisical step, before touching the database at all.

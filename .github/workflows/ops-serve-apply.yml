@@ -1,0 +1,88 @@
+name: "Ops Serve Apply"
+
+# Applies the one-origin tailscale serve route table to the VPS by workflow
+# dispatch, replacing the runbook's shell-into-the-box instruction (the docs
+# themselves called for "the ops-workflow pattern, one dispatchable task").
+# The route map itself stays in docs/ops/tailscale-serve-apply.sh -- tested,
+# idempotent, preflighted -- and this workflow is only its transport: ship the
+# exact checked-in script over keyless Tailscale SSH and run it with --apply.
+# The script's own preflights (Shell health asset, LifeOS /life/ base-path
+# assertion, all three loopback healthz probes) fail the run loudly before
+# any route changes, and existing routes are only ever added to, never
+# wiped wholesale.
+#
+# Credentials: the shell-deploy Infisical identity (/platform/shell-deploy/)
+# supplies the tailnet OAuth client -- the serve table fronts the Shell
+# origin, and that path already exists for deploy.yml's deploy-shell job.
+# No new identity, no GitHub secrets, no SSH key material.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-serve-apply-production
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Apply serve routes
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Secrets · Pull the tailnet OAuth client from Infisical
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_SHELL_DEPLOY_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/shell-deploy/"
+          domain: https://app.infisical.com
+
+      - name: Network · Join tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
+
+      - name: Apply · Ship the route script and apply it on the box
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          if [[ ! "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}[A-Za-z0-9]$ ]]; then
+            echo "DEPLOY_HOST must be a non-empty DNS name or IPv4 address." >&2
+            exit 1
+          fi
+          status=0
+          scp "${ssh_options[@]}" docs/ops/tailscale-serve-apply.sh "deploy@$DEPLOY_HOST:tailscale-serve-apply.sh"
+          out=$(ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          chmod 0755 tailscale-serve-apply.sh
+          echo "=== serve status BEFORE ==="
+          tailscale serve status || true
+          echo "=== apply ==="
+          ./tailscale-serve-apply.sh --apply
+          echo "=== serve status AFTER ==="
+          tailscale serve status
+          REMOTE
+          ) || status=$?
+          printf '%s\n' "$out"
+          { echo '### ops-serve-apply'; echo '```'; printf '%s\n' "$out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

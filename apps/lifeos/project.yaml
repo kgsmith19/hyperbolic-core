@@ -20,18 +20,21 @@ ci:
     - merge_group
 
 operations:
-  # Inert in this repo (standalone-repo lifecycle; see ci note above).
-  # release-smoke.yml exists only in the standalone repo and is not present
-  # in this subtree.
+  # ROOT workflows own the lifecycle after the cutover (docs/ops/runbook.md,
+  # "LifeOS cutover"); the app-local .github/workflows/ copies remain inert
+  # standalone-repo references. release-smoke.yml exists only in the
+  # standalone repo.
   workflows:
-    - .github/workflows/ops.yml
-    - .github/workflows/backup.yml
+    - ../../.github/workflows/lifeos-backup.yml
+    - ../../.github/workflows/lifeos-ops.yml
   backup_scope: "Nightly pg_dump of the public schema PLUS a tar of the
     document blob volume (/app/var/blobs), verified, age-encrypted, uploaded
-    as a GitHub Actions artifact with 90-day retention (backup.yml)"
+    as a GitHub Actions artifact with 90-day retention (lifeos-backup.yml,
+    gated LIFEOS_BACKUP_ENABLED)"
 
 deploy:
-  # Inert in this repo: this describes the standalone kgsmith19/lifeos
-  # pipeline, which currently owns the live deployment.
-  mechanism: "push to main -> PR Gate -> backend and frontend deploy when DEPLOY_ENABLED"
+  # ROOT workflow, dark until cutover: backend container + /life/ UI as
+  # versioned dirs behind lifeos-ui/current with auto-rollback.
+  workflow: ../../.github/workflows/lifeos-deploy.yml
+  mechanism: "push to main -> lifeos-deploy.yml when DEPLOY_ENABLED and LIFEOS_DEPLOY_ENABLED"
   smoke: "curl -fsS http://127.0.0.1:8000/healthz"
