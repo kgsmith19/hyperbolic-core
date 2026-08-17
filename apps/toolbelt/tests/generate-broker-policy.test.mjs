@@ -109,19 +109,60 @@ test("generateBrokerPolicy: a malformed tool.json fails loudly rather than produ
   );
 });
 
+test("generateBrokerPolicy: a manifest requesting an invalid host format is rejected, never passed through into the policy", () => {
+  // The negative control this Issue's own acceptance criteria calls for.
+  // A plausible wrong implementation: aggregate whatever JSON parses,
+  // trusting that networkEgress entries are already well-formed hostnames
+  // because manifests:check presumably ran first -- it might not have,
+  // since broker-policy:generate carries no enforced ordering against it.
+  withFixtureRoot(
+    {
+      "tool.json": baseManifest({ id: "root-spine", kind: "headless", entry: { headless: { command: "noop" } } }),
+      "apps/bad-host/tool.json": baseManifest({
+        id: "bad-host-caller",
+        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt/apps/bad-host" },
+        permissions: { db: { read: [], write: [] }, networkEgress: ["not a valid host!!!"], llmHandler: { access: false } },
+      }),
+    },
+    (dir) => {
+      assert.throws(() => generateBrokerPolicy(findManifestPaths(dir)), /networkEgress.*must match format "hostname"/);
+    },
+  );
+});
+
+test("generateBrokerPolicy: a manifest with a malformed vaultKeys entry (wrong pattern) is rejected the same way", () => {
+  withFixtureRoot(
+    {
+      "tool.json": baseManifest({ id: "root-spine", kind: "headless", entry: { headless: { command: "noop" } } }),
+      "apps/bad-key/tool.json": baseManifest({
+        id: "bad-key-caller",
+        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt/apps/bad-key" },
+        permissions: { db: { read: [], write: [] }, networkEgress: [], vaultKeys: ["lowercase_not_allowed"], llmHandler: { access: false } },
+      }),
+    },
+    (dir) => {
+      assert.throws(() => generateBrokerPolicy(findManifestPaths(dir)), /vaultKeys.*must match pattern/);
+    },
+  );
+});
+
 test("generateBrokerPolicy: a manifest with no id fails loudly rather than being silently skipped", () => {
+  // Caught by checkManifestShape's own tool.schema.json required:["id"]
+  // (reused, not a hand-rolled duplicate of this check).
   withFixtureRoot(
     {
       "tool.json": baseManifest({ id: "root-spine", kind: "headless", entry: { headless: { command: "noop" } } }),
       "apps/no-id/tool.json": baseManifest({ id: undefined }),
     },
     (dir) => {
-      assert.throws(() => generateBrokerPolicy(findManifestPaths(dir)), /missing a string "id"/);
+      assert.throws(() => generateBrokerPolicy(findManifestPaths(dir)), /required property 'id'/);
     },
   );
 });
 
 test("generateBrokerPolicy: two manifests claiming the same id is refused as an ambiguous policy, not silently merged or last-write-wins", () => {
+  // Caught by checkManifestIdUniqueness (reused, not a hand-rolled
+  // duplicate of this check).
   withFixtureRoot(
     {
       "tool.json": baseManifest({ id: "root-spine", kind: "headless", entry: { headless: { command: "noop" } } }),
@@ -129,7 +170,7 @@ test("generateBrokerPolicy: two manifests claiming the same id is refused as an 
       "apps/tool-b/tool.json": baseManifest({ id: "dupe" }),
     },
     (dir) => {
-      assert.throws(() => generateBrokerPolicy(findManifestPaths(dir)), /already claimed by another manifest/);
+      assert.throws(() => generateBrokerPolicy(findManifestPaths(dir)), /manifest id "dupe" is declared by 2 manifests/);
     },
   );
 });
@@ -152,7 +193,14 @@ test("generateBrokerPolicy: regenerating from the same inputs is idempotent -- b
   );
 });
 
-test("generateBrokerPolicy: the generated document always validates against the broker contract", () => {
+test("generateBrokerPolicy: a schema-valid manifest with real values in every field produces a document that also passes the broker contract", () => {
+  // Honest about what this proves and what it doesn't: tool.schema.json's
+  // own constraints on networkEgress/vaultKeys/maxUsdPerDay are already at
+  // least as strict as validatePolicyDocument's, so this cannot exercise
+  // generateBrokerPolicy's final-validation THROW path (see that call's
+  // own code comment) -- it only confirms the two schemas stay consistent
+  // for realistic input, i.e. tightening tool.schema.json further can't
+  // silently produce a document the broker's own contract would reject.
   withFixtureRoot(
     {
       "tool.json": baseManifest({ id: "root-spine", kind: "headless", entry: { headless: { command: "noop" } } }),
