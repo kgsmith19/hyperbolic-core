@@ -111,6 +111,7 @@ jobs:
     needs: changes
     if: >-
       needs.changes.outputs.migrations == 'true' &&
+      vars.DEPLOY_ENABLED == 'true' &&
       github.ref == 'refs/heads/main'
     permissions:
       contents: read
