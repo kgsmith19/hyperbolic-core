@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -51,7 +51,7 @@ test("Handler A's and the Brain's deploy jobs each use their own SSH key variabl
   assert.match(workflow, /INFISICAL_BRAIN_DEPLOY_IDENTITY_ID/);
   const deployShell = workflow.slice(workflow.indexOf("  deploy-shell:"), workflow.indexOf("  build-llm-handler:"));
   const deployLlmHandler = workflow.slice(workflow.indexOf("  deploy-llm-handler:"), workflow.indexOf("  build-brain:"));
-  const deployBrain = workflow.slice(workflow.indexOf("  deploy-brain:"));
+  const deployBrain = workflow.slice(workflow.indexOf("  deploy-brain:"), workflow.indexOf("  build-broker:"));
   const sshKeyVars = ["SHELL_DEPLOY_SSH_KEY", "LLM_HANDLER_SSH_KEY", "BRAIN_DEPLOY_SSH_KEY"];
   const jobs = { deployShell, deployLlmHandler, deployBrain };
   const owners = { SHELL_DEPLOY_SSH_KEY: "deployShell", LLM_HANDLER_SSH_KEY: "deployLlmHandler", BRAIN_DEPLOY_SSH_KEY: "deployBrain" };
@@ -119,7 +119,7 @@ test("checkout credentials are never persisted in deploy jobs", () => {
 
 test("build-brain and deploy-brain each carry the same production-gate and success-dependency shape as build/deploy-llm-handler", () => {
   const buildBrain = workflow.slice(workflow.indexOf("  build-brain:"), workflow.indexOf("  deploy-brain:"));
-  const deployBrain = workflow.slice(workflow.indexOf("  deploy-brain:"));
+  const deployBrain = workflow.slice(workflow.indexOf("  deploy-brain:"), workflow.indexOf("  build-broker:"));
   assert.match(buildBrain, /needs\.changes\.outputs\.brain == 'true'/);
   assert.match(buildBrain, /file: services\/brain\/Dockerfile/);
   assert.match(deployBrain, /needs\.build-brain\.result == 'success'/);
@@ -145,6 +145,12 @@ test("deploy-broker generates broker-policy.json fresh from every discovered man
   assert.match(deployBroker, /node apps\/toolbelt\/scripts\/generate-broker-policy\.mjs --out "\$RUNNER_TEMP\/broker-policy\.json"/);
   assert.match(deployBroker, /scp .* "\$RUNNER_TEMP\/broker-policy\.json" "deploy@\$DEPLOY_HOST:broker\/broker-policy\.json"/);
   assert.doesNotMatch(workflow, /git add .*broker-policy\.json|committed.*broker-policy\.json/);
+  // Positive check, not just the absence check above: services/broker/ itself
+  // has no tracked broker-policy.json, and its own .gitignore backstops one
+  // ever landing there by accident.
+  assert.doesNotMatch(readdirSync(path.join(root, "services/broker")).join(","), /broker-policy\.json/);
+  const brokerGitignore = readFileSync(path.join(root, "services/broker/.gitignore"), "utf8");
+  assert.match(brokerGitignore, /^broker-policy\.json$/m);
 });
 
 test("deploy-broker reads only its own dedicated Infisical path and SSH key, matching every sibling unit's isolation", () => {
@@ -152,6 +158,20 @@ test("deploy-broker reads only its own dedicated Infisical path and SSH key, mat
   const deployBroker = workflow.slice(workflow.indexOf("  deploy-broker:"), workflow.indexOf("  smoke:"));
   assert.match(deployBroker, /BROKER_DEPLOY_SSH_KEY/);
   assert.doesNotMatch(deployBroker, /SHELL_DEPLOY_SSH_KEY|LLM_HANDLER_SSH_KEY|BRAIN_DEPLOY_SSH_KEY/);
+});
+
+test("deploy-broker ships broker-policy.json world-readable (644), never 600 like .env -- the container reads it as a different uid than deploy owns it as", () => {
+  // Independent adversarial review finding: broker-policy.json is a bind
+  // mount (services/broker/compose.yaml), so it keeps the HOST file's owner
+  // (deploy) and mode on the container side too -- the broker process runs
+  // as uid 10300 (Dockerfile), not deploy, so a 600 mode would be EACCES
+  // and fail `docker compose up --wait` on every deploy. The file holds no
+  // secrets (aggregated from committed tool.json files: host allowlists and
+  // vault KEY NAMES only), so 644 costs nothing.
+  const deployBroker = workflow.slice(workflow.indexOf("  deploy-broker:"), workflow.indexOf("  smoke:"));
+  assert.match(deployBroker, /chmod 644 broker-policy\.json/);
+  assert.doesNotMatch(deployBroker, /chmod 600 \.env broker-policy\.json/);
+  assert.match(deployBroker, /chmod 600 \.env(?! broker-policy)/);
 });
 
 test("the Brain's rendered .env uses the env names the daemon actually reads", () => {

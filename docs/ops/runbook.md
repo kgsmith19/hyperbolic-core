@@ -301,6 +301,25 @@ This repository proves, in `docs/ops/deploy-workflow.test.mjs`, that `deploy-bra
 
 `services/brain/src/server.ts` registers its HTTP surface under `/api/brain/*` plus a bare `/healthz` for the in-container Docker healthcheck. The serve mount is `/api/brain/` -- tailscale forwards the full incoming path unchanged (the same mechanic as `/api/` and `/life/api/`), so `https://<origin>/api/brain/<route>` reaches the container as `/api/brain/<route>`, exactly what the server handles. (The original mount was `/brain/stream`, a name that predated the server's real route shape; nothing handled that path, so it was retired when the mount was corrected -- issue #134.) The `/api/brain/` mount is more specific than `/api/`, and Tailscale Serve routes by most-specific path, so Handler A keeps everything else under `/api/`. External health probes use `/api/brain/health` (unauthenticated), never the origin's bare `/healthz`, which is the Shell's static health asset.
 
+## Guards broker deployment (issue #185)
+
+`services/broker` is a log-only pass-through forward proxy (Epic #182) on `127.0.0.1:8300` -- `.github/workflows/deploy.yml`'s `build-broker`/`deploy-broker` jobs follow the same shape as Handler A's own deploy, in its own `broker/` compose project directory. It logs every proxied request (caller, target host, timestamp) and forwards it unmodified; no credential injection (#186), no egress allowlist enforcement (#187), no budget enforcement (#188) yet -- those are separate, later Issues.
+
+Configure these repository variables in addition to Shell's own (`DEPLOY_ENABLED`, `DEPLOY_HOST`, `INFISICAL_PROJECT_SLUG` are shared):
+
+| Variable | Purpose |
+| --- | --- |
+| `INFISICAL_BROKER_DEPLOY_IDENTITY_ID` | Dedicated OIDC identity for this pipeline (ADR-05: never another unit's identity). |
+| `BROKER_DEPLOY_ENABLED` | Set to `true` once the broker has actually been deployed and its healthz is confirmed reachable. Gates `platform-smoke.yml`'s broker probe -- **leave unset until then**: the broker is brand new (unlike Shell/Handler A/Brain, which have been continuously live since earlier milestones), and an ungated probe would fail the smoke verdict, and so withhold the release tag, for every OTHER unit's deploy too. |
+
+The `broker-deploy` identity's `/platform/broker/` secret path must contain: `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` (tailnet join) and `BROKER_DEPLOY_SSH_KEY` (a distinct deploy key from every other unit's own -- `docs/ops/bootstrap-vps.sh` generates and installs it automatically, alongside the other three, as of this Issue).
+
+`services/broker/tool.json`'s own `permissions.networkEgress` is intentionally empty: the field describes a fixed list of hosts a unit contacts, and the broker's actual proxied targets are dynamic per-request (whatever `targetHost` a caller supplies, validated but not host-allowlisted until #187's enforcement flip) -- there is no fixed set to declare yet.
+
+At deploy time, `deploy-broker` regenerates `broker-policy.json` fresh from every discovered `tool.json` (`apps/toolbelt/scripts/generate-broker-policy.mjs`, issue #184) and ships it alongside `compose.yaml`/`.env`, bind-mounted read-only into the container at `/app/broker-policy.json`. It is world-readable (`chmod 644`) on the box, unlike `.env`'s `600`: the file holds no secrets (host allowlists and vault key **names**, aggregated from committed `tool.json` files), and the container reads it as the `broker` user (fixed uid `10300`), not `deploy` -- a `600` file owned by `deploy` would be unreadable to any other uid and fail `docker compose up --wait` on every deploy.
+
+The broker has no Tailscale Serve mount, deliberately: its callers are other containers on the same Docker network, not external clients, and giving it a public/tailnet-reachable mount would defeat the point of an internal-only proxy. `platform-smoke.yml`'s broker probe therefore runs over keyless Tailscale SSH (ADR 008) instead of the shared-origin `probe()` every other unit uses -- see that workflow's own header comment for the scoping discipline (exactly one `ssh` invocation, a single read-only `curl`, structurally asserted in `docs/ops/platform-smoke-workflow.test.mjs`).
+
 ## Release tagging (issue #189)
 
 Every unit that deploys and passes the post-deploy smoke verdict gets a durable git tag: `deploy/<unit>/<yyyymmdd>-<shortsha>` (UTC date, first 12 hex characters of the deployed commit). Units: `shell`, `llm-handler`, `brain` (from `deploy.yml`'s own `tag-release` job) and `lifeos-backend`, `lifeos-ui` (from `lifeos-deploy.yml`'s own `tag-release` job). Query them with `git tag -l 'deploy/shell/*'` or via the GitHub UI's tag list -- there was no queryable release history before this landed.
@@ -326,6 +345,7 @@ reviewers on a database migration without forcing the same gate onto a read-only
 | `deploy.yml` | `deploy-shell` | `shell-deploy-production` |
 | `deploy.yml` | `deploy-llm-handler` | `llm-handler-deploy-production` |
 | `deploy.yml` | `deploy-brain` | `brain-deploy-production` |
+| `deploy.yml` | `deploy-broker` (issue #185) | `broker-deploy-production` |
 | `lifeos-deploy.yml` | `deploy-backend` | `lifeos-backend-deploy-production` |
 | `lifeos-deploy.yml` | `deploy-ui` | `lifeos-ui-deploy-production` |
 | `platform-backup.yml` | `bundle` | `platform-backup-production` |

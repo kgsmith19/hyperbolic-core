@@ -9,6 +9,14 @@ const KNOWN_CALLER_POLICY: PolicyDocument = {
   "llm-handler": { allowedHosts: ["api.anthropic.com"], vaultKeys: [], maxUsdPerDay: null },
 };
 
+function bodyText(result: { body: Buffer }): string {
+  return result.body.toString("utf8");
+}
+
+function bodyJSON(result: { body: Buffer }): unknown {
+  return JSON.parse(bodyText(result));
+}
+
 // A real local HTTP server standing in for a third-party target host --
 // an independent oracle for "was the request actually forwarded and the
 // response actually relayed," not an assertion derived from proxyRequest's
@@ -38,7 +46,7 @@ test("proxyRequest: missing required fields is refused with a 400 and no upstrea
   const logged: ProxyLogEntry[] = [];
   const result = await proxyRequest({ caller: "llm-handler" }, EMPTY_POLICY, (entry) => logged.push(entry));
   assert.equal(result.status, 400);
-  const parsed = JSON.parse(result.body) as { error: string; details: string[] };
+  const parsed = bodyJSON(result) as { error: string; details: string[] };
   assert.equal(parsed.error, "invalid broker request");
   assert.ok(parsed.details.length > 0);
   assert.equal(logged.length, 0, "an invalid request has nothing valid to log and must not be logged");
@@ -49,6 +57,61 @@ test("proxyRequest: never throws on malformed input -- a function, an array, or 
     const result = await proxyRequest(malformed, EMPTY_POLICY);
     assert.equal(result.status, 400);
   }
+});
+
+// Every case below is a value that would previously have reached
+// node:http's own request layer and thrown a Node-internal
+// TypeError/RangeError (leaked verbatim to the caller, and for the body
+// case, left a connected socket open with nothing to ever close it -- an
+// independent adversarial review of this file's first draft measured file
+// descriptors climbing under exactly this load). None of these may ever
+// open a socket: forward() must never run.
+test("proxyRequest: rejects every field that would otherwise reach node:http's request layer unsafely, with a clean 400, before any socket opens", async () => {
+  const base = { caller: "llm-handler", token: "t", targetHost: "127.0.0.1:1" };
+  const cases: [string, Record<string, unknown>][] = [
+    ["header name with a space", { ...base, headers: { "bad name": "x" } }],
+    ["header value with embedded CRLF (header injection)", { ...base, headers: { "x-a": "a\r\nX-Injected: 1" } }],
+    ["headers as an array, not an object", { ...base, headers: ["a"] }],
+    ["method containing a space (request-line injection)", { ...base, method: "GET /evil HTTP/1.1" }],
+    ["method as a number", { ...base, method: 42 }],
+    ["path containing a space", { ...base, path: "/a b" }],
+    ["path containing embedded CRLF", { ...base, path: "/a\r\nX: 1" }],
+    ["targetHost containing embedded CRLF", { ...base, targetHost: "127.0.0.1\r\nX: 1" }],
+    ["targetHost with a garbage (non-numeric-suffix) port", { ...base, targetHost: "127.0.0.1:99999x" }],
+    ["targetHost with a port above 65535", { ...base, targetHost: "127.0.0.1:99999" }],
+    ["targetHost with a stray second colon (ambiguous)", { ...base, targetHost: "127.0.0.1:1:9999" }],
+    ["body that is not a string", { ...base, body: { a: 1 } }],
+  ];
+  for (const [label, malformed] of cases) {
+    const result = await proxyRequest(malformed, KNOWN_CALLER_POLICY);
+    assert.equal(result.status, 400, `${label}: expected 400, got ${result.status} (body: ${bodyText(result)})`);
+    const parsed = bodyJSON(result) as { error: string };
+    assert.equal(parsed.error, "invalid broker request", `${label}: must be refused as a broker-request validation error, not an upstream failure`);
+  }
+});
+
+test("proxyRequest: a targetHost's port is parsed exactly, never silently coerced -- the logged host:port is what was actually contacted", async () => {
+  // The demonstrated failure mode: a bare Number() cast on a garbage port
+  // suffix produces NaN, which node:http silently replaces with the
+  // protocol default port -- so the audit log would record a host:port the
+  // broker never actually reached. Confirmed fixed by construction: the
+  // malformed-port cases above are refused outright rather than reaching
+  // forward() with a wrong port at all.
+  await withFakeUpstream(
+    (_req, res) => {
+      res.writeHead(200, {});
+      res.end();
+    },
+    async (port) => {
+      const logged: ProxyLogEntry[] = [];
+      await proxyRequest(
+        { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
+        KNOWN_CALLER_POLICY,
+        (entry) => logged.push(entry),
+      );
+      assert.equal(logged[0]!.targetHost, `127.0.0.1:${port}`);
+    },
+  );
 });
 
 test("proxyRequest: a known caller is logged with knownCaller=true, caller, targetHost, and a real ISO timestamp", async () => {
@@ -94,7 +157,7 @@ test("proxyRequest: an UNKNOWN caller is logged with knownCaller=false but is st
       );
       assert.equal(logged[0]!.knownCaller, false);
       assert.equal(result.status, 200);
-      assert.equal(result.body, "reached the target");
+      assert.equal(bodyText(result), "reached the target");
     },
   );
 });
@@ -129,7 +192,74 @@ test("proxyRequest: forwards method, path, headers, and body to the target, and 
       );
       assert.equal(result.status, 201);
       assert.equal(result.headers["content-type"], "application/json");
-      assert.equal(result.body, '{"answer":"world"}');
+      assert.equal(bodyText(result), '{"answer":"world"}');
+    },
+  );
+});
+
+test("proxyRequest: relays the FULL upstream header set, not just content-type -- Location, Set-Cookie, and custom headers all survive", async () => {
+  await withFakeUpstream(
+    (_req, res) => {
+      res.writeHead(302, {
+        "content-type": "text/plain",
+        location: "https://example.com/next",
+        "set-cookie": ["a=1; Path=/", "b=2; Path=/"],
+        "x-ratelimit-remaining": "42",
+      });
+      res.end();
+    },
+    async (port) => {
+      const result = await proxyRequest(
+        { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
+        KNOWN_CALLER_POLICY,
+      );
+      assert.equal(result.status, 302);
+      assert.equal(result.headers.location, "https://example.com/next");
+      assert.deepEqual(result.headers["set-cookie"], ["a=1; Path=/", "b=2; Path=/"]);
+      assert.equal(result.headers["x-ratelimit-remaining"], "42");
+    },
+  );
+});
+
+test("proxyRequest: never drops hop-by-hop headers into the relayed response (they describe the upstream connection, not this one)", async () => {
+  await withFakeUpstream(
+    (_req, res) => {
+      // node:http manages connection/transfer-encoding itself; setting them
+      // explicitly here still exercises the filter if the server honors it.
+      res.writeHead(200, { connection: "close", "x-real-header": "kept" });
+      res.end("body");
+    },
+    async (port) => {
+      const result = await proxyRequest(
+        { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
+        KNOWN_CALLER_POLICY,
+      );
+      assert.equal(result.headers.connection, undefined);
+      assert.equal(result.headers["x-real-header"], "kept");
+    },
+  );
+});
+
+test("proxyRequest: relays a multi-byte UTF-8 character split across two separate upstream writes without corruption", async () => {
+  // The demonstrated failure mode: `data += chunk` implicitly calls
+  // Buffer.prototype.toString() on EACH chunk independently, so a
+  // multi-byte character whose bytes land in two different chunks is
+  // corrupted into two replacement characters. Buffer.concat (this file's
+  // actual fix) only decodes/relays once the full body is assembled.
+  const euroSignBytes = Buffer.from("€", "utf8"); // E2 82 AC
+  await withFakeUpstream(
+    (_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+      res.write(euroSignBytes.subarray(0, 1));
+      res.write(euroSignBytes.subarray(1));
+      res.end();
+    },
+    async (port) => {
+      const result = await proxyRequest(
+        { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
+        KNOWN_CALLER_POLICY,
+      );
+      assert.equal(bodyText(result), "€");
     },
   );
 });
@@ -159,6 +289,6 @@ test("proxyRequest: an unreachable target answers with 502, never throws or hang
     KNOWN_CALLER_POLICY,
   );
   assert.equal(result.status, 502);
-  const parsed = JSON.parse(result.body) as { error: string };
+  const parsed = bodyJSON(result) as { error: string };
   assert.equal(parsed.error, "broker upstream request failed");
 });

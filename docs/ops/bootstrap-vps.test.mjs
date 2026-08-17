@@ -96,27 +96,29 @@ test("apply: creates the deploy user only when it does not already exist", () =>
   assert.doesNotMatch(readFileSync(existing.log, "utf8"), /useradd/);
 });
 
-test("apply: creates all four target directories and installs three authorized_keys entries", () => {
+test("apply: creates all five target directories and installs four authorized_keys entries", () => {
   const env = fakeBin(true);
   const result = spawnSync(script, ["--apply"], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin`, NODE_TEST_CONTEXT: "child-v8", BOOTSTRAP_VPS_TEST_ROOT: env.home, EUID: "0" } });
   assert.equal(result.status, 0, result.stderr);
-  for (const dir of ["shell", "lifeos-ui", "llm-handler", "brain"]) {
+  for (const dir of ["shell", "lifeos-ui", "llm-handler", "brain", "broker"]) {
     assert.ok(existsSync(path.join(env.home, dir)), `${dir} was not created`);
   }
   const authorizedKeys = readFileSync(path.join(env.home, ".ssh", "authorized_keys"), "utf8");
-  assert.equal(authorizedKeys.trim().split("\n").length, 3);
+  assert.equal(authorizedKeys.trim().split("\n").length, 4);
   assert.match(authorizedKeys, /shell-deploy@hyperbolic-core/);
   assert.match(authorizedKeys, /llm-handler-deploy@hyperbolic-core/);
   assert.match(authorizedKeys, /brain-deploy@hyperbolic-core/);
+  assert.match(authorizedKeys, /broker-deploy@hyperbolic-core/);
 });
 
-test("apply: prints all three private keys with their Infisical variable name and path, exactly once", () => {
+test("apply: prints all four private keys with their Infisical variable name and path, exactly once", () => {
   const env = fakeBin(true);
   const result = spawnSync(script, ["--apply"], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin`, NODE_TEST_CONTEXT: "child-v8", BOOTSTRAP_VPS_TEST_ROOT: env.home, EUID: "0" } });
   for (const [varName, infisicalPath] of [
     ["SHELL_DEPLOY_SSH_KEY", "/platform/shell-deploy/"],
     ["LLM_HANDLER_SSH_KEY", "/platform/llm-handler/"],
     ["BRAIN_DEPLOY_SSH_KEY", "/brain/"],
+    ["BROKER_DEPLOY_SSH_KEY", "/platform/broker/"],
   ]) {
     assert.match(result.stdout, new RegExp(`--- ${varName} \\(path ${infisicalPath.replace(/\//g, "\\/")}\\) ---`));
   }
@@ -129,7 +131,7 @@ test("apply: rerunning rotates the key for each name instead of accumulating dea
   const firstKeys = readFileSync(path.join(env.home, ".ssh", "authorized_keys"), "utf8");
   spawnSync(script, ["--apply"], opts);
   const secondKeys = readFileSync(path.join(env.home, ".ssh", "authorized_keys"), "utf8");
-  assert.equal(secondKeys.trim().split("\n").length, 3, "a second run must replace, not append, each key name's entry");
+  assert.equal(secondKeys.trim().split("\n").length, 4, "a second run must replace, not append, each key name's entry");
   assert.notEqual(firstKeys, secondKeys, "the regenerated keys must actually differ (a real rerun mints fresh key material)");
 });
 

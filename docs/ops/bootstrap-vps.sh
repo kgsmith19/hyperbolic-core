@@ -18,12 +18,13 @@ usage: bootstrap-vps.sh [--dry-run|--apply] [--tailnet-authkey=KEY]
   --tailnet-authkey=KEY  Also run `tailscale up --authkey=KEY` first. Omit to
                           join the tailnet yourself before running this script.
 
-Prints the three deploy-key PRIVATE halves to stdout ONCE at the end of a
+Prints the four deploy-key PRIVATE halves to stdout ONCE at the end of a
 successful --apply run (SHELL_DEPLOY_SSH_KEY, LLM_HANDLER_SSH_KEY,
-BRAIN_DEPLOY_SSH_KEY) -- copy them into Infisical immediately. The key files
-themselves are shredded from disk before this script exits; if you lose the
-printed output, rerun with --apply to generate a fresh pair (and update the
-matching authorized_keys entry + Infisical value together).
+BRAIN_DEPLOY_SSH_KEY, BROKER_DEPLOY_SSH_KEY) -- copy them into Infisical
+immediately. The key files themselves are shredded from disk before this
+script exits; if you lose the printed output, rerun with --apply to
+generate a fresh pair (and update the matching authorized_keys entry +
+Infisical value together).
 EOF
 }
 
@@ -52,11 +53,11 @@ fi
 authorized_keys="$deploy_home/.ssh/authorized_keys"
 
 # name -> (infisical path, infisical variable name) -- the exact pairing
-# runbook.md's "Shell/Handler A/Brain deployment" sections already document.
-key_names=(shell-deploy llm-handler-deploy brain-deploy)
-key_paths=("/platform/shell-deploy/" "/platform/llm-handler/" "/brain/")
-key_vars=(SHELL_DEPLOY_SSH_KEY LLM_HANDLER_SSH_KEY BRAIN_DEPLOY_SSH_KEY)
-target_dirs=(shell lifeos-ui llm-handler brain)
+# runbook.md's "Shell/Handler A/Brain/broker deployment" sections already document.
+key_names=(shell-deploy llm-handler-deploy brain-deploy broker-deploy)
+key_paths=("/platform/shell-deploy/" "/platform/llm-handler/" "/brain/" "/platform/broker/")
+key_vars=(SHELL_DEPLOY_SSH_KEY LLM_HANDLER_SSH_KEY BRAIN_DEPLOY_SSH_KEY BROKER_DEPLOY_SSH_KEY)
+target_dirs=(shell lifeos-ui llm-handler brain broker)
 
 print_cmd() {
   printf '+ %q' "$1"

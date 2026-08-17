@@ -866,8 +866,15 @@ jobs:
           scp "${ssh_options[@]}" services/broker/compose.yaml "deploy@$DEPLOY_HOST:broker/compose.yaml"
           scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.prod" "deploy@$DEPLOY_HOST:broker/.env"
           scp "${ssh_options[@]}" "$RUNNER_TEMP/broker-policy.json" "deploy@$DEPLOY_HOST:broker/broker-policy.json"
+          # broker-policy.json is world-readable (644), .env stays 600: the
+          # policy file holds no secrets (it's an aggregation of committed
+          # tool.json files -- host allowlists and vault KEY NAMES, never
+          # values), and the container reads it as uid 10300, not `deploy`
+          # -- a bind-mounted 600 file owned by `deploy` would be EACCES to
+          # every other uid, which independent review confirmed would fail
+          # `docker compose up --wait` on every single deploy.
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
-            "cd broker && chmod 600 .env broker-policy.json && BROKER_IMAGE=$IMAGE docker compose up -d --wait && curl -fsS http://127.0.0.1:8300/healthz"
+            "cd broker && chmod 600 .env && chmod 644 broker-policy.json && BROKER_IMAGE=$IMAGE docker compose up -d --wait && curl -fsS http://127.0.0.1:8300/healthz"
 
       - name: Roll back the broker to the previous image
         if: failure() && steps.previous.outputs.image != '' && steps.previous.outputs.image != '__none__'

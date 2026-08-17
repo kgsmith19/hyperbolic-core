@@ -27,10 +27,13 @@ export function createHandler(policy: PolicyDocument, log?: LogFn) {
       readJsonBody(req, PROXY_BODY_CAP_BYTES)
         .then((parsed) => proxyRequest(parsed, policy, log))
         .then((result) => {
-          res.writeHead(result.status, {
-            "content-type": result.headers["content-type"] ?? "application/json",
-            "cache-control": "no-store",
-          });
+          // The full, filtered upstream header set (proxy.ts already
+          // stripped hop-by-hop headers) -- relayed as-is, not narrowed to
+          // content-type, so Location/Set-Cookie/Retry-After/etc. survive
+          // the round trip. The response body is a Buffer end-to-end
+          // (proxy.ts's own Buffer.concat), so res.end() writes the exact
+          // bytes the upstream sent, never a re-encoded string.
+          res.writeHead(result.status, { ...result.headers, "cache-control": "no-store" });
           res.end(result.body);
         })
         .catch((err: Error) => {

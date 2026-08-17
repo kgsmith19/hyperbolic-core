@@ -82,6 +82,41 @@ test("server: POST /proxy end-to-end round-trips through the real HTTP server, n
   }
 });
 
+test("server: /proxy relays a non-content-type response header (e.g. a rate-limit header) through the real HTTP stack, not just through proxyRequest() directly", async () => {
+  const upstream = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain", "x-ratelimit-remaining": "7" });
+    res.end("ok");
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    const upstreamAddress = upstream.address();
+    const upstreamPort = typeof upstreamAddress === "object" && upstreamAddress ? upstreamAddress.port : 0;
+
+    const server = await startServer(0, POLICY);
+    try {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      const headers = await new Promise<http.IncomingHttpHeaders>((resolve, reject) => {
+        const req = http.request(
+          { host: "127.0.0.1", port, path: "/proxy", method: "POST", headers: { "content-type": "application/json" } },
+          (res) => {
+            res.on("data", () => {});
+            res.on("end", () => resolve(res.headers));
+          },
+        );
+        req.on("error", reject);
+        req.write(JSON.stringify({ caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${upstreamPort}`, protocol: "http" }));
+        req.end();
+      });
+      assert.equal(headers["x-ratelimit-remaining"], "7");
+    } finally {
+      server.close();
+    }
+  } finally {
+    upstream.close();
+  }
+});
+
 test("server: a malformed JSON body on /proxy is answered with 400, not a hung connection or a 500", async () => {
   const server = await startServer(0, POLICY);
   try {
