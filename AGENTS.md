@@ -311,9 +311,13 @@ required stage finishes, because nothing downstream of it starts before it does.
 > applying it to the live ruleset is a manual owner action outside this repository's files (no
 > ruleset-write API is available to an agent in this harness) and may lag a commit or two behind
 > this table. **Read the live ruleset itself, never this table alone, to know what is actually
-> enforced at any given moment**, and confirm the exact required-status-check context strings
-> against a real PR's Checks tab before entering them into the ruleset — a `workflow_call`-chained
-> job's reported check name is not guaranteed to be byte-identical to its `name:` field.
+> enforced at any given moment.** Confirmed against PR #160's own first real run: a
+> `workflow_call`-chained job's reported check name is the COMPOUND form
+> `"<pr-verify.yml job name> / <called workflow's own job name>"`, not the bare `Verify: X` name
+> in the table above — e.g. the real required-status-check context for `Verify: Secrets` is
+> `"Verify: Secrets / Verify: Secrets"`. `docs/ops/bootstrap-github.sh` already uses the correct
+> compound form; if entering the ruleset by hand instead, use the exact string from a real PR's
+> Checks tab, not the short name.
 
 Each of the nine gates still has a real aggregator job inside its own reusable workflow file:
 `if: always()`, full `needs:` coverage, explicit strict success-checking, an SHA-vs-live-PR-head

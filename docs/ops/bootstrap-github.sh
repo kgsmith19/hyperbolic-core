@@ -148,6 +148,14 @@ if ((branch_protection)); then
   # review as required for control-plane paths, which is a separate, more
   # sensitive policy decision than this script's scope -- flip it by hand
   # if the owner wants it enforced at the ruleset level.
+  #
+  # Context strings below are the COMPOUND form GitHub actually reports for
+  # a workflow_call-chained job -- "<pr-verify.yml job name> / <called
+  # workflow's own job name>" -- not each gate's bare "Verify: X" name.
+  # Confirmed empirically against PR #160's own first real run (every stage
+  # from Verify: Secrets through Verify: Brain reported this way); do not
+  # simplify these back to the short form, a required check that never
+  # matches the real reported context blocks every PR forever.
   protection_body=$(cat <<'JSON'
 {
   "name": "main",
@@ -176,14 +184,14 @@ if ((branch_protection)); then
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": true,
         "required_status_checks": [
-          { "context": "Verify: Secrets" },
-          { "context": "Verify: Repo Policy" },
-          { "context": "Verify: PR Description" },
-          { "context": "Verify: Toolbelt" },
-          { "context": "Verify: ACC" },
-          { "context": "Verify: Brain" },
-          { "context": "Verify: Shell" },
-          { "context": "Verify: LifeOS" }
+          { "context": "Verify: Secrets / Verify: Secrets" },
+          { "context": "Verify: Repo Policy / Verify: Repo Policy" },
+          { "context": "Verify: PR Description / Verify: PR Description" },
+          { "context": "Verify: Toolbelt / Verify: Toolbelt" },
+          { "context": "Verify: ACC / Verify: ACC" },
+          { "context": "Verify: Brain / Verify: Brain" },
+          { "context": "Verify: Shell / Verify: Shell" },
+          { "context": "Verify: LifeOS / Verify: LifeOS" }
         ]
       }
     }

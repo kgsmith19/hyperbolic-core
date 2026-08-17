@@ -123,14 +123,14 @@ test("dry run with --branch-protection prints the exact ruleset body without sen
   assert.deepEqual(
     requiredChecksRule.parameters.required_status_checks.map((check) => check.context),
     [
-      "Verify: Secrets",
-      "Verify: Repo Policy",
-      "Verify: PR Description",
-      "Verify: Toolbelt",
-      "Verify: ACC",
-      "Verify: Brain",
-      "Verify: Shell",
-      "Verify: LifeOS",
+      "Verify: Secrets / Verify: Secrets",
+      "Verify: Repo Policy / Verify: Repo Policy",
+      "Verify: PR Description / Verify: PR Description",
+      "Verify: Toolbelt / Verify: Toolbelt",
+      "Verify: ACC / Verify: ACC",
+      "Verify: Brain / Verify: Brain",
+      "Verify: Shell / Verify: Shell",
+      "Verify: LifeOS / Verify: LifeOS",
     ],
   );
   assert.equal(requiredChecksRule.parameters.strict_required_status_checks_policy, true);
