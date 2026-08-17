@@ -1,6 +1,6 @@
 # Test Ledger
 
-A running record of this app's test suites: what exists, what it covers, and the result of its most recent run. Historical context for contributors, not a merge gate — `Toolbelt PR Gate` is the gate.
+A running record of this app's test suites: what exists, what it covers, and the result of its most recent run. Historical context for contributors, not a merge gate — `Verify: Tests (Linux)` is the gate.
 
 | Suite | Covers | Command | Last run | Result |
 | --- | --- | --- | --- | --- |

@@ -3,13 +3,13 @@ description: >-
   LifeOS's full suite, backend then frontend: pytest against a pgvector
   Postgres with migrations applied, then the frontend's type-check, unit
   tests, Playwright e2e, and production build. Shared by pr-verify.yml's
-  native "Verify: Tests (LifeOS)" job and lifeos-ci.yml's own
+  native "Verify: Tests (Linux)" job and lifeos-ci.yml's own
   merge_group/push/workflow_dispatch triggers, so the suite has exactly one
   source. Assumes the caller already checked out the repository.
 
-  Lint (ruff / npm run lint) is deliberately NOT here -- it runs earlier and
-  separately as the "Verify: Linting" gate (.github/actions/verify-linting)
-  so a lint break fails fast without waiting on this whole suite.
+  Lint (ruff / npm run lint) is deliberately NOT here -- it runs earlier in
+  the same job, as its own step (.github/actions/verify-linting), so a lint
+  break fails fast without waiting on this whole suite.
 
   This content is AUTHORED FRESH for the monorepo, never relocated: the
   nested apps/lifeos/.github/workflows/ci.yml also carries build-backend and

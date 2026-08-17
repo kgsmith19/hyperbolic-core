@@ -21,7 +21,7 @@ npm test       # node --test 'test/**/*.test.mjs' && node test/size-check.mjs
 
 ## ✅ Completion Criteria
 
-GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `.github/workflows/shell-ci.yml` terminal check `Shell PR Gate` succeeds — it covers `packages/**`.
+GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `Verify: Tests (Linux)` gate succeeds — it covers `packages/**`.
 
 ## 🔒 Collaboration Boundary
 

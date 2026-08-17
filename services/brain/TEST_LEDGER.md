@@ -1,6 +1,6 @@
 # Test Ledger
 
-The suites for `services/brain`. All of them run in the `Brain PR Gate`
+The suites for `services/brain`. All of them run in the `Verify: Tests (Linux)`
 (`.github/workflows/brain-ci.yml`).
 
 | Suite | Covers | Command |
@@ -9,4 +9,4 @@ The suites for `services/brain`. All of them run in the `Brain PR Gate`
 | `tests/cli/*.test.ts` | The Brain's CLI surface. | `npm test` |
 
 Add a row when a new suite is introduced. This ledger is historical context for
-contributors, not a merge gate — `Brain PR Gate` is the gate.
+contributors, not a merge gate — `Verify: Tests (Linux)` is the gate.

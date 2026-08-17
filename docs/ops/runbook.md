@@ -182,10 +182,11 @@ bundled into the identity-recording pass: recording where the secrets live
 and actually flipping `deploy.yml`/`platform-backup.yml` live are different
 decisions, and the script keeps them separable so a rerun to correct one
 variable can't silently also go live. `--branch-protection` sets exactly
-this issue's own acceptance criterion (`Toolbelt PR Gate`, `ACC PR Gate`,
-`Shell PR Gate` required on `main`); GitHub's branch-protection API replaces
-the whole rule on every call, so this is safe to rerun but will overwrite
-any protection settings configured by hand outside this script.
+the required-status-checks rule on `main`'s Ruleset to `Verify: All Gates`
+(see the root `AGENTS.md`'s "PR Gate and merge behavior" section for what
+that one check rolls up); the Rulesets API replaces the whole rule on every
+call, so this is safe to rerun but will overwrite any protection settings
+configured by hand outside this script.
 
 Once both scripts have run, the one remaining action name a placeholder in
 this runbook can't stand in for is `TOOLBELT_OWNER_TOKEN`: set it once

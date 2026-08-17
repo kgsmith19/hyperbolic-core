@@ -3,7 +3,7 @@ description: >-
   Brain's suite: type-check, unit/integration tests, the ADR-05 isolation
   check, the eval corpus gate, and a Docker build-and-smoke of the service
   image (verification only, never pushed from CI). Shared by pr-verify.yml's
-  native "Verify: Tests (Brain)" job and brain-ci.yml's own
+  native "Verify: Tests (Linux)" job and brain-ci.yml's own
   merge_group/push/workflow_dispatch triggers, so the suite has exactly one
   source. Assumes the caller already checked out the repository.
 
