@@ -1,0 +1,130 @@
+name: Verify Tests Shell
+description: >-
+  Shell's suite: builds packages/ui, type-checks and unit-tests apps/shell
+  plus the packages/services it composes (platform-client, ui, llm,
+  llm-handler), runs the deployment-operator tooling tests and the full
+  Playwright e2e suite against a local PostgreSQL, then the production build,
+  health endpoint, and size budgets. Shared by pr-verify.yml's native
+  "Verify: Tests (Shell)" job and shell-ci.yml's own
+  merge_group/push/workflow_dispatch triggers, so the suite has exactly one
+  source. Assumes the caller already checked out the repository.
+
+  No lint step: neither apps/shell nor any packages/* workspace declares a
+  "lint" script, and no ESLint/Biome config exists anywhere in the repo
+  today. LifeOS is the only app with a linter, and it has its own
+  "Verify: Linting" gate -- see .github/actions/verify-linting.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup · Configure Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: "22"
+        cache: npm
+        cache-dependency-path: package-lock.json
+
+    - name: Setup · Install workspace dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Build · Build packages/ui dependency
+      shell: bash
+      run: npm run build --workspace=packages/ui
+
+    - name: Type-check · apps/shell
+      shell: bash
+      run: npx tsc -b apps/shell/frontend
+
+    - name: Type-check · packages/platform-client
+      shell: bash
+      run: npm run typecheck --workspace=packages/platform-client
+
+    - name: Type-check · packages/llm
+      shell: bash
+      run: npm run typecheck --workspace=packages/llm
+
+    - name: Type-check · services/llm-handler
+      shell: bash
+      run: npm run typecheck --workspace=@hyperbolic/llm-handler
+
+    - name: Type-check · packages/ui
+      # The dependency build above already emitted the clean-checkout
+      # declarations Shell consumes; this re-runs the compiler explicitly.
+      shell: bash
+      run: npx tsc -b packages/ui
+
+    - name: Test · apps/shell (vitest)
+      shell: bash
+      run: npm run test:unit --workspace=apps/shell
+
+    - name: Test · packages/platform-client (node --test)
+      shell: bash
+      run: npm test --workspace=packages/platform-client
+
+    - name: Test · packages/ui (node --test)
+      shell: bash
+      run: npm test --workspace=packages/ui
+
+    - name: Test · packages/llm (node --test)
+      shell: bash
+      run: npm test --workspace=packages/llm
+
+    - name: Test · services/llm-handler (node --test)
+      shell: bash
+      run: npm test --workspace=@hyperbolic/llm-handler
+
+    - name: Test · deployment operator tooling
+      shell: bash
+      run: node --test docs/ops/*.test.mjs
+
+    - name: E2E · Cache Playwright Chromium
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: shell-playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+    - name: E2E · Install Playwright Chromium
+      shell: bash
+      working-directory: apps/shell
+      run: npx playwright install --with-deps chromium
+
+    - name: E2E · Start PostgreSQL for the registry-backed browser journey
+      shell: bash
+      run: |
+        sudo systemctl start postgresql.service
+        sudo -n -u postgres psql -v ON_ERROR_STOP=1 -tAc "select 1"
+
+    - name: E2E · Run every Shell e2e suite
+      # playwright.config.ts moved into frontend/ with the rest of the
+      # frontend tree; Playwright resolves it from the working directory.
+      shell: bash
+      working-directory: apps/shell/frontend
+      run: npx playwright test
+
+    - name: Build · Production build
+      shell: bash
+      run: npm run build:app --workspace=apps/shell
+
+    - name: Build · Verify the static health endpoint
+      shell: bash
+      run: npm run healthz-check --workspace=apps/shell
+
+    - name: Size · Enforce UI size budget
+      shell: bash
+      run: node packages/ui/test/size-check.mjs
+
+    - name: Size · Enforce Shell size budget
+      shell: bash
+      run: npm run size-check --workspace=apps/shell
+
+    - name: E2E · Upload Playwright failure evidence
+      if: failure()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: shell-e2e-evidence
+        path: |
+          apps/shell/frontend/playwright-report/
+          apps/shell/frontend/test-results/
+        if-no-files-found: ignore
+        retention-days: 14
