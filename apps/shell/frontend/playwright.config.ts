@@ -10,7 +10,17 @@ import { defineConfig } from "@playwright/test";
 // result.
 export default defineConfig({
   testDir: "e2e",
-  reporter: [["line"], ["html", { open: "never" }]],
+  // Both output locations are pinned to absolute paths under THIS directory
+  // rather than left to Playwright's own relative-path resolution (issue
+  // #148). A real failed CI run wrote its trace to `../test-results/` --
+  // apps/shell/, one level up -- while the workflow's evidence upload looked
+  // in apps/shell/frontend/, so the trace that existed was discarded and the
+  // failure shipped no evidence at all. Anchoring on import.meta.dirname
+  // makes the location independent of which directory the runner happens to
+  // resolve the config from, so the upload path in
+  // .github/actions/verify-tests-shell/action.yml can name it exactly.
+  outputDir: path.resolve(import.meta.dirname, "test-results"),
+  reporter: [["line"], ["html", { open: "never", outputFolder: path.resolve(import.meta.dirname, "playwright-report") }]],
   use: {
     baseURL: "http://127.0.0.1:4173",
     screenshot: process.env.E2E_PROOF ? "on" : "only-on-failure",

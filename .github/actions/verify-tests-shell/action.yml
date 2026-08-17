@@ -131,8 +131,16 @@ runs:
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: shell-e2e-evidence
+        # These two paths are the ones playwright.config.ts pins explicitly
+        # via import.meta.dirname (issue #148) -- before that, Playwright
+        # resolved them one level up, in apps/shell/, and this step uploaded
+        # nothing on a real failure ("No files were found with the provided
+        # path"), discarding the trace it had actually written.
         path: |
           apps/shell/frontend/playwright-report/
           apps/shell/frontend/test-results/
-        if-no-files-found: ignore
+        # `error`, not `ignore`: this step only runs on failure, and a failed
+        # e2e run that produces no evidence is itself a defect worth failing
+        # loudly on -- silently uploading nothing is what let #148 hide.
+        if-no-files-found: error
         retention-days: 14
