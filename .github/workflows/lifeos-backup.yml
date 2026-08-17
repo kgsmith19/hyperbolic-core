@@ -120,6 +120,13 @@ jobs:
           tar -tf "$payload/lifeos-blobs.tar" > /dev/null
           (cd "$payload" && sha256sum lifeos.dump lifeos-blobs.tar > SHA256SUMS)
 
+          # Handed off to the restic step below (RUNNER_TEMP survives across
+          # steps in the same job, unlike $work). Unconditional: this copy
+          # costs nothing when RESTIC_BACKUP_ENABLED is off, and the age
+          # path below it is completely unaffected either way -- same
+          # handoff shape as platform-backup.yml's own restic addition.
+          cp "$payload/lifeos.dump" "$RUNNER_TEMP/lifeos.dump"
+
           tar -C "$payload" -cf "$work/lifeos-backup.tar" \
             lifeos.dump lifeos-blobs.tar SHA256SUMS
           age -r "$AGE_PUBLIC_KEY" \
@@ -134,3 +141,122 @@ jobs:
           path: lifeos-backup-${{ github.run_id }}.tar.age
           retention-days: 90
           if-no-files-found: error
+
+      # Restic primary, gated on its own var (same one platform-backup.yml
+      # uses -- one switch for both pipelines): the age->artifact path above
+      # is unconditional and unaffected by this being on or off.
+      # continue-on-error on both restic steps, plus the final gate step
+      # below: a Storage Box/SSH/Infisical hiccup here must never fail the
+      # whole job or misrepresent the age path, which already succeeded and
+      # uploaded by this point (same shape as platform-backup.yml's own
+      # restic addition, issue #176).
+      - name: Restic · Pull Storage Box credentials from Infisical
+        if: vars.RESTIC_BACKUP_ENABLED == 'true'
+        id: restic-credentials
+        continue-on-error: true
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PLATFORM_RESTIC_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/backup/"
+          domain: https://app.infisical.com
+
+      - name: Restic · Back up the dump and live blobs volume on the box
+        if: vars.RESTIC_BACKUP_ENABLED == 'true'
+        id: restic-backup
+        continue-on-error: true
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          if [ ! -s "$RUNNER_TEMP/lifeos.dump" ]; then
+            echo "lifeos.dump was not produced by the earlier bundle step -- refusing to back up nothing." >&2
+            exit 1
+          fi
+          if [ -z "${RESTIC_PASSWORD:-}" ] || [ -z "${STORAGEBOX_SSH_KEY:-}" ]; then
+            echo "RESTIC_PASSWORD/STORAGEBOX_SSH_KEY were not supplied by Infisical (/platform/backup/)." >&2
+            exit 1
+          fi
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          umask 077
+          printf '%s\n' "$STORAGEBOX_SSH_KEY" > "$tmp/storagebox-key"
+          printf '%s' "$RESTIC_PASSWORD" > "$tmp/restic-password"
+          cp docs/ops/restic-setup.sh "$tmp/restic-setup.sh"
+          cp "$RUNNER_TEMP/lifeos.dump" "$tmp/lifeos.dump"
+
+          remote_dir="restic-backup-tmp"
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+            "deploy@$DEPLOY_HOST" "mkdir -p -m 700 \"$remote_dir\""
+          scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            "$tmp"/storagebox-key "$tmp"/restic-password "$tmp"/restic-setup.sh "$tmp"/lifeos.dump \
+            "deploy@$DEPLOY_HOST:$remote_dir/"
+
+          # RUN_ID and the Storage Box host/user pass through the ssh
+          # command's own remote environment (never RESTIC_PASSWORD or the
+          # key -- those travel only as the files just scp'd above, read via
+          # `cat` inside the remote script, never as a bare argument any
+          # `ps` on the box could observe).
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+            "deploy@$DEPLOY_HOST" \
+            "STORAGEBOX_HOST='${{ vars.STORAGEBOX_HOST }}' STORAGEBOX_USER='${{ vars.STORAGEBOX_USER }}' RUN_ID='${GITHUB_RUN_ID}' bash -s" <<'RESTIC_REMOTE'
+          set -euo pipefail
+          cd "$HOME/restic-backup-tmp"
+          trap 'rm -rf "$HOME/restic-backup-tmp"' EXIT
+          chmod 600 storagebox-key restic-password
+          chmod +x restic-setup.sh
+
+          export RESTIC_PASSWORD
+          RESTIC_PASSWORD="$(cat restic-password)"
+
+          # Installs a pinned, checksum-verified restic and writes the
+          # Storage Box's SSH config alias; idempotently a no-op against an
+          # already-initialized repository (docs/ops/restic-setup.sh, #164).
+          ./restic-setup.sh --apply \
+            --storagebox-host="$STORAGEBOX_HOST" \
+            --storagebox-user="$STORAGEBOX_USER" \
+            --ssh-key-file="$PWD/storagebox-key" \
+            --repos=lifeos
+
+          # /app/var/blobs (apps/lifeos/backend/compose.yaml) is a named
+          # Docker volume, not a host bind mount -- there is no plain
+          # filesystem path to point restic at without asking Docker for the
+          # volume's real (Compose-project-prefixed) name first, rather than
+          # guessing at that naming convention.
+          cd "$HOME/lifeos"
+          volume_name="$(docker inspect \
+            --format '{{ range .Mounts }}{{ if eq .Destination "/app/var/blobs" }}{{ .Name }}{{ end }}{{ end }}' \
+            "$(docker compose ps -q api)")"
+          test -n "$volume_name"
+
+          # A local, host-to-host copy out of the volume (fast: no network
+          # involved) -- restic then walks a plain directory like it does
+          # for the platform pipeline's dump file. The dedup benefit is on
+          # the Storage Box side: restic still only uploads new/changed
+          # chunks against last night's snapshot, which a fresh tarball
+          # streamed to CI every night (the age path above) cannot do.
+          blobs_copy="$HOME/restic-backup-tmp/blobs"
+          mkdir -p "$blobs_copy"
+          docker run --rm -v "$volume_name":/src:ro -v "$blobs_copy":/dst alpine:3.21 cp -a /src/. /dst/
+
+          repository="sftp:hetzner-storagebox:/lifeos"
+          restic -r "$repository" backup \
+            "$HOME/restic-backup-tmp/lifeos.dump" "$blobs_copy" \
+            --host lifeos-backup --tag "run-${RUN_ID}"
+          restic -r "$repository" forget \
+            --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+
+          # Proves the snapshot actually landed, not just that restic exited 0.
+          restic -r "$repository" snapshots --tag "run-${RUN_ID}" --json \
+            | grep -q "run-${RUN_ID}"
+          RESTIC_REMOTE
+
+      - name: Restic · Fail the job if the Storage Box backup did not succeed
+        if: vars.RESTIC_BACKUP_ENABLED == 'true' && (steps.restic-credentials.outcome != 'success' || steps.restic-backup.outcome != 'success')
+        run: |
+          echo "::error::Restic backup to the Hetzner Storage Box failed this run. The age->artifact backup above succeeded and uploaded normally; only the restic leg failed -- see the 'Restic · Pull Storage Box credentials from Infisical' / 'Restic · Back up the dump and live blobs volume on the box' step logs above." >&2
+          exit 1
