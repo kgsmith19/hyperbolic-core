@@ -601,3 +601,42 @@ ssh deploy@<tailnet-name> "sudo ufw status 2>/dev/null || echo 'no ufw configure
 Also confirm in the Cloudflare dashboard that the tunnel shows **Healthy**, and that a request to the
 public hostname reaches `edge-origin` (a 404 for every path is correct until one is uncommented in
 `public_paths.conf`).
+
+### Cloudflare Access setup (issue #170)
+
+Dashboard configuration, not code -- do this after the Cloudflare Tunnel itself is live and
+reachable (issue #169) and before uncommenting any path in `public_paths.conf`. Every public hostname must
+sit behind Access before it carries real traffic; there is no code-level enforcement of that
+ordering, only this runbook.
+
+1. **Identity provider.** Cloudflare Zero Trust dashboard -> Settings -> Authentication -> add a
+   login method (Google Workspace, GitHub, one-time PIN, whichever the owner already uses
+   elsewhere). One IdP is enough for a single-owner setup; add more only if additional people need
+   access later.
+2. **One Access application per public hostname.** Zero Trust dashboard -> Access -> Applications ->
+   Add an application -> Self-hosted. Application domain = the exact public hostname the Tunnel
+   serves (the same value that will go into the `CLOUDFLARE_PUBLIC_HOSTNAME` repository variable
+   below). Do not scope the application to a sub-path here -- `public_paths.conf` already decides
+   which paths exist at all; Access's job is "who may reach this hostname," not "which paths."
+3. **Policy.** Include rule: the specific identity/identities allowed through (e.g. "Emails ending
+   in @yourdomain.com", or a literal email allowlist for a single owner). Session duration: pick a
+   value the owner is comfortable re-authenticating at (e.g. 24h) -- shorter is more secure, longer
+   is more convenient; there is no code-level default to defer to here.
+4. **Confirm, then flip the smoke gate.** Visit the public hostname in an incognito/logged-out
+   browser -- it must redirect to a Cloudflare-hosted login page, never reach the app directly. Only
+   once that's true, set the repository variable `CLOUDFLARE_PUBLIC_HOSTNAME` (the exact hostname
+   from step 2) so `platform-smoke.yml`'s public-edge probe (below) starts asserting it on every
+   deploy.
+
+### Public-edge smoke check (`platform-smoke.yml`, issue #170)
+
+Additive and independently gated -- the existing tailnet-private probes are completely unaffected by
+this being on or off. Once `CLOUDFLARE_EDGE_ENABLED` and `CLOUDFLARE_PUBLIC_HOSTNAME` are both set,
+every smoke run also sends one unauthenticated `GET` to `https://$CLOUDFLARE_PUBLIC_HOSTNAME/` and
+asserts the response is a 3xx redirect (toward Access) -- never a 2xx (Access is not actually in
+front of the app -- the exact regression this check exists to catch) and never a 5xx (the edge
+itself is broken). The probe deliberately never follows the redirect (no `-L`): it confirms the
+redirect happened, not what Access's own login page contains. The step's own gate is
+`(success() || failure()) && vars.CLOUDFLARE_EDGE_ENABLED == 'true'`, not a bare variable check --
+GitHub Actions implicitly ANDs a bare `if:` with `success()`, which would silently skip this probe
+whenever the private-probe step above it fails, exactly when the public edge might also be broken.
