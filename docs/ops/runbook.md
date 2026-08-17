@@ -488,12 +488,12 @@ key file the caller already placed -- both are read from the environment/an exis
 echoed or logged. The script has not been run against a real Storage Box yet: no box exists, so no
 credentials exist for it to use. This is expected until the owner completes steps 1-3 above.
 
-## Cloudflare edge origin (nginx)
+## Cloudflare edge origin (nginx + cloudflared)
 
-`docs/ops/edge-origin/` (issue #165) is the local HTTP origin `cloudflared` (#168, not yet built)
-will point at once the owner sets up Cloudflare Tunnel + Access. It is a second, deliberately
-narrower front door onto the same box: `tailscale-serve-apply.sh`'s private route table is
-untouched and keeps working exactly as before over the tailnet.
+`docs/ops/edge-origin/` (issue #165) is the local HTTP origin `cloudflared` (issue #169, added to
+the same compose file) points at once the owner sets up Cloudflare Tunnel + Access. It is a second,
+deliberately narrower front door onto the same box: `tailscale-serve-apply.sh`'s private route table
+is untouched and keeps working exactly as before over the tailnet.
 
 **Nothing is public by default.** `docs/ops/edge-origin/public_paths.conf` is the only place a path
 can become reachable through this origin, and every line in the checked-in file is commented out --
@@ -502,16 +502,59 @@ no location block for any of the five private routes, so every request 404s; onl
 (defined directly in `nginx.conf`, not in `public_paths.conf`) ever answers, and it exists purely so
 the container's own healthcheck has something stable to poll.
 
-To expose a path: uncomment its `location` block in `public_paths.conf` and redeploy the
-`edge-origin` compose service. Each block's target must mirror `tailscale-serve-apply.sh`'s mount ->
-target mapping exactly (`edge-origin.test.mjs`'s sync test fails the build if they ever drift
-apart), so copy the block as written rather than retyping it. There is currently no workflow that
-deploys this compose service -- that wiring, and the Cloudflare tunnel itself, is #168-#170; today
-this can only be run by hand from a checkout on the box (`docker compose -f
-docs/ops/edge-origin/compose.yml up -d`).
+To expose a path: uncomment its `location` block in `public_paths.conf` and redeploy (`ops-edge.yml`
+dispatch, or push a change under `docs/ops/edge-origin/`). Each block's target must mirror
+`tailscale-serve-apply.sh`'s mount -> target mapping exactly (`edge-origin.test.mjs`'s sync test
+fails the build if they ever drift apart), so copy the block as written rather than retyping it.
 
 `nginx.conf` sets `access_log off;` -- deliberate for now, since with nothing exposed there is
 nothing worth logging. Once a path is actually uncommented and this becomes cloudflared's real
 public origin, revisit that line: Cloudflare Access/Tunnel logs the request at the edge, but if
 nginx-side request logging is wanted too (e.g. to correlate against `docker logs` on the origin
 containers), turn `access_log` back on at that point -- an explicit owner call, not made here.
+
+### Deploying the stack (`ops-edge.yml`, issue #169)
+
+Dark behind `CLOUDFLARE_EDGE_ENABLED` -- ships `compose.yml`/`nginx.conf`/`public_paths.conf` and a
+rendered `.env` (holding only `CLOUDFLARE_TUNNEL_TOKEN`) to the box over keyless Tailscale SSH (ADR
+008, no SSH key material), then `docker compose pull && docker compose up -d --wait`. Triggers on
+`workflow_dispatch` or a push to `main` touching `docs/ops/edge-origin/**`.
+
+Owner setup, one time, before flipping the gate:
+
+| Variable | Purpose |
+| --- | --- |
+| `INFISICAL_PLATFORM_EDGE_IDENTITY_ID` | Dedicated OIDC identity reading `/platform/edge/` -- distinct from every other pipeline's identity (ADR-05); `/platform/edge/` must contain `CLOUDFLARE_TUNNEL_TOKEN` (from the Cloudflare dashboard when the tunnel is created). |
+| `CLOUDFLARE_EDGE_ENABLED` | Set to `true` once the identity/token above are provisioned and a Cloudflare Tunnel exists pointed at this box. Off by default. |
+
+Cloudflare dashboard steps (owner, one time): create a Tunnel, copy its token into
+`/platform/edge/`'s `CLOUDFLARE_TUNNEL_TOKEN`, and set the tunnel's public hostname ingress rule to
+`http://127.0.0.1:8081` (the edge-origin container) -- one blanket rule, not a per-path proxy;
+per-path routing is entirely `public_paths.conf`'s job, never duplicated in the tunnel config. Access
+policies (who may reach which public hostname/path) are #170, a separate dashboard step.
+
+`docs/ops/edge-origin/compose.yml` pins `cloudflare/cloudflared:2025.6.1` -- **unverified against the
+live registry** in the environment this was authored in (no network access to Docker Hub to confirm
+the tag exists). Confirm or bump this tag before the first real deploy; a wrong tag fails loudly at
+`docker compose pull` on the box, not silently.
+
+### Verification once live (owner, manual)
+
+Not automated in CI -- run once after the first real deploy, and after any change to the compose
+stack:
+
+```bash
+# From a tailnet client (or the box itself): confirm cloudflared is genuinely
+# outbound-only. Anything printed here besides existing loopback listeners
+# (127.0.0.1:*, [::1]:*) and Tailscale's own listeners is a regression --
+# the whole point of a tunnel is zero new inbound ports.
+ssh deploy@<tailnet-name> "ss -tlnp"
+
+# Confirm the box's firewall posture is unchanged (whatever it was before
+# this deploy -- ufw status, or the absence of one, must match).
+ssh deploy@<tailnet-name> "sudo ufw status 2>/dev/null || echo 'no ufw configured'"
+```
+
+Also confirm in the Cloudflare dashboard that the tunnel shows **Healthy**, and that a request to the
+public hostname reaches `edge-origin` (a 404 for every path is correct until one is uncommented in
+`public_paths.conf`).
