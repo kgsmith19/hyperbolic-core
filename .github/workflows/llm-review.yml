@@ -38,6 +38,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: >-
+          Pull request to review. Leave empty to no-op. Supplying one runs the
+          full reviewer path on demand -- the provisioning loop this exists for
+          (issue #216), since pr-verify.yml only reaches this gate after its
+          ~16-minute test job.
+        required: false
+        default: ""
 
 # Least privilege at the top; the job widens only to what it actually uses.
 # Nothing here writes to a pull request, so no job gets
@@ -66,11 +75,38 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # pr_number is deliberately empty for these triggers: there is no pull
-      # request to review outside pull_request, and the composite action
-      # no-ops cleanly rather than failing.
+      # On push, and on a dispatch with no pr_number, this resolves to nothing
+      # and every step below no-ops exactly as before -- there is no pull
+      # request to review outside pull_request. A dispatch that DOES name one
+      # resolves its base/head here rather than asking the operator for SHAs,
+      # so the reviewer sees precisely the range pr-verify.yml would have
+      # given it. The composite action is untouched, so the pull_request path
+      # cannot drift from this one.
+      - name: Context · Resolve the dispatched PR's base and head
+        if: inputs.pr_number != ''
+        id: dispatched_pr
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            // Used as a NUMBER, never interpolated into a shell command --
+            // the same handling the composite action applies to the issue
+            // number it derives.
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            core.setOutput("base", pr.base.sha);
+            core.setOutput("head", pr.head.sha);
       - uses: ./.github/actions/verify-llm-review
         with:
+          pr_number: ${{ inputs.pr_number }}
+          base_sha: ${{ steps.dispatched_pr.outputs.base }}
+          head_sha: ${{ steps.dispatched_pr.outputs.head }}
           github_token: ${{ github.token }}
           infisical_identity_id: ${{ vars.INFISICAL_REVIEW_IDENTITY_ID }}
           infisical_project_slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
