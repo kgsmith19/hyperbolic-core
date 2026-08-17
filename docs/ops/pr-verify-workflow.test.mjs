@@ -117,6 +117,52 @@ test("the four rows are the expected jobs, and only All Gates holds a write toke
   assert.doesNotMatch(windows, /needs:/, "Windows job must stay parallel with the Linux job");
 });
 
+test("every doc that names a gate agrees with pr-verify.yml's actual job names", () => {
+  // Doc drift is not cosmetic here: a required-checks list that disagreed
+  // with the workflow is what stranded PRs #118, #120 and #160. This pins
+  // the agreement so the next rename cannot land half-applied.
+  const jobNames = [...workflow.matchAll(/^\s{4}name: "(Verify: [^"]+)"$/gm)].map((m) => m[1]).sort();
+  assert.ok(jobNames.length >= 4, `expected the four Verify: jobs, found ${jobNames.length}`);
+
+  // project.yaml: each ci.workflows entry carries exactly one gate: and one
+  // required:, in that order, so zipping them pairs correctly.
+  const projectYaml = readFileSync(path.join(root, "project.yaml"), "utf8");
+  const gates = [...projectYaml.matchAll(/^\s+gate: "([^"]+)"$/gm)].map((m) => m[1]);
+  const requireds = [...projectYaml.matchAll(/^\s+required: (true|false)/gm)].map((m) => m[1] === "true");
+  assert.equal(gates.length, requireds.length, "project.yaml: every gate: needs exactly one required:");
+
+  assert.deepEqual(
+    [...gates].sort(),
+    jobNames,
+    "project.yaml's gate list and pr-verify.yml's job names have drifted apart"
+  );
+
+  const requiredGates = gates.filter((_, i) => requireds[i]);
+  assert.deepEqual(
+    requiredGates,
+    ["Verify: All Gates"],
+    "exactly one gate may be required, and it must be the rollup"
+  );
+
+  // bootstrap-github.sh writes the ruleset; it must ask for that same one.
+  const bootstrap = readFileSync(path.join(root, "docs/ops/bootstrap-github.sh"), "utf8");
+  const contexts = [...bootstrap.matchAll(/"context":\s*"([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(
+    contexts,
+    ["Verify: All Gates"],
+    "bootstrap-github.sh's required-status-checks list disagrees with project.yaml"
+  );
+
+  // Prose docs must at least name every gate, so a renamed job cannot leave
+  // a doc silently describing a check that no longer exists.
+  for (const file of ["AGENTS.md", "README.md"]) {
+    const text = readFileSync(path.join(root, file), "utf8");
+    for (const name of jobNames) {
+      assert.ok(text.includes(`\`${name}\``), `${file} never mentions ${name}`);
+    }
+  }
+});
+
 test("All Gates arms auto-merge only on a green verdict, and never past a hold, draft, or fork", async () => {
   const modulePath = loadAllGatesModule();
   const allGates = (await import(`file://${modulePath}`)).default;
