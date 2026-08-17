@@ -1,0 +1,10 @@
+{
+  "name": "@hyperbolic/broker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The sole egress path for third-party credentials from service containers (Epic #182): a forward proxy enforcing per-caller host allowlisting and LLM-spend budgets derived from each unit's own tool.json. This package starts with the request/policy contract only (issue #183); the runtime service lands in a later issue.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test *.test.mjs"
+  }
+}
