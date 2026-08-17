@@ -471,3 +471,25 @@ Neither the SSH private key nor `RESTIC_PASSWORD` is ever written to disk by thi
 key file the caller already placed -- both are read from the environment/an existing file and never
 echoed or logged. The script has not been run against a real Storage Box yet: no box exists, so no
 credentials exist for it to use. This is expected until the owner completes steps 1-3 above.
+
+## Cloudflare edge origin (nginx)
+
+`docs/ops/edge-origin/` (issue #165) is the local HTTP origin `cloudflared` (#168, not yet built)
+will point at once the owner sets up Cloudflare Tunnel + Access. It is a second, deliberately
+narrower front door onto the same box: `tailscale-serve-apply.sh`'s private route table is
+untouched and keeps working exactly as before over the tailnet.
+
+**Nothing is public by default.** `docs/ops/edge-origin/public_paths.conf` is the only place a path
+can become reachable through this origin, and every line in the checked-in file is commented out --
+`docs/ops/edge-origin.test.mjs` asserts this on every commit. With the file in that state, nginx has
+no location block for any of the five private routes, so every request 404s; only `GET /healthz`
+(defined directly in `nginx.conf`, not in `public_paths.conf`) ever answers, and it exists purely so
+the container's own healthcheck has something stable to poll.
+
+To expose a path: uncomment its `location` block in `public_paths.conf` and redeploy the
+`edge-origin` compose service. Each block's target must mirror `tailscale-serve-apply.sh`'s mount ->
+target mapping exactly (`edge-origin.test.mjs`'s sync test fails the build if they ever drift
+apart), so copy the block as written rather than retyping it. There is currently no workflow that
+deploys this compose service -- that wiring, and the Cloudflare tunnel itself, is #168-#170; today
+this can only be run by hand from a checkout on the box (`docker compose -f
+docs/ops/edge-origin/compose.yml up -d`).
