@@ -157,7 +157,7 @@ The VPS exposes one tailnet-only HTTPS origin. Tailscale provides the network bo
 | `/api/` | `http://127.0.0.1:8200` | active loopback proxy (Handler A; `/api/intake/submit` and `/api/v1/complete`\|`stream`\|`count`, m4-05) |
 | `/api/brain/` | `http://127.0.0.1:8100` | active loopback proxy (the Brain daemon; full-path forwarding matches `server.ts`'s `/api/brain/*` routes) |
 
-The command shape follows the current [Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve). Run the checked-in operator script on the VPS:
+The command shape follows the current [Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve). Apply the routes by dispatching the **`Ops Serve Apply`** workflow (`.github/workflows/ops-serve-apply.yml`) from the Actions tab -- it ships the exact checked-in script over keyless Tailscale SSH, runs it with `--apply`, and republishes `tailscale serve status` before and after to the run summary. Gated on `DEPLOY_ENABLED`, same as every prod-touching job. The script can still be run directly on the VPS when working on the box itself:
 
 Do not apply these routes until the LifeOS m2-08 base-path release and Handler A (`llm-handler`, see "Handler A deployment" below) are both deployed. The script proves the built LifeOS asset URLs use `/life/`, and that both the LifeOS and Handler A loopback `/healthz` endpoints respond, before it changes any route.
 
@@ -330,10 +330,8 @@ used it).
    standalone layout until the route table is re-applied, so the live-route
    verify cannot pass yet. This run creates `lifeos-ui/current` and starts
    the backend from the monorepo image.
-5. **Re-apply the serve routes** (`tailscale serve` route table above) so
-   `/life/` serves `lifeos-ui/current`. Until the dispatchable ops workflow
-   for this exists, run `docs/ops/tailscale-serve-apply.sh --apply` on the
-   box.
+5. **Re-apply the serve routes** so `/life/` serves `lifeos-ui/current`:
+   dispatch the `Ops Serve Apply` workflow (route table above).
 6. **Fully verified deploy.** Dispatch `lifeos-deploy.yml` again with
    defaults. Both units must go green, including the live `/life/` verify
    and the backend's `/healthz` gate. Then confirm from a tailnet device:
