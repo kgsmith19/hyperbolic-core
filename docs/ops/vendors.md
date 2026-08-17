@@ -19,7 +19,7 @@ and links there rather than duplicating values that would drift.
 | Hetzner | Storage Box BX11 *(planned, #164)* | ~€3.81 |
 | Tailscale | Personal (free) | €0 |
 | Infisical | Free tier | €0 |
-| Cloudflare | Tunnel + Access, ≤50 users *(planned, #168–#170)* | €0 |
+| Cloudflare | Tunnel + Access, ≤50 users *(mechanism built, #169; account planned, #170)* | €0 |
 | Supabase | Free tier ×3 projects | €0 |
 | GitHub | Actions minutes + ghcr, private repo | €0 (within free allowance) |
 | age | n/a — a local encryption tool, not a hosted service | €0 |
@@ -92,17 +92,25 @@ identity's blast radius is that pipeline's secrets alone. Live paths:
 | `/platform/lifeos-deploy/` | LifeOS deploy, LifeOS backup, LifeOS ops |
 | `/review/` | LLM Review gate |
 | `/platform/backup/` *(planned, #166)* | restic → Storage Box credentials |
-| `/platform/edge/` *(planned, #168)* | Cloudflare tunnel token |
+| `/platform/edge/` *(pipeline built #169, awaiting owner's tunnel token)* | Cloudflare tunnel token |
 
 **Rotation:** per-secret, in the Infisical console under the owning path; no workflow file changes
 needed since every value is read at run time. Identity/OIDC trust rotation (rare) is documented per
 pipeline in `runbook.md`.
 
-## Cloudflare *(planned — #168–#170)*
+## Cloudflare *(mechanism built — #165, #169; account/tunnel planned — #170)*
 
 **What:** the public-internet edge. Owner decision: Cloudflare Tunnel (outbound-only, zero open
 inbound ports on the VPS) + Cloudflare Access (SSO in front of whichever paths are explicitly
 exposed). Additive to Tailscale — the private tailnet path is unaffected.
+
+**Access policy model (#170):** one Access application per public hostname
+(`vars.CLOUDFLARE_PUBLIC_HOSTNAME`), each bound to an owner-chosen identity provider (SSO) and a
+policy naming who may authenticate plus a session duration — configured entirely in the Cloudflare
+dashboard, never in code. `platform-smoke.yml`'s public-edge probe only asserts the *shape* of the
+boundary (an unauthenticated request gets a 3xx redirect toward Access, never a 2xx from the app
+or a 5xx from a broken edge) — it does not and cannot assert *who* a policy admits. See
+`runbook.md`'s "Cloudflare Access setup" section for the exact owner dashboard steps.
 
 **Auth:** a tunnel token (Infisical `/platform/edge/`) authorizes `cloudflared` to establish the
 outbound connection; Access policies are configured in the Cloudflare dashboard, not in code.
@@ -110,11 +118,14 @@ outbound connection; Access policies are configured in the Cloudflare dashboard,
 **Secrets:** tunnel token only, in Infisical.
 
 **Rotation:** regenerate the tunnel token in the Cloudflare dashboard, update
-`/platform/edge/`, redeploy the edge compose stack.
+`/platform/edge/`, redeploy the edge compose stack (`ops-edge.yml`, dispatch or push to
+`docs/ops/edge-origin/**`).
 
-**Status:** not yet provisioned. `docs/ops/edge-origin/` (the local nginx origin cloudflared points
-at) can be built and tested without a Cloudflare account at all (#165); the tunnel itself needs the
-owner's account and domain.
+**Status:** the local nginx origin (`docs/ops/edge-origin/`, #165), the `cloudflared` compose
+service, and its dark-gated deploy pipeline (`ops-edge.yml`, `CLOUDFLARE_EDGE_ENABLED`, #169) are
+built and tested — all buildable without a Cloudflare account at all. Not yet provisioned: the
+account, domain, and Tunnel itself (owner action, `docs/ops/runbook.md`'s "Cloudflare edge origin"
+section), and Access policies (#170).
 
 ## Supabase
 
@@ -188,5 +199,5 @@ public half, keep the old private key offline until every artifact encrypted und
 | LLM Review provider keys | `/review/` | Provider console; update the one path |
 | age recipient keypairs (×2) | repo vars (public) + owner-held (private) | `age-keygen`; retire old private key after retention window |
 | SSH deploy keys (×3, platform pipeline only) | Infisical, per-pipeline paths | `bootstrap-vps.sh`; planned unification onto keyless Tailscale SSH (not yet scheduled) |
-| restic repository password + SFTP key *(planned, #164)* | `/platform/backup/` | Storage Box console + `restic key` |
-| Cloudflare tunnel token *(planned, #168)* | `/platform/edge/` | Cloudflare dashboard |
+| restic repository password + SFTP key *(pipeline built #164/#166/#167, awaiting Storage Box)* | `/platform/backup/` | Storage Box console + `restic key` |
+| Cloudflare tunnel token *(pipeline built #169, awaiting owner's Tunnel)* | `/platform/edge/` | Cloudflare dashboard |

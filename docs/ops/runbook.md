@@ -300,6 +300,17 @@ This repository proves, in `docs/ops/deploy-workflow.test.mjs`, that `deploy-bra
 ### Brain external reachability: `/api/brain/` mount
 
 `services/brain/src/server.ts` registers its HTTP surface under `/api/brain/*` plus a bare `/healthz` for the in-container Docker healthcheck. The serve mount is `/api/brain/` -- tailscale forwards the full incoming path unchanged (the same mechanic as `/api/` and `/life/api/`), so `https://<origin>/api/brain/<route>` reaches the container as `/api/brain/<route>`, exactly what the server handles. (The original mount was `/brain/stream`, a name that predated the server's real route shape; nothing handled that path, so it was retired when the mount was corrected -- issue #134.) The `/api/brain/` mount is more specific than `/api/`, and Tailscale Serve routes by most-specific path, so Handler A keeps everything else under `/api/`. External health probes use `/api/brain/health` (unauthenticated), never the origin's bare `/healthz`, which is the Shell's static health asset.
+
+## Release tagging (issue #189)
+
+Every unit that deploys and passes the post-deploy smoke verdict gets a durable git tag: `deploy/<unit>/<yyyymmdd>-<shortsha>` (UTC date, first 12 hex characters of the deployed commit). Units: `shell`, `llm-handler`, `brain` (from `deploy.yml`'s own `tag-release` job) and `lifeos-backend`, `lifeos-ui` (from `lifeos-deploy.yml`'s own `tag-release` job). Query them with `git tag -l 'deploy/shell/*'` or via the GitHub UI's tag list -- there was no queryable release history before this landed.
+
+The tagging job runs last, `needs` every deploy job in its file plus `smoke`, and only fires once `needs.smoke.result == 'success'` -- not merely because an individual unit's own deploy job succeeded. A unit's deploy job succeeding but the run's overall smoke failing means something is wrong with the live result even if that one container came up cleanly, so no tag is created for anyone that run. A deploy job that internally rolled back to its previous release still reports its own job result as `failure` (GitHub Actions marks a job failed once any step fails, even when a later `if: failure()` rollback step recovers cleanly) -- so per-unit tagging naturally skips a rolled-back unit too, with no extra rollback-detection logic needed beyond checking the job's own result.
+
+Tagging is idempotent: re-running a deploy for a unit that already has today's tag (e.g. a second push same day) checks for the exact tag name via the GitHub API first and skips creating it again rather than erroring or overwriting. The tagging logic itself lives in one shared script, `docs/ops/tag-release.sh` (`docs/ops/tag-release.test.mjs` exercises it against a faked GitHub API, not a real network call), called once per unit from each workflow's own job -- the tag format and idempotency check exist in exactly one place, not duplicated between `deploy.yml` and `lifeos-deploy.yml`.
+
+`contents: write` is granted only on the `tag-release` job in each file -- nowhere else in either workflow needs it, and every other job stays read-only. No new secret or Infisical path: tagging authenticates with the workflow's own ambient `GITHUB_TOKEN` (`permissions: contents: write` is sufficient to create a tag ref via the Git Data API).
+
 ## LifeOS cutover: standalone repo to monorepo
 
 The standalone `kgsmith19/lifeos` repository ran the live LifeOS pipeline
@@ -407,7 +418,11 @@ Recency matters more than existence here: a backup from before the base commit d
 
 ### Restore drill
 
-Run this against a scratch database, never the platform project. Record the date, the backup run id, and the row counts in the table below on each drill.
+This is the manual procedure for the age-encrypted GitHub-artifact backup above. Once restic is live
+(`RESTIC_BACKUP_ENABLED`), `ops-restore-drill.yml` (issue #168) runs an equivalent drill against both
+restic repositories automatically, monthly and on demand -- see
+["Restic restore drill (automated)"](#restic-restore-drill-automated) below. Run this manual
+procedure against a scratch database, never the platform project. Record the date, the backup run id, and the row counts in the table below on each drill.
 
 ```bash
 # 1. Download the artifact from the backup run, then decrypt with the offline identity.
@@ -445,6 +460,33 @@ dropdb platform_restore_drill
 - All scratch databases and the local age key pair were dropped/deleted immediately after; nothing from this drill was retained.
 
 Executing the first drill against a real `platform-backup.yml` artifact and filling in the table above is an operator action requiring the offline age identity and live platform credentials, neither of which exists in a CI or agent environment by design -- it is the one acceptance criterion of m6-03 that repository changes cannot satisfy.
+
+## Restic restore drill (automated)
+
+`ops-restore-drill.yml` (issue #168, closes gap G-17 from the deployment research) runs monthly and
+on demand once `RESTIC_BACKUP_ENABLED` is on. Unlike the manual age-based drill above, it needs no
+operator: it runs entirely in the GitHub Actions runner, over SFTP straight to the Hetzner Storage
+Box (no Tailscale join, no SSH to the VPS -- both restic repositories are reachable directly).
+
+For each repository (`platform`, `lifeos`), in order:
+
+1. `restic check --read-data-subset=10%` -- catches silent repository corruption before a real
+   restore would ever need to find out the hard way.
+2. Restore the latest snapshot into a scratch directory.
+3. `pg_restore --list` verifies the restored dump archive is well-formed, then it is loaded into a
+   throwaway Postgres 17 service container (the same job-level `services:` container both
+   repositories share, torn down with the runner).
+4. Row counts are asserted non-zero on a small set of real tables -- `platform.config`, `core.app`,
+   `core.run`, `core.cost`, `prompt.prompt`, `idea.idea`, `intake.idea` for `platform` (the same set
+   the manual drill above checks); `entity`, `type_definition`, `event`, `entity_type` for `lifeos`
+   (the actual kernel tables from `apps/lifeos/backend/supabase/migrations/`, every domain record and
+   event passes through `entity`/`event` -- there is no per-domain table to check instead).
+5. For `lifeos` only: the restored blob directory's file count is asserted non-zero (a database-only
+   check would miss a backup that silently stopped covering `/app/var/blobs`).
+
+Results (pass/fail, snapshot id, every count) are written to the run's job summary regardless of
+outcome. A failure in one repository's drill does not prevent the other's from running or from being
+reported -- both are always attempted, and the job only fails at the very end if either one did.
 
 ## Hetzner Storage Box bootstrap (restic)
 
@@ -488,12 +530,12 @@ key file the caller already placed -- both are read from the environment/an exis
 echoed or logged. The script has not been run against a real Storage Box yet: no box exists, so no
 credentials exist for it to use. This is expected until the owner completes steps 1-3 above.
 
-## Cloudflare edge origin (nginx)
+## Cloudflare edge origin (nginx + cloudflared)
 
-`docs/ops/edge-origin/` (issue #165) is the local HTTP origin `cloudflared` (#168, not yet built)
-will point at once the owner sets up Cloudflare Tunnel + Access. It is a second, deliberately
-narrower front door onto the same box: `tailscale-serve-apply.sh`'s private route table is
-untouched and keeps working exactly as before over the tailnet.
+`docs/ops/edge-origin/` (issue #165) is the local HTTP origin `cloudflared` (issue #169, added to
+the same compose file) points at once the owner sets up Cloudflare Tunnel + Access. It is a second,
+deliberately narrower front door onto the same box: `tailscale-serve-apply.sh`'s private route table
+is untouched and keeps working exactly as before over the tailnet.
 
 **Nothing is public by default.** `docs/ops/edge-origin/public_paths.conf` is the only place a path
 can become reachable through this origin, and every line in the checked-in file is commented out --
@@ -502,16 +544,99 @@ no location block for any of the five private routes, so every request 404s; onl
 (defined directly in `nginx.conf`, not in `public_paths.conf`) ever answers, and it exists purely so
 the container's own healthcheck has something stable to poll.
 
-To expose a path: uncomment its `location` block in `public_paths.conf` and redeploy the
-`edge-origin` compose service. Each block's target must mirror `tailscale-serve-apply.sh`'s mount ->
-target mapping exactly (`edge-origin.test.mjs`'s sync test fails the build if they ever drift
-apart), so copy the block as written rather than retyping it. There is currently no workflow that
-deploys this compose service -- that wiring, and the Cloudflare tunnel itself, is #168-#170; today
-this can only be run by hand from a checkout on the box (`docker compose -f
-docs/ops/edge-origin/compose.yml up -d`).
+To expose a path: uncomment its `location` block in `public_paths.conf` and redeploy (`ops-edge.yml`
+dispatch, or push a change under `docs/ops/edge-origin/`). Each block's target must mirror
+`tailscale-serve-apply.sh`'s mount -> target mapping exactly (`edge-origin.test.mjs`'s sync test
+fails the build if they ever drift apart), so copy the block as written rather than retyping it.
 
 `nginx.conf` sets `access_log off;` -- deliberate for now, since with nothing exposed there is
 nothing worth logging. Once a path is actually uncommented and this becomes cloudflared's real
 public origin, revisit that line: Cloudflare Access/Tunnel logs the request at the edge, but if
 nginx-side request logging is wanted too (e.g. to correlate against `docker logs` on the origin
 containers), turn `access_log` back on at that point -- an explicit owner call, not made here.
+
+### Deploying the stack (`ops-edge.yml`, issue #169)
+
+Dark behind `CLOUDFLARE_EDGE_ENABLED` -- ships `compose.yml`/`nginx.conf`/`public_paths.conf` and a
+rendered `.env` (holding only `CLOUDFLARE_TUNNEL_TOKEN`) to the box over keyless Tailscale SSH (ADR
+008, no SSH key material), then `docker compose pull && docker compose up -d --wait`. Triggers on
+`workflow_dispatch` or a push to `main` touching `docs/ops/edge-origin/**` (or the workflow file
+itself, `.github/workflows/ops-edge.yml`).
+
+Owner setup, one time, before flipping the gate:
+
+| Variable | Purpose |
+| --- | --- |
+| `INFISICAL_PLATFORM_EDGE_IDENTITY_ID` | Dedicated OIDC identity reading `/platform/edge/` -- distinct from every other pipeline's identity (ADR-05); `/platform/edge/` must contain `CLOUDFLARE_TUNNEL_TOKEN` (from the Cloudflare dashboard when the tunnel is created). |
+| `CLOUDFLARE_EDGE_ENABLED` | Set to `true` once the identity/token above are provisioned and a Cloudflare Tunnel exists pointed at this box. Off by default. |
+
+Cloudflare dashboard steps (owner, one time): create a Tunnel, copy its token into
+`/platform/edge/`'s `CLOUDFLARE_TUNNEL_TOKEN`, and set the tunnel's public hostname ingress rule to
+`http://127.0.0.1:8081` (the edge-origin container) -- one blanket rule, not a per-path proxy;
+per-path routing is entirely `public_paths.conf`'s job, never duplicated in the tunnel config. Access
+policies (who may reach which public hostname/path) are #170, a separate dashboard step.
+
+`docs/ops/edge-origin/compose.yml` pins `cloudflare/cloudflared:2025.6.1` -- **unverified against the
+live registry** in the environment this was authored in (no network access to Docker Hub to confirm
+the tag exists). Confirm or bump this tag before the first real deploy; a wrong tag fails loudly at
+`docker compose pull` on the box, not silently.
+
+### Verification once live (owner, manual)
+
+Not automated in CI -- run once after the first real deploy, and after any change to the compose
+stack:
+
+```bash
+# From a tailnet client (or the box itself): confirm cloudflared is genuinely
+# outbound-only. Anything printed here besides existing loopback listeners
+# (127.0.0.1:*, [::1]:*) and Tailscale's own listeners is a regression --
+# the whole point of a tunnel is zero new inbound ports.
+ssh deploy@<tailnet-name> "ss -tlnp"
+
+# Confirm the box's firewall posture is unchanged (whatever it was before
+# this deploy -- ufw status, or the absence of one, must match).
+ssh deploy@<tailnet-name> "sudo ufw status 2>/dev/null || echo 'no ufw configured'"
+```
+
+Also confirm in the Cloudflare dashboard that the tunnel shows **Healthy**, and that a request to the
+public hostname reaches `edge-origin` (a 404 for every path is correct until one is uncommented in
+`public_paths.conf`).
+
+### Cloudflare Access setup (issue #170)
+
+Dashboard configuration, not code -- do this after the Cloudflare Tunnel itself is live and
+reachable (issue #169) and before uncommenting any path in `public_paths.conf`. Every public hostname must
+sit behind Access before it carries real traffic; there is no code-level enforcement of that
+ordering, only this runbook.
+
+1. **Identity provider.** Cloudflare Zero Trust dashboard -> Settings -> Authentication -> add a
+   login method (Google Workspace, GitHub, one-time PIN, whichever the owner already uses
+   elsewhere). One IdP is enough for a single-owner setup; add more only if additional people need
+   access later.
+2. **One Access application per public hostname.** Zero Trust dashboard -> Access -> Applications ->
+   Add an application -> Self-hosted. Application domain = the exact public hostname the Tunnel
+   serves (the same value that will go into the `CLOUDFLARE_PUBLIC_HOSTNAME` repository variable
+   below). Do not scope the application to a sub-path here -- `public_paths.conf` already decides
+   which paths exist at all; Access's job is "who may reach this hostname," not "which paths."
+3. **Policy.** Include rule: the specific identity/identities allowed through (e.g. "Emails ending
+   in @yourdomain.com", or a literal email allowlist for a single owner). Session duration: pick a
+   value the owner is comfortable re-authenticating at (e.g. 24h) -- shorter is more secure, longer
+   is more convenient; there is no code-level default to defer to here.
+4. **Confirm, then flip the smoke gate.** Visit the public hostname in an incognito/logged-out
+   browser -- it must redirect to a Cloudflare-hosted login page, never reach the app directly. Only
+   once that's true, set the repository variable `CLOUDFLARE_PUBLIC_HOSTNAME` (the exact hostname
+   from step 2) so `platform-smoke.yml`'s public-edge probe (below) starts asserting it on every
+   deploy.
+
+### Public-edge smoke check (`platform-smoke.yml`, issue #170)
+
+Additive and independently gated -- the existing tailnet-private probes are completely unaffected by
+this being on or off. Once `CLOUDFLARE_EDGE_ENABLED` and `CLOUDFLARE_PUBLIC_HOSTNAME` are both set,
+every smoke run also sends one unauthenticated `GET` to `https://$CLOUDFLARE_PUBLIC_HOSTNAME/` and
+asserts the response is a 3xx redirect (toward Access) -- never a 2xx (Access is not actually in
+front of the app -- the exact regression this check exists to catch) and never a 5xx (the edge
+itself is broken). The probe deliberately never follows the redirect (no `-L`): it confirms the
+redirect happened, not what Access's own login page contains. The step's own gate is
+`(success() || failure()) && vars.CLOUDFLARE_EDGE_ENABLED == 'true'`, not a bare variable check --
+GitHub Actions implicitly ANDs a bare `if:` with `success()`, which would silently skip this probe
+whenever the private-probe step above it fails, exactly when the public edge might also be broken.
