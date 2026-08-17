@@ -1,0 +1,136 @@
+name: "LifeOS Backup"
+
+# Nightly encrypted LifeOS recovery bundle, run from THIS repository -- the
+# like-for-like port of the standalone repo's backup.yml (inert here), so the
+# ordered cutover (runbook) can hand backup ownership to the monorepo with
+# identical scope: the prod public schema PLUS the document blob volume. The
+# database read also keeps the Supabase free-tier project from pausing after
+# 7 idle days. The age private key never touches CI.
+#
+# Gated dark: vars.LIFEOS_BACKUP_ENABLED stays unset until cutover, so this
+# workflow is a visible skip until the owner flips it -- the standalone
+# pipeline keeps sole ownership of the nightly until then (no double-backup,
+# no split ownership of the artifact trail).
+#
+# Distinct-by-design from the platform backup: its own cron slot (existing
+# crons: platform backup 52 9, standalone LifeOS 17 8, brain-eval 9:17 --
+# this one takes 41 8), its own age recipient variable
+# (vars.LIFEOS_AGE_PUBLIC_KEY, deliberately NOT vars.PLATFORM_AGE_PUBLIC_KEY,
+# so the two pipelines never share a key pair), and the LifeOS deploy
+# identity's own Infisical path (/platform/lifeos-deploy/ -- DATABASE_URL and
+# the tailnet OAuth client already live there for lifeos-deploy.yml).
+# Keyless Tailscale SSH throughout (ADR 008): no SSH key material, no GitHub
+# Actions secrets.
+
+on:
+  schedule:
+    - cron: "41 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lifeos-backup-production
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    name: Create encrypted recovery bundle
+    if: vars.LIFEOS_BACKUP_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secrets · Pull backup configuration from Infisical
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/lifeos-deploy/"
+          domain: https://app.infisical.com
+
+      - name: Preflight · Validate backup configuration
+        shell: bash
+        env:
+          AGE_PUBLIC_KEY: ${{ vars.LIFEOS_AGE_PUBLIC_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "${DATABASE_URL:-}"
+          test -n "${AGE_PUBLIC_KEY:-}"
+          test -n "${DEPLOY_HOST:-}"
+          test -n "${TS_OAUTH_CLIENT_ID:-}"
+          test -n "${TS_OAUTH_SECRET:-}"
+          case "$AGE_PUBLIC_KEY" in
+            age1*) ;;
+            *) echo "LIFEOS_AGE_PUBLIC_KEY must be an age1... recipient, not an identity." >&2; exit 1 ;;
+          esac
+
+      - name: Network · Join tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
+
+      - name: Setup · Install age
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq age
+
+      - name: Bundle · Create, verify, and encrypt the recovery bundle
+        shell: bash
+        env:
+          AGE_PUBLIC_KEY: ${{ vars.LIFEOS_AGE_PUBLIC_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          payload="$work/payload"
+          mkdir -p "$payload"
+
+          # Postgres public schema, dumped through a throwaway container
+          # pinned to the prod major so pg_dump matches the server.
+          docker run --rm -e DATABASE_URL postgres:17 \
+            sh -ec 'pg_dump --format=custom --no-owner --schema=public "$DATABASE_URL"' \
+            > "$payload/lifeos.dump"
+
+          # The document blob volume, streamed read-only out of the running
+          # API container over Tailscale SSH -- no plaintext archive is ever
+          # written to the production host.
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+            "deploy@$DEPLOY_HOST" 'bash -s' > "$payload/lifeos-blobs.tar" <<'REMOTE'
+          set -euo pipefail
+          cd /home/deploy/lifeos
+          docker compose exec -T api python -c 'import sys, tarfile; archive = tarfile.open(fileobj=sys.stdout.buffer, mode="w|"); archive.add("/app/var/blobs", arcname="blobs", recursive=True); archive.close()'
+          REMOTE
+
+          # Verify BEFORE encrypting: a bundle that cannot be listed is not
+          # a backup, and discovering that during a restore is too late.
+          test -s "$payload/lifeos.dump"
+          test -s "$payload/lifeos-blobs.tar"
+          docker run --rm -i postgres:17 pg_restore --list \
+            < "$payload/lifeos.dump" > /dev/null
+          tar -tf "$payload/lifeos-blobs.tar" > /dev/null
+          (cd "$payload" && sha256sum lifeos.dump lifeos-blobs.tar > SHA256SUMS)
+
+          tar -C "$payload" -cf "$work/lifeos-backup.tar" \
+            lifeos.dump lifeos-blobs.tar SHA256SUMS
+          age -r "$AGE_PUBLIC_KEY" \
+            -o "lifeos-backup-${GITHUB_RUN_ID}.tar.age" \
+            "$work/lifeos-backup.tar"
+          head -c 22 "lifeos-backup-${GITHUB_RUN_ID}.tar.age" | grep -q "age-encryption.org"
+
+      - name: Publish · Upload the encrypted bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lifeos-backup-${{ github.run_id }}
+          path: lifeos-backup-${{ github.run_id }}.tar.age
+          retention-days: 90
+          if-no-files-found: error
