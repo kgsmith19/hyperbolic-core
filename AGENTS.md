@@ -421,6 +421,15 @@ workflow also triggers on `auto_merge_disabled`, `labeled` and `unlabeled`, armi
 when auto-merge is switched off without an owner hold, and an `owner:hold-merge` label applied by
 the owner disables it again on the next run.
 
+> [!NOTE]
+> That reactivity now costs a **full pipeline run** — up to ~16 minutes — for every label change,
+> body edit, draft toggle, or auto-merge switch-off, because those events must re-run the workflow
+> that contains the orchestration. Under the previous shape `merge-policy.yml` answered them in
+> about five seconds from its own `pull_request_target` job; absorbing that job is what removed a
+> permanent check row, and this is the price. `cancel-in-progress` bounds it — rapid successive
+> edits cancel the superseded run rather than queueing another. Weigh this before adding another
+> event to `pr-verify.yml`'s `types:` list.
+
 `.github/CODEOWNERS` requires `@kgsmith19` review for this repo's control-plane paths
 (`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`). `main` protection: pull request
 required, squash only, linear history, no force push, no deletion, code-owner approval required
