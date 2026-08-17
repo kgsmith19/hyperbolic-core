@@ -75,15 +75,18 @@ const REAL_MIGRATIONS = [
 const BOOTSTRAP_ROLES_SQL = `
 do $$
 begin
-  if not exists (select from pg_roles where rolname = 'anon') then
+  begin
     create role anon;
-  end if;
-  if not exists (select from pg_roles where rolname = 'authenticated') then
+  exception when duplicate_object then null;
+  end;
+  begin
     create role authenticated;
-  end if;
-  if not exists (select from pg_roles where rolname = 'service_role') then
+  exception when duplicate_object then null;
+  end;
+  begin
     create role service_role;
-  end if;
+  exception when duplicate_object then null;
+  end;
 end
 $$;
 `;

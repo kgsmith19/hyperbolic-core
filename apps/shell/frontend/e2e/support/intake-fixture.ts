@@ -56,26 +56,44 @@ const REAL_MIGRATIONS = [
 export const OWNER_UUID = "00000000-0000-4000-8000-000000000099";
 export const FIXTURE_SERVICE_ROLE_KEY = "fixture-e2e-service-role-key";
 
+// Roles are CLUSTER-level in Postgres, not per-database, so every parallel
+// Playwright worker shares one role namespace even though each gets its own
+// database. A check-then-create ("if not exists ... then create role") is
+// therefore a TOCTOU race between workers: two can both observe the role
+// missing and both attempt to create it, and the loser dies with
+// `duplicate key value violates unique constraint "pg_authid_rolname_index"`.
+// That raced intermittently in CI for exactly this reason.
+//
+// Catching duplicate_object per role is the idiomatic fix: it is the only
+// outcome we are willing to ignore (the role already exists, which is what
+// we wanted), and it stays a hard failure for anything else. Each create
+// gets its own sub-block because an exception aborts the whole block it is
+// raised in -- one shared handler would silently skip the remaining roles.
+//
+// authenticator is needed by intake_create_schema.sql's own last statement
+// ("alter role authenticator set pgrst.db_schemas = ...", mirroring every
+// other schema-exposure migration in this repo). A persistent local Postgres
+// cluster usually already has it from other fixtures or prior runs, which
+// hides the gap locally; a fresh CI runner's Postgres does not.
 const BOOTSTRAP_ROLES_SQL = `
 do $$
 begin
-  if not exists (select from pg_roles where rolname = 'anon') then
+  begin
     create role anon;
-  end if;
-  if not exists (select from pg_roles where rolname = 'authenticated') then
+  exception when duplicate_object then null;
+  end;
+  begin
     create role authenticated;
-  end if;
-  if not exists (select from pg_roles where rolname = 'service_role') then
+  exception when duplicate_object then null;
+  end;
+  begin
     create role service_role;
-  end if;
-  -- intake_create_schema.sql's own last statement ("alter role authenticator
-  -- set pgrst.db_schemas = ...", mirroring every other schema-exposure
-  -- migration in this repo) needs this role to exist. This sandbox's
-  -- persistent Postgres cluster already had it from other fixtures/prior
-  -- runs, which hid this gap locally; a fresh CI runner's Postgres does not.
-  if not exists (select from pg_roles where rolname = 'authenticator') then
+  exception when duplicate_object then null;
+  end;
+  begin
     create role authenticator;
-  end if;
+  exception when duplicate_object then null;
+  end;
 end
 $$;
 `;

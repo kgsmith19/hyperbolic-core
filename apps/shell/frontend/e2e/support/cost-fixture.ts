@@ -53,10 +53,22 @@ export const OWNER_UUID = "00000000-0000-4000-8000-000000000099";
 const BOOTSTRAP_ROLES_SQL = `
 do $$
 begin
-  if not exists (select from pg_roles where rolname = 'anon') then create role anon; end if;
-  if not exists (select from pg_roles where rolname = 'authenticated') then create role authenticated; end if;
-  if not exists (select from pg_roles where rolname = 'service_role') then create role service_role; end if;
-  if not exists (select from pg_roles where rolname = 'authenticator') then create role authenticator; end if;
+  begin
+    create role anon;
+  exception when duplicate_object then null;
+  end;
+  begin
+    create role authenticated;
+  exception when duplicate_object then null;
+  end;
+  begin
+    create role service_role;
+  exception when duplicate_object then null;
+  end;
+  begin
+    create role authenticator;
+  exception when duplicate_object then null;
+  end;
 end
 $$;
 `;

@@ -151,10 +151,22 @@ as $$ select current_setting('role') $$;
 
 do $$
 begin
-  if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticator') then create role authenticator nologin; end if;
+  begin
+    create role anon nologin;
+  exception when duplicate_object then null;
+  end;
+  begin
+    create role authenticated nologin;
+  exception when duplicate_object then null;
+  end;
+  begin
+    create role service_role nologin;
+  exception when duplicate_object then null;
+  end;
+  begin
+    create role authenticator nologin;
+  exception when duplicate_object then null;
+  end;
 end
 $$;
 ${seed}`;
