@@ -694,3 +694,21 @@ jobs:
           scp "${ssh_options[@]}" docs/ops/prune-docker-images.sh "deploy@$DEPLOY_HOST:brain/prune-docker-images.sh"
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
             "chmod 0755 brain/prune-docker-images.sh && brain/prune-docker-images.sh ghcr.io/${{ github.repository }}/brain '$IMAGE'"
+
+  smoke:
+    name: Post-deploy smoke
+    # Runs whenever at least one unit actually deployed, even if a sibling
+    # failed (always() beats the default failure-skip): the surviving units
+    # still deserve a live verdict, and a red smoke keeps the run red.
+    needs: [deploy-shell, deploy-llm-handler, deploy-brain]
+    if: >-
+      always() &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      (needs.deploy-shell.result == 'success' ||
+       needs.deploy-llm-handler.result == 'success' ||
+       needs.deploy-brain.result == 'success')
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/platform-smoke.yml

@@ -379,3 +379,18 @@ jobs:
           ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
             'chmod 0755 lifeos-ui/prune-dist-dirs.sh && lifeos-ui/prune-dist-dirs.sh lifeos-ui'
+
+  smoke:
+    name: Post-deploy smoke
+    needs: [deploy-backend, deploy-ui]
+    if: >-
+      always() &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      vars.LIFEOS_DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      (needs.deploy-backend.result == 'success' ||
+       needs.deploy-ui.result == 'success')
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/platform-smoke.yml
