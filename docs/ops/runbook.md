@@ -429,3 +429,45 @@ dropdb platform_restore_drill
 - All scratch databases and the local age key pair were dropped/deleted immediately after; nothing from this drill was retained.
 
 Executing the first drill against a real `platform-backup.yml` artifact and filling in the table above is an operator action requiring the offline age identity and live platform credentials, neither of which exists in a CI or agent environment by design -- it is the one acceptance criterion of m6-03 that repository changes cannot satisfy.
+
+## Hetzner Storage Box bootstrap (restic)
+
+`docs/ops/restic-setup.sh` (issue #164) prepares the VPS to back up onto a Hetzner Storage Box via
+restic. It is setup machinery only -- it installs a checksum-verified restic binary, writes the SSH
+config alias the Storage Box's non-standard SFTP port needs, and idempotently `restic init`s the
+`platform` and `lifeos` repositories. It does not run on a schedule and is not wired into any
+workflow yet; `platform-backup.yml`/`lifeos-backup.yml` gain restic backup steps in #166/#167.
+
+Owner steps, one time, before running it:
+
+1. In the Hetzner Cloud console, purchase a Storage Box (BX11, ~€3.81/mo -- see
+   [`docs/ops/vendors.md`](vendors.md#hetzner)).
+2. Create two SFTP sub-accounts on the box, one per restic repository (`platform`, `lifeos`), each
+   with its own home directory and its own SSH public key. Sub-account isolation means a compromised
+   backup identity for one app cannot read or overwrite the other's snapshots.
+3. Generate an SSH keypair per sub-account (or reuse one if the owner prefers a single credential --
+   `restic-setup.sh --ssh-key-file=` accepts one key path per invocation). Store each private key and
+   the shared `RESTIC_PASSWORD` (restic's own repository-encryption password, independent of the SSH
+   key) under Infisical `/platform/backup/`, the path `platform-backup.yml`'s restic steps read from
+   (see [`vendors.md`](vendors.md#infisical)'s Infisical path table).
+4. Run the script once per box, from a host that already holds the SSH private key at 0600
+   permissions:
+
+   ```bash
+   # Preview every command it would run -- no mutation.
+   docs/ops/restic-setup.sh --storagebox-host=u123456.your-storagebox.de \
+     --storagebox-user=u123456-sub1 --ssh-key-file=/path/to/key
+
+   # Run for real once the plan looks right. RESTIC_PASSWORD must be set first.
+   RESTIC_PASSWORD=... docs/ops/restic-setup.sh --apply \
+     --storagebox-host=u123456.your-storagebox.de \
+     --storagebox-user=u123456-sub1 --ssh-key-file=/path/to/key
+   ```
+
+   Re-running is safe: an already-installed matching restic version and an already-initialized
+   repository are both detected and skipped rather than re-done.
+
+Neither the SSH private key nor `RESTIC_PASSWORD` is ever written to disk by this script beyond the
+key file the caller already placed -- both are read from the environment/an existing file and never
+echoed or logged. The script has not been run against a real Storage Box yet: no box exists, so no
+credentials exist for it to use. This is expected until the owner completes steps 1-3 above.
