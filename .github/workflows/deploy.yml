@@ -712,3 +712,39 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/platform-smoke.yml
+
+  tag-release:
+    name: Tag successful releases
+    # Only once the run's overall post-deploy smoke actually succeeded --
+    # a unit whose own deploy job succeeded but that fails smoke has not
+    # earned a release tag, since smoke is this pipeline's live verdict on
+    # whether the deploy is actually good (see the smoke job's own header
+    # comment above: "a red smoke keeps the run red").
+    needs: [deploy-shell, deploy-llm-handler, deploy-brain, smoke]
+    if: >-
+      always() &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      needs.smoke.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tag each unit that deployed successfully this run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          SHELL_RESULT: ${{ needs.deploy-shell.result }}
+          LLM_HANDLER_RESULT: ${{ needs.deploy-llm-handler.result }}
+          BRAIN_RESULT: ${{ needs.deploy-brain.result }}
+        run: |
+          set -euo pipefail
+          docs/ops/tag-release.sh shell "$SHELL_RESULT" "$SHA"
+          docs/ops/tag-release.sh llm-handler "$LLM_HANDLER_RESULT" "$SHA"
+          docs/ops/tag-release.sh brain "$BRAIN_RESULT" "$SHA"

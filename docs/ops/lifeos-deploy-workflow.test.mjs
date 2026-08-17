@@ -60,7 +60,7 @@ test("no GitHub Actions secrets at all -- Infisical OIDC is the only secret sour
 test("every checkout refuses to persist credentials", () => {
   const checkouts = workflow.match(/actions\/checkout@/g) ?? [];
   const persists = workflow.match(/persist-credentials: false/g) ?? [];
-  assert.equal(checkouts.length, 3);
+  assert.equal(checkouts.length, 4);
   assert.equal(persists.length, checkouts.length);
 });
 
@@ -156,4 +156,32 @@ test("serve-apply is keyless, secretless, strict-moded, and publishes before/aft
   assert.match(serveApply, /serve status BEFORE/);
   assert.match(serveApply, /serve status AFTER/);
   assert.match(serveApply, />> "\$GITHUB_STEP_SUMMARY"/);
+});
+
+test("tag-release (issue #189): contents: write is scoped to that job alone, nowhere else in the file", () => {
+  const writeOccurrences = workflow.match(/contents: write/g) ?? [];
+  assert.equal(writeOccurrences.length, 1, "exactly one contents: write in the whole file");
+  const tagJob = workflow.slice(workflow.indexOf("  tag-release:"));
+  assert.match(tagJob, /contents: write/);
+});
+
+test("tag-release only fires once the run's overall smoke verdict succeeded, not merely because a deploy job did", () => {
+  const tagJob = workflow.slice(workflow.indexOf("  tag-release:"));
+  assert.match(tagJob, /needs\.smoke\.result == 'success'/);
+  assert.match(tagJob, /vars\.LIFEOS_DEPLOY_ENABLED == 'true'/);
+  assert.doesNotMatch(tagJob, /needs\.deploy-backend\.result == 'success' \|\|/);
+});
+
+test("tag-release calls tag-release.sh once per unit, passing that unit's own deploy result and the exact deployed sha", () => {
+  const tagJob = workflow.slice(workflow.indexOf("  tag-release:"));
+  assert.match(tagJob, /BACKEND_RESULT: \$\{\{ needs\.deploy-backend\.result \}\}/);
+  assert.match(tagJob, /UI_RESULT: \$\{\{ needs\.deploy-ui\.result \}\}/);
+  assert.match(tagJob, /docs\/ops\/tag-release\.sh lifeos-backend "\$BACKEND_RESULT" "\$SHA"/);
+  assert.match(tagJob, /docs\/ops\/tag-release\.sh lifeos-ui "\$UI_RESULT" "\$SHA"/);
+  assert.match(tagJob, /SHA: \$\{\{ github\.sha \}\}/);
+});
+
+test("tag-release checks out with credentials not persisted, matching every other job in this file", () => {
+  const tagJob = workflow.slice(workflow.indexOf("  tag-release:"));
+  assert.match(tagJob, /persist-credentials: false/);
 });

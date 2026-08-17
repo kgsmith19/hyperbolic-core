@@ -394,3 +394,36 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/platform-smoke.yml
+
+  tag-release:
+    name: Tag successful releases
+    # Only once the run's overall post-deploy smoke actually succeeded --
+    # a unit whose own deploy job succeeded but that fails smoke has not
+    # earned a release tag; matches deploy.yml's own tag-release job.
+    needs: [deploy-backend, deploy-ui, smoke]
+    if: >-
+      always() &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      vars.LIFEOS_DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      needs.smoke.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tag each unit that deployed successfully this run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          BACKEND_RESULT: ${{ needs.deploy-backend.result }}
+          UI_RESULT: ${{ needs.deploy-ui.result }}
+        run: |
+          set -euo pipefail
+          docs/ops/tag-release.sh lifeos-backend "$BACKEND_RESULT" "$SHA"
+          docs/ops/tag-release.sh lifeos-ui "$UI_RESULT" "$SHA"
