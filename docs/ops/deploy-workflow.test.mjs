@@ -130,3 +130,19 @@ test("the Brain's rendered .env uses the env names the daemon actually reads", (
   assert.doesNotMatch(workflow, /\bLIFEOS_API_BASE_URL\b/);
   assert.doesNotMatch(workflow, /\bLIFEOS_AGENT_TOKEN\b/);
 });
+
+test("Handler A's rendered .env can deliver the LLM provider keys the service reads", () => {
+  // services/llm-handler/src/config.ts reads LLM_KEYS_ANTHROPIC / LLM_KEYS_OPENAI /
+  // LLM_KEYS_GEMINI from the environment. Before issue #133 the deploy rendered
+  // none of them, so production Handler A had no provider credentials at all.
+  const job = workflow.slice(
+    workflow.indexOf("  deploy-llm-handler:"),
+    workflow.indexOf("  build-brain:"),
+  );
+  assert.match(job, /LLM_KEYS_ANTHROPIC=/);
+  assert.match(job, /LLM_KEYS_OPENAI=/);
+  assert.match(job, /LLM_KEYS_GEMINI=/);
+  // Optional-var shape, not required: an unprovisioned key must be omitted from
+  // .env (the daemon treats them as optional), never rendered empty or fatal.
+  assert.match(job, /\[ -n "\$\{LLM_KEYS_ANTHROPIC:-\}" \]/);
+});
