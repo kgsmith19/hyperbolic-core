@@ -47,5 +47,5 @@ Apply `supabase/migrations/*.sql` through the Supabase API. Each up migration ha
 
 New work starts in Toolbelt GitHub Issues. Pull requests are verified by the
 hyperbolic-core root's `.github/workflows/toolbelt-ci.yml`, called as the
-`Verify: Toolbelt` stage of the root's sequential `pr-verify.yml` chain.
+`Verify: Tests (Toolbelt)` stage of the root's sequential `pr-verify.yml` chain.
 Successful pull requests use native squash auto-merge.

@@ -149,18 +149,26 @@ if ((branch_protection)); then
   # sensitive policy decision than this script's scope -- flip it by hand
   # if the owner wants it enforced at the ruleset level.
   #
-  # All five contexts below are NATIVE jobs in pr-verify.yml (no
-  # workflow_call involved for any of them), so each reports its bare
-  # "Verify: X" name with no compound prefix -- the same pattern already
-  # confirmed for "Hyperbolic Core Merge Policy". Do NOT use these bare
-  # names for anything that IS workflow_call-chained (the five app gates,
-  # LLM Review): those report the COMPOUND form
-  # "<pr-verify.yml job name> / <called workflow's own job name>" instead,
-  # confirmed empirically against PR #160's own first real run -- a
-  # required check that never matches the real reported context blocks
-  # every PR forever. The five app gates (Toolbelt/ACC/Brain/Shell/LifeOS)
-  # are deliberately NOT required individually -- only the "Verify: Tests"
-  # umbrella that needs all five is.
+  # Every context below is a NATIVE job in pr-verify.yml -- nothing in that
+  # file uses workflow_call any more -- so each reports its bare
+  # "Verify: X" name with no compound prefix. That is exactly why the
+  # refactor happened: a workflow_call-invoked job is always reported as
+  # "<caller job name> / <callee job name>", so a bare name typed into the
+  # ruleset would create a required check that NEVER reports and blocks
+  # every PR forever (confirmed empirically against PR #160's own runs).
+  #
+  # Every "Verify: Tests (<App>)" job ALWAYS runs and always reports: when
+  # its app's paths were not touched it reports a trivial pass in seconds
+  # rather than running the suite, which is what makes a path-scoped check
+  # safe to require. ACC has two contexts because its PowerShell suites
+  # need a windows-latest runner and one job cannot span two runner images.
+  #
+  # NOT required, deliberately: "Verify: LLM Review" (fails closed until the
+  # owner provisions reviewer credentials -- see llm-review.yml) and
+  # "Verify: Merge Policy" (merge-policy.yml: orchestration, not
+  # verification; it arms auto-merge and maintains the Work State/Evidence
+  # Index comments, and is built to never fail, so requiring it would add a
+  # rubber stamp rather than a check).
   protection_body=$(cat <<'JSON'
 {
   "name": "main",
@@ -189,11 +197,17 @@ if ((branch_protection)); then
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": true,
         "required_status_checks": [
+          { "context": "Verify: Detect Changes" },
           { "context": "Verify: Secrets" },
           { "context": "Verify: Repo Policy" },
           { "context": "Verify: PR Description" },
           { "context": "Verify: Linting" },
-          { "context": "Verify: Tests" }
+          { "context": "Verify: Tests (Toolbelt)" },
+          { "context": "Verify: Tests (ACC)" },
+          { "context": "Verify: Tests (ACC Windows)" },
+          { "context": "Verify: Tests (Brain)" },
+          { "context": "Verify: Tests (Shell)" },
+          { "context": "Verify: Tests (LifeOS)" }
         ]
       }
     }

@@ -25,7 +25,7 @@
 # (standard.vendored: false in project.yaml); the two must be kept in
 # sync by hand whenever the pinned standard commit is bumped and its
 # reference implementation has changed.
-name: Hyperbolic Core Merge Policy
+name: "Verify: Merge Policy"
 
 on:
   pull_request_target:
@@ -54,7 +54,7 @@ concurrency:
 
 jobs:
   reconcile:
-    name: Hyperbolic Core Merge Policy
+    name: "Verify: Merge Policy"
     runs-on: ubuntu-latest
     steps:
       - name: Merge Policy · Reconcile pull request state

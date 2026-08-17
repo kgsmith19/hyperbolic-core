@@ -1,41 +1,26 @@
-# LifeOS had NO merge gate in this monorepo. Its own
-# apps/lifeos/.github/workflows/ci.yml is inert by design -- GitHub only runs
-# workflows from the repository root -- and no root workflow covered
-# apps/lifeos/**, so 680 test cases never ran on a pull request while the app's
-# AGENTS.md told readers a root gate verified them.
+name: "Verify: Tests (LifeOS)"
+
+# Standalone entry point for merge_group/push/workflow_dispatch only. The
+# pull_request path runs this same suite as a native job in pr-verify.yml
+# (see that file's header for why nothing here is workflow_call any more),
+# both calling the verify-tests-lifeos composite action under
+# .github/actions/ so the suite has exactly one source.
 #
-# This file is AUTHORED FRESH, not relocated. The repo-root AGENTS.md invariant
-# exists precisely because that nested file also carries `build-backend` and
-# `deploy-backend` jobs, and `build-backend` has no repository-variable gate:
-# moving that file to this directory would publish a Docker image to
-# ghcr.io on every push to main. So this workflow contains the two TEST jobs
-# only. It does trigger on `push` to main (re-running the same test jobs as a
-# post-merge freshness check, matching the other Verify: * gates), but there
-# is no build or deploy job anywhere in this file for that trigger to key off.
+# LifeOS had NO merge gate in this monorepo before this file existed. Its
+# own apps/lifeos/.github/workflows/ci.yml is inert by design -- GitHub only
+# runs workflows from the repository root -- and no root workflow covered
+# apps/lifeos/**, so 680 test cases never ran on a pull request while the
+# app's AGENTS.md told readers a root gate verified them.
 #
-# Called as the "Verify: LifeOS" stage of pr-verify.yml's sequential chain.
-# The detect-changes job replaces the old top-level pull_request paths:
-# filter: instead of the whole workflow silently never triggering on a PR
-# that doesn't touch LifeOS (the forever-pending failure this repo hit on
-# PRs #118/#120), the gate always runs and reports a trivial pass when
-# LifeOS's own paths weren't touched -- which is what makes it safe to mark
-# required. See repo-policy.yml's header comment for why
-# pull_request-specific data arrives via inputs rather than
-# github.event.pull_request.
-name: "LifeOS PR Gate"
+# The composite action this calls is AUTHORED FRESH, not relocated. The
+# repo-root AGENTS.md invariant exists precisely because that nested file
+# also carries `build-backend` and `deploy-backend` jobs, and
+# `build-backend` has no repository-variable gate: running that file from
+# the root would publish a Docker image to ghcr.io on every push to main.
+# So verify-tests-lifeos contains the TEST steps only -- there is no build
+# or deploy step anywhere in it for the push trigger below to key off.
 
 on:
-  workflow_call:
-    inputs:
-      pr_number:
-        type: string
-        required: false
-      pr_head_sha:
-        type: string
-        required: false
-      pr_base_sha:
-        type: string
-        required: false
   merge_group:
     types: [checks_requested]
   push:
@@ -46,237 +31,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.pr_number || github.event.merge_group.head_sha || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.merge_group.head_sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  detect-changes:
-    name: Detect changes
+  verify-tests-lifeos:
+    name: "Verify: Tests (LifeOS)"
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      relevant: ${{ steps.check.outputs.relevant }}
-    steps:
-      - name: Setup · Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Detect · Does this change touch LifeOS's paths?
-        id: check
-        shell: bash
-        env:
-          PR_BASE_SHA: ${{ inputs.pr_base_sha }}
-        run: |
-          set -euo pipefail
-          if [ -n "${PR_BASE_SHA}" ]; then
-            base="${PR_BASE_SHA}"
-          elif [ "${{ github.event_name }}" = "merge_group" ]; then
-            base="${{ github.event.merge_group.base_sha }}"
-          else
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "No comparable base for this event; running the real checks."
-            exit 0
-          fi
-          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "Base commit not available locally; running the real checks to be safe."
-            exit 0
-          fi
-          if git diff --name-only "${base}...HEAD" | grep -qE '^(apps/lifeos/|\.github/workflows/lifeos-ci\.yml$|\.github/workflows/pr-verify\.yml$)'; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "LifeOS paths changed; running the real checks."
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-            echo "No LifeOS paths changed; nothing to verify."
-          fi
-
-  backend:
-    name: LifeOS backend
-    needs: [detect-changes]
-    if: needs.detect-changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
-    defaults:
-      run:
-        working-directory: apps/lifeos/backend
+    timeout-minutes: 50
     steps:
       - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Setup · Start Postgres
-        shell: bash
-        run: |
-          docker run --detach --name lifeos-ci-postgres \
-            -e POSTGRES_PASSWORD=postgres \
-            -p 5432:5432 \
-            pgvector/pgvector:pg17
-          for attempt in $(seq 1 30); do
-            if docker exec lifeos-ci-postgres pg_isready -U postgres >/dev/null 2>&1; then
-              exit 0
-            fi
-            sleep 1
-          done
-          docker logs lifeos-ci-postgres
-          exit 1
-      - name: Setup · Install Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: "3.14"
-          cache: pip
-          cache-dependency-path: apps/lifeos/backend/pyproject.toml
-      - name: Dependencies · Install backend package (dev extras)
-        run: python -m pip install -e .[dev]
-      - name: Lint · ruff check
-        run: ruff check .
-      - name: Type-check · mypy
-        run: mypy
-      - name: Setup · Apply migrations
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'create schema if not exists extensions'
-          for migration in supabase/migrations/*.sql; do
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
-          done
-      - name: Test · pytest
-        run: pytest
-      - name: Cleanup · Stop Postgres
-        if: always()
-        run: docker rm --force lifeos-ci-postgres >/dev/null 2>&1 || true
-
-  frontend:
-    name: LifeOS frontend
-    needs: [detect-changes]
-    if: needs.detect-changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    env:
-      # Unit and browser tests intercept every external request. These public,
-      # non-production values let the Supabase client initialize without
-      # coupling PR validation to a deployed project.
-      #
-      # VITE_API_URL is deliberately NOT set, and that is load-bearing.
-      # playwright.config.ts's webServer.env sets only the two values above
-      # and says why: "VITE_API_URL is deliberately UNSET: src/api/client.ts's
-      # default ('/life/api', same-origin relative) is real behavior this suite
-      # exercises". But webServer.env is MERGED over process.env, not
-      # substituted for it, so a job-level VITE_API_URL still reaches Vite and
-      # repoints the client at an absolute origin that page.route() never
-      # intercepts. Five of six browser tests then fail on "element not found"
-      # because the mocked data never arrives. The inert ci.yml this workflow
-      # was modelled on carries that same variable -- it just never ran, so
-      # nothing ever contradicted its own config's comment.
-      VITE_SUPABASE_URL: https://test.supabase.co
-      VITE_SUPABASE_PUBLISHABLE_KEY: test-public-anon-key
-    defaults:
-      run:
-        working-directory: apps/lifeos/frontend
-    steps:
-      - name: Setup · Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Setup · Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: apps/lifeos/frontend/package-lock.json
-      # This app's frontend depends on @hyperbolic/ui and
-      # @hyperbolic/platform-client through `file:` paths, and its tsconfig
-      # project-references them, so `tsc -b` compiles platform-client's OWN
-      # source. That needs the root workspace install (for
-      # @supabase/supabase-js, which platform-client depends on) and needs
-      # packages/ui built to emit the declarations App.tsx imports. Neither
-      # happens from inside apps/lifeos/frontend, which is why the first run
-      # of this gate failed on both. shell-ci.yml does the same two steps for
-      # the same reason.
-      - name: Dependencies · Install root workspace dependencies
-        run: npm ci
-        working-directory: .
-      - name: Build · Build the packages/ui dependency
-        run: npm run build --workspace=packages/ui
-        working-directory: .
-      - name: Dependencies · Install frontend dependencies
-        run: npm ci
-      - name: Lint · npm run lint
-        run: npm run lint
-      - name: Type-check · npx tsc -b
-        run: npx tsc -b
-      - name: Test · npm run test
-        run: npm run test
-      - name: Cache · Cache Playwright Chromium
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: lifeos-playwright-chromium-${{ runner.os }}-${{ hashFiles('apps/lifeos/frontend/package-lock.json') }}
-      - name: E2E · Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-      - name: E2E · npm run e2e
-        run: npm run e2e
-      - name: Evidence · Upload Playwright failure evidence
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: lifeos-playwright-failure-evidence
-          path: |
-            apps/lifeos/frontend/playwright-report/
-            apps/lifeos/frontend/test-results/
-          if-no-files-found: ignore
-          retention-days: 14
-      - name: Build · npm run build
-        run: npm run build
-
-  lifeos-pr-gate:
-    name: "Verify: LifeOS"
-    runs-on: ubuntu-latest
-    needs: [detect-changes, backend, frontend]
-    if: always()
-    permissions:
-      pull-requests: read
-    steps:
-      - name: Gate · Confirm both halves passed
-        run: |
-          if [ "${{ needs.detect-changes.outputs.relevant }}" = "true" ]; then
-            test "${{ needs.backend.result }}" = "success"
-            test "${{ needs.frontend.result }}" = "success"
-          else
-            test "${{ needs.backend.result }}" = "skipped"
-            test "${{ needs.frontend.result }}" = "skipped"
-            echo "LifeOS was not touched by this change; nothing to verify."
-          fi
-      - name: Gate · Confirm tested SHA matches the live PR head
-        if: inputs.pr_number != ''
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ inputs.pr_number }}
-          TESTED_SHA: ${{ inputs.pr_head_sha }}
-        run: |
-          set -euo pipefail
-          live_sha="$(curl --fail --silent \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
-          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
-            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
-            exit 1
-          fi
-          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
-      - name: Gate · Publish step summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "### Verify: LifeOS"
-            echo ""
-            echo "| Job | Result |"
-            echo "| --- | --- |"
-            echo "| detect-changes | relevant=${{ needs.detect-changes.outputs.relevant }} |"
-            echo "| backend | ${{ needs.backend.result }} |"
-            echo "| frontend | ${{ needs.frontend.result }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: ./.github/actions/verify-tests-lifeos

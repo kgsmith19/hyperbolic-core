@@ -1,76 +1,60 @@
 name: "PR Verification"
 
-# Entry point for every PR-time verification gate. The required surface is
-# deliberately small: Secrets, Repo Policy, PR Description, Linting, and
-# one combined Tests gate -- five app-scoped CI files run underneath Tests,
-# but only the umbrella is required, not each of them individually. LLM
-# Review runs last and stays non-required until reviewer credentials are
-# provisioned. See AGENTS.md's "PR Gate and merge behavior" section for the
-# full rationale and the required-checks list this maps to.
+# Single entry point for every PR-time verification gate.
+#
+# EVERY job below is a NATIVE job whose name starts with "Verify: ", and
+# every one of them produces exactly ONE check row with that exact bare
+# name. That is deliberate and load-bearing, not cosmetic:
+#
+#   * A required status check is matched by its literal reported name. A
+#     workflow_call-invoked job is ALWAYS reported as
+#     "<caller job name> / <callee job name>" for every job the called
+#     workflow has, no matter how few -- there is no way to get a bare name
+#     through that boundary. Typing the bare name into the ruleset then
+#     silently creates a required check that NEVER reports, which blocks
+#     every PR forever (see the warning in AGENTS.md > PR Gate and merge
+#     behavior, and the PR #118/#120 incident).
+#   * So nothing here uses workflow_call. The real work lives in composite
+#     actions under .github/actions/, which run INSIDE the calling job and
+#     therefore add no rows of their own. Those same composite actions are
+#     reused by the standalone workflow files (secret-scan.yml,
+#     repo-policy.yml, template-lint.yml, toolbelt-ci.yml, acc-ci.yml,
+#     brain-ci.yml, shell-ci.yml, lifeos-ci.yml, llm-review.yml) for their
+#     own merge_group/push/workflow_dispatch triggers, so every check has
+#     exactly one source of logic despite two trigger paths.
 #
 # Order, and why:
-#   1. Verify: Secrets        -- fail fast; no point running anything else
-#                                 if a secret was just committed. REQUIRED.
-#   2. Verify: Repo Policy                                          REQUIRED.
-#   3. Verify: PR Description                                       REQUIRED.
-#   4. Verify: Linting        -- LifeOS-only today (the only app with a
-#                                 lint command configured); always reports
-#                                 via its own detect-changes job.  REQUIRED.
-#   5. The five app gates (Toolbelt/ACC/Brain/Shell/LifeOS) run in
-#      PARALLEL once Linting passes -- each always reports (a trivial pass
-#      when its own app's paths weren't touched, via its own leading
-#      detect-changes job), so none of them individually risks the
-#      forever-pending failure PRs #118/#120 hit. None of them is required
-#      on its own; they remain real, visibly-named evidence for review, and
-#      any one of them CAN be promoted to its own required check later for
-#      an app that needs a stronger guarantee than the shared umbrella.
-#   6. Verify: Tests           -- REQUIRED umbrella; needs all five app
-#                                  gates and passes only when every one of
-#                                  them did (whether by really running or by
-#                                  correctly skipping as not-relevant). This
-#                                  is the single required "test flow" gate
-#                                  instead of five separate required checks.
-#   7. Verify: LLM Review     -- LAST, deliberately: only spend reviewer
-#                                 tokens on a PR that already passed
-#                                 everything else. NOT a required check yet
-#                                 (no reviewer credentials provisioned); its
-#                                 own fail-closed design must never block
-#                                 merge while unrequired.
+#   1. Verify: Detect Changes  -- one job computing which apps this PR
+#                                 actually touches, replacing the six
+#                                 separate per-app detect-changes jobs.
+#   2. Verify: Secrets         -- fail fast; no point running anything else
+#                                 if a secret was just committed.
+#   3. Verify: Repo Policy
+#   4. Verify: PR Description
+#   5. Verify: Linting         -- LifeOS-only today (the only app with a
+#                                 lint command configured).
+#   6. Verify: Tests (<App>)   -- all six in PARALLEL. Each ALWAYS runs and
+#                                 always reports: when its app's paths were
+#                                 not touched it reports a trivial pass in
+#                                 seconds instead of running the suite. That
+#                                 is what makes a path-scoped check safe to
+#                                 mark required -- it can never be the
+#                                 forever-pending check that blocks a PR.
+#   7. Verify: LLM Review      -- LAST, so no reviewer tokens are spent on a
+#                                 PR that would fail everything else anyway.
+#                                 NOT required (no reviewer credentials
+#                                 provisioned yet); its own fail-closed
+#                                 design must never block merge while
+#                                 unrequired.
 #
-# Stages 1-4 are NATIVE jobs (steps defined directly below, no
-# workflow_call) so each reports its own bare "Verify: X" check name with
-# no compound prefix -- exactly the same reason Verify: Tests and
-# Hyperbolic Core Merge Policy already report bare. A workflow_call-invoked
-# job is ALWAYS exposed as "<caller job name> / <callee job name>" for
-# every job the called workflow has, no matter how few; there is no way to
-# get a bare name through that boundary. The five app gates and LLM Review
-# stay workflow_call (their own files are large and independently
-# triggered by push/merge_group/workflow_dispatch too), so their checks
-# remain compound -- harmless, since none of them is individually required.
+# ACC reports two rows -- "Verify: Tests (ACC)" and
+# "Verify: Tests (ACC Windows)" -- and that is a hard platform constraint,
+# not an oversight: its PowerShell shim and cap-watcher suites need a
+# windows-latest runner, and a single job cannot span two runner images.
 #
-# Stages 1, 2, and 4's actual check logic lives in a composite action under
-# .github/actions/ (verify-secrets, verify-repo-policy, verify-linting),
-# shared with secret-scan.yml/repo-policy.yml's own standalone
-# merge_group/push/workflow_dispatch triggers so the logic has exactly one
-# source despite running from two different trigger paths. Stage 3
-# (verify-pr-description) uses the verify-pr-description composite action
-# the same way template-lint.yml's own standalone triggers do.
-#
-# No paths: filter here, deliberately -- see repo-policy.yml's header
-# comment. The five app gates and LLM Review still receive the PR's
-# number/head/base SHA as explicit workflow_call inputs rather than reading
-# github.event.pull_request itself, since that context is not reliably
-# available across a workflow_call boundary -- native jobs don't have that
-# problem and read github.event.pull_request directly.
-#
-# secrets: inherit on every workflow_call job below is required, not
-# incidental: repository secrets are NOT automatically visible inside a
-# called reusable workflow -- without this, toolbelt-ci.yml's owner-session
-# exchange (secrets.TOOLBELT_OWNER_REFRESH_TOKEN) fails closed with
-# "required" even though the secret exists at the repository level.
-# Configuration variables (vars.*, used by llm-review.yml) don't need this
-# -- vars are visible across the workflow_call boundary without an
-# explicit passthrough.
+# No paths: filter anywhere in this file, deliberately. Path scoping is done
+# INSIDE the jobs via Verify: Detect Changes, precisely so every required
+# check still reports on every PR.
 
 on:
   pull_request:
@@ -79,26 +63,92 @@ on:
 permissions:
   contents: read
   pull-requests: read
-  id-token: write
 
 concurrency:
   group: pr-verify-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  # ---------------------------------------------------------------------
-  # Stage 1: Verify: Secrets
-  # ---------------------------------------------------------------------
-  secrets-scan:
-    name: Gitleaks Scan
+  # =====================================================================
+  # 1. Verify: Detect Changes
+  # =====================================================================
+  verify-detect-changes:
+    name: "Verify: Detect Changes"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      toolbelt: ${{ steps.detect.outputs.toolbelt }}
+      acc: ${{ steps.detect.outputs.acc }}
+      brain: ${{ steps.detect.outputs.brain }}
+      shell: ${{ steps.detect.outputs.shell }}
+      lifeos: ${{ steps.detect.outputs.lifeos }}
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect · Which apps does this change touch?
+        id: detect
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          # Fail OPEN, never closed: if the base commit isn't reachable we
+          # cannot tell what changed, so every suite runs. A wrong "nothing
+          # changed" here would silently skip real verification.
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "Base commit ${BASE_SHA} not available locally; running every suite to be safe."
+            for app in toolbelt acc brain shell lifeos; do
+              echo "${app}=true" >> "$GITHUB_OUTPUT"
+            done
+            exit 0
+          fi
+
+          changed="$(git diff --name-only "${BASE_SHA}...HEAD")"
+          echo "Changed files:"
+          echo "${changed}" | sed 's/^/  /'
+
+          # A change to the CI plumbing itself makes EVERY suite relevant,
+          # so a workflow/composite-action edit is exercised end to end
+          # rather than trivially passing against untouched apps.
+          if grep -qE '^\.github/(workflows/|actions/)' <<< "${changed}"; then
+            echo "CI plumbing changed; running every suite."
+            for app in toolbelt acc brain shell lifeos; do
+              echo "${app}=true" >> "$GITHUB_OUTPUT"
+            done
+            exit 0
+          fi
+
+          relevant() {
+            if grep -qE "$2" <<< "${changed}"; then
+              echo "$1=true" >> "$GITHUB_OUTPUT"
+              echo "  $1: relevant"
+            else
+              echo "$1=false" >> "$GITHUB_OUTPUT"
+              echo "  $1: not touched"
+            fi
+          }
+
+          echo "Relevance:"
+          relevant toolbelt '^(apps/toolbelt/|packages/toolbelt-cli/|package\.json$|package-lock\.json$)'
+          relevant acc      '^(apps/agentic-command-center/|apps/toolbelt/guards/)'
+          relevant brain    '^(services/brain/|package\.json$|package-lock\.json$)'
+          relevant shell    '^(apps/shell/|packages/|services/llm-handler/|docs/ops/)'
+          relevant lifeos   '^apps/lifeos/'
+
+  # =====================================================================
+  # 2. Verify: Secrets
+  # =====================================================================
+  verify-secrets:
+    name: "Verify: Secrets"
+    needs: [verify-detect-changes]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # A LOCAL composite action's own action.yml must already be on disk
-      # before it can be resolved, so the calling job needs its own
-      # checkout first -- the composite action's internal checkout (with
-      # its specific fetch-depth) then runs again for real.
-      - name: Setup · Checkout repository (so the local action is resolvable)
+      - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -106,17 +156,6 @@ jobs:
         with:
           base_sha: ${{ github.event.pull_request.base.sha }}
           head_sha: ${{ github.event.pull_request.head.sha }}
-
-  verify-secrets:
-    name: "Verify: Secrets"
-    needs: [secrets-scan]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Gate · Confirm Gitleaks passed
-        shell: bash
-        run: test "${{ needs.secrets-scan.result }}" = "success"
       - name: Gate · Confirm tested SHA matches the live PR head
         shell: bash
         env:
@@ -136,28 +175,17 @@ jobs:
             exit 1
           fi
           echo "Tested SHA matches the live PR head (${TESTED_SHA})."
-      - name: Gate · Publish step summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "### Verify: Secrets"
-            echo ""
-            echo "| Job | Result |"
-            echo "| --- | --- |"
-            echo "| secrets-scan | ${{ needs.secrets-scan.result }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
 
-  # ---------------------------------------------------------------------
-  # Stage 2: Verify: Repo Policy
-  # ---------------------------------------------------------------------
-  repo-policy-checks:
-    name: Repo Policy Checks
+  # =====================================================================
+  # 3. Verify: Repo Policy
+  # =====================================================================
+  verify-repo-policy:
+    name: "Verify: Repo Policy"
     needs: [verify-secrets]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Setup · Checkout repository (so the local action is resolvable)
+      - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -165,59 +193,16 @@ jobs:
         with:
           base_sha: ${{ github.event.pull_request.base.sha }}
 
-  verify-repo-policy:
-    name: "Verify: Repo Policy"
-    needs: [verify-secrets, repo-policy-checks]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Gate · Confirm every required job passed
-        shell: bash
-        run: test "${{ needs.repo-policy-checks.result }}" = "success"
-      - name: Gate · Confirm tested SHA matches the live PR head
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          live_sha="$(curl --fail --silent \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
-          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
-            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
-            exit 1
-          fi
-          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
-      - name: Gate · Publish step summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "### Verify: Repo Policy"
-            echo ""
-            echo "| Job | Result |"
-            echo "| --- | --- |"
-            echo "| repo-policy-checks | ${{ needs.repo-policy-checks.result }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # ---------------------------------------------------------------------
-  # Stage 3: Verify: PR Description
-  # ---------------------------------------------------------------------
-  pr-description-checks:
-    name: PR Description Checks
+  # =====================================================================
+  # 4. Verify: PR Description
+  # =====================================================================
+  verify-pr-description:
+    name: "Verify: PR Description"
     needs: [verify-repo-policy]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      pull-requests: read
     steps:
-      - name: Setup · Checkout repository (so the local action is resolvable)
+      - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -226,259 +211,175 @@ jobs:
           pr_number: ${{ github.event.pull_request.number }}
           github_token: ${{ github.token }}
 
-  verify-pr-description:
-    name: "Verify: PR Description"
-    needs: [verify-repo-policy, pr-description-checks]
-    if: always()
+  # =====================================================================
+  # 5. Verify: Linting (LifeOS-only today)
+  # =====================================================================
+  verify-linting:
+    name: "Verify: Linting"
+    needs: [verify-detect-changes, verify-pr-description]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
-      - name: Gate · Confirm every required job passed
+      - name: Setup · Checkout repository
+        if: needs.verify-detect-changes.outputs.lifeos == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/verify-linting
+        if: needs.verify-detect-changes.outputs.lifeos == 'true'
+      - name: Lint · Not applicable to this change
+        if: needs.verify-detect-changes.outputs.lifeos != 'true'
         shell: bash
-        run: test "${{ needs.pr-description-checks.result }}" = "success"
-      - name: Gate · Confirm tested SHA matches the live PR head
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          live_sha="$(curl --fail --silent \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
-          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
-            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
-            exit 1
-          fi
-          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
-      - name: Gate · Publish step summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "### Verify: PR Description"
-            echo ""
-            echo "| Job | Result |"
-            echo "| --- | --- |"
-            echo "| pr-description-checks | ${{ needs.pr-description-checks.result }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: echo "LifeOS was not touched by this change, and it is the only app with a lint command configured; nothing to lint."
 
-  # ---------------------------------------------------------------------
-  # Stage 4: Verify: Linting (LifeOS-only today)
-  # ---------------------------------------------------------------------
-  lint-detect-changes:
-    name: Detect changes
-    needs: [verify-pr-description]
+  # =====================================================================
+  # 6. Verify: Tests (<App>) -- all in parallel, each always reports
+  # =====================================================================
+  verify-tests-toolbelt:
+    name: "Verify: Tests (Toolbelt)"
+    needs: [verify-detect-changes, verify-linting]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      relevant: ${{ steps.check.outputs.relevant }}
+    timeout-minutes: 40
+    steps:
+      - name: Setup · Checkout repository
+        if: needs.verify-detect-changes.outputs.toolbelt == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/verify-tests-toolbelt
+        if: needs.verify-detect-changes.outputs.toolbelt == 'true'
+        with:
+          owner_refresh_token: ${{ secrets.TOOLBELT_OWNER_REFRESH_TOKEN }}
+      - name: Test · Not applicable to this change
+        if: needs.verify-detect-changes.outputs.toolbelt != 'true'
+        shell: bash
+        run: echo "Toolbelt was not touched by this change; nothing to verify."
+
+  verify-tests-acc:
+    name: "Verify: Tests (ACC)"
+    needs: [verify-detect-changes, verify-linting]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Setup · Checkout repository
+        if: needs.verify-detect-changes.outputs.acc == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/verify-tests-acc
+        if: needs.verify-detect-changes.outputs.acc == 'true'
+        with:
+          base_sha: ${{ github.event.pull_request.base.sha }}
+      - name: Test · Not applicable to this change
+        if: needs.verify-detect-changes.outputs.acc != 'true'
+        shell: bash
+        run: echo "ACC was not touched by this change; nothing to verify."
+
+  verify-tests-acc-windows:
+    name: "Verify: Tests (ACC Windows)"
+    needs: [verify-detect-changes, verify-linting]
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Setup · Checkout repository
+        if: needs.verify-detect-changes.outputs.acc == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/verify-tests-acc-windows
+        if: needs.verify-detect-changes.outputs.acc == 'true'
+      - name: Test · Not applicable to this change
+        if: needs.verify-detect-changes.outputs.acc != 'true'
+        shell: bash
+        run: echo "ACC was not touched by this change; nothing to verify."
+
+  verify-tests-brain:
+    name: "Verify: Tests (Brain)"
+    needs: [verify-detect-changes, verify-linting]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Setup · Checkout repository
+        if: needs.verify-detect-changes.outputs.brain == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/verify-tests-brain
+        if: needs.verify-detect-changes.outputs.brain == 'true'
+      - name: Test · Not applicable to this change
+        if: needs.verify-detect-changes.outputs.brain != 'true'
+        shell: bash
+        run: echo "Brain was not touched by this change; nothing to verify."
+
+  verify-tests-shell:
+    name: "Verify: Tests (Shell)"
+    needs: [verify-detect-changes, verify-linting]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Setup · Checkout repository
+        if: needs.verify-detect-changes.outputs.shell == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/verify-tests-shell
+        if: needs.verify-detect-changes.outputs.shell == 'true'
+      - name: Test · Not applicable to this change
+        if: needs.verify-detect-changes.outputs.shell != 'true'
+        shell: bash
+        run: echo "Shell was not touched by this change; nothing to verify."
+
+  verify-tests-lifeos:
+    name: "Verify: Tests (LifeOS)"
+    needs: [verify-detect-changes, verify-linting]
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Setup · Checkout repository
+        if: needs.verify-detect-changes.outputs.lifeos == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/verify-tests-lifeos
+        if: needs.verify-detect-changes.outputs.lifeos == 'true'
+      - name: Test · Not applicable to this change
+        if: needs.verify-detect-changes.outputs.lifeos != 'true'
+        shell: bash
+        run: echo "LifeOS was not touched by this change; nothing to verify."
+
+  # =====================================================================
+  # 7. Verify: LLM Review (last, non-required)
+  # =====================================================================
+  verify-llm-review:
+    name: "Verify: LLM Review"
+    needs:
+      - verify-tests-toolbelt
+      - verify-tests-acc
+      - verify-tests-acc-windows
+      - verify-tests-brain
+      - verify-tests-shell
+      - verify-tests-lifeos
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
     steps:
       - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Detect · Does this change touch LifeOS's paths?
-        id: check
-        shell: bash
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "Base commit not available locally; linting to be safe."
-            exit 0
-          fi
-          if git diff --name-only "${BASE_SHA}...HEAD" | grep -qE '^(apps/lifeos/|\.github/actions/verify-linting/|\.github/workflows/pr-verify\.yml$)'; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "LifeOS paths changed; linting for real."
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-            echo "No LifeOS paths changed; nothing to lint."
-          fi
-
-  lint-checks:
-    name: Linting Checks
-    needs: [lint-detect-changes]
-    if: needs.lint-detect-changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Setup · Checkout repository (so the local action is resolvable)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/verify-llm-review
         with:
-          persist-credentials: false
-      - uses: ./.github/actions/verify-linting
-
-  verify-linting:
-    name: "Verify: Linting"
-    needs: [lint-detect-changes, lint-checks]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Gate · Confirm linting passed
-        shell: bash
-        run: |
-          if [ "${{ needs.lint-detect-changes.outputs.relevant }}" = "true" ]; then
-            test "${{ needs.lint-checks.result }}" = "success"
-          else
-            test "${{ needs.lint-checks.result }}" = "skipped"
-            echo "LifeOS was not touched by this change; nothing to lint."
-          fi
-      - name: Gate · Confirm tested SHA matches the live PR head
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          live_sha="$(curl --fail --silent \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
-          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
-            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
-            exit 1
-          fi
-          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
-      - name: Gate · Publish step summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "### Verify: Linting"
-            echo ""
-            echo "| Job | Result |"
-            echo "| --- | --- |"
-            echo "| detect-changes | relevant=${{ needs.lint-detect-changes.outputs.relevant }} |"
-            echo "| checks | ${{ needs.lint-checks.result }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # ---------------------------------------------------------------------
-  # Stage 5: the five app gates, in parallel (none individually required)
-  # ---------------------------------------------------------------------
-  verify-toolbelt:
-    name: "Verify: Toolbelt"
-    needs: [verify-linting]
-    uses: ./.github/workflows/toolbelt-ci.yml
-    secrets: inherit
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      pr_number: ${{ github.event.pull_request.number }}
-      pr_head_sha: ${{ github.event.pull_request.head.sha }}
-      pr_base_sha: ${{ github.event.pull_request.base.sha }}
-
-  verify-acc:
-    name: "Verify: ACC"
-    needs: [verify-linting]
-    uses: ./.github/workflows/acc-ci.yml
-    secrets: inherit
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      pr_number: ${{ github.event.pull_request.number }}
-      pr_head_sha: ${{ github.event.pull_request.head.sha }}
-      pr_base_sha: ${{ github.event.pull_request.base.sha }}
-
-  verify-brain:
-    name: "Verify: Brain"
-    needs: [verify-linting]
-    uses: ./.github/workflows/brain-ci.yml
-    secrets: inherit
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      pr_number: ${{ github.event.pull_request.number }}
-      pr_head_sha: ${{ github.event.pull_request.head.sha }}
-      pr_base_sha: ${{ github.event.pull_request.base.sha }}
-
-  verify-shell:
-    name: "Verify: Shell"
-    needs: [verify-linting]
-    uses: ./.github/workflows/shell-ci.yml
-    secrets: inherit
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      pr_number: ${{ github.event.pull_request.number }}
-      pr_head_sha: ${{ github.event.pull_request.head.sha }}
-      pr_base_sha: ${{ github.event.pull_request.base.sha }}
-
-  verify-lifeos:
-    name: "Verify: LifeOS"
-    needs: [verify-linting]
-    uses: ./.github/workflows/lifeos-ci.yml
-    secrets: inherit
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      pr_number: ${{ github.event.pull_request.number }}
-      pr_head_sha: ${{ github.event.pull_request.head.sha }}
-      pr_base_sha: ${{ github.event.pull_request.base.sha }}
-
-  # ---------------------------------------------------------------------
-  # Stage 6: Verify: Tests (required umbrella over the five app gates)
-  # ---------------------------------------------------------------------
-  verify-tests:
-    name: "Verify: Tests"
-    needs: [verify-toolbelt, verify-acc, verify-brain, verify-shell, verify-lifeos]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Gate · Confirm every app gate passed
-        shell: bash
-        run: |
-          test "${{ needs.verify-toolbelt.result }}" = "success"
-          test "${{ needs.verify-acc.result }}" = "success"
-          test "${{ needs.verify-brain.result }}" = "success"
-          test "${{ needs.verify-shell.result }}" = "success"
-          test "${{ needs.verify-lifeos.result }}" = "success"
-      - name: Gate · Publish step summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "### Verify: Tests"
-            echo ""
-            echo "| App gate | Result |"
-            echo "| --- | --- |"
-            echo "| Toolbelt | ${{ needs.verify-toolbelt.result }} |"
-            echo "| ACC | ${{ needs.verify-acc.result }} |"
-            echo "| Brain | ${{ needs.verify-brain.result }} |"
-            echo "| Shell | ${{ needs.verify-shell.result }} |"
-            echo "| LifeOS | ${{ needs.verify-lifeos.result }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # ---------------------------------------------------------------------
-  # Stage 7: Verify: LLM Review (last, non-required)
-  # ---------------------------------------------------------------------
-  verify-llm-review:
-    name: "Verify: LLM Review"
-    needs: [verify-tests]
-    uses: ./.github/workflows/llm-review.yml
-    secrets: inherit
-    permissions:
-      contents: read
-      pull-requests: read
-      id-token: write
-    with:
-      pr_number: ${{ github.event.pull_request.number }}
-      pr_head_sha: ${{ github.event.pull_request.head.sha }}
-      pr_base_sha: ${{ github.event.pull_request.base.sha }}
+          pr_number: ${{ github.event.pull_request.number }}
+          base_sha: ${{ github.event.pull_request.base.sha }}
+          head_sha: ${{ github.event.pull_request.head.sha }}
+          github_token: ${{ github.token }}
+          infisical_identity_id: ${{ vars.INFISICAL_REVIEW_IDENTITY_ID }}
+          infisical_project_slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          review_provider: ${{ vars.REVIEW_PROVIDER }}
+          review_model: ${{ vars.REVIEW_MODEL }}
+          review_builder_provider: ${{ vars.REVIEW_BUILDER_PROVIDER }}

@@ -11,7 +11,7 @@ Use this lean lifecycle:
 1. Start with a GitHub Issue that states the outcome and acceptance criteria.
 2. Implement the smallest coherent change that satisfies the Issue.
 3. Run the relevant tests and update affected product documentation.
-4. Open one Toolbelt pull request and let the hyperbolic-core root's `Verify: Toolbelt` verify the change.
+4. Open one Toolbelt pull request and let the hyperbolic-core root's `Verify: Tests (Toolbelt)` verify the change.
 5. Successful pull requests may complete through native squash auto-merge.
 
 This app does not keep committed specs or ADRs — see `TEST_LEDGER.md` for the current, lean test-tracking convention. Future work is tracked in GitHub Issues.
@@ -59,7 +59,7 @@ The Node and browser suites call the live Supabase project using the public anon
 
 A change is ready when its acceptance criteria are satisfied, relevant
 documentation is accurate, applicable local checks pass, and the
-hyperbolic-core root's `Verify: Toolbelt` reports success. State any
+hyperbolic-core root's `Verify: Tests (Toolbelt)` reports success. State any
 unverified item explicitly.
 
 ## 🔒 Collaboration Boundary

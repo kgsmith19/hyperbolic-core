@@ -16,123 +16,147 @@ services:
   - services/llm-handler
 
 ci:
-  # Seven named gate stages, run by .github/workflows/pr-verify.yml ("PR
-  # Verification"). Stages 1-4 are NATIVE jobs (no workflow_call) so each
-  # reports a bare "Verify: X" check name with no compound prefix --
-  # workflow_call always exposes "<caller job> / <callee job>" instead, and
-  # a required check needs the literal reported name to match. Stages 1, 2,
-  # and 4's actual check logic lives in a composite action under
-  # .github/actions/, shared with the standalone secret-scan.yml/
-  # repo-policy.yml files' own merge_group/push/workflow_dispatch triggers
-  # so the logic has exactly one source; stage 3 does the same via
-  # template-lint.yml. Stages 1-4 are needs:-chained in strict order (each
-  # starts only once the previous succeeded). Stage 5 (the five app-scoped
-  # gates) runs as five parallel workflow_call jobs, all depending only on
-  # stage 4 -- none of them individually gates merge. Stage 6,
-  # "Verify: Tests", is a native job that needs all five of stage 5 and is
-  # the single required umbrella over them. Stage 7, LLM Review, runs last
-  # (workflow_call) and stays non-required. `required:` below states the
-  # INTENDED branch-ruleset configuration -- it is a specification, not a
-  # live read of the ruleset, which an agent cannot write in this harness
-  # and which may lag behind this file. See AGENTS.md's "PR Gate and merge
-  # behavior" / "Path-scoped gates in monorepo topologies" note: a required
-  # check tied to a paths: filter blocks forever on any PR that never
-  # triggers it, which is exactly what happened live on PRs #118 and #120.
-  # Verify: Linting (stage 4) and the five app-scoped gates (stage 5) each
-  # carry a leading detect-changes job that replaces a top-level paths:
-  # filter, so they always report -- a trivial pass when their own paths
-  # weren't touched -- which is what keeps a path-scoped gate safe to
-  # require (Linting directly; the app gates via the Verify: Tests
-  # umbrella that depends on them).
+  # Every gate runs as a NATIVE job in .github/workflows/pr-verify.yml
+  # ("PR Verification") whose name starts with "Verify: ", each producing
+  # exactly ONE check row with that exact bare name. Nothing there uses
+  # workflow_call: a workflow_call-invoked job is always reported as
+  # "<caller job> / <callee job>", so a bare name typed into the ruleset
+  # would create a required check that never reports and blocks every PR
+  # forever. The real work lives in composite actions under
+  # .github/actions/, which run inside the calling job and add no rows;
+  # each is reused by the matching standalone workflow file below for that
+  # file's own merge_group/push/workflow_dispatch triggers, so every check
+  # has exactly one source of logic despite two trigger paths.
+  #
+  # Orders 1-5 are needs:-chained in strict sequence. The order-6 test
+  # gates then run in parallel with each other. Every order-6 gate ALWAYS
+  # runs and always reports: when its app's paths were not touched it
+  # reports a trivial pass in seconds instead of running the suite, using
+  # order 1's outputs rather than a paths: filter on the workflow. That is
+  # what makes a path-scoped check safe to require -- a required check tied
+  # to a paths: filter blocks forever on any PR that never triggers it,
+  # which is exactly what happened live on PRs #118 and #120. A change to
+  # .github/workflows/** or .github/actions/** marks every app relevant, so
+  # a CI edit is exercised end to end.
+  #
+  # `required:` below states the INTENDED branch-ruleset configuration --
+  # it is a specification, not a live read of the ruleset, which an agent
+  # cannot write in this harness and which may lag behind this file.
   workflows:
     - order: 1
       path: .github/workflows/pr-verify.yml
-      gate: "Verify: Secrets"
-      covers: whole repo, every PR — no path filter; leaked-credential
-        scan via the verify-secrets composite action (also the standalone
-        entry point secret-scan.yml uses for merge_group/push/
-        workflow_dispatch)
+      gate: "Verify: Detect Changes"
+      covers: whole repo, every PR — computes which apps this PR touches,
+        consumed by every gate below
       required: true
     - order: 2
       path: .github/workflows/pr-verify.yml
-      gate: "Verify: Repo Policy"
-      covers: whole repo, every PR — no path filter; structural checks on
-        CLAUDE.md/GEMINI.md/AGENTS.md/action pinning/YAML validity/
-        whitespace via the verify-repo-policy composite action (also the
-        standalone entry point repo-policy.yml uses)
+      standalone: .github/workflows/secret-scan.yml
+      action: .github/actions/verify-secrets
+      gate: "Verify: Secrets"
+      covers: whole repo, every PR — no path filter; leaked-credential scan
       required: true
     - order: 3
       path: .github/workflows/pr-verify.yml
-      gate: "Verify: PR Description"
-      covers: whole repo, every PR — no path filter; PR body vs
-        PULL_REQUEST_TEMPLATE.md's required sections via the
-        verify-pr-description composite action (also the standalone
-        entry point template-lint.yml uses)
+      standalone: .github/workflows/repo-policy.yml
+      action: .github/actions/verify-repo-policy
+      gate: "Verify: Repo Policy"
+      covers: whole repo, every PR — no path filter; structural checks on
+        CLAUDE.md/GEMINI.md/AGENTS.md/action pinning/YAML validity/
+        whitespace
       required: true
     - order: 4
       path: .github/workflows/pr-verify.yml
-      gate: "Verify: Linting"
-      covers: apps/lifeos/** — LifeOS's own ruff/npm-lint commands via the
-        verify-linting composite action; LifeOS is the only app with a
-        lint command configured today
+      standalone: .github/workflows/template-lint.yml
+      action: .github/actions/verify-pr-description
+      gate: "Verify: PR Description"
+      covers: whole repo, every PR — no path filter; PR body vs
+        PULL_REQUEST_TEMPLATE.md's required sections
       required: true
     - order: 5
-      path: .github/workflows/toolbelt-ci.yml
-      gate: "Verify: Toolbelt"
-      covers: apps/toolbelt/** (root tools, guards/, prompt-organizer,
-        idea-intake, network-checker)
-      required: false # covered by the "Verify: Tests" umbrella (order 6)
-    - order: 5
-      path: .github/workflows/acc-ci.yml
-      gate: "Verify: ACC"
-      covers: apps/agentic-command-center/**, apps/toolbelt/guards/**
-      required: false # covered by the "Verify: Tests" umbrella (order 6)
-    - order: 5
-      path: .github/workflows/brain-ci.yml
-      gate: "Verify: Brain"
-      covers: services/brain/**
-      required: false # covered by the "Verify: Tests" umbrella (order 6)
-    - order: 5
-      path: .github/workflows/shell-ci.yml
-      gate: "Verify: Shell"
-      covers: apps/shell/**, packages/**, services/llm-handler/**,
-        docs/ops/**
-      required: false # covered by the "Verify: Tests" umbrella (order 6)
-    - order: 5
-      path: .github/workflows/lifeos-ci.yml
-      gate: "Verify: LifeOS"
-      covers: apps/lifeos/**
-      required: false # covered by the "Verify: Tests" umbrella (order 6)
+      path: .github/workflows/pr-verify.yml
+      action: .github/actions/verify-linting
+      gate: "Verify: Linting"
+      covers: apps/lifeos/** — LifeOS's own ruff/npm-lint commands; LifeOS
+        is the only app with a lint command configured today
+      required: true
     - order: 6
       path: .github/workflows/pr-verify.yml
-      gate: "Verify: Tests"
-      covers: umbrella over the order-5 app gates — a native job (not
-        workflow_call) that needs all five and passes only when every one
-        of them did, whether by really running or by correctly skipping
-        as not-relevant
+      standalone: .github/workflows/toolbelt-ci.yml
+      action: .github/actions/verify-tests-toolbelt
+      gate: "Verify: Tests (Toolbelt)"
+      covers: apps/toolbelt/** (root tools, guards/, prompt-organizer,
+        idea-intake, network-checker), packages/toolbelt-cli/**
+      required: true
+    - order: 6
+      path: .github/workflows/pr-verify.yml
+      standalone: .github/workflows/acc-ci.yml
+      action: .github/actions/verify-tests-acc
+      gate: "Verify: Tests (ACC)"
+      covers: apps/agentic-command-center/**, apps/toolbelt/guards/** —
+        the Linux suites (UI build, contract e2e, portable, coverage gate)
+      required: true
+    - order: 6
+      path: .github/workflows/pr-verify.yml
+      standalone: .github/workflows/acc-ci.yml
+      action: .github/actions/verify-tests-acc-windows
+      gate: "Verify: Tests (ACC Windows)"
+      covers: the same ACC paths — native and PowerShell suites that need a
+        windows-latest runner. A separate row because one job cannot span
+        two runner images; that is a platform constraint, not a choice.
+      required: true
+    - order: 6
+      path: .github/workflows/pr-verify.yml
+      standalone: .github/workflows/brain-ci.yml
+      action: .github/actions/verify-tests-brain
+      gate: "Verify: Tests (Brain)"
+      covers: services/brain/**
+      required: true
+    - order: 6
+      path: .github/workflows/pr-verify.yml
+      standalone: .github/workflows/shell-ci.yml
+      action: .github/actions/verify-tests-shell
+      gate: "Verify: Tests (Shell)"
+      covers: apps/shell/**, packages/**, services/llm-handler/**,
+        docs/ops/**
+      required: true
+    - order: 6
+      path: .github/workflows/pr-verify.yml
+      standalone: .github/workflows/lifeos-ci.yml
+      action: .github/actions/verify-tests-lifeos
+      gate: "Verify: Tests (LifeOS)"
+      covers: apps/lifeos/**
       required: true
     - order: 7
-      path: .github/workflows/llm-review.yml
+      path: .github/workflows/pr-verify.yml
+      standalone: .github/workflows/llm-review.yml
+      action: .github/actions/verify-llm-review
       gate: "Verify: LLM Review"
       covers: whole repo, every PR — no path filter; adversarial LLM review
-        of the diff against the Issue and AGENTS.md. Runs LAST, after the
-        Verify Tests umbrella (order 6) has succeeded.
+        of the diff against the Issue and AGENTS.md. Runs LAST, after every
+        order-6 test gate has succeeded.
       required: false # pending owner-provisioned reviewer credentials
+    - path: .github/workflows/merge-policy.yml
+      gate: "Verify: Merge Policy"
+      covers: orchestration, not verification — arms native squash
+        auto-merge and maintains the managed Work State and Evidence Index
+        comments. Runs on pull_request_target, outside the pr-verify.yml
+        chain, so it has no order.
+      required: false # and must never be; see the note below
   orchestrator: .github/workflows/pr-verify.yml
-  composite_actions: .github/actions/{verify-secrets,verify-repo-policy,verify-pr-description,verify-linting}
   note: >-
     apps/lifeos's own nested workflows (apps/lifeos/.github/workflows/) are
     intentionally inert here (see AGENTS.md's Workflow Safety Invariant) —
-    its authoritative CI runs from the standalone lifeos repo; lifeos-ci.yml
-    above is written fresh for this monorepo and is the real gate here. Not
-    required: the five order-5 app gates individually (only the
-    "Verify: Tests" umbrella that depends on them is), "Verify: LLM Review"
-    (pending credentials), and "Hyperbolic Core Merge Policy"
-    (merge-policy.yml — orchestration, not verification; it arms auto-merge
-    and manages the Work State/Evidence Index comments but never checks out
-    or executes PR-controlled code). Any one of the five app gates can still
-    become its own required check later, alongside "Verify: Tests", if a
-    specific app needs a stronger guarantee than the shared umbrella.
+    its authoritative CI runs from the standalone lifeos repo; the
+    verify-tests-lifeos composite action above is written fresh for this
+    monorepo and is the real gate here. Not required, deliberately:
+    "Verify: LLM Review" (fails closed until the owner provisions reviewer
+    credentials) and "Verify: Merge Policy" (merge-policy.yml — it is built
+    never to fail, so requiring it would add a rubber stamp rather than a
+    check, and would block every PR repo-wide on the rare occasion it broke;
+    it also cannot be removed from the Checks tab, since any workflow that
+    runs on a PR reports a row and there is no suppression). Deleting
+    merge-policy.yml would disable auto-merge for the whole repository.
 
 vendors:
   # Full detail (auth, secret paths, cost, rotation) lives in

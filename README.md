@@ -13,12 +13,12 @@ Standard](https://github.com/kgsmith19/agent-engineering-standard).
 
 | Component | What it is | Gate |
 | --- | --- | --- |
-| [`apps/agentic-command-center`](apps/agentic-command-center) | Local coding-agent guard rail, control panel, and bounded task runner | `Verify: ACC` |
-| [`apps/lifeos`](apps/lifeos) | Personal life-management system — typed entity graph, append-only event log | `Verify: LifeOS` |
-| [`apps/shell`](apps/shell) | Unified React/Vite front end composing every zone behind one owner login | `Verify: Shell` |
-| [`apps/toolbelt`](apps/toolbelt) | Small portfolio tools — a prompt-library client, local-first network diagnostics | `Verify: Toolbelt` |
-| [`services/brain`](services/brain) | Long-lived autonomous-coding orchestrator — daemon, DAG scheduler, task/result contracts | `Verify: Brain` |
-| [`services/llm-handler`](services/llm-handler) | Deployed general-purpose LLM service behind the Shell | covered by `Verify: Shell` |
+| [`apps/agentic-command-center`](apps/agentic-command-center) | Local coding-agent guard rail, control panel, and bounded task runner | `Verify: Tests (ACC)` + `Verify: Tests (ACC Windows)` |
+| [`apps/lifeos`](apps/lifeos) | Personal life-management system — typed entity graph, append-only event log | `Verify: Tests (LifeOS)` + `Verify: Linting` |
+| [`apps/shell`](apps/shell) | Unified React/Vite front end composing every zone behind one owner login | `Verify: Tests (Shell)` |
+| [`apps/toolbelt`](apps/toolbelt) | Small portfolio tools — a prompt-library client, local-first network diagnostics | `Verify: Tests (Toolbelt)` |
+| [`services/brain`](services/brain) | Long-lived autonomous-coding orchestrator — daemon, DAG scheduler, task/result contracts | `Verify: Tests (Brain)` |
+| [`services/llm-handler`](services/llm-handler) | Deployed general-purpose LLM service behind the Shell | covered by `Verify: Tests (Shell)` |
 | [`packages/*`](packages) | Shared TypeScript packages — `platform-client`, `ui`, `llm`, `toolbelt-cli` | covered by each consumer |
 
 Every `apps/<name>/` was imported via `git subtree` and still carries its own upstream
@@ -32,16 +32,21 @@ are native to this repo.
 
 ## 🚦 CI & merge gates
 
-`.github/workflows/pr-verify.yml` runs every `Verify: *` gate on every pull request, but keeps
-the *required* surface small: `Verify: Secrets` → `Verify: Repo Policy` → `Verify: PR Description`
-→ `Verify: Linting` (LifeOS's own lint commands — the only app with one configured today) run in
-strict sequence first, then the five app gates from the table above run in parallel, then
-`Verify: Tests` — a single umbrella check, not five separate required ones — passes only once all
-five have. `Verify: LLM Review` runs last and stays non-required until reviewer credentials are
-provisioned. See [`AGENTS.md`](./AGENTS.md)'s "PR Gate and merge behavior" section for the full
-order, which gates are (intended to be) required by the branch ruleset, and what's actually
-enforced right now versus the intended target — and [`project.yaml`](./project.yaml) for the full
-topology.
+`.github/workflows/pr-verify.yml` runs every gate on every pull request. Each one is a native job
+named `Verify: <what>`, producing exactly one check row under that bare name:
+`Verify: Detect Changes` → `Verify: Secrets` → `Verify: Repo Policy` → `Verify: PR Description` →
+`Verify: Linting` run in strict sequence, then the six `Verify: Tests (<App>)` gates run in
+parallel, then `Verify: LLM Review` last.
+
+**Every test gate always runs and always reports** — when its app wasn't touched it reports a
+trivial pass in seconds instead of running the suite, using `Verify: Detect Changes`'s output
+rather than a `paths:` filter. That's what makes a path-scoped check safe to require. Only
+`Verify: LLM Review` (no reviewer credentials yet) and `Verify: Merge Policy` (orchestration, not
+verification) are deliberately *not* required.
+
+See [`AGENTS.md`](./AGENTS.md)'s "PR Gate and merge behavior" section for the full order, which
+gates are (intended to be) required by the branch ruleset, and what's actually enforced right now
+versus the intended target — and [`project.yaml`](./project.yaml) for the full topology.
 
 ## 📜 Policy
 

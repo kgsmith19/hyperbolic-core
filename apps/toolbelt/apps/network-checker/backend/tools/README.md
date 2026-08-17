@@ -31,7 +31,7 @@ found anything and 0 if it did not.
 | `documentation_check.py` | Missing README sections, template artifacts, scaffold files | `high` adds public functions with no docstring |
 
 `medium` is the complexity profile used by `check.sh`. `low` is intended for
-exploration and is not part of `Verify: Toolbelt`.
+exploration and is not part of `Verify: Tests (Toolbelt)`.
 
 ```bash
 python tools/code_simplification.py network-checker -i medium

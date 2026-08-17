@@ -1,27 +1,16 @@
-name: "ACC PR Gate"
+name: "Verify: Tests (ACC)"
 
-# Called as the "Verify: ACC" stage of pr-verify.yml's sequential chain.
-# The detect-changes job replaces the old top-level pull_request paths:
-# filter: instead of the whole workflow silently never triggering on a PR
-# that doesn't touch ACC (the forever-pending failure this repo hit on PRs
-# #118/#120), the gate always runs and reports a trivial pass when ACC's
-# own paths weren't touched -- which is what makes it safe to mark
-# required. See repo-policy.yml's header comment for why
-# pull_request-specific data arrives via inputs rather than
-# github.event.pull_request.
+# Standalone entry point for merge_group/push/workflow_dispatch only. The
+# pull_request path runs these same suites as native jobs in pr-verify.yml
+# (see that file's header for why nothing here is workflow_call any more),
+# both calling the verify-tests-acc / verify-tests-acc-windows composite
+# actions under .github/actions/ so each suite has exactly one source.
+#
+# Two jobs, not one, and that is a hard platform constraint: the PowerShell
+# shim and cap-watcher suites need a windows-latest runner, and a single job
+# cannot span two runner images.
 
 on:
-  workflow_call:
-    inputs:
-      pr_number:
-        type: string
-        required: false
-      pr_head_sha:
-        type: string
-        required: false
-      pr_base_sha:
-        type: string
-        required: false
   merge_group:
     types: [checks_requested]
   push:
@@ -32,219 +21,31 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.pr_number || github.event.merge_group.head_sha || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.merge_group.head_sha || github.ref }}
   cancel-in-progress: true
 
-env:
-  ACC_ROUTING_MD: ${{ github.workspace }}/apps/agentic-command-center/backend/hooks/fixtures/ROUTING.md
-
 jobs:
-  detect-changes:
-    name: Detect changes
+  verify-tests-acc:
+    name: "Verify: Tests (ACC)"
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      relevant: ${{ steps.check.outputs.relevant }}
+    timeout-minutes: 35
     steps:
       - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Detect · Does this change touch ACC's paths?
-        id: check
-        shell: bash
-        env:
-          PR_BASE_SHA: ${{ inputs.pr_base_sha }}
-        run: |
-          set -euo pipefail
-          if [ -n "${PR_BASE_SHA}" ]; then
-            base="${PR_BASE_SHA}"
-          elif [ "${{ github.event_name }}" = "merge_group" ]; then
-            base="${{ github.event.merge_group.base_sha }}"
-          else
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "No comparable base for this event; running the real checks."
-            exit 0
-          fi
-          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "Base commit not available locally; running the real checks to be safe."
-            exit 0
-          fi
-          if git diff --name-only "${base}...HEAD" | grep -qE '^(apps/agentic-command-center/|apps/toolbelt/guards/|\.github/workflows/acc-ci\.yml$|\.github/workflows/pr-verify\.yml$)'; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "ACC paths changed; running the real checks."
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-            echo "No ACC paths changed; nothing to verify."
-          fi
-
-  portable:
-    name: Portable tests and coverage
-    needs: [detect-changes]
-    if: needs.detect-changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout · Fetch repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/verify-tests-acc
         with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Setup · Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '22'
-      - name: Test · Portable test suite
-        run: npm test
-        working-directory: apps/agentic-command-center
-      - name: Coverage · Expose the integration diff to covgate
-        shell: bash
-        env:
-          PR_BASE_SHA: ${{ inputs.pr_base_sha }}
-        run: |
-          if [ -n "${PR_BASE_SHA}" ]; then
-            BASE_SHA=$(git merge-base "${PR_BASE_SHA}" HEAD)
-            git reset --soft "$BASE_SHA"
-          elif [ "${{ github.event_name }}" = "merge_group" ]; then
-            git reset --soft "${{ github.event.merge_group.base_sha }}"
-          fi
-      - name: Coverage · Changed-file coverage
-        run: npm run covgate
-        working-directory: apps/agentic-command-center
+          base_sha: ${{ github.event.merge_group.base_sha }}
 
-  windows-integration:
-    name: Windows integration
-    needs: [detect-changes]
-    if: needs.detect-changes.outputs.relevant == 'true'
+  verify-tests-acc-windows:
+    name: "Verify: Tests (ACC Windows)"
     runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout · Fetch repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Setup · Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '22'
-      - name: Test · Native test suite
-        run: npm run test:windows
-        working-directory: apps/agentic-command-center
-      - name: Test · Launch-shim tests
-        shell: pwsh
-        run: powershell -File backend/shim/claude.test.ps1
-        working-directory: apps/agentic-command-center
-      - name: Test · Cap-watcher tests
-        shell: pwsh
-        run: powershell -File backend/watcher/claude-cap-watch.test.ps1
-        working-directory: apps/agentic-command-center
-      - name: Test · Cap-watcher installer tests
-        shell: pwsh
-        run: powershell -File backend/watcher/install-cap-watch-task.test.ps1
-        working-directory: apps/agentic-command-center
-
-  ui:
-    name: UI build and ACC contract
-    needs: [detect-changes]
-    if: needs.detect-changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Checkout · Fetch repository
+      - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Setup · Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: apps/agentic-command-center/frontend/package-lock.json
-      - name: Setup · Install frontend dependencies
-        run: npm ci
-        working-directory: apps/agentic-command-center/frontend
-      - name: Build · Build frontend
-        run: npm run build
-        working-directory: apps/agentic-command-center/frontend
-      - name: Setup · Cache Playwright Chromium
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: acc-ui-playwright-chromium-${{ runner.os }}-${{ hashFiles('apps/agentic-command-center/frontend/package-lock.json') }}
-      - name: Setup · Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-        working-directory: apps/agentic-command-center/frontend
-      - name: E2E · Contract end-to-end against the monorepo ACC server
-        run: npm run e2e
-        working-directory: apps/agentic-command-center/frontend
-        env:
-          ACC_DIR: ${{ github.workspace }}/apps/agentic-command-center
-      - name: Evidence · Upload UI Playwright failure evidence
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: acc-ui-playwright-failure-evidence
-          path: |
-            apps/agentic-command-center/frontend/playwright-report/
-            apps/agentic-command-center/frontend/test-results/
-          if-no-files-found: ignore
-          retention-days: 14
-
-  pr-gate:
-    name: "Verify: ACC"
-    if: always()
-    needs: [detect-changes, portable, windows-integration, ui]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pull-requests: read
-    steps:
-      - name: Gate · Confirm every correctness job passed
-        shell: bash
-        run: |
-          if [ "${{ needs.detect-changes.outputs.relevant }}" = "true" ]; then
-            test "${{ needs.portable.result }}" = "success"
-            test "${{ needs.windows-integration.result }}" = "success"
-            test "${{ needs.ui.result }}" = "success"
-          else
-            test "${{ needs.portable.result }}" = "skipped"
-            test "${{ needs.windows-integration.result }}" = "skipped"
-            test "${{ needs.ui.result }}" = "skipped"
-            echo "ACC was not touched by this change; nothing to verify."
-          fi
-      - name: Gate · Confirm tested SHA matches the live PR head
-        if: inputs.pr_number != ''
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ inputs.pr_number }}
-          TESTED_SHA: ${{ inputs.pr_head_sha }}
-        run: |
-          set -euo pipefail
-          live_sha="$(curl --fail --silent \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
-          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
-            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
-            exit 1
-          fi
-          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
-      - name: Gate · Publish step summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "### Verify: ACC"
-            echo ""
-            echo "| Job | Result |"
-            echo "| --- | --- |"
-            echo "| detect-changes | relevant=${{ needs.detect-changes.outputs.relevant }} |"
-            echo "| portable | ${{ needs.portable.result }} |"
-            echo "| windows-integration | ${{ needs.windows-integration.result }} |"
-            echo "| ui | ${{ needs.ui.result }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: ./.github/actions/verify-tests-acc-windows

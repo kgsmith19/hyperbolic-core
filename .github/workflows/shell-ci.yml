@@ -1,249 +1,38 @@
-name: "Shell PR Gate"
+name: "Verify: Tests (Shell)"
 
-# docs/planning/10-cicd-deployment.md section 1.2. packages/** is in the path
-# filter because a shared-package change must re-verify the Shell that
-# consumes it (packages/platform-client, packages/ui, packages/llm all ship
-# through apps/shell). This is an npm workspaces monorepo (root package.json
-# "workspaces": ["packages/*", "apps/shell"]), so one root `npm ci` installs
-# every workspace member; there is no apps/shell/package-lock.json of its
-# own to key the npm cache on, so the cache below keys on the root lockfile
-# instead (a deliberate correction of section 1.2's literal wording to match
-# the repo's actual single-lockfile structure).
+# Standalone entry point for merge_group/push/workflow_dispatch only. The
+# pull_request path runs this same suite as a native job in pr-verify.yml
+# (see that file's header for why nothing here is workflow_call any more),
+# both calling the verify-tests-shell composite action under
+# .github/actions/ so the suite has exactly one source.
 #
-# Called as the "Verify: Shell" stage of pr-verify.yml's sequential chain.
-# The detect-changes job replaces the old top-level pull_request paths:
-# filter: instead of the whole workflow silently never triggering on a PR
-# that doesn't touch Shell (the forever-pending failure this repo hit on
-# PRs #118/#120), the gate always runs and reports a trivial pass when
-# Shell's own paths weren't touched -- which is what makes it safe to mark
-# required. See repo-policy.yml's header comment for why
-# pull_request-specific data arrives via inputs rather than
-# github.event.pull_request.
+# packages/** and services/llm-handler/** are in Shell's relevance filter
+# (see pr-verify.yml's Verify: Detect Changes job) because a shared-package
+# change must re-verify the Shell that consumes it: packages/platform-client,
+# packages/ui, and packages/llm all ship through apps/shell.
 
 on:
-  workflow_call:
-    inputs:
-      pr_number:
-        type: string
-        required: false
-      pr_head_sha:
-        type: string
-        required: false
-      pr_base_sha:
-        type: string
-        required: false
   merge_group:
     types: [checks_requested]
   push:
     branches: [main]
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ inputs.pr_number || github.event.merge_group.head_sha || github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  detect-changes:
-    name: Detect changes
+  verify-tests-shell:
+    name: "Verify: Tests (Shell)"
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      relevant: ${{ steps.check.outputs.relevant }}
-    steps:
-      - name: Setup · Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Detect · Does this change touch Shell's paths?
-        id: check
-        shell: bash
-        env:
-          PR_BASE_SHA: ${{ inputs.pr_base_sha }}
-        run: |
-          set -euo pipefail
-          if [ -n "${PR_BASE_SHA}" ]; then
-            base="${PR_BASE_SHA}"
-          elif [ "${{ github.event_name }}" = "merge_group" ]; then
-            base="${{ github.event.merge_group.base_sha }}"
-          else
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "No comparable base for this event; running the real checks."
-            exit 0
-          fi
-          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "Base commit not available locally; running the real checks to be safe."
-            exit 0
-          fi
-          if git diff --name-only "${base}...HEAD" | grep -qE '^(apps/shell/|packages/|services/llm-handler/|docs/ops/|\.github/workflows/deploy\.yml$|\.github/workflows/shell-ci\.yml$|\.github/workflows/pr-verify\.yml$)'; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "Shell paths changed; running the real checks."
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-            echo "No Shell paths changed; nothing to verify."
-          fi
-
-  checks:
-    name: Checks
-    needs: [detect-changes]
-    if: needs.detect-changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 16 # ~2x the 8-minute budget (10-cicd-deployment.md section 10.3)
+    timeout-minutes: 25
     steps:
       - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Setup · Configure Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Setup · Install workspace dependencies
-        run: npm ci
-
-      # No lint step: neither apps/shell nor any packages/* workspace
-      # declares a "lint" script, and no ESLint/Biome config exists anywhere
-      # in the repo today (confirmed by search). Adding one is out of scope
-      # for this CI chore; noted honestly here rather than inventing a script
-      # that doesn't exist.
-
-      - name: Build · Build packages/ui dependency
-        run: npm run build --workspace=packages/ui
-
-      - name: Type-check · apps/shell
-        run: npx tsc -b apps/shell/frontend
-
-      - name: Type-check · packages/platform-client
-        run: npm run typecheck --workspace=packages/platform-client
-
-      - name: Type-check · packages/llm
-        run: npm run typecheck --workspace=packages/llm
-
-      - name: Type-check · services/llm-handler
-        run: npm run typecheck --workspace=@hyperbolic/llm-handler
-
-      - name: Type-check · packages/ui
-        # The dependency build above already emitted the clean-checkout
-        # declarations Shell consumes; this re-runs the compiler explicitly.
-        run: npx tsc -b packages/ui
-
-      - name: Test · apps/shell (vitest)
-        run: npm run test:unit --workspace=apps/shell
-
-      - name: Test · packages/platform-client (node --test)
-        run: npm test --workspace=packages/platform-client
-
-      - name: Test · packages/ui (node --test)
-        run: npm test --workspace=packages/ui
-
-      - name: Test · packages/llm (node --test)
-        run: npm test --workspace=packages/llm
-
-      - name: Test · services/llm-handler (node --test)
-        run: npm test --workspace=@hyperbolic/llm-handler
-
-      - name: Test · deployment operator tooling
-        run: node --test docs/ops/*.test.mjs
-
-      - name: E2E · Cache Playwright Chromium
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: shell-playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-
-      - name: E2E · Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-        working-directory: apps/shell
-
-      - name: E2E · Start PostgreSQL for the registry-backed browser journey
-        run: |
-          sudo systemctl start postgresql.service
-          sudo -n -u postgres psql -v ON_ERROR_STOP=1 -tAc "select 1"
-
-      - name: E2E · Run every Shell e2e suite
-        run: npx playwright test
-        # playwright.config.ts moved into frontend/ with the rest of the
-        # frontend tree; Playwright resolves it from the working directory.
-        working-directory: apps/shell/frontend
-
-      - name: Build · Production build
-        run: npm run build:app --workspace=apps/shell
-
-      - name: Build · Verify the static health endpoint
-        run: npm run healthz-check --workspace=apps/shell
-
-      - name: Size · Enforce UI size budget
-        run: node packages/ui/test/size-check.mjs
-
-      - name: Size · Enforce Shell size budget
-        run: npm run size-check --workspace=apps/shell
-
-      - name: E2E · Upload Playwright failure evidence
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: shell-e2e-evidence
-          path: |
-            apps/shell/frontend/playwright-report/
-            apps/shell/frontend/test-results/
-          if-no-files-found: ignore
-          retention-days: 14
-
-  pr-gate:
-    name: "Verify: Shell"
-    needs: [detect-changes, checks]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pull-requests: read
-    steps:
-      - name: Gate · Confirm every required job passed
-        shell: bash
-        run: |
-          if [ "${{ needs.detect-changes.outputs.relevant }}" = "true" ]; then
-            test "${{ needs.checks.result }}" = "success"
-          else
-            test "${{ needs.checks.result }}" = "skipped"
-            echo "Shell was not touched by this change; nothing to verify."
-          fi
-      - name: Gate · Confirm tested SHA matches the live PR head
-        if: inputs.pr_number != ''
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ inputs.pr_number }}
-          TESTED_SHA: ${{ inputs.pr_head_sha }}
-        run: |
-          set -euo pipefail
-          live_sha="$(curl --fail --silent \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
-          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
-            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
-            exit 1
-          fi
-          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
-      - name: Gate · Publish step summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "### Verify: Shell"
-            echo ""
-            echo "| Job | Result |"
-            echo "| --- | --- |"
-            echo "| detect-changes | relevant=${{ needs.detect-changes.outputs.relevant }} |"
-            echo "| checks | ${{ needs.checks.result }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: ./.github/actions/verify-tests-shell
