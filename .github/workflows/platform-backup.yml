@@ -105,6 +105,12 @@ jobs:
           docker run --rm -i postgres:17 pg_restore --list \
             < "$payload/platform.dump" > /dev/null
 
+          # Handed off to the restic step below (RUNNER_TEMP survives across
+          # steps in the same job, unlike $work). Unconditional: this copy
+          # costs nothing when RESTIC_BACKUP_ENABLED is off, and the age
+          # path below it is completely unaffected either way.
+          cp "$payload/platform.dump" "$RUNNER_TEMP/platform.dump"
+
           # Record the migration ledger state alongside the dump: a restore
           # has to know which migrations the snapshot already contains.
           docker run --rm -e SUPABASE_DB_URL postgres:17 \
@@ -130,6 +136,60 @@ jobs:
           path: platform-backup-${{ github.run_id }}.tar.age
           retention-days: 90
           if-no-files-found: error
+
+      # Restic primary, gated on its own var: the age->artifact path above
+      # is unconditional and unaffected by this being on or off. A separate
+      # Infisical identity/path from the SUPABASE_DB_URL step above (ADR-05
+      # -- a compromised restic credential must not also unlock the
+      # database, and vice versa), scoped to exactly the restic
+      # credentials, never SUPABASE_DB_URL.
+      - name: Storage Box restic credentials
+        if: vars.RESTIC_BACKUP_ENABLED == 'true'
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PLATFORM_RESTIC_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/backup/"
+          domain: https://app.infisical.com
+
+      - name: Back up the platform dump to the Hetzner Storage Box (restic)
+        if: vars.RESTIC_BACKUP_ENABLED == 'true'
+        run: |
+          set -euo pipefail
+          if [ ! -s "$RUNNER_TEMP/platform.dump" ]; then
+            echo "platform.dump was not produced by the earlier bundle step -- refusing to back up nothing." >&2
+            exit 1
+          fi
+          if [ -z "${RESTIC_PASSWORD:-}" ] || [ -z "${STORAGEBOX_SSH_KEY:-}" ]; then
+            echo "RESTIC_PASSWORD/STORAGEBOX_SSH_KEY were not supplied by Infisical (/platform/backup/)." >&2
+            exit 1
+          fi
+
+          key_file=$(mktemp)
+          trap 'rm -f "$key_file"' EXIT
+          umask 077
+          printf '%s\n' "$STORAGEBOX_SSH_KEY" > "$key_file"
+
+          # Installs a pinned, checksum-verified restic and writes the
+          # Storage Box's SSH config alias; idempotently a no-op against an
+          # already-initialized repository (docs/ops/restic-setup.sh, #164).
+          ./docs/ops/restic-setup.sh --apply \
+            --storagebox-host="${{ vars.STORAGEBOX_HOST }}" \
+            --storagebox-user="${{ vars.STORAGEBOX_USER }}" \
+            --ssh-key-file="$key_file" \
+            --repos=platform
+
+          repository="sftp:hetzner-storagebox:/platform"
+          restic -r "$repository" backup "$RUNNER_TEMP/platform.dump" \
+            --host platform-backup --tag "run-${GITHUB_RUN_ID}"
+          restic -r "$repository" forget \
+            --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+
+          # Proves the snapshot actually landed, not just that restic exited 0.
+          restic -r "$repository" snapshots --tag "run-${GITHUB_RUN_ID}" --json \
+            | grep -q "run-${GITHUB_RUN_ID}"
 
       - name: Record the run id for the destructive-migration precondition
         run: |
