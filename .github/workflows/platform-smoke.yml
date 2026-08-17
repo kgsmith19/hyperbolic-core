@@ -131,7 +131,12 @@ jobs:
       # or outcome -- it only runs at all once the owner has both enabled
       # the edge and set the public hostname it answers on.
       - name: Smoke · Public edge — unauthenticated request must redirect toward Access, never reach the app
-        if: vars.CLOUDFLARE_EDGE_ENABLED == 'true'
+        # success() || failure(), not a bare gate: GitHub Actions implicitly ANDs a bare
+        # `if:` with success(), which would silently skip this step whenever the private
+        # probe step above fails -- exactly when the public edge might ALSO be broken and
+        # nothing would report it. success()||failure() (not always(), which would also
+        # fire on a cancelled run) decouples the two without masking a real cancellation.
+        if: (success() || failure()) && vars.CLOUDFLARE_EDGE_ENABLED == 'true'
         shell: bash
         env:
           CLOUDFLARE_PUBLIC_HOSTNAME: ${{ vars.CLOUDFLARE_PUBLIC_HOSTNAME }}

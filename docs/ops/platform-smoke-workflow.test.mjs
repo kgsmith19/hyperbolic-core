@@ -47,7 +47,23 @@ test("LifeOS probes are gated on the cutover switch, not skipped forever", () =>
 
 test("the public-edge probe is independently gated behind CLOUDFLARE_EDGE_ENABLED (issue #170)", () => {
   const publicStep = smoke.slice(smoke.indexOf("- name: Smoke · Public edge"));
-  assert.match(publicStep, /if: vars\.CLOUDFLARE_EDGE_ENABLED == 'true'/);
+  assert.match(publicStep, /if: \(success\(\) \|\| failure\(\)\) && vars\.CLOUDFLARE_EDGE_ENABLED == 'true'/);
+});
+
+test("the public-edge probe still runs even if the private-probe step above it failed -- not an implicit success()-AND (verification finding, issue #170)", () => {
+  // A plausible wrong implementation: a bare `if: vars.CLOUDFLARE_EDGE_ENABLED == 'true'`
+  // is implicitly ANDed with success() by GitHub Actions, so a failure in the private
+  // probe step above silently skips this one -- exactly the run where the public edge
+  // might ALSO be broken and nothing would report it. success()||failure(), not always()
+  // (which would also fire on a cancelled run), is what actually decouples the two.
+  const publicStep = smoke.slice(smoke.indexOf("- name: Smoke · Public edge"));
+  assert.match(publicStep, /if: \(success\(\) \|\| failure\(\)\)/);
+  assert.doesNotMatch(publicStep, /if: always\(\)/);
+});
+
+test("the public-edge probe runs with set -euo pipefail, so a curl transport failure can't fall through to the range check with a garbage status", () => {
+  const publicStep = smoke.slice(smoke.indexOf("- name: Smoke · Public edge"));
+  assert.match(publicStep, /set -euo pipefail/);
 });
 
 test("the private probes carry no CLOUDFLARE_EDGE_ENABLED gate of their own -- additive, not intertwined", () => {

@@ -518,8 +518,8 @@ containers), turn `access_log` back on at that point -- an explicit owner call, 
 
 ### Cloudflare Access setup (issue #170)
 
-Dashboard configuration, not code -- do this after the Tunnel itself is live (`ops-edge.yml`
-section above) and before uncommenting any path in `public_paths.conf`. Every public hostname must
+Dashboard configuration, not code -- do this after the Cloudflare Tunnel itself is live and
+reachable (issue #169) and before uncommenting any path in `public_paths.conf`. Every public hostname must
 sit behind Access before it carries real traffic; there is no code-level enforcement of that
 ordering, only this runbook.
 
@@ -550,4 +550,7 @@ every smoke run also sends one unauthenticated `GET` to `https://$CLOUDFLARE_PUB
 asserts the response is a 3xx redirect (toward Access) -- never a 2xx (Access is not actually in
 front of the app -- the exact regression this check exists to catch) and never a 5xx (the edge
 itself is broken). The probe deliberately never follows the redirect (no `-L`): it confirms the
-redirect happened, not what Access's own login page contains.
+redirect happened, not what Access's own login page contains. The step's own gate is
+`(success() || failure()) && vars.CLOUDFLARE_EDGE_ENABLED == 'true'`, not a bare variable check --
+GitHub Actions implicitly ANDs a bare `if:` with `success()`, which would silently skip this probe
+whenever the private-probe step above it fails, exactly when the public edge might also be broken.
