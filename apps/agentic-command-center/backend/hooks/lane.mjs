@@ -312,23 +312,54 @@ export function isUtilityInvocation(args) {
   return first != null && UTILITY_ARGS.has(String(first));
 }
 
+// A tight budget on the query below does not merely delay the answer -- it
+// DISABLES THE CAP. gate() treats a throw from it as "could not count" and
+// fails open, so every second shaved off this timeout is a second in which a
+// busy machine silently stops enforcing its own ceiling. That is backwards:
+// WMI is slowest precisely when the machine is loaded, which is when the cap
+// is the thing that matters.
+//
+// Observed on windows-latest: the identical suite finished in 51s on one
+// runner and 2m54s on another, and under the old single 5s attempt the slow
+// runner let a cap:0 launch straight through (Issue #222).
+//
+// More budget and more than one attempt can only ever REDUCE spurious
+// fail-opens -- neither can turn an allow into a refusal -- so this changes
+// no documented semantics, only how often the erroring path is reached.
+const QUERY_TIMEOUT_MS = 20000;
+const QUERY_ATTEMPTS = 3;
+
 // One real Win32_Process query, filtered by NAME only (path-filtering happens
 // in countCappedProcesses) — Name alone would also match the unrelated
 // desktop app's claude.exe, which is exactly why the caller must filter by
 // ExecutablePath afterward.
-export function queryClaudeProcesses() {
+export function queryClaudeProcesses(opts = {}) {
   const script =
     "Get-CimInstance Win32_Process -Filter \"Name='claude.exe'\" | " +
     "Select-Object ProcessId,ExecutablePath,CreationDate | ConvertTo-Json -Compress -Depth 3";
-  const out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf8",
-    timeout: 5000,
-    windowsHide: true,
-  });
-  const trimmed = out.trim();
-  if (!trimmed) return [];
-  const parsed = JSON.parse(trimmed);
-  return Array.isArray(parsed) ? parsed : [parsed];
+  const exec = opts.exec || execFileSync;
+  const attempts = Math.max(1, opts.attempts ?? QUERY_ATTEMPTS);
+  const timeout = opts.timeoutMs ?? QUERY_TIMEOUT_MS;
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const out = exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+        encoding: "utf8",
+        timeout,
+        windowsHide: true,
+      });
+      const trimmed = String(out ?? "").trim();
+      if (!trimmed) return [];
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch (e) {
+      // Retried rather than rethrown, including a JSON parse failure: a
+      // truncated read from a timed-out child looks exactly like malformed
+      // output, and the caller cannot tell them apart either.
+      lastError = e;
+    }
+  }
+  throw lastError;
 }
 
 // Matched by absolute exe PATH, never by image name — claude.exe is also the
@@ -392,6 +423,22 @@ export function runCli(argv) {
   return { ok: false, reason: `unknown command: ${cmd}` };
 }
 
+// A test seam, and deliberately a narrow one. The shim's own control-flow
+// test (shim/claude.test.ps1) has to assert "cap reached => exit 42 and the
+// real exe never ran" WITHOUT depending on a live WMI query completing --
+// which is exactly the thing that is unreliable under load, and exactly what
+// made that test fail on a slow runner while passing on a fast one.
+//
+// This grants no capability worth having: anyone who can set this variable
+// can equally point ACC_POLICY at a policy with a huge cap, or skip the shim
+// and run claude.exe directly. The cap guards against an accidental
+// self-inflicted API jam, not against someone who controls the environment.
+export function fixtureListerFromEnv(env = process.env) {
+  const raw = env.ACC_LANE_PROCESS_FIXTURE;
+  if (!raw) return {};
+  return { listProcesses: () => JSON.parse(raw) };
+}
+
 if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2);
   const [cmd, ...rest] = argv;
@@ -402,10 +449,17 @@ if (isMainModule(import.meta.url)) {
     // terminal. Silent on allow; one human-readable line on stderr to
     // refuse.
     const gateArgs = rest[0] === "--" ? rest.slice(1) : rest;
-    const out = gate(gateArgs);
+    const out = gate(gateArgs, fixtureListerFromEnv());
     if (out && out.ok === false) {
       console.error(`lane: claude launch cap reached (${out.count}/${out.cap}) — held by ${formatHolders(out.holders)}`);
       process.exitCode = 42;
+    } else if (out && out.reason === "count-failed") {
+      // The one allow that is NOT silent. Staying quiet here is what made
+      // Issue #222 hard to see: a cap that could not be applied looked
+      // exactly like a launch comfortably under it. This is still an allow
+      // -- the fail-open decision is unchanged -- it just stops being
+      // invisible.
+      console.error(`lane: could not count running claude processes (${out.error}) — launch cap NOT applied`);
     }
   } else {
     const out = runCli(argv);

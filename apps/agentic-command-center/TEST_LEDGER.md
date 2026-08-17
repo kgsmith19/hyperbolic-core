@@ -6,7 +6,7 @@ The detailed, per-test regression rationale that used to live here (`specs/TEST-
 
 | Suite | Covers | Command | Last run | Result |
 | --- | --- | --- | --- | --- |
-| `backend/hooks/*.test.mjs` | Guard, budget, directive, lane, route, engine, and other hook logic | `npm test` | 2026-08-12 | pass (see `npm run covgate` for changed-file coverage floors) |
+| `backend/hooks/*.test.mjs` | Guard, budget, directive, lane, route, engine, and other hook logic | `npm test` | 2026-08-17 | pass (see `npm run covgate` for changed-file coverage floors) |
 | `backend/kernel/**/*.test.mjs` | Bounded task runner, adapters, ledger, guard/guardhook | `npm test` | 2026-08-12 | pass |
 | `backend/runner/runner.test.mjs` | Directive execution loop, singleton pid handling | `npm test` | 2026-08-12 | pass |
 | `backend/gui/server.test.mjs` | Loopback API surface, `--ui-dist` static serving | `npm test` | 2026-08-12 | pass |

@@ -24,6 +24,14 @@ function Set-Cap([int]$cap) {
 $env:ACC_POLICY = $policyPath
 $env:ACC_LANE_DIR = $laneDir
 $env:ACC_REAL_CLAUDE_EXE = $standIn
+# Supply the process list instead of letting gate() run a live WMI query.
+# This is CONTROL-FLOW test, not a test of the query: with cap 0 any
+# successful count refuses, so the query's only influence on the outcome is
+# whether it throws -- and on a loaded runner Get-CimInstance Win32_Process
+# did exactly that, gate() failed open by design, and both refuse assertions
+# below failed while the identical code passed on a faster runner (#222).
+# The real CIM query keeps its own coverage in hooks/lane.test.mjs.
+$env:ACC_LANE_PROCESS_FIXTURE = '[]'
 
 $fail = 0
 function Check($name, $cond) { if ($cond) { Write-Host "PASS $name" } else { Write-Host "FAIL $name"; $script:fail = 1 } }

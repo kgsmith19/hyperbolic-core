@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const HERE_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -39,7 +39,7 @@ setPolicy(BASELINE);
 const {
   acquireSlot, withLaunchSlot, transportFailure, retryTransport, laneStatus, laneConfig,
   recordTransportFailure, breakerState, breakerReset, runCli,
-  isUtilityInvocation, countCappedProcesses, gate, queryClaudeProcesses, formatHolders,
+  isUtilityInvocation, countCappedProcesses, gate, queryClaudeProcesses, formatHolders, fixtureListerFromEnv,
 } = await import("./lane.mjs");
 
 const LANE = process.env.ACC_LANE_DIR;
@@ -568,6 +568,89 @@ test("queryClaudeProcesses runs a real CIM query and returns an array", { skip: 
   assert.ok(Array.isArray(out));
 });
 
+// #222: a single 5s attempt meant a slow WMI query threw, gate() fail-opened
+// by design, and the machine-wide cap silently stopped applying -- on a
+// loaded machine, which is exactly when it matters. These pin the retry.
+test("queryClaudeProcesses retries a failing query before giving up", () => {
+  let calls = 0;
+  const out = queryClaudeProcesses({
+    attempts: 3,
+    exec: () => {
+      calls += 1;
+      if (calls < 3) {
+        const err = new Error("spawnSync powershell.exe ETIMEDOUT");
+        err.code = "ETIMEDOUT";
+        throw err;
+      }
+      return JSON.stringify({ ProcessId: 5, ExecutablePath: "C:\\real\\claude.exe" });
+    },
+  });
+  assert.equal(calls, 3, "must keep trying until a query succeeds");
+  assert.deepEqual(out.map((p) => p.ProcessId), [5], "a single object must still come back as an array");
+});
+
+test("queryClaudeProcesses gives up after the last attempt and rethrows the real error", () => {
+  let calls = 0;
+  assert.throws(
+    () => queryClaudeProcesses({
+      attempts: 3,
+      exec: () => { calls += 1; throw new Error("CIM unavailable"); },
+    }),
+    /CIM unavailable/,
+    "the caller must still see a genuine failure -- retrying must not swallow it"
+  );
+  assert.equal(calls, 3, "must stop at the configured attempt count, not loop");
+});
+
+// The test above passes `attempts` explicitly, so it says nothing about the
+// DEFAULT -- and the default is the only one production ever uses. #222 was
+// a single default attempt, so that is what has to be pinned.
+test("queryClaudeProcesses retries by default, not only when a caller asks for it", () => {
+  let calls = 0;
+  const out = queryClaudeProcesses({
+    exec: () => {
+      calls += 1;
+      if (calls < 2) throw new Error("spawnSync powershell.exe ETIMEDOUT");
+      return "[]";
+    },
+  });
+  assert.ok(calls > 1, "one attempt by default is the #222 defect: a slow query silently disables the cap");
+  assert.deepEqual(out, []);
+});
+
+test("queryClaudeProcesses does not retry a query that succeeds", () => {
+  let calls = 0;
+  const out = queryClaudeProcesses({ exec: () => { calls += 1; return "[]"; } });
+  assert.equal(calls, 1, "a healthy query must cost exactly one process spawn");
+  assert.deepEqual(out, []);
+});
+
+test("queryClaudeProcesses asks for a budget WMI can actually meet on a loaded machine", () => {
+  let seen = null;
+  queryClaudeProcesses({ exec: (_f, _a, o) => { seen = o; return "[]"; } });
+  assert.ok(
+    seen.timeout >= 15000,
+    `the query timeout is the cap's failure budget, not a latency knob: ${seen.timeout}ms is too tight`
+  );
+});
+
+test("fixtureListerFromEnv is inert unless ACC_LANE_PROCESS_FIXTURE is set", () => {
+  assert.deepEqual(fixtureListerFromEnv({}), {}, "no fixture -> gate() must use the real query");
+  const lister = fixtureListerFromEnv({ ACC_LANE_PROCESS_FIXTURE: '[{"ProcessId":9,"ExecutablePath":"C:\\\\real\\\\claude.exe"}]' });
+  assert.deepEqual(lister.listProcesses().map((p) => p.ProcessId), [9]);
+});
+
+// The shim test's whole refuse case rides on this: cap 0 with a countable
+// (even empty) process list must refuse, so the assertion no longer depends
+// on a live query completing.
+test("gate: cap 0 with a countable list refuses, and the count never has to be non-empty", () => {
+  setPolicy({ total: { cap: 0, exe: ["C:\\real\\claude.exe"] } });
+  const out = gate(["-p", "hi"], fixtureListerFromEnv({ ACC_LANE_PROCESS_FIXTURE: "[]" }));
+  assert.equal(out.ok, false, "an explicit cap of 0 must refuse once the count succeeds");
+  assert.equal(out.count, 0);
+  assert.equal(out.cap, 0);
+});
+
 test("CLI: node hooks/lane.mjs gate --version bypasses the cap and exits 0 silently", () => {
   const out = execFileSync(process.execPath, [path.join(HERE_DIR, "lane.mjs"), "gate", "--version"], {
     env: { ...process.env, ACC_LANE_DIR: process.env.ACC_LANE_DIR, ACC_POLICY: process.env.ACC_POLICY },
@@ -576,11 +659,23 @@ test("CLI: node hooks/lane.mjs gate --version bypasses the cap and exits 0 silen
   assert.equal(out, "");
 });
 
-test("CLI: node hooks/lane.mjs gate with cap:0 refuses for real and exits 42 with a stderr holder line", { skip: process.platform !== "win32" }, () => {
+// This is the exact path shim/claude.cmd takes, so it is the oracle that
+// matters for #222 -- and until the fixture existed it could only run on
+// Windows, because it needed a live WMI query to reach the refuse branch.
+// The fixture removes that dependency, so the refusal is now proven on
+// EVERY platform this suite runs on, and a revert of the CLI's
+// fixtureListerFromEnv() wiring fails here rather than only resurfacing as
+// an intermittent PowerShell failure on a slow runner.
+test("CLI: node hooks/lane.mjs gate with cap:0 refuses and exits 42 with a stderr holder line", () => {
   setPolicy({ total: { cap: 0, exe: ["C:\\definitely-not-a-real-path\\claude.exe"] } });
   assert.throws(
     () => execFileSync(process.execPath, [path.join(HERE_DIR, "lane.mjs"), "gate", "--", "-p", "hi"], {
-      env: { ...process.env, ACC_LANE_DIR: process.env.ACC_LANE_DIR, ACC_POLICY: process.env.ACC_POLICY },
+      env: {
+        ...process.env,
+        ACC_LANE_DIR: process.env.ACC_LANE_DIR,
+        ACC_POLICY: process.env.ACC_POLICY,
+        ACC_LANE_PROCESS_FIXTURE: "[]",
+      },
       encoding: "utf8",
     }),
     (err) => {
@@ -588,6 +683,46 @@ test("CLI: node hooks/lane.mjs gate with cap:0 refuses for real and exits 42 wit
       assert.match(err.stderr, /lane: claude launch cap reached \(0\/0\)/);
       return true;
     },
+  );
+});
+
+test("CLI: a cap that could not be applied says so on stderr instead of allowing silently", () => {
+  setPolicy({ total: { cap: 0, exe: ["C:\\definitely-not-a-real-path\\claude.exe"] } });
+  // Malformed fixture -> the lister throws -> gate() fails open, which is the
+  // documented behavior and is NOT changed here. What must not happen is that
+  // it does so invisibly: that silence is why #222 read as a passing cap.
+  // spawnSync, not execFileSync: the process exits 0 here, and execFileSync
+  // only surfaces stderr on a non-zero exit -- so it cannot see the very
+  // line under test.
+  const r = spawnSync(process.execPath, [path.join(HERE_DIR, "lane.mjs"), "gate", "--", "-p", "hi"], {
+    env: {
+      ...process.env,
+      ACC_LANE_DIR: process.env.ACC_LANE_DIR,
+      ACC_POLICY: process.env.ACC_POLICY,
+      ACC_LANE_PROCESS_FIXTURE: "{not json",
+    },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, "fail-open must still allow the launch -- that decision is unchanged");
+  assert.equal(r.stdout, "", "the allow path still writes nothing to stdout");
+  assert.match(
+    r.stderr,
+    /launch cap NOT applied/,
+    "an inapplicable cap must announce itself; silence here is what hid #222"
+  );
+});
+
+// The shim's own test is PowerShell and only ever runs on windows-latest, so
+// nothing in this suite can execute it. This at least pins the one line that
+// makes its refuse case deterministic: drop it and that test goes back to
+// depending on a live WMI query, which is #222 exactly -- and it would come
+// back as an intermittent red on a slow runner, not as a local failure.
+test("the shim's control-flow test supplies a process fixture instead of querying WMI", () => {
+  const ps = fs.readFileSync(path.join(HERE_DIR, "..", "shim", "claude.test.ps1"), "utf8");
+  assert.match(
+    ps,
+    /\$env:ACC_LANE_PROCESS_FIXTURE\s*=/,
+    "claude.test.ps1 must set ACC_LANE_PROCESS_FIXTURE, or its refuse case depends on a live WMI query"
   );
 });
 
