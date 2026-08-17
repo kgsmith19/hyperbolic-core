@@ -300,6 +300,17 @@ This repository proves, in `docs/ops/deploy-workflow.test.mjs`, that `deploy-bra
 ### Brain external reachability: `/api/brain/` mount
 
 `services/brain/src/server.ts` registers its HTTP surface under `/api/brain/*` plus a bare `/healthz` for the in-container Docker healthcheck. The serve mount is `/api/brain/` -- tailscale forwards the full incoming path unchanged (the same mechanic as `/api/` and `/life/api/`), so `https://<origin>/api/brain/<route>` reaches the container as `/api/brain/<route>`, exactly what the server handles. (The original mount was `/brain/stream`, a name that predated the server's real route shape; nothing handled that path, so it was retired when the mount was corrected -- issue #134.) The `/api/brain/` mount is more specific than `/api/`, and Tailscale Serve routes by most-specific path, so Handler A keeps everything else under `/api/`. External health probes use `/api/brain/health` (unauthenticated), never the origin's bare `/healthz`, which is the Shell's static health asset.
+
+## Release tagging (issue #189)
+
+Every unit that deploys and passes the post-deploy smoke verdict gets a durable git tag: `deploy/<unit>/<yyyymmdd>-<shortsha>` (UTC date, first 12 hex characters of the deployed commit). Units: `shell`, `llm-handler`, `brain` (from `deploy.yml`'s own `tag-release` job) and `lifeos-backend`, `lifeos-ui` (from `lifeos-deploy.yml`'s own `tag-release` job). Query them with `git tag -l 'deploy/shell/*'` or via the GitHub UI's tag list -- there was no queryable release history before this landed.
+
+The tagging job runs last, `needs` every deploy job in its file plus `smoke`, and only fires once `needs.smoke.result == 'success'` -- not merely because an individual unit's own deploy job succeeded. A unit's deploy job succeeding but the run's overall smoke failing means something is wrong with the live result even if that one container came up cleanly, so no tag is created for anyone that run. A deploy job that internally rolled back to its previous release still reports its own job result as `failure` (GitHub Actions marks a job failed once any step fails, even when a later `if: failure()` rollback step recovers cleanly) -- so per-unit tagging naturally skips a rolled-back unit too, with no extra rollback-detection logic needed beyond checking the job's own result.
+
+Tagging is idempotent: re-running a deploy for a unit that already has today's tag (e.g. a second push same day) checks for the exact tag name via the GitHub API first and skips creating it again rather than erroring or overwriting. The tagging logic itself lives in one shared script, `docs/ops/tag-release.sh` (`docs/ops/tag-release.test.mjs` exercises it against a faked GitHub API, not a real network call), called once per unit from each workflow's own job -- the tag format and idempotency check exist in exactly one place, not duplicated between `deploy.yml` and `lifeos-deploy.yml`.
+
+`contents: write` is granted only on the `tag-release` job in each file -- nowhere else in either workflow needs it, and every other job stays read-only. No new secret or Infisical path: tagging authenticates with the workflow's own ambient `GITHUB_TOKEN` (`permissions: contents: write` is sufficient to create a tag ref via the Git Data API).
+
 ## LifeOS cutover: standalone repo to monorepo
 
 The standalone `kgsmith19/lifeos` repository ran the live LifeOS pipeline
