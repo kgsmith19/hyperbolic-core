@@ -152,7 +152,7 @@ The VPS exposes one tailnet-only HTTPS origin. Tailscale provides the network bo
 | Path | Target | State |
 | --- | --- | --- |
 | `/` | `/home/deploy/shell/current` | active static bundle |
-| `/life/` | `/home/deploy/lifeos-ui/dist` | active static bundle |
+| `/life/` | `/home/deploy/lifeos-ui/current` | active static bundle (versioned dirs + symlink, activated by `lifeos-deploy.yml`) |
 | `/life/api/` | `http://127.0.0.1:8000` | active loopback proxy |
 | `/api/` | `http://127.0.0.1:8200` | active loopback proxy (Handler A; `/api/intake/submit` and `/api/v1/complete`\|`stream`\|`count`, m4-05) |
 | `/api/brain/` | `http://127.0.0.1:8100` | active loopback proxy (the Brain daemon; full-path forwarding matches `server.ts`'s `/api/brain/*` routes) |

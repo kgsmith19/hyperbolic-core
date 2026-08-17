@@ -1,0 +1,381 @@
+name: "LifeOS Deploy"
+
+# Deploys LifeOS from THIS repository: backend container + /life/ UI, closing
+# the gap that the one-origin route table's /life/ and /life/api/ mounts had
+# no producer here (the standalone kgsmith19/lifeos repo ran the live
+# pipeline). Authored FRESH -- the inert apps/lifeos/.github/workflows/ files
+# are reference material only and are never relocated (Workflow Safety
+# Invariant: the standalone ci.yml's build-backend job has no repository-
+# variable gate and would publish a ghcr image on every push to main).
+#
+# TWO gates, both required on every deploying job:
+#   vars.DEPLOY_ENABLED        -- the repo-wide production master switch
+#   vars.LIFEOS_DEPLOY_ENABLED -- the LifeOS cutover switch (the two-writers
+#                                 race breaker: it stays unset until the owner
+#                                 flips the standalone repo's DEPLOY_ENABLED
+#                                 off, per the ordered cutover -- runbook
+#                                 section lands with the cutover issue #141)
+# Until both are 'true' this workflow is provably inert: every run is a
+# visible skip.
+#
+# NO REGISTRY, deliberately: the image is built in-job and shipped over
+# Tailscale SSH via docker save | gzip | ssh | docker load, so this workflow
+# contains no registry login and no push -- the accidental-publish hazard the
+# Safety Invariant warns about cannot occur here by construction (pinned by
+# docs/ops/lifeos-deploy-workflow.test.mjs). The image is tagged
+# lifeos:sha-<sha> on the box; docs/ops/prune-docker-images.sh keeps the
+# newest three.
+#
+# NO SSH KEYS, deliberately (ADR 008): authentication is Tailscale SSH --
+# the CI runner joins the tailnet as an ephemeral tag:ci node and the
+# tailnet ACL grants tag:ci SSH to deploy@<vps>. No SSH key material exists
+# anywhere in this pipeline (test-pinned). Infisical OIDC (identity
+# vars.INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID, secret-path /platform/lifeos-deploy/)
+# supplies the application secrets and the tailnet OAuth client.
+#
+# One-origin shape: the backend is reached through the /life/api/ serve mount
+# (full-path forwarding), so LIFEOS_ROOT_PATH=/life/api is rendered into its
+# env; the UI is built with base /life/ and VITE_API_URL=/life/api and is
+# activated as versioned directories behind a lifeos-ui/current symlink with
+# automatic rollback -- replacing the standalone pipeline's destructive
+# rm -rf swap. The /life/ serve route must point at lifeos-ui/current (the
+# route table change lands with this workflow; re-apply routes at cutover).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/lifeos/**"
+      - ".github/workflows/lifeos-deploy.yml"
+      - "docs/ops/prune-dist-dirs.sh"
+      - "docs/ops/prune-docker-images.sh"
+  workflow_dispatch:
+    inputs:
+      deploy_backend:
+        description: Deploy the LifeOS backend container
+        type: boolean
+        default: true
+      deploy_ui:
+        description: Deploy the LifeOS UI bundle
+        type: boolean
+        default: true
+      skip_live_verify:
+        description: >-
+          First-cutover bootstrap only: skip the live-route UI verify (and its
+          rollback trigger) for the one deploy that must run BEFORE the /life/
+          serve route points at lifeos-ui/current. Sequence: dispatch with this
+          set, apply the serve routes, then dispatch again unset for a fully
+          verified deploy. Never needed afterwards.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Classify changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.classify.outputs.backend }}
+      ui: ${{ steps.classify.outputs.ui }}
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify · Determine which units changed
+        id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          DEPLOY_BACKEND: ${{ inputs.deploy_backend }}
+          DEPLOY_UI: ${{ inputs.deploy_ui }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "backend=$DEPLOY_BACKEND" >> "$GITHUB_OUTPUT"
+            echo "ui=$DEPLOY_UI" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$BEFORE" =~ ^0+$ ]]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            echo "ui=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only "$BEFORE" "$GITHUB_SHA" > "$RUNNER_TEMP/changed-paths"
+          backend=false; ui=false
+          if grep -Eq '^(apps/lifeos/backend/|docs/ops/prune-docker-images\.sh$|\.github/workflows/lifeos-deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
+            backend=true
+          fi
+          if grep -Eq '^(apps/lifeos/frontend/|docs/ops/prune-dist-dirs\.sh$|\.github/workflows/lifeos-deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
+            ui=true
+          fi
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
+          echo "ui=$ui" >> "$GITHUB_OUTPUT"
+
+  deploy-backend:
+    name: Deploy LifeOS backend
+    needs: changes
+    if: >-
+      needs.changes.outputs.backend == 'true' &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      vars.LIFEOS_DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: deploy-lifeos-backend-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Secrets · Pull deploy configuration from Infisical
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/lifeos-deploy/"
+          domain: https://app.infisical.com
+
+      - name: Setup · Install Supabase CLI
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3
+        with:
+          version: 2.114.0
+
+      - name: Migrations · Apply LifeOS schema migrations
+        shell: bash
+        working-directory: apps/lifeos/backend
+        run: |
+          set -euo pipefail
+          test "$(supabase --version)" = "2.114.0"
+          test -n "${DATABASE_URL:-}"
+          supabase db push --db-url "$DATABASE_URL" --include-all --yes
+
+      - name: Network · Join tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
+
+      - name: Build · Build the backend image (no registry, ever)
+        shell: bash
+        env:
+          IMAGE: lifeos:sha-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker build --tag "$IMAGE" apps/lifeos/backend
+
+      - name: Deploy · Ship image and configuration, activate, verify
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          IMAGE: lifeos:sha-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          if [[ ! "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}[A-Za-z0-9]$ ]]; then
+            echo "DEPLOY_HOST must be a non-empty DNS name or IPv4 address." >&2
+            exit 1
+          fi
+          test -n "${DATABASE_URL:-}"
+          test -n "${LIFEOS_SUPABASE_URL:-}"
+          test -n "${LIFEOS_OWNER_USER_ID:-}"
+          umask 077
+          {
+            printf 'LIFEOS_IMAGE=%s\n' "$IMAGE"
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+            printf 'LIFEOS_SUPABASE_URL=%s\n' "$LIFEOS_SUPABASE_URL"
+            printf 'LIFEOS_OWNER_USER_ID=%s\n' "$LIFEOS_OWNER_USER_ID"
+            # One-origin shape: reached through the /life/api/ serve mount,
+            # which forwards the full path (docs/ops/tailscale-serve-apply.sh).
+            printf 'LIFEOS_ROOT_PATH=/life/api\n'
+            [ -n "${ANTHROPIC_API_KEY:-}" ] && printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
+            [ -n "${LIFEOS_ICS_URLS:-}" ] && printf 'LIFEOS_ICS_URLS=%s\n' "$LIFEOS_ICS_URLS"
+            [ -n "${LIFEOS_BRIEFING_TZ:-}" ] && printf 'LIFEOS_BRIEFING_TZ=%s\n' "$LIFEOS_BRIEFING_TZ"
+            [ -n "${LIFEOS_SLEEPHQ_CLIENT_ID:-}" ] && printf 'LIFEOS_SLEEPHQ_CLIENT_ID=%s\n' "$LIFEOS_SLEEPHQ_CLIENT_ID"
+            [ -n "${LIFEOS_SLEEPHQ_CLIENT_SECRET:-}" ] && printf 'LIFEOS_SLEEPHQ_CLIENT_SECRET=%s\n' "$LIFEOS_SLEEPHQ_CLIENT_SECRET"
+            [ -n "${LIFEOS_SIMPLEFIN_ACCESS_URL:-}" ] && printf 'LIFEOS_SIMPLEFIN_ACCESS_URL=%s\n' "$LIFEOS_SIMPLEFIN_ACCESS_URL"
+          } > "$RUNNER_TEMP/.env.prod"
+          docker save "$IMAGE" | gzip | ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'gunzip | docker load'
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'mkdir -p lifeos'
+          scp "${ssh_options[@]}" apps/lifeos/backend/compose.yaml "deploy@$DEPLOY_HOST:lifeos/compose.yaml"
+          scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.prod" "deploy@$DEPLOY_HOST:lifeos/.env"
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            "cd lifeos && chmod 600 .env && LIFEOS_IMAGE=$IMAGE docker compose up -d --wait && curl -fsS http://127.0.0.1:8000/healthz"
+
+      - name: Prune · Retire old backend images on the box
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          IMAGE: lifeos:sha-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          scp "${ssh_options[@]}" docs/ops/prune-docker-images.sh "deploy@$DEPLOY_HOST:lifeos/prune-docker-images.sh"
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            "chmod 0755 lifeos/prune-docker-images.sh && lifeos/prune-docker-images.sh lifeos '$IMAGE'"
+
+  deploy-ui:
+    name: Deploy LifeOS UI
+    needs: changes
+    if: >-
+      needs.changes.outputs.ui == 'true' &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      vars.LIFEOS_DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: deploy-lifeos-ui-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup · Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/lifeos/frontend/package-lock.json
+
+      - name: Build · Build the UI with public production configuration
+        shell: bash
+        working-directory: apps/lifeos/frontend
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          # Same-origin: the UI lives under /life/ and its API behind /life/api/.
+          VITE_API_URL: /life/api
+        run: |
+          set -euo pipefail
+          test -n "$VITE_SUPABASE_URL"
+          test -n "$VITE_SUPABASE_PUBLISHABLE_KEY"
+          npm ci
+          npm run build
+
+      # Secrets are pulled only AFTER npm ci + build have finished: the
+      # Infisical action exports to GITHUB_ENV, and third-party npm install
+      # scripts must never run with production credentials in their
+      # environment. The build needs only public vars.* values.
+      - name: Secrets · Pull deploy configuration from Infisical
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/lifeos-deploy/"
+          domain: https://app.infisical.com
+
+      - name: Network · Join tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
+
+      - name: Deploy · Stage the release
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          INCOMING: lifeos-ui/incoming-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}[A-Za-z0-9]$ ]]; then
+            echo "DEPLOY_HOST must be a non-empty DNS name or IPv4 address." >&2
+            exit 1
+          fi
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "rm -rf -- '$INCOMING'; mkdir -p -- '$INCOMING' lifeos-ui"
+          scp "${ssh_options[@]}" -r apps/lifeos/frontend/dist/. "deploy@$DEPLOY_HOST:$INCOMING/"
+          scp "${ssh_options[@]}" docs/ops/prune-dist-dirs.sh "deploy@$DEPLOY_HOST:lifeos-ui/prune-dist-dirs.sh"
+
+      - name: Deploy · Activate the release
+        id: activate
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          INCOMING: lifeos-ui/incoming-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          RELEASE: dist-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          previous="$(ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'readlink lifeos-ui/current 2>/dev/null || true')"
+          if [[ -n "$previous" && ! "$previous" =~ ^dist-[0-9a-f]{40}(-[0-9]+-[0-9]+)?$ ]]; then
+            echo "lifeos-ui/current points at an unexpected target: $previous" >&2
+            exit 1
+          fi
+          echo "previous=${previous:-__none__}" >> "$GITHUB_OUTPUT"
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "
+            set -euo pipefail
+            target='lifeos-ui/$RELEASE'
+            test ! -e \"\$target\"
+            mv -- '$INCOMING' \"\$target\"
+            next='lifeos-ui/current.next-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'
+            rm -f -- \"\$next\"
+            ln -s '$RELEASE' \"\$next\"
+            mv -Tf -- \"\$next\" lifeos-ui/current
+          "
+
+      - name: Verify · Live bundle serves the built assets
+        if: inputs.skip_live_verify != true
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          asset="$(grep -m1 -oE '/life/assets/[A-Za-z0-9_.-]+\.js' apps/lifeos/frontend/dist/index.html)"
+          curl --fail --silent --show-error --max-time 15 "https://$DEPLOY_HOST/life/" > "$RUNNER_TEMP/live-lifeos.html"
+          grep -qF "$asset" "$RUNNER_TEMP/live-lifeos.html"
+
+      - name: Recover · Roll back an unhealthy release
+        if: failure() && steps.activate.outputs.previous != ''
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          PREVIOUS: ${{ steps.activate.outputs.previous }}
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          if [[ "$PREVIOUS" == "__none__" ]]; then
+            ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'rm -f -- lifeos-ui/current'
+          else
+            ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "
+              set -euo pipefail
+              ln -s '$PREVIOUS' lifeos-ui/current.rollback
+              mv -Tf -- lifeos-ui/current.rollback lifeos-ui/current
+            "
+          fi
+
+      - name: Prune · Retire old releases
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            'chmod 0755 lifeos-ui/prune-dist-dirs.sh && lifeos-ui/prune-dist-dirs.sh lifeos-ui'
