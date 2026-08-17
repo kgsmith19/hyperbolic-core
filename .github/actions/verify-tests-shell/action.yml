@@ -2,9 +2,9 @@ name: Verify Tests Shell
 description: >-
   Shell's suite: builds packages/ui, type-checks and unit-tests apps/shell
   plus the packages/services it composes (platform-client, ui, llm,
-  llm-handler), runs the deployment-operator tooling tests and the full
-  Playwright e2e suite against a local PostgreSQL, then the production build,
-  health endpoint, and size budgets. Shared by pr-verify.yml's native
+  llm-handler, broker), runs the deployment-operator tooling tests and the
+  full Playwright e2e suite against a local PostgreSQL, then the production
+  build, health endpoint, and size budgets. Shared by pr-verify.yml's native
   "Verify: Tests (Shell)" job and shell-ci.yml's own
   merge_group/push/workflow_dispatch triggers, so the suite has exactly one
   source. Assumes the caller already checked out the repository.
@@ -48,6 +48,10 @@ runs:
       shell: bash
       run: npm run typecheck --workspace=@hyperbolic/llm-handler
 
+    - name: Type-check · services/broker
+      shell: bash
+      run: npm run typecheck --workspace=@hyperbolic/broker
+
     - name: Type-check · packages/ui
       # The dependency build above already emitted the clean-checkout
       # declarations Shell consumes; this re-runs the compiler explicitly.
@@ -73,6 +77,10 @@ runs:
     - name: Test · services/llm-handler (node --test)
       shell: bash
       run: npm test --workspace=@hyperbolic/llm-handler
+
+    - name: Test · services/broker (node --test)
+      shell: bash
+      run: npm test --workspace=@hyperbolic/broker
 
     - name: Test · deployment operator tooling
       shell: bash

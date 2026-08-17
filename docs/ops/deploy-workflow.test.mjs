@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -12,12 +12,13 @@ test("deploy discovery covers every manifest-owned migration directory", () => {
   assert.match(workflow, /\^apps\/toolbelt\/\(\.\*\/\)\?supabase\/migrations\//);
 });
 
-test("all six deploy jobs plus the migrations call, the smoke call, and the tag-release job retain the explicit production gate", () => {
-  // 6 build/deploy jobs + migrate-platform (issue #135) + the post-deploy
-  // smoke call (issue #143) + tag-release (issue #189): every prod-touching
-  // job carries the gate.
+test("all eight deploy jobs plus the migrations call, the smoke call, and the tag-release job retain the explicit production gate", () => {
+  // 8 build/deploy jobs (issue #185 adds build-broker/deploy-broker) +
+  // migrate-platform (issue #135) + the post-deploy smoke call (issue
+  // #143) + tag-release (issue #189): every prod-touching job carries the
+  // gate.
   const occurrences = workflow.match(/vars\.DEPLOY_ENABLED == 'true'/g) ?? [];
-  assert.equal(occurrences.length, 9);
+  assert.equal(occurrences.length, 11);
 });
 
 test("production migrations cannot be dispatched from a feature ref", () => {
@@ -37,9 +38,12 @@ test("manual deploy requires an explicit migration choice instead of coupling de
   assert.doesNotMatch(workflow, /workflow_dispatch[\s\S]{0,500}migrations=true/);
 });
 
-test("Shell, Handler A, and Brain deploy each read only their own dedicated Infisical path", () => {
+test("Shell, Handler A, Brain, and the broker deploy each read only their own dedicated Infisical path", () => {
   const paths = [...workflow.matchAll(/secret-path: "([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(new Set(paths), new Set(["/platform/shell-deploy/", "/platform/llm-handler/", "/brain/"]));
+  assert.deepEqual(
+    new Set(paths),
+    new Set(["/platform/shell-deploy/", "/platform/llm-handler/", "/brain/", "/platform/broker/"]),
+  );
 });
 
 test("Handler A's and the Brain's deploy jobs each use their own SSH key variable, never another unit's", () => {
@@ -47,7 +51,7 @@ test("Handler A's and the Brain's deploy jobs each use their own SSH key variabl
   assert.match(workflow, /INFISICAL_BRAIN_DEPLOY_IDENTITY_ID/);
   const deployShell = workflow.slice(workflow.indexOf("  deploy-shell:"), workflow.indexOf("  build-llm-handler:"));
   const deployLlmHandler = workflow.slice(workflow.indexOf("  deploy-llm-handler:"), workflow.indexOf("  build-brain:"));
-  const deployBrain = workflow.slice(workflow.indexOf("  deploy-brain:"));
+  const deployBrain = workflow.slice(workflow.indexOf("  deploy-brain:"), workflow.indexOf("  build-broker:"));
   const sshKeyVars = ["SHELL_DEPLOY_SSH_KEY", "LLM_HANDLER_SSH_KEY", "BRAIN_DEPLOY_SSH_KEY"];
   const jobs = { deployShell, deployLlmHandler, deployBrain };
   const owners = { SHELL_DEPLOY_SSH_KEY: "deployShell", LLM_HANDLER_SSH_KEY: "deployLlmHandler", BRAIN_DEPLOY_SSH_KEY: "deployBrain" };
@@ -109,19 +113,65 @@ test("a services/brain-only change classifies as the brain unit alone, not Shell
 test("checkout credentials are never persisted in deploy jobs", () => {
   const checkouts = workflow.match(/uses: actions\/checkout@[0-9a-f]{40}/g) ?? [];
   const disabled = workflow.match(/persist-credentials: false/g) ?? [];
-  assert.equal(checkouts.length, 8);
+  assert.equal(checkouts.length, 10);
   assert.equal(disabled.length, checkouts.length);
 });
 
 test("build-brain and deploy-brain each carry the same production-gate and success-dependency shape as build/deploy-llm-handler", () => {
   const buildBrain = workflow.slice(workflow.indexOf("  build-brain:"), workflow.indexOf("  deploy-brain:"));
-  const deployBrain = workflow.slice(workflow.indexOf("  deploy-brain:"));
+  const deployBrain = workflow.slice(workflow.indexOf("  deploy-brain:"), workflow.indexOf("  build-broker:"));
   assert.match(buildBrain, /needs\.changes\.outputs\.brain == 'true'/);
   assert.match(buildBrain, /file: services\/brain\/Dockerfile/);
   assert.match(deployBrain, /needs\.build-brain\.result == 'success'/);
   assert.match(deployBrain, /needs\.migrate-platform\.result == 'success' \|\| needs\.migrate-platform\.result == 'skipped'/);
   assert.match(deployBrain, /group: deploy-brain-production/);
   assert.match(deployBrain, /cancel-in-progress: false/);
+});
+
+test("build-broker and deploy-broker (issue #185) carry the same production-gate and success-dependency shape as the other units", () => {
+  const buildBroker = workflow.slice(workflow.indexOf("  build-broker:"), workflow.indexOf("  deploy-broker:"));
+  const deployBroker = workflow.slice(workflow.indexOf("  deploy-broker:"), workflow.indexOf("  smoke:"));
+  assert.match(buildBroker, /needs\.changes\.outputs\.broker == 'true'/);
+  assert.match(buildBroker, /file: services\/broker\/Dockerfile/);
+  assert.match(deployBroker, /needs\.build-broker\.result == 'success'/);
+  assert.match(deployBroker, /needs\.migrate-platform\.result == 'success' \|\| needs\.migrate-platform\.result == 'skipped'/);
+  assert.match(deployBroker, /group: deploy-broker-production/);
+  assert.match(deployBroker, /cancel-in-progress: false/);
+  assert.match(deployBroker, /environment: broker-deploy-production/);
+});
+
+test("deploy-broker generates broker-policy.json fresh from every discovered manifest before shipping it, never a committed copy", () => {
+  const deployBroker = workflow.slice(workflow.indexOf("  deploy-broker:"), workflow.indexOf("  smoke:"));
+  assert.match(deployBroker, /node apps\/toolbelt\/scripts\/generate-broker-policy\.mjs --out "\$RUNNER_TEMP\/broker-policy\.json"/);
+  assert.match(deployBroker, /scp .* "\$RUNNER_TEMP\/broker-policy\.json" "deploy@\$DEPLOY_HOST:broker\/broker-policy\.json"/);
+  assert.doesNotMatch(workflow, /git add .*broker-policy\.json|committed.*broker-policy\.json/);
+  // Positive check, not just the absence check above: services/broker/ itself
+  // has no tracked broker-policy.json, and its own .gitignore backstops one
+  // ever landing there by accident.
+  assert.doesNotMatch(readdirSync(path.join(root, "services/broker")).join(","), /broker-policy\.json/);
+  const brokerGitignore = readFileSync(path.join(root, "services/broker/.gitignore"), "utf8");
+  assert.match(brokerGitignore, /^broker-policy\.json$/m);
+});
+
+test("deploy-broker reads only its own dedicated Infisical path and SSH key, matching every sibling unit's isolation", () => {
+  assert.match(workflow, /INFISICAL_BROKER_DEPLOY_IDENTITY_ID/);
+  const deployBroker = workflow.slice(workflow.indexOf("  deploy-broker:"), workflow.indexOf("  smoke:"));
+  assert.match(deployBroker, /BROKER_DEPLOY_SSH_KEY/);
+  assert.doesNotMatch(deployBroker, /SHELL_DEPLOY_SSH_KEY|LLM_HANDLER_SSH_KEY|BRAIN_DEPLOY_SSH_KEY/);
+});
+
+test("deploy-broker ships broker-policy.json world-readable (644), never 600 like .env -- the container reads it as a different uid than deploy owns it as", () => {
+  // Independent adversarial review finding: broker-policy.json is a bind
+  // mount (services/broker/compose.yaml), so it keeps the HOST file's owner
+  // (deploy) and mode on the container side too -- the broker process runs
+  // as uid 10300 (Dockerfile), not deploy, so a 600 mode would be EACCES
+  // and fail `docker compose up --wait` on every deploy. The file holds no
+  // secrets (aggregated from committed tool.json files: host allowlists and
+  // vault KEY NAMES only), so 644 costs nothing.
+  const deployBroker = workflow.slice(workflow.indexOf("  deploy-broker:"), workflow.indexOf("  smoke:"));
+  assert.match(deployBroker, /chmod 644 broker-policy\.json/);
+  assert.doesNotMatch(deployBroker, /chmod 600 \.env broker-policy\.json/);
+  assert.match(deployBroker, /chmod 600 \.env(?! broker-policy)/);
 });
 
 test("the Brain's rendered .env uses the env names the daemon actually reads", () => {
@@ -185,15 +235,18 @@ test("the production Shell build bakes a Brain API base that reaches the shared 
   assert.match(buildJob, /VITE_BRAIN_API: \$\{\{ vars\.VITE_BRAIN_API \|\| '\/' \}\}/);
 });
 
-test("both container deploys record the running image, then roll back to it on failure", () => {
-  // Shell has had activate->verify->rollback since m2-07; the two container
+test("all three container deploys record the running image, then roll back to it on failure", () => {
+  // Shell has had activate->verify->rollback since m2-07; the container
   // units had NO rollback (gap G-2): a failed compose up --wait left the
   // broken image live. Each job must record the box's current image BEFORE
   // shipping, and repoint .env back to it under failure() -- degrading
   // gracefully (no rollback attempt) on a first-ever deploy (__none__).
+  // issue #185 adds the broker as a third container unit with the same
+  // shape.
   for (const [recordName, job, envkey] of [
     ["Handler A", "Handler A", "LLM_HANDLER_IMAGE"],
     ["Brain", "the Brain", "BRAIN_IMAGE"],
+    ["broker", "the broker", "BROKER_IMAGE"],
   ]) {
     const record = workflow.indexOf(`- name: Record the running ${recordName} image for rollback`);
     const deploy = workflow.indexOf(`- name: Deploy ${job}\n`, record);
@@ -209,7 +262,7 @@ test("both container deploys record the running image, then roll back to it on f
   // The recorded reference is validated before reuse -- an unexpected value
   // must abort rather than be sed'd into .env.
   const guards = workflow.match(/Refusing to trust an unexpected running-image reference/g) ?? [];
-  assert.equal(guards.length, 2);
+  assert.equal(guards.length, 3);
 });
 
 test("tag-release (issue #189): contents: write is scoped to that job alone, nowhere else in the file", () => {
@@ -233,9 +286,11 @@ test("tag-release calls tag-release.sh once per unit, passing that unit's own de
   assert.match(tagJob, /SHELL_RESULT: \$\{\{ needs\.deploy-shell\.result \}\}/);
   assert.match(tagJob, /LLM_HANDLER_RESULT: \$\{\{ needs\.deploy-llm-handler\.result \}\}/);
   assert.match(tagJob, /BRAIN_RESULT: \$\{\{ needs\.deploy-brain\.result \}\}/);
+  assert.match(tagJob, /BROKER_RESULT: \$\{\{ needs\.deploy-broker\.result \}\}/);
   assert.match(tagJob, /docs\/ops\/tag-release\.sh shell "\$SHELL_RESULT" "\$SHA"/);
   assert.match(tagJob, /docs\/ops\/tag-release\.sh llm-handler "\$LLM_HANDLER_RESULT" "\$SHA"/);
   assert.match(tagJob, /docs\/ops\/tag-release\.sh brain "\$BRAIN_RESULT" "\$SHA"/);
+  assert.match(tagJob, /docs\/ops\/tag-release\.sh broker "\$BROKER_RESULT" "\$SHA"/);
   assert.match(tagJob, /SHA: \$\{\{ github\.sha \}\}/);
 });
 

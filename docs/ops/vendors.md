@@ -198,6 +198,6 @@ public half, keep the old private key offline until every artifact encrypted und
 | Brain Anthropic API key | `/brain/` | Anthropic console; update the one path |
 | LLM Review provider keys | `/review/` | Provider console; update the one path |
 | age recipient keypairs (×2) | repo vars (public) + owner-held (private) | `age-keygen`; retire old private key after retention window |
-| SSH deploy keys (×3, platform pipeline only) | Infisical, per-pipeline paths | `bootstrap-vps.sh`; planned unification onto keyless Tailscale SSH (not yet scheduled) |
+| SSH deploy keys (×4, platform pipeline only) | Infisical, per-pipeline paths | `bootstrap-vps.sh`; planned unification onto keyless Tailscale SSH (not yet scheduled) |
 | restic repository password + SFTP key *(pipeline built #164/#166/#167, awaiting Storage Box)* | `/platform/backup/` | Storage Box console + `restic key` |
 | Cloudflare tunnel token *(pipeline built #169, awaiting owner's Tunnel)* | `/platform/edge/` | Cloudflare dashboard |

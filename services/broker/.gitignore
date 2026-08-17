@@ -1,0 +1,7 @@
+dist/
+*.tsbuildinfo
+node_modules/
+# Generated fresh on every deploy (apps/toolbelt/scripts/generate-broker-policy.mjs)
+# and shipped from $RUNNER_TEMP, never written here in normal CI -- ignored as a
+# backstop in case a local `--out` run lands it in this directory by hand.
+broker-policy.json

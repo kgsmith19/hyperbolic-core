@@ -147,7 +147,7 @@ jobs:
           relevant toolbelt '^(apps/toolbelt/|packages/toolbelt-cli/|package\.json$|package-lock\.json$)'
           relevant acc      '^(apps/agentic-command-center/|apps/toolbelt/guards/)'
           relevant brain    '^(services/brain/|package\.json$|package-lock\.json$)'
-          relevant shell    '^(apps/shell/|packages/|services/llm-handler/|docs/ops/)'
+          relevant shell    '^(apps/shell/|packages/|services/llm-handler/|services/broker/|docs/ops/)'
           relevant lifeos   '^apps/lifeos/'
 
       - name: Standards · Secrets

@@ -19,10 +19,41 @@ test("smoke is callable, dispatchable, production-gated, and read-only by design
   assert.match(onBlock, /workflow_dispatch:/);
   assert.doesNotMatch(onBlock, /push:|schedule:|pull_request/);
   assert.match(smoke, /if: vars\.DEPLOY_ENABLED == 'true'/);
-  // Read-only: probes only -- no ssh, no scp, no mutation of the box.
-  assert.doesNotMatch(smoke, /\bssh\b|\bscp\b/);
+  // Read-only: probes only -- no scp, no mutation of the box. ssh alone is
+  // no longer forbidden outright (issue #185's broker probe uses it, since
+  // the broker has no Serve mount -- see the dedicated test below for what
+  // stays true about that one exception), but every other read-only-over-
+  // HTTPS invariant is unchanged: no key material, no secrets beyond the
+  // tailnet OAuth client already used to join.
+  assert.doesNotMatch(smoke, /\bscp\b/);
   assert.doesNotMatch(smoke, /\$\{\{ secrets\./);
   assert.doesNotMatch(smoke, /SSH_KEY|id_ed25519/);
+});
+
+test("the broker probe is the ONLY ssh usage, keyless, and strictly read-only (curl, never a mutating command)", () => {
+  // issue #185: the broker is deliberately loopback-only with no Serve
+  // mount (its callers are other containers, not external clients), so it
+  // cannot be reached through the shared-origin probe() every other unit
+  // uses. probe_ssh() is the one, disclosed exception to this file's
+  // otherwise-total "no ssh" design -- scoped narrowly enough that a
+  // regression widening it (a second ssh call, or a mutating command
+  // riding along) fails this test, not just the eyeball review that added
+  // it.
+  const sshInvocations = smoke.match(/\bssh\b/g) ?? [];
+  assert.equal(sshInvocations.length, 1, "exactly one ssh invocation in the whole file");
+  const probeSshFn = smoke.slice(smoke.indexOf("probe_ssh() {"), smoke.indexOf("\n          }\n", smoke.indexOf("probe_ssh() {")));
+  // Positive match on the ENTIRE remote command string, not a blocklist:
+  // a blocklist (forbidding "docker compose", "rm ", etc.) misses anything
+  // not named -- confirmed by mutation testing during independent review,
+  // where appending `&& docker restart broker` to the same one-line curl
+  // still passed a blocklist-shaped assertion. Requiring the whole quoted
+  // remote command to be exactly one curl invocation and nothing else (no
+  // `&&`, `;`, `|`, backticks, or `$()`) closes that gap structurally.
+  const remoteCommandMatch = /ssh "\$\{ssh_options\[@\]\}" "deploy@\$DEPLOY_HOST" "([^"]*)"/.exec(smoke);
+  assert.ok(remoteCommandMatch, "must find the ssh invocation's quoted remote command");
+  const remoteCommand = remoteCommandMatch[1];
+  assert.match(remoteCommand, /^curl --fail --silent --show-error --max-time 15 '\$url'$/);
+  assert.match(smoke, /probe_ssh "Broker" "http:\/\/127\.0\.0\.1:8300\/healthz"/);
 });
 
 test("the probe map covers every mounted unit through the shared origin", () => {
@@ -43,6 +74,20 @@ test("LifeOS probes are gated on the cutover switch, not skipped forever", () =>
   // the LIFEOS_DEPLOY_ENABLED variable, checked at runtime.
   assert.match(smoke, /LIFEOS_LIVE: \$\{\{ vars\.LIFEOS_DEPLOY_ENABLED \}\}/);
   assert.match(smoke, /skipped \(pre-cutover\)/);
+});
+
+test("the broker probe is gated behind BROKER_DEPLOY_ENABLED, not run unconditionally (issue #185)", () => {
+  // The broker has never been deployed until the owner provisions Infisical
+  // /platform/broker/ and confirms it live -- unlike Shell/Handler A/Brain,
+  // which have been continuously live since earlier milestones and are
+  // correctly probed unconditionally. An UNGATED broker probe would turn
+  // every future deploy of every OTHER unit red indefinitely (an
+  // independent adversarial review of this file's first draft caught
+  // exactly this).
+  assert.match(smoke, /BROKER_LIVE: \$\{\{ vars\.BROKER_DEPLOY_ENABLED \}\}/);
+  assert.match(smoke, /if \[\[ "\$\{BROKER_LIVE:-\}" == "true" \]\]/);
+  assert.match(smoke, /probe_ssh "Broker" "http:\/\/127\.0\.0\.1:8300\/healthz"/);
+  assert.match(smoke, /skipped \(not yet deployed\)/);
 });
 
 test("the public-edge probe is independently gated behind CLOUDFLARE_EDGE_ENABLED (issue #170)", () => {

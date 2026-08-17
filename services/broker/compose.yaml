@@ -1,0 +1,43 @@
+# Production runtime on the VPS (docs/ops/runbook.md). Shipped by
+# deploy.yml's deploy-broker job to deploy@host:broker/compose.yaml --
+# mirrors services/llm-handler/compose.yaml's shape exactly (same
+# loopback-only posture, same image-tag-from-env convention, same
+# healthcheck-then-log-rotation pattern).
+services:
+  broker:
+    # Every deploy records BROKER_IMAGE (a sha tag) in the project
+    # directory's .env; no fallback tag, since the box only ever loads
+    # sha-tagged images over SSH (no registry credentials on the VPS).
+    image: ${BROKER_IMAGE:?recorded in ./.env by every deploy (deploy.yml's deploy-broker job)}
+    restart: unless-stopped
+    env_file: .env
+    # Matches the Dockerfile's own USER, the same way services/llm-handler's
+    # compose pins `user: handler`. Stated here too so a stale image without
+    # the USER directive still cannot come up as root.
+    user: broker
+    ports:
+      - "127.0.0.1:8300:8300"
+    volumes:
+      # broker-policy.json (apps/toolbelt/scripts/generate-broker-policy.mjs's
+      # output, issue #184) is generated fresh on the CI runner and scp'd
+      # alongside this file on every deploy -- never baked into the image,
+      # the same reasoning .env is rendered at deploy time rather than
+      # shipped in the image: a running container's policy must not go
+      # stale between deploys of the manifests that feed it. Read-only:
+      # the broker only ever reads this file, never writes it.
+      - ./broker-policy.json:/app/broker-policy.json:ro
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8300/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
