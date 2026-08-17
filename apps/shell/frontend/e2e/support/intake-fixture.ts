@@ -64,11 +64,21 @@ export const FIXTURE_SERVICE_ROLE_KEY = "fixture-e2e-service-role-key";
 // `duplicate key value violates unique constraint "pg_authid_rolname_index"`.
 // That raced intermittently in CI for exactly this reason.
 //
-// Catching duplicate_object per role is the idiomatic fix: it is the only
-// outcome we are willing to ignore (the role already exists, which is what
-// we wanted), and it stays a hard failure for anything else. Each create
-// gets its own sub-block because an exception aborts the whole block it is
-// raised in -- one shared handler would silently skip the remaining roles.
+// Catching "the role already exists" per role is the fix -- that is the only
+// outcome we are willing to ignore (it is what we wanted anyway), and
+// anything else stays a hard failure. Each create gets its own sub-block
+// because an exception aborts the whole block it is raised in -- one shared
+// handler would silently skip the remaining roles.
+//
+// BOTH exception classes are required, and catching only duplicate_object is
+// the bug this file shipped once already. CREATE ROLE opens pg_authid with
+// RowExclusiveLock, which does not block a concurrent RowExclusiveLock
+// holder, and only then runs its catalog pre-check. So two workers can BOTH
+// pass that pre-check; the loser never reaches it a second time and dies at
+// the unique index instead, raising a raw unique_violation (23505) rather
+// than duplicate_object (42710). duplicate_object alone covers only the
+// easy, already-committed case -- the actual simultaneous race raises 23505
+// and went straight through the handler.
 //
 // authenticator is needed by intake_create_schema.sql's own last statement
 // ("alter role authenticator set pgrst.db_schemas = ...", mirroring every
@@ -80,19 +90,19 @@ do $$
 begin
   begin
     create role anon;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role authenticated;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role service_role;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role authenticator;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
 end
 $$;

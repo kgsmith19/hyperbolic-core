@@ -86,23 +86,26 @@ create or replace function auth.uid() returns uuid
 language sql stable
 as $$ select nullif(current_setting('app.test_uid', true), '')::uuid $$;
 
+-- Both exception classes below are load-bearing -- duplicate_object alone
+-- lets the real cross-worker race through. See the full explanation in
+-- apps/shell/frontend/e2e/support/intake-fixture.ts.
 do $$
 begin
   begin
     create role anon nologin;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role authenticated nologin;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role service_role nologin;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role authenticator nologin;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
 end
 $$;

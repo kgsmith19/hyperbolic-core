@@ -149,23 +149,26 @@ create or replace function auth.role() returns text
 language sql stable
 as $$ select current_setting('role') $$;
 
+-- Both exception classes below are load-bearing -- duplicate_object alone
+-- lets the real cross-worker race through. See the full explanation in
+-- apps/shell/frontend/e2e/support/intake-fixture.ts.
 do $$
 begin
   begin
     create role anon nologin;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role authenticated nologin;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role service_role nologin;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role authenticator nologin;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
 end
 $$;

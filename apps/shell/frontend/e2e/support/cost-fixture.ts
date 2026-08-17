@@ -50,24 +50,26 @@ function coreLlmCallWithoutCron(): string {
 
 export const OWNER_UUID = "00000000-0000-4000-8000-000000000099";
 
+// Both exception classes are load-bearing -- duplicate_object alone lets the
+// real cross-worker race through. See intake-fixture.ts for the full why.
 const BOOTSTRAP_ROLES_SQL = `
 do $$
 begin
   begin
     create role anon;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role authenticated;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role service_role;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
   begin
     create role authenticator;
-  exception when duplicate_object then null;
+  exception when duplicate_object or unique_violation then null;
   end;
 end
 $$;
