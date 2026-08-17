@@ -152,7 +152,7 @@ jobs:
   # Stage 2: Verify: Repo Policy
   # ---------------------------------------------------------------------
   repo-policy-checks:
-    name: Checks
+    name: Repo Policy Checks
     needs: [verify-secrets]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -210,7 +210,7 @@ jobs:
   # Stage 3: Verify: PR Description
   # ---------------------------------------------------------------------
   pr-description-checks:
-    name: Checks
+    name: PR Description Checks
     needs: [verify-repo-policy]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -304,7 +304,7 @@ jobs:
           fi
 
   lint-checks:
-    name: Checks
+    name: Linting Checks
     needs: [lint-detect-changes]
     if: needs.lint-detect-changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
