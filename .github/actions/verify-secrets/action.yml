@@ -1,0 +1,67 @@
+name: Verify Secrets
+description: >-
+  Scans the repository working tree, and the commits introduced by this
+  change when a commit range is available, for leaked credentials via
+  checksum-verified Gitleaks. Shared by pr-verify.yml's "Verify: Standards"
+  job and secret-scan.yml's own merge_group/push/workflow_dispatch
+  triggers, so the actual scanning logic has exactly one source.
+
+  The CALLER must have already checked out the repository with
+  fetch-depth: 0 -- this action does not check out, so a job running
+  several of these actions back to back checks out exactly once, and full
+  history is required for the commit-range scan below.
+
+inputs:
+  base_sha:
+    description: Base commit SHA of the range to scan. Empty skips the commit-range scan (the working-tree scan above still runs).
+    required: false
+    default: ""
+  head_sha:
+    description: Head commit SHA of the range to scan. Empty skips the commit-range scan.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Setup · Install checksum-verified Gitleaks
+      shell: bash
+      env:
+        GITLEAKS_VERSION: "8.30.1"
+        GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+      run: |
+        set -euo pipefail
+        asset="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+        archive="${RUNNER_TEMP}/${asset}"
+        curl --fail --location --silent --show-error --retry 3 \
+          --output "${archive}" \
+          "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${asset}"
+        echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum --check --status
+        tar --no-same-owner -xzf "${archive}" -C "${RUNNER_TEMP}" gitleaks
+        chmod 0755 "${RUNNER_TEMP}/gitleaks"
+
+    - name: Scan · Scan the repository working tree
+      shell: bash
+      run: |
+        "${RUNNER_TEMP}/gitleaks" dir --no-banner --redact --verbose --config .gitleaks.toml .
+
+    - name: Scan · Scan commits introduced by this change
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base_sha }}
+        HEAD_SHA: ${{ inputs.head_sha }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${BASE_SHA}" || -z "${HEAD_SHA}" ]]; then
+          echo "No commit range provided for this event; the working-tree scan above already covers the full checkout."
+          exit 0
+        fi
+        sha_pattern='^[0-9a-f]{40}$'
+        if [[ ! "${BASE_SHA}" =~ ${sha_pattern} || ! "${HEAD_SHA}" =~ ${sha_pattern} ]]; then
+          echo "A commit range was provided but is not a valid SHA pair." >&2
+          exit 1
+        fi
+        git cat-file -e "${BASE_SHA}^{commit}"
+        git cat-file -e "${HEAD_SHA}^{commit}"
+        "${RUNNER_TEMP}/gitleaks" git --no-banner --redact --verbose \
+          --config .gitleaks.toml --log-opts="${BASE_SHA}..${HEAD_SHA}" .

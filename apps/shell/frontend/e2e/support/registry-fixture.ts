@@ -72,18 +72,23 @@ const REAL_MIGRATIONS = [
   "20260813003000_register_idea-intake.sql",
 ];
 
+// Both exception classes are load-bearing -- duplicate_object alone lets the
+// real cross-worker race through. See intake-fixture.ts for the full why.
 const BOOTSTRAP_ROLES_SQL = `
 do $$
 begin
-  if not exists (select from pg_roles where rolname = 'anon') then
+  begin
     create role anon;
-  end if;
-  if not exists (select from pg_roles where rolname = 'authenticated') then
+  exception when duplicate_object or unique_violation then null;
+  end;
+  begin
     create role authenticated;
-  end if;
-  if not exists (select from pg_roles where rolname = 'service_role') then
+  exception when duplicate_object or unique_violation then null;
+  end;
+  begin
     create role service_role;
-  end if;
+  exception when duplicate_object or unique_violation then null;
+  end;
 end
 $$;
 `;

@@ -1,125 +1,33 @@
-name: "Brain PR Gate"
+name: "Verify: Tests (Brain)"
 
-# 10-cicd-deployment.md section 1.3: checkout, setup-node, npm ci, lint,
-# type-check, unit+integration tests, then a Docker build-and-smoke of the
-# section 3 image (network-checker release workflow's own build-and-smoke pattern,
-# toolbelt-network-checker-release.yml) -- built for verification only,
-# never pushed from CI.
+# Standalone entry point for merge_group/push/workflow_dispatch only. The
+# pull_request path runs this same suite as a native job in pr-verify.yml
+# (see that file's header for why nothing here is workflow_call any more),
+# both calling the verify-tests-brain composite action under
+# .github/actions/ so the suite has exactly one source.
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
-    paths:
-      - "services/brain/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/brain-ci.yml"
   merge_group:
     types: [checks_requested]
   push:
     branches: [main]
   workflow_dispatch:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  checks:
-    name: Checks
+  verify-tests-brain:
+    name: "Verify: Tests (Brain)"
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Setup · Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-      - name: Setup · Install root workspace dependencies
-        run: npm ci
-      - name: Build · Type-check services/brain
-        working-directory: services/brain
-        run: npm run typecheck
-      - name: Test · Run services/brain tests
-        working-directory: services/brain
-        run: npm test
-      - name: "Security · ADR-05 isolation check (m4-18, BR-3/II-4): this runner is a real non-Brain process context -- no Brain secret file is ever mounted here"
-        run: |
-          if node services/brain/scripts/isolation-check.mjs; then
-            echo "isolation-check exited 0 (secret readable) from a non-Brain CI runner -- this must never happen" >&2
-            exit 1
-          fi
-          echo "isolation-check correctly exited non-zero: the Brain secret is not readable from this context"
-      - name: "Test · Eval corpus gate (m4-19, 07 section 7.11): brain eval run over services/brain/evals/cases/*.case.json"
-        working-directory: services/brain
-        env:
-          # Scratch state, never the production /data or /workspaces
-          # volumes -- this CLI invocation only needs somewhere to open a
-          # throwaway SQLite store and check out worktrees for the
-          # duration of the eval run. config.ts's own default
-          # workspacesRoot ("/workspaces") assumes the Dockerfile's own
-          # VOLUME mkdir -- this bare runner has neither that directory
-          # nor permission to create one at the filesystem root, so the
-          # m6-01 seed corpus (the first real cases ever dispatched
-          # through this step) needs an explicit, writable path.
-          BRAIN_DATA_DIR: ${{ runner.temp }}/brain-eval-data
-          BRAIN_WORKSPACES_ROOT: ${{ runner.temp }}/brain-eval-workspaces
-        run: node bin/brain.mjs eval run --json
-      - name: Docker · Build the Brain image (verification only, never pushed from CI)
-        run: docker build -f services/brain/Dockerfile -t brain:pr-gate .
-      - name: Docker · Smoke-run the built image (brain status --offline, no live daemon required)
-        run: |
-          out="$(docker run --rm --entrypoint node brain:pr-gate services/brain/bin/brain.mjs status --offline)"
-          echo "$out"
-          echo "$out" | grep -q '"status":"ok"'
-
-  pr-gate:
-    name: Brain PR Gate
-    needs: [checks]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pull-requests: read
-    steps:
-      - name: Gate · Confirm every required job passed
-        shell: bash
-        run: |
-          test "${{ needs.checks.result }}" = "success"
-      - name: Gate · Confirm tested SHA matches the live PR head
-        if: github.event_name == 'pull_request'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          live_sha="$(curl --fail --silent \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
-          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
-            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
-            exit 1
-          fi
-          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
-      - name: Gate · Publish step summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "### Brain PR Gate"
-            echo ""
-            echo "| Job | Result |"
-            echo "| --- | --- |"
-            echo "| checks | ${{ needs.checks.result }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: ./.github/actions/verify-tests-brain
