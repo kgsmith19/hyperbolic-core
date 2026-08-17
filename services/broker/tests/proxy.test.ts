@@ -391,11 +391,11 @@ test("proxyRequest: a caller-supplied content-length that disagrees with the act
         // caller-declared 5 bytes with the remainder left to be misread as
         // a second request's start.
         assert.equal(received, '{"prompt":"12345678"}');
-        // The falsified value must never survive on the wire -- whether
-        // node:http ends up omitting content-length (chunked framing) or
-        // recomputing it correctly is an implementation detail this test
-        // doesn't pin down.
-        assert.notEqual(req.headers["content-length"], "5");
+        // Round-3 independent review's finding (F-1/F-3): the falsified
+        // value must never survive, AND the broker must not simply leave
+        // framing to chance (which left GET/HEAD/etc. entirely unframed) --
+        // it recomputes the real length itself.
+        assert.equal(req.headers["content-length"], String(Buffer.byteLength('{"prompt":"12345678"}', "utf8")));
         res.writeHead(200, {});
         res.end();
       });
@@ -417,6 +417,86 @@ test("proxyRequest: a caller-supplied content-length that disagrees with the act
       assert.equal(result.status, 200);
     },
   );
+});
+
+// Round-3 independent review's finding (F-1): stripping a caller-supplied
+// content-length header is not the same as closing the smuggling primitive
+// it enables. node:http only chunks a written body by default for
+// POST/PUT/PATCH; for GET/HEAD/DELETE/OPTIONS/TRACE a body written with no
+// length header previously went out entirely UNFRAMED, so the same
+// "attacker-controlled Host + a smuggled second request" outcome was still
+// reachable by moving the payload from headers into `body` on one of those
+// methods. The independent review's own real-origin repro: a GET whose
+// body was itself a raw second HTTP request was accepted by the origin as
+// TWO separate requests. Explicitly computing content-length for every
+// bodied request (not just POST) closes the primitive itself.
+test("proxyRequest: a GET request carrying a body is still correctly framed with a real content-length -- a body cannot smuggle a second request past the origin regardless of method", async () => {
+  const smugglingBody = "POST /attacker-controlled HTTP/1.1\r\nHost: evil.example.com\r\nContent-Length: 400\r\n\r\n";
+  let requestCount = 0;
+  let firstReceivedBody = "";
+  await withFakeUpstream(
+    (req, res) => {
+      requestCount += 1;
+      let received = "";
+      req.on("data", (chunk: Buffer) => (received += chunk));
+      req.on("end", () => {
+        if (requestCount === 1) firstReceivedBody = received;
+        res.writeHead(200, {});
+        res.end();
+      });
+    },
+    async (port) => {
+      const result = await proxyRequest(
+        {
+          caller: "llm-handler",
+          token: "t",
+          targetHost: `127.0.0.1:${port}`,
+          protocol: "http",
+          method: "GET",
+          path: "/harmless",
+          body: smugglingBody,
+        },
+        KNOWN_CALLER_POLICY,
+      );
+      assert.equal(result.status, 200);
+      // A real HTTP server that received a SECOND, smuggled request would
+      // fire the request handler again on the SAME connection -- give the
+      // keep-alive socket a beat to prove that never happens.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    },
+  );
+  assert.equal(requestCount, 1, "the origin must see exactly one request, never a smuggled second one");
+  assert.equal(firstReceivedBody, smugglingBody, "the smuggled payload must be read as an inert BODY of the first request, not as wire framing for a second one");
+});
+
+// Round-3 independent review's finding (F-2): injectCredential runs BEFORE
+// sanitizeRequestHeaders, so naming a connection header (host/content-
+// length/transfer-encoding) as credentialHeader previously authorized the
+// request, logged credentialGranted=true, then had the credential silently
+// stripped by sanitization before ever reaching the wire -- fails safe on
+// disclosure, but is exactly the "silently proxy without the credential"
+// failure mode the __proto__ fix already closed, one connection-header
+// away, and leaves the audit log stating something untrue.
+test("proxyRequest: a credentialHeader naming a connection header (host/content-length/transfer-encoding) is refused with 400, never silently authorized then discarded", async () => {
+  for (const connectionHeader of ["host", "Host", "content-length", "Content-Length", "transfer-encoding"]) {
+    const logged: ProxyLogEntry[] = [];
+    const result = await proxyRequest(
+      {
+        caller: "llm-handler",
+        token: "the-real-llm-handler-token",
+        targetHost: "127.0.0.1:1",
+        protocol: "https",
+        credential: "LLM_KEYS_ANTHROPIC",
+        credentialHeader: connectionHeader,
+      },
+      CREDENTIAL_POLICY,
+      { credentials: PROVISIONED_CREDENTIALS, callerTokens: REAL_CALLER_TOKENS, log: (entry) => logged.push(entry) },
+    );
+    assert.equal(result.status, 400, `credentialHeader "${connectionHeader}" must be refused`);
+    const parsed = bodyJSON(result) as { error: string };
+    assert.equal(parsed.error, "invalid broker request");
+    assert.equal(logged.length, 0, `credentialHeader "${connectionHeader}": an invalid request must never be logged as if it were a real authorization decision`);
+  }
 });
 
 test("proxyRequest: relays a multi-byte UTF-8 character split across two separate upstream writes without corruption", async () => {

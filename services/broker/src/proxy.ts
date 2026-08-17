@@ -94,16 +94,33 @@ const HOP_BY_HOP_HEADERS = new Set([
 // actual target/body, never relayed from the caller's own headers.
 const REQUEST_CONNECTION_HEADERS = new Set(["host", "content-length", "transfer-encoding"]);
 
-function sanitizeRequestHeaders(headers: Record<string, string> | undefined): Record<string, string> | undefined {
-  if (!headers) return headers;
+// Round-3 independent review's finding (F-1/F-3): stripping a
+// caller-supplied content-length is not the same as CLOSING the smuggling
+// primitive it enables. node only frames a request body as chunked by
+// default for POST/PUT/PATCH (`useChunkedEncodingByDefault`); for
+// GET/HEAD/DELETE/OPTIONS/TRACE a `.write()`'d body with no length header
+// went out with NO framing at all, so the exact same "attacker-controlled
+// Host + a second request" outcome NEW-3 already named was still fully
+// reachable by moving the payload from headers into `body` on one of
+// those methods -- reproduced against a real origin: a GET whose body was
+// itself a raw "POST /x HTTP/1.1\r\nHost: evil\r\n...\r\n\r\n" was accepted
+// by the origin as two separate requests. Computing content-length here
+// (never trusting a caller-supplied one, which is why it is unconditionally
+// stripped above first) gives every bodied request explicit, correct
+// framing regardless of method, closing the primitive itself rather than
+// only the header-shaped spelling of it.
+function sanitizeRequestHeaders(headers: Record<string, string> | undefined, body: string | undefined): Record<string, string> {
   // Object.create(null), matching injectCredential's own reasoning: `name`
   // may legitimately be "__proto__" (a valid HTTP_TOKEN_RE token, and this
   // function may receive injectCredential's own output), and a plain `{}`
   // would silently swallow that assignment via Object.prototype's own
   // __proto__ setter.
   const sanitized: Record<string, string> = Object.create(null);
-  for (const [name, value] of Object.entries(headers)) {
+  for (const [name, value] of Object.entries(headers ?? {})) {
     if (!REQUEST_CONNECTION_HEADERS.has(name.toLowerCase())) sanitized[name] = value;
+  }
+  if (body !== undefined) {
+    sanitized["content-length"] = String(Buffer.byteLength(body, "utf8"));
   }
   return sanitized;
 }
@@ -228,6 +245,20 @@ function validateForwarding(request: ProxyRequestBody): string | null {
     }
     if (typeof request.credentialHeader !== "string" || !HTTP_TOKEN_RE.test(request.credentialHeader)) {
       return "credentialHeader must be a valid header-name token when credential is present";
+    }
+    // Round-3 independent review's finding (F-2): sanitizeRequestHeaders
+    // strips host/content-length/transfer-encoding from EVERY forwarded
+    // request, unconditionally, including one injectCredential just wrote
+    // the credential into -- so naming one of those three as
+    // credentialHeader previously authorized and logged the request as
+    // credentialGranted=true, then silently sent it with NO credential at
+    // all once sanitization ran after injection. The same "fail closed,
+    // never silently proxy without the credential" violation the
+    // __proto__ fix already closed, one connection-header away: refused up
+    // front, before authorizeCredential ever runs, rather than an audit
+    // log that states something untrue.
+    if (REQUEST_CONNECTION_HEADERS.has(request.credentialHeader.toLowerCase())) {
+      return `credentialHeader must not be a connection header ("${request.credentialHeader}") -- host/content-length/transfer-encoding are never relayed from any header source and would silently discard the injected credential`;
     }
   }
   return null;
@@ -420,7 +451,7 @@ function forward(request: ProxyRequestBody, target: ParsedTarget): Promise<Proxy
       port: target.port,
       path: request.path ?? "/",
       method: request.method ?? "GET",
-      headers: sanitizeRequestHeaders(request.headers),
+      headers: sanitizeRequestHeaders(request.headers, request.body),
       timeout: UPSTREAM_TIMEOUT_MS,
     });
 
