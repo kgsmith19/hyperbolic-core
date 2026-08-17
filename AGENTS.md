@@ -343,6 +343,19 @@ linter.
 > cannot be removed from the Checks tab, though: any workflow that runs on a PR reports a row, and
 > there is no suppression — the row is expected, it simply must never gate merge.
 >
+> It also runs early, not last: `pull_request_target` fires it immediately on every push, well
+> before `pr-verify.yml`'s own `Verify: *` jobs even start, because reacting promptly to
+> `owner:hold-merge` / `owner:allow-draft` label changes needs that immediacy. Being fast is fine
+> for that part. It would not be fine for the auto-merge-arming action specifically — that one, by
+> itself, is what actually lets a PR merge — so `reconcileReadyState` never arms auto-merge without
+> first calling `requiredGatesGreen`, which reads the real check-run conclusions for the PR's own
+> head SHA directly (not `pr.mergeable_state`, and not whatever the live branch ruleset happens to
+> require, since that list has drifted from what this document specifies before) and requires every
+> `Verify: Standards` / `Verify: Tests (<App>)` row to be a fresh success. `Verify: LLM Review` is
+> excluded from that check, matching its non-required status. This is what makes "the last real
+> gate finishing is the only thing that can enable a merge" true in practice and not just in the
+> required-checks list.
+>
 > The "Required" column above is this document's specification of the correct configuration —
 > applying it to the live ruleset is a manual owner action outside this repository's files (no
 > ruleset-write API is available to an agent in this harness) and may lag a commit or two behind
