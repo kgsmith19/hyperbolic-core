@@ -7,6 +7,10 @@ updated: 2026-08-15
 
 # Platform Operations Runbook
 
+For what each third-party vendor does, how it's authenticated, and its cost, see
+[`docs/ops/vendors.md`](vendors.md) — this runbook stays the authoritative source for exact
+secret paths and operational procedures.
+
 ## VPS bootstrap (from nothing)
 
 Every section below assumes a `deploy@$DEPLOY_HOST` that already exists, is
