@@ -6,7 +6,7 @@ LifeOS is one product with two applications: `backend/` (FastAPI, the typed enti
 
 ## 📋 Product Boundaries
 
-- `apps/lifeos/.github/workflows/` is not executed here — GitHub runs workflows only from the repository root — so `ci.yml`, `ops.yml`, and `backup.yml` are inert and are kept only because the standalone `kgsmith19/lifeos` repo still runs them. In this repo the merge gate is the root's `.github/workflows/lifeos-ci.yml`. Never relocate these workflows to the root: `ci.yml`'s `build-backend` job has no repository-variable gate and would publish a Docker image on every push to `main`.
+- `apps/lifeos/.github/workflows/` is not executed here — GitHub runs workflows only from the repository root — so `ci.yml`, `ops.yml`, and `backup.yml` are inert and are kept only because the standalone `kgsmith19/lifeos` repo still runs them. In this repo the merge gate is the root's `.github/workflows/lifeos-ci.yml`, and the lifecycle (deploy/backup/ops) is owned by the root's `lifeos-deploy.yml`, `lifeos-backup.yml`, and `lifeos-ops.yml` after the cutover (docs/ops/runbook.md, "LifeOS cutover"). Never relocate these workflows to the root: `ci.yml`'s `build-backend` job has no repository-variable gate and would publish a Docker image on every push to `main`.
 - Backend domain changes must also preserve `backend/.agents/invariants.md` and the relevant domain constitution.
 - Generated frontend API types are read-only; regenerate them from the backend contract.
 - Make the smallest clear change that completely resolves its linked GitHub Issue.
