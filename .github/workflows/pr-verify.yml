@@ -65,6 +65,19 @@ name: "PR Verification"
 # INSIDE the jobs via the detect-changes action, precisely so every required
 # check still reports on every PR.
 
+# EVERY event listed here now costs a full pipeline run -- roughly 16 minutes
+# when a change makes all five Linux suites relevant. That is a real
+# regression from the shape that preceded it, and it is deliberate: the
+# draft/label/auto-merge events used to be handled by merge-policy.yml's
+# separate pull_request_target job in about five seconds, and absorbing that
+# job into Verify: All Gates is what removed a permanent check row. Those
+# events have to stay, because All Gates is now the only thing that enforces
+# owner:hold-merge, clears an unauthorized draft, and re-arms auto-merge when
+# it is switched off -- none of which can happen if the workflow never runs.
+#
+# concurrency below (cancel-in-progress) keeps the damage bounded: relabelling
+# or re-editing in quick succession cancels the superseded run rather than
+# queueing another. Do not add an event here without weighing that same cost.
 on:
   pull_request:
     types:
