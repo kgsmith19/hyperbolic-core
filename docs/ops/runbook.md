@@ -311,6 +311,49 @@ Tagging is idempotent: re-running a deploy for a unit that already has today's t
 
 `contents: write` is granted only on the `tag-release` job in each file -- nowhere else in either workflow needs it, and every other job stays read-only. No new secret or Infisical path: tagging authenticates with the workflow's own ambient `GITHUB_TOKEN` (`permissions: contents: write` is sufficient to create a tag ref via the Git Data API).
 
+## GitHub deployment environments (issue #190)
+
+Every job that mutates the production box or its data now runs under its own GitHub deployment
+environment -- a native, per-job approval/protection point independent of this repo's own
+`vars.*_ENABLED` gates. Extends the one pattern already live in this repo (`platform-migrations.yml`'s
+`migrate` job, `environment: platform-migrations-production`, Epic #131) to every other prod-touching
+job, distinct per-job rather than one shared `production` environment -- so the owner can put required
+reviewers on a database migration without forcing the same gate onto a read-only smoke check.
+
+| Workflow | Job | Environment |
+| --- | --- | --- |
+| `platform-migrations.yml` | `migrate` (called by `deploy.yml`'s `migrate-platform`) | `platform-migrations-production` |
+| `deploy.yml` | `deploy-shell` | `shell-deploy-production` |
+| `deploy.yml` | `deploy-llm-handler` | `llm-handler-deploy-production` |
+| `deploy.yml` | `deploy-brain` | `brain-deploy-production` |
+| `lifeos-deploy.yml` | `deploy-backend` | `lifeos-backend-deploy-production` |
+| `lifeos-deploy.yml` | `deploy-ui` | `lifeos-ui-deploy-production` |
+| `platform-backup.yml` | `bundle` | `platform-backup-production` |
+| `lifeos-backup.yml` | `bundle` | `lifeos-backup-production` |
+| `ops-serve-apply.yml` | `apply` | `ops-serve-apply-production` |
+| `ops-edge.yml` | `deploy` | `ops-edge-production` |
+
+Deliberately excluded (read-only or never touches the deployed box): `smoke`, `tag-release`, and
+`ops-restore-drill.yml` (runs entirely against a throwaway Postgres in the CI runner -- no Tailscale
+join, no SSH to the box).
+
+**Owner action, not agent-completable.** Creating a repository Environment and setting its protection
+rules both require the *Administration* repository permission, which this repo's routine agent
+identity deliberately does not carry (same identity-boundary rule that keeps `main` ruleset changes an
+owner-administrative action). GitHub auto-creates an unprotected environment the first time a workflow
+run references it, but do this explicitly instead so protection rules are in place before the first
+real run, not after:
+
+1. Settings -> Environments -> New environment, once per row in the table above (9 new environments;
+   `platform-migrations-production` already exists from Epic #131).
+2. For each, configure protection rules as wanted -- required reviewers, a wait timer, or none. There
+   is no code-level default to defer to; risk varies by job (a database migration is a reasonable
+   place for a required reviewer, a read-only smoke probe is not, since it carries no environment at
+   all).
+3. Read the live settings back (Settings -> Environments -> the environment) and confirm they match
+   what was configured -- the same "never treat a write response or committed JSON template as
+   verification of live state" discipline already applied to the `main` ruleset.
+
 ## LifeOS cutover: standalone repo to monorepo
 
 The standalone `kgsmith19/lifeos` repository ran the live LifeOS pipeline
