@@ -183,6 +183,27 @@ test("anthropicDriver.complete: a malformed successful response is a non-retryab
   );
 });
 
+// Round-2 independent review's finding (issue #186, NEW-6): a content
+// array with a malformed entry (e.g. `null`) must raise provider_bug, not
+// silently filter the entry out and report a normal-looking success -- a
+// caller cannot tell "the completion was genuinely just empty" apart from
+// "part of the response was silently dropped" if both look identical.
+test("anthropicDriver.complete: a content array containing a malformed entry (null) is a provider_bug, never silently filtered into an emptier-looking success", async () => {
+  await withPatchedFetch(
+    async () => jsonResponse(fixtureMessage({ content: [null, { type: "text", text: "partial", citations: null }] })),
+    async () => {
+      await assert.rejects(
+        () => anthropicDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
+        (error: unknown) => {
+          assert.ok(isLlmError(error));
+          assert.equal(error.class, "provider_bug");
+          return true;
+        },
+      );
+    },
+  );
+});
+
 test("complete(): honors a 429 retry-after header verbatim, not the computed backoff, then recovers", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let fetchCalls = 0;

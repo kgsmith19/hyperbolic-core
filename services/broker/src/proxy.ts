@@ -82,6 +82,32 @@ const HOP_BY_HOP_HEADERS = new Set([
   "content-length",
 ]);
 
+// Headers describing THIS connection to the target -- never caller-
+// controlled (round-2 independent review's finding, NEW-3). `host`
+// determines virtual-host routing at the destination independently of the
+// TCP host:port authorizeCredential's own allowedHosts check constrains
+// (classic domain fronting: an allowed TCP destination, an attacker-chosen
+// Host header). `content-length`/`transfer-encoding` disagreeing with the
+// actual body node:http writes lets the destination read the declared
+// byte count and misinterpret the remainder as the start of a second,
+// smuggled request. All three are values THIS module computes from the
+// actual target/body, never relayed from the caller's own headers.
+const REQUEST_CONNECTION_HEADERS = new Set(["host", "content-length", "transfer-encoding"]);
+
+function sanitizeRequestHeaders(headers: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!headers) return headers;
+  // Object.create(null), matching injectCredential's own reasoning: `name`
+  // may legitimately be "__proto__" (a valid HTTP_TOKEN_RE token, and this
+  // function may receive injectCredential's own output), and a plain `{}`
+  // would silently swallow that assignment via Object.prototype's own
+  // __proto__ setter.
+  const sanitized: Record<string, string> = Object.create(null);
+  for (const [name, value] of Object.entries(headers)) {
+    if (!REQUEST_CONNECTION_HEADERS.has(name.toLowerCase())) sanitized[name] = value;
+  }
+  return sanitized;
+}
+
 function jsonResult(status: number, body: unknown): ProxyResult {
   return { status, headers: { "content-type": "application/json" }, body: Buffer.from(JSON.stringify(body), "utf8") };
 }
@@ -251,6 +277,14 @@ function authorizeCredential(
   if (!knownAndDeclared || !tokenOk) {
     return { status: 403, reason: `caller "${request.caller}" is not authorized for vault key "${request.credential}"` };
   }
+  // Round-2 independent review's finding (NEW-2): a credential-bearing
+  // request must travel over TLS -- without this, `protocol: "http"` put
+  // the real secret on the wire in cleartext even to an allowed host.
+  // request.protocol is optional and already defaults to https in
+  // forward() when absent, so only an EXPLICIT "http" is refused here.
+  if (request.protocol === "http") {
+    return { status: 403, reason: "a credential-bearing request must use protocol \"https\"" };
+  }
   const targetLower = targetHost.toLowerCase();
   if (!(entry!.allowedHosts ?? []).some((host) => host.toLowerCase() === targetLower)) {
     return { status: 403, reason: `caller "${request.caller}" is not authorized to reach host "${targetHost}" with a credential` };
@@ -386,7 +420,7 @@ function forward(request: ProxyRequestBody, target: ParsedTarget): Promise<Proxy
       port: target.port,
       path: request.path ?? "/",
       method: request.method ?? "GET",
-      headers: request.headers,
+      headers: sanitizeRequestHeaders(request.headers),
       timeout: UPSTREAM_TIMEOUT_MS,
     });
 

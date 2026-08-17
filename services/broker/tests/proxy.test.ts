@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import * as http from "node:http";
+import * as https from "node:https";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { proxyRequest, type ProxyLogEntry } from "../src/proxy.ts";
 import type { PolicyDocument } from "../src/policy.ts";
@@ -60,6 +65,51 @@ function withFakeUpstream(
       }
     });
   });
+}
+
+// Issue #186 round-2 independent review's finding (NEW-2): a credential-
+// bearing request must be refused unless protocol is "https" -- proving
+// the SUCCESS path (credential actually delivered) therefore requires a
+// real TLS handshake, not just an http.createServer stand-in. A throwaway
+// self-signed cert generated once via the system `openssl` binary (same
+// tool docs/ops/restic-setup.sh and bootstrap-vps.sh already shell out to
+// elsewhere in this repo); NODE_TLS_REJECT_UNAUTHORIZED is set only for the
+// duration of each call that needs it and always restored, since this test
+// process is the one making the outbound connection through the broker.
+function generateSelfSignedCert(): { key: string; cert: string } {
+  const dir = mkdtempSync(join(tmpdir(), "broker-tls-test-"));
+  try {
+    const keyPath = join(dir, "key.pem");
+    const certPath = join(dir, "cert.pem");
+    execFileSync("openssl", [
+      "req", "-x509", "-newkey", "rsa:2048", "-keyout", keyPath, "-out", certPath,
+      "-days", "1", "-nodes", "-subj", "/CN=127.0.0.1",
+    ]);
+    return { key: readFileSync(keyPath, "utf8"), cert: readFileSync(certPath, "utf8") };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const SELF_SIGNED = generateSelfSignedCert();
+
+async function withFakeHttpsUpstream(
+  handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
+  fn: (port: number) => Promise<void>,
+): Promise<void> {
+  const server = https.createServer({ key: SELF_SIGNED.key, cert: SELF_SIGNED.cert }, handler);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  try {
+    await fn(port);
+  } finally {
+    if (previous === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 }
 
 test("proxyRequest: missing required fields is refused with a 400 and no upstream call is ever attempted", async () => {
@@ -294,6 +344,81 @@ test("proxyRequest: never drops hop-by-hop headers into the relayed response (th
   );
 });
 
+// Round-2 independent review's finding (NEW-3): the destination TCP
+// host:port is what authorizeCredential's allowedHosts check constrains,
+// but a caller-supplied `Host` header controls virtual-host routing AT the
+// destination independently of that -- domain fronting. Applies to every
+// forwarded request, not just credentialed ones (the same class of bug
+// #185's own original design already should have closed for headers that
+// describe the connection, not the payload).
+test("proxyRequest: a caller-supplied Host header is never relayed -- node:http's own Host, derived from the actual TCP destination, is what the upstream sees", async () => {
+  await withFakeUpstream(
+    (req, res) => {
+      assert.notEqual(req.headers.host, "evil.example.com");
+      res.writeHead(200, {});
+      res.end();
+    },
+    async (port) => {
+      const result = await proxyRequest(
+        {
+          caller: "llm-handler",
+          token: "t",
+          targetHost: `127.0.0.1:${port}`,
+          protocol: "http",
+          headers: { host: "evil.example.com" },
+        },
+        KNOWN_CALLER_POLICY,
+      );
+      assert.equal(result.status, 200);
+    },
+  );
+});
+
+// A caller-supplied content-length that disagrees with the actual body
+// previously let the upstream read exactly the DECLARED byte count and
+// treat the remaining bytes as the start of a second, smuggled request --
+// classic HTTP request smuggling. Stripping it lets node:http decide its
+// own framing (here: chunked, since no length is pre-declared) rather than
+// trusting a caller-supplied number that may not match what is actually
+// written.
+test("proxyRequest: a caller-supplied content-length that disagrees with the actual body is never relayed -- no request-smuggling via a falsified length", async () => {
+  await withFakeUpstream(
+    (req, res) => {
+      let received = "";
+      req.on("data", (chunk: Buffer) => (received += chunk));
+      req.on("end", () => {
+        // The full body must be read as ONE request, not truncated to the
+        // caller-declared 5 bytes with the remainder left to be misread as
+        // a second request's start.
+        assert.equal(received, '{"prompt":"12345678"}');
+        // The falsified value must never survive on the wire -- whether
+        // node:http ends up omitting content-length (chunked framing) or
+        // recomputing it correctly is an implementation detail this test
+        // doesn't pin down.
+        assert.notEqual(req.headers["content-length"], "5");
+        res.writeHead(200, {});
+        res.end();
+      });
+    },
+    async (port) => {
+      const body = '{"prompt":"12345678"}';
+      const result = await proxyRequest(
+        {
+          caller: "llm-handler",
+          token: "t",
+          targetHost: `127.0.0.1:${port}`,
+          protocol: "http",
+          method: "POST",
+          headers: { "content-length": "5" }, // falsified -- must never reach the wire
+          body,
+        },
+        KNOWN_CALLER_POLICY,
+      );
+      assert.equal(result.status, 200);
+    },
+  );
+});
+
 test("proxyRequest: relays a multi-byte UTF-8 character split across two separate upstream writes without corruption", async () => {
   // The demonstrated failure mode: `data += chunk` implicitly calls
   // Buffer.prototype.toString() on EACH chunk independently, so a
@@ -352,8 +477,8 @@ test("proxyRequest: an unreachable target answers with 502, never throws or hang
 // caller-identity path above, every one of these must actually refuse, not
 // merely log a would-have-refused entry.
 
-test("proxyRequest: a caller authorized for the named vault key, with a valid token, gets the real credential injected into the forwarded request, never the raw name", async () => {
-  await withFakeUpstream(
+test("proxyRequest: a caller authorized for the named vault key, with a valid token, gets the real credential injected into the forwarded request over TLS, never the raw name", async () => {
+  await withFakeHttpsUpstream(
     (req, res) => {
       assert.equal(req.headers["x-api-key"], "sk-ant-real-secret");
       res.writeHead(200, {});
@@ -365,7 +490,7 @@ test("proxyRequest: a caller authorized for the named vault key, with a valid to
           caller: "llm-handler",
           token: "the-real-llm-handler-token",
           targetHost: `127.0.0.1:${port}`,
-          protocol: "http",
+          protocol: "https",
           credential: "LLM_KEYS_ANTHROPIC",
           credentialHeader: "x-api-key",
         },
@@ -375,6 +500,27 @@ test("proxyRequest: a caller authorized for the named vault key, with a valid to
       assert.equal(result.status, 200);
     },
   );
+});
+
+// Round-2 independent review's finding (NEW-2): a credential-bearing
+// request over plain HTTP put the real secret on the wire in cleartext,
+// even to an allowed host -- refused before any upstream call is attempted.
+test("proxyRequest: a credential-bearing request over plain HTTP (protocol: \"http\") is refused with 403, even for an otherwise-fully-authorized caller+vaultKey+host", async () => {
+  const result = await proxyRequest(
+    {
+      caller: "llm-handler",
+      token: "the-real-llm-handler-token",
+      targetHost: "127.0.0.1:1",
+      protocol: "http",
+      credential: "LLM_KEYS_ANTHROPIC",
+      credentialHeader: "x-api-key",
+    },
+    CREDENTIAL_POLICY,
+    { credentials: PROVISIONED_CREDENTIALS, callerTokens: REAL_CALLER_TOKENS },
+  );
+  assert.equal(result.status, 403);
+  const parsed = bodyJSON(result) as { error: string };
+  assert.equal(parsed.error, "credential request refused");
 });
 
 test("proxyRequest: an unknown caller naming any credential is refused with 403, and no upstream call is ever attempted", async () => {
@@ -456,7 +602,7 @@ test("proxyRequest: a manifest-declared vault key that is not yet provisioned on
       caller: "llm-handler",
       token: "the-real-llm-handler-token",
       targetHost: "127.0.0.1:1",
-      protocol: "http",
+      protocol: "https",
       credential: "LLM_KEYS_ANTHROPIC",
       credentialHeader: "x-api-key",
     },
@@ -474,7 +620,7 @@ test("proxyRequest: a manifest-declared vault key that is not yet provisioned on
 // exactly the "fail closed, never silently proxy without the credential"
 // violation the file's own header comment promised couldn't happen.
 test("proxyRequest: credentialHeader: \"__proto__\" still injects the credential as a real, present header -- never silently swallowed by the prototype chain", async () => {
-  await withFakeUpstream(
+  await withFakeHttpsUpstream(
     (req, res) => {
       // req.headers is a normal object -- node:http's OWN header parser hits
       // the identical __proto__-setter quirk populating it, independent of
@@ -495,7 +641,7 @@ test("proxyRequest: credentialHeader: \"__proto__\" still injects the credential
           caller: "llm-handler",
           token: "the-real-llm-handler-token",
           targetHost: `127.0.0.1:${port}`,
-          protocol: "http",
+          protocol: "https",
           credential: "LLM_KEYS_ANTHROPIC",
           credentialHeader: "__proto__",
         },
@@ -513,7 +659,7 @@ test("proxyRequest: a provisioned credential value that is not a valid HTTP head
       caller: "llm-handler",
       token: "the-real-llm-handler-token",
       targetHost: "127.0.0.1:1",
-      protocol: "http",
+      protocol: "https",
       credential: "LLM_KEYS_ANTHROPIC",
       credentialHeader: "x-api-key",
     },
@@ -545,7 +691,7 @@ test("proxyRequest: a refused credential request is logged with credentialGrante
 });
 
 test("proxyRequest: a granted credential request is logged with credentialGranted=true", async () => {
-  await withFakeUpstream(
+  await withFakeHttpsUpstream(
     (_req, res) => {
       res.writeHead(200, {});
       res.end();
@@ -557,7 +703,7 @@ test("proxyRequest: a granted credential request is logged with credentialGrante
           caller: "llm-handler",
           token: "the-real-llm-handler-token",
           targetHost: `127.0.0.1:${port}`,
-          protocol: "http",
+          protocol: "https",
           credential: "LLM_KEYS_ANTHROPIC",
           credentialHeader: "x-api-key",
         },
@@ -572,7 +718,7 @@ test("proxyRequest: a granted credential request is logged with credentialGrante
 });
 
 test("proxyRequest: a caller-supplied value for the same header name as credentialHeader is always overwritten, never leaked through to the real forwarded request", async () => {
-  await withFakeUpstream(
+  await withFakeHttpsUpstream(
     (req, res) => {
       assert.equal(req.headers["x-api-key"], "sk-ant-real-secret");
       res.writeHead(200, {});
@@ -584,7 +730,7 @@ test("proxyRequest: a caller-supplied value for the same header name as credenti
           caller: "llm-handler",
           token: "the-real-llm-handler-token",
           targetHost: `127.0.0.1:${port}`,
-          protocol: "http",
+          protocol: "https",
           headers: { "X-Api-Key": "caller-supplied-value-must-not-survive" },
           credential: "LLM_KEYS_ANTHROPIC",
           credentialHeader: "x-api-key",

@@ -303,7 +303,9 @@ This repository proves, in `docs/ops/deploy-workflow.test.mjs`, that `deploy-bra
 
 ## Guards broker deployment (issue #185)
 
-`services/broker` is a log-only pass-through forward proxy (Epic #182) on `127.0.0.1:8300` -- `.github/workflows/deploy.yml`'s `build-broker`/`deploy-broker` jobs follow the same shape as Handler A's own deploy, in its own `broker/` compose project directory. It logs every proxied request (caller, target host, timestamp) and forwards it unmodified; no credential injection (#186), no egress allowlist enforcement (#187), no budget enforcement (#188) yet -- those are separate, later Issues.
+`services/broker` is a log-only pass-through forward proxy (Epic #182) on `127.0.0.1:8300` -- `.github/workflows/deploy.yml`'s `build-broker`/`deploy-broker` jobs follow the same shape as Handler A's own deploy, in its own `broker/` compose project directory. It logs every proxied request (caller, target host, timestamp) and forwards it unmodified; no egress allowlist enforcement (#187), no budget enforcement (#188) yet -- those are separate, later Issues.
+
+Credential injection (#186) is implemented but **inert in production today**: the broker will authenticate a caller (`BROKER_CALLER_TOKEN_<CALLER>`), authorize it against its manifest's `vaultKeys`/`allowedHosts`, and inject a real secret from its own environment (`/platform/broker/`, once the owner provisions it) -- but no caller's `tool.json` declares any `vaultKeys` yet, and `services/llm-handler`'s own request path still calls providers directly with its own `LLM_KEYS_*` (unchanged in this PR). Flipping a caller over to the broker-routed path is a separate, explicit, owner-directed cutover.
 
 Configure these repository variables in addition to Shell's own (`DEPLOY_ENABLED`, `DEPLOY_HOST`, `INFISICAL_PROJECT_SLUG` are shared):
 

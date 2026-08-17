@@ -23,8 +23,23 @@ function envVarNameFor(caller: string): string {
 
 export function loadCallerTokens(env: NodeJS.ProcessEnv, callerIds: Iterable<string>): CallerTokenMap {
   const tokens: CallerTokenMap = {};
+  const envVarsSeen = new Map<string, string>();
   for (const caller of callerIds) {
     const envVar = envVarNameFor(caller);
+    // Round-2 independent review's finding (NEW-5): two distinct caller ids
+    // can normalize to the identical env var name (e.g. "llm-handler" and
+    // "llm_handler" both -> BROKER_CALLER_TOKEN_LLM_HANDLER). No collision
+    // exists among today's real caller ids, but a silent one would let a
+    // future manifest's caller authenticate as a DIFFERENT caller entirely
+    // -- fail loud at load time instead, the same "never silently wrong"
+    // posture credentials.ts's own defense-in-depth already takes.
+    const previousCaller = envVarsSeen.get(envVar);
+    if (previousCaller !== undefined) {
+      throw new Error(
+        `services/broker: caller ids "${previousCaller}" and "${caller}" both normalize to the same token env var "${envVar}" -- cannot provision distinct tokens for them`,
+      );
+    }
+    envVarsSeen.set(envVar, caller);
     if (!Object.prototype.hasOwnProperty.call(env, envVar)) continue;
     const value = env[envVar];
     if (typeof value === "string" && value.length > 0) tokens[caller] = value;
@@ -38,8 +53,17 @@ export function loadCallerTokens(env: NodeJS.ProcessEnv, callerIds: Iterable<str
 // self-comparison on a length mismatch keeps the function's total work
 // close to constant regardless of which branch is taken, rather than
 // short-circuiting on `expected.length !== supplied.length` alone.
+//
+// hasOwnProperty-guarded (round-2 independent review's finding, NEW-1 --
+// the same defect class as credentials.ts's own S6 fix, one file over): a
+// bare `tokens[caller]` reads through the prototype chain, so
+// `caller: "constructor"` resolved to a function, which then reached
+// Buffer.from(<function>) and threw a raw, unclassified TypeError out of
+// proxyRequest entirely -- both leaking Node's own internal error text
+// (this module's stated "never throws" contract) and skipping the audit
+// log entirely, since the throw happened before proxyRequest's log() call.
 export function verifyCallerToken(tokens: CallerTokenMap, caller: string, suppliedToken: string): boolean {
-  const expected = tokens[caller];
+  const expected = Object.prototype.hasOwnProperty.call(tokens, caller) ? tokens[caller] : undefined;
   if (expected === undefined) return false;
   const expectedBuf = Buffer.from(expected, "utf8");
   const suppliedBuf = Buffer.from(suppliedToken, "utf8");

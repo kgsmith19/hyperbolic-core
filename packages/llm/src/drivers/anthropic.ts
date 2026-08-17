@@ -167,18 +167,27 @@ export function fromAnthropicMessage(message: Anthropic.Message, latencyMs: numb
   if (!Array.isArray(message.content) || !message.usage || typeof message.model !== "string") {
     throw createLlmError("provider_bug", "anthropic driver: malformed successful response", { cause: message });
   }
-  // `b != null` guards (issue #186 round-2 independent review's finding):
-  // the official SDK's own client never produces a null content-block
-  // entry, but this function is now also reachable with a JSON body relayed
-  // verbatim through services/broker's /proxy envelope
-  // (anthropic-via-broker.ts) -- a shape neither this SDK nor this file's
-  // own top-level guard above validates element-by-element. Without this,
-  // a content array containing `null` threw a raw, unclassified TypeError
-  // on `b.type` instead of this function's own "malformed successful
-  // response" provider_bug.
-  const textBlocks = message.content.filter((b): b is Anthropic.TextBlock => b != null && b.type === "text");
+  // Element-by-element shape check (issue #186 round-2 independent review's
+  // finding, both passes): the official SDK's own client never produces a
+  // null/non-object content-block entry, but this function is now also
+  // reachable with a JSON body relayed verbatim through services/broker's
+  // /proxy envelope (anthropic-via-broker.ts) -- a shape neither this SDK
+  // nor this file's own top-level guard above validates per-element. The
+  // first fix (`b != null` inside each filter) stopped the raw, unclassified
+  // TypeError on `b.type`, but SILENTLY DROPPED the bad entry and returned
+  // a normal-looking success -- a malformed relayed body would be reported
+  // to callers as a legitimate (if maybe emptier-than-expected) completion,
+  // exactly the kind of quietly-wrong response this driver's error taxonomy
+  // exists to prevent. A malformed element now raises the same
+  // "malformed successful response" provider_bug the top-level guard above
+  // already raises for a malformed message shape, rather than being
+  // filtered out.
+  if (message.content.some((b) => b === null || typeof b !== "object" || typeof (b as { type?: unknown }).type !== "string")) {
+    throw createLlmError("provider_bug", "anthropic driver: malformed successful response (a content block is not a well-formed object)", { cause: message });
+  }
+  const textBlocks = message.content.filter((b): b is Anthropic.TextBlock => b.type === "text");
   const toolCalls: ToolCall[] = message.content
-    .filter((b): b is Anthropic.ToolUseBlock => b != null && b.type === "tool_use")
+    .filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
     .map((b) => ({ id: b.id, name: b.name, input: b.input }));
   return {
     text: textBlocks.length > 0 ? textBlocks.map((b) => b.text).join("") : null,
