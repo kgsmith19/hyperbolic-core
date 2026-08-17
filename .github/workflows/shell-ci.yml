@@ -7,7 +7,8 @@ name: "Verify: Tests (Shell)"
 # .github/actions/ so the suite has exactly one source.
 #
 # packages/** and services/llm-handler/** are in Shell's relevance filter
-# (see pr-verify.yml's Verify: Detect Changes job) because a shared-package
+# (see pr-verify.yml's Verify: Standards job, which computes relevance)
+# because a shared-package
 # change must re-verify the Shell that consumes it: packages/platform-client,
 # packages/ui, and packages/llm all ship through apps/shell.
 
