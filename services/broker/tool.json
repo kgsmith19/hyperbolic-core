@@ -1,0 +1,32 @@
+{
+  "id": "broker",
+  "name": "Guards Broker",
+  "kind": "headless",
+  "version": "0.1.0",
+  "description": "The guards broker (Epic #182, issue #185): a forward proxy on 127.0.0.1:8300 for outbound calls other services make. Log-only pass-through in this phase -- logs every proxied request (caller, target host, timestamp) and forwards it unmodified. No credential injection (#186), no egress allowlist enforcement (#187), no budget enforcement (#188) yet.",
+  "ownership": {
+    "owner": "kylegsmith19@gmail.com",
+    "path": "services/broker"
+  },
+  "entry": {
+    "headless": {
+      "command": "node src/index.ts"
+    }
+  },
+  "schemas": [],
+  "permissions": {
+    "db": {
+      "read": [],
+      "write": []
+    },
+    "networkEgress": [],
+    "llmHandler": {
+      "access": false
+    }
+  },
+  "lifecycle": {
+    "migrate": "none",
+    "health": "node --test \"tests/*.test.ts\"",
+    "register": "20260817120000_register_broker.sql"
+  }
+}

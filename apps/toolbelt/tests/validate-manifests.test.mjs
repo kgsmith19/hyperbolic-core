@@ -507,7 +507,7 @@ test("CLI exits 0 within the TB-1a 5-second budget against the real repository m
 test("CLI --registry verifies every real manifest against its local registration migration", () => {
   const result = runCli(["--registry"]);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Registry parity passed for 6 manifests/);
+  assert.match(result.stdout, /Registry parity passed for 7 manifests/);
   assert.match(result.stdout, /toolbelt\s+sha256=[0-9a-f]{64}/);
   assert.match(result.stdout, /sha256=[0-9a-f]{64}/);
   assert.doesNotMatch(result.stdout, /Registry comparison not yet available/);

@@ -1,0 +1,27 @@
+# Repository-specific facts for tools and contributors. The external standard
+# reference is informational; this repository owns its workflow and settings.
+
+project:
+  name: "@hyperbolic/broker"
+  type: node-service
+
+runtime:
+  package_manager: npm
+  workspace: true
+
+commands:
+  test: npm test
+  typecheck: npm run typecheck
+
+ci:
+  # Repo-root path: this package is gated from the monorepo root, not from
+  # its own directory. Piggybacks the Shell gate, the same convention
+  # services/llm-handler already uses for a services/* unit with no
+  # dedicated CI workflow of its own -- see root project.yaml's own
+  # "Verify: Tests (Shell)" entry for the actual live gate name/workflow.
+  workflow: .github/workflows/pr-verify.yml
+  required_check: "Verify: Tests (Shell)"
+  triggers: [pull_request, merge_group]
+
+work_tracking:
+  system: github-issues

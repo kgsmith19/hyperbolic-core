@@ -14,6 +14,7 @@ apps:
 services:
   - services/brain
   - services/llm-handler
+  - services/broker
 
 ci:
   # Every gate runs as a NATIVE job in .github/workflows/pr-verify.yml
@@ -101,7 +102,7 @@ ci:
       action: .github/actions/verify-tests-shell
       gate: "Verify: Tests (Shell)"
       covers: apps/shell/**, packages/**, services/llm-handler/**,
-        docs/ops/**
+        services/broker/**, docs/ops/**
       required: true
     - order: 2
       path: .github/workflows/pr-verify.yml

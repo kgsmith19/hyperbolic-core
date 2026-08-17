@@ -22,8 +22,16 @@ name: "Platform Smoke"
 #   /life/api/healthz   LifeOS API through the /life/api/ mount (same gate)
 #
 # Credentials: only the tailnet OAuth client (shell-deploy Infisical path).
-# No SSH at all -- the box is probed exactly the way a user's browser
-# reaches it, over the tailnet HTTPS origin.
+# No SSH for the six probes above -- the box is probed exactly the way a
+# user's browser reaches it, over the tailnet HTTPS origin.
+#
+# The broker (issue #185) is the one exception: it is deliberately
+# loopback-only with no Tailscale Serve mount of its own -- its callers are
+# other containers on the same Docker network, not external clients, and
+# giving it a Serve mount would make it reachable from any tailnet device,
+# defeating the point. It is probed over keyless Tailscale SSH instead
+# (ADR 008, the same credential-free mechanism deploy.yml's own jobs use),
+# reusing this job's own tailnet join rather than a second one.
 
 on:
   workflow_call:
@@ -98,10 +106,27 @@ jobs:
             echo "ok   $label ($path)"
           }
 
+          # The broker has no Serve mount (see this file's own header
+          # comment) -- reached over keyless Tailscale SSH instead, the
+          # same ssh_options shape deploy.yml's own jobs use.
+          probe_ssh() {
+            local label="$1" url="$2"
+            local ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+            if ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "curl --fail --silent --show-error --max-time 15 '$url'" >/dev/null 2>&1; then
+              results+=("| $label | \`$url\` (via SSH) | ✅ |")
+              echo "ok   $label ($url, via SSH)"
+            else
+              results+=("| $label | \`$url\` (via SSH) | ❌ unreachable |")
+              echo "FAIL $label ($url, via SSH): unreachable" >&2
+              failures=$((failures + 1))
+            fi
+          }
+
           probe "Shell health" "/healthz" '\{"status":"ok"\}'
           probe "Shell index" "/" '/assets/[A-Za-z0-9_.-]+\.js'
           probe "Handler A" "/api/healthz" ''
           probe "Brain" "/api/brain/health" ''
+          probe_ssh "Broker" "http://127.0.0.1:8300/healthz"
 
           if [[ "${LIFEOS_LIVE:-}" == "true" ]]; then
             probe "LifeOS UI" "/life/" '/life/assets/[A-Za-z0-9_.-]+\.js'

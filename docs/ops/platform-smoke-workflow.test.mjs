@@ -19,10 +19,32 @@ test("smoke is callable, dispatchable, production-gated, and read-only by design
   assert.match(onBlock, /workflow_dispatch:/);
   assert.doesNotMatch(onBlock, /push:|schedule:|pull_request/);
   assert.match(smoke, /if: vars\.DEPLOY_ENABLED == 'true'/);
-  // Read-only: probes only -- no ssh, no scp, no mutation of the box.
-  assert.doesNotMatch(smoke, /\bssh\b|\bscp\b/);
+  // Read-only: probes only -- no scp, no mutation of the box. ssh alone is
+  // no longer forbidden outright (issue #185's broker probe uses it, since
+  // the broker has no Serve mount -- see the dedicated test below for what
+  // stays true about that one exception), but every other read-only-over-
+  // HTTPS invariant is unchanged: no key material, no secrets beyond the
+  // tailnet OAuth client already used to join.
+  assert.doesNotMatch(smoke, /\bscp\b/);
   assert.doesNotMatch(smoke, /\$\{\{ secrets\./);
   assert.doesNotMatch(smoke, /SSH_KEY|id_ed25519/);
+});
+
+test("the broker probe is the ONLY ssh usage, keyless, and strictly read-only (curl, never a mutating command)", () => {
+  // issue #185: the broker is deliberately loopback-only with no Serve
+  // mount (its callers are other containers, not external clients), so it
+  // cannot be reached through the shared-origin probe() every other unit
+  // uses. probe_ssh() is the one, disclosed exception to this file's
+  // otherwise-total "no ssh" design -- scoped narrowly enough that a
+  // regression widening it (a second ssh call, or a mutating command
+  // riding along) fails this test, not just the eyeball review that added
+  // it.
+  const sshInvocations = smoke.match(/\bssh\b/g) ?? [];
+  assert.equal(sshInvocations.length, 1, "exactly one ssh invocation in the whole file");
+  const probeSshFn = smoke.slice(smoke.indexOf("probe_ssh() {"), smoke.indexOf("\n          }\n", smoke.indexOf("probe_ssh() {")));
+  assert.match(probeSshFn, /curl --fail --silent --show-error --max-time 15/);
+  assert.doesNotMatch(probeSshFn, /docker compose|systemctl|rm |mv |>>|scp/);
+  assert.match(smoke, /probe_ssh "Broker" "http:\/\/127\.0\.0\.1:8300\/healthz"/);
 });
 
 test("the probe map covers every mounted unit through the shared origin", () => {

@@ -9,6 +9,7 @@ on:
       - "packages/**"
       - "services/llm-handler/**"
       - "services/brain/**"
+      - "services/broker/**"
       - "apps/agentic-command-center/backend/kernel/**"
       - "apps/agentic-command-center/backend/hooks/**"
       - "apps/agentic-command-center/backend/runner/**"
@@ -34,6 +35,11 @@ on:
         required: true
         type: boolean
         default: true
+      deploy_broker:
+        description: Build and deploy the guards broker (services/broker) from the current main commit.
+        required: true
+        type: boolean
+        default: true
       apply_migrations:
         description: Apply pending platform migrations before Shell/Handler A/Brain deploy.
         required: true
@@ -52,6 +58,7 @@ jobs:
       shell: ${{ steps.changes.outputs.shell }}
       llm_handler: ${{ steps.changes.outputs.llm_handler }}
       brain: ${{ steps.changes.outputs.brain }}
+      broker: ${{ steps.changes.outputs.broker }}
       migrations: ${{ steps.changes.outputs.migrations }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -71,6 +78,7 @@ jobs:
               echo "shell=${{ inputs.deploy_shell }}"
               echo "llm_handler=${{ inputs.deploy_llm_handler }}"
               echo "brain=${{ inputs.deploy_brain }}"
+              echo "broker=${{ inputs.deploy_broker }}"
               echo "migrations=${{ inputs.apply_migrations }}"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -80,6 +88,7 @@ jobs:
               echo "shell=true"
               echo "llm_handler=true"
               echo "brain=true"
+              echo "broker=true"
               echo "migrations=false"
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -99,6 +108,11 @@ jobs:
             echo "brain=true" >> "$GITHUB_OUTPUT"
           else
             echo "brain=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -Eq '^(services/broker/|packages/|docs/ops/prune-docker-images\.sh$|\.github/workflows/deploy\.yml$)' "$RUNNER_TEMP/changed-paths"; then
+            echo "broker=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "broker=false" >> "$GITHUB_OUTPUT"
           fi
           if grep -Eq '^apps/toolbelt/(.*/)?supabase/migrations/' "$RUNNER_TEMP/changed-paths"; then
             echo "migrations=true" >> "$GITHUB_OUTPUT"
@@ -698,19 +712,210 @@ jobs:
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
             "chmod 0755 brain/prune-docker-images.sh && brain/prune-docker-images.sh ghcr.io/${{ github.repository }}/brain '$IMAGE'"
 
+  build-broker:
+    name: Build the guards broker
+    needs: changes
+    if: >-
+      needs.changes.outputs.broker == 'true' &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push the broker image
+        # Deliberately a NEW image name under this repository (10-cicd-
+        # deployment.md section 2.3), never the bare
+        # ghcr.io/kgsmith19/hyperbolic-core the root AGENTS.md warns
+        # about -- the same posture build-llm-handler/build-brain already
+        # established, above.
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: services/broker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/broker:main
+            ghcr.io/${{ github.repository }}/broker:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-broker:
+    name: Deploy the guards broker
+    needs: [changes, migrate-platform, build-broker]
+    if: >-
+      always() &&
+      needs.changes.outputs.broker == 'true' &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      needs.build-broker.result == 'success' &&
+      (needs.migrate-platform.result == 'success' || needs.migrate-platform.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: broker-deploy-production
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
+    concurrency:
+      group: deploy-broker-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Generate broker-policy.json from every discovered tool.json
+        # Fresh on every deploy, never committed -- the same
+        # deploy-time-rendering posture .env already uses, so a caller's
+        # manifest change takes effect the next time the broker itself
+        # redeploys without needing a second, separately-scoped pipeline.
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          node apps/toolbelt/scripts/generate-broker-policy.mjs --out "$RUNNER_TEMP/broker-policy.json"
+      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_BROKER_DEPLOY_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/broker/"
+          domain: https://app.infisical.com
+      - name: Load the deploy SSH key
+        # Same gap and same fix as every sibling deploy job's own "Load the
+        # deploy SSH key" step: Infisical/secrets-action never writes an SSH
+        # key file itself. A distinct key from every other identity's
+        # (ADR-05: one identity's leaked secret must not grant another
+        # identity's access), materialized at the same default path since
+        # each job runs on its own fresh, single-use runner.
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${BROKER_DEPLOY_SSH_KEY:-}" ]; then
+            echo "::error::BROKER_DEPLOY_SSH_KEY was not injected from Infisical (/platform/broker/) -- cannot authenticate to the deploy host." >&2
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$BROKER_DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+      - name: Join tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
+      - name: Record the running broker image for rollback
+        id: previous
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          # The image reference the box is running now, from the compose .env
+          # this workflow itself renders on every deploy. First-ever deploy
+          # (no .env yet) records __none__ and rollback degrades gracefully.
+          previous="$(ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            "grep -m1 '^BROKER_IMAGE=' broker/.env 2>/dev/null | cut -d= -f2- || true")"
+          if [[ -n "$previous" && ! "$previous" =~ ^ghcr\.io/[A-Za-z0-9_./-]+:sha-[0-9a-f]{40}$ ]]; then
+            echo "Refusing to trust an unexpected running-image reference: $previous" >&2
+            exit 1
+          fi
+          echo "image=${previous:-__none__}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy the broker
+        # Same shape as deploy-llm-handler; the one addition is shipping
+        # broker-policy.json alongside compose.yaml and .env, bind-mounted
+        # read-only (compose.yaml's own `volumes:` block).
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          IMAGE: ghcr.io/${{ github.repository }}/broker:sha-${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          umask 077
+          printf 'BROKER_IMAGE=%s\n' "$IMAGE" > "$RUNNER_TEMP/.env.prod"
+          docker pull --quiet "$IMAGE"
+          docker save "$IMAGE" | gzip | ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'gunzip | docker load'
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'mkdir -p broker'
+          scp "${ssh_options[@]}" services/broker/compose.yaml "deploy@$DEPLOY_HOST:broker/compose.yaml"
+          scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.prod" "deploy@$DEPLOY_HOST:broker/.env"
+          scp "${ssh_options[@]}" "$RUNNER_TEMP/broker-policy.json" "deploy@$DEPLOY_HOST:broker/broker-policy.json"
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            "cd broker && chmod 600 .env broker-policy.json && BROKER_IMAGE=$IMAGE docker compose up -d --wait && curl -fsS http://127.0.0.1:8300/healthz"
+
+      - name: Roll back the broker to the previous image
+        if: failure() && steps.previous.outputs.image != '' && steps.previous.outputs.image != '__none__'
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          PREVIOUS: ${{ steps.previous.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          echo "Deploy failed; rolling broker back to $PREVIOUS" >&2
+          if ! ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "
+            set -euo pipefail
+            cd broker
+            sed -i \"s|^BROKER_IMAGE=.*|BROKER_IMAGE=$PREVIOUS|\" .env
+            BROKER_IMAGE='$PREVIOUS' docker compose up -d --wait
+            curl -fsS http://127.0.0.1:8300/healthz
+          "; then
+            echo "::error::ROLLBACK FAILED for broker: the previous image ($PREVIOUS) did not come back healthy -- the service needs manual attention NOW (runbook: manual rollback section)." >&2
+            exit 1
+          fi
+          echo "Rolled back: broker is serving $PREVIOUS again."
+      - name: Prune superseded broker images (10-cicd-deployment.md section 8.3, keep newest 3)
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          IMAGE: ghcr.io/${{ github.repository }}/broker:sha-${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          scp "${ssh_options[@]}" docs/ops/prune-docker-images.sh "deploy@$DEPLOY_HOST:broker/prune-docker-images.sh"
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+            "chmod 0755 broker/prune-docker-images.sh && broker/prune-docker-images.sh ghcr.io/${{ github.repository }}/broker '$IMAGE'"
+
   smoke:
     name: Post-deploy smoke
     # Runs whenever at least one unit actually deployed, even if a sibling
     # failed (always() beats the default failure-skip): the surviving units
     # still deserve a live verdict, and a red smoke keeps the run red.
-    needs: [deploy-shell, deploy-llm-handler, deploy-brain]
+    needs: [deploy-shell, deploy-llm-handler, deploy-brain, deploy-broker]
     if: >-
       always() &&
       vars.DEPLOY_ENABLED == 'true' &&
       github.ref == 'refs/heads/main' &&
       (needs.deploy-shell.result == 'success' ||
        needs.deploy-llm-handler.result == 'success' ||
-       needs.deploy-brain.result == 'success')
+       needs.deploy-brain.result == 'success' ||
+       needs.deploy-broker.result == 'success')
     permissions:
       contents: read
       id-token: write
@@ -723,7 +928,7 @@ jobs:
     # earned a release tag, since smoke is this pipeline's live verdict on
     # whether the deploy is actually good (see the smoke job's own header
     # comment above: "a red smoke keeps the run red").
-    needs: [deploy-shell, deploy-llm-handler, deploy-brain, smoke]
+    needs: [deploy-shell, deploy-llm-handler, deploy-brain, deploy-broker, smoke]
     if: >-
       always() &&
       vars.DEPLOY_ENABLED == 'true' &&
@@ -746,8 +951,10 @@ jobs:
           SHELL_RESULT: ${{ needs.deploy-shell.result }}
           LLM_HANDLER_RESULT: ${{ needs.deploy-llm-handler.result }}
           BRAIN_RESULT: ${{ needs.deploy-brain.result }}
+          BROKER_RESULT: ${{ needs.deploy-broker.result }}
         run: |
           set -euo pipefail
           docs/ops/tag-release.sh shell "$SHELL_RESULT" "$SHA"
           docs/ops/tag-release.sh llm-handler "$LLM_HANDLER_RESULT" "$SHA"
           docs/ops/tag-release.sh brain "$BRAIN_RESULT" "$SHA"
+          docs/ops/tag-release.sh broker "$BROKER_RESULT" "$SHA"
