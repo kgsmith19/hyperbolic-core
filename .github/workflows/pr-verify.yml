@@ -558,6 +558,18 @@ jobs:
                   );
                 } else if (/already.*enabled/i.test(message)) {
                   summaryLines.push("- Auto-merge: already enabled.");
+                } else if (/unstable status/i.test(message)) {
+                  // The steady state while Verify: LLM Review reports failure,
+                  // NOT an anomaly. GitHub refuses the mutation outright on an
+                  // unstable PR -- it does not arm-and-wait -- so nothing is
+                  // pending and a later run has to re-attempt this once the PR
+                  // leaves unstable. Observed verbatim on PR #219:
+                  //   "Pull request Pull request is in unstable status"
+                  summaryLines.push(
+                    "- Auto-merge: refused while the PR is `unstable` (a non-required check is red, " +
+                    "normally `Verify: LLM Review`). Nothing is armed and nothing is queued; a later " +
+                    "run of this workflow re-attempts arming once the PR leaves that state."
+                  );
                 } else {
                   core.warning(
                     `All Gates: unexpected error arming auto-merge for PR #${pr.number}, continuing without failing the run: ${message}`

@@ -189,6 +189,8 @@ test("All Gates arms auto-merge only on a green verdict, and never past a hold, 
     // GATE_RESULTS -- or `null` to unset the variable entirely. Only the
     // fail-closed cases at the bottom need it.
     rawGateResults,
+    // Message GitHub's enablePullRequestAutoMerge mutation should reject with.
+    armError = null,
     draft = false,
     labels = [],
     timeline = [],
@@ -240,7 +242,11 @@ test("All Gates arms auto-merge only on a green verdict, and never past a hold, 
         },
       },
       graphql: async (q) => {
-        if (/enablePullRequestAutoMerge/.test(q)) return void calls.push("ARM") || {};
+        if (/enablePullRequestAutoMerge/.test(q)) {
+          calls.push("ARM-ATTEMPTED");
+          if (armError) throw new Error(armError);
+          return void calls.push("ARM") || {};
+        }
         if (/disablePullRequestAutoMerge/.test(q)) return void calls.push("DISARM") || {};
         if (/markPullRequestReadyForReview/.test(q)) return void calls.push("UNDRAFT") || {};
         throw new Error("unexpected graphql mutation in test");
@@ -353,6 +359,28 @@ test("All Gates arms auto-merge only on a green verdict, and never past a hold, 
   m = await run({ gates: GREEN, draft: true });
   assert.ok(m.calls.includes("UNDRAFT"), "an unauthorized draft must be cleared");
   assert.ok(m.calls.includes("ARM"), "a cleared draft must then arm");
+
+  // ---- an unstable PR is the steady state, not an anomaly ----------------
+  //
+  // While Verify: LLM Review reports failure the PR stays `unstable`, and
+  // GitHub REFUSES the arming mutation outright rather than arming and
+  // waiting -- observed verbatim on PR #219. That must not fail the run (it
+  // is not a verification failure) and must not be reported as an unexpected
+  // error, because it is the expected condition until reviewer credentials
+  // are provisioned.
+  m = await run({ gates: GREEN, armError: "Pull request Pull request is in unstable status" });
+  assert.ok(m.calls.includes("ARM-ATTEMPTED"), "a green verdict must still attempt to arm");
+  assert.equal(m.failed, null, "an unstable PR is not a verification failure");
+  assert.match(
+    m.core.summary._b || "",
+    /unstable/i,
+    "the summary must say the PR was unstable, not report an unexpected error"
+  );
+  assert.doesNotMatch(
+    m.core.summary._b || "",
+    /unexpected error/i,
+    "the expected steady state must not be labelled an unexpected error"
+  );
 
   // ---- fail CLOSED when the needs payload says nothing ------------------
   //
