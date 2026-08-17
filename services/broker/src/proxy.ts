@@ -19,7 +19,7 @@
 import * as http from "node:http";
 import * as https from "node:https";
 import { validateRequest } from "@hyperbolic/broker-contract";
-import { isKnownCaller, type PolicyDocument } from "./policy.ts";
+import { isKnownCaller, type PolicyDocument, type PolicyEntry } from "./policy.ts";
 import type { CredentialMap } from "./credentials.ts";
 import { verifyCallerToken, type CallerTokenMap } from "./caller-tokens.ts";
 
@@ -57,6 +57,13 @@ export interface ProxyLogEntry {
   // (both fields absent) where no credential was ever requested at all.
   credentialRequested?: string;
   credentialGranted?: boolean;
+  // issue #187, log-only: whether targetHost is in the caller's manifest
+  // allowedHosts (an unknown caller, or one with no matching entry, is
+  // false -- deny-by-default). This is purely observational during the
+  // soak period: it never blocks the request (see hostIsAllowed's own
+  // header comment for why this is a different mechanism from
+  // authorizeCredential's own, already-enforced, allowedHosts check).
+  hostAllowed: boolean;
   timestamp: string;
 }
 
@@ -269,6 +276,17 @@ export interface CredentialError {
   reason: string;
 }
 
+// Shared by authorizeCredential's own HARD gate and the general-purpose,
+// log-only host-allowlist check below (issue #187) -- the same
+// case-insensitive hostname-only match, one definition. An unknown caller
+// (no policy entry at all) is deny-by-default: there is nothing to check
+// against, so there is nothing to allow.
+function hostIsAllowed(entry: PolicyEntry | undefined, targetHost: string): boolean {
+  if (!entry) return false;
+  const targetLower = targetHost.toLowerCase();
+  return (entry.allowedHosts ?? []).some((host) => host.toLowerCase() === targetLower);
+}
+
 // Authorization is a HARD gate, never log-only (issue #186's own design
 // rationale, unlike #187's host-allowlist soak): handing a caller
 // credentials its own manifest never declared is a real vulnerability the
@@ -316,8 +334,7 @@ function authorizeCredential(
   if (request.protocol === "http") {
     return { status: 403, reason: "a credential-bearing request must use protocol \"https\"" };
   }
-  const targetLower = targetHost.toLowerCase();
-  if (!(entry!.allowedHosts ?? []).some((host) => host.toLowerCase() === targetLower)) {
+  if (!hostIsAllowed(entry, targetHost)) {
     return { status: 403, reason: `caller "${request.caller}" is not authorized to reach host "${targetHost}" with a credential` };
   }
   if (!Object.prototype.hasOwnProperty.call(credentials, request.credential!)) {
@@ -392,6 +409,14 @@ export async function proxyRequest(input: unknown, policy: PolicyDocument, conte
   // truthful record of where the request went, and parseTargetHost is the
   // only thing in this module allowed to decide that.
   const loggedTarget = target.port !== undefined ? `${target.host}:${target.port}` : target.host;
+  // issue #187, log-only: computed for EVERY request (credentialed or not),
+  // recorded in the audit log, and NEVER consulted to refuse anything here
+  // -- this is the soak-period visibility #187's own Issue text describes
+  // ("logs would-be denials without blocking"), not enforcement. The
+  // credential path's own allowedHosts check (authorizeCredential, issue
+  // #186) is a separate, already-enforced hard gate for a different risk
+  // (secret disclosure vs. general egress) and does not read this value.
+  const hostAllowed = hostIsAllowed(policy[request.caller], target.host);
 
   // The credential decision runs BEFORE the log entry is emitted (round-2
   // independent review's finding): logging first meant a 403-refused
@@ -411,6 +436,7 @@ export async function proxyRequest(input: unknown, policy: PolicyDocument, conte
         knownCaller,
         credentialRequested: request.credential,
         credentialGranted: false,
+        hostAllowed,
         timestamp: new Date().toISOString(),
       });
       return jsonResult(authError.status, { error: "credential request refused", reason: authError.reason });
@@ -427,6 +453,7 @@ export async function proxyRequest(input: unknown, policy: PolicyDocument, conte
     knownCaller,
     credentialRequested: request.credential,
     credentialGranted,
+    hostAllowed,
     timestamp: new Date().toISOString(),
   });
 

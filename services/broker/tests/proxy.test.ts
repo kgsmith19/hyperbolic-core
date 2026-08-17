@@ -266,6 +266,84 @@ test("proxyRequest: an UNKNOWN caller is logged with knownCaller=false but is st
   );
 });
 
+// Issue #187: a log-only host-allowlist signal, computed for EVERY
+// proxied request (not just credentialed ones) and recorded in the audit
+// log -- but never consulted to refuse anything here. This is the soak-
+// period visibility the Issue's own acceptance criteria describes; the
+// actual enforcement flip (403 + logged denial) is a separate, later,
+// owner-approved dispatch, not a consequence of this code existing.
+
+test("proxyRequest: a known caller reaching a host IN its own allowedHosts is logged with hostAllowed=true", async () => {
+  await withFakeUpstream(
+    (_req, res) => {
+      res.writeHead(200, {});
+      res.end();
+    },
+    async (port) => {
+      const logged: ProxyLogEntry[] = [];
+      const policy: PolicyDocument = {
+        "llm-handler": { allowedHosts: ["127.0.0.1"], vaultKeys: [], maxUsdPerDay: null },
+      };
+      await proxyRequest(
+        { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
+        policy,
+        { log: (entry) => logged.push(entry) },
+      );
+      assert.equal(logged.length, 1);
+      assert.equal(logged[0]!.hostAllowed, true);
+    },
+  );
+});
+
+test("proxyRequest: a known caller reaching a host NOT in its own allowedHosts is logged with hostAllowed=false but is STILL proxied -- log-only means no denial yet, exactly like the unknown-caller case above", async () => {
+  await withFakeUpstream(
+    (_req, res) => {
+      res.writeHead(200, {});
+      res.end("reached the disallowed-in-policy target anyway");
+    },
+    async (port) => {
+      const logged: ProxyLogEntry[] = [];
+      // KNOWN_CALLER_POLICY only declares "api.anthropic.com" -- the fake
+      // upstream's 127.0.0.1 target is deliberately NOT in it.
+      const result = await proxyRequest(
+        { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
+        KNOWN_CALLER_POLICY,
+        { log: (entry) => logged.push(entry) },
+      );
+      assert.equal(logged.length, 1);
+      assert.equal(logged[0]!.knownCaller, true);
+      assert.equal(logged[0]!.hostAllowed, false);
+      assert.equal(result.status, 200, "log-only: a caller reaching a host outside its allowedHosts is still forwarded, not refused");
+      assert.equal(bodyText(result), "reached the disallowed-in-policy target anyway");
+    },
+  );
+});
+
+test("proxyRequest: an unknown caller (no policy entry at all) is logged with hostAllowed=false -- deny-by-default has nothing to allow against, but still doesn't block", async () => {
+  await withFakeUpstream(
+    (_req, res) => {
+      res.writeHead(200, {});
+      res.end();
+    },
+    async (port) => {
+      const logged: ProxyLogEntry[] = [];
+      const result = await proxyRequest(
+        { caller: "never-declared", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
+        EMPTY_POLICY,
+        { log: (entry) => logged.push(entry) },
+      );
+      assert.equal(logged[0]!.hostAllowed, false);
+      assert.equal(result.status, 200);
+    },
+  );
+});
+
+test("proxyRequest: an invalid (never-forwarded) request is not logged at all, so it has no hostAllowed value either -- unchanged from the existing 'nothing valid to log' invariant", async () => {
+  const logged: ProxyLogEntry[] = [];
+  await proxyRequest({ caller: "llm-handler" }, EMPTY_POLICY, { log: (entry) => logged.push(entry) });
+  assert.equal(logged.length, 0);
+});
+
 test("proxyRequest: forwards method, path, headers, and body to the target, and relays the target's response status and body unmodified", async () => {
   await withFakeUpstream(
     (req, res) => {
@@ -659,6 +737,7 @@ test("proxyRequest: a known caller declared for the vault key, but presenting th
 });
 
 test("proxyRequest: a known, correctly-tokened caller naming a declared vault key is still refused (403) when the target host is not in that caller's own allowedHosts -- the credential gate's destination check is hard-enforced, not #187's soakable general egress allowlist", async () => {
+  const logged: ProxyLogEntry[] = [];
   const result = await proxyRequest(
     {
       caller: "llm-handler",
@@ -669,11 +748,15 @@ test("proxyRequest: a known, correctly-tokened caller naming a declared vault ke
       credentialHeader: "x-api-key",
     },
     DISALLOWED_HOST_POLICY,
-    { credentials: PROVISIONED_CREDENTIALS, callerTokens: REAL_CALLER_TOKENS },
+    { credentials: PROVISIONED_CREDENTIALS, callerTokens: REAL_CALLER_TOKENS, log: (entry) => logged.push(entry) },
   );
   assert.equal(result.status, 403);
   const parsed = bodyJSON(result) as { error: string };
   assert.equal(parsed.error, "credential request refused");
+  // The two allowedHosts checks (this hard-enforced credential gate, and
+  // #187's own separate log-only signal) independently agree on the same
+  // underlying policy fact for the same request.
+  assert.equal(logged[0]!.hostAllowed, false);
 });
 
 test("proxyRequest: a manifest-declared vault key that is not yet provisioned on this broker fails closed with 502, not a silently unauthenticated call", async () => {
@@ -793,6 +876,7 @@ test("proxyRequest: a granted credential request is logged with credentialGrante
       assert.equal(logged.length, 1);
       assert.equal(logged[0]!.credentialRequested, "LLM_KEYS_ANTHROPIC");
       assert.equal(logged[0]!.credentialGranted, true);
+      assert.equal(logged[0]!.hostAllowed, true, "a granted credential request necessarily reached an allowed host -- the two independent checks agree");
     },
   );
 });

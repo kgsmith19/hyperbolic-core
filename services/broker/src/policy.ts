@@ -8,9 +8,9 @@
 // a partial document.
 
 import { readFileSync } from "node:fs";
-import { validatePolicyDocument, isKnownCaller, type PolicyDocument } from "@hyperbolic/broker-contract";
+import { validatePolicyDocument, isKnownCaller, type PolicyDocument, type PolicyEntry } from "@hyperbolic/broker-contract";
 
-export type { PolicyDocument };
+export type { PolicyDocument, PolicyEntry };
 
 export function loadPolicy(path: string): PolicyDocument {
   let raw: string;
