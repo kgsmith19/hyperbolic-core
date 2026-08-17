@@ -26,16 +26,18 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(root, ".github/workflows/merge-policy.yml");
 const workflow = readFileSync(workflowPath, "utf8");
+const prVerifyWorkflow = readFileSync(path.join(root, ".github/workflows/pr-verify.yml"), "utf8");
 
-const REQUIRED_GATE_NAMES = [
-  "Verify: Standards",
-  "Verify: Tests (Toolbelt)",
-  "Verify: Tests (ACC)",
-  "Verify: Tests (ACC Windows)",
-  "Verify: Tests (Brain)",
-  "Verify: Tests (Shell)",
-  "Verify: Tests (LifeOS)",
-];
+// Read from the source rather than hardcoding a second copy here -- a
+// hardcoded duplicate is exactly the kind of two-places-to-update drift
+// that has already caused real incidents in this repo's required-checks
+// history (see AGENTS.md's PR Gate section).
+function extractRequiredGateNames(yamlText) {
+  const start = yamlText.indexOf("const REQUIRED_GATE_NAMES");
+  assert.ok(start >= 0, "merge-policy.yml: no REQUIRED_GATE_NAMES constant found");
+  const block = yamlText.slice(start, yamlText.indexOf("]", start));
+  return [...block.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
 
 // The script: block is a YAML block scalar, and no YAML library is a
 // dependency of this repo's test suite (see the other *-workflow.test.mjs
@@ -61,7 +63,9 @@ function loadReconcileModule() {
   return file;
 }
 
-test("workflow structure: privileged, checkout-free, checks:read present for the new gate read", () => {
+const REQUIRED_GATE_NAMES = extractRequiredGateNames(workflow);
+
+test("workflow structure: privileged, checkout-free, checks:read present for the gate read", () => {
   assert.match(workflow, /pull_request_target:/);
   assert.match(workflow, /workflow_run:/);
   assert.match(workflow, /workflows: \["PR Verification"\]/);
@@ -70,37 +74,53 @@ test("workflow structure: privileged, checkout-free, checks:read present for the
   assert.doesNotMatch(workflow, /uses: actions\/checkout/);
   assert.doesNotMatch(workflow, /\n\s*run: \|/);
   assert.match(workflow, /checks: read/);
+  // The workflow-level name and the job-level name are DELIBERATELY
+  // different: "Merge Automation" is the outer label shown in the PR
+  // checks list ("Merge Automation / Verify: Merge Policy"); if both were
+  // "Verify: Merge Policy" the row would read as a confusing doubled
+  // label sitting next to "PR Verification / Verify: <gate>" -- which is
+  // exactly what prompted this test.
+  assert.match(workflow, /^name: "Merge Automation"$/m);
   assert.match(workflow, /name: "Verify: Merge Policy"/);
 });
 
-test("the required-gate list matches pr-verify.yml's actual job names, and excludes LLM Review and itself", () => {
-  for (const gateName of REQUIRED_GATE_NAMES) {
-    assert.ok(workflow.includes(`"${gateName}"`), `REQUIRED_GATE_NAMES is missing ${gateName}`);
-  }
-  const constBlock = workflow.slice(
-    workflow.indexOf("const REQUIRED_GATE_NAMES"),
-    workflow.indexOf("];", workflow.indexOf("const REQUIRED_GATE_NAMES"))
+test("REQUIRED_GATE_NAMES is exactly the one Verify: All Gates rollup, and pr-verify.yml has that job", () => {
+  assert.deepEqual(
+    REQUIRED_GATE_NAMES,
+    ["Verify: All Gates"],
+    "the whole point of the rollup job is that this workflow only ever needs to track one name"
   );
-  assert.doesNotMatch(constBlock, /Verify: LLM Review/, "LLM Review must stay excluded while unrequired");
-  assert.doesNotMatch(constBlock, /Verify: Merge Policy/, "a job cannot gate on its own conclusion");
 
-  const prVerify = readFileSync(path.join(root, ".github/workflows/pr-verify.yml"), "utf8");
-  for (const gateName of REQUIRED_GATE_NAMES) {
-    assert.ok(prVerify.includes(`name: "${gateName}"`), `pr-verify.yml no longer has a job named ${gateName}`);
+  const gatesJob = prVerifyWorkflow.slice(
+    prVerifyWorkflow.indexOf("verify-all-gates:"),
+    prVerifyWorkflow.indexOf("verify-llm-review:")
+  );
+  assert.match(gatesJob, /name: "Verify: All Gates"/);
+  assert.match(gatesJob, /if: always\(\)/, "must report even when a needs: job failed, or this row is never present to require");
+  for (const jobId of [
+    "verify-standards",
+    "verify-tests-toolbelt",
+    "verify-tests-acc",
+    "verify-tests-acc-windows",
+    "verify-tests-brain",
+    "verify-tests-shell",
+    "verify-tests-lifeos",
+  ]) {
+    assert.match(gatesJob, new RegExp(`- ${jobId}\\b`), `Verify: All Gates does not depend on ${jobId}`);
   }
+  // Verify: LLM Review must inherit the gate through the rollup, not
+  // re-list the six test jobs a second time -- two lists of the same
+  // seven names is the drift risk this whole rollup exists to remove.
+  const llmReviewJob = prVerifyWorkflow.slice(prVerifyWorkflow.indexOf("verify-llm-review:"));
+  assert.match(llmReviewJob.split("\n").slice(0, 3).join("\n"), /needs: \[verify-all-gates\]/);
 });
 
-test("auto-merge is armed only after requiredGatesGreen confirms every gate, and never on gateState.ready === false", async () => {
+test("auto-merge is armed only after requiredGatesGreen confirms the rollup, and never on gateState.ready === false", async () => {
   const modulePath = loadReconcileModule();
   const reconcile = (await import(`file://${modulePath}`)).default;
+  const [gateName] = REQUIRED_GATE_NAMES;
 
-  function makeMocks(gateConclusions) {
-    const checkRuns = Object.entries(gateConclusions).map(([name, conclusion], i) => ({
-      name,
-      status: conclusion ? "completed" : "in_progress",
-      conclusion,
-      started_at: new Date(2026, 0, 1, 0, i).toISOString(),
-    }));
+  function makeMocks(checkRuns) {
     const graphqlCalls = [];
     const github = {
       paginate: async (fn) => {
@@ -155,8 +175,8 @@ test("auto-merge is armed only after requiredGatesGreen confirms every gate, and
     return { github, core, graphqlCalls };
   }
 
-  async function run(gateConclusions) {
-    const { github, core, graphqlCalls } = makeMocks(gateConclusions);
+  async function run(checkRuns) {
+    const { github, core, graphqlCalls } = makeMocks(checkRuns);
     const context = {
       eventName: "pull_request_target",
       repo: { owner: "kgsmith19", repo: "hyperbolic-core" },
@@ -172,25 +192,21 @@ test("auto-merge is armed only after requiredGatesGreen confirms every gate, and
     };
   }
 
-  const allGreen = Object.fromEntries(REQUIRED_GATE_NAMES.map((n) => [n, "success"]));
+  // The rollup itself failed -> must not arm, and must say why.
+  const red = await run([{ name: gateName, status: "completed", conclusion: "failure", started_at: new Date().toISOString() }]);
+  assert.equal(red.armed, false, "armed auto-merge with a red Verify: All Gates");
+  assert.match(red.summary, /not armed/i);
+  assert.match(red.summary, new RegExp(gateName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
-  // One required gate still red -> must not arm, and must say why.
-  const oneRed = await run({ ...allGreen, "Verify: Standards": "failure" });
-  assert.equal(oneRed.armed, false, "armed auto-merge with a red required gate");
-  assert.match(oneRed.summary, /not armed/i);
-  assert.match(oneRed.summary, /Verify: Standards/);
+  // The rollup has not reported at all yet (missing from the check-runs
+  // list) -- the exact shape of a pull_request_target event that fires
+  // before pr-verify.yml has posted anything.
+  const missing = await run([]);
+  assert.equal(missing.armed, false, "armed auto-merge when Verify: All Gates has not reported yet");
 
-  // A required gate that has not reported at all yet (missing from the
-  // check-runs list) -- the exact shape of a pull_request_target event
-  // that fires before pr-verify.yml has posted anything.
-  const { "Verify: Tests (Shell)": _drop, ...missingOne } = allGreen;
-  const missingGate = await run(missingOne);
-  assert.equal(missingGate.armed, false, "armed auto-merge with a gate that has not reported yet");
-  assert.match(missingGate.summary, /Verify: Tests \(Shell\)/);
-
-  // Every required gate green, but Verify: LLM Review red -- must still
-  // arm, since LLM Review is deliberately excluded while unrequired.
-  const llmReviewRedOnly = await run(allGreen); // mocks never include LLM Review at all
-  assert.equal(llmReviewRedOnly.armed, true, "did not arm despite every required gate being green");
-  assert.match(llmReviewRedOnly.summary, /Auto-merge: armed/);
+  // The rollup succeeded -> arm, regardless of Verify: LLM Review (never
+  // even queried here, since it is deliberately excluded from the list).
+  const green = await run([{ name: gateName, status: "completed", conclusion: "success", started_at: new Date().toISOString() }]);
+  assert.equal(green.armed, true, "did not arm despite Verify: All Gates succeeding");
+  assert.match(green.summary, /Auto-merge: armed/);
 });

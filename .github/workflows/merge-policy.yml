@@ -15,11 +15,12 @@
 # GitHub merge) against a commit whose real verification hasn't run yet.
 # reconcileReadyState therefore never arms auto-merge without first calling
 # requiredGatesGreen, which reads the actual check-run conclusions for the
-# PR's own head SHA and requires every Verify: Standards / Verify: Tests
-# (<App>) row to be a fresh success -- Verify: LLM Review excluded, since
-# it is not required. This job's own draft/hold/comment-bookkeeping actions
-# are unaffected and still run immediately; only the "allow this to merge"
-# action is gated.
+# PR's own head SHA and requires pr-verify.yml's "Verify: All Gates" rollup
+# job -- itself needs: on Verify: Standards and all six Verify: Tests
+# (<App>) jobs -- to be a fresh success. Verify: LLM Review is excluded,
+# since it is not required. This job's own draft/hold/comment-bookkeeping
+# actions are unaffected and still run immediately; only the "allow this to
+# merge" action is gated.
 #
 # This workflow is privileged: pull_request_target runs from the BASE
 # branch with repository secrets and a write token, even for a pull
@@ -39,7 +40,7 @@
 # (standard.vendored: false in project.yaml); the two must be kept in
 # sync by hand whenever the pinned standard commit is bumped and its
 # reference implementation has changed.
-name: "Verify: Merge Policy"
+name: "Merge Automation"
 
 on:
   pull_request_target:
@@ -94,24 +95,19 @@ jobs:
               const DRAFT_LABEL = "owner:allow-draft";
               const HOLD_LABEL = "owner:hold-merge";
 
-              // The gates that must report success, for THIS pull request's
+              // The gate(s) that must report success, for THIS pull request's
               // own head SHA, before this workflow will arm auto-merge.
+              // pr-verify.yml's own "Verify: All Gates" job is a rollup --
+              // needs: on Verify: Standards and all six Verify: Tests
+              // (<App>) jobs, if: always() so it reports even when a
+              // dependency failed -- kept in that one file specifically so
+              // this list only ever needs one entry, no matter how many
+              // individual gates pr-verify.yml grows or loses over time.
               // Verify: LLM Review is deliberately excluded -- it fails
               // closed until reviewer credentials are provisioned and is
               // not required. Verify: Merge Policy itself is excluded -- a
-              // job cannot gate on its own conclusion. Keep this list in
-              // sync with pr-verify.yml's job names and AGENTS.md's PR Gate
-              // table by hand; there is no single source both files could
-              // import from inside a GitHub Actions script.
-              const REQUIRED_GATE_NAMES = [
-                "Verify: Standards",
-                "Verify: Tests (Toolbelt)",
-                "Verify: Tests (ACC)",
-                "Verify: Tests (ACC Windows)",
-                "Verify: Tests (Brain)",
-                "Verify: Tests (Shell)",
-                "Verify: Tests (LifeOS)",
-              ];
+              // job cannot gate on its own conclusion.
+              const REQUIRED_GATE_NAMES = ["Verify: All Gates"];
 
               const summaryLines = [];
 
@@ -483,9 +479,9 @@ jobs:
                 // default branch. This also naturally re-arms auto-merge after an
                 // auto_merge_disabled event: that event type reaches this same path
                 // whenever the hold is not authorized. Auto-merge is armed only once
-                // requiredGatesGreen confirms every Verify: Standards / Verify: Tests
-                // (<App>) gate has actually succeeded for this exact head SHA --
-                // Verify: LLM Review is excluded, matching its non-required status.
+                // requiredGatesGreen confirms pr-verify.yml's Verify: All Gates rollup
+                // has actually succeeded for this exact head SHA -- Verify: LLM Review
+                // is excluded, matching its non-required status.
                 let gateState = null;
                 if (!eligible) {
                   summaryLines.push(
