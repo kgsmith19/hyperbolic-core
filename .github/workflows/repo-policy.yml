@@ -1,16 +1,17 @@
-name: "Repo Policy"
+name: "Verify: Repo Policy"
 
 # Repo-wide structural check with NO paths: filter, deliberately. See
 # AGENTS.md's "Path-scoped gates in monorepo topologies" note (mirrored
 # from the pinned standard): a required status check tied to a paths:
-# filter blocks forever on any PR that never triggers it. This check --
-# and Gitleaks -- are the two checks safe to mark required in this repo's
-# ruleset; the six app-scoped PR Gates stay real and visible but are not
-# themselves marked required.
+# filter blocks forever on any PR that never triggers it.
+#
+# Standalone entry point for merge_group/push/workflow_dispatch only -- the
+# pull_request path runs this same logic as a native job in pr-verify.yml
+# (see that file's header), both calling the verify-repo-policy composite
+# action under .github/actions/ so the actual checks have exactly one
+# source.
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
   merge_group:
     types: [checks_requested]
   push:
@@ -21,173 +22,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.merge_group.head_sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  checks:
-    name: Checks
+  verify-repo-policy:
+    name: "Verify: Repo Policy"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Setup · Checkout repository
+      - name: Setup · Checkout repository (so the local action is resolvable)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Setup · Install Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: ./.github/actions/verify-repo-policy
         with:
-          python-version: "3.12"
-
-      - name: Setup · Install PyYAML
-        run: pip install --quiet pyyaml
-
-      - name: Policy · Confirm CLAUDE.md and GEMINI.md are exact adapters
-        shell: bash
-        run: |
-          set -euo pipefail
-          printf '# CLAUDE.md\n\n@AGENTS.md\n' > /tmp/expected-claude.md
-          printf '# GEMINI.md\n\n@AGENTS.md\n' > /tmp/expected-gemini.md
-          fail=0
-          if ! cmp -s CLAUDE.md /tmp/expected-claude.md; then
-            echo "CLAUDE.md is not the exact 2-line adapter (# CLAUDE.md / blank / @AGENTS.md)." >&2
-            fail=1
-          fi
-          if ! cmp -s GEMINI.md /tmp/expected-gemini.md; then
-            echo "GEMINI.md is not the exact 2-line adapter (# GEMINI.md / blank / @AGENTS.md)." >&2
-            fail=1
-          fi
-          exit "$fail"
-
-      - name: Policy · Confirm AGENTS.md has every required section
-        shell: bash
-        run: |
-          set -euo pipefail
-          missing=()
-          while IFS= read -r heading; do
-            [ -z "$heading" ] && continue
-            grep -qF -- "$heading" AGENTS.md || missing+=("$heading")
-          done <<'HEADINGS'
-          ## Objective
-          ## 🎯 Repository purpose
-          ## ⚠️ Workflow Safety Invariant
-          ## ⚠️ The platform publishable key has six hardcoded copies
-          ## Owner authority
-          ## Sources of truth
-          ## Session bootstrap
-          ## Provider-neutral roles
-          ## Releases and milestones
-          ## Thin Issues and work claiming
-          ## Worktrees and parallel work
-          ## Context recovery and subagent tracking
-          ## Risk classification
-          ## Intent and behavioral claims
-          ## Test quality
-          ## Verification flow
-          ## Evidence and artifacts
-          ## Lean engineering
-          ## Documentation and handoff
-          ## PR Gate and merge behavior
-          ## Agent boundaries
-          ## Completion standard
-          HEADINGS
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "AGENTS.md is missing required sections:" >&2
-            printf '  - %s\n' "${missing[@]}" >&2
-            exit 1
-          fi
-          echo "AGENTS.md has every required section."
-
-      - name: Policy · Confirm every workflow action is SHA-pinned
-        shell: bash
-        run: |
-          set -euo pipefail
-          fail=0
-          while IFS= read -r -d '' file; do
-            while IFS= read -r line; do
-              [ -z "$line" ] && continue
-              # Local reusable-workflow references (uses: ./path/to/workflow.yml)
-              # are pinned by definition to the calling workflow's own checkout;
-              # only external third-party actions need an explicit SHA pin.
-              if echo "$line" | grep -qE 'uses:[[:space:]]*\./'; then
-                continue
-              fi
-              if ! echo "$line" | grep -qE '@[0-9a-f]{40}[[:space:]]+# v[0-9]'; then
-                echo "Unpinned action or missing version comment in $file: $line" >&2
-                fail=1
-              fi
-            done < <(grep -E '^\s*uses:' "$file" || true)
-          done < <(find .github/workflows -maxdepth 1 -name '*.yml' -print0)
-          exit "$fail"
-
-      - name: Policy · Confirm project.yaml and standard.lock parse as valid YAML
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -c "import yaml; yaml.safe_load(open('project.yaml'))"
-          python3 -c "import yaml; yaml.safe_load(open('standard.lock'))"
-          echo "project.yaml and standard.lock parse as valid YAML."
-
-      - name: Policy · Confirm no trailing whitespace was introduced
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
-          elif [ "${{ github.event_name }}" = "merge_group" ]; then
-            base="${{ github.event.merge_group.base_sha }}"
-          else
-            base=""
-          fi
-          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
-            git diff --check "${base}...HEAD"
-          else
-            echo "No comparable base for this event; skipping incremental whitespace check."
-          fi
-
-  pr-gate:
-    name: Repo Policy
-    needs: [checks]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pull-requests: read
-    steps:
-      - name: Gate · Confirm every required job passed
-        shell: bash
-        run: |
-          test "${{ needs.checks.result }}" = "success"
-      - name: Gate · Confirm tested SHA matches the live PR head
-        if: github.event_name == 'pull_request'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          TESTED_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          live_sha="$(curl --fail --silent \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
-          if [ "${live_sha}" != "${TESTED_SHA}" ]; then
-            echo "Tested SHA (${TESTED_SHA}) no longer matches the live PR head (${live_sha})." >&2
-            exit 1
-          fi
-          echo "Tested SHA matches the live PR head (${TESTED_SHA})."
-      - name: Gate · Publish step summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "### Repo Policy"
-            echo ""
-            echo "| Job | Result |"
-            echo "| --- | --- |"
-            echo "| checks | ${{ needs.checks.result }} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          base_sha: ${{ github.event.merge_group.base_sha }}

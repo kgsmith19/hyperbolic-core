@@ -1,0 +1,57 @@
+name: Verify PR Description
+description: >-
+  Confirms a pull request's body includes every required
+  PULL_REQUEST_TEMPLATE.md section and a closing-issue reference. A no-op
+  when there is no pull request context. Shared by pr-verify.yml's
+  "Verify: Standards" job and template-lint.yml's own
+  merge_group/push/workflow_dispatch triggers, so the actual check has
+  exactly one source. Reads the PR body from the API, so it needs no
+  checkout of its own.
+
+inputs:
+  pr_number:
+    description: Pull request number to check. Empty no-ops (nothing to lint outside a pull_request event).
+    required: false
+    default: ""
+  github_token:
+    description: Token used to fetch the PR body via the REST API. Required only when pr_number is set.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Lint · Confirm PR body matches the required template sections
+      if: inputs.pr_number != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+      run: |
+        set -euo pipefail
+        PR_BODY="$(curl --fail --silent \
+          -H "Authorization: Bearer ${GH_TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
+          | python3 -c 'import json,sys; print(json.load(sys.stdin).get("body") or "")')"
+        missing=()
+        for heading in "## 📋 Summary" "## 🔗 Related Issue" "## 🔨 Changes" "## 🧪 Verification" "## ✅ Scope Check"; do
+          if ! grep -qF -- "$heading" <<< "$PR_BODY"; then
+            missing+=("$heading")
+          fi
+        done
+        if ! grep -qiE '(closes|fixes|resolves)[[:space:]]+#[0-9]+' <<< "$PR_BODY"; then
+          missing+=("a Closes/Fixes/Resolves #<issue-number> reference")
+        fi
+        if [ "${#missing[@]}" -gt 0 ]; then
+          echo "PR body is missing required template sections:" >&2
+          printf '  - %s\n' "${missing[@]}" >&2
+          exit 1
+        fi
+        echo "PR body includes every required template section."
+
+    - name: Lint · Not applicable outside pull_request events
+      if: inputs.pr_number == ''
+      shell: bash
+      run: 'echo "Verify: PR Description only evaluates pull_request bodies; nothing to check for this event."'

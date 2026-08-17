@@ -1,4 +1,4 @@
-name: PR Gate
+name: "INERT — do not enable (LifeOS subtree legacy CI, never runs from this path)"
 
 on:
   pull_request:
@@ -105,7 +105,7 @@ jobs:
       - run: npm run build
 
   pr-gate:
-    name: PR Gate
+    name: "INERT — see root lifeos-ci.yml's Verify: LifeOS instead"
     if: always()
     needs: [backend, frontend]
     runs-on: ubuntu-latest
