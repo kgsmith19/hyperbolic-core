@@ -64,6 +64,19 @@ name: "PR Verification"
 # No paths: filter anywhere in this file, deliberately. Path scoping is done
 # INSIDE the jobs via the detect-changes action, precisely so every required
 # check still reports on every PR.
+#
+# Every checkout below pins ref: to the PR's head SHA. Without that, a
+# pull_request-triggered checkout defaults to GitHub's synthetic merge ref
+# (head merged onto whatever main currently points to), which can drift
+# ahead of the base.sha every diff-scoped gate (detect-changes,
+# verify-secrets, verify-repo-policy, verify-tests-acc, verify-llm-review)
+# diffs against on a re-trigger with no new push (labeled/edited/etc.).
+# That only ever widens the diff those gates see -- base.sha stays an
+# ancestor of the merge commit, so it can produce a false-positive
+# "relevant" verdict, never a false negative -- but it also meant the tree
+# actually tested was not exactly the PR head, contradicting the "Confirm
+# tested SHA matches the live PR head" check below. Pinning ref: fixes both
+# (Issue #224).
 
 # EVERY event listed here now costs a full pipeline run -- roughly 16 minutes
 # when a change makes all five Linux suites relevant. That is a real
@@ -123,6 +136,7 @@ jobs:
       - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -258,6 +272,7 @@ jobs:
       - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -292,6 +307,7 @@ jobs:
       - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/verify-llm-review
