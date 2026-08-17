@@ -33,7 +33,7 @@ these two just flip the gates deploy.yml/platform-backup.yml check):
 
 Optional:
   --branch-protection    also set the required-status-checks rule on main's
-                          Ruleset to the eight "Verify: *" gates (requires
+                          Ruleset to the seven "Verify: *" gates (requires
                           --main-ruleset-id; see AGENTS.md's "PR Gate and
                           merge behavior" section). main is governed by the
                           Repository Rulesets feature here, not the
@@ -197,11 +197,7 @@ if ((branch_protection)); then
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": true,
         "required_status_checks": [
-          { "context": "Verify: Detect Changes" },
-          { "context": "Verify: Secrets" },
-          { "context": "Verify: Repo Policy" },
-          { "context": "Verify: PR Description" },
-          { "context": "Verify: Linting" },
+          { "context": "Verify: Standards" },
           { "context": "Verify: Tests (Toolbelt)" },
           { "context": "Verify: Tests (ACC)" },
           { "context": "Verify: Tests (ACC Windows)" },

@@ -2,9 +2,14 @@ name: Verify Secrets
 description: >-
   Scans the repository working tree, and the commits introduced by this
   change when a commit range is available, for leaked credentials via
-  checksum-verified Gitleaks. Shared by pr-verify.yml's native "Verify:
-  Secrets" job and secret-scan.yml's own merge_group/push/workflow_dispatch
+  checksum-verified Gitleaks. Shared by pr-verify.yml's "Verify: Standards"
+  job and secret-scan.yml's own merge_group/push/workflow_dispatch
   triggers, so the actual scanning logic has exactly one source.
+
+  The CALLER must have already checked out the repository with
+  fetch-depth: 0 -- this action does not check out, so a job running
+  several of these actions back to back checks out exactly once, and full
+  history is required for the commit-range scan below.
 
 inputs:
   base_sha:
@@ -19,12 +24,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Setup · Checkout repository
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        fetch-depth: 0
-        persist-credentials: false
-
     - name: Setup · Install checksum-verified Gitleaks
       shell: bash
       env:

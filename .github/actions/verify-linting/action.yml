@@ -7,14 +7,13 @@ description: >-
   and shell-ci.yml's own header comment on why Shell has none). Extend this
   action, not a second one, when another app adopts a linter.
 
+  The CALLER must have already checked out the repository -- this action
+  does not check out, so a job running several of these actions back to
+  back checks out exactly once.
+
 runs:
   using: composite
   steps:
-    - name: Setup · Checkout repository
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        persist-credentials: false
-
     - name: Setup · Install Python
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
       with:

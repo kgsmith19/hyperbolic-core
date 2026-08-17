@@ -273,45 +273,50 @@ Every PR-time verification gate runs from one entry point, `.github/workflows/pr
 ("PR Verification"). **Every job in it is a native job whose name starts with `Verify: `, and each
 produces exactly one check row with that exact bare name.** Nothing there uses `workflow_call`;
 the real work lives in composite actions under `.github/actions/`, which run *inside* the calling
-job and so add no rows of their own.
+job and so add no rows of their own. Eight rows total, seven of them required.
 
 | Order | Gate | Covers | Required |
 | --- | --- | --- | --- |
-| 1 | `Verify: Detect Changes` | computes which apps this PR touches, for every gate below | Yes |
-| 2 | `Verify: Secrets` | whole repo, every PR — leaked-credential scan | Yes |
-| 3 | `Verify: Repo Policy` | whole repo, every PR | Yes |
-| 4 | `Verify: PR Description` | whole repo, every PR (PR body only) | Yes |
-| 5 | `Verify: Linting` | `apps/lifeos/**` — the only app with a lint command configured today | Yes |
-| 6 | `Verify: Tests (Toolbelt)` | `apps/toolbelt/**`, `packages/toolbelt-cli/**` | Yes |
-| 6 | `Verify: Tests (ACC)` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` (Linux suites) | Yes |
-| 6 | `Verify: Tests (ACC Windows)` | same paths, PowerShell/native suites on `windows-latest` | Yes |
-| 6 | `Verify: Tests (Brain)` | `services/brain/**` | Yes |
-| 6 | `Verify: Tests (Shell)` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `docs/ops/**` | Yes |
-| 6 | `Verify: Tests (LifeOS)` | `apps/lifeos/**` | Yes |
-| 7 | `Verify: LLM Review` | whole repo — adversarial LLM review of the diff against the Issue and this file | **No** (pending credentials) |
+| 1 | `Verify: Standards` | whole repo, every PR — which apps changed, leaked-credential scan, repo structure, PR description, and lint | Yes |
+| 2 | `Verify: Tests (Toolbelt)` | `apps/toolbelt/**`, `packages/toolbelt-cli/**` | Yes |
+| 2 | `Verify: Tests (ACC)` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` (Linux suites) | Yes |
+| 2 | `Verify: Tests (ACC Windows)` | same paths, PowerShell/native suites on `windows-latest` | Yes |
+| 2 | `Verify: Tests (Brain)` | `services/brain/**` | Yes |
+| 2 | `Verify: Tests (Shell)` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `docs/ops/**` | Yes |
+| 2 | `Verify: Tests (LifeOS)` | `apps/lifeos/**` | Yes |
+| 3 | `Verify: LLM Review` | whole repo — adversarial LLM review of the diff against the Issue and this file | **No** (pending credentials) |
 | — | `Verify: Merge Policy` | `merge-policy.yml` — orchestration, not verification | **No** (see below) |
 
-Stages 1–5 are `needs:`-chained in strict sequence (each starts only once the previous
-succeeded), so nothing runs — and no compute is spent — on a PR with a leaked secret or a
-malformed description. The six stage-6 test gates then run in **parallel** with each other, all
-depending only on stage 5. `Verify: LLM Review` (stage 7) runs last, after every test gate, so no
-reviewer tokens are spent on a PR that would fail everything else anyway.
+`Verify: Standards` is **one job** carrying every repo-wide conformance check — change detection,
+the secret scan, the repo-structure checks, the PR-description check, and lint. They are all fast,
+strictly sequential, and share a single checkout on a single runner, so splitting them into five
+jobs bought nothing and cost roughly a minute of pure runner startup per PR. A failing step stops
+the job, so fail-fast ordering is preserved exactly as before: nothing below runs on a PR with a
+leaked secret. The tradeoff is that a failure shows as one row — open the job log to see which
+step broke.
 
-**Every stage-6 gate always runs and always reports.** When its app's paths weren't touched it
+The six order-2 test gates then run in **parallel** with each other, all depending only on
+`Verify: Standards`. They are deliberately *not* merged into one row: parallel wall-clock is the
+slowest single app rather than the sum of all six, and a failing row names the app directly.
+`Verify: LLM Review` runs last, after every test gate, so no reviewer tokens are spent on a PR
+that would fail everything else anyway.
+
+**Every order-2 gate always runs and always reports.** When its app's paths weren't touched it
 reports a trivial pass in seconds instead of running the suite — the relevance decision comes from
-stage 1's outputs, not from a `paths:` filter on the workflow. That is precisely what makes a
-path-scoped check safe to mark required: it can never become the check that never reports. A
-change to `.github/workflows/**` or `.github/actions/**` marks **every** app relevant, so a CI
-edit is exercised end to end rather than trivially passing against untouched apps.
+`Verify: Standards`'s job outputs, not from a `paths:` filter on the workflow. That is precisely
+what makes a path-scoped check safe to mark required: it can never become the check that never
+reports. A change to `.github/workflows/**` or `.github/actions/**` marks **every** app relevant,
+so a CI edit is exercised end to end rather than trivially passing against untouched apps.
 
 ACC reports **two** rows (`Verify: Tests (ACC)` and `Verify: Tests (ACC Windows)`) and that is a
 hard platform constraint, not an oversight: its PowerShell shim and cap-watcher suites need a
 `windows-latest` runner, and a single job cannot span two runner images.
 
-`Verify: Linting` runs only LifeOS's own lint commands (`ruff check` for the backend, `npm run
-lint` for the frontend) today, because LifeOS is the only app in this repo with a lint command
-configured — see `apps/lifeos/AGENTS.md`. Extend `.github/actions/verify-linting/action.yml` in
-place, not a second gate, when another app adopts a linter.
+The lint step inside `Verify: Standards` runs only LifeOS's own lint commands (`ruff check` for
+the backend, `npm run lint` for the frontend) today, because LifeOS is the only app in this repo
+with a lint command configured — see `apps/lifeos/AGENTS.md`. Extend
+`.github/actions/verify-linting/action.yml` in place, not a second gate, when another app adopts a
+linter.
 
 > [!WARNING]
 > **The bare-name requirement is load-bearing, not cosmetic.** A required status check is matched

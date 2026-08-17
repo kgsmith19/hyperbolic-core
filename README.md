@@ -33,16 +33,18 @@ are native to this repo.
 ## 🚦 CI & merge gates
 
 `.github/workflows/pr-verify.yml` runs every gate on every pull request. Each one is a native job
-named `Verify: <what>`, producing exactly one check row under that bare name:
-`Verify: Detect Changes` → `Verify: Secrets` → `Verify: Repo Policy` → `Verify: PR Description` →
-`Verify: Linting` run in strict sequence, then the six `Verify: Tests (<App>)` gates run in
-parallel, then `Verify: LLM Review` last.
+named `Verify: <what>`, producing exactly one check row under that bare name — eight rows total,
+seven of them required.
+
+`Verify: Standards` runs first: one job carrying every repo-wide conformance check (which apps
+changed, leaked-credential scan, repo structure, PR description, lint). Then the six
+`Verify: Tests (<App>)` gates run in parallel, then `Verify: LLM Review` last.
 
 **Every test gate always runs and always reports** — when its app wasn't touched it reports a
-trivial pass in seconds instead of running the suite, using `Verify: Detect Changes`'s output
+trivial pass in seconds instead of running the suite, using `Verify: Standards`'s job outputs
 rather than a `paths:` filter. That's what makes a path-scoped check safe to require. Only
 `Verify: LLM Review` (no reviewer credentials yet) and `Verify: Merge Policy` (orchestration, not
-verification) are deliberately *not* required.
+verification — it's what arms auto-merge) are deliberately *not* required.
 
 See [`AGENTS.md`](./AGENTS.md)'s "PR Gate and merge behavior" section for the full order, which
 gates are (intended to be) required by the branch ruleset, and what's actually enforced right now

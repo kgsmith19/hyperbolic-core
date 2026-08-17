@@ -3,9 +3,14 @@ description: >-
   Structural checks: CLAUDE.md/GEMINI.md are exact adapters, AGENTS.md has
   every required section, every workflow action is SHA-pinned,
   project.yaml/standard.lock parse as valid YAML, and no trailing
-  whitespace was introduced. Shared by pr-verify.yml's native "Verify: Repo
-  Policy" job and repo-policy.yml's own merge_group/push/workflow_dispatch
+  whitespace was introduced. Shared by pr-verify.yml's "Verify: Standards"
+  job and repo-policy.yml's own merge_group/push/workflow_dispatch
   triggers, so the actual checks have exactly one source.
+
+  The CALLER must have already checked out the repository with
+  fetch-depth: 0 -- this action does not check out, so a job running
+  several of these actions back to back checks out exactly once, and the
+  whitespace check below needs history back to the base commit.
 
 inputs:
   base_sha:
@@ -16,12 +21,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Setup · Checkout repository
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        fetch-depth: 0
-        persist-credentials: false
-
     - name: Setup · Install Python
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
