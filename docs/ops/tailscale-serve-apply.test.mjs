@@ -32,10 +32,10 @@ function applyFixture(lifeIndex) {
   const deploy = path.join(root, "deploy");
   const log = path.join(root, "tailscale.log");
   mkdirSync(path.join(deploy, "shell", "current"), { recursive: true });
-  mkdirSync(path.join(deploy, "lifeos-ui", "dist"), { recursive: true });
+  mkdirSync(path.join(deploy, "lifeos-ui", "current"), { recursive: true });
   mkdirSync(bin);
   writeFileSync(path.join(deploy, "shell", "current", "healthz"), '{"status":"ok"}\n');
-  writeFileSync(path.join(deploy, "lifeos-ui", "dist", "index.html"), lifeIndex);
+  writeFileSync(path.join(deploy, "lifeos-ui", "current", "index.html"), lifeIndex);
   writeFileSync(path.join(bin, "tailscale"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TAILSCALE_TEST_LOG"\n');
   writeFileSync(path.join(bin, "curl"), "#!/bin/sh\nexit 0\n");
   chmodSync(path.join(bin, "tailscale"), 0o755);
@@ -62,7 +62,7 @@ function applyFixture(lifeIndex) {
 test("dry run emits the exact five fixed, private-origin routes", () => {
   assert.deepEqual(run("--dry-run").split("\n"), [
     "tailscale serve --bg --yes --https=443 --set-path=/ /home/deploy/shell/current",
-    "tailscale serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/dist",
+    "tailscale serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/current",
     "tailscale serve --bg --yes --https=443 --set-path=/life/api/ http://127.0.0.1:8000",
     "tailscale serve --bg --yes --https=443 --set-path=/api/ http://127.0.0.1:8200",
     "tailscale serve --bg --yes --https=443 --set-path=/api/brain/ http://127.0.0.1:8100",
@@ -109,10 +109,10 @@ test("apply refuses before mutation when Handler A's healthz is unreachable", ()
   const bin = path.join(root, "bin");
   const deploy = path.join(root, "deploy");
   mkdirSync(path.join(deploy, "shell", "current"), { recursive: true });
-  mkdirSync(path.join(deploy, "lifeos-ui", "dist"), { recursive: true });
+  mkdirSync(path.join(deploy, "lifeos-ui", "current"), { recursive: true });
   mkdirSync(bin);
   writeFileSync(path.join(deploy, "shell", "current", "healthz"), '{"status":"ok"}\n');
-  writeFileSync(path.join(deploy, "lifeos-ui", "dist", "index.html"), '<script src="/life/assets/app.js"></script>');
+  writeFileSync(path.join(deploy, "lifeos-ui", "current", "index.html"), '<script src="/life/assets/app.js"></script>');
   writeFileSync(path.join(bin, "tailscale"), '#!/bin/sh\nexit 0\n');
   // Every OTHER curl call (LifeOS API's own healthz) must keep succeeding;
   // only the Handler A port (8200) fails, isolating this preflight check.
@@ -139,10 +139,10 @@ test("apply refuses before mutation when the Brain's healthz is unreachable", ()
   const bin = path.join(root, "bin");
   const deploy = path.join(root, "deploy");
   mkdirSync(path.join(deploy, "shell", "current"), { recursive: true });
-  mkdirSync(path.join(deploy, "lifeos-ui", "dist"), { recursive: true });
+  mkdirSync(path.join(deploy, "lifeos-ui", "current"), { recursive: true });
   mkdirSync(bin);
   writeFileSync(path.join(deploy, "shell", "current", "healthz"), '{"status":"ok"}\n');
-  writeFileSync(path.join(deploy, "lifeos-ui", "dist", "index.html"), '<script src="/life/assets/app.js"></script>');
+  writeFileSync(path.join(deploy, "lifeos-ui", "current", "index.html"), '<script src="/life/assets/app.js"></script>');
   writeFileSync(path.join(bin, "tailscale"), '#!/bin/sh\nexit 0\n');
   // Every OTHER curl call (LifeOS API, Handler A) must keep succeeding;
   // only the Brain port (8100) fails, isolating this preflight check.
@@ -169,7 +169,7 @@ test("apply preflights, applies exactly five routes, and reports final status", 
   assert.deepEqual(calls.map((call) => call.replace(/\/tmp\/tailscale-serve-apply-[^/]+\/deploy/g, "/home/deploy")), [
     "serve status",
     "serve --bg --yes --https=443 --set-path=/ /home/deploy/shell/current",
-    "serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/dist",
+    "serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/current",
     "serve --bg --yes --https=443 --set-path=/life/api/ http://127.0.0.1:8000",
     "serve --bg --yes --https=443 --set-path=/api/ http://127.0.0.1:8200",
     "serve --bg --yes --https=443 --set-path=/api/brain/ http://127.0.0.1:8100",
