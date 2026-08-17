@@ -2,6 +2,10 @@
 
 The load-bearing behaviour here is the unavailable/fail split. Sections that
 need credentials must go quiet, not loud, when they have none.
+
+This file covers the individual probes. scan()'s own composition -- which
+sections it assembles and what it threads through to each collaborator --
+lives in test_environ_scan.py.
 """
 import unittest
 from unittest.mock import patch, MagicMock
@@ -147,100 +151,6 @@ class MtuWalkTest(unittest.TestCase):
         with patch.object(environ.probes, "_run", side_effect=self.fits_under(900)):
             got = environ.mtu("192.0.2.1", sizes=(1172, 872, 472))
         self.assertEqual(got["mtu"], 900)
-
-
-class ScanShapeTest(unittest.TestCase):
-    def test_every_scan_section_reports_a_valid_state_hermetically(self):
-        """Verified against the real environ.scan() return value -- not a
-        hand-built stand-in, which would pass no matter what scan() did.
-        Every network- and subprocess-touching call is mocked, so this
-        exercises scan()'s real composition with no live egress."""
-        with patch.object(environ, "wifi", return_value={"state": "ok", "channel": 44, "bssid": "aa:bb:cc:dd:ee:ff"}), \
-             patch.object(environ, "congestion", return_value={"state": "unavailable", "reason": "mocked"}), \
-             patch.object(environ, "driver", return_value={"state": "unavailable", "reason": "mocked"}), \
-             patch.object(environ, "events", return_value={"state": "unavailable", "reason": "mocked"}), \
-             patch.object(environ, "tcp_globals", return_value={"state": "ok", "autotuning": "normal"}), \
-             patch.object(environ, "mtu", return_value={"state": "fail", "reason": "mocked"}), \
-             patch.object(environ, "tailscale", return_value={"state": "ok", "installed": False}), \
-             patch.object(environ.dualstack, "dual_stack", return_value={"state": "unavailable"}), \
-             patch.object(environ.remote, "modem", return_value={"state": "unavailable", "reason": "no credentials"}), \
-             patch.object(environ.snmp, "modem_snmp", return_value={"state": "unavailable"}), \
-             patch.object(environ.remote, "router", return_value={"state": "fail", "reason": "unreachable"}), \
-             patch.object(environ.ssdp, "identify_gateway", return_value={"state": "unavailable"}), \
-             patch.object(environ.remote, "wan", return_value={"state": "ok", "ip": "203.0.113.7",
-                                                               "double_nat": False, "cgnat": False}), \
-             patch.object(environ.remote, "anthropic", return_value={"state": "ok", "indicator": "none",
-                                                                      "degraded": False}):
-            got = environ.scan(deep=False)
-
-        for name, section in got.items():
-            if name == "ts":
-                continue
-            self.assertIn("state", section, f"section {name!r} has no state field")
-            self.assertIn(section["state"], ("ok", "fail", "unavailable"),
-                         f"section {name!r} has invalid state: {section['state']}")
-        # Spot-check that each mock actually threads through to its own named
-        # key, not merely that *some* section somewhere has a valid state.
-        self.assertEqual(got["router"]["state"], "fail")
-        self.assertEqual(got["modem"]["state"], "unavailable")
-        self.assertEqual(got["wan"]["state"], "ok")
-
-
-class ScanTierTest(unittest.TestCase):
-    """FR-018/019: deep tier adds topology and exposure; standard omits both.
-    wan()'s include_geo wiring is mocked instead, since asserting on "geo"
-    directly would depend on live network reachability."""
-
-    def test_standard_tier_omits_topology(self):
-        got = environ.scan(deep=False)
-        self.assertNotIn("topology", got)
-        self.assertNotIn("exposure", got)
-
-    def test_deep_tier_includes_topology(self):
-        got = environ.scan(deep=True)
-        self.assertIn("topology", got)
-        self.assertIn("exposure", got)
-
-    def test_deep_tier_wires_topology_into_exposure(self):
-        topo = {"state": "ok", "devices": []}
-        with patch.object(environ, "wifi", return_value={"state": "ok", "channel": None,
-                                                         "bssid": None}), \
-             patch.object(environ, "congestion", return_value={"state": "unavailable"}), \
-             patch.object(environ, "driver", return_value={"state": "unavailable"}), \
-             patch.object(environ, "events", return_value={"state": "unavailable"}), \
-             patch.object(environ, "tcp_globals", return_value={"state": "unavailable"}), \
-             patch.object(environ, "mtu", return_value={"state": "unavailable"}), \
-             patch.object(environ, "tailscale", return_value={"state": "unavailable"}), \
-             patch.object(environ.dualstack, "dual_stack", return_value={"state": "unavailable"}), \
-             patch.object(environ.remote, "modem", return_value={"state": "unavailable"}), \
-             patch.object(environ.snmp, "modem_snmp", return_value={"state": "unavailable"}), \
-             patch.object(environ.remote, "router", return_value={"state": "unavailable"}), \
-             patch.object(environ.ssdp, "identify_gateway", return_value={"state": "unavailable"}), \
-             patch.object(environ.remote, "wan", return_value={"state": "unavailable"}), \
-             patch.object(environ.remote, "anthropic", return_value={"state": "unavailable"}), \
-             patch.object(environ.topology, "map_devices", return_value=topo), \
-             patch.object(environ.exposure, "scan",
-                          return_value={"state": "ok", "devices": [], "findings": []}) as mock_scan:
-            environ.scan(deep=True)
-        mock_scan.assert_called_once_with(topo)
-
-    def test_standard_tier_tells_wan_to_skip_geolocation(self):
-        with patch.object(environ.remote, "wan") as mock_wan:
-            environ.scan(deep=False)
-        mock_wan.assert_called_once_with(include_geo=False)
-
-    def test_deep_tier_tells_wan_to_include_geolocation(self):
-        with patch.object(environ.remote, "wan") as mock_wan:
-            environ.scan(deep=True)
-        mock_wan.assert_called_once_with(include_geo=True)
-
-    def test_scan_passes_target_to_tailscale_so_scan_and_probe_agree(self):
-        """tailscale() must be checked against environ.TARGET, not a second
-        hardcoded default that silently ignores a NETWORK_CHECKER_TARGET
-        override."""
-        with patch.object(environ, "tailscale") as mock_tailscale:
-            environ.scan(deep=False)
-        mock_tailscale.assert_called_once_with(environ.TARGET)
 
 
 if __name__ == "__main__":

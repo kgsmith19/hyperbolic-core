@@ -8,6 +8,36 @@ import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import http from "node:http";
 
+// Windows keeps a directory handle open briefly AFTER the child process that
+// used it has already left the process table, so a removal immediately after
+// waitForProcessExit() can still hit EBUSY/EPERM. That is a filesystem lock
+// race in fixture teardown, never a product defect, so it must not be reported
+// as a test failure -- and this is teardown, not an assertion, so retrying
+// weakens no oracle.
+//
+// fs.rmSync's own maxRetries is NOT sufficient and was measured failing here:
+// a run with { maxRetries: 10, retryDelay: 100 } still failed in 1.26 ms, far
+// less than a single retry delay, because an EBUSY thrown by the top-level
+// rmdirSync inside rimrafSync does not go through that retry path. So the loop
+// is explicit rather than delegated to an undocumented internal.
+//
+// Atomics.wait on a throwaway SharedArrayBuffer is the only real synchronous
+// sleep available; these call sites are synchronous fixture helpers, so an
+// await-based delay is not an option.
+function rmWithRetry(target, options = {}) {
+  const LOCK_ERRORS = new Set(["EBUSY", "ENOTEMPTY", "EPERM", "EACCES"]);
+  const ATTEMPTS = 25;                       // ~2.5s of real waiting, worst case
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    try {
+      fs.rmSync(target, { force: true, ...options });
+      return;
+    } catch (err) {
+      if (!LOCK_ERRORS.has(err.code) || attempt === ATTEMPTS) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+  }
+}
+
 const BASE = fs.mkdtempSync(path.join(os.tmpdir(), "acc-gui-srv-"));
 process.env.ACC_POLICY = path.join(BASE, "policy.json");
 process.env.ACC_ROOT = path.join(BASE, "root");
@@ -57,7 +87,9 @@ beforeEach(resetPolicy);
 // maxRetries for the same Windows reason as resetLaunch below: BASE is the
 // parent of LAUNCH_DIR, so it holds every file the fake runner's children
 // touched, and a lingering handle makes this throw EBUSY without a retry.
-after(() => { globalThis.fetch = REAL_FETCH; srv.close(); fs.rmSync(BASE, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+// BASE is LAUNCH_DIR's parent, so it holds every file the fake runner's
+// children touched -- same lock race, same helper.
+after(() => { globalThis.fetch = REAL_FETCH; srv.close(); rmWithRetry(BASE, { recursive: true }); });
 
 const good = () => ({ ...KERNEL, budget: { ...KERNEL.budget, toolCalls: 150 } });
 // One JSON-POST helper for every group; each group aliases it for readability.
@@ -749,18 +781,8 @@ fs.writeFileSync(ROUTING_MD, "# routes\n```json\n" + JSON.stringify({
 }) + "\n```\n");
 
 function resetLaunch() {
-  // maxRetries is required on Windows, and `force: true` does not cover it:
-  // force only suppresses ENOENT. LAUNCH_DIR is where the fake runner's child
-  // processes execute, and Windows keeps a directory handle open briefly after
-  // a child exits, so an immediate rmSync races that handle and throws EBUSY.
-  // Node retries EBUSY/ENOTEMPTY/EPERM with linear backoff ONLY when
-  // maxRetries > 0, and it defaults to 0 -- so the default is a guaranteed
-  // intermittent failure here rather than a slow one. This is teardown, not an
-  // assertion: retrying weakens no oracle, it stops a lock race from being
-  // reported as a product failure. Observed as three AC-11x failures on
-  // windows-latest, all "EBUSY: resource busy or locked, rmdir ...\\launch".
-  fs.rmSync(LAUNCH_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  fs.rmSync(RUNNER_LOG, { force: true, maxRetries: 10, retryDelay: 100 });
+  rmWithRetry(LAUNCH_DIR, { recursive: true });
+  rmWithRetry(RUNNER_LOG);
   fs.mkdirSync(LAUNCH_DIR, { recursive: true });
   process.env.ACC_ROOT = LAUNCH_DIR;
   process.env.ACC_ROUTING_MD = ROUTING_MD;
