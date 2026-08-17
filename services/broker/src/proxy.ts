@@ -28,6 +28,7 @@ import { validateRequest } from "@hyperbolic/broker-contract";
 import { isKnownCaller, type PolicyDocument, type PolicyEntry } from "./policy.ts";
 import type { CredentialMap } from "./credentials.ts";
 import { verifyCallerToken, type CallerTokenMap } from "./caller-tokens.ts";
+import { checkSpend, logBrokerCall, type BudgetConfig } from "./budget.ts";
 
 export interface ProxyRequestBody {
   caller: string;
@@ -45,6 +46,18 @@ export interface ProxyRequestBody {
   // log-only pass-through, unchanged.
   credential?: string;
   credentialHeader?: string;
+  // issue #200 (buildable slice of #188): the caller's own estimate of what
+  // this specific call will cost, e.g. pre-computed from token counts the
+  // same way services/llm-handler already estimates cost for
+  // core.log_llm_call. Optional -- a request that omits it is unaffected by
+  // the budget-ledger path entirely, exactly like #185's original pass-
+  // through is unaffected by naming no credential. The broker has no
+  // generic way to derive a cost for an arbitrary proxied request itself
+  // (it does not parse response bodies for provider-specific token usage),
+  // so this is caller-supplied, the same trust boundary
+  // core.log_llm_call's own p_usd_estimate parameter already accepts from
+  // its caller today.
+  estimatedCostUsd?: number;
 }
 
 export interface ProxyResult {
@@ -70,6 +83,15 @@ export interface ProxyLogEntry {
   // header comment for why this is a different mechanism from
   // authorizeCredential's own, already-enforced, allowedHosts check).
   hostAllowed: boolean;
+  // issue #200 (buildable slice of #188), log-only: present only when the
+  // request named an estimatedCostUsd AND a budget config was provisioned
+  // (dark otherwise, exactly like credentialRequested/credentialGranted's
+  // own absent-when-not-applicable shape). spentTodayUsd is null when the
+  // ledger read itself failed -- unknown, never coerced to a number that
+  // would misrepresent real spend in the soak data.
+  estimatedCostUsd?: number;
+  spentTodayUsd?: number | null;
+  budgetWouldExceed?: boolean;
   timestamp: string;
 }
 
@@ -248,6 +270,12 @@ function validateForwarding(request: ProxyRequestBody): string | null {
   if (request.body !== undefined && typeof request.body !== "string") {
     return "body must be a string when present";
   }
+  if (
+    request.estimatedCostUsd !== undefined &&
+    (typeof request.estimatedCostUsd !== "number" || !Number.isFinite(request.estimatedCostUsd) || request.estimatedCostUsd < 0)
+  ) {
+    return "estimatedCostUsd must be a finite, non-negative number when present";
+  }
   // credential/credentialHeader are a pair: naming one without the other
   // is always a mistake (either "inject something, but into what header?"
   // or "here's a header name, but nothing to inject"), refused up front
@@ -387,11 +415,15 @@ function injectCredential(headers: Record<string, string> | undefined, credentia
 export interface ProxyContext {
   credentials?: CredentialMap;
   callerTokens?: CallerTokenMap;
+  // issue #200: dark until provisioned, matching credentials/callerTokens's
+  // own convention -- undefined means the budget-ledger feature is simply
+  // not live yet, never an error.
+  budget?: BudgetConfig;
   log?: LogFn;
 }
 
 export async function proxyRequest(input: unknown, policy: PolicyDocument, context: ProxyContext = {}): Promise<ProxyResult> {
-  const { credentials = {}, callerTokens = {}, log = defaultLog } = context;
+  const { credentials = {}, callerTokens = {}, budget, log = defaultLog } = context;
   const candidate = normalize(input);
   const validation = validateRequest(candidate);
   if (!validation.ok) {
@@ -453,6 +485,20 @@ export async function proxyRequest(input: unknown, policy: PolicyDocument, conte
     };
   }
 
+  // issue #200, log-only, and only for a request that will actually be
+  // forwarded (unlike hostAllowed's unconditional computation): a real
+  // Postgres round-trip is not free the way an in-memory allowedHosts
+  // lookup is, so a credential-refused request above returns before ever
+  // reaching this -- there is no spend to check for a call that never
+  // happens. Dark whenever the caller names no estimatedCostUsd, or the
+  // owner has not yet provisioned `budget` (SUPABASE_URL/
+  // SUPABASE_SERVICE_ROLE_KEY), matching every other feature in this file's
+  // own dark-until-provisioned convention.
+  let spendCheck: Awaited<ReturnType<typeof checkSpend>> | undefined;
+  if (request.estimatedCostUsd !== undefined && budget !== undefined) {
+    spendCheck = await checkSpend(budget, request.caller, policy[request.caller]?.maxUsdPerDay ?? null, request.estimatedCostUsd);
+  }
+
   log({
     caller: request.caller,
     targetHost: loggedTarget,
@@ -460,10 +506,25 @@ export async function proxyRequest(input: unknown, policy: PolicyDocument, conte
     credentialRequested: request.credential,
     credentialGranted,
     hostAllowed,
+    estimatedCostUsd: request.estimatedCostUsd,
+    spentTodayUsd: spendCheck?.spentTodayUsd,
+    budgetWouldExceed: spendCheck?.wouldExceedBudget,
     timestamp: new Date().toISOString(),
   });
 
-  return forward(forwardRequest, target);
+  const result = await forward(forwardRequest, target);
+
+  // Fire-and-forget: never delays or fails the response the caller is
+  // actually waiting on (budget.ts's own logBrokerCall never throws
+  // either). Logs the attempted cost regardless of the upstream's own
+  // response status -- this is an ESTIMATE the caller supplied, not a
+  // metered actual, so there is no post-hoc "real" cost to wait for or
+  // correct it with.
+  if (request.estimatedCostUsd !== undefined && budget !== undefined) {
+    void logBrokerCall(budget, request.caller, loggedTarget, request.estimatedCostUsd);
+  }
+
+  return result;
 }
 
 const UPSTREAM_TIMEOUT_MS = 15_000;
