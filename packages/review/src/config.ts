@@ -43,10 +43,23 @@ function isProvider(value: string): value is Provider {
 }
 
 /**
+ * One canonical representation: provider identifiers are lowercase. This is
+ * the single place case is normalized -- "OPENAI" in a repository variable
+ * must mean openai here at the configuration boundary, not surface as a
+ * confusing exact-match failure downstream (Issue #227's failure mode).
+ * Error messages still echo the caller's original spelling for diagnosis.
+ */
+function normalizeProvider(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/**
  * Resolve `ReviewConfig` from environment variables.
  *
  * Reads `REVIEW_PROVIDER`, `REVIEW_MODEL`, and optionally
- * `REVIEW_BUILDER_PROVIDER` (default `"anthropic"`).
+ * `REVIEW_BUILDER_PROVIDER` (default `"anthropic"`). Provider identifiers are
+ * case-insensitive at this boundary and canonicalized to lowercase; nothing
+ * downstream ever sees a mixed-case provider name.
  *
  * Throws -- never returns a partial or defaulted config -- when a required
  * variable is missing, when a provider name is not one of the three supported
@@ -58,7 +71,8 @@ export function resolveConfig(env: ReviewEnv): ReviewConfig {
     "REVIEW_PROVIDER",
     `Set it to the provider family that should REVIEW this change, one of: ${VALID_PROVIDERS.join(", ")}. It must differ from REVIEW_BUILDER_PROVIDER.`
   );
-  if (!isProvider(rawProvider)) {
+  const reviewerProvider = normalizeProvider(rawProvider);
+  if (!isProvider(reviewerProvider)) {
     throw new Error(
       `REVIEW_PROVIDER="${rawProvider}" is not a supported provider. Valid providers are: ${VALID_PROVIDERS.join(", ")}.`
     );
@@ -74,24 +88,25 @@ export function resolveConfig(env: ReviewEnv): ReviewConfig {
   );
 
   const rawBuilder = (env.REVIEW_BUILDER_PROVIDER ?? "").trim();
-  const builderCandidate = rawBuilder === "" ? DEFAULT_BUILDER_PROVIDER : rawBuilder;
+  const builderCandidate =
+    rawBuilder === "" ? DEFAULT_BUILDER_PROVIDER : normalizeProvider(rawBuilder);
   if (!isProvider(builderCandidate)) {
     throw new Error(
-      `REVIEW_BUILDER_PROVIDER="${builderCandidate}" is not a supported provider. Valid providers are: ${VALID_PROVIDERS.join(", ")}.`
+      `REVIEW_BUILDER_PROVIDER="${rawBuilder}" is not a supported provider. Valid providers are: ${VALID_PROVIDERS.join(", ")}.`
     );
   }
 
-  if (rawProvider === builderCandidate) {
+  if (reviewerProvider === builderCandidate) {
     throw new Error(
-      `Provider separation is required: REVIEW_PROVIDER and REVIEW_BUILDER_PROVIDER are both "${rawProvider}". ` +
+      `Provider separation is required: REVIEW_PROVIDER and REVIEW_BUILDER_PROVIDER are both "${reviewerProvider}". ` +
         `The reviewer must come from a different provider family than the one that wrote the code, so the review is not a model ` +
         `family grading its own work and re-deriving its own blind spots. Set REVIEW_PROVIDER to one of: ` +
-        `${VALID_PROVIDERS.filter((provider) => provider !== rawProvider).join(", ")}.`
+        `${VALID_PROVIDERS.filter((provider) => provider !== reviewerProvider).join(", ")}.`
     );
   }
 
   return {
-    reviewerProvider: rawProvider,
+    reviewerProvider,
     reviewerModel,
     builderProvider: builderCandidate,
     maxTokens: DEFAULT_MAX_TOKENS,

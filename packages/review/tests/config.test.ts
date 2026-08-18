@@ -124,6 +124,57 @@ test("resolveConfig: differing reviewer and builder families resolve successfull
   assert.ok(config.timeoutMs > 0);
 });
 
+// Behavior protected: provider identifiers are case-insensitive at the
+// configuration boundary, canonicalized to lowercase. Defect caught: the
+// live failure from Issue #227 -- REVIEW_PROVIDER=OPENAI set as a repository
+// variable failed an exact-match check even though the owner's intent was
+// unambiguous. Any casing of a valid family must resolve, and must resolve
+// to the lowercase canonical form (bin/review.mjs keys the credential
+// variable name off config.reviewerProvider, so a mixed-case passthrough
+// would fail credential lookup instead).
+test("resolveConfig: REVIEW_PROVIDER casing is normalized to the lowercase canonical form", () => {
+  for (const spelling of ["OPENAI", "OpenAI", "openai"]) {
+    const config = resolveConfig({
+      REVIEW_PROVIDER: spelling,
+      REVIEW_MODEL: "a-specific-model-id",
+      REVIEW_BUILDER_PROVIDER: "anthropic",
+    });
+    assert.equal(
+      config.reviewerProvider,
+      "openai",
+      `REVIEW_PROVIDER="${spelling}" must canonicalize to "openai"`
+    );
+  }
+});
+
+// Behavior protected: case cannot smuggle a same-family pairing past the
+// separation guard. Defect caught: normalizing the reviewer but comparing
+// against a raw mixed-case builder (or vice versa), which would let
+// REVIEW_PROVIDER=Anthropic / REVIEW_BUILDER_PROVIDER=ANTHROPIC run a
+// same-family review that string inequality made look separated.
+test("resolveConfig: separation guard compares normalized values, so casing cannot bypass it", () => {
+  assert.throws(
+    () =>
+      resolveConfig({
+        REVIEW_PROVIDER: "Anthropic",
+        REVIEW_MODEL: "a-specific-model-id",
+        REVIEW_BUILDER_PROVIDER: "ANTHROPIC",
+      }),
+    /[Pp]rovider separation is required/
+  );
+});
+
+// Behavior protected: the builder identifier gets the same normalization as
+// the reviewer -- one canonical representation, applied at one boundary.
+test("resolveConfig: REVIEW_BUILDER_PROVIDER casing is normalized too", () => {
+  const config = resolveConfig({
+    REVIEW_PROVIDER: "openai",
+    REVIEW_MODEL: "a-specific-model-id",
+    REVIEW_BUILDER_PROVIDER: "Anthropic",
+  });
+  assert.equal(config.builderProvider, "anthropic");
+});
+
 // Behavior protected: an invalid REVIEW_BUILDER_PROVIDER is rejected rather
 // than silently coerced. Defect caught: treating an unrecognized builder name
 // as "not equal to the reviewer, therefore fine" -- which would turn a typo in

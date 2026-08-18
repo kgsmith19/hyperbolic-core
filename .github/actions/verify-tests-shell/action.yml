@@ -1,7 +1,7 @@
 name: Verify Tests Shell
 description: >-
   Shell's suite: builds packages/ui, type-checks and unit-tests apps/shell
-  plus the packages/services it composes (platform-client, ui, llm,
+  plus the packages/services it composes (platform-client, ui, llm, review,
   llm-handler, broker), runs the deployment-operator tooling tests and the
   full Playwright e2e suite against a local PostgreSQL, then the production
   build, health endpoint, and size budgets. Shared by pr-verify.yml's native
@@ -11,8 +11,8 @@ description: >-
 
   No lint step: neither apps/shell nor any packages/* workspace declares a
   "lint" script, and no ESLint/Biome config exists anywhere in the repo
-  today. LifeOS is the only app with a linter, and it runs as an earlier
-  step in the same job -- see .github/actions/verify-linting.
+  today. LifeOS is the only app with a linter, and it runs inside its own
+  lane -- see .github/actions/verify-tests-lifeos.
 
 runs:
   using: composite
@@ -44,6 +44,10 @@ runs:
       shell: bash
       run: npm run typecheck --workspace=packages/llm
 
+    - name: Type-check · packages/review
+      shell: bash
+      run: npm run typecheck --workspace=@hyperbolic/review
+
     - name: Type-check · services/llm-handler
       shell: bash
       run: npm run typecheck --workspace=@hyperbolic/llm-handler
@@ -73,6 +77,13 @@ runs:
     - name: Test · packages/llm (node --test)
       shell: bash
       run: npm test --workspace=packages/llm
+
+    - name: Test · packages/review (node --test)
+      # The provider-separation guard AGENTS.md calls the mechanical
+      # enforcement lives in this package's config tests; before this step
+      # existed they ran in no CI job at all.
+      shell: bash
+      run: npm test --workspace=@hyperbolic/review
 
     - name: Test · services/llm-handler (node --test)
       shell: bash
