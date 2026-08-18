@@ -336,12 +336,13 @@ owner's behalf. If Repository Standards fails, GitHub skips `AI Review` outright
 failed), which surfaces as `result: "skipped"` — and `PR Gate`'s allow-list treats that exactly
 like any other non-`"success"` result: a failure, never a silent pass.
 
-The lint step inside the `LifeOS` lane runs only LifeOS's own lint commands (`ruff check` for
-the backend, `npm run lint` for the frontend) today, because LifeOS is the only app in this repo
-with a lint command configured — see `apps/lifeos/AGENTS.md`. Extend
-`.github/actions/verify-linting/action.yml` in place, not a second gate, when another app adopts a
-linter; when an app's own lane already runs its full suite, folding that app's lint directly into
-its own composite action is the more natural home going forward.
+The `LifeOS` lane runs only LifeOS's own lint commands (`ruff check` for the backend, `npm run
+lint` for the frontend), early in each half of its suite, ahead of `mypy`/`pytest` and the
+type-check/e2e/build steps — because LifeOS is the only app in this repo with a lint command
+configured, see `apps/lifeos/AGENTS.md`. Lint lives directly inside
+`.github/actions/verify-tests-lifeos/action.yml`, not a separate composite action: each app's own
+lane is the natural home for its lint once that lane already runs its full suite. Extend that
+action in place, not a second gate, when another app adopts a linter.
 
 > [!WARNING]
 > **The bare-name requirement is load-bearing, not cosmetic.** A required status check is matched
@@ -379,9 +380,9 @@ its own composite action is the more natural home going forward.
 > entering it.
 
 Each gate's real work lives in a composite action under `.github/actions/` — `verify-secrets`,
-`verify-repo-policy`, `verify-pr-description`, `verify-linting`, `verify-tests-toolbelt`,
-`verify-tests-acc`, `verify-tests-acc-windows`, `verify-tests-brain`, `verify-tests-shell`,
-`verify-tests-lifeos`, `verify-llm-review`. Each is also reused by the matching standalone
+`verify-repo-policy`, `verify-pr-description`, `verify-tests-toolbelt`, `verify-tests-acc`,
+`verify-tests-acc-windows`, `verify-tests-brain`, `verify-tests-shell`, `verify-tests-lifeos`,
+`verify-llm-review`. Each is also reused by the matching standalone
 workflow file (`secret-scan.yml`, `repo-policy.yml`, `template-lint.yml`, `toolbelt-ci.yml`,
 `acc-ci.yml`, `brain-ci.yml`, `shell-ci.yml`, `lifeos-ci.yml`, `llm-review.yml`) for that file's
 own `merge_group`/`push`/`workflow_dispatch` triggers, so every check has exactly one source of

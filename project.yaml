@@ -133,10 +133,11 @@ ci:
     - order: 1
       path: .github/workflows/pr-verify.yml
       standalone: .github/workflows/lifeos-ci.yml
-      action: .github/actions/{detect-changes,verify-linting,verify-tests-lifeos}
+      action: .github/actions/{detect-changes,verify-tests-lifeos}
       gate: "LifeOS"
       covers: apps/lifeos — lint (ruff, npm run lint; the only app with a
-        linter configured) ahead of its backend/frontend suites.
+        linter configured, run early inside verify-tests-lifeos itself)
+        ahead of its backend/frontend suites.
       required: false # rolled into "PR Gate" below, not typed here individually
     - order: 2
       path: .github/workflows/pr-verify.yml

@@ -11,8 +11,8 @@ description: >-
 
   No lint step: neither apps/shell nor any packages/* workspace declares a
   "lint" script, and no ESLint/Biome config exists anywhere in the repo
-  today. LifeOS is the only app with a linter, and it runs as an earlier
-  step in the same job -- see .github/actions/verify-linting.
+  today. LifeOS is the only app with a linter, and it runs inside its own
+  lane -- see .github/actions/verify-tests-lifeos.
 
 runs:
   using: composite

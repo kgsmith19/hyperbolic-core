@@ -352,14 +352,11 @@ jobs:
           base_sha: ${{ github.event.pull_request.base.sha }}
 
       # LifeOS owns its lint: it is the only app with lint commands
-      # configured, and they run in its own lane, not in Repository
-      # Standards. (No port-5432 juggling here any more: this lane's own
-      # Postgres container is the only thing on this runner that binds it,
-      # exactly as in lifeos-ci.yml.)
-      - name: Lint · LifeOS
-        if: steps.detect.outputs.lifeos == 'true'
-        uses: ./.github/actions/verify-linting
-
+      # configured, and verify-tests-lifeos runs them itself, early in each
+      # half of its suite, rather than as a separate composite action. (No
+      # port-5432 juggling here any more: this lane's own Postgres
+      # container is the only thing on this runner that binds it, exactly
+      # as in lifeos-ci.yml.)
       - name: Tests · LifeOS
         if: steps.detect.outputs.lifeos == 'true'
         uses: ./.github/actions/verify-tests-lifeos
