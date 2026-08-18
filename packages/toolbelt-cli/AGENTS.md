@@ -20,7 +20,7 @@ npm run tool:new  # scaffold a new tool
 
 ## ✅ Completion Criteria
 
-GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `Verify: Tests (Linux)` gate succeeds — it covers `packages/**`.
+GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `Toolbelt` gate succeeds — it covers `packages/toolbelt-cli` specifically (see `.github/actions/verify-tests-toolbelt`).
 
 ## 🔒 Collaboration Boundary
 

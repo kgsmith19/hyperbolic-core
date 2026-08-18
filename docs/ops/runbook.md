@@ -117,8 +117,9 @@ signup, same as any other SaaS org. Everything after that is scriptable.
    | is `pull_request`-triggered with no environment | `pull_request` | `...:pull_request` |
 
    Every OIDC job in this repository takes the first row -- each declares its
-   own `<pipeline>-production` environment -- **except** `verify-llm-review`
-   in `pr-verify.yml`, which takes the second. Do not "fix" that asymmetry by
+   own `<pipeline>-production` environment -- **except** the `ai-review` job
+   (displayed as check `AI Review`) in `pr-verify.yml`, which takes the
+   second. Do not "fix" that asymmetry by
    giving the review gate an environment: an environment on a
    `pull_request`-triggered job inherits that environment's protection rules,
    so a required-reviewer rule would stall every pull request awaiting manual
@@ -182,7 +183,7 @@ bundled into the identity-recording pass: recording where the secrets live
 and actually flipping `deploy.yml`/`platform-backup.yml` live are different
 decisions, and the script keeps them separable so a rerun to correct one
 variable can't silently also go live. `--branch-protection` sets exactly
-the required-status-checks rule on `main`'s Ruleset to `Verify: All Gates`
+the required-status-checks rule on `main`'s Ruleset to `PR Gate`
 (see the root `AGENTS.md`'s "PR Gate and merge behavior" section for what
 that one check rolls up); the Rulesets API replaces the whole rule on every
 call, so this is safe to rerun but will overwrite any protection settings

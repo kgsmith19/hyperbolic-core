@@ -2,16 +2,18 @@ name: Verify LLM Review
 description: >-
   Adversarial LLM review of the diff against the linked Issue and AGENTS.md,
   via packages/review's CLI. Shared by pr-verify.yml's native
-  "Verify: LLM Review" job and llm-review.yml's own push/workflow_dispatch
-  triggers. Assumes the caller already checked out the repository with full
-  history, and that the calling job grants id-token: write for the Infisical
-  OIDC exchange.
+  "AI Review" job and llm-review.yml's own "Verify: LLM Review"
+  push/workflow_dispatch job. Assumes the caller already checked out the
+  repository with full history, and that the calling job grants
+  id-token: write for the Infisical OIDC exchange.
 
   Fails closed: the CLI exits 1 on a valid blocking finding and 2 when the
   review could not be performed at all. That is intended for an
   unprovisioned gate -- it must never report green by default -- which is
-  exactly why "Verify: LLM Review" stays OUT of the required-checks list
-  until the owner provisions the credentials llm-review.yml documents.
+  exactly why an unprovisioned run must fail outright (exit 1) rather than
+  default green: AI Review is mandatory in substance through PR Gate's
+  needs:, so a failing preflight here now blocks every PR until the owner
+  provisions the credentials llm-review.yml documents.
 
   The model gets a structured-output tool and nothing else: no shell, no
   filesystem, no network, and no ability to alter the verdict's shape.
@@ -225,7 +227,11 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "### Verify: LLM Review"
+          # Deliberately name-agnostic: this step runs under two callers whose
+          # jobs have different actual check names -- pr-verify.yml's
+          # "AI Review" and llm-review.yml's own "Verify: LLM Review" -- so
+          # hardcoding either one would be wrong for the other caller.
+          echo "### LLM Review Verdict"
           echo ""
           if [ -f "$RUNNER_TEMP/review-verdict.json" ]; then
             echo '```json'

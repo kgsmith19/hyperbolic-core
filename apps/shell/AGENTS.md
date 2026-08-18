@@ -67,7 +67,7 @@ npm run healthz-check
 
 A change is ready when its acceptance criteria are satisfied, affected
 documentation is accurate, the local checks above pass, and the
-`Verify: Tests (Linux)` reports success. That gate
+`Platform` reports success. That gate
 also type-checks and unit-tests `packages/platform-client`, `packages/ui`,
 `packages/llm`, and `services/llm-handler`, so a change here can break it via
 any of those. State any unverified item explicitly.

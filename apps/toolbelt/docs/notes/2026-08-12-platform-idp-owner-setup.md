@@ -81,7 +81,7 @@ sufficient. Do this before merging m1-08, not after.
      -H "apikey: <anon key>" -d '{"email":"x@example.com","password":"xxxxxxxxxx"}'
    ```
    must return an error, not a created user.
-5. **Watch the next `Verify: Tests (Linux)` run** after the secret is set: the
+5. **Watch the next `Toolbelt` run** after the secret is set: the
    "Run Toolbelt tests" step should show `TOOLBELT_OWNER_TOKEN` taking effect
    (positive-path suites authenticating as the owner instead of falling back
    to the `toolbelt-test-a` fixture). Nothing else changes yet — RLS policies
