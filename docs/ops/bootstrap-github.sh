@@ -33,8 +33,8 @@ these two just flip the gates deploy.yml/platform-backup.yml check):
 
 Optional:
   --branch-protection    also set the required-status-checks rule on main's
-                          Ruleset to the single "Verify: All Gates" rollup
-                          check (requires --main-ruleset-id; see AGENTS.md's
+                          Ruleset to the single "PR Gate" rollup check
+                          (requires --main-ruleset-id; see AGENTS.md's
                           "PR Gate and merge behavior" section). main is
                           governed by the Repository Rulesets feature here,
                           not the deprecated classic branch-protection API
@@ -151,37 +151,35 @@ if ((branch_protection)); then
   # if the owner wants it enforced at the ruleset level.
   #
   # The one context below is a NATIVE job in pr-verify.yml -- nothing in
-  # that file uses workflow_call any more -- so it reports its bare
-  # "Verify: X" name with no compound prefix. That is exactly why the
-  # refactor happened: a workflow_call-invoked job is always reported as
-  # "<caller job name> / <callee job name>", so a bare name typed into the
-  # ruleset would create a required check that NEVER reports and blocks
-  # every PR forever (confirmed empirically against PR #160's own runs).
+  # that file uses workflow_call -- so it reports its bare "PR Gate" name
+  # with no compound prefix. That matters concretely: a workflow_call-
+  # invoked job is always reported as "<caller job name> / <callee job
+  # name>", so a bare name typed into the ruleset would create a required
+  # check that NEVER reports and blocks every PR forever (confirmed
+  # empirically against PR #160's own runs).
   #
-  # "Verify: All Gates" is a rollup job: needs: on "Verify: Tests (Linux)"
-  # and "Verify: Tests (Windows)", if: always() so it still reports when a
-  # dependency failed. Its verdict comes from the workflow's own
-  # needs.*.result, so anything that is not exactly success -- including
-  # skipped or cancelled -- fails it. Those test jobs still run and still
-  # report individually, and are still real gates in substance; they are
-  # just no longer separately typed into this ruleset, which is what keeps
-  # this list from drifting out of sync with pr-verify.yml the way it
-  # already has three times (PRs #118, #120, #160). Each app suite ALWAYS
-  # runs and always reports: when its paths were not touched it passes in
-  # seconds rather than running, which is what makes folding a path-scoped
-  # check into the rollup safe. Windows is its own row because ACC's
+  # "PR Gate" is the rollup job: needs: on every worker lane (Repository
+  # Standards, Toolbelt, ACC Linux, ACC Windows, Brain, Platform, LifeOS,
+  # AI Review), if: always() so it still reports when a dependency failed.
+  # Its verdict comes from the workflow's own needs.*.result, so anything
+  # that is not exactly success -- including skipped or cancelled -- fails
+  # it. Those lanes still run and still report individually, and are still
+  # real gates in substance; they are just no longer separately typed into
+  # this ruleset, which is what keeps this list from drifting out of sync
+  # with pr-verify.yml the way it already has three times (PRs #118, #120,
+  # #160). Every lane ALWAYS runs and always reports: when its app was not
+  # touched it passes in seconds via an explicit "not applicable" step
+  # rather than being skipped, which is what makes folding a path-scoped
+  # check into the rollup safe. ACC Windows is its own row because its
   # PowerShell suites need a windows-latest runner and one job cannot span
-  # two runner images.
+  # two runner images. AI Review is mandatory in substance too -- it is in
+  # PR Gate's needs:, by owner decision, so a provider outage or a blocking
+  # finding stops auto-merge until resolved (the ruleset bypass below
+  # remains the owner's escape hatch).
   #
-  # "Verify: All Gates" is also where merge is armed: merge-policy.yml was
-  # deleted and its orchestration moved into that same job, after the
-  # verdict is computed. There is no separate merge-policy check to
-  # consider here any more.
-  #
-  # NOT required, deliberately: "Verify: LLM Review" (fails closed until the
-  # owner provisions reviewer credentials -- see llm-review.yml). While it
-  # reports failure the pull request stays "unstable" and GitHub's own
-  # auto-merge will not fire even though the required check passes.
+  # "PR Gate" is also where merge is armed: it computes the rollup verdict
+  # and then, later in the same job, arms native squash auto-merge. There
+  # is no separate merge-policy check to consider here.
   protection_body=$(cat <<'JSON'
 {
   "name": "main",
@@ -210,7 +208,7 @@ if ((branch_protection)); then
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": true,
         "required_status_checks": [
-          { "context": "Verify: All Gates" }
+          { "context": "PR Gate" }
         ]
       }
     }
