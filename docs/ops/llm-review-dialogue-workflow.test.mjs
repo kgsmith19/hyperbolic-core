@@ -9,15 +9,18 @@
 // three-workflow design rather than one, and getting any of them wrong is a
 // security bug, not a style issue:
 //
-//   1. verify-llm-review (pr-verify.yml) executes pull-request-authored code
-//      while holding a provider credential, so it must NEVER hold a token
-//      that can write to the pull request.
+//   1. ai-review (pr-verify.yml) executes pull-request-authored code while
+//      holding a provider credential, so it must NEVER hold a token that
+//      can write to the pull request -- unaffected by it also being a
+//      mandatory needs: dependency of PR Gate (#232): "required in
+//      substance" says nothing about which job is safe to trust with write
+//      access.
 //   2. The posting job (llm-review-dialogue.yml) holds pull-requests: write,
 //      so it must NEVER check out or execute repository content -- same
-//      discipline as pr-verify.yml's own "Verify: All Gates".
+//      discipline as pr-verify.yml's own "PR Gate".
 //   3. Neither new workflow may add a pull-request check row -- workflow_run
 //      and repository_dispatch report none, which is exactly why they were
-//      chosen over a fifth job in pr-verify.yml.
+//      chosen over a new job in pr-verify.yml.
 //
 // The behavioral tests extract the real embedded scripts and execute them
 // against a mocked GitHub API, for the same reason pr-verify-workflow.test.mjs
@@ -120,12 +123,14 @@ function permissionsBlocks(text) {
   return blocks;
 }
 
-test("verify-llm-review stays read-only: no pull-requests write in any permissions block reachable by it", () => {
+test("ai-review stays read-only: no pull-requests write in any permissions block reachable by it", () => {
   const reviewWorkflow = readFileSync(path.join(root, ".github/workflows/llm-review.yml"), "utf8");
   const prVerify = readFileSync(path.join(root, ".github/workflows/pr-verify.yml"), "utf8");
-  const jobStart = prVerify.indexOf("verify-llm-review:");
-  const jobEnd = prVerify.indexOf("\n  verify-all-gates:", jobStart);
-  const job = prVerify.slice(jobStart, jobEnd > 0 ? jobEnd : undefined);
+  const jobStart = prVerify.indexOf("\n  ai-review:");
+  const jobEnd = prVerify.indexOf("\n  pr-gate:", jobStart);
+  assert.ok(jobStart >= 0, "pr-verify.yml: no ai-review job found");
+  assert.ok(jobEnd > jobStart, "pr-verify.yml: no pr-gate job found after ai-review");
+  const job = prVerify.slice(jobStart, jobEnd);
 
   for (const blocks of [permissionsBlocks(reviewActionYaml), permissionsBlocks(reviewWorkflow), permissionsBlocks(job)]) {
     for (const block of blocks) {

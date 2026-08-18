@@ -18,42 +18,56 @@ services:
 
 ci:
   # pr-verify.yml ("PR Verification") is the ONLY workflow that triggers on
-  # a pull request, and every gate in it is a NATIVE job whose name starts
-  # with "Verify: ", each producing exactly ONE check row with that exact
-  # bare name. Nothing there uses workflow_call: a workflow_call-invoked job
-  # is always reported as "<caller job> / <callee job>", so a bare name typed
-  # into the ruleset would create a required check that never reports and
-  # blocks every PR forever. The real work lives in composite actions under
-  # .github/actions/, which run inside the calling job and add no rows; each
-  # is reused by the matching standalone workflow file below for that file's
-  # own merge_group/push/workflow_dispatch triggers, so every check has
-  # exactly one source of logic despite two trigger paths.
+  # a pull request. Every gate in it is a NATIVE job producing exactly ONE
+  # check row with its exact bare name. Nothing there uses workflow_call: a
+  # workflow_call-invoked job is always reported as "<caller job> / <callee
+  # job>", so a bare name typed into the ruleset would create a required
+  # check that never reports and blocks every PR forever. The real work
+  # lives in composite actions under .github/actions/, which run inside the
+  # calling job and add no rows; each is reused by the matching standalone
+  # workflow file below for that file's own merge_group/push/
+  # workflow_dispatch triggers, so every check has exactly one source of
+  # logic despite two trigger paths.
   #
-  # ONE CHECK ROW PER JOB is a GitHub invariant with no suppression, so the
-  # only way to shorten the PR checks list is to run fewer jobs. That is why
-  # every repo-wide conformance check and all five Linux suites share ONE
-  # job: four rows total instead of ten. The cost is real and deliberate --
-  # measured on PR #205 (a CI change, so every suite ran for real) the old
-  # parallel shape took 8.0 min and the same work sums to 17.3 min. ACC's
-  # Windows suite cannot join it (one job runs on one runner image), so it
-  # stays its own row and does its own change detection to remain parallel.
+  # Architecture: Repository Standards verifies the repository; each app
+  # lane verifies itself; AI Review independently evaluates the change; PR
+  # Gate verifies that every one of those lanes succeeded and alone
+  # controls merge authorization. By owner directive this repository
+  # optimizes for clear ownership, parallel execution, and diagnostics over
+  # the fewest visible check rows — the seven worker lanes (Repository
+  # Standards plus six app lanes) all start in parallel at T=0, and ACC's
+  # Windows suite gets its own row because one job cannot span two runner
+  # images, a platform constraint, not a choice.
   #
-  # Each suite still skips in seconds when its app was not touched: relevance
-  # comes from the detect-changes composite action, not from a paths: filter
-  # on the workflow. A required check tied to a paths: filter blocks forever
-  # on any PR that never triggers it, which is exactly what happened live on
-  # PRs #118 and #120. A change to .github/workflows/** or .github/actions/**
-  # marks every app relevant, so a CI edit is exercised end to end.
+  # Every lane still reports in seconds when its app was not touched:
+  # relevance comes from the detect-changes composite action INSIDE each
+  # job, never from a paths: filter on the workflow. A required check tied
+  # to a paths: filter blocks forever on any PR that never triggers it,
+  # which is exactly what happened live on PRs #118 and #120. A change to
+  # .github/workflows/** or .github/actions/** marks every app relevant, so
+  # a CI edit is exercised end to end. Every lane below EXISTS on every PR —
+  # an irrelevant lane reports success via an explicit "not applicable"
+  # step, never a job-level path condition — so PR Gate's invariant stays
+  # simple: every expected dependency exists and must conclude "success".
   #
-  # Order 3, "Verify: All Gates", is the ONLY gate below with required: true.
-  # Its verdict comes from the workflow's own needs.*.result, so anything not
-  # exactly "success" (including skipped or cancelled) fails it. The jobs it
-  # rolls up keep required: false here even though they are real,
-  # required-in-substance checks -- All Gates cannot go green without them --
-  # they are simply no longer typed into the branch ruleset individually. One
-  # name instead of many is one fewer thing to drift out of sync with this
-  # file, the exact failure mode that stranded PRs #118, #120 and #160 on
-  # stale required-check lists.
+  # Order 3, "PR Gate", is the ONLY gate below with required: true. Its
+  # verdict comes from the workflow's own needs.*.result, so anything not
+  # exactly "success" (including skipped or cancelled) fails it. The lanes
+  # it rolls up keep required: false here even though they are real,
+  # required-in-substance checks -- PR Gate cannot go green without them --
+  # they are simply no longer typed into the branch ruleset individually.
+  # One name instead of many is one fewer thing to drift out of sync with
+  # this file, the exact failure mode that stranded PRs #118, #120 and #160
+  # on stale required-check lists.
+  #
+  # AI Review is mandatory in substance too, by explicit owner decision: it
+  # is in PR Gate's needs:, so a provider outage or a blocking finding stops
+  # auto-merge until resolved (the owner's ruleset bypass remains the
+  # escape hatch). It depends on Repository Standards, and ONLY Repository
+  # Standards, so the leaked-secret scan completes before diff content
+  # reaches an external model provider; it deliberately does not wait on
+  # the app lanes, which would serialize the pipeline for no security
+  # benefit.
   #
   # `required:` below states the INTENDED branch-ruleset configuration --
   # it is a specification, not a live read of the ruleset, which an agent
@@ -61,62 +75,101 @@ ci:
   workflows:
     - order: 1
       path: .github/workflows/pr-verify.yml
-      standalone: .github/workflows/{secret-scan,repo-policy,template-lint,toolbelt-ci,acc-ci,brain-ci,shell-ci,lifeos-ci}.yml
-      action: .github/actions/{detect-changes,verify-secrets,verify-repo-policy,verify-pr-description,verify-linting,verify-tests-toolbelt,verify-tests-acc,verify-tests-brain,verify-tests-shell,verify-tests-lifeos}
-      gate: "Verify: Tests (Linux)"
-      covers: whole repo, every PR — no path filter; which apps changed,
-        leaked-credential scan, repo structure (CLAUDE.md/GEMINI.md/
-        AGENTS.md/action pinning/YAML validity/whitespace), PR body vs
-        PULL_REQUEST_TEMPLATE.md's required sections, LifeOS's ruff/npm-lint
-        commands, and then the Toolbelt, ACC (Linux), Brain, Shell and
-        LifeOS suites. One job, because one check row per job is a GitHub
-        invariant with no suppression — the only way to shorten the checks
-        list is to run fewer jobs. Each suite still skips in seconds when
-        its app was not touched.
-      required: false # rolled into "Verify: All Gates" below, not typed here individually
+      standalone: .github/workflows/{secret-scan,repo-policy,template-lint}.yml
+      action: .github/actions/{verify-secrets,verify-repo-policy,verify-pr-description}
+      gate: "Repository Standards"
+      covers: whole repo, every PR — no path filter; leaked-credential scan,
+        repo structure (CLAUDE.md/GEMINI.md/AGENTS.md/action pinning/YAML
+        validity/whitespace), PR body vs PULL_REQUEST_TEMPLATE.md's required
+        sections, and exact-head consistency. Repository-wide concerns only
+        — no app-specific engineering check (lint, typecheck, build,
+        coverage) belongs here; each app lane owns its own.
+      required: false # rolled into "PR Gate" below, not typed here individually
+    - order: 1
+      path: .github/workflows/pr-verify.yml
+      standalone: .github/workflows/toolbelt-ci.yml
+      action: .github/actions/{detect-changes,verify-tests-toolbelt}
+      gate: "Toolbelt"
+      covers: apps/toolbelt and packages/toolbelt-cli — self-contained;
+        skips in seconds via detect-changes when untouched.
+      required: false # rolled into "PR Gate" below, not typed here individually
+    - order: 1
+      path: .github/workflows/pr-verify.yml
+      standalone: .github/workflows/acc-ci.yml
+      action: .github/actions/{detect-changes,verify-tests-acc}
+      gate: "ACC Linux"
+      covers: apps/agentic-command-center and apps/toolbelt/guards — the
+        Linux-native suites and covgate. Runs its own change detection so
+        it stays parallel with every other lane.
+      required: false # rolled into "PR Gate" below, not typed here individually
     - order: 1
       path: .github/workflows/pr-verify.yml
       standalone: .github/workflows/acc-ci.yml
       action: .github/actions/{detect-changes,verify-tests-acc-windows}
-      gate: "Verify: Tests (Windows)"
-      covers: the ACC paths — native and PowerShell suites that need a
-        windows-latest runner. A separate row because one job cannot span
-        two runner images; that is a platform constraint, not a choice. It
-        runs its own change detection so it stays parallel with the Linux
-        job rather than waiting on it.
-      required: false # rolled into "Verify: All Gates" below, not typed here individually
+      gate: "ACC Windows"
+      covers: apps/agentic-command-center's PowerShell launch-shim,
+        cap-watcher and installer suites — needs a windows-latest runner. A
+        separate row because one job cannot span two runner images; that is
+        a platform constraint, not a choice.
+      required: false # rolled into "PR Gate" below, not typed here individually
+    - order: 1
+      path: .github/workflows/pr-verify.yml
+      standalone: .github/workflows/brain-ci.yml
+      action: .github/actions/{detect-changes,verify-tests-brain}
+      gate: "Brain"
+      covers: services/brain — typecheck, tests, ADR-05 isolation check,
+        eval corpus gate, Docker build/smoke. Skips in seconds when untouched.
+      required: false # rolled into "PR Gate" below, not typed here individually
+    - order: 1
+      path: .github/workflows/pr-verify.yml
+      standalone: .github/workflows/shell-ci.yml
+      action: .github/actions/{detect-changes,verify-tests-shell}
+      gate: "Platform"
+      covers: apps/shell, every packages/* workspace, services/llm-handler,
+        services/broker, and the docs/ops operator tooling (including this
+        workflow's own topology contract test) — type-checks, unit tests,
+        e2e, production build, size budgets.
+      required: false # rolled into "PR Gate" below, not typed here individually
+    - order: 1
+      path: .github/workflows/pr-verify.yml
+      standalone: .github/workflows/lifeos-ci.yml
+      action: .github/actions/{detect-changes,verify-tests-lifeos}
+      gate: "LifeOS"
+      covers: apps/lifeos — lint (ruff, npm run lint; the only app with a
+        linter configured, run early inside verify-tests-lifeos itself)
+        ahead of its backend/frontend suites.
+      required: false # rolled into "PR Gate" below, not typed here individually
     - order: 2
       path: .github/workflows/pr-verify.yml
       standalone: .github/workflows/llm-review.yml
       action: .github/actions/verify-llm-review
-      gate: "Verify: LLM Review"
+      gate: "AI Review"
       covers: whole repo, every PR — no path filter; adversarial LLM review
-        of the diff against the Issue and AGENTS.md. Needs both test jobs so
-        no reviewer tokens are spent on a PR failing anything else.
-        Deliberately NOT a dependency of the rollup below — it fails closed
-        while uncredentialed, and depending on it would make the one
-        required check permanently red. Stages its verdict as an artifact
+        of the diff against the Issue and AGENTS.md, provider-separated from
+        the builder. Needs Repository Standards ONLY, so the leaked-secret
+        scan finishes before diff content reaches an external provider.
+        Mandatory in substance via PR Gate's needs — not separately typed
+        into the branch ruleset. Stages its verdict as an artifact
         (always(), so a blocking or failed run is captured, not just a
         passing one) for .github/workflows/llm-review-dialogue.yml to post
         — this job stays read-only and never writes to the pull request
         itself.
-      required: false # pending owner-provisioned reviewer credentials
+      required: false # mandatory through PR Gate's needs:, not separately required
     - order: 3
       path: .github/workflows/pr-verify.yml
-      gate: "Verify: All Gates"
+      gate: "PR Gate"
       covers: whole repo, every PR — no path filter. Two things at once.
-        (1) The rollup — needs both order-1 test jobs, always reporting even
-        when one failed, and its verdict comes from this workflow's own
+        (1) The rollup — needs every lane above, always reporting even when
+        one failed, and its verdict comes from this workflow's own
         needs.*.result, so anything that is not exactly success (including
         skipped or cancelled) fails it. This is the ONLY gate typed into the
         branch ruleset's required-status-checks list.
-        (2) Merge orchestration, absorbed from the deleted merge-policy.yml —
-        maintains the managed Work State/Evidence Index comments, enforces
-        owner:hold-merge and owner:allow-draft, and arms native squash
-        auto-merge. Arming is a later step of the same job that computes the
-        verdict, so a merge cannot be enabled ahead of the verification it
-        depends on. It is the only job holding a write token and performs no
-        checkout and no shell over repository content.
+        (2) Merge orchestration — maintains the managed Work State comments,
+        enforces owner:hold-merge and owner:allow-draft, and arms native
+        squash auto-merge. Arming is a later step of the same job that
+        computes the verdict, so a merge cannot be enabled ahead of the
+        verification it depends on. It is the only job holding a write
+        token and performs no checkout and no shell over repository content.
       required: true
   orchestrator: .github/workflows/pr-verify.yml
   note: >-
@@ -124,29 +177,28 @@ ci:
     intentionally inert here (see AGENTS.md's Workflow Safety Invariant) —
     its authoritative CI runs from the standalone lifeos repo; the
     verify-tests-lifeos composite action above is written fresh for this
-    monorepo and is the real gate here. "Verify: Tests (Linux)" and
-    "Verify: Tests (Windows)" are real, required-in-substance checks --
-    "Verify: All Gates" cannot go green without them -- but only that one
-    rollup name is typed into the branch ruleset, to keep the required-check
-    list from drifting out of sync with this file. "Verify: LLM Review" is
-    not required and fails closed until the owner provisions reviewer
-    credentials; while it reports failure the pull request stays "unstable"
-    and GitHub's own auto-merge will not fire even though every required
-    check passes, so auto-merge starts working once that row stops being
-    red. There is no separate merge-policy workflow any more: merge-policy.yml
-    was deleted and its behavior lives in the "Verify: All Gates" job.
+    monorepo and is the real gate here. "Repository Standards" and the six
+    app lanes are real, required-in-substance checks -- "PR Gate" cannot go
+    green without them -- but only that one rollup name is typed into the
+    branch ruleset, to keep the required-check list from drifting out of
+    sync with this file. "AI Review" is likewise mandatory in substance
+    through PR Gate's needs: rather than as a second required-check name; it
+    fails closed on any infrastructure problem (missing credential, invalid
+    provider config, API error, timeout) and never substitutes a default
+    green verdict. There is no separate merge-policy workflow: merge
+    orchestration lives entirely in the "PR Gate" job.
 
     Two further workflows implement Issue #128's deferred review-dialogue
     design (Issue #231) and are deliberately NOT in the gates list above —
     neither produces a pull-request check row, so neither can be typed into
     a required-checks list.
     .github/workflows/llm-review-dialogue.yml (on: workflow_run, keyed to
-    "PR Verification") reads Verify: LLM Review's staged verdict artifact
-    and posts it into the pull request as exactly one managed comment
-    (marker "<!-- agent-engineering-standard:llm-review:v1 -->", updated in
-    place per head) carrying a round counter, and — same discipline as
-    Verify: All Gates — holds pull-requests: write while performing no
-    checkout and no shell over repository content.
+    "PR Verification") reads AI Review's staged verdict artifact and posts
+    it into the pull request as exactly one managed comment (marker
+    "<!-- agent-engineering-standard:llm-review:v1 -->", updated in place
+    per head) carrying a round counter, and — same discipline as PR Gate —
+    holds pull-requests: write while performing no checkout and no shell
+    over repository content.
     .github/workflows/claude-dispatch.yml (on: repository_dispatch, fired
     by the dialogue workflow only for a blocking verdict on a
     same-repository PR) hands the findings to the developer agent, which

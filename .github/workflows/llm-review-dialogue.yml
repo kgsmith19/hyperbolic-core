@@ -1,39 +1,45 @@
 name: "LLM Review Dialogue"
 
-# Posts Verify: LLM Review's findings into the pull request as ONE managed
-# comment, keeps a round counter, wakes the developer agent, and escalates to
-# the owner when the disagreement will not resolve. Issue #128 claims 7 and 8
+# Posts AI Review's findings into the pull request as ONE managed comment,
+# keeps a round counter, wakes the developer agent, and escalates to the
+# owner when the disagreement will not resolve. Issue #128 claims 7 and 8
 # specified this; PR #130 deferred it and Issue #231 tracks it.
 #
 # WHY THIS IS A SEPARATE workflow_run WORKFLOW, and not a step somewhere in
 # pr-verify.yml -- three constraints intersect, and workflow_run is the only
 # shape that satisfies all three at once:
 #
-#   1. The reviewer job CANNOT post. verify-llm-review runs `npm ci` and
-#      executes pull-request-authored code while holding a provider
-#      credential. llm-review.yml says so verbatim ("must not also carry a
-#      token that could speak on a PR's behalf") and commit 1e4f8e5 removed
-#      that grant deliberately. Giving it pull-requests: write would hand a
-#      PR author's own code a token over their PR.
-#   2. Verify: All Gates CANNOT post it either. It is forbidden from
-#      depending on the non-required LLM Review job -- doing so would make
-#      the one required check permanently red while the reviewer is
-#      unprovisioned -- and docs/ops/pr-verify-workflow.test.mjs pins that.
-#      Without that dependency the verdict does not exist yet when All Gates
-#      runs.
-#   3. A fifth job in pr-verify.yml would add a fifth check row. One check
-#      row per job is a GitHub invariant with no suppression mechanism, and
-#      the four-row shape was bought deliberately (AGENTS.md > PR Gate and
-#      merge behavior).
+#   1. The reviewer job CANNOT post. ai-review runs `npm ci` and executes
+#      pull-request-authored code while holding a provider credential.
+#      llm-review.yml says so verbatim ("must not also carry a token that
+#      could speak on a PR's behalf") and commit 1e4f8e5 removed that grant
+#      deliberately. Giving it pull-requests: write would hand a PR author's
+#      own code a token over their PR. This holds regardless of AI Review
+#      being a mandatory needs: dependency of PR Gate now (#232) -- being
+#      required in substance changes nothing about which job is safe to
+#      trust with a write token.
+#   2. PR Gate CANNOT post it either, even though it already runs after
+#      ai-review and already holds pull-requests: write. Its own contract
+#      test (docs/ops/pr-verify-workflow.test.mjs) pins it as the terminal
+#      job with exactly one embedded script block, on the strength that this
+#      keeps it auditable in one read; adding verdict-rendering logic there
+#      would grow that one script into two concerns with different trust
+#      inputs (context.payload/API responses vs. an artifact carrying
+#      model-authored text) and break the "boring, single script" contract
+#      the file's own header now states explicitly.
+#   3. A new job in pr-verify.yml would add a new check row. One check row
+#      per job is a GitHub invariant with no suppression mechanism, and the
+#      nine-lane-into-one-rollup shape was bought deliberately (AGENTS.md >
+#      PR Gate and merge behavior, and its own #232 rollup comment).
 #
-# A workflow_run workflow reports NO pull-request check run, so it adds no
-# row, and it runs from the base repository with its own token rather than
+# A workflow_run workflow reports NO pull-request check row, so it adds
+# none, and it runs from the base repository with its own token rather than
 # the triggering run's -- which is exactly why it may hold write scope while
 # the job that ran the PR's code may not.
 #
 # TRUST NOTE. This workflow holds pull-requests: write and therefore obeys
-# the same discipline as Verify: All Gates: NO actions/checkout, and no shell
-# over repository content. It touches exactly two things from the untrusted
+# the same discipline as PR Gate: NO actions/checkout, and no shell over
+# repository content. It touches exactly two things from the untrusted
 # side -- a downloaded artifact, parsed as JSON data and never executed, and
 # the model-authored strings inside it, which are neutralized before they are
 # rendered (see `neutralize` below). The pull request number travels in that
@@ -82,7 +88,7 @@ jobs:
     steps:
       # continue-on-error, not a hard failure: the artifact is absent for
       # every legitimate run where the reviewer never produced one -- most
-      # commonly because a test job failed, so Verify: LLM Review was
+      # commonly because Repository Standards failed, so AI Review was
       # skipped by its own needs:. That is silence, not breakage.
       - name: Dialogue · Fetch the reviewer's verdict
         id: fetch
@@ -96,7 +102,7 @@ jobs:
 
       - name: Dialogue · No verdict to report
         if: steps.fetch.outcome != 'success'
-        run: 'echo "Verify: LLM Review produced no verdict artifact for this run; nothing to post."'
+        run: 'echo "AI Review produced no verdict artifact for this run; nothing to post."'
 
       - name: Dialogue · Post findings, count the round, escalate if unresolved
         if: steps.fetch.outcome == 'success'

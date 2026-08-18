@@ -1,13 +1,16 @@
 name: "PR Verification"
 
 # THE single entry point for every PR-time verification gate AND for merge
-# orchestration. There is no second workflow on pull requests any more --
-# merge-policy.yml was deleted and its behavior lives in "Verify: All
-# Gates" below.
+# orchestration. There is no second workflow on pull requests -- merge
+# policy lives in the "PR Gate" job below.
 #
-# EVERY job here is a NATIVE job whose name starts with "Verify: ", and each
-# produces exactly ONE check row with that exact bare name. That is
-# deliberate and load-bearing:
+# The architecture, in one sentence: Repository Standards verifies the
+# repository, each app lane verifies its own software, AI Review
+# independently evaluates the change, and PR Gate verifies that every
+# mandatory lane succeeded and alone controls merge authorization.
+#
+# EVERY job here is a NATIVE job producing exactly ONE check row with its
+# exact bare name. That is deliberate and load-bearing:
 #
 #   * A required status check is matched by its literal reported name. A
 #     workflow_call-invoked job is ALWAYS reported as
@@ -24,46 +27,47 @@ name: "PR Verification"
 #     own merge_group/push/workflow_dispatch triggers, so every check has
 #     exactly one source of logic despite two trigger paths.
 #
-# ONE CHECK ROW PER JOB is a GitHub invariant with no suppression
-# mechanism, so the ONLY way to shorten the PR checks list is to run fewer
-# jobs. That is why the five Linux suites and every repo-wide conformance
-# check share ONE job here rather than running in parallel: four rows total
-# instead of ten. The cost is real and was accepted deliberately -- measured
-# on PR #205 (a CI change, so every suite ran for real), the parallel shape
-# finished in 8.0 min and the sum of the same work is 17.3 min. Wall-clock
-# roughly doubles; the checks list drops from ten rows to four.
+# The lanes run in PARALLEL, one job per app (plus one repository-wide
+# standards lane), by owner decision: clear ownership, independent logs and
+# runners, faster wall-clock, and easy app onboarding are worth more than a
+# short checks list. Only ONE of these rows is required by the ruleset --
+# "PR Gate" -- so the abstraction "one required check" lives at the final
+# aggregation layer, not in the job count. The worker lanes are mandatory
+# in substance because PR Gate refuses to pass unless every one of them
+# reports exactly "success".
 #
-# ACC's Windows suite CANNOT join the Linux job -- one job runs on one
-# runner image -- so it stays its own row. That is a platform constraint,
-# not a choice. It runs its own change detection (via the shared
-# detect-changes action) rather than consuming a Linux job output, so it
-# still runs in parallel instead of waiting ~16 min to learn whether ACC
-# was even touched.
+# EVERY lane reports on EVERY pull request. Relevance is decided INSIDE
+# each app job via the shared detect-changes action -- never a paths:
+# filter on this file -- so an irrelevant lane reports success in seconds
+# via an explicit "not applicable" step instead of disappearing. That keeps
+# PR Gate's invariant brutally simple: every expected dependency exists and
+# must conclude exactly "success". A change to .github/workflows/** or
+# .github/actions/** marks every app relevant (see detect-changes), so a CI
+# change is exercised end to end rather than trivially passing.
 #
-# The rows, in order:
-#   1. Verify: Tests (Linux)   -- every repo-wide conformance check (which
-#                                 apps changed, leaked-secret scan, repo
-#                                 structure, PR description, lint) followed
-#                                 by the five Linux app suites, each still
-#                                 skipped in seconds when its app was not
-#                                 touched. Fail-fast ordering is preserved:
-#                                 a failing step stops the job, so nothing
-#                                 below runs on a PR with a leaked secret.
-#   1. Verify: Tests (Windows) -- ACC's PowerShell/native suites, parallel
-#                                 with the Linux job.
-#   2. Verify: LLM Review      -- needs both test jobs, so no reviewer
-#                                 tokens are spent on a PR that would fail
-#                                 anything else. NOT required, and it fails
-#                                 closed while reviewer credentials are
-#                                 unprovisioned.
-#   3. Verify: All Gates       -- needs both test jobs, if: always() so it
-#                                 still reports when one failed. THE only
-#                                 required check, and the only place merge
-#                                 is armed. See its own header comment.
+# AI Review is the one lane with a dependency: it needs Repository
+# Standards, and ONLY Repository Standards, so the leaked-credential scan
+# completes before any diff content is sent to an external model provider.
+# It deliberately does NOT wait for the app suites -- that would serialize
+# the pipeline for no security benefit. If Repository Standards fails, AI
+# Review is skipped, and PR Gate treats "skipped" as failure.
 #
-# No paths: filter anywhere in this file, deliberately. Path scoping is done
-# INSIDE the jobs via the detect-changes action, precisely so every required
-# check still reports on every PR.
+# The rows:
+#   Repository Standards -- repository integrity only: secret scan, repo
+#                           policy, PR description, tested-SHA consistency.
+#                           App-specific checks NEVER belong here.
+#   Toolbelt / ACC Linux / ACC Windows / Brain / Platform / LifeOS
+#                        -- each app's complete engineering verification,
+#                           self-contained. ACC spans two rows because one
+#                           job runs on one runner image and its PowerShell
+#                           suites need windows-latest; that is a platform
+#                           constraint, not a choice.
+#   AI Review            -- adversarial LLM review (packages/review),
+#                           provider-separated from the builder, fail
+#                           closed. Mandatory via PR Gate's needs.
+#   PR Gate              -- rollup AND merge orchestration. THE only
+#                           required check, and the only place merge is
+#                           armed. See its own header comment.
 #
 # Every checkout below pins ref: to the PR's head SHA. Without that, a
 # pull_request-triggered checkout defaults to GitHub's synthetic merge ref
@@ -78,19 +82,14 @@ name: "PR Verification"
 # tested SHA matches the live PR head" check below. Pinning ref: fixes both
 # (Issue #224).
 
-# EVERY event listed here now costs a full pipeline run -- roughly 16 minutes
-# when a change makes all five Linux suites relevant. That is a real
-# regression from the shape that preceded it, and it is deliberate: the
-# draft/label/auto-merge events used to be handled by merge-policy.yml's
-# separate pull_request_target job in about five seconds, and absorbing that
-# job into Verify: All Gates is what removed a permanent check row. Those
-# events have to stay, because All Gates is now the only thing that enforces
-# owner:hold-merge, clears an unauthorized draft, and re-arms auto-merge when
-# it is switched off -- none of which can happen if the workflow never runs.
-#
-# concurrency below (cancel-in-progress) keeps the damage bounded: relabelling
-# or re-editing in quick succession cancels the superseded run rather than
-# queueing another. Do not add an event here without weighing that same cost.
+# EVERY event listed here costs a pipeline run. The draft/label/auto-merge
+# events have to stay, because PR Gate is the only thing that enforces
+# owner:hold-merge, clears an unauthorized draft, and re-arms auto-merge
+# when it is switched off -- none of which can happen if the workflow never
+# runs. With the lanes parallel, a re-trigger on an unchanged head costs
+# wall-clock equal to the slowest relevant lane, and concurrency below
+# (cancel-in-progress) keeps rapid successive edits from queueing runs.
+# Do not add an event here without weighing that cost.
 on:
   pull_request:
     types:
@@ -104,9 +103,10 @@ on:
       - unlabeled
       - auto_merge_disabled
 
-# Read-only by default. "Verify: All Gates" raises its own permissions to
-# what merge orchestration needs; no job that executes pull-request-authored
-# code ever holds a write token.
+# Read-only by default. "PR Gate" raises its own permissions to what merge
+# orchestration needs; no job that executes pull-request-authored code ever
+# holds a write token. "AI Review" adds only id-token: write for Infisical
+# OIDC.
 permissions:
   contents: read
   pull-requests: read
@@ -117,22 +117,22 @@ concurrency:
 
 jobs:
   # =====================================================================
-  # 1. Verify: Tests (Linux) -- conformance + every Linux app suite
+  # Repository Standards -- repository integrity, nothing app-specific
   # =====================================================================
-  verify-tests-linux:
-    name: "Verify: Tests (Linux)"
+  # Owns: leaked-secret detection, repository structure/policy, PR
+  # description requirements, and exact-head consistency. It must NOT
+  # accumulate app-specific engineering checks -- lint, typecheck, build,
+  # coverage and tests belong to the app lanes, so adding a lint rule to an
+  # app six months from now touches that app's verification, not this
+  # architecture. No detect-changes here: every check below is repo-wide
+  # and runs unconditionally.
+  repository-standards:
+    name: "Repository Standards"
     runs-on: ubuntu-latest
-    # Generous on purpose: this is the sum of what used to be six jobs
-    # (measured ~16 min when every suite runs for real), and the previous
-    # per-job timeouts summed to 175. A hang should fail, not run for an
-    # hour and a half, but a slow-but-healthy full run must not be killed.
-    timeout-minutes: 90
+    timeout-minutes: 15
     steps:
-      # One checkout for every composite action below -- none of them
-      # checks out on its own, precisely so this job does it once.
-      # fetch-depth: 0 because change detection needs the base commit, the
-      # secret scan needs the commit range, and the whitespace check needs
-      # history back to the base commit.
+      # fetch-depth: 0 because the secret scan needs the commit range and
+      # the whitespace check needs history back to the base commit.
       - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -140,13 +140,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Detect · Which apps does this change touch?
-        id: detect
-        uses: ./.github/actions/detect-changes
-        with:
-          base_sha: ${{ github.event.pull_request.base.sha }}
-
-      # --- repo-wide conformance, fail-fast, cheapest first --------------
+      # Cheapest-to-most-expensive, fail-fast: nothing runs after a leaked
+      # secret is found.
       - name: Standards · Secrets
         uses: ./.github/actions/verify-secrets
         with:
@@ -163,15 +158,6 @@ jobs:
         with:
           pr_number: ${{ github.event.pull_request.number }}
           github_token: ${{ github.token }}
-
-      - name: Standards · Linting
-        if: steps.detect.outputs.lifeos == 'true'
-        uses: ./.github/actions/verify-linting
-
-      - name: Standards · Linting not applicable to this change
-        if: steps.detect.outputs.lifeos != 'true'
-        shell: bash
-        run: echo "LifeOS was not touched by this change, and it is the only app with a lint command configured; nothing to lint."
 
       - name: Standards · Confirm tested SHA matches the live PR head
         shell: bash
@@ -193,19 +179,61 @@ jobs:
           fi
           echo "Tested SHA matches the live PR head (${TESTED_SHA})."
 
-      # --- the Linux app suites -----------------------------------------
-      # Each still skips in seconds when its app was not touched; merging
-      # the jobs did not merge the relevance decisions.
+  # =====================================================================
+  # App lanes -- one self-contained job per app, all parallel
+  # =====================================================================
+  # Every lane: checkout, detect relevance, run the app's composite action
+  # when relevant, otherwise an explicit successful "not applicable" step.
+  # Never continue-on-error, never a job-level path condition -- the job
+  # must exist and report on every PR so PR Gate can demand its success.
+  toolbelt:
+    name: "Toolbelt"
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect · Is Toolbelt touched by this change?
+        id: detect
+        uses: ./.github/actions/detect-changes
+        with:
+          base_sha: ${{ github.event.pull_request.base.sha }}
+
       - name: Tests · Toolbelt
         if: steps.detect.outputs.toolbelt == 'true'
         uses: ./.github/actions/verify-tests-toolbelt
         with:
           owner_refresh_token: ${{ secrets.TOOLBELT_OWNER_REFRESH_TOKEN }}
 
-      - name: Tests · Toolbelt not applicable to this change
+      - name: Tests · Not applicable to this change
         if: steps.detect.outputs.toolbelt != 'true'
         shell: bash
         run: echo "Toolbelt was not touched by this change; nothing to verify."
+
+  acc-linux:
+    name: "ACC Linux"
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      # fetch-depth: 0 also feeds covgate's merge-base coverage diff inside
+      # verify-tests-acc.
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect · Is ACC touched by this change?
+        id: detect
+        uses: ./.github/actions/detect-changes
+        with:
+          base_sha: ${{ github.event.pull_request.base.sha }}
 
       - name: Tests · ACC (Linux suites)
         if: steps.detect.outputs.acc == 'true'
@@ -213,59 +241,16 @@ jobs:
         with:
           base_sha: ${{ github.event.pull_request.base.sha }}
 
-      - name: Tests · ACC not applicable to this change
+      - name: Tests · Not applicable to this change
         if: steps.detect.outputs.acc != 'true'
         shell: bash
         run: echo "ACC was not touched by this change; nothing to verify."
 
-      - name: Tests · Brain
-        if: steps.detect.outputs.brain == 'true'
-        uses: ./.github/actions/verify-tests-brain
-
-      - name: Tests · Brain not applicable to this change
-        if: steps.detect.outputs.brain != 'true'
-        shell: bash
-        run: echo "Brain was not touched by this change; nothing to verify."
-
-      - name: Tests · Shell
-        if: steps.detect.outputs.shell == 'true'
-        uses: ./.github/actions/verify-tests-shell
-
-      - name: Tests · Shell not applicable to this change
-        if: steps.detect.outputs.shell != 'true'
-        shell: bash
-        run: echo "Shell was not touched by this change; nothing to verify."
-
-      # LifeOS is LAST on purpose, and this step is why. Its suite runs its
-      # own Postgres in Docker bound to host port 5432, while the Toolbelt
-      # and Shell suites above use the runner's SYSTEM postgresql service on
-      # that same port. As separate jobs they never met; in one job the
-      # container fails to bind with "port is already allocated" unless the
-      # service is stopped first. Nothing after this step needs the system
-      # service, so stopping it here is safe, and `|| true` keeps it a no-op
-      # on a PR where neither earlier suite ever started it.
-      - name: Tests · Free port 5432 for LifeOS's own Postgres container
-        if: steps.detect.outputs.lifeos == 'true'
-        shell: bash
-        run: sudo systemctl stop postgresql.service || true
-
-      - name: Tests · LifeOS
-        if: steps.detect.outputs.lifeos == 'true'
-        uses: ./.github/actions/verify-tests-lifeos
-
-      - name: Tests · LifeOS not applicable to this change
-        if: steps.detect.outputs.lifeos != 'true'
-        shell: bash
-        run: echo "LifeOS was not touched by this change; nothing to verify."
-
-  # =====================================================================
-  # 1. Verify: Tests (Windows) -- ACC's windows-latest suites
-  # =====================================================================
-  # A separate row because one job cannot span two runner images. It runs
-  # its own detect-changes rather than depending on the Linux job, so it
-  # stays parallel instead of idling ~16 min for an output.
-  verify-tests-windows:
-    name: "Verify: Tests (Windows)"
+  # ACC's second row: one job runs on one runner image, and the PowerShell
+  # launch-shim, cap-watcher and installer suites need windows-latest. The
+  # split is a platform constraint -- do not fake Windows coverage on Linux.
+  acc-windows:
+    name: "ACC Windows"
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -276,7 +261,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Detect · Which apps does this change touch?
+      - name: Detect · Is ACC touched by this change?
         id: detect
         uses: ./.github/actions/detect-changes
         with:
@@ -291,16 +276,121 @@ jobs:
         shell: bash
         run: echo "ACC was not touched by this change; nothing to verify."
 
+  brain:
+    name: "Brain"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect · Is Brain touched by this change?
+        id: detect
+        uses: ./.github/actions/detect-changes
+        with:
+          base_sha: ${{ github.event.pull_request.base.sha }}
+
+      - name: Tests · Brain
+        if: steps.detect.outputs.brain == 'true'
+        uses: ./.github/actions/verify-tests-brain
+
+      - name: Tests · Not applicable to this change
+        if: steps.detect.outputs.brain != 'true'
+        shell: bash
+        run: echo "Brain was not touched by this change; nothing to verify."
+
+  # The shared platform surface: apps/shell, every packages/* workspace,
+  # services/llm-handler, services/broker, and the docs/ops operator
+  # tooling (including this workflow's own contract test).
+  platform:
+    name: "Platform"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect · Is the platform surface touched by this change?
+        id: detect
+        uses: ./.github/actions/detect-changes
+        with:
+          base_sha: ${{ github.event.pull_request.base.sha }}
+
+      - name: Tests · Platform (Shell, packages, services)
+        if: steps.detect.outputs.shell == 'true'
+        uses: ./.github/actions/verify-tests-shell
+
+      - name: Tests · Not applicable to this change
+        if: steps.detect.outputs.shell != 'true'
+        shell: bash
+        run: echo "The platform surface was not touched by this change; nothing to verify."
+
+  lifeos:
+    name: "LifeOS"
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect · Is LifeOS touched by this change?
+        id: detect
+        uses: ./.github/actions/detect-changes
+        with:
+          base_sha: ${{ github.event.pull_request.base.sha }}
+
+      # LifeOS owns its lint: it is the only app with lint commands
+      # configured, and verify-tests-lifeos runs them itself, early in each
+      # half of its suite, rather than as a separate composite action. (No
+      # port-5432 juggling here any more: this lane's own Postgres
+      # container is the only thing on this runner that binds it, exactly
+      # as in lifeos-ci.yml.)
+      - name: Tests · LifeOS
+        if: steps.detect.outputs.lifeos == 'true'
+        uses: ./.github/actions/verify-tests-lifeos
+
+      - name: Tests · Not applicable to this change
+        if: steps.detect.outputs.lifeos != 'true'
+        shell: bash
+        run: echo "LifeOS was not touched by this change; nothing to verify."
+
   # =====================================================================
-  # 2. Verify: LLM Review (non-required)
+  # AI Review -- adversarial LLM review, after the secret scan only
   # =====================================================================
-  # Canary: trivial comment, no functional change -- exercises this job for
-  # real (pull_request-triggered OIDC subject) now that the review-gate
-  # identity's Infisical project membership has been granted and
-  # REVIEW_PROVIDER has been corrected to lowercase (Issue #227).
-  verify-llm-review:
-    name: "Verify: LLM Review"
-    needs: [verify-tests-linux, verify-tests-windows]
+  # Depends on Repository Standards and ONLY Repository Standards: the
+  # leaked-credential scan must complete before this repository's diff is
+  # sent to an external model provider, and nothing else about the app
+  # suites is a security precondition for reviewing. Deliberately no
+  # dependency on the app lanes -- waiting for them would serialize the
+  # pipeline just to conserve reviewer tokens on a doomed PR, and PR Gate
+  # already refuses to merge anything whose tests failed.
+  #
+  # No if: on this job. If Repository Standards fails, GitHub skips this
+  # job, needs.ai-review.result becomes "skipped", and PR Gate fails --
+  # exactly the intended fail-closed behavior.
+  #
+  # Mandatory in substance: this job is in PR Gate's needs, so a failed or
+  # skipped review blocks auto-merge. It is NOT separately listed in the
+  # ruleset's required checks -- "PR Gate" is the one required name. It
+  # fails closed on infrastructure problems (missing credential, invalid
+  # provider config, API error, timeout) and never substitutes a default
+  # green verdict; a weak or malformed model ANSWER, by contrast, is a
+  # pass (see packages/review).
+  ai-review:
+    name: "AI Review"
+    needs: [repository-standards]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -327,45 +417,45 @@ jobs:
           review_builder_provider: ${{ vars.REVIEW_BUILDER_PROVIDER }}
 
   # =====================================================================
-  # 3. Verify: All Gates -- the single required check AND merge orchestration
+  # PR Gate -- the sole required check AND the sole merge authority
   # =====================================================================
-  # This job replaces the deleted merge-policy.yml entirely. It is both:
+  # This job is deliberately boring. It is both:
   #
-  #   (a) the rollup gate -- it fails unless every verification job above
-  #       succeeded, and it is the ONLY name in the branch ruleset's
-  #       required-status-checks list. One name instead of many is one
-  #       fewer thing to drift out of sync with this file, which is the
-  #       exact failure mode that stranded PRs #118, #120 and #160 on stale
-  #       required-check lists.
+  #   (a) the rollup gate -- it fails unless every lane above reports
+  #       exactly "success", and it is the ONLY name in the branch
+  #       ruleset's required-status-checks list. One name instead of many
+  #       is one fewer thing to drift out of sync with this file, the
+  #       exact failure mode that stranded PRs #118, #120 and #160 on
+  #       stale required-check lists.
   #
-  #   (b) the merge orchestrator -- it maintains the managed Work State /
-  #       Evidence Index comments, enforces owner:hold-merge and
-  #       owner:allow-draft, and arms native squash auto-merge. Arming now
-  #       happens HERE, structurally after every gate has already
-  #       succeeded, rather than in a pull_request_target workflow that
-  #       fired immediately on push and had to re-read check conclusions
-  #       from the API to find out whether verification had even run.
-  #       "The last gate finishing is the only thing that can enable a
-  #       merge" is now true by construction.
+  #   (b) the merge orchestrator -- it maintains the managed Work State
+  #       comments, enforces owner:hold-merge and owner:allow-draft, and
+  #       arms native squash auto-merge. Arming happens HERE, structurally
+  #       after every lane has already succeeded, so "the last gate
+  #       finishing is the only thing that can enable a merge" is true by
+  #       construction. Nothing else in this repository may call
+  #       enablePullRequestAutoMerge.
   #
-  # Verify: LLM Review is deliberately NOT in needs: -- it is not required
-  # and fails closed while reviewer credentials are unprovisioned, so
-  # depending on it would make this required check permanently red. NOTE:
-  # while that row is red the pull request stays "unstable", and GitHub's
-  # own auto-merge does not fire on an unstable pull request even when
-  # every required check passes. Auto-merge therefore begins working the
-  # moment LLM Review stops reporting failure; until then this job still
-  # arms it and the arming simply waits.
+  # AI Review is in needs: by owner decision -- it is mandatory in
+  # substance. An LLM provider outage or a blocking finding therefore
+  # stops auto-merge until resolved; the owner's ruleset bypass remains
+  # the escape hatch, and no agent may use it.
   #
-  # This job raises its own permissions to write and deliberately performs
-  # NO checkout and runs NO shell script over repository content: the only
-  # thing it executes is actions/github-script against context.payload and
-  # API responses. Keep it that way -- it is the one job in this workflow
+  # This job MUST stay last in this file, and its github-script step must
+  # remain the only embedded script block here: the workflow contract test
+  # extracts everything after that step's script input and executes it, so
+  # a second such block (or a job below this one) would silently corrupt
+  # what the behavioral tests exercise.
+  #
+  # It raises its own permissions to write and deliberately performs NO
+  # checkout and runs NO shell over repository content: the only thing it
+  # executes is actions/github-script against context.payload and API
+  # responses. Keep it that way -- it is the one job in this workflow
   # holding a write token, and the sibling jobs that DO execute
   # pull-request-authored code hold only the read-only workflow default.
-  verify-all-gates:
-    name: "Verify: All Gates"
-    needs: [verify-tests-linux, verify-tests-windows]
+  pr-gate:
+    name: "PR Gate"
+    needs: [repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos, ai-review]
     # always(), not the default: the default skips this job the moment a
     # needs: job fails, which would leave THIS row -- the one row the
     # ruleset actually requires -- permanently absent on exactly the pull
@@ -408,16 +498,17 @@ jobs:
             // that stops reporting turns this red rather than silently
             // counting as a pass, because anything that is not exactly
             // "success" fails the gate.
-            // The jobs this gate exists to roll up. Naming them explicitly is
-            // what makes an EMPTY or truncated needs payload fail closed: a
-            // bare "nothing failed" test over an empty object is vacuously
+            // The lanes this gate exists to roll up. Naming them explicitly
+            // is what makes an EMPTY or truncated needs payload fail closed:
+            // a bare "nothing failed" test over an empty object is vacuously
             // true, so a needs: list that was edited away, or a GATE_RESULTS
             // that arrived empty, would report GREEN and arm a merge having
             // verified nothing at all. Measured: with GATE_RESULTS="{}" the
             // unguarded form armed auto-merge and passed. Keep this list in
-            // step with the job ids above -- a job present here but missing
-            // from needs: fails the gate rather than being skipped silently.
-            const EXPECTED_GATE_JOBS = ["verify-tests-linux", "verify-tests-windows"];
+            // step with the job ids above -- a lane present here but missing
+            // from needs: fails the gate rather than being skipped silently,
+            // and the workflow contract test holds the two lists equal.
+            const EXPECTED_GATE_JOBS = ["repository-standards", "toolbelt", "acc-linux", "acc-windows", "brain", "platform", "lifeos", "ai-review"];
 
             let gateResults;
             try {
@@ -579,20 +670,22 @@ jobs:
                 } else if (/already.*enabled/i.test(message)) {
                   summaryLines.push("- Auto-merge: already enabled.");
                 } else if (/unstable status/i.test(message)) {
-                  // The steady state while Verify: LLM Review reports failure,
-                  // NOT an anomaly. GitHub refuses the mutation outright on an
-                  // unstable PR -- it does not arm-and-wait -- so nothing is
-                  // pending and a later run has to re-attempt this once the PR
-                  // leaves unstable. Observed verbatim on PR #219:
+                  // GitHub refuses the mutation outright on an "unstable" PR
+                  // (some non-required check is red) -- it does not
+                  // arm-and-wait, so nothing is pending and a later run has
+                  // to re-attempt. With every lane in this workflow already
+                  // inside this job's needs, our own rows cannot cause this
+                  // any more; a red third-party check or a stale re-run of a
+                  // sibling workflow still can. Observed verbatim on PR #219:
                   //   "Pull request Pull request is in unstable status"
                   summaryLines.push(
-                    "- Auto-merge: refused while the PR is `unstable` (a non-required check is red, " +
-                    "normally `Verify: LLM Review`). Nothing is armed and nothing is queued; a later " +
-                    "run of this workflow re-attempts arming once the PR leaves that state."
+                    "- Auto-merge: refused while the PR is `unstable` (a non-required check outside this " +
+                    "workflow's lanes is red). Nothing is armed and nothing is queued; a later run of this " +
+                    "workflow re-attempts arming once the PR leaves that state."
                   );
                 } else {
                   core.warning(
-                    `All Gates: unexpected error arming auto-merge for PR #${pr.number}, continuing without failing the run: ${message}`
+                    `PR Gate: unexpected error arming auto-merge for PR #${pr.number}, continuing without failing the run: ${message}`
                   );
                   summaryLines.push(
                     `- Auto-merge: unexpected error, not failing the run: ${message}`
@@ -605,7 +698,7 @@ jobs:
               if (stillDraft) return "draft (owner:allow-draft honored)";
               if (holdAuthorized) return "held (owner:hold-merge honored)";
               if (pr.mergeable_state === "dirty") return "blocked: merge conflict against base";
-              if (!gatesGreen) return "waiting on Verify: * gates";
+              if (!gatesGreen) return "waiting on verification lanes";
               return "ready";
             }
 
@@ -650,7 +743,7 @@ jobs:
               summaryLines.push(`### PR #${pr.number}: ${pr.title}`);
               summaryLines.push(
                 gatesGreen
-                  ? "- Gates: every verification job succeeded."
+                  ? "- Gates: every verification lane succeeded."
                   : `- Gates: NOT green -- ${failedGates.join(", ")}.`
               );
 
@@ -689,7 +782,7 @@ jobs:
                     );
                   } catch (error) {
                     core.warning(
-                      `All Gates: failed to clear unauthorized draft state on PR #${pr.number}: ${error.message}`
+                      `PR Gate: failed to clear unauthorized draft state on PR #${pr.number}: ${error.message}`
                     );
                     summaryLines.push(
                       `- Draft: failed to clear unauthorized draft state: ${error.message}`
@@ -730,7 +823,7 @@ jobs:
                     );
                   } else {
                     core.warning(
-                      `All Gates: owner:hold-merge honored for PR #${pr.number} but disabling auto-merge failed: ${message}`
+                      `PR Gate: owner:hold-merge honored for PR #${pr.number} but disabling auto-merge failed: ${message}`
                     );
                     summaryLines.push(
                       `- Hold: owner:hold-merge is authorized, but disabling auto-merge failed: ${message}`
@@ -779,12 +872,12 @@ jobs:
               // either direction: they are logged, and the gate result
               // below is still reported from needs.* alone.
               core.error(
-                `All Gates: orchestration error, verdict unaffected: ${error.message}`
+                `PR Gate: orchestration error, verdict unaffected: ${error.message}`
               );
               summaryLines.push(`- Orchestration error: ${error.message}`);
             } finally {
               try {
-                core.summary.addHeading("Verify: All Gates");
+                core.summary.addHeading("PR Gate");
                 core.summary.addRaw(
                   summaryLines.join("\n") || "_No actions recorded._",
                   true
@@ -792,7 +885,7 @@ jobs:
                 await core.summary.write();
               } catch (summaryError) {
                 core.warning(
-                  `All Gates: failed to write job summary: ${summaryError.message}`
+                  `PR Gate: failed to write job summary: ${summaryError.message}`
                 );
               }
             }
@@ -800,6 +893,6 @@ jobs:
             // THE verdict. Last, so the orchestration above always runs.
             if (!gatesGreen) {
               core.setFailed(
-                `One or more required gates did not succeed: ${failedGates.join(", ")}. See the individual Verify: * rows on this PR.`
+                `One or more verification lanes did not succeed: ${failedGates.join(", ")}. See the individual lane rows on this PR.`
               );
             }

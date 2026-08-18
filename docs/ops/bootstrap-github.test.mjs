@@ -122,7 +122,7 @@ test("dry run with --branch-protection prints the exact ruleset body without sen
   const requiredChecksRule = body.rules.find((rule) => rule.type === "required_status_checks");
   assert.deepEqual(
     requiredChecksRule.parameters.required_status_checks.map((check) => check.context),
-    ["Verify: All Gates"],
+    ["PR Gate"],
   );
   assert.equal(requiredChecksRule.parameters.strict_required_status_checks_policy, true);
   for (const type of ["deletion", "required_linear_history", "non_fast_forward", "pull_request"]) {

@@ -112,8 +112,12 @@ runs:
         # packages/review/src/config.ts throws when these match, defaulting the
         # builder to anthropic -- caught here so the reason is stated up front
         # rather than surfacing as a reviewer crash after credentials are pulled.
-        builder="${REVIEW_BUILDER_PROVIDER:-anthropic}"
-        if [ "$REVIEW_PROVIDER" = "$builder" ]; then
+        # Compare the same way config.ts does: provider identifiers are
+        # case-insensitive and canonicalized to lowercase at the boundary, so
+        # this preflight must not disagree with the library about equality.
+        reviewer="$(printf '%s' "$REVIEW_PROVIDER" | tr '[:upper:]' '[:lower:]')"
+        builder="$(printf '%s' "${REVIEW_BUILDER_PROVIDER:-anthropic}" | tr '[:upper:]' '[:lower:]')"
+        if [ "$reviewer" = "$builder" ]; then
           echo "REVIEW_PROVIDER and the builder family are both \"$builder\"." >&2
           echo "packages/review refuses to let one model family grade its own work, so the" >&2
           echo "reviewer must be a different family (AGENTS.md, R2/R3 provider separation)." >&2

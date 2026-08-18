@@ -1,6 +1,6 @@
 name: "Claude Dispatch"
 
-# Wakes the developer agent when Verify: LLM Review blocks a pull request.
+# Wakes the developer agent when AI Review blocks a pull request.
 # llm-review-dialogue.yml posts the findings and then fires this via
 # repository_dispatch; this workflow is the half that can actually change
 # code. Issue #231.
@@ -126,7 +126,7 @@ jobs:
             You are the developer agent for pull request #${{ github.event.client_payload.prNumber }}
             in this repository, on branch `${{ steps.pr.outputs.branch }}`.
 
-            The adversarial review gate (`Verify: LLM Review`) is blocking this pull
+            The adversarial review gate (`AI Review`) is blocking this pull
             request. Its findings are in the single managed comment on the pull
             request whose body starts with:
 
