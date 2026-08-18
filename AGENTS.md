@@ -132,8 +132,12 @@ anything else in this session.
   it. It exists because every agent capable of working in this repo is built to honor `AGENTS.md`,
   and honoring it here is exactly as mandatory as honoring any other rule in this file.
 - The two values in `agent-roles.yaml` must never be equal. `repository-standards` enforces this
-  mechanically as of the CI-integration slice that follows this one; until then, treat it as a
-  standing rule with no automated check yet.
+  mechanically: `.github/actions/verify-repo-policy` validates the file on every PR — it must
+  parse, both `dev.provider` and `review.provider` must be one of `anthropic | openai | gemini`,
+  both must name a non-empty `model`, and the two providers must differ. Any violation fails the
+  whole `PR Gate` closed — a role collision or a malformed file blocks every PR, not just one that
+  touches this file. This is the first of three independent checks of the same constraint; the dev
+  dispatcher and the reviewer gate each re-verify it too, once those slices land.
 
 ## Provider-neutral roles
 
