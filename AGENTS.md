@@ -116,6 +116,29 @@ and final review, fresh verification before completion.
 Local plans, briefs, and ledgers live only in gitignored workspaces (`.superpowers/`,
 `.agent-runtime/`); nothing drafted there may be committed. The Issue is the durable artifact.
 
+## Active agent roles
+
+This repo has exactly two automation roles, **dev** and **review**, each bound to one model
+vendor at a time by `agent-roles.yaml` at the repo root. Read that file now, before doing
+anything else in this session.
+
+- **About to write code, push a commit, or open/update a pull request?** You must be the vendor
+  named under `dev`. If you are not, stop and say so plainly to whoever is directing you, naming
+  the vendor that *is* currently assigned, before writing anything. Proceed only on their explicit
+  instruction to override — that is the owner's call to make, not yours.
+- **About to post a review verdict, or claim to speak as "the" reviewer, on a PR in this repo?**
+  Same rule, against `review`.
+- This is an instruction, not a technical lock — nothing stops a determined session from ignoring
+  it. It exists because every agent capable of working in this repo is built to honor `AGENTS.md`,
+  and honoring it here is exactly as mandatory as honoring any other rule in this file.
+- The two values in `agent-roles.yaml` must never be equal. `repository-standards` enforces this
+  mechanically: `.github/actions/verify-repo-policy` validates the file on every PR — it must
+  parse, both `dev.provider` and `review.provider` must be one of `anthropic | openai | gemini`,
+  both must name a non-empty `model`, and the two providers must differ. Any violation fails the
+  whole `PR Gate` closed — a role collision or a malformed file blocks every PR, not just one that
+  touches this file. This is the first of three independent checks of the same constraint; the dev
+  dispatcher and the reviewer gate each re-verify it too, once those slices land.
+
 ## Provider-neutral roles
 
 | Role | Responsibility |
@@ -462,7 +485,7 @@ on the next run.
 > this before adding another event to `pr-verify.yml`'s `types:` list.
 
 `.github/CODEOWNERS` requires `@kgsmith19` review for this repo's control-plane paths
-(`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`). `main` protection: pull request
+(`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`, `agent-roles.yaml`). `main` protection: pull request
 required, squash only, linear history, no force push, no deletion, code-owner approval required
 for those paths, owner bypass.
 

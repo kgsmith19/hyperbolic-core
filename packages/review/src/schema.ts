@@ -59,6 +59,11 @@ const findingSchema = {
       description:
         "Either a specific acceptance criterion from the linked Issue (quote or number it) or a named AGENTS.md section (e.g. 'AGENTS.md > Test quality'). Required. A finding without a citation is discarded.",
     },
+    outOfScope: {
+      type: "boolean",
+      description:
+        "True only when the pull request's own dialogue thread shows the dev agent proposing this exact finding belongs in a separate, non-blocking Issue instead of blocking this pull request, and you agree. Never true on a first-round review -- there is nothing yet to have agreed to. Does not change `severity`; it only excludes an otherwise-blocking finding from the block decision, and the finding still gets reported.",
+    },
   },
   required: ["severity", "category", "claim", "evidence", "requestedChange", "citation"],
 } as const;
