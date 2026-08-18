@@ -413,10 +413,31 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
 - **Fail-closed vs. fail-open:** infrastructure failure (missing credential, unset
   `REVIEW_MODEL`, invalid provider configuration, API error, timeout) fails the gate; a weak or
   malformed model answer does not.
-- Findings are published to the run's job summary, and the authoring agent fixes or rebuts them
-  argued from the work item, this standard, and the diff — objectively, never from taste.
-  Posting findings into the PR discussion itself, with a round counter and owner escalation after
-  repeated unresolved rounds, is tracked separately and is **not** yet implemented.
+- Findings are published to the run's job summary, and also posted into the pull request as
+  **exactly one managed comment** (marker `<!-- agent-engineering-standard:llm-review:v1 -->`,
+  updated in place per head — never a new comment per run), by `llm-review-dialogue.yml` (Issue
+  #231). That workflow triggers on `workflow_run`, not `pull_request`, so it adds no PR check row,
+  and it holds `pull-requests: write` under the same discipline as `PR Gate`: no checkout, no shell
+  over repository content, only `actions/github-script` against a downloaded artifact and the API.
+  `AI Review` itself stays read-only — the artifact is the only thing that crosses the boundary,
+  and the PR number it names is verified against the triggering run's own head SHA before anything
+  is posted.
+- The comment carries a **round counter**: it increments when a new head still leaves a blocking
+  finding open, holds steady on a same-head re-run, and resets on a passing verdict. A blocking
+  finding wakes the developer agent via `repository_dispatch` (`claude-dispatch.yml`) — the
+  documented exception to `GITHUB_TOKEN`'s recursion prevention, needing no PAT or long-lived
+  credential beyond the agent's own model key — which fixes the finding, pushes, and lets the
+  gates re-run, or rebuts it in the same comment thread, argued from the work item, this standard,
+  and the diff, objectively and never from taste.
+- After a configurable number of unresolved rounds (`vars.LLM_REVIEW_ESCALATE_AFTER`, default 3)
+  with the gate still red, the comment tags `@kgsmith19` once and states the unresolved
+  disagreement plainly — the documented rare escape hatch, not the normal path. The same
+  escalation fires immediately, without waiting on the round threshold, if the agent-wake
+  credential is unprovisioned or the dispatch itself fails: a loop that cannot advance must not
+  stall silently behind a counter that will never tick. This matters more now that `AI Review` is
+  a `needs:` dependency of `PR Gate` (below) — an unresolved blocking finding stops auto-merge for
+  real, not just cosmetically, so a disagreement that cannot resolve itself must reach the owner
+  rather than stall.
 
 > [!IMPORTANT]
 > **No agent review may block the owner.** `AI Review` is mandatory in substance — it is a
