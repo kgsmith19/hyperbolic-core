@@ -543,6 +543,61 @@ test("dialogue: a hyphenated @mention is defused, not just a single-word one", a
   assert.match(body, /@​another-hyphenated-name/);
 });
 
+// AI Review finding on PR #234 (blocking #2): the script derives
+// blockingFindings from verdict.findings alone, with no cross-check against
+// verdict.discarded. packages/review's own validateVerdict (validate.ts)
+// partitions each raw model finding into EITHER findings OR discarded --
+// never both (`(parsed.valid ? findings : discarded).push(...)`), so a real
+// verdict from this repo's own reviewer can never put the same finding in
+// both arrays. But the dialogue script treats the staged artifact as data
+// crossing a job boundary, not as a call into validateVerdict directly (see
+// the SHA-mismatch security test above) -- so this test constructs a verdict
+// a *malformed* producer could emit (a "blocking"-severity entry sitting in
+// discarded) and confirms the script still only ever counts verdict.findings
+// toward blocking/round/dispatch, exactly as Issue #231 claim 4 and
+// AGENTS.md's "discarded findings ... cannot block" require, regardless of
+// what shape a future or malformed producer hands it.
+test("dialogue: an entry in verdict.discarded never counts toward blocking, even if mislabeled 'blocking' severity", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "11",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": {
+        verdict: "block",
+        findings: [
+          { severity: "blocking", category: "real", claim: "the one real finding", evidence: "e", requestedChange: "r", citation: "AGENTS.md > x" },
+        ],
+        discarded: [
+          { severity: "blocking", category: "malformed", claim: "should never block", evidence: "", requestedChange: "", citation: "" },
+        ],
+        summary: "s",
+      },
+    },
+  }, { pr: BASE_PR });
+
+  const body = calls.createComment[0].body;
+  assert.match(body, /### Blocking findings \(1\)/);
+  assert.match(body, /the one real finding/);
+  // The discarded entry is still rendered -- for transparency, under its own
+  // "Discarded" section -- so what matters is WHERE it lands, not whether it
+  // appears at all: it must come after the Discarded heading, never inside
+  // the Blocking findings section above it.
+  const blockingHeadingEnd = body.indexOf("### Blocking findings (1)") + "### Blocking findings (1)".length;
+  const discardedHeadingIndex = body.indexOf("Discarded (1)");
+  const discardedTextIndex = body.indexOf("should never block");
+  assert.ok(discardedHeadingIndex > blockingHeadingEnd, "Discarded heading must come after Blocking findings");
+  assert.ok(discardedTextIndex > discardedHeadingIndex, "the discarded entry's text must render after the Discarded heading, not inside Blocking findings");
+  assert.equal(calls.createDispatchEvent.length, 1);
+  assert.equal(calls.createDispatchEvent[0].client_payload.round, 1, "round/dispatch must derive from findings alone, not be inflated by discarded");
+});
+
 // ---------------------------------------------------------------------------
 // Behavioral: claude-dispatch.yml's staleness guard.
 // ---------------------------------------------------------------------------
