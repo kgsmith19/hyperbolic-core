@@ -151,20 +151,24 @@ interface OpenAIBaseParams {
   temperature?: number;
 }
 
-// Reasoning-family models reject any explicit `temperature` other than the
+// These model families reject any explicit `temperature` other than the
 // API's own default (1) -- a real, documented Chat Completions constraint,
 // not something this driver can negotiate around. The SDK exposes no
 // capability flag for this, so detection is by id prefix. Observed via a
 // live 400 from gpt-5-mini ("'temperature' does not support 0 with this
-// model"); o1/o3/o4 share the same reasoning-model restriction.
-const REASONING_MODEL_PREFIXES = ["o1", "o3", "o4", "gpt-5"];
+// model"); o1/o3/o4 are reasoning models with the same restriction, and it
+// also covers the whole gpt-5 series including the non-reasoning
+// "gpt-5-chat" variant -- this is a model-family restriction, not strictly
+// a reasoning-model one, confirmed against OpenAI's own community/API
+// error reports for gpt-5-chat-latest.
+const TEMPERATURE_LOCKED_MODEL_PREFIXES = ["o1", "o3", "o4", "gpt-5"];
 
 // A bare startsWith() would also match a same-prefix different-generation
 // id it was never meant to (e.g. a hypothetical "gpt-50" starts with
 // "gpt-5"), so the prefix must be the whole id or be followed by a
 // non-digit (a real next model id extends with "-", not a digit run).
-function isReasoningModel(model: string): boolean {
-  return REASONING_MODEL_PREFIXES.some((prefix) => {
+function isTemperatureLocked(model: string): boolean {
+  return TEMPERATURE_LOCKED_MODEL_PREFIXES.some((prefix) => {
     if (!model.startsWith(prefix)) return false;
     const next = model[prefix.length];
     return next === undefined || !/[0-9]/.test(next);
@@ -178,7 +182,7 @@ function buildParams(request: LlmRequest): OpenAIBaseParams {
     max_completion_tokens: request.maxTokens,
     tools: request.tools?.map(toOpenAITool),
     tool_choice: request.toolChoice ? toOpenAIToolChoice(request.toolChoice) : undefined,
-    temperature: isReasoningModel(request.model) ? undefined : request.temperature,
+    temperature: isTemperatureLocked(request.model) ? undefined : request.temperature,
   };
 }
 
