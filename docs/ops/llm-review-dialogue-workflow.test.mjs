@@ -92,6 +92,15 @@ function loadDispatchPrCheckScript() {
   return new AsyncFunction("context", "core", "github", "process", extractScript(dispatchYaml, marker));
 }
 
+// The conversation step is the SECOND script: | block in this file (after
+// the Issue-body step), so it needs a starting index -- the same reason
+// loadDispatchPrCheckScript() above locates its block by a step id first.
+function loadConversationScript() {
+  const marker = reviewActionYaml.indexOf("Context · Write the pull request's conversation to a file");
+  assert.ok(marker >= 0, "verify-llm-review/action.yml: conversation step not found");
+  return new AsyncFunction("require", "context", "core", "github", "process", extractScript(reviewActionYaml, marker));
+}
+
 // ---------------------------------------------------------------------------
 // Structural: the token-placement invariant, mechanically enforced the same
 // way docs/ops/pr-verify-workflow.test.mjs enforces it for All Gates.
@@ -638,4 +647,57 @@ test("dispatch: a closed PR at the right head still stands down -- there is noth
   await loadDispatchPrCheckScript()(context, core, github, proc);
 
   assert.equal(outputs.stale, "true");
+});
+
+// ---------------------------------------------------------------------------
+// verify-llm-review/action.yml's "Context · Write the pull request's
+// conversation to a file" step -- gives the reviewer everything posted on
+// the pull request so far, chronological, unfiltered, as
+// packages/review/src/prompt.ts's fenced DATA.
+// ---------------------------------------------------------------------------
+
+async function runConversationScript(comments) {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const dir = fs.mkdtempSync(path_.join(os.tmpdir(), "llm-review-conversation-test-"));
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const github = {
+    rest: { issues: { listComments: async () => ({ data: comments }) } },
+    paginate: async (fn) => (await fn()).data,
+  };
+  const core = { info: () => {} };
+  const proc = { env: { PR_NUMBER: "240", RUNNER_TEMP: dir } };
+
+  await loadConversationScript()(require, context, core, github, proc);
+  return fs.readFileSync(path_.join(dir, "pr-conversation.md"), "utf8");
+}
+
+// Behavior protected: comments render chronologically (listComments' own
+// order, never re-sorted), each carrying its author and timestamp, so the
+// reviewer can tell a fix description from an earlier rebuttal apart.
+// Defect caught: dropping the author/timestamp, which would make "who said
+// this, and was it before or after the last verdict?" unanswerable from the
+// rendered text alone.
+test("conversation step: renders comments chronologically with author and timestamp", async () => {
+  const body = await runConversationScript([
+    { user: { login: "github-actions[bot]" }, created_at: "2026-08-18T00:00:00Z", body: "round 1 verdict: block" },
+    { user: { login: "kgsmith19" }, created_at: "2026-08-18T01:00:00Z", body: "fixed, please re-check" },
+  ]);
+
+  const firstIndex = body.indexOf("round 1 verdict: block");
+  const secondIndex = body.indexOf("fixed, please re-check");
+  assert.ok(firstIndex >= 0 && secondIndex >= 0, "both comment bodies must appear");
+  assert.ok(firstIndex < secondIndex, "comments must render in chronological order");
+  assert.match(body, /github-actions\[bot\] \(2026-08-18T00:00:00Z\)/);
+  assert.match(body, /kgsmith19 \(2026-08-18T01:00:00Z\)/);
+});
+
+// Behavior protected: a pull request with no comments yet (the common case
+// on a first-round review) writes an empty file rather than throwing --
+// gatherContext's own default ("") and prompt.ts's first-round placeholder
+// depend on this being a clean empty string, not an error or "undefined".
+test("conversation step: no comments yet writes an empty conversation, not an error", async () => {
+  const body = await runConversationScript([]);
+  assert.equal(body, "");
 });
