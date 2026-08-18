@@ -263,7 +263,7 @@ jobs:
             }
 
             const existing = await findManagedComment();
-            const prior = parseState(existing?.body) || { round: 0, headSha: null, escalated: false };
+            const prior = parseState(existing?.body) || { round: 0, headSha: null, escalated: false, deferredIssues: {} };
 
             // ---------------------------------------------------------------
             // Classify this run.
@@ -276,8 +276,13 @@ jobs:
             const blocking = ran && verdict.verdict === "block";
             const findings = ran && Array.isArray(verdict.findings) ? verdict.findings : [];
             const discarded = ran && Array.isArray(verdict.discarded) ? verdict.discarded : [];
-            const blockingFindings = findings.filter((f) => f.severity === "blocking");
-            const advisoryFindings = findings.filter((f) => f.severity !== "blocking");
+            // outOfScope excuses a finding from blocking without changing its
+            // severity (packages/review/src/types.ts) -- so it must come out
+            // of blockingFindings here too, or the render would keep showing
+            // "blocking" on a finding the verdict itself no longer blocks on.
+            const blockingFindings = findings.filter((f) => f.severity === "blocking" && f.outOfScope !== true);
+            const advisoryFindings = findings.filter((f) => f.severity !== "blocking" && f.outOfScope !== true);
+            const deferredFindings = findings.filter((f) => f.outOfScope === true);
 
             if (!ran) {
               core.info("The reviewer produced no verdict (unprovisioned or infrastructure failure); leaving the dialogue comment untouched.");
@@ -342,7 +347,93 @@ jobs:
             const escalateNow = blocking && !escalated && (round >= escalateAfter || cannotAdvance);
             if (escalateNow) escalated = true;
 
-            const state = { round, headSha, escalated, verdict: verdict.verdict };
+            // ---------------------------------------------------------------
+            // File a non-blocking Issue for each finding the reviewer and the
+            // dev agent agreed is legitimate but out of this pull request's
+            // scope (packages/review/src/types.ts's outOfScope field). This
+            // NEVER blocks: deferredFindings is already excluded from
+            // blockingFindings above, and nothing here can change `blocking`.
+            // ---------------------------------------------------------------
+            const DEFERRED_MARKER_OPEN = "<!-- llm-review-deferred: ";
+            const DEFERRED_MARKER_CLOSE = " -->";
+
+            function fingerprintOf(finding) {
+              return require("node:crypto")
+                .createHash("sha256")
+                .update(`${finding.category}|${finding.file ?? ""}|${finding.line ?? ""}`)
+                .digest("hex")
+                .slice(0, 16);
+            }
+
+            // Prose can drift slightly between rounds even at temperature 0
+            // (packages/review/src/review.ts), so the fingerprint deliberately
+            // hashes only the STRUCTURAL fields (category/file/line) -- never
+            // the free-text claim/evidence, which would make the fingerprint
+            // too sensitive and fail toward duplicate Issues, the bad
+            // direction for an "only ever file this once" guarantee.
+            const deferredIssues = { ...(prior.deferredIssues || {}) };
+
+            for (const finding of deferredFindings) {
+              const fingerprint = fingerprintOf(finding);
+              if (deferredIssues[fingerprint]) {
+                continue; // already filed and recorded in the managed comment's own state
+              }
+
+              // Fallback: the managed comment's state can be lost (hand-edited,
+              // or a marker parse failure) without the Issue itself vanishing.
+              // Search for it by the same fingerprint before creating a new
+              // one, so state loss degrades to "found by search" rather than
+              // "filed again."
+              let existingIssueNumber = null;
+              try {
+                const searchResult = await github.rest.search.issuesAndPullRequests({
+                  q: `repo:${owner}/${repo} is:issue in:body "${DEFERRED_MARKER_OPEN}${fingerprint}${DEFERRED_MARKER_CLOSE}"`,
+                });
+                existingIssueNumber = searchResult.data.items[0]?.number ?? null;
+              } catch (error) {
+                core.warning(`Could not search for an existing deferred Issue (fingerprint ${fingerprint}): ${error.message}`);
+              }
+
+              if (existingIssueNumber !== null) {
+                deferredIssues[fingerprint] = existingIssueNumber;
+                continue;
+              }
+
+              try {
+                const created = await github.rest.issues.create({
+                  owner,
+                  repo,
+                  title: `[AI Review, deferred] ${neutralize(finding.claim, 120)}`,
+                  body: [
+                    `${DEFERRED_MARKER_OPEN}${fingerprint}${DEFERRED_MARKER_CLOSE}`,
+                    `Opened by the automated reviewer during review of #${meta.prNumber} — legitimate finding, agreed with the dev agent to be out of that pull request's scope. **Does not block #${meta.prNumber}.**`,
+                    "",
+                    `**Category.** \`${neutralize(finding.category, 60)}\``,
+                    finding.file ? `**Location.** \`${neutralize(finding.file, 200)}${finding.line ? `:${finding.line}` : ""}\`` : "",
+                    "",
+                    `**Claim.** ${neutralize(finding.claim, 1200)}`,
+                    "",
+                    "**Evidence.**",
+                    "```",
+                    neutralize(finding.evidence, 1200),
+                    "```",
+                    "",
+                    `**Requested change.** ${neutralize(finding.requestedChange, 1200)}`,
+                    "",
+                    `**Cites.** ${neutralize(finding.citation, 300)}`,
+                  ]
+                    .filter((line) => line !== "")
+                    .join("\n"),
+                  labels: ["source:ai-review"],
+                });
+                deferredIssues[fingerprint] = created.data.number;
+                core.info(`Filed deferred Issue #${created.data.number} for PR #${meta.prNumber} (fingerprint ${fingerprint}).`);
+              } catch (error) {
+                core.warning(`Could not file a deferred Issue for fingerprint ${fingerprint}: ${error.message}`);
+              }
+            }
+
+            const state = { round, headSha, escalated, verdict: verdict.verdict, deferredIssues };
 
             // ---------------------------------------------------------------
             // Build the comment.
@@ -378,6 +469,16 @@ jobs:
               );
               advisoryFindings.forEach((finding, i) => lines.push(renderFinding(finding, i + 1), ""));
               lines.push("</details>", "");
+            }
+
+            if (deferredFindings.length > 0) {
+              lines.push(`### Deferred findings (${deferredFindings.length}) — agreed out of scope, does not block`, "");
+              deferredFindings.forEach((finding, i) => {
+                const fingerprint = fingerprintOf(finding);
+                const issueNumber = deferredIssues[fingerprint];
+                lines.push(renderFinding(finding, i + 1));
+                lines.push(issueNumber ? `**Tracked in.** #${issueNumber}` : "_Could not file a tracking Issue for this finding; see the run log._", "");
+              });
             }
 
             if (discarded.length > 0) {
