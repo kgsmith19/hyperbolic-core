@@ -127,8 +127,9 @@ subsystem documentation before running them.
    spanning the API and React client must keep `backend/gui/README.md`, `frontend/src/api.ts`,
    and the UI contract suite consistent.
 4. Open a pull request that links the Issue and reports exact verification.
-5. Let `.github/workflows/acc-ci.yml` produce this app's required check,
-   `Verify: Tests (Linux)` and `Verify: Tests (Windows)`, as stages of the root's `pr-verify.yml`.
+5. Let the root's `pr-verify.yml` verify this app's change: `ACC Linux` and
+   `ACC Windows`, its two native parallel jobs (sharing `acc-ci.yml`'s own
+   composite actions).
 6. After the configured gate passes, GitHub may squash-merge the pull request
    and delete the branch.
 

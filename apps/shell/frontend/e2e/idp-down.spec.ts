@@ -25,7 +25,7 @@ import { mockAuth, blockIdp, fillAndSubmitLogin } from "./support/auth";
 // issue's report.
 //
 // MANUAL-ONLY (Finding #80, PR #8 security review): this spec is no longer
-// run by shell-ci.yml's PR-blocking pr-gate job -- each test here pays a
+// run by pr-verify.yml's PR-blocking Platform lane -- each test here pays a
 // real ~30s wait (test.setTimeout(75_000) below), a repeated cost on every
 // Shell/packages PR for a scenario that changes rarely. Run it via
 // .github/workflows/shell-idp-down.yml (workflow_dispatch, manual) or

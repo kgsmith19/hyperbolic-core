@@ -1,6 +1,6 @@
 # Test Ledger
 
-The Shell's suites. All of them run in the `Verify: Tests (Linux)`
+The Shell's suites. All of them run in the `Platform`
 (`.github/workflows/shell-ci.yml`) except where noted.
 
 | Suite | Covers | Command |
@@ -40,6 +40,6 @@ Playwright's own round-trip reports the harness, not the app.
 
 ## 🔗 Cross-Package Coupling
 
-The `Verify: Tests (Linux)` also type-checks and unit-tests `packages/platform-client`,
+The `Platform` gate also type-checks and unit-tests `packages/platform-client`,
 `packages/ui`, `packages/llm`, and `services/llm-handler`. A change in this
 app can turn the gate red through any of them.

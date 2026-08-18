@@ -1,7 +1,7 @@
 // Finding #80 (PR #8 security review): e2e/idp-down.spec.ts's two Playwright
 // specs each wait out @supabase/auth-js's REAL exponential backoff (~30s,
 // deliberately un-faked -- see that file's own header comment), and ran in
-// the PR-BLOCKING pr-gate job on every Shell/packages PR. That real-timing
+// the PR-blocking Platform lane of pr-verify.yml on every Shell/packages PR. That real-timing
 // proof is now relocated to .github/workflows/shell-idp-down.yml (manual
 // workflow_dispatch, mirroring toolbelt-network-checker-release.yml's own
 // manual-trigger pattern) -- see that spec file's own updated header

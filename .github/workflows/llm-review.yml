@@ -43,8 +43,10 @@ on:
         description: >-
           Pull request to review. Leave empty to no-op. Supplying one runs the
           full reviewer path on demand -- the provisioning loop this exists for
-          (issue #216), since pr-verify.yml only reaches this gate after its
-          ~16-minute test job.
+          (issue #216), without waiting on a pull_request event: pr-verify.yml's
+          AI Review job depends only on Repository Standards and runs in
+          parallel with the six app lanes, so this input just lets you exercise
+          the reviewer without opening/pushing a PR at all.
         required: false
         default: ""
 

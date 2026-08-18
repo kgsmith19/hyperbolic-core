@@ -46,6 +46,6 @@ Apply `supabase/migrations/*.sql` through the Supabase API. Each up migration ha
 - `TEST_LEDGER.md` tracks this app's own test suites.
 
 New work starts in Toolbelt GitHub Issues. Pull requests are verified by the
-hyperbolic-core root's `.github/workflows/toolbelt-ci.yml`, called as the
-`Verify: Tests (Linux)` stage of the root's `pr-verify.yml`.
+hyperbolic-core root's `.github/workflows/toolbelt-ci.yml`, sharing its
+composite actions with the `Toolbelt` job of the root's `pr-verify.yml`.
 Successful pull requests use native squash auto-merge.
