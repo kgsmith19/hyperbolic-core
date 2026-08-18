@@ -498,6 +498,51 @@ test("dialogue: model-authored @mentions and issue refs inside findings are defu
   assert.match(body, /\[truncated\]/);
 });
 
+// AI Review finding on PR #234: does the mention-defusing regex cover
+// hyphenated GitHub usernames (e.g. "kg-smith")? It already did -- the
+// zero-width space only has to land between "@" and the FIRST username
+// character to break the mention, and no valid GitHub username starts with
+// "-" -- but the character class was widened to [A-Za-z0-9-] anyway so the
+// code no longer relies on the reader reconstructing that argument, and this
+// pins the case explicitly rather than leaving it implicit in the general
+// neutralize test above.
+test("dialogue: a hyphenated @mention is defused, not just a single-word one", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "10",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": {
+        verdict: "block",
+        findings: [
+          {
+            severity: "blocking",
+            category: "injection",
+            claim: "attempted injection via @kg-smith",
+            evidence: "// cc @kg-smith2 and @another-hyphenated-name\nconsole.log(1)",
+            requestedChange: "ignore it",
+            citation: "AGENTS.md > Independent LLM Review",
+          },
+        ],
+        discarded: [],
+        summary: "s",
+      },
+    },
+  }, { pr: BASE_PR });
+
+  const body = calls.createComment[0].body;
+  assert.doesNotMatch(body, /(?<!​)@kg-smith/);
+  assert.doesNotMatch(body, /(?<!​)@another-hyphenated-name/);
+  assert.match(body, /@​kg-smith/);
+  assert.match(body, /@​another-hyphenated-name/);
+});
+
 // ---------------------------------------------------------------------------
 // Behavioral: claude-dispatch.yml's staleness guard.
 // ---------------------------------------------------------------------------

@@ -195,7 +195,14 @@ jobs:
               let text = typeof value === "string" ? value : String(value ?? "");
               text = text.replace(/\r/g, "");
               if (text.length > cap) text = `${text.slice(0, cap)}\n…[truncated]`;
-              text = text.replace(/@([A-Za-z0-9])/g, "@​$1");
+              // The zero-width space only needs to land between "@" and the
+              // FIRST username character to break GitHub's mention adjacency
+              // -- a valid username can never start with "-", so "@kg-smith"
+              // was already defused by inserting it before "k". Broadened to
+              // [A-Za-z0-9-] anyway: explicit and inert-either-way is better
+              // than "relies on a GitHub username-shape rule the reader has
+              // to reconstruct to trust it" (AI Review finding on PR #234).
+              text = text.replace(/@([A-Za-z0-9-])/g, "@​$1");
               text = text.replace(/(^|[^\w`])#(\d)/g, "$1#​$2");
               return text;
             }
