@@ -226,6 +226,10 @@ runs:
       run: |
         set -euo pipefail
         {
+          # Deliberately name-agnostic: this step runs under two callers whose
+          # jobs have different actual check names -- pr-verify.yml's
+          # "AI Review" and llm-review.yml's own "Verify: LLM Review" -- so
+          # hardcoding either one would be wrong for the other caller.
           echo "### LLM Review Verdict"
           echo ""
           if [ -f "$RUNNER_TEMP/review-verdict.json" ]; then
