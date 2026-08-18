@@ -296,7 +296,8 @@ jobs:
   # =====================================================================
   # Canary: trivial comment, no functional change -- exercises this job for
   # real (pull_request-triggered OIDC subject) now that the review-gate
-  # identity's Infisical project membership has been granted.
+  # identity's Infisical project membership has been granted and
+  # REVIEW_PROVIDER has been corrected to lowercase (Issue #227).
   verify-llm-review:
     name: "Verify: LLM Review"
     needs: [verify-tests-linux, verify-tests-windows]
