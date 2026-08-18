@@ -159,8 +159,16 @@ interface OpenAIBaseParams {
 // model"); o1/o3/o4 share the same reasoning-model restriction.
 const REASONING_MODEL_PREFIXES = ["o1", "o3", "o4", "gpt-5"];
 
+// A bare startsWith() would also match a same-prefix different-generation
+// id it was never meant to (e.g. a hypothetical "gpt-50" starts with
+// "gpt-5"), so the prefix must be the whole id or be followed by a
+// non-digit (a real next model id extends with "-", not a digit run).
 function isReasoningModel(model: string): boolean {
-  return REASONING_MODEL_PREFIXES.some((prefix) => model.startsWith(prefix));
+  return REASONING_MODEL_PREFIXES.some((prefix) => {
+    if (!model.startsWith(prefix)) return false;
+    const next = model[prefix.length];
+    return next === undefined || !/[0-9]/.test(next);
+  });
 }
 
 function buildParams(request: LlmRequest): OpenAIBaseParams {
