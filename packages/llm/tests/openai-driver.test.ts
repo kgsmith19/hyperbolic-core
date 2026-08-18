@@ -125,6 +125,94 @@ test("openaiDriver.complete: maps system/user/assistant/tool messages, tools, an
   assert.deepEqual(capturedBody?.tool_choice, { type: "function", function: { name: "get_weather" } });
 });
 
+test("openaiDriver.complete: forwards an explicit temperature for a non-reasoning model", async () => {
+  let capturedBody: Record<string, unknown> | undefined;
+
+  await withPatchedFetch(
+    async (_input, init) => {
+      capturedBody = JSON.parse(String(init?.body));
+      return jsonResponse(fixtureChatCompletion());
+    },
+    () => openaiDriver.complete({ ...BASE_REQUEST, model: "gpt-4o", temperature: 0 }, { apiKey: "fixture-key" }),
+  );
+
+  assert.equal(capturedBody?.temperature, 0);
+});
+
+// gpt-5-mini rejected this live: "'temperature' does not support 0 with
+// this model. Only the default (1) value is supported." (#229) --
+// reasoning-family models (o1/o3/o4/gpt-5) only accept the API's own
+// default, so the driver must omit the field rather than send a value the
+// API will 400 on.
+test("openaiDriver.complete: omits temperature for reasoning-family models", async () => {
+  for (const model of ["o1", "o1-mini", "o3", "o3-mini", "o4-mini", "gpt-5", "gpt-5-mini"]) {
+    let capturedBody: Record<string, unknown> | undefined;
+
+    await withPatchedFetch(
+      async (_input, init) => {
+        capturedBody = JSON.parse(String(init?.body));
+        return jsonResponse(fixtureChatCompletion());
+      },
+      () => openaiDriver.complete({ ...BASE_REQUEST, model, temperature: 0 }, { apiKey: "fixture-key" }),
+    );
+
+    assert.ok(capturedBody);
+    assert.equal("temperature" in (capturedBody as object), false, `expected no temperature field for model "${model}"`);
+  }
+});
+
+// streamImpl() calls the same buildParams() as completeImpl() (#229 review
+// finding: the acceptance criteria named both complete() and stream()
+// explicitly, and only complete() had coverage).
+test("openaiDriver.stream: omits temperature for reasoning-family models, forwards it otherwise", async () => {
+  const minimalChunks = [
+    { id: "chatcmpl_fixture", object: "chat.completion.chunk", created: 1_700_000_000, model: "gpt-fixture-resolved", choices: [{ index: 0, delta: { role: "assistant", content: "hi" }, finish_reason: null }] },
+    { id: "chatcmpl_fixture", object: "chat.completion.chunk", created: 1_700_000_000, model: "gpt-fixture-resolved", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+  ];
+
+  let reasoningBody: Record<string, unknown> | undefined;
+  await withPatchedFetch(
+    async (_input, init) => {
+      reasoningBody = JSON.parse(String(init?.body));
+      return sseResponse(minimalChunks);
+    },
+    () => collectStream(openaiDriver.stream({ ...BASE_REQUEST, model: "gpt-5-mini", temperature: 0 }, { apiKey: "fixture-key" })),
+  );
+  assert.ok(reasoningBody);
+  assert.equal("temperature" in (reasoningBody as object), false, "expected no temperature field for a reasoning-family model");
+
+  let nonReasoningBody: Record<string, unknown> | undefined;
+  await withPatchedFetch(
+    async (_input, init) => {
+      nonReasoningBody = JSON.parse(String(init?.body));
+      return sseResponse(minimalChunks);
+    },
+    () => collectStream(openaiDriver.stream({ ...BASE_REQUEST, model: "gpt-4o", temperature: 0 }, { apiKey: "fixture-key" })),
+  );
+  assert.equal(nonReasoningBody?.temperature, 0);
+});
+
+// Advisory finding on #229's review: startsWith() alone would also match a
+// hypothetical non-reasoning model that merely shares a prefix (e.g.
+// "gpt-50"). isReasoningModel requires the prefix to be the whole id or be
+// followed by a non-digit, so a same-prefix-different-generation id like
+// "gpt-50" or "o10" is not mistaken for "gpt-5" or "o1".
+test("openaiDriver.complete: prefix matching does not over-match a same-prefix different-generation model id", async () => {
+  for (const model of ["gpt-50", "o10", "o30", "o40"]) {
+    let capturedBody: Record<string, unknown> | undefined;
+
+    await withPatchedFetch(
+      async (_input, init) => {
+        capturedBody = JSON.parse(String(init?.body));
+        return jsonResponse(fixtureChatCompletion());
+      },
+      () => openaiDriver.complete({ ...BASE_REQUEST, model, temperature: 0 }, { apiKey: "fixture-key" }),
+    );
+
+    assert.equal(capturedBody?.temperature, 0, `expected temperature to still be forwarded for unrelated model id "${model}"`);
+  }
+});
+
 test("openaiDriver.complete: splits a tool-role message with multiple ToolResultParts into separate wire tool messages", async () => {
   let capturedBody: Record<string, unknown> | undefined;
   const request: LlmRequest = {
