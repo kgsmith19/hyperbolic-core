@@ -208,8 +208,9 @@ function makeArtifact(fs, path_, dir, files) {
   return dir;
 }
 
-function makeGithub({ pr, existingComment = null, dispatchThrows = false }) {
-  const calls = { updateComment: [], createComment: [], createDispatchEvent: [] };
+function makeGithub({ pr, existingComment = null, dispatchThrows = false, searchResults = [], createIssueThrows = false }) {
+  const calls = { updateComment: [], createComment: [], createDispatchEvent: [], createIssue: [], search: [] };
+  let nextIssueNumber = 300;
   const api = {
     rest: {
       pulls: { get: async () => ({ data: pr }) },
@@ -221,11 +222,24 @@ function makeGithub({ pr, existingComment = null, dispatchThrows = false }) {
         updateComment: async (args) => {
           calls.updateComment.push(args);
         },
+        create: async (args) => {
+          calls.createIssue.push(args);
+          if (createIssueThrows) throw new Error("simulated Issue-creation failure");
+          const number = nextIssueNumber;
+          nextIssueNumber += 1;
+          return { data: { number } };
+        },
       },
       repos: {
         createDispatchEvent: async (args) => {
           calls.createDispatchEvent.push(args);
           if (dispatchThrows) throw new Error("simulated dispatch failure");
+        },
+      },
+      search: {
+        issuesAndPullRequests: async (args) => {
+          calls.search.push(args);
+          return { data: { items: searchResults } };
         },
       },
     },
@@ -246,11 +260,11 @@ function makeCore() {
   };
 }
 
-async function runDialogue(fs, os, path_, env, { pr, existingComment, dispatchThrows } = {}) {
+async function runDialogue(fs, os, path_, env, { pr, existingComment, dispatchThrows, searchResults, createIssueThrows } = {}) {
   const dir = fs.mkdtempSync(path_.join(os.tmpdir(), "llm-review-dialogue-test-"));
   makeArtifact(fs, path_, dir, env.__files);
   delete env.__files;
-  const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows });
+  const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows, searchResults, createIssueThrows });
   const core = makeCore();
   const proc = { env: { ...env, ARTIFACT_DIR: dir } };
   const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
@@ -638,4 +652,159 @@ test("dispatch: a closed PR at the right head still stands down -- there is noth
   await loadDispatchPrCheckScript()(context, core, github, proc);
 
   assert.equal(outputs.stale, "true");
+});
+
+// ---------------------------------------------------------------------------
+// Deferred (outOfScope) findings: rendered separately, never blocking, and
+// filed as a non-blocking Issue -- idempotently across re-runs.
+// ---------------------------------------------------------------------------
+
+const DEFERRED_FINDING = {
+  severity: "blocking",
+  category: "lean",
+  file: "src/pricing.ts",
+  line: 10,
+  claim: "The discount cap belongs in a shared constants module.",
+  evidence: "const CAP = 0.5;",
+  requestedChange: "Move CAP to packages/shared/constants.ts in a follow-up.",
+  citation: "AGENTS.md > Lean engineering",
+  outOfScope: true,
+};
+
+// packages/review/src/validate.ts already excludes outOfScope from the
+// block/pass computation, so a verdict containing ONLY a deferred finding
+// arrives here as "pass" -- this fixture matches that real contract rather
+// than asserting something validate.ts would never actually produce.
+const DEFERRED_ONLY_VERDICT = {
+  verdict: "pass",
+  findings: [DEFERRED_FINDING],
+  discarded: [],
+  summary: "One finding, agreed out of scope in the conversation.",
+};
+
+function deferredEnv(overrides = {}) {
+  return {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "success", verdictPresent: true },
+      "review-verdict.json": DEFERRED_ONLY_VERDICT,
+    },
+    ...overrides,
+  };
+}
+
+// Behavior protected: a fresh outOfScope finding is rendered in its own
+// "Deferred findings" section (never the blocking section), and files
+// exactly one new Issue, linked back from the rendered finding.
+// Defect caught: leaving outOfScope findings in blockingFindings (the exact
+// bug that would keep this PR red despite the deferral), or never actually
+// calling issues.create.
+test("dialogue: a fresh outOfScope finding renders as deferred, not blocking, and files one Issue", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, deferredEnv(), { pr: BASE_PR });
+
+  assert.equal(calls.createIssue.length, 1, "exactly one Issue must be filed");
+  assert.match(calls.createIssue[0].title, /discount cap belongs in a shared constants module/);
+  assert.deepEqual(calls.createIssue[0].labels, ["source:ai-review"]);
+  assert.match(calls.createIssue[0].body, /Does not block #230/);
+  assert.match(calls.createIssue[0].body, /^<!-- llm-review-deferred: [0-9a-f]{16} -->/);
+
+  const body = calls.createComment[0].body;
+  assert.match(body, /### Deferred findings \(1\) — agreed out of scope, does not block/);
+  assert.doesNotMatch(body, /### Blocking findings/);
+  assert.match(body, /\*\*Tracked in\.\*\* #300/);
+  assert.match(body, /"verdict":"pass"/);
+});
+
+// NEGATIVE CONTROL / idempotency. Behavior protected: re-running the SAME
+// finding (same fingerprint) against a comment that already recorded it does
+// NOT file a second Issue -- the whole point of tracking deferredIssues in
+// the managed comment's own state. Defect caught: filing a new Issue on
+// every re-run (a label/edit-triggered retrigger, a re-run of the same
+// workflow run) instead of reusing the recorded number.
+test("dialogue: re-running the same deferred finding does not file a duplicate Issue", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const fingerprint = require("node:crypto")
+    .createHash("sha256")
+    .update(`${DEFERRED_FINDING.category}|${DEFERRED_FINDING.file}|${DEFERRED_FINDING.line}`)
+    .digest("hex")
+    .slice(0, 16);
+  const priorState = { round: 0, headSha: HEAD, escalated: false, deferredIssues: { [fingerprint]: 555 } };
+  const existingComment = {
+    id: 1,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\n\nprior body`,
+  };
+
+  const { calls } = await runDialogue(fs, os, path_, deferredEnv(), { pr: BASE_PR, existingComment });
+
+  assert.equal(calls.createIssue.length, 0, "no new Issue may be filed for an already-recorded fingerprint");
+  assert.equal(calls.updateComment.length, 1);
+  assert.match(calls.updateComment[0].body, /\*\*Tracked in\.\*\* #555/);
+});
+
+// Behavior protected: state loss (a hand-edited or corrupted managed
+// comment) degrades to "found by search," not "filed again" -- the fallback
+// this repo's own idempotency design depends on.
+test("dialogue: a lost comment state falls back to search and reuses the found Issue", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const fingerprint = require("node:crypto")
+    .createHash("sha256")
+    .update(`${DEFERRED_FINDING.category}|${DEFERRED_FINDING.file}|${DEFERRED_FINDING.line}`)
+    .digest("hex")
+    .slice(0, 16);
+
+  const { calls } = await runDialogue(fs, os, path_, deferredEnv(), {
+    pr: BASE_PR,
+    searchResults: [{ number: 777, body: `<!-- llm-review-deferred: ${fingerprint} -->\nold issue` }],
+  });
+
+  assert.equal(calls.createIssue.length, 0, "a fingerprint found via search must not be re-filed");
+  assert.match(calls.createComment[0].body, /\*\*Tracked in\.\*\* #777/);
+});
+
+// Behavior protected: deferredIssues survives the round-reset that zeroes
+// round/escalated on a resolved verdict -- these are permanent Issue
+// records, not per-round state, and must not be forgotten just because the
+// blocking streak ended.
+test("dialogue: deferredIssues survives the round/escalated reset on a resolved verdict", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const priorState = { round: 2, headSha: "b".repeat(40), escalated: true, deferredIssues: { abc123: 999 } };
+  const existingComment = {
+    id: 1,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\n\nprior body`,
+  };
+  const { calls } = await runDialogue(
+    fs,
+    os,
+    path_,
+    {
+      RUN_ID: "1",
+      RUN_URL: "http://x",
+      RUN_HEAD_SHA: HEAD,
+      ESCALATE_AFTER: "3",
+      AGENT_PROVISIONED: "true",
+      __files: {
+        "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "success", verdictPresent: true },
+        "review-verdict.json": { verdict: "pass", findings: [], discarded: [], summary: "clean" },
+      },
+    },
+    { pr: BASE_PR, existingComment }
+  );
+
+  const body = calls.updateComment[0].body;
+  assert.match(body, /"round":0/);
+  assert.match(body, /"escalated":false/);
+  assert.match(body, /"deferredIssues":\{"abc123":999\}/);
 });
