@@ -125,6 +125,42 @@ test("openaiDriver.complete: maps system/user/assistant/tool messages, tools, an
   assert.deepEqual(capturedBody?.tool_choice, { type: "function", function: { name: "get_weather" } });
 });
 
+test("openaiDriver.complete: forwards an explicit temperature for a non-reasoning model", async () => {
+  let capturedBody: Record<string, unknown> | undefined;
+
+  await withPatchedFetch(
+    async (_input, init) => {
+      capturedBody = JSON.parse(String(init?.body));
+      return jsonResponse(fixtureChatCompletion());
+    },
+    () => openaiDriver.complete({ ...BASE_REQUEST, model: "gpt-4o", temperature: 0 }, { apiKey: "fixture-key" }),
+  );
+
+  assert.equal(capturedBody?.temperature, 0);
+});
+
+// gpt-5-mini rejected this live: "'temperature' does not support 0 with
+// this model. Only the default (1) value is supported." (#229) --
+// reasoning-family models (o1/o3/o4/gpt-5) only accept the API's own
+// default, so the driver must omit the field rather than send a value the
+// API will 400 on.
+test("openaiDriver.complete: omits temperature for reasoning-family models", async () => {
+  for (const model of ["o1", "o1-mini", "o3", "o3-mini", "o4-mini", "gpt-5", "gpt-5-mini"]) {
+    let capturedBody: Record<string, unknown> | undefined;
+
+    await withPatchedFetch(
+      async (_input, init) => {
+        capturedBody = JSON.parse(String(init?.body));
+        return jsonResponse(fixtureChatCompletion());
+      },
+      () => openaiDriver.complete({ ...BASE_REQUEST, model, temperature: 0 }, { apiKey: "fixture-key" }),
+    );
+
+    assert.ok(capturedBody);
+    assert.equal("temperature" in (capturedBody as object), false, `expected no temperature field for model "${model}"`);
+  }
+});
+
 test("openaiDriver.complete: splits a tool-role message with multiple ToolResultParts into separate wire tool messages", async () => {
   let capturedBody: Record<string, unknown> | undefined;
   const request: LlmRequest = {

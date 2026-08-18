@@ -151,6 +151,18 @@ interface OpenAIBaseParams {
   temperature?: number;
 }
 
+// Reasoning-family models reject any explicit `temperature` other than the
+// API's own default (1) -- a real, documented Chat Completions constraint,
+// not something this driver can negotiate around. The SDK exposes no
+// capability flag for this, so detection is by id prefix. Observed via a
+// live 400 from gpt-5-mini ("'temperature' does not support 0 with this
+// model"); o1/o3/o4 share the same reasoning-model restriction.
+const REASONING_MODEL_PREFIXES = ["o1", "o3", "o4", "gpt-5"];
+
+function isReasoningModel(model: string): boolean {
+  return REASONING_MODEL_PREFIXES.some((prefix) => model.startsWith(prefix));
+}
+
 function buildParams(request: LlmRequest): OpenAIBaseParams {
   return {
     model: request.model,
@@ -158,7 +170,7 @@ function buildParams(request: LlmRequest): OpenAIBaseParams {
     max_completion_tokens: request.maxTokens,
     tools: request.tools?.map(toOpenAITool),
     tool_choice: request.toolChoice ? toOpenAIToolChoice(request.toolChoice) : undefined,
-    temperature: request.temperature,
+    temperature: isReasoningModel(request.model) ? undefined : request.temperature,
   };
 }
 
