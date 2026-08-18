@@ -21,7 +21,7 @@ npm run typecheck # tsc -b . && tsc -p tsconfig.test.json
 
 ## ✅ Completion Criteria
 
-GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `Verify: Tests (Linux)` gate succeeds — it covers `packages/**`.
+GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `Platform` gate succeeds — it covers `packages/**`.
 
 ## 🔒 Collaboration Boundary
 

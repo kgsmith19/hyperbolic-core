@@ -106,7 +106,7 @@ documented known gap in `/brain/stream` external tailscale routing.
 
 A change is ready when its acceptance criteria are satisfied, affected
 documentation is accurate, the commands above pass locally, and the
-`Verify: Tests (Linux)` reports success --
+`Brain` reports success --
 that gate also runs the eval corpus and the isolation check, and builds
 and smoke-runs the Docker image. State any unverified item explicitly.
 

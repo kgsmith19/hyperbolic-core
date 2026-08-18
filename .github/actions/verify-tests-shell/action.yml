@@ -5,7 +5,7 @@ description: >-
   llm-handler, broker), runs the deployment-operator tooling tests and the
   full Playwright e2e suite against a local PostgreSQL, then the production
   build, health endpoint, and size budgets. Shared by pr-verify.yml's native
-  "Verify: Tests (Linux)" job and shell-ci.yml's own
+  "Platform" job and shell-ci.yml's own
   merge_group/push/workflow_dispatch triggers, so the suite has exactly one
   source. Assumes the caller already checked out the repository.
 

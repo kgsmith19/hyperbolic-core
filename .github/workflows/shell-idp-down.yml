@@ -5,20 +5,22 @@ name: "Shell IdP-Down (manual, real backoff timing)"
 # test.setTimeout(75_000) each, deliberately un-faked -- see that file's own
 # header comment for why: faking timers inside a real Playwright-driven
 # browser page risks corrupting React's own scheduling). Running that on
-# every Shell/packages PR (as shell-ci.yml's pr-gate job previously did) is
-# a real, repeated ~75s-per-spec cost for a scenario -- SH-6, the IdP going
-# unreachable -- that changes rarely. Relocated here, a manual
-# workflow_dispatch run, mirroring
+# every Shell/packages PR (as this composite action's suite, run inside the
+# Platform lane of pr-verify.yml, previously did) is a real, repeated
+# ~75s-per-spec cost for a scenario -- SH-6, the IdP going unreachable --
+# that changes rarely. Relocated here, a manual workflow_dispatch run,
+# mirroring
 # .github/workflows/toolbelt-network-checker-release.yml's own existing
 # manual-trigger pattern in this repo.
 #
-# This is deliberately NOT a full replacement for pr-gate coverage: the
-# FAST, deterministic half of the exact same UI contract this spec proves
-# (fail-closed getSession() redirects to /login, no chrome, no data nodes --
-# with no real or fake-timer wait needed at all, since apps/shell's own
-# useShellSession hook has no retry/backoff of its own to fake) still runs
-# on every PR via shell-ci.yml's ordinary "Unit tests: apps/shell (vitest)"
-# step: apps/shell/frontend/src/idp-down-contract.test.tsx. What ONLY this workflow
+# This is deliberately NOT a full replacement for Platform-lane coverage:
+# the FAST, deterministic half of the exact same UI contract this spec
+# proves (fail-closed getSession() redirects to /login, no chrome, no data
+# nodes -- with no real or fake-timer wait needed at all, since apps/shell's
+# own useShellSession hook has no retry/backoff of its own to fake) still
+# runs on every PR via pr-verify.yml's Platform lane (and shell-ci.yml's own
+# merge_group/push/workflow_dispatch run) -- its "Test · apps/shell
+# (vitest)" step: apps/shell/frontend/src/idp-down-contract.test.tsx. What ONLY this workflow
 # proves is the real backoff TIMING itself against a real browser -- run it
 # by hand after touching auth/session code, or on a schedule if that
 # coverage gap is ever felt in practice.

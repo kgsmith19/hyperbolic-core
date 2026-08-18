@@ -2,7 +2,7 @@ name: Verify Secrets
 description: >-
   Scans the repository working tree, and the commits introduced by this
   change when a commit range is available, for leaked credentials via
-  checksum-verified Gitleaks. Shared by pr-verify.yml's "Verify: Tests (Linux)"
+  checksum-verified Gitleaks. Shared by pr-verify.yml's "Repository Standards"
   job and secret-scan.yml's own merge_group/push/workflow_dispatch
   triggers, so the actual scanning logic has exactly one source.
 

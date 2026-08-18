@@ -2,7 +2,7 @@ name: Verify Tests ACC
 description: >-
   ACC's Linux test suite: the UI build and contract e2e, then the portable
   suite and its changed-file coverage gate. Shared by pr-verify.yml's native
-  "Verify: Tests (Linux)" job and acc-ci.yml's own
+  "ACC Linux" job and acc-ci.yml's own
   merge_group/push/workflow_dispatch triggers, so the suite has exactly one
   source. ACC's Windows suite lives in verify-tests-acc-windows -- it needs
   a windows-latest runner and so cannot share a job with these steps.
