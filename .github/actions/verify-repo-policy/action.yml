@@ -155,10 +155,15 @@ runs:
             if not isinstance(section, dict):
                 errors.append(f"'{role}' section is missing or not a mapping.")
                 continue
-            provider = section.get("provider")
+            raw_provider = section.get("provider")
+            # Canonicalize the same way packages/review/src/config.ts does
+            # for REVIEW_PROVIDER: trim + lowercase before comparison, so
+            # harmless casing ("OpenAI") never causes a spurious failure or,
+            # worse, silently evades the collision check below.
+            provider = raw_provider.strip().lower() if isinstance(raw_provider, str) else raw_provider
             if provider not in VALID_PROVIDERS:
                 errors.append(
-                    f"'{role}.provider' is {provider!r}; must be one of {sorted(VALID_PROVIDERS)}."
+                    f"'{role}.provider' is {raw_provider!r}; must be one of {sorted(VALID_PROVIDERS)}."
                 )
             else:
                 providers[role] = provider
