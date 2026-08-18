@@ -117,8 +117,9 @@ signup, same as any other SaaS org. Everything after that is scriptable.
    | is `pull_request`-triggered with no environment | `pull_request` | `...:pull_request` |
 
    Every OIDC job in this repository takes the first row -- each declares its
-   own `<pipeline>-production` environment -- **except** `ai-review`
-   in `pr-verify.yml`, which takes the second. Do not "fix" that asymmetry by
+   own `<pipeline>-production` environment -- **except** the `ai-review` job
+   (displayed as check `AI Review`) in `pr-verify.yml`, which takes the
+   second. Do not "fix" that asymmetry by
    giving the review gate an environment: an environment on a
    `pull_request`-triggered job inherits that environment's protection rules,
    so a required-reviewer rule would stall every pull request awaiting manual
