@@ -80,6 +80,13 @@ function toFinding(raw: unknown): { finding: Finding; valid: boolean } | null {
   if (line !== undefined) {
     finding.line = line;
   }
+  // Only a literal `true` counts. Anything else -- absent, false, a string,
+  // a typo -- leaves the finding subject to the ordinary blocking rule, the
+  // same fail-safe-toward-blocking posture severityOf() takes on an unknown
+  // token: a field this consequential must never be promoted by accident.
+  if (raw.outOfScope === true) {
+    finding.outOfScope = true;
+  }
 
   const valid = claim !== null && evidence !== null && citation !== null && requestedChange !== null;
   return { finding, valid };
@@ -118,7 +125,11 @@ export function validateVerdict(raw: unknown): ReviewVerdict {
     (parsed.valid ? findings : discarded).push(parsed.finding);
   }
 
-  const blocking = findings.filter((finding) => finding.severity === "blocking");
+  // outOfScope excuses a finding from the block decision without touching its
+  // severity or dropping it from `findings` -- see the field's doc comment in
+  // types.ts. It is reachable only through the dialogue deliberation this
+  // package's caller drives; validate.ts just has to honor it once set.
+  const blocking = findings.filter((finding) => finding.severity === "blocking" && finding.outOfScope !== true);
   const verdict: ReviewVerdict["verdict"] = blocking.length > 0 ? "block" : "pass";
 
   const modelSummary = nonEmptyString(raw.summary);
