@@ -294,6 +294,9 @@ jobs:
   # =====================================================================
   # 2. Verify: LLM Review (non-required)
   # =====================================================================
+  # Canary: trivial comment, no functional change -- exercises this job for
+  # real (pull_request-triggered OIDC subject) now that the review-gate
+  # identity's Infisical project membership has been granted.
   verify-llm-review:
     name: "Verify: LLM Review"
     needs: [verify-tests-linux, verify-tests-windows]
