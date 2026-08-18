@@ -145,6 +145,16 @@ test("llm-review-dialogue.yml holds a write token but never checks out or shells
   assert.doesNotMatch(dialogueYaml, /\n\s+run: \|/, "no multi-line shell over repository content");
 });
 
+// Behavior protected: the deferred-Issue-filing code (issues.create,
+// search.issuesAndPullRequests) has a real permission grant behind it, not
+// an assumption -- AI Review correctly caught on PR #247 that nothing
+// asserted this before those calls were added. `issues: write` was already
+// present (needed for posting PR comments via the Issues API), so this pins
+// that fact rather than requesting anything new.
+test("llm-review-dialogue.yml holds issues: write, which issues.create and search.issuesAndPullRequests both require", () => {
+  assert.match(dialogueYaml, /issues:\s*write/);
+});
+
 test("llm-review-dialogue.yml triggers on workflow_run, not on any PR event, and adds no PR check row", () => {
   const onBlock = dialogueYaml.slice(dialogueYaml.indexOf("\non:"), dialogueYaml.indexOf("\npermissions:"));
   assert.match(onBlock, /workflow_run:/);
