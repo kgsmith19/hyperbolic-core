@@ -46,6 +46,20 @@ export interface Finding {
   requestedChange: string;
   /** An Issue acceptance criterion, or a named AGENTS.md section. */
   citation: string;
+  /**
+   * Orthogonal to `severity`, not a third tier of it -- `severity` still
+   * only ever means "changes the merge decision or not", exactly as
+   * documented above. `outOfScope` answers a different question: the
+   * reviewer and the dev agent deliberated in the pull request's dialogue
+   * thread and agreed this finding, real as it is, belongs in a follow-up
+   * Issue rather than blocking the current one. It is reachable only
+   * through that deliberation -- never true on a first-round review, since
+   * there is nothing yet to have agreed to -- and validate.ts excludes an
+   * out-of-scope finding from the blocking count while still reporting it
+   * for transparency. Absent or `false` changes nothing about today's
+   * behavior.
+   */
+  outOfScope?: boolean;
 }
 
 /**

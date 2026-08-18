@@ -133,6 +133,60 @@ test("validateVerdict: an unrecognized severity is treated as advisory, not bloc
   assert.equal(result.findings[0]?.severity, "advisory");
 });
 
+// Behavior protected: a blocking finding the model marks outOfScope: true does
+// not block, but is still reported (never silently dropped).
+// Defect caught: forgetting to exclude outOfScope findings from the blocking
+// filter, which would make the whole deferred-to-an-Issue path a no-op; or
+// dropping the finding from `findings` entirely, which would make the
+// dialogue workflow unable to render or file an Issue for it.
+test("validateVerdict: a blocking finding marked outOfScope does not block, and is kept", () => {
+  const result = validateVerdict({
+    verdict: "block",
+    summary: "Reviewer and dev agreed this is out of scope.",
+    findings: [wellFormedFinding({ severity: "blocking", outOfScope: true })],
+  });
+
+  assert.equal(result.verdict, "pass");
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0]?.severity, "blocking");
+  assert.equal(result.findings[0]?.outOfScope, true);
+});
+
+// NEGATIVE CONTROL for the field's trust posture. Behavior protected: only a
+// literal boolean `true` can excuse a finding from blocking. Defect caught: a
+// looser check (truthy string, any non-undefined value) that a model could
+// trip accidentally -- e.g. emitting outOfScope: "false" as a string -- and
+// have it wrongly excuse a real blocking finding.
+test("validateVerdict: outOfScope is only honored as a literal boolean true", () => {
+  for (const value of ["true", "false", 1, 0, null]) {
+    const result = validateVerdict({
+      verdict: "block",
+      summary: "Non-boolean outOfScope must not excuse this finding.",
+      findings: [wellFormedFinding({ severity: "blocking", outOfScope: value })],
+    });
+    assert.equal(result.verdict, "block", `outOfScope: ${JSON.stringify(value)} must not excuse a blocking finding`);
+    assert.equal(result.findings[0]?.outOfScope, undefined);
+  }
+});
+
+// Behavior protected: outOfScope is invisible on a normal finding -- it must
+// not appear as `false` by default, keeping the field's absence and its
+// explicit-false meaning identical (both "not excused").
+// Defect caught: a validator that always sets outOfScope: false, which would
+// make a later "was this explicitly considered and rejected?" distinction
+// (not needed today, but the field's own doc comment leaves room for it)
+// impossible to add without a breaking change.
+test("validateVerdict: outOfScope is omitted, not defaulted to false, on an ordinary finding", () => {
+  const result = validateVerdict({
+    verdict: "block",
+    summary: "Ordinary finding, no dialogue involved.",
+    findings: [wellFormedFinding({ severity: "blocking" })],
+  });
+
+  assert.equal(result.verdict, "block");
+  assert.equal("outOfScope" in (result.findings[0] ?? {}), false);
+});
+
 // Behavior protected: unparseable model output never throws and never blocks.
 // Defect caught: letting a JSON/shape error escape, which would be caught by
 // the CLI's infrastructure handler and reported as exit 2 -- turning "the model
