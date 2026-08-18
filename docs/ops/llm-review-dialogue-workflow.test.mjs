@@ -656,14 +656,17 @@ test("dispatch: a closed PR at the right head still stands down -- there is noth
 // packages/review/src/prompt.ts's fenced DATA.
 // ---------------------------------------------------------------------------
 
-async function runConversationScript(comments) {
+async function runConversationScript(issueComments, reviewComments = []) {
   const fs = await import("node:fs");
   const os = await import("node:os");
   const path_ = await import("node:path");
   const dir = fs.mkdtempSync(path_.join(os.tmpdir(), "llm-review-conversation-test-"));
   const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
   const github = {
-    rest: { issues: { listComments: async () => ({ data: comments }) } },
+    rest: {
+      issues: { listComments: async () => ({ data: issueComments }) },
+      pulls: { listReviewComments: async () => ({ data: reviewComments }) },
+    },
     paginate: async (fn) => (await fn()).data,
   };
   const core = { info: () => {} };
@@ -691,6 +694,41 @@ test("conversation step: renders comments chronologically with author and timest
   assert.ok(firstIndex < secondIndex, "comments must render in chronological order");
   assert.match(body, /github-actions\[bot\] \(2026-08-18T00:00:00Z\)/);
   assert.match(body, /kgsmith19 \(2026-08-18T01:00:00Z\)/);
+});
+
+// Behavior protected: inline review-thread comments (pulls.listReviewComments
+// -- a different API surface from top-level issue comments) are fetched too,
+// and merged into ONE chronological stream rather than appended after all
+// issue comments regardless of when they were actually posted. Defect
+// caught (this is the exact AI Review finding on PR #244 that this test
+// exists to pin down): fetching only issues.listComments, which silently
+// drops every inline "why is this line...?" reply from the reviewer's view.
+test("conversation step: inline review comments are fetched and merged chronologically with issue comments", async () => {
+  const body = await runConversationScript(
+    [
+      { user: { login: "github-actions[bot]" }, created_at: "2026-08-18T00:00:00Z", body: "round 1 verdict: block" },
+      { user: { login: "kgsmith19" }, created_at: "2026-08-18T02:00:00Z", body: "fixed, please re-check" },
+    ],
+    [
+      {
+        user: { login: "kgsmith19" },
+        created_at: "2026-08-18T01:00:00Z",
+        body: "why does this line truncate at 100 chars?",
+        path: "packages/review/src/context.ts",
+        line: 42,
+      },
+    ]
+  );
+
+  const verdictIndex = body.indexOf("round 1 verdict: block");
+  const inlineIndex = body.indexOf("why does this line truncate");
+  const fixedIndex = body.indexOf("fixed, please re-check");
+  assert.ok(verdictIndex >= 0 && inlineIndex >= 0 && fixedIndex >= 0, "all three comments must appear");
+  assert.ok(
+    verdictIndex < inlineIndex && inlineIndex < fixedIndex,
+    "the inline review comment must sort between the two issue comments by created_at, not be appended after both"
+  );
+  assert.match(body, /kgsmith19 \(2026-08-18T01:00:00Z\) on packages\/review\/src\/context\.ts:42:/);
 });
 
 // Behavior protected: a pull request with no comments yet (the common case

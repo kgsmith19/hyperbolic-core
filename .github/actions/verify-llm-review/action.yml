@@ -221,15 +221,30 @@ runs:
         script: |
           const fs = require("node:fs");
           const { owner, repo } = context.repo;
-          const comments = await github.paginate(github.rest.issues.listComments, {
-            owner,
-            repo,
-            issue_number: Number(process.env.PR_NUMBER),
-            per_page: 100,
-          });
+          const pull_number = Number(process.env.PR_NUMBER);
+
+          // Two kinds of comment live on a pull request, from two different
+          // API surfaces: top-level conversation (issues.listComments) and
+          // inline review-thread comments (pulls.listReviewComments). A dev
+          // agent's rebuttal or an owner's line-level question can land in
+          // either, so both are fetched and merged into one chronological
+          // stream -- omitting either would leave part of "every comment"
+          // (this repo's own stated acceptance criterion for this step)
+          // structurally invisible to the reviewer.
+          const [issueComments, reviewComments] = await Promise.all([
+            github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pull_number, per_page: 100 }),
+            github.paginate(github.rest.pulls.listReviewComments, { owner, repo, pull_number, per_page: 100 }),
+          ]);
+
+          const comments = [...issueComments, ...reviewComments].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
 
           const conversation = comments
-            .map((comment) => `${comment.user?.login ?? "(unknown)"} (${comment.created_at}):\n${comment.body ?? ""}`)
+            .map((comment) => {
+              const where = comment.path ? ` on ${comment.path}${comment.line ? `:${comment.line}` : ""}` : "";
+              return `${comment.user?.login ?? "(unknown)"} (${comment.created_at})${where}:\n${comment.body ?? ""}`;
+            })
             .join("\n\n---\n\n");
 
           fs.mkdirSync(process.env.RUNNER_TEMP, { recursive: true });
