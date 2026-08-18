@@ -1,0 +1,164 @@
+name: "Claude Dispatch"
+
+# Wakes the developer agent when Verify: LLM Review blocks a pull request.
+# llm-review-dialogue.yml posts the findings and then fires this via
+# repository_dispatch; this workflow is the half that can actually change
+# code. Issue #231.
+#
+# WHY repository_dispatch AND NOT an @mention. A comment posted with
+# GITHUB_TOKEN cannot trigger an issue_comment workflow -- GitHub suppresses
+# workflow runs from events its own token authored, to prevent recursion --
+# and repository_dispatch is one of the two documented exceptions
+# (the other being workflow_dispatch). Routing the handoff this way means the
+# loop closes with the built-in token alone: no PAT, no App token, and no new
+# long-lived credential beyond the model key the agent itself needs.
+#
+# TRUST NOTE, and it is the opposite of every other workflow here. This job
+# DOES check out pull-request-authored code AND holds write scope AND holds a
+# model credential -- all three at once. That is not an oversight, it is the
+# entire job: an agent that cannot write cannot fix anything. The containment
+# is upstream instead: llm-review-dialogue.yml only ever dispatches for
+# same-repository pull requests, so a fork can never reach this workflow. Do
+# not add a trigger that bypasses that check.
+#
+# OWNER-PROVISIONED PREREQUISITE. This cannot resolve anything until the
+# owner has created one of the following; neither is agent-settable:
+#   - secrets.CLAUDE_CODE_OAUTH_TOKEN   from the Claude GitHub App
+#                                       (run /install-github-app), OR
+#   - secrets.ANTHROPIC_API_KEY         a direct Anthropic API key
+# Until then the preflight step below fails this job's run explicitly, and
+# llm-review-dialogue.yml never attempts the dispatch in the first place
+# (AGENT_PROVISIONED is false), escalating straight to the owner instead.
+on:
+  repository_dispatch:
+    types: [llm-review-finding]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One agent per pull request. Two concurrent fixers on one branch would
+  # race each other's pushes.
+  group: claude-dispatch-${{ github.event.client_payload.prNumber }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: "Resolve review findings"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Preflight · Confirm the agent credential is provisioned
+        id: preflight
+        shell: bash
+        env:
+          OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OAUTH}" ] && [ -z "${API_KEY}" ]; then
+            {
+              echo "No agent credential is provisioned, so there is nothing to wake."
+              echo
+              echo "Add ONE of these repository secrets:"
+              echo "  - CLAUDE_CODE_OAUTH_TOKEN  (from the Claude GitHub App; run /install-github-app)"
+              echo "  - ANTHROPIC_API_KEY"
+              echo
+              echo "Until then llm-review-dialogue.yml escalates straight to the owner"
+              echo "instead of waiting on a fixer that cannot start -- see Issue #231."
+            } >&2
+            exit 1
+          fi
+          echo "Agent credential present."
+
+      # The dispatch carries the head it was raised against. If the branch has
+      # moved since, that finding is already stale: a newer head means a newer
+      # review run, which will post its own verdict and raise its own dispatch.
+      # Acting on the old one would fight a fix that may already exist.
+      - name: Context · Resolve the pull request, and stop if it moved on
+        id: pr
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          PR_NUMBER: ${{ github.event.client_payload.prNumber }}
+          DISPATCH_HEAD_SHA: ${{ github.event.client_payload.headSha }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (pr.head.sha !== process.env.DISPATCH_HEAD_SHA) {
+              core.info(
+                `PR #${pr.number} has moved to ${pr.head.sha}; this dispatch was raised for ${process.env.DISPATCH_HEAD_SHA}. Standing down.`
+              );
+              core.setOutput("stale", "true");
+              return;
+            }
+            if (pr.state !== "open") {
+              core.info(`PR #${pr.number} is ${pr.state}; nothing to resolve.`);
+              core.setOutput("stale", "true");
+              return;
+            }
+            core.setOutput("stale", "false");
+            core.setOutput("branch", pr.head.ref);
+
+      - name: Setup · Checkout the pull request branch
+        if: steps.pr.outputs.stale == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pr.outputs.branch }}
+          fetch-depth: 0
+
+      - name: Resolve · Hand the findings to the developer agent
+        if: steps.pr.outputs.stale == 'false'
+        uses: anthropics/claude-code-action@1d9782c6c3a2eaaf8845d33b203bea0ec00c1596 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: |
+            You are the developer agent for pull request #${{ github.event.client_payload.prNumber }}
+            in this repository, on branch `${{ steps.pr.outputs.branch }}`.
+
+            The adversarial review gate (`Verify: LLM Review`) is blocking this pull
+            request. Its findings are in the single managed comment on the pull
+            request whose body starts with:
+
+                <!-- agent-engineering-standard:llm-review:v1 -->
+
+            Read that comment. This is round ${{ github.event.client_payload.round }};
+            the review run is ${{ github.event.client_payload.runUrl }}.
+
+            Read `AGENTS.md` at the repository root first — it governs how you work
+            here — and read the Issue this pull request closes.
+
+            For EACH blocking finding, do exactly one of:
+
+            1. FIX IT. Make the smallest change that fully resolves the finding, and
+               commit it to this branch. Every fix needs a test that would have failed
+               before it. Never weaken, delete, or skip a test to turn the gate green —
+               `AGENTS.md` forbids it outright, and doing so is worse than leaving the
+               finding open.
+            2. REBUT IT. Reply in the pull request discussion with the argument. Ground
+               it in the linked Issue's acceptance criteria, a named `AGENTS.md`
+               section, and the diff itself. Objectively, never from taste. A finding
+               that cites nothing checkable is discarded by the gate already, so say so
+               plainly if that is the case.
+
+            Judge each finding on its merits — you are looking for the correct outcome,
+            not for agreement and not for a way to dismiss the reviewer. Partial
+            agreement is a fine answer: fix what is right and rebut what is not.
+
+            If you genuinely cannot resolve a finding either way, say so in the reply
+            and explain what is blocking you. Do not guess, and do not silently drop it —
+            the dialogue workflow escalates unresolved rounds to @kgsmith19, and it can
+            only do that honestly if you have said where you got stuck.
+
+            Never merge the pull request, never approve it, never change repository
+            settings, and never use an administrative bypass.

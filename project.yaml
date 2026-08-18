@@ -95,7 +95,11 @@ ci:
         no reviewer tokens are spent on a PR failing anything else.
         Deliberately NOT a dependency of the rollup below — it fails closed
         while uncredentialed, and depending on it would make the one
-        required check permanently red.
+        required check permanently red. Stages its verdict as an artifact
+        (always(), so a blocking or failed run is captured, not just a
+        passing one) for .github/workflows/llm-review-dialogue.yml to post
+        — this job stays read-only and never writes to the pull request
+        itself.
       required: false # pending owner-provisioned reviewer credentials
     - order: 3
       path: .github/workflows/pr-verify.yml
@@ -131,6 +135,27 @@ ci:
     check passes, so auto-merge starts working once that row stops being
     red. There is no separate merge-policy workflow any more: merge-policy.yml
     was deleted and its behavior lives in the "Verify: All Gates" job.
+
+    Two further workflows implement Issue #128's deferred review-dialogue
+    design (Issue #231) and are deliberately NOT in the gates list above —
+    neither produces a pull-request check row, so neither can be typed into
+    a required-checks list.
+    .github/workflows/llm-review-dialogue.yml (on: workflow_run, keyed to
+    "PR Verification") reads Verify: LLM Review's staged verdict artifact
+    and posts it into the pull request as exactly one managed comment
+    (marker "<!-- agent-engineering-standard:llm-review:v1 -->", updated in
+    place per head) carrying a round counter, and — same discipline as
+    Verify: All Gates — holds pull-requests: write while performing no
+    checkout and no shell over repository content.
+    .github/workflows/claude-dispatch.yml (on: repository_dispatch, fired
+    by the dialogue workflow only for a blocking verdict on a
+    same-repository PR) hands the findings to the developer agent, which
+    fixes or rebuts them in place. Owner-provisioned prerequisites:
+    vars.LLM_REVIEW_ESCALATE_AFTER (round threshold, default 3) and one of
+    secrets.CLAUDE_CODE_OAUTH_TOKEN / secrets.ANTHROPIC_API_KEY — until
+    provisioned, the dialogue workflow still posts findings and escalates
+    to the owner immediately rather than waiting on a fixer that can never
+    start.
 
 vendors:
   # Full detail (auth, secret paths, cost, rotation) lives in

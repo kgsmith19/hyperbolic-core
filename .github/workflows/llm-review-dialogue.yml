@@ -1,0 +1,444 @@
+name: "LLM Review Dialogue"
+
+# Posts Verify: LLM Review's findings into the pull request as ONE managed
+# comment, keeps a round counter, wakes the developer agent, and escalates to
+# the owner when the disagreement will not resolve. Issue #128 claims 7 and 8
+# specified this; PR #130 deferred it and Issue #231 tracks it.
+#
+# WHY THIS IS A SEPARATE workflow_run WORKFLOW, and not a step somewhere in
+# pr-verify.yml -- three constraints intersect, and workflow_run is the only
+# shape that satisfies all three at once:
+#
+#   1. The reviewer job CANNOT post. verify-llm-review runs `npm ci` and
+#      executes pull-request-authored code while holding a provider
+#      credential. llm-review.yml says so verbatim ("must not also carry a
+#      token that could speak on a PR's behalf") and commit 1e4f8e5 removed
+#      that grant deliberately. Giving it pull-requests: write would hand a
+#      PR author's own code a token over their PR.
+#   2. Verify: All Gates CANNOT post it either. It is forbidden from
+#      depending on the non-required LLM Review job -- doing so would make
+#      the one required check permanently red while the reviewer is
+#      unprovisioned -- and docs/ops/pr-verify-workflow.test.mjs pins that.
+#      Without that dependency the verdict does not exist yet when All Gates
+#      runs.
+#   3. A fifth job in pr-verify.yml would add a fifth check row. One check
+#      row per job is a GitHub invariant with no suppression mechanism, and
+#      the four-row shape was bought deliberately (AGENTS.md > PR Gate and
+#      merge behavior).
+#
+# A workflow_run workflow reports NO pull-request check run, so it adds no
+# row, and it runs from the base repository with its own token rather than
+# the triggering run's -- which is exactly why it may hold write scope while
+# the job that ran the PR's code may not.
+#
+# TRUST NOTE. This workflow holds pull-requests: write and therefore obeys
+# the same discipline as Verify: All Gates: NO actions/checkout, and no shell
+# over repository content. It touches exactly two things from the untrusted
+# side -- a downloaded artifact, parsed as JSON data and never executed, and
+# the model-authored strings inside it, which are neutralized before they are
+# rendered (see `neutralize` below). The pull request number travels in that
+# artifact, so it is treated as a claim, not a fact: it is verified against
+# the triggering run's own head SHA before anything is posted.
+#
+# OPTIONAL owner-provisioned setting: vars.LLM_REVIEW_ESCALATE_AFTER (round
+# threshold before tagging the owner; defaults to 3 when unset or invalid,
+# not agent-settable to a different default). Everything else this workflow
+# needs -- posting findings, counting rounds -- works with no setup at all;
+# only the developer-agent handoff in claude-dispatch.yml needs a credential.
+on:
+  workflow_run:
+    workflows: ["PR Verification"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keyed on the head SHA rather than the run: a re-run for the same commit
+  # must update the same comment, not race a second copy of itself.
+  group: llm-review-dialogue-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  dialogue:
+    name: "Review dialogue"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only same-repository pull requests. A fork's run gets no managed
+    # comment, exactly as it gets no auto-merge arming today -- and a fork
+    # must never reach a write token by way of an artifact it authored.
+    # head_repository.fork is GitHub's own purpose-built field for this
+    # check (docs: "Events that trigger workflows"), not a same-repo
+    # full_name comparison reimplementing the same fact less directly.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.fork == false
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      # Needed to read an artifact belonging to the triggering run.
+      actions: read
+    steps:
+      # continue-on-error, not a hard failure: the artifact is absent for
+      # every legitimate run where the reviewer never produced one -- most
+      # commonly because a test job failed, so Verify: LLM Review was
+      # skipped by its own needs:. That is silence, not breakage.
+      - name: Dialogue · Fetch the reviewer's verdict
+        id: fetch
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: llm-review-verdict
+          path: ${{ runner.temp }}/llm-review
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Dialogue · No verdict to report
+        if: steps.fetch.outcome != 'success'
+        run: 'echo "Verify: LLM Review produced no verdict artifact for this run; nothing to post."'
+
+      - name: Dialogue · Post findings, count the round, escalate if unresolved
+        if: steps.fetch.outcome == 'success'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          # Everything the script reads arrives through env, never through
+          # ${{ }} interpolation into the script body -- that is the standard
+          # script-injection hardening, and it matters more than usual here
+          # because some of these values originate in a pull request.
+          ARTIFACT_DIR: ${{ runner.temp }}/llm-review
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          ESCALATE_AFTER: ${{ vars.LLM_REVIEW_ESCALATE_AFTER }}
+          AGENT_PROVISIONED: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
+        with:
+          script: |
+            const fs = require("node:fs");
+            const path = require("node:path");
+
+            const { owner, repo } = context.repo;
+
+            // Specified in Issue #128 claim 7. Must be the FIRST bytes of the
+            // comment body: the upsert finds it with startsWith, the same
+            // convention the Work State comment uses.
+            const MARKER = "<!-- agent-engineering-standard:llm-review:v1 -->";
+            const STATE_OPEN = "<!-- llm-review-state: ";
+            const STATE_CLOSE = " -->";
+            const OWNER_HANDLE = "kgsmith19";
+            const DEFAULT_ESCALATE_AFTER = 3;
+
+            const escalateAfter = (() => {
+              const raw = Number.parseInt(process.env.ESCALATE_AFTER || "", 10);
+              return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_ESCALATE_AFTER;
+            })();
+            const agentProvisioned = process.env.AGENT_PROVISIONED === "true";
+
+            // ---------------------------------------------------------------
+            // Read the artifact. It is DATA: parsed, never executed.
+            // ---------------------------------------------------------------
+            const dir = process.env.ARTIFACT_DIR;
+            function readJson(name) {
+              const file = path.join(dir, name);
+              if (!fs.existsSync(file)) return null;
+              try {
+                return JSON.parse(fs.readFileSync(file, "utf8"));
+              } catch (error) {
+                core.warning(`Could not parse ${name}: ${error.message}`);
+                return null;
+              }
+            }
+
+            const meta = readJson("review-meta.json");
+            if (!meta || !Number.isInteger(meta.prNumber)) {
+              core.warning("Verdict artifact carried no usable pull request number; nothing posted.");
+              return;
+            }
+
+            // The PR number came from the untrusted side, so prove it names
+            // the pull request this run actually judged before writing to it.
+            // Without this check a crafted artifact could aim a write token
+            // at an unrelated pull request.
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: meta.prNumber,
+            });
+            if (pr.head.sha !== process.env.RUN_HEAD_SHA) {
+              core.warning(
+                `Artifact names PR #${meta.prNumber}, whose head is ${pr.head.sha}, but this run judged ${process.env.RUN_HEAD_SHA}. Refusing to post.`
+              );
+              return;
+            }
+
+            const verdict = readJson("review-verdict.json");
+            const headSha = process.env.RUN_HEAD_SHA;
+            const shortSha = headSha.slice(0, 7);
+
+            // ---------------------------------------------------------------
+            // Neutralize model-authored text before it is rendered.
+            // ---------------------------------------------------------------
+            // Every one of these strings is written by the reviewer model,
+            // and `evidence` is verbatim code quoted out of the pull request
+            // -- so both a confused model and a hostile diff can steer it. It
+            // is rendered, never trusted: mentions and issue references are
+            // defused with a zero-width space so quoted code cannot ping a
+            // third party or cross-link an unrelated issue, and length is
+            // capped so one finding cannot exhaust the comment budget.
+            function neutralize(value, cap = 1200) {
+              let text = typeof value === "string" ? value : String(value ?? "");
+              text = text.replace(/\r/g, "");
+              if (text.length > cap) text = `${text.slice(0, cap)}\n…[truncated]`;
+              text = text.replace(/@([A-Za-z0-9])/g, "@​$1");
+              text = text.replace(/(^|[^\w`])#(\d)/g, "$1#​$2");
+              return text;
+            }
+
+            // A fence long enough that nothing inside can close it early.
+            function codeBlock(value) {
+              const text = neutralize(value);
+              const longest = (text.match(/`+/g) || []).reduce((n, run) => Math.max(n, run.length), 0);
+              const fence = "`".repeat(Math.max(3, longest + 1));
+              return `${fence}\n${text}\n${fence}`;
+            }
+
+            function locate(finding) {
+              if (!finding.file) return "";
+              return finding.line ? ` — \`${neutralize(finding.file, 200)}:${finding.line}\`` : ` — \`${neutralize(finding.file, 200)}\``;
+            }
+
+            function renderFinding(finding, index) {
+              return [
+                `#### ${index}. \`${neutralize(finding.category || "unspecified", 60)}\`${locate(finding)}`,
+                "",
+                `**Claim.** ${neutralize(finding.claim)}`,
+                "",
+                "**Evidence.**",
+                codeBlock(finding.evidence),
+                "",
+                `**Requested change.** ${neutralize(finding.requestedChange)}`,
+                "",
+                `**Cites.** ${neutralize(finding.citation, 300)}`,
+              ].join("\n");
+            }
+
+            // ---------------------------------------------------------------
+            // Prior state lives in the comment itself -- there is nowhere
+            // else to keep it that survives a run.
+            // ---------------------------------------------------------------
+            async function findManagedComment() {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: meta.prNumber,
+                per_page: 100,
+              });
+              return comments.find((entry) => (entry.body || "").startsWith(MARKER)) || null;
+            }
+
+            function parseState(body) {
+              if (!body) return null;
+              const start = body.indexOf(STATE_OPEN);
+              if (start < 0) return null;
+              const end = body.indexOf(STATE_CLOSE, start);
+              if (end < 0) return null;
+              try {
+                return JSON.parse(body.slice(start + STATE_OPEN.length, end));
+              } catch {
+                return null;
+              }
+            }
+
+            const existing = await findManagedComment();
+            const prior = parseState(existing?.body) || { round: 0, headSha: null, escalated: false };
+
+            // ---------------------------------------------------------------
+            // Classify this run.
+            // ---------------------------------------------------------------
+            // "Reviewed and passed" and "never ran" both have to be told
+            // apart from each other AND from "blocked" -- reporting a gate
+            // that never ran as a clean bill of health would be the worst of
+            // the three failures.
+            const ran = Boolean(verdict) && meta.verdictPresent === true;
+            const blocking = ran && verdict.verdict === "block";
+            const findings = ran && Array.isArray(verdict.findings) ? verdict.findings : [];
+            const discarded = ran && Array.isArray(verdict.discarded) ? verdict.discarded : [];
+            const blockingFindings = findings.filter((f) => f.severity === "blocking");
+            const advisoryFindings = findings.filter((f) => f.severity !== "blocking");
+
+            if (!ran) {
+              core.info("The reviewer produced no verdict (unprovisioned or infrastructure failure); leaving the dialogue comment untouched.");
+              return;
+            }
+
+            // A new head with the objection still standing is a new round. A
+            // re-run on the same commit is the same round -- re-running must
+            // not inflate the counter toward an escalation nobody earned.
+            const sameHead = prior.headSha === headSha;
+            let round = prior.round || 0;
+            let escalated = Boolean(prior.escalated);
+            if (blocking && !sameHead) round += 1;
+            if (blocking && round === 0) round = 1;
+            if (!blocking) {
+              // Resolved: the streak resets, so a later regression starts its
+              // own count rather than inheriting a spent one.
+              round = 0;
+              escalated = false;
+            }
+
+            // ---------------------------------------------------------------
+            // Wake the developer agent.
+            // ---------------------------------------------------------------
+            // repository_dispatch, not an @mention: a comment posted with
+            // GITHUB_TOKEN cannot trigger issue_comment workflows (GitHub's
+            // recursion prevention), and repository_dispatch is one of the two
+            // documented exceptions. So the handoff needs no PAT and no App
+            // token. The payload carries identifiers only -- the agent reads
+            // the findings from the comment, so no model text crosses here.
+            let dispatchFailed = false;
+            if (blocking && agentProvisioned) {
+              try {
+                await github.rest.repos.createDispatchEvent({
+                  owner,
+                  repo,
+                  event_type: "llm-review-finding",
+                  client_payload: {
+                    prNumber: meta.prNumber,
+                    headSha,
+                    round,
+                    runUrl: process.env.RUN_URL,
+                  },
+                });
+                core.info(`Dispatched llm-review-finding for PR #${meta.prNumber} (round ${round}).`);
+              } catch (error) {
+                dispatchFailed = true;
+                core.warning(`Could not wake the developer agent: ${error.message}`);
+              }
+            }
+
+            // ---------------------------------------------------------------
+            // Escalate. This is the part that must never silently not happen.
+            // ---------------------------------------------------------------
+            // Three ways to earn an escalation, and the last two matter as
+            // much as the first: a loop that CANNOT advance must not wait out
+            // a round counter that will never increment, because rounds only
+            // tick when somebody pushes a new head. An unprovisioned or
+            // broken agent is a true gap needing manual intervention, which
+            // is exactly what the owner asked to be told about.
+            const cannotAdvance = !agentProvisioned || dispatchFailed;
+            const escalateNow = blocking && !escalated && (round >= escalateAfter || cannotAdvance);
+            if (escalateNow) escalated = true;
+
+            const state = { round, headSha, escalated, verdict: verdict.verdict };
+
+            // ---------------------------------------------------------------
+            // Build the comment.
+            // ---------------------------------------------------------------
+            const lines = [MARKER, `${STATE_OPEN}${JSON.stringify(state)}${STATE_CLOSE}`, ""];
+
+            if (blocking) {
+              lines.push(`## 🔍 LLM Review — round ${round}`, "");
+              lines.push(
+                `**Verdict: \`block\`** · head \`${shortSha}\` · [review run](${process.env.RUN_URL})`,
+                ""
+              );
+            } else {
+              lines.push("## 🔍 LLM Review — resolved", "");
+              lines.push(
+                `**Verdict: \`pass\`** · head \`${shortSha}\` · [review run](${process.env.RUN_URL})`,
+                ""
+              );
+            }
+
+            lines.push(neutralize(verdict.summary, 2000), "");
+
+            if (blockingFindings.length > 0) {
+              lines.push(`### Blocking findings (${blockingFindings.length})`, "");
+              blockingFindings.forEach((finding, i) => lines.push(renderFinding(finding, i + 1), ""));
+            }
+
+            if (advisoryFindings.length > 0) {
+              lines.push(
+                "<details>",
+                `<summary><b>Advisory findings (${advisoryFindings.length})</b> — these do not block</summary>`,
+                ""
+              );
+              advisoryFindings.forEach((finding, i) => lines.push(renderFinding(finding, i + 1), ""));
+              lines.push("</details>", "");
+            }
+
+            if (discarded.length > 0) {
+              lines.push(
+                "<details>",
+                `<summary><b>Discarded (${discarded.length})</b> — missing evidence or citation, cannot block</summary>`,
+                "",
+                "Per `AGENTS.md` > Independent LLM Review, a finding without both concrete evidence and a citation is invalid output. These are shown for transparency and carry no weight.",
+                ""
+              );
+              discarded.forEach((finding, i) => lines.push(renderFinding(finding, i + 1), ""));
+              lines.push("</details>", "");
+            }
+
+            if (blocking) {
+              lines.push("---", "");
+              if (agentProvisioned && !dispatchFailed) {
+                lines.push(
+                  "@claude — you authored this change. Read each blocking finding above and resolve it:",
+                  "",
+                  "1. **Fix it** — push a commit and let the gates re-run, or",
+                  "2. **Rebut it** — reply here with the argument, grounded in the linked Issue's acceptance criteria, `AGENTS.md`, and the diff. Objectively, never from taste.",
+                  "",
+                  `A finding you neither fix nor rebut is unresolved, and after ${escalateAfter} rounds this comment escalates to @${OWNER_HANDLE}.`,
+                  ""
+                );
+              } else {
+                lines.push(
+                  "_The developer agent could not be woken automatically, so this finding needs a human._",
+                  ""
+                );
+              }
+            }
+
+            if (escalated) {
+              lines.push("> [!IMPORTANT]", `> @${OWNER_HANDLE} — this needs your decision.`, ">");
+              if (cannotAdvance) {
+                lines.push(
+                  `> The reviewer is blocking, but the developer agent ${agentProvisioned ? "could not be reached" : "is not provisioned"}, so no automated resolution is coming. Nothing will advance this without you.`,
+                  ">"
+                );
+              } else {
+                lines.push(
+                  `> ${round} rounds have passed on this pull request with the gate still red and the disagreement unresolved.`,
+                  ">"
+                );
+              }
+              lines.push(
+                `> Unresolved: ${blockingFindings.length} blocking finding(s), the first being — ${neutralize(blockingFindings[0]?.claim || verdict.summary, 400)}`,
+                ">",
+                "> You may merge over this at any time; a red review is a status check and never a veto on you.",
+                ""
+              );
+            }
+
+            const body = lines.join("\n");
+
+            // Exactly one comment, updated in place. A stream of new comments
+            // per run is a named forbidden outcome in Issue #128.
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: meta.prNumber, body });
+            }
+
+            core.summary.addHeading("LLM Review Dialogue");
+            core.summary.addRaw(
+              [
+                `- Pull request: #${meta.prNumber} (head \`${shortSha}\`)`,
+                `- Verdict: \`${verdict.verdict}\``,
+                `- Round: ${round} (escalates at ${escalateAfter})`,
+                `- Agent woken: ${blocking && agentProvisioned && !dispatchFailed ? "yes" : "no"}`,
+                `- Owner escalated: ${escalated ? "yes" : "no"}`,
+              ].join("\n"),
+              true
+            );
+            await core.summary.write();

@@ -198,6 +198,7 @@ runs:
           core.info(`Wrote ${body.length} chars of Issue context for the reviewer.`);
 
     - name: Review · Run the adversarial LLM reviewer
+      id: review
       if: inputs.pr_number != ''
       shell: bash
       env:
@@ -230,6 +231,69 @@ runs:
             echo "No verdict file was produced -- the review did not complete. See the reviewer step's log."
           fi
         } >> "$GITHUB_STEP_SUMMARY"
+
+    # The verdict has to outlive this job, and it cannot be posted from
+    # here: this job executes pull-request-authored code while holding a
+    # provider credential, so it deliberately holds no token that can speak
+    # on a pull request's behalf (see llm-review.yml's permissions comment,
+    # and commit 1e4f8e5 which removed that grant on purpose). An artifact
+    # is the handoff -- llm-review-dialogue.yml reads it from a workflow_run
+    # that never checks this code out, and does the posting there.
+    #
+    # always(), because the case that MUST reach the pull request is the one
+    # where the step above exited non-zero. A success-only upload would
+    # publish nothing exactly when there is something to say.
+    - name: Review · Stage the verdict for the dialogue workflow
+      if: always() && inputs.pr_number != ''
+      shell: bash
+      env:
+        PR_NUMBER: ${{ inputs.pr_number }}
+        BASE_SHA: ${{ inputs.base_sha }}
+        HEAD_SHA: ${{ inputs.head_sha }}
+        REVIEW_OUTCOME: ${{ steps.review.outcome }}
+      run: |
+        set -euo pipefail
+        staging="$RUNNER_TEMP/llm-review-artifact"
+        mkdir -p "$staging"
+
+        # "Reviewed and passed" and "never ran" are different facts, and the
+        # consumer must not conflate them -- an unprovisioned preflight or an
+        # infrastructure failure produces NO verdict file at all, and
+        # reporting that as a clean bill of health would be a lie.
+        if [ -f "$RUNNER_TEMP/review-verdict.json" ]; then
+          cp "$RUNNER_TEMP/review-verdict.json" "$staging/review-verdict.json"
+          export VERDICT_PRESENT=true
+        else
+          export VERDICT_PRESENT=false
+        fi
+
+        # The verdict itself carries no SHAs and no PR number by design
+        # (packages/review/src/types.ts keeps ReviewVerdict pure), so the
+        # identity of what was judged travels beside it, not inside it.
+        python3 - "$staging/review-meta.json" <<'PY'
+        import json, os, sys
+        json.dump(
+            {
+                "prNumber": int(os.environ["PR_NUMBER"]),
+                "baseSha": os.environ["BASE_SHA"],
+                "headSha": os.environ["HEAD_SHA"],
+                "reviewOutcome": os.environ["REVIEW_OUTCOME"],
+                "verdictPresent": os.environ["VERDICT_PRESENT"] == "true",
+            },
+            open(sys.argv[1], "w"),
+            indent=2,
+        )
+        PY
+        echo "Staged verdict for the dialogue workflow (verdictPresent=${VERDICT_PRESENT}, reviewOutcome=${REVIEW_OUTCOME})."
+
+    - name: Review · Upload the verdict artifact
+      if: always() && inputs.pr_number != ''
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: llm-review-verdict
+        path: ${{ runner.temp }}/llm-review-artifact
+        if-no-files-found: error
+        retention-days: 7
 
     - name: Review · Not applicable outside pull requests
       if: inputs.pr_number == ''

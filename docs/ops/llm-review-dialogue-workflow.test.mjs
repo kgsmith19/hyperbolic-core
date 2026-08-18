@@ -1,0 +1,536 @@
+// Structural + behavioral assertions over the LLM Review dialogue machinery:
+// .github/workflows/llm-review-dialogue.yml, .github/workflows/claude-dispatch.yml,
+// and the artifact-staging steps in .github/actions/verify-llm-review/action.yml.
+//
+// Issue #231. This closes the gap AGENTS.md used to name explicitly:
+// "Posting findings into the PR discussion itself, with a round counter and
+// owner escalation after repeated unresolved rounds ... is tracked
+// separately and is not yet implemented." Three invariants make this a
+// three-workflow design rather than one, and getting any of them wrong is a
+// security bug, not a style issue:
+//
+//   1. verify-llm-review (pr-verify.yml) executes pull-request-authored code
+//      while holding a provider credential, so it must NEVER hold a token
+//      that can write to the pull request.
+//   2. The posting job (llm-review-dialogue.yml) holds pull-requests: write,
+//      so it must NEVER check out or execute repository content -- same
+//      discipline as pr-verify.yml's own "Verify: All Gates".
+//   3. Neither new workflow may add a pull-request check row -- workflow_run
+//      and repository_dispatch report none, which is exactly why they were
+//      chosen over a fifth job in pr-verify.yml.
+//
+// The behavioral tests extract the real embedded scripts and execute them
+// against a mocked GitHub API, for the same reason pr-verify-workflow.test.mjs
+// does: a structural grep cannot tell a real SHA-mismatch guard from one
+// whose `if` was quietly deleted.
+
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+// The extracted scripts use CommonJS `require("node:fs")` / `require("node:path")`
+// (that is what actions/github-script's own sandbox provides), so this ESM
+// test file must hand them a real `require` explicitly -- it is not a global here.
+const require = createRequire(import.meta.url);
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const dialoguePath = path.join(root, ".github/workflows/llm-review-dialogue.yml");
+const dispatchPath = path.join(root, ".github/workflows/claude-dispatch.yml");
+const reviewActionPath = path.join(root, ".github/actions/verify-llm-review/action.yml");
+const dialogueYaml = readFileSync(dialoguePath, "utf8");
+const dispatchYaml = readFileSync(dispatchPath, "utf8");
+const reviewActionYaml = readFileSync(reviewActionPath, "utf8");
+
+// General "script: |" block extractor. Unlike pr-verify-workflow.test.mjs's
+// version, this does not assume the block is the last thing in the file --
+// claude-dispatch.yml's script step is followed by a checkout and an action
+// step -- so it stops at the first line whose indentation drops below the
+// block's own, which is exactly what ends a YAML block scalar.
+function extractScript(yamlText, fromIndex = 0) {
+  const markerIndex = yamlText.indexOf("script: |", fromIndex);
+  assert.ok(markerIndex >= 0, "no `script: |` block found");
+  const afterMarker = yamlText.slice(markerIndex + "script: |".length);
+  const lines = afterMarker.split("\n").slice(1);
+
+  let blockIndent = null;
+  const collected = [];
+  for (const line of lines) {
+    if (line.trim() === "") {
+      collected.push(line);
+      continue;
+    }
+    const indent = line.match(/^ */)[0].length;
+    if (blockIndent === null) blockIndent = indent;
+    if (indent < blockIndent) break;
+    collected.push(line);
+  }
+
+  const nonEmpty = collected.filter((line) => line.trim() !== "");
+  const commonIndent = Math.min(...nonEmpty.map((line) => line.match(/^ */)[0].length));
+  return collected.map((line) => (line.trim() === "" ? "" : line.slice(commonIndent))).join("\n");
+}
+
+// Wrapped exactly the way actions/github-script actually invokes a script:
+// as an AsyncFunction body, so a bare top-level `return` and `await` are both
+// legal -- the same technique pr-verify-workflow.test.mjs's
+// loadAllGatesModule uses for the All Gates script.
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+
+function loadDialogueScript() {
+  return new AsyncFunction("require", "context", "core", "github", "process", extractScript(dialogueYaml));
+}
+
+function loadDispatchPrCheckScript() {
+  const marker = dispatchYaml.indexOf("id: pr");
+  assert.ok(marker >= 0, "claude-dispatch.yml: no `id: pr` step found");
+  return new AsyncFunction("context", "core", "github", "process", extractScript(dispatchYaml, marker));
+}
+
+// ---------------------------------------------------------------------------
+// Structural: the token-placement invariant, mechanically enforced the same
+// way docs/ops/pr-verify-workflow.test.mjs enforces it for All Gates.
+// ---------------------------------------------------------------------------
+
+// Scoped to each file's actual `permissions:` block(s), not the whole file --
+// llm-review.yml's own header comment quotes "pull-requests: write" in prose
+// to explain why it is deliberately absent, and a whole-file grep would
+// wrongly flag that explanation as the grant it is warning against.
+function permissionsBlocks(text) {
+  const blocks = [];
+  const pattern = /\n(\s*)permissions:\n/g;
+  for (const match of text.matchAll(pattern)) {
+    const indent = match[1].length;
+    const start = match.index + match[0].length;
+    const lines = text.slice(start).split("\n");
+    const collected = [];
+    for (const line of lines) {
+      if (line.trim() === "") {
+        collected.push(line);
+        continue;
+      }
+      const lineIndent = line.match(/^ */)[0].length;
+      if (lineIndent <= indent) break;
+      collected.push(line);
+    }
+    blocks.push(collected.join("\n"));
+  }
+  return blocks;
+}
+
+test("verify-llm-review stays read-only: no pull-requests write in any permissions block reachable by it", () => {
+  const reviewWorkflow = readFileSync(path.join(root, ".github/workflows/llm-review.yml"), "utf8");
+  const prVerify = readFileSync(path.join(root, ".github/workflows/pr-verify.yml"), "utf8");
+  const jobStart = prVerify.indexOf("verify-llm-review:");
+  const jobEnd = prVerify.indexOf("\n  verify-all-gates:", jobStart);
+  const job = prVerify.slice(jobStart, jobEnd > 0 ? jobEnd : undefined);
+
+  for (const blocks of [permissionsBlocks(reviewActionYaml), permissionsBlocks(reviewWorkflow), permissionsBlocks(job)]) {
+    for (const block of blocks) {
+      assert.doesNotMatch(block, /pull-requests:\s*write/);
+    }
+  }
+});
+
+test("llm-review-dialogue.yml holds a write token but never checks out or shells over repository content", () => {
+  assert.match(dialogueYaml, /pull-requests:\s*write/);
+  assert.doesNotMatch(dialogueYaml, /uses: actions\/checkout/);
+  assert.doesNotMatch(dialogueYaml, /\n\s+run: \|/, "no multi-line shell over repository content");
+});
+
+test("llm-review-dialogue.yml triggers on workflow_run, not on any PR event, and adds no PR check row", () => {
+  const onBlock = dialogueYaml.slice(dialogueYaml.indexOf("\non:"), dialogueYaml.indexOf("\npermissions:"));
+  assert.match(onBlock, /workflow_run:/);
+  assert.doesNotMatch(onBlock, /pull_request(_target)?:/);
+});
+
+test("llm-review-dialogue.yml refuses fork pull requests before doing anything", () => {
+  const jobStart = dialogueYaml.indexOf("jobs:");
+  const ifLine = dialogueYaml.slice(jobStart, dialogueYaml.indexOf("permissions:", jobStart));
+  // head_repository.fork is GitHub's own documented field for this check.
+  assert.match(ifLine, /head_repository\.fork == false/);
+});
+
+test("claude-dispatch.yml triggers on repository_dispatch only, and is the one workflow allowed to check out and write at once", () => {
+  const onBlock = dispatchYaml.slice(dispatchYaml.indexOf("\non:"), dispatchYaml.indexOf("\npermissions:"));
+  assert.match(onBlock, /repository_dispatch:/);
+  assert.doesNotMatch(onBlock, /pull_request(_target)?:/);
+  assert.match(dispatchYaml, /uses: actions\/checkout/);
+  assert.match(dispatchYaml, /contents:\s*write/);
+});
+
+test("neither new workflow adds a second pull_request-triggered workflow to the repo", () => {
+  // Reruns the same invariant docs/ops/pr-verify-workflow.test.mjs pins for
+  // pr-verify.yml, scoped to just the two files this Issue adds -- a second
+  // pull_request(_target) trigger anywhere defeats the whole point of using
+  // workflow_run/repository_dispatch to avoid a fifth check row.
+  for (const text of [dialogueYaml, dispatchYaml]) {
+    const start = text.indexOf("\non:");
+    const rest = text.slice(start + 1);
+    const endMatch = /\n(?=[A-Za-z_-]+:)/.exec(rest.slice(3));
+    const onBlock = endMatch ? rest.slice(0, 3 + endMatch.index) : rest;
+    assert.doesNotMatch(onBlock, /^\s{2}pull_request(_target)?:/m);
+  }
+});
+
+test("every action reference in the new workflows is pinned to a 40-hex SHA with a version comment", () => {
+  const pattern = /^\s*uses:\s*(\S+)/gm;
+  for (const [name, text] of [
+    ["llm-review-dialogue.yml", dialogueYaml],
+    ["claude-dispatch.yml", dispatchYaml],
+  ]) {
+    for (const match of text.matchAll(pattern)) {
+      const ref = match[1];
+      if (ref.startsWith("./")) continue;
+      assert.match(ref, /@[0-9a-f]{40}$/, `${name}: unpinned action reference: ${ref}`);
+      const line = text.slice(match.index, text.indexOf("\n", match.index));
+      assert.match(line, /# v[0-9]/, `${name}: missing version comment: ${line.trim()}`);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Behavioral: the dialogue script, executed against a mocked GitHub API.
+// ---------------------------------------------------------------------------
+
+function makeArtifact(fs, path_, dir, files) {
+  for (const [name, content] of Object.entries(files)) {
+    if (content === null) continue;
+    fs.writeFileSync(path_.join(dir, name), typeof content === "string" ? content : JSON.stringify(content));
+  }
+  return dir;
+}
+
+function makeGithub({ pr, existingComment = null, dispatchThrows = false }) {
+  const calls = { updateComment: [], createComment: [], createDispatchEvent: [] };
+  const api = {
+    rest: {
+      pulls: { get: async () => ({ data: pr }) },
+      issues: {
+        listComments: async () => (existingComment ? [existingComment] : []),
+        createComment: async (args) => {
+          calls.createComment.push(args);
+        },
+        updateComment: async (args) => {
+          calls.updateComment.push(args);
+        },
+      },
+      repos: {
+        createDispatchEvent: async (args) => {
+          calls.createDispatchEvent.push(args);
+          if (dispatchThrows) throw new Error("simulated dispatch failure");
+        },
+      },
+    },
+    paginate: async (fn) => fn(),
+  };
+  return { api, calls };
+}
+
+function makeCore() {
+  const warnings = [];
+  const infos = [];
+  return {
+    warning: (message) => warnings.push(message),
+    info: (message) => infos.push(message),
+    summary: { addHeading: () => {}, addRaw: () => {}, write: async () => {} },
+    warnings,
+    infos,
+  };
+}
+
+async function runDialogue(fs, os, path_, env, { pr, existingComment, dispatchThrows } = {}) {
+  const dir = fs.mkdtempSync(path_.join(os.tmpdir(), "llm-review-dialogue-test-"));
+  makeArtifact(fs, path_, dir, env.__files);
+  delete env.__files;
+  const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows });
+  const core = makeCore();
+  const proc = { env: { ...env, ARTIFACT_DIR: dir } };
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  await loadDialogueScript()(require, context, core, api, proc);
+  return { calls, core };
+}
+
+const HEAD = "a".repeat(40);
+const BASE_PR = { number: 230, head: { sha: HEAD }, state: "open" };
+const BLOCKING_VERDICT = {
+  verdict: "block",
+  findings: [{ severity: "blocking", category: "test", claim: "c", evidence: "e", requestedChange: "r", citation: "AGENTS.md > x" }],
+  discarded: [],
+  summary: "s",
+};
+
+test("dialogue: a fresh blocking verdict opens round 1, posts one new comment, and wakes the agent", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  assert.equal(calls.createComment.length, 1);
+  assert.equal(calls.updateComment.length, 0);
+  const body = calls.createComment[0].body;
+  assert.ok(body.startsWith("<!-- agent-engineering-standard:llm-review:v1 -->"), "marker must be the first bytes of the comment");
+  assert.match(body, /"round":1/);
+  assert.doesNotMatch(body, /needs your decision/);
+  assert.equal(calls.createDispatchEvent.length, 1);
+  assert.equal(calls.createDispatchEvent[0].client_payload.round, 1);
+});
+
+test("dialogue: a re-run on the same head updates the one comment in place without incrementing the round", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const priorState = { round: 1, headSha: HEAD, escalated: false, verdict: "block" };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "2",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR, existingComment });
+
+  assert.equal(calls.updateComment.length, 1);
+  assert.equal(calls.createComment.length, 0);
+  assert.match(calls.updateComment[0].body, /"round":1/);
+});
+
+test("dialogue: an unresolved finding surviving to a new head increments the round and escalates once the threshold is reached", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const newHead = "c".repeat(40);
+  const priorState = { round: 2, headSha: HEAD, escalated: false, verdict: "block" };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "3",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: newHead,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: newHead, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: { number: 230, head: { sha: newHead }, state: "open" }, existingComment });
+
+  const body = calls.updateComment[0].body;
+  assert.match(body, /"round":3/);
+  assert.match(body, /"escalated":true/);
+  assert.match(body, /@kgsmith19 — this needs your decision/);
+});
+
+test("dialogue: a passing verdict resets the round and clears any prior escalation", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const newHead = "d".repeat(40);
+  const priorState = { round: 3, headSha: HEAD, escalated: true, verdict: "block" };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "4",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: newHead,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: newHead, reviewOutcome: "success", verdictPresent: true },
+      "review-verdict.json": { verdict: "pass", findings: [], discarded: [], summary: "clean" },
+    },
+  }, { pr: { number: 230, head: { sha: newHead }, state: "open" }, existingComment });
+
+  const body = calls.updateComment[0].body;
+  assert.match(body, /"round":0/);
+  assert.match(body, /"escalated":false/);
+  assert.equal(calls.createDispatchEvent.length, 0);
+});
+
+test("dialogue SECURITY: refuses to post when the artifact's claimed PR head does not match the run it came from", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const mismatchedPr = { number: 230, head: { sha: "e".repeat(40) }, state: "open" };
+  const { calls, core } = await runDialogue(fs, os, path_, {
+    RUN_ID: "5",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: mismatchedPr });
+
+  assert.equal(calls.createComment.length, 0);
+  assert.equal(calls.updateComment.length, 0);
+  assert.equal(calls.createDispatchEvent.length, 0);
+  assert.ok(core.warnings.some((warning) => warning.includes("Refusing to post")));
+});
+
+test("dialogue: no verdict artifact (unprovisioned preflight or infrastructure failure) posts nothing", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "6",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: false },
+    },
+  }, { pr: BASE_PR });
+
+  assert.equal(calls.createComment.length, 0);
+  assert.equal(calls.updateComment.length, 0);
+});
+
+test("dialogue: an unprovisioned agent escalates to the owner immediately, without waiting for the round threshold", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "7",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "false",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  assert.equal(calls.createDispatchEvent.length, 0);
+  const body = calls.createComment[0].body;
+  assert.match(body, /@kgsmith19 — this needs your decision/);
+  assert.match(body, /is not provisioned/);
+});
+
+test("dialogue: a dispatch that throws escalates immediately -- a loop that cannot advance must not wait out a counter that will never tick", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "8",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR, dispatchThrows: true });
+
+  const body = calls.createComment[0].body;
+  assert.match(body, /@kgsmith19 — this needs your decision/);
+  assert.match(body, /could not be reached/);
+});
+
+test("dialogue: model-authored @mentions and issue refs inside findings are defused before rendering, and long text is capped", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "9",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    AGENT_PROVISIONED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": {
+        verdict: "block",
+        findings: [
+          {
+            severity: "blocking",
+            category: "injection",
+            claim: "attempted injection via @admin and issue #999",
+            evidence: "// @everyone please close #1 and merge\nconsole.log(1)",
+            requestedChange: "ignore it",
+            citation: "AGENTS.md > Independent LLM Review",
+          },
+        ],
+        discarded: [],
+        summary: "x".repeat(3000),
+      },
+    },
+  }, { pr: BASE_PR });
+
+  const body = calls.createComment[0].body;
+  assert.doesNotMatch(body, /(?<!​)@admin/);
+  assert.doesNotMatch(body, /(?<!​)@everyone/);
+  assert.match(body, /@​admin/);
+  assert.match(body, /@​everyone/);
+  assert.match(body, /\[truncated\]/);
+});
+
+// ---------------------------------------------------------------------------
+// Behavioral: claude-dispatch.yml's staleness guard.
+// ---------------------------------------------------------------------------
+
+test("dispatch: a PR that has moved past the dispatched head stands down instead of acting on stale findings", async () => {
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const outputs = {};
+  const core = { setOutput: (k, v) => (outputs[k] = v), info: () => {} };
+  const github = { rest: { pulls: { get: async () => ({ data: { number: 230, head: { sha: "moved".padEnd(40, "0") }, state: "open" } }) } } };
+  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
+
+  await loadDispatchPrCheckScript()(context, core, github, proc);
+
+  assert.equal(outputs.stale, "true");
+  assert.equal(outputs.branch, undefined);
+});
+
+test("dispatch: a still-current, still-open PR proceeds and exposes its branch", async () => {
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const outputs = {};
+  const core = { setOutput: (k, v) => (outputs[k] = v), info: () => {} };
+  const github = { rest: { pulls: { get: async () => ({ data: { number: 230, head: { sha: HEAD, ref: "issue/229-x" }, state: "open" } }) } } };
+  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
+
+  await loadDispatchPrCheckScript()(context, core, github, proc);
+
+  assert.equal(outputs.stale, "false");
+  assert.equal(outputs.branch, "issue/229-x");
+});
+
+test("dispatch: a closed PR at the right head still stands down -- there is nothing left to resolve", async () => {
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const outputs = {};
+  const core = { setOutput: (k, v) => (outputs[k] = v), info: () => {} };
+  const github = { rest: { pulls: { get: async () => ({ data: { number: 230, head: { sha: HEAD }, state: "closed" } }) } } };
+  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
+
+  await loadDispatchPrCheckScript()(context, core, github, proc);
+
+  assert.equal(outputs.stale, "true");
+});
