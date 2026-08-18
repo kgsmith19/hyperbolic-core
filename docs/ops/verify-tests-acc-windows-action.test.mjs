@@ -5,24 +5,35 @@
 // back to TAP when stdout is not a TTY, TAP numbers only top-level tests, and
 // nothing was uploaded when the job failed. The fix adds spec+junit
 // reporters via NODE_OPTIONS and uploads the junit report on failure. A live
-// seeded-canary run (linked on PR #236) proved this works end to end, but
-// that proof is ephemeral -- the seed was reverted, so nothing in the
-// merged diff itself would catch a future edit that quietly breaks the
-// wiring again. This file is that permanent, cheap check: it does not run
-// the native suite (that is what the real CI lane is for), it only pins
-// that the reporter destination and the artifact upload path are computed
-// to name the exact same file, and that the failure-evidence contract
-// (if-no-files-found: error, if: failure()) still holds.
+// seeded-canary run against the real Windows lane (linked on PR #236) proved
+// this end to end once, but that proof was necessarily ephemeral -- the seed
+// was reverted, because a nested subtest left permanently failing in the
+// real ACC suite would make `ACC Windows` red forever, which is a worse
+// defect than the one this Issue fixes. A permanent proof has to live
+// somewhere that can fail on its own without ever failing the real suite:
+// this file spawns an ISOLATED `node --test` process, elsewhere in the
+// filesystem, against a throwaway fixture, using the exact reporter types
+// action.yml configures -- so a future edit that quietly breaks the
+// reporter wiring, or the pairing between the reporter's destination and
+// the artifact upload path, fails HERE, every run, without ever touching
+// the real ACC test suite.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const actionPath = path.join(root, ".github/actions/verify-tests-acc-windows/action.yml");
 const action = readFileSync(actionPath, "utf8");
+
+const tmpDirs = [];
+after(() => {
+  for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 const packageJsonPath = path.join(root, "apps/agentic-command-center/package.json");
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
@@ -93,4 +104,70 @@ test("all three PowerShell suites are still wired ahead of the evidence step", (
   ]) {
     assert.ok(action.includes(script), `expected ${script} to still be invoked`);
   }
+});
+
+test("action.yml's own reporter types, run for real against a failing nested subtest, name it on stdout and in the junit file", () => {
+  // Reads the reporter TYPES out of action.yml (not the destinations -- the
+  // destination-pairing test above already owns that) so this test fails if
+  // a future edit swaps spec/junit for something else, same as it would
+  // fail on a real drift today.
+  const nodeOptionsMatch = /NODE_OPTIONS:\s*>-\s*\n((?:\s+.+\n)+)/.exec(action);
+  assert.ok(nodeOptionsMatch, "expected a NODE_OPTIONS block before the native test step");
+  const reporterTypes = [...nodeOptionsMatch[1].matchAll(/--test-reporter=(\S+)/g)].map((m) => m[1]);
+  assert.deepEqual(
+    reporterTypes,
+    ["spec", "junit"],
+    "expected exactly spec (stdout visibility) then junit (evidence artifact) -- this proof only covers those two",
+  );
+
+  const dir = mkdtempSync(path.join(tmpdir(), "acc-windows-reporter-proof-"));
+  tmpDirs.push(dir);
+  const fixturePath = path.join(dir, "fixture.test.mjs");
+  const junitPath = path.join(dir, "report.xml");
+  const failingName = "nested subtest that must be named in evidence";
+  writeFileSync(
+    fixturePath,
+    [
+      'import { test } from "node:test";',
+      'import assert from "node:assert";',
+      'test("outer", async (t) => {',
+      `  await t.test(${JSON.stringify(failingName)}, () => {`,
+      "    assert.strictEqual(1, 2);",
+      "  });",
+      "});",
+      "",
+    ].join("\n"),
+  );
+
+  // NODE_TEST_CONTEXT is how node --test marks the child process it spawns
+  // for THIS FILE. Left in the environment, the fixture run below inherits
+  // it and node --test treats that as a *recursive* run() call and silently
+  // skips it (0 tests, exit 0) -- a real Node behavior this test would
+  // otherwise fail on for a reason that has nothing to do with action.yml.
+  const { NODE_TEST_CONTEXT: _unused, ...childEnv } = process.env;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--test",
+      "--test-reporter=spec",
+      "--test-reporter-destination=stdout",
+      "--test-reporter=junit",
+      `--test-reporter-destination=${junitPath}`,
+      fixturePath,
+    ],
+    { encoding: "utf8", env: childEnv },
+  );
+
+  assert.notEqual(result.status, 0, "the fixture's seeded failure must make the run exit non-zero");
+  assert.ok(
+    result.stdout.includes(failingName),
+    `the spec reporter must name the failing nested subtest on stdout; got:\n${result.stdout}`,
+  );
+
+  assert.ok(existsSync(junitPath), "the junit reporter must write its report file even though the run failed");
+  const junitContents = readFileSync(junitPath, "utf8");
+  assert.ok(
+    junitContents.includes(failingName),
+    `the junit report must name the failing nested subtest; got:\n${junitContents}`,
+  );
 });
