@@ -1,0 +1,28 @@
+# agent-roles.yaml
+#
+# Single source of truth for which LLM vendor holds each automation role on
+# this repo: `dev` (writes code, pushes commits, opens/updates pull
+# requests) and `review` (posts the adversarial LLM Review verdict). Every
+# agent working on this repo — on any surface, Claude Code CLI/desktop/web/
+# cloud, Codex CLI, Antigravity, local or hosted — must read this file
+# before doing dev or review work here. See AGENTS.md > "Active agent
+# roles" for exactly what that means and why it is an instruction rather
+# than a technical lock.
+#
+# To reassign a role: edit the relevant `provider` (and `model`, if you are
+# also changing which exact model that vendor should run) below and commit.
+# .github/CODEOWNERS requires @kgsmith19's own approval on this file, so a
+# dev-role agent can never edit itself into also being the review role.
+#
+# HARD CONSTRAINT: dev.provider must never equal review.provider. Starting
+# with the CI-enforcement slice that follows this one, `repository-standards`
+# fails the whole PR Gate closed if it ever does — this is what guarantees
+# there is always exactly one dev, one reviewer, and the third vendor idle.
+
+dev:
+  provider: anthropic # anthropic | openai | gemini (gemini = Antigravity)
+  model: claude-opus-5 # exact model id the dev dispatcher requests
+
+review:
+  provider: openai
+  model: gpt-5-mini
