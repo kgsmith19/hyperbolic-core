@@ -86,6 +86,32 @@ runs:
           echo "No base SHA provided; leaving HEAD alone and letting covgate see the full tree."
           exit 0
         fi
+        # BASE_SHA is the base branch's CURRENT tip at event time, not
+        # necessarily this branch's fork point -- if main has advanced since
+        # the pull request was opened (any later PR merging is enough), that
+        # commit was never an ancestor of HEAD and fetch-depth: 0 on `ref:
+        # head.sha` only unshallows HEAD's own ancestry, never fetching it.
+        # `git merge-base` then fails outright on a missing object, not a
+        # real "no common ancestor" case (Issue #245). Fetching BASE_SHA
+        # alone (even unshallowed) is not enough on its own: merge-base has
+        # to walk back from it to find the actual shared commit, which could
+        # be several merges further back than BASE_SHA's immediate parent --
+        # a shallow fetch would only ever accidentally work. Fetching main's
+        # own full history is the only fetch guaranteed to contain whatever
+        # that shared commit turns out to be, since that is where every
+        # merge that could have advanced BASE_SHA past this branch's fork
+        # point actually landed. If that also fails (network issue, a
+        # genuinely bad/rewritten SHA), fail open the same way the
+        # empty-BASE_SHA branch above already does -- the same posture this
+        # job's own detect-changes step takes for the identical "base commit
+        # not available locally" case.
+        if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+          echo "Base commit ${BASE_SHA} not yet fetched; fetching main's full history to reach it."
+          if ! git fetch origin main 2>/dev/null; then
+            echo "Could not fetch main; leaving HEAD alone and letting covgate see the full tree."
+            exit 0
+          fi
+        fi
         merge_base="$(git merge-base "${BASE_SHA}" HEAD)"
         git reset --soft "${merge_base}"
 
