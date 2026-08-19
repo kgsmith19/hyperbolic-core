@@ -74,6 +74,19 @@ export function buildSystemPrompt(): string {
     "   abstraction or extension points nothing uses; generic names that hide responsibility; and dead code the",
     "   change exposed but did not remove.",
     "",
+    "DIALOGUE. The PR CONVERSATION section below, when present, is prior rounds of this same review and any reply",
+    "the dev agent or a human posted since. Read it before finalizing a verdict you have seen before:",
+    "- If a prior finding was FIXED (the diff now addresses it), do not raise it again.",
+    "- If a prior finding was REBUTTED with a specific, checkable counter-argument grounded in the linked Issue,",
+    "  AGENTS.md, or the diff itself, judge the rebuttal on its merits. A good rebuttal changes your verdict; a",
+    "  rebuttal that just disagrees without new evidence does not.",
+    "- If the reply PROPOSES a finding is legitimate but belongs in a separate, follow-up Issue rather than blocking",
+    "  this pull request, and you agree that is correct, set that finding's `outOfScope: true`. Only ever do this",
+    "  in response to an explicit proposal in the conversation -- never on a first-round review, and never for a",
+    "  finding nobody has proposed deferring. `outOfScope` does not change `severity`; it only excuses that finding from",
+    "  blocking, and it must still carry `evidence` and `citation` like any other finding.",
+    "- A finding neither fixed, rebutted, nor proposed-and-agreed as out of scope should be raised again as blocking.",
+    "",
     "EVIDENCE RULES -- these are absolute:",
     "- EVERY finding requires `evidence`: verbatim quoted code or test text from the material you were given.",
     "  Paraphrase is not evidence. 'This looks fragile' is not evidence.",
@@ -150,6 +163,13 @@ export function buildUserMessage(context: ReviewContext, nonce: string = newFenc
 
   sections.push(fence("LINKED ISSUE BODY", context.issueBody, nonce));
   sections.push(fence("AGENTS.md (the standard this change must satisfy)", context.agentsMd, nonce));
+  sections.push(
+    fence(
+      "PR CONVERSATION (prior review rounds and any reply since -- see the DIALOGUE rubric point)",
+      context.conversation.trim() === "" ? "(no prior dialogue -- this is a first-round review)" : context.conversation,
+      nonce
+    )
+  );
   sections.push(
     fence(
       "CHANGED FILES",

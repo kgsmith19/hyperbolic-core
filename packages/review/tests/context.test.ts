@@ -48,6 +48,44 @@ test("gatherContext: an over-cap diff is cut with a visible [truncated N chars] 
   assert.ok(!context.diff.startsWith("x".repeat(101)), "nothing beyond the cap may be retained");
 });
 
+// Behavior protected: a first-round review (no `conversation` option supplied)
+// gets an empty string, never undefined -- prompt.ts renders it unconditionally
+// and a missing value would be a runtime crash, not a graceful "no dialogue yet".
+// Defect caught: dropping the default and letting `conversation` come back
+// `undefined` when the caller omits it.
+test("gatherContext: conversation defaults to an empty string when not supplied", async () => {
+  const context = await gatherContext({
+    baseSha: "base0000",
+    headSha: "head1111",
+    issueBody: "criterion 1",
+    agentsMd: "## Test quality",
+    runGit: fakeGit({}, "+diff", ["src/a.ts"]),
+  });
+
+  assert.equal(context.conversation, "");
+});
+
+// Behavior protected: a supplied conversation is carried through to the
+// context, and is truncated the same visible way as every other input rather
+// than being silently exempt from the budget.
+test("gatherContext: a supplied conversation is carried through and subject to truncation", async () => {
+  const oversized = "reply ".repeat(50);
+  const context = await gatherContext({
+    baseSha: "base0000",
+    headSha: "head1111",
+    issueBody: "criterion 1",
+    agentsMd: "## Test quality",
+    conversation: oversized,
+    runGit: fakeGit({}, "+diff", ["src/a.ts"]),
+    perInputCharCap: 20,
+    totalCharCap: 10_000,
+  });
+
+  assert.equal(context.truncated, true);
+  assert.match(context.conversation, /\[truncated \d+ chars\]/);
+  assert.ok(context.conversation.startsWith(oversized.slice(0, 20)));
+});
+
 // Behavior protected: content that fits is passed through byte-for-byte and not
 // flagged. Defect caught: an off-by-one that truncates at exactly the cap, or a
 // `truncated` flag stuck at true -- which would make the marker meaningless by

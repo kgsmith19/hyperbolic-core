@@ -29,14 +29,15 @@ import process from "node:process";
 
 import { gatherContext, resolveConfig, runReview } from "../src/index.ts";
 
-const USAGE = `Usage: node packages/review/bin/review.mjs --base <sha> --head <sha> [--issue-body-file <path>] [--out <path>]`;
+const USAGE = `Usage: node packages/review/bin/review.mjs --base <sha> --head <sha> [--issue-body-file <path>] [--conversation-file <path>] [--out <path>]`;
 
 function parseArgs(argv) {
-  const args = { base: null, head: null, issueBodyFile: null, out: null };
+  const args = { base: null, head: null, issueBodyFile: null, conversationFile: null, out: null };
   const flags = {
     "--base": "base",
     "--head": "head",
     "--issue-body-file": "issueBodyFile",
+    "--conversation-file": "conversationFile",
     "--out": "out",
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -134,6 +135,12 @@ async function main(argv, env) {
       ? "(no linked Issue body was supplied to this run)"
       : await readFile(args.issueBodyFile, "utf8");
 
+  // Empty, not a placeholder sentence: gatherContext's own default is "",
+  // and context.ts / prompt.ts already render a first-round placeholder for
+  // that case. A second, different placeholder text here would just be a
+  // maintenance seam with no behavioral purpose.
+  const conversation = args.conversationFile === null ? "" : await readFile(args.conversationFile, "utf8");
+
   // AGENTS.md is read from the checkout under review, not bundled: the
   // reviewer must judge against the standard as it stands on this branch.
   let agentsMd;
@@ -148,6 +155,7 @@ async function main(argv, env) {
     headSha: args.head,
     issueBody,
     agentsMd,
+    conversation,
   });
 
   const verdict = await runReview({ config, context, credentials });

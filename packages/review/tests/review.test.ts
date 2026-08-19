@@ -22,6 +22,7 @@ const context: ReviewContext = {
   testFiles: [{ path: "tests/pricing.test.ts", contents: "assert.equal(rate, 0.1);" }],
   issueBody: "Acceptance criterion 1: the rate is configurable.",
   agentsMd: "## Test quality\nEvery test must be able to fail.",
+  conversation: "",
   truncated: false,
 };
 
