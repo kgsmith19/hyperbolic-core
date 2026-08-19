@@ -2,10 +2,12 @@ name: Verify Repo Policy
 description: >-
   Structural checks: CLAUDE.md/GEMINI.md are exact adapters, AGENTS.md has
   every required section, every workflow action is SHA-pinned,
-  project.yaml/standard.lock parse as valid YAML, and no trailing
-  whitespace was introduced. Shared by pr-verify.yml's "Repository Standards"
-  job and repo-policy.yml's own merge_group/push/workflow_dispatch
-  triggers, so the actual checks have exactly one source.
+  project.yaml/standard.lock/agent-roles.yaml parse as valid YAML,
+  agent-roles.yaml's dev and review providers are valid and distinct, and
+  no trailing whitespace was introduced. Shared by pr-verify.yml's
+  "Repository Standards" job and repo-policy.yml's own
+  merge_group/push/workflow_dispatch triggers, so the actual checks have
+  exactly one source.
 
   The CALLER must have already checked out the repository with
   fetch-depth: 0 -- this action does not check out, so a job running
@@ -63,6 +65,7 @@ runs:
         ## Owner authority
         ## Sources of truth
         ## Session bootstrap
+        ## Active agent roles
         ## Provider-neutral roles
         ## Releases and milestones
         ## Thin Issues and work claiming
@@ -116,6 +119,73 @@ runs:
         python3 -c "import yaml; yaml.safe_load(open('project.yaml'))"
         python3 -c "import yaml; yaml.safe_load(open('standard.lock'))"
         echo "project.yaml and standard.lock parse as valid YAML."
+
+    # This is the mechanical half of the "dev.provider != review.provider"
+    # rule AGENTS.md > Active agent roles states in prose: fail the whole
+    # PR Gate closed rather than let a misconfigured file quietly leave both
+    # roles on the same vendor. This is one of three independent checks of
+    # the same constraint (the dev dispatcher and the reviewer gate each
+    # re-verify it too, once those slices land) -- defense in depth, never
+    # trust a single check alone.
+    - name: Policy · Confirm agent-roles.yaml is valid and dev/review providers differ
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 <<'PYEOF'
+        import sys
+        import yaml
+
+        VALID_PROVIDERS = {"anthropic", "openai", "gemini"}
+
+        try:
+            with open("agent-roles.yaml") as f:
+                data = yaml.safe_load(f)
+        except (OSError, yaml.YAMLError) as error:
+            print(f"agent-roles.yaml could not be read or parsed: {error}", file=sys.stderr)
+            sys.exit(1)
+
+        if not isinstance(data, dict):
+            print("agent-roles.yaml must parse to a mapping with 'dev' and 'review' keys.", file=sys.stderr)
+            sys.exit(1)
+
+        errors = []
+        providers = {}
+        for role in ("dev", "review"):
+            section = data.get(role)
+            if not isinstance(section, dict):
+                errors.append(f"'{role}' section is missing or not a mapping.")
+                continue
+            raw_provider = section.get("provider")
+            # Canonicalize the same way packages/review/src/config.ts does
+            # for REVIEW_PROVIDER: trim + lowercase before comparison, so
+            # harmless casing ("OpenAI") never causes a spurious failure or,
+            # worse, silently evades the collision check below.
+            provider = raw_provider.strip().lower() if isinstance(raw_provider, str) else raw_provider
+            if provider not in VALID_PROVIDERS:
+                errors.append(
+                    f"'{role}.provider' is {raw_provider!r}; must be one of {sorted(VALID_PROVIDERS)}."
+                )
+            else:
+                providers[role] = provider
+            if not isinstance(section.get("model"), str) or not section.get("model", "").strip():
+                errors.append(f"'{role}.model' is missing or empty.")
+
+        if "dev" in providers and "review" in providers and providers["dev"] == providers["review"]:
+            errors.append(
+                f"dev.provider and review.provider are both {providers['dev']!r}. "
+                "They must never be equal -- see AGENTS.md > Active agent roles."
+            )
+
+        if errors:
+            print("agent-roles.yaml failed validation:", file=sys.stderr)
+            for error in errors:
+                print(f"  - {error}", file=sys.stderr)
+            sys.exit(1)
+
+        print(
+            f"agent-roles.yaml is valid: dev={providers['dev']}, review={providers['review']}."
+        )
+        PYEOF
 
     - name: Policy · Confirm no trailing whitespace was introduced
       shell: bash
