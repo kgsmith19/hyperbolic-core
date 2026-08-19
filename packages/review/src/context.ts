@@ -50,6 +50,15 @@ export interface ReviewContext {
   testFiles: ChangedTestFile[];
   issueBody: string;
   agentsMd: string;
+  /**
+   * The pull request's own comment thread, chronological, each entry
+   * pre-formatted as "<author> (<timestamp>): <body>" by the caller. Empty
+   * string on a first-round review, where there is nothing yet to have a
+   * conversation about. Exactly as untrusted as `issueBody` -- fenced as
+   * DATA the same way, never instructions -- since anyone who can comment on
+   * the pull request can write into it.
+   */
+  conversation: string;
   /** True when any input was cut. Mirrors the in-text `[truncated]` markers. */
   truncated: boolean;
 }
@@ -59,6 +68,8 @@ export interface GatherContextOptions {
   headSha: string;
   issueBody: string;
   agentsMd: string;
+  /** See `ReviewContext.conversation`. Defaults to "" (no prior dialogue). */
+  conversation?: string;
   runGit?: RunGit;
   perInputCharCap?: number;
   totalCharCap?: number;
@@ -106,6 +117,7 @@ export async function gatherContext(options: GatherContextOptions): Promise<Revi
     headSha,
     issueBody,
     agentsMd,
+    conversation = "",
     runGit = defaultRunGit,
     perInputCharCap = PER_INPUT_CHAR_CAP,
     totalCharCap = TOTAL_CHAR_CAP,
@@ -155,6 +167,7 @@ export async function gatherContext(options: GatherContextOptions): Promise<Revi
   const diff = cap(rawDiff, perInputCharCap);
   const cappedIssueBody = cap(issueBody, perInputCharCap);
   const cappedAgentsMd = cap(agentsMd, perInputCharCap);
+  const cappedConversation = cap(conversation, perInputCharCap);
   const cappedTestFiles = rawTestFiles.map((file) => ({
     path: file.path,
     contents: cap(file.contents, perInputCharCap),
@@ -163,7 +176,10 @@ export async function gatherContext(options: GatherContextOptions): Promise<Revi
   // Then the total budget, spent in priority order: the diff is the thing
   // under review and is paid for first; test files are next because test
   // quality is this gate's sharpest question; the Issue and AGENTS.md are the
-  // oracles and are smallest.
+  // oracles and are smallest. The conversation is spent last, alongside them
+  // -- it matters for continuity across rounds, but a first-round review has
+  // none of it, and a truncated diff is a worse loss than a truncated
+  // rebuttal.
   let remaining = totalCharCap;
   const spend = (text: string): string => {
     if (text.length <= remaining) {
@@ -183,6 +199,7 @@ export async function gatherContext(options: GatherContextOptions): Promise<Revi
   }));
   const budgetedIssueBody = spend(cappedIssueBody);
   const budgetedAgentsMd = spend(cappedAgentsMd);
+  const budgetedConversation = spend(cappedConversation);
 
   return {
     baseSha,
@@ -192,6 +209,7 @@ export async function gatherContext(options: GatherContextOptions): Promise<Revi
     testFiles: budgetedTestFiles,
     issueBody: budgetedIssueBody,
     agentsMd: budgetedAgentsMd,
+    conversation: budgetedConversation,
     truncated,
   };
 }
