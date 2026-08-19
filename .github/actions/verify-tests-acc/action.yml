@@ -107,8 +107,27 @@ runs:
         # not available locally" case.
         if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
           echo "Base commit ${BASE_SHA} not yet fetched; fetching main's full history to reach it."
+          # Defensive, not redundant: this job's own checkout always passes
+          # fetch-depth: 0, but this action is also invoked by other CI
+          # entry points with their own checkout config, and a caller that
+          # ever used a shallow fetch would otherwise leave `git fetch origin
+          # main` bounded by that existing shallow horizon instead of truly
+          # reaching back to BASE_SHA.
+          if [ -f "$(git rev-parse --git-dir)/shallow" ]; then
+            echo "Repository is shallow; unshallowing before fetching main."
+            git fetch --unshallow origin 2>/dev/null || true
+          fi
           if ! git fetch origin main 2>/dev/null; then
             echo "Could not fetch main; leaving HEAD alone and letting covgate see the full tree."
+            exit 0
+          fi
+          # A successful fetch of main does not guarantee BASE_SHA itself
+          # exists anywhere -- a stale or malformed value is real input, not
+          # hypothetical, since it travels through an event payload. Fail
+          # open here too rather than letting a bad SHA reach merge-base and
+          # crash the job.
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "Base commit ${BASE_SHA} still not found after fetching main; leaving HEAD alone and letting covgate see the full tree."
             exit 0
           fi
         fi
