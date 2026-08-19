@@ -18,6 +18,15 @@ inputs:
     description: Base commit SHA the changed-file coverage gate diffs against. Empty skips the reset (full-tree coverage).
     required: false
     default: ""
+  base_ref:
+    description: >-
+      Base branch name to fetch when base_sha isn't yet present locally
+      (github.event.pull_request.base.ref). Defaults to "main" only when the
+      caller doesn't supply one, since every caller in this repo targets it
+      -- never hardcoded past this one default, so a same-repo PR against a
+      different base branch still resolves correctly.
+    required: false
+    default: "main"
 
 runs:
   using: composite
@@ -80,6 +89,7 @@ runs:
       shell: bash
       env:
         BASE_SHA: ${{ inputs.base_sha }}
+        BASE_REF: ${{ inputs.base_ref }}
       run: |
         set -euo pipefail
         if [ -z "${BASE_SHA}" ]; then
@@ -87,47 +97,48 @@ runs:
           exit 0
         fi
         # BASE_SHA is the base branch's CURRENT tip at event time, not
-        # necessarily this branch's fork point -- if main has advanced since
-        # the pull request was opened (any later PR merging is enough), that
-        # commit was never an ancestor of HEAD and fetch-depth: 0 on `ref:
-        # head.sha` only unshallows HEAD's own ancestry, never fetching it.
-        # `git merge-base` then fails outright on a missing object, not a
-        # real "no common ancestor" case (Issue #245). Fetching BASE_SHA
-        # alone (even unshallowed) is not enough on its own: merge-base has
-        # to walk back from it to find the actual shared commit, which could
-        # be several merges further back than BASE_SHA's immediate parent --
-        # a shallow fetch would only ever accidentally work. Fetching main's
-        # own full history is the only fetch guaranteed to contain whatever
-        # that shared commit turns out to be, since that is where every
-        # merge that could have advanced BASE_SHA past this branch's fork
-        # point actually landed. If that also fails (network issue, a
-        # genuinely bad/rewritten SHA), fail open the same way the
-        # empty-BASE_SHA branch above already does -- the same posture this
-        # job's own detect-changes step takes for the identical "base commit
-        # not available locally" case.
+        # necessarily this branch's fork point -- if the base branch has
+        # advanced since the pull request was opened (any later PR merging
+        # is enough), that commit was never an ancestor of HEAD and
+        # fetch-depth: 0 on `ref: head.sha` only unshallows HEAD's own
+        # ancestry, never fetching it. `git merge-base` then fails outright
+        # on a missing object, not a real "no common ancestor" case (Issue
+        # #245). Fetching BASE_SHA alone (even unshallowed) is not enough on
+        # its own: merge-base has to walk back from it to find the actual
+        # shared commit, which could be several merges further back than
+        # BASE_SHA's immediate parent -- a shallow fetch would only ever
+        # accidentally work. Fetching the base branch's own full history is
+        # the only fetch guaranteed to contain whatever that shared commit
+        # turns out to be, since that is where every merge that could have
+        # advanced BASE_SHA past this branch's fork point actually landed.
+        # BASE_REF names that branch -- the caller passes
+        # github.event.pull_request.base.ref for a real pull_request event,
+        # so this never actually hardcodes "main" for a same-repo PR; the
+        # input's own default exists only for a caller that doesn't supply
+        # one, and every caller in this repo does.
         if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-          echo "Base commit ${BASE_SHA} not yet fetched; fetching main's full history to reach it."
+          echo "Base commit ${BASE_SHA} not yet fetched; fetching ${BASE_REF}'s full history to reach it."
           # Defensive, not redundant: this job's own checkout always passes
           # fetch-depth: 0, but this action is also invoked by other CI
           # entry points with their own checkout config, and a caller that
-          # ever used a shallow fetch would otherwise leave `git fetch origin
-          # main` bounded by that existing shallow horizon instead of truly
+          # ever used a shallow fetch would otherwise leave the fetch below
+          # bounded by that existing shallow horizon instead of truly
           # reaching back to BASE_SHA.
           if [ -f "$(git rev-parse --git-dir)/shallow" ]; then
-            echo "Repository is shallow; unshallowing before fetching main."
+            echo "Repository is shallow; unshallowing before fetching ${BASE_REF}."
             git fetch --unshallow origin 2>/dev/null || true
           fi
-          if ! git fetch origin main 2>/dev/null; then
-            echo "Could not fetch main; leaving HEAD alone and letting covgate see the full tree."
+          if ! git fetch origin "${BASE_REF}" 2>/dev/null; then
+            echo "Could not fetch ${BASE_REF}; leaving HEAD alone and letting covgate see the full tree."
             exit 0
           fi
-          # A successful fetch of main does not guarantee BASE_SHA itself
+          # A successful fetch of BASE_REF does not guarantee BASE_SHA itself
           # exists anywhere -- a stale or malformed value is real input, not
           # hypothetical, since it travels through an event payload. Fail
           # open here too rather than letting a bad SHA reach merge-base and
           # crash the job.
           if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            echo "Base commit ${BASE_SHA} still not found after fetching main; leaving HEAD alone and letting covgate see the full tree."
+            echo "Base commit ${BASE_SHA} still not found after fetching ${BASE_REF}; leaving HEAD alone and letting covgate see the full tree."
             exit 0
           fi
         fi

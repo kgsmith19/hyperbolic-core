@@ -67,26 +67,26 @@ function commit(cwd, file, message) {
  * fetch-depth: 0 on `ref: <C's sha>` would produce, never fetching D.
  * Returns { checkoutDir, baseSha (D), mergeBaseSha (B) } and a `cleanup()`.
  */
-function buildDriftedScenario({ shallow = false } = {}) {
+function buildDriftedScenario({ shallow = false, baseBranch = "main" } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "covgate-test-"));
   const originDir = path.join(dir, "origin.git");
   const workDir = path.join(dir, "work");
 
-  git(dir, "init", "--bare", "-b", "main", originDir);
-  git(dir, "init", "-b", "main", workDir);
+  git(dir, "init", "--bare", "-b", baseBranch, originDir);
+  git(dir, "init", "-b", baseBranch, workDir);
   git(workDir, "remote", "add", "origin", originDir);
 
   commit(workDir, "a.txt", "A");
   const bSha = commit(workDir, "b.txt", "B"); // the real fork point
-  git(workDir, "push", "origin", "main");
+  git(workDir, "push", "origin", baseBranch);
 
   git(workDir, "checkout", "-b", "feature");
   const cSha = commit(workDir, "c.txt", "C"); // this branch's own head
   git(workDir, "push", "origin", "feature");
 
-  git(workDir, "checkout", "main");
+  git(workDir, "checkout", baseBranch);
   const dSha = commit(workDir, "d.txt", "D"); // a LATER, unrelated PR's merge
-  git(workDir, "push", "origin", "main");
+  git(workDir, "push", "origin", baseBranch);
 
   const checkoutDir = path.join(dir, "checkout");
   git(dir, "init", "-b", "detached", checkoutDir);
@@ -106,13 +106,13 @@ function buildDriftedScenario({ shallow = false } = {}) {
   };
 }
 
-function runCovgate(checkoutDir, baseSha) {
+function runCovgate(checkoutDir, baseSha, baseRef = "main") {
   const scriptFile = path.join(checkoutDir, "covgate-step.sh");
   writeFileSync(scriptFile, extractCovgateScript());
   return execFileSync("bash", [scriptFile], {
     cwd: checkoutDir,
     encoding: "utf8",
-    env: { ...process.env, BASE_SHA: baseSha },
+    env: { ...process.env, BASE_SHA: baseSha, BASE_REF: baseRef },
   });
 }
 
@@ -125,9 +125,30 @@ test("covgate: BASE_SHA drifted past the fork point is fetched and resolved corr
   const scenario = buildDriftedScenario();
   try {
     const output = runCovgate(scenario.checkoutDir, scenario.baseSha);
-    assert.match(output, /Base commit .* not yet fetched; fetching main's full history/);
+    // The HEAD assertion below is the real oracle -- it proves the merge
+    // base was actually resolved, which a message match alone never could.
+    // This one stays a loose substring, diagnostic only, so a harmless
+    // wording tweak in the script can't break the test on its own.
+    assert.match(output, /not yet fetched/);
     const headAfter = git(scenario.checkoutDir, "rev-parse", "HEAD");
     assert.equal(headAfter, scenario.mergeBaseSha, "HEAD must land on the TRUE merge base (B), not fail or silently no-op");
+  } finally {
+    scenario.cleanup();
+  }
+});
+
+// Behavior protected: BASE_REF is actually what gets fetched, not a
+// hardcoded "main" -- the direct fix for AI Review's PR #248 round-2
+// finding. Uses a base branch deliberately NOT named "main" so a
+// regression back to a hardcoded value would fail this test specifically,
+// not just happen to still work because the fixture's branch is named main.
+test("covgate: a non-main base branch is fetched via BASE_REF, not a hardcoded name", () => {
+  const scenario = buildDriftedScenario({ baseBranch: "release" });
+  try {
+    const output = runCovgate(scenario.checkoutDir, scenario.baseSha, "release");
+    assert.match(output, /not yet fetched/);
+    const headAfter = git(scenario.checkoutDir, "rev-parse", "HEAD");
+    assert.equal(headAfter, scenario.mergeBaseSha, "must resolve correctly against a base branch that isn't main");
   } finally {
     scenario.cleanup();
   }
@@ -136,13 +157,13 @@ test("covgate: BASE_SHA drifted past the fork point is fetched and resolved corr
 // Behavior protected: the defensive unshallow path actually works, not just
 // the already-unshallowed common case above -- this is the direct fix for
 // the reviewer's second finding on PR #248 (a shallow clone would otherwise
-// leave `git fetch origin main` bounded by the existing shallow horizon).
-test("covgate: a shallow checkout is unshallowed before fetching main, and still resolves correctly", () => {
+// leave the fetch below bounded by the existing shallow horizon).
+test("covgate: a shallow checkout is unshallowed before fetching the base ref, and still resolves correctly", () => {
   const scenario = buildDriftedScenario({ shallow: true });
   try {
     assert.ok(existsSync(path.join(scenario.checkoutDir, ".git", "shallow")), "test setup must actually produce a shallow repo");
     const output = runCovgate(scenario.checkoutDir, scenario.baseSha);
-    assert.match(output, /Repository is shallow; unshallowing before fetching main/);
+    assert.match(output, /unshallowing before fetching/);
     const headAfter = git(scenario.checkoutDir, "rev-parse", "HEAD");
     assert.equal(headAfter, scenario.mergeBaseSha);
   } finally {
@@ -175,7 +196,7 @@ test("covgate: a BASE_SHA that cannot be fetched at all falls back safely instea
   try {
     const cSha = git(scenario.checkoutDir, "rev-parse", "HEAD");
     const output = runCovgate(scenario.checkoutDir, bogusSha);
-    assert.match(output, /Could not fetch main|leaving HEAD alone/);
+    assert.match(output, /leaving HEAD alone/);
     const headAfter = git(scenario.checkoutDir, "rev-parse", "HEAD");
     assert.equal(headAfter, cSha, "HEAD must be untouched when the fix cannot resolve a base at all");
   } finally {
