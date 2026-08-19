@@ -186,6 +186,30 @@ test("covgate: an already-fetched BASE_SHA skips the fetch entirely", () => {
   }
 });
 
+// Behavior protected: a BASE_SHA that exists but shares NO history with
+// HEAD (unrelated histories -- distinct from the missing-object case every
+// other test here covers) makes git merge-base exit non-zero with empty
+// output. Without the `|| true` and the emptiness guard, set -e would kill
+// the job with no explanation, or `git reset --soft ""` would fail
+// confusingly. Fails open like every other branch.
+test("covgate: unrelated histories (no common ancestor) fall back safely instead of crashing", () => {
+  const scenario = buildDriftedScenario();
+  try {
+    // A second, entirely independent root commit in the same repository:
+    // reachable as an object, but with no ancestor in common with HEAD.
+    const orphanSha = git(scenario.checkoutDir, "commit-tree", "-m", "orphan", `${scenario.mergeBaseSha}^{tree}`);
+    const headBefore = git(scenario.checkoutDir, "rev-parse", "HEAD");
+
+    const output = runCovgate(scenario.checkoutDir, orphanSha);
+
+    assert.match(output, /No common ancestor/);
+    const headAfter = git(scenario.checkoutDir, "rev-parse", "HEAD");
+    assert.equal(headAfter, headBefore, "HEAD must be untouched when there is no merge base to reset to");
+  } finally {
+    scenario.cleanup();
+  }
+});
+
 // NEGATIVE CONTROL / fail-open guarantee. Behavior protected: a genuinely
 // unreachable BASE_SHA (bad data, not just drift) must never crash the job
 // -- it falls back to "leave HEAD alone," the same safe posture the

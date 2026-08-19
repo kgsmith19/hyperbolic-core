@@ -142,7 +142,17 @@ runs:
             exit 0
           fi
         fi
-        merge_base="$(git merge-base "${BASE_SHA}" HEAD)"
+        # `|| true` so a genuine "no common ancestor" (an unrelated-histories
+        # base, not the missing-object case handled above) reaches the
+        # emptiness check below instead of dying at set -e with no
+        # explanation. Both outcomes fail open, for the same reason every
+        # other branch here does: covgate seeing the whole tree is a worse
+        # coverage signal, never a wrong one.
+        merge_base="$(git merge-base "${BASE_SHA}" HEAD || true)"
+        if [ -z "${merge_base}" ]; then
+          echo "No common ancestor between ${BASE_SHA} and HEAD; leaving HEAD alone and letting covgate see the full tree."
+          exit 0
+        fi
         git reset --soft "${merge_base}"
 
     - name: Coverage · Changed-file coverage
