@@ -128,6 +128,10 @@ runs:
             echo "Repository is shallow; unshallowing before fetching ${BASE_REF}."
             git fetch --unshallow origin 2>/dev/null || true
           fi
+          # "origin" is not an assumption here: actions/checkout always names
+          # the remote it creates "origin", and every caller of this action
+          # checks out with it. Deriving the name would be speculative
+          # generality against a guarantee the platform already makes.
           if ! git fetch origin "${BASE_REF}" 2>/dev/null; then
             echo "Could not fetch ${BASE_REF}; leaving HEAD alone and letting covgate see the full tree."
             exit 0
