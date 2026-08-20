@@ -22,17 +22,29 @@ runs:
       working-directory: apps/agentic-command-center
       run: npm run test:windows
 
+    # A composite action skips every later step once one fails, so a single
+    # flaky native subtest silently cost all three PowerShell suites their run
+    # -- the lane went red having never exercised the launch shim, the
+    # cap-watcher, or its installer at all (issue #250). These are independent
+    # suites with no dependency on the native run, so each reports on its own
+    # merits. `!cancelled()` rather than `always()`: a genuinely cancelled run
+    # (a superseded push, cancel-in-progress) must still stop here. The job's
+    # verdict is unchanged -- a failed native suite still fails the lane, and
+    # so does a failed suite below.
     - name: Test · Launch-shim tests
+      if: ${{ !cancelled() }}
       shell: pwsh
       working-directory: apps/agentic-command-center
       run: powershell -File backend/shim/claude.test.ps1
 
     - name: Test · Cap-watcher tests
+      if: ${{ !cancelled() }}
       shell: pwsh
       working-directory: apps/agentic-command-center
       run: powershell -File backend/watcher/claude-cap-watch.test.ps1
 
     - name: Test · Cap-watcher installer tests
+      if: ${{ !cancelled() }}
       shell: pwsh
       working-directory: apps/agentic-command-center
       run: powershell -File backend/watcher/install-cap-watch-task.test.ps1
