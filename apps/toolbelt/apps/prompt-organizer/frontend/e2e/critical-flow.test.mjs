@@ -46,6 +46,7 @@ import { test, expect } from "@playwright/test";
 // helpers.mjs lives at tests/helpers.mjs; from tests/e2e/ the relative path
 // is one level up. It exports login, rest, USER_A (and USER_B), all of which
 // are used by every integration test in tests/*.test.mjs.
+import { randomUUID } from "node:crypto";
 import { login, rest, USER_A } from "../../backend/tests/helpers.mjs";
 
 // Must match web/index.html's own TOKEN_STORAGE_KEY constant exactly --
@@ -56,7 +57,13 @@ const TOKEN_STORAGE_KEY = "prompt-organizer-manual-check-token";
 // ---------------------------------------------------------------------------
 // Fixture data — unique per run so concurrent CI runs don't collide.
 // ---------------------------------------------------------------------------
-const RUN_ID = Date.now();
+// Date.now() alone is not run-unique: concurrent CI runs share ONE owner
+// account and prompt.prompt carries a unique index on (user_id, lower(title)),
+// so two runners entering this millisecond collide -- one save 409s and fails
+// as an opaque "element(s) not found". A random suffix makes the title
+// genuinely per-run, which is what isolates concurrent runs from each other on
+// the write path and keeps each run's teardown scoped to its own row.
+const RUN_ID = `${Date.now()}-${randomUUID().slice(0, 8)}`;
 const PROMPT_TITLE = `e2e-critical-flow-${RUN_ID}`;
 const PROMPT_BODY = "Deploy {{REPO}} to production.";
 const VARIABLE_VALUE = "toolbelt";
@@ -87,6 +94,22 @@ test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
   // Owner-credential threading (see header comment): resolve the real token
   // ONCE, before navigating, then seed it into sessionStorage so
   // index.html's own boot check finds it already there.
+  // In CI the owner session is always exported by the lane's "Exchange and
+  // verify the owner session" step, so an unset token there means that step
+  // silently degraded -- and the fallback below is not equivalent. prompt.* RLS
+  // is pinned to the real owner (20260812180000_prompt_owner_pin.sql), so a
+  // fixture-A login yields a valid Supabase session whose every write is
+  // RLS-denied: the save fails, no row is added, and the journey reports the
+  // same opaque "element(s) not found" this Issue is about. Fail loudly rather
+  // than quietly proving nothing with a powerless identity. Locally the
+  // fallback stays, for the same reasons it always existed.
+  if (!ownerToken && process.env.CI) {
+    throw new Error(
+      "TOOLBELT_OWNER_TOKEN is unset in CI. prompt.* RLS is pinned to the real owner, so the " +
+        "fixture-A fallback cannot write and this journey would fail at the save without ever " +
+        "exercising the behaviour it exists to prove."
+    );
+  }
   const token = ownerToken || (await login(user));
   cleanupToken = token;
   await page.addInitScript(
