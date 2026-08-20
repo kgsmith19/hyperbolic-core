@@ -36,6 +36,7 @@ test("gatherContext: an over-cap diff is cut with a visible [truncated N chars] 
     baseSha: "base0000",
     headSha: "head1111",
     issueBody: "criterion 1",
+    prBody: "implemented per criterion 1",
     agentsMd: "## Test quality",
     runGit: fakeGit({}, oversized, ["src/a.ts"]),
     perInputCharCap: 100,
@@ -58,6 +59,7 @@ test("gatherContext: conversation defaults to an empty string when not supplied"
     baseSha: "base0000",
     headSha: "head1111",
     issueBody: "criterion 1",
+    prBody: "implemented per criterion 1",
     agentsMd: "## Test quality",
     runGit: fakeGit({}, "+diff", ["src/a.ts"]),
   });
@@ -74,6 +76,7 @@ test("gatherContext: a supplied conversation is carried through and subject to t
     baseSha: "base0000",
     headSha: "head1111",
     issueBody: "criterion 1",
+    prBody: "implemented per criterion 1",
     agentsMd: "## Test quality",
     conversation: oversized,
     runGit: fakeGit({}, "+diff", ["src/a.ts"]),
@@ -86,6 +89,30 @@ test("gatherContext: a supplied conversation is carried through and subject to t
   assert.ok(context.conversation.startsWith(oversized.slice(0, 20)));
 });
 
+// Behavior protected: Issue #251 -- the PR body reaches the context as its
+// own field, distinct from issueBody, and is truncated the same visible way
+// as every other input. Defect caught: dropping it, or folding it into
+// issueBody instead of keeping the two separate (the exact conflation this
+// closes -- see prompt.ts's separately-fenced sections).
+test("gatherContext: the PR body is carried through as its own field, distinct from issueBody, and subject to truncation", async () => {
+  const oversized = "evidence ".repeat(50);
+  const context = await gatherContext({
+    baseSha: "base0000",
+    headSha: "head1111",
+    issueBody: "criterion 1",
+    prBody: oversized,
+    agentsMd: "## Test quality",
+    runGit: fakeGit({}, "+diff", ["src/a.ts"]),
+    perInputCharCap: 20,
+    totalCharCap: 10_000,
+  });
+
+  assert.equal(context.truncated, true);
+  assert.match(context.prBody, /\[truncated \d+ chars\]/);
+  assert.ok(context.prBody.startsWith(oversized.slice(0, 20)));
+  assert.equal(context.issueBody, "criterion 1", "the PR body's truncation must not touch issueBody");
+});
+
 // Behavior protected: content that fits is passed through byte-for-byte and not
 // flagged. Defect caught: an off-by-one that truncates at exactly the cap, or a
 // `truncated` flag stuck at true -- which would make the marker meaningless by
@@ -96,6 +123,7 @@ test("gatherContext: content within the cap is untouched and not flagged", async
     baseSha: "base0000",
     headSha: "head1111",
     issueBody: "criterion 1",
+    prBody: "implemented per criterion 1",
     agentsMd: "## Test quality",
     runGit: fakeGit({}, diff, ["src/a.ts"]),
     perInputCharCap: 100,
@@ -117,6 +145,7 @@ test("gatherContext: exceeding the TOTAL cap is marked too, not silently dropped
     baseSha: "base0000",
     headSha: "head1111",
     issueBody: "y".repeat(80),
+    prBody: "w".repeat(80),
     agentsMd: "z".repeat(80),
     runGit: fakeGit({}, "x".repeat(80), ["src/a.ts"]),
     perInputCharCap: 1_000,
@@ -139,6 +168,7 @@ test("gatherContext: changed test files are included whole, keyed by path", asyn
     baseSha: "base0000",
     headSha: "head1111",
     issueBody: "criterion 1",
+    prBody: "implemented per criterion 1",
     agentsMd: "## Test quality",
     runGit: fakeGit({ "tests/pricing.test.ts": wholeTestFile }, "diff body", [
       "src/pricing.ts",
@@ -162,6 +192,7 @@ test("gatherContext: a test file deleted at head does not abort the review", asy
     baseSha: "base0000",
     headSha: "head1111",
     issueBody: "criterion 1",
+    prBody: "implemented per criterion 1",
     agentsMd: "## Test quality",
     runGit: fakeGit({}, "diff body", ["tests/deleted.test.ts"]),
   });

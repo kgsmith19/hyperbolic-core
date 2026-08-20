@@ -5,7 +5,7 @@
 //
 // Usage:
 //   node packages/review/bin/review.mjs \
-//     --base <sha> --head <sha> [--issue-body-file <path>] [--out <path>]
+//     --base <sha> --head <sha> [--issue-body-file <path>] [--pr-body-file <path>] [--out <path>]
 //
 // Environment (see ../src/config.ts -- nothing here is defaulted silently):
 //   REVIEW_PROVIDER            reviewer provider family (anthropic|openai|gemini)
@@ -29,14 +29,15 @@ import process from "node:process";
 
 import { gatherContext, resolveConfig, runReview } from "../src/index.ts";
 
-const USAGE = `Usage: node packages/review/bin/review.mjs --base <sha> --head <sha> [--issue-body-file <path>] [--conversation-file <path>] [--out <path>]`;
+const USAGE = `Usage: node packages/review/bin/review.mjs --base <sha> --head <sha> [--issue-body-file <path>] [--pr-body-file <path>] [--conversation-file <path>] [--out <path>]`;
 
 function parseArgs(argv) {
-  const args = { base: null, head: null, issueBodyFile: null, conversationFile: null, out: null };
+  const args = { base: null, head: null, issueBodyFile: null, prBodyFile: null, conversationFile: null, out: null };
   const flags = {
     "--base": "base",
     "--head": "head",
     "--issue-body-file": "issueBodyFile",
+    "--pr-body-file": "prBodyFile",
     "--conversation-file": "conversationFile",
     "--out": "out",
   };
@@ -135,6 +136,11 @@ async function main(argv, env) {
       ? "(no linked Issue body was supplied to this run)"
       : await readFile(args.issueBodyFile, "utf8");
 
+  const prBody =
+    args.prBodyFile === null
+      ? "(no pull request body was supplied to this run)"
+      : await readFile(args.prBodyFile, "utf8");
+
   // Empty, not a placeholder sentence: gatherContext's own default is "",
   // and context.ts / prompt.ts already render a first-round placeholder for
   // that case. A second, different placeholder text here would just be a
@@ -154,6 +160,7 @@ async function main(argv, env) {
     baseSha: args.base,
     headSha: args.head,
     issueBody,
+    prBody,
     agentsMd,
     conversation,
   });

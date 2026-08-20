@@ -49,6 +49,16 @@ export interface ReviewContext {
   /** Full text of every changed file whose path looks like a test. */
   testFiles: ChangedTestFile[];
   issueBody: string;
+  /**
+   * The pull request's own description, as written by its author -- distinct
+   * from `issueBody`: the Issue states intent, this states the author's
+   * claimed evidence (verification commands run, oracle-change disclosures,
+   * scope reasoning). Never folded into `issueBody`; prompt.ts fences it as
+   * its own labelled section so the model can tell the two kinds of claim
+   * apart, and its own rubric text treats every claim in it as something to
+   * verify against the diff, not something to accept at face value.
+   */
+  prBody: string;
   agentsMd: string;
   /**
    * The pull request's own comment thread, chronological, each entry
@@ -67,6 +77,8 @@ export interface GatherContextOptions {
   baseSha: string;
   headSha: string;
   issueBody: string;
+  /** See `ReviewContext.prBody`. */
+  prBody: string;
   agentsMd: string;
   /** See `ReviewContext.conversation`. Defaults to "" (no prior dialogue). */
   conversation?: string;
@@ -116,6 +128,7 @@ export async function gatherContext(options: GatherContextOptions): Promise<Revi
     baseSha,
     headSha,
     issueBody,
+    prBody,
     agentsMd,
     conversation = "",
     runGit = defaultRunGit,
@@ -166,6 +179,7 @@ export async function gatherContext(options: GatherContextOptions): Promise<Revi
 
   const diff = cap(rawDiff, perInputCharCap);
   const cappedIssueBody = cap(issueBody, perInputCharCap);
+  const cappedPrBody = cap(prBody, perInputCharCap);
   const cappedAgentsMd = cap(agentsMd, perInputCharCap);
   const cappedConversation = cap(conversation, perInputCharCap);
   const cappedTestFiles = rawTestFiles.map((file) => ({
@@ -175,11 +189,11 @@ export async function gatherContext(options: GatherContextOptions): Promise<Revi
 
   // Then the total budget, spent in priority order: the diff is the thing
   // under review and is paid for first; test files are next because test
-  // quality is this gate's sharpest question; the Issue and AGENTS.md are the
-  // oracles and are smallest. The conversation is spent last, alongside them
-  // -- it matters for continuity across rounds, but a first-round review has
-  // none of it, and a truncated diff is a worse loss than a truncated
-  // rebuttal.
+  // quality is this gate's sharpest question; the Issue, PR body, and
+  // AGENTS.md are the claim/standard documents and are typically smallest.
+  // The conversation is spent last -- it matters for continuity across
+  // rounds, but a first-round review has none of it, and a truncated diff or
+  // a truncated claim is a worse loss than a truncated rebuttal.
   let remaining = totalCharCap;
   const spend = (text: string): string => {
     if (text.length <= remaining) {
@@ -198,6 +212,7 @@ export async function gatherContext(options: GatherContextOptions): Promise<Revi
     contents: spend(file.contents),
   }));
   const budgetedIssueBody = spend(cappedIssueBody);
+  const budgetedPrBody = spend(cappedPrBody);
   const budgetedAgentsMd = spend(cappedAgentsMd);
   const budgetedConversation = spend(cappedConversation);
 
@@ -208,6 +223,7 @@ export async function gatherContext(options: GatherContextOptions): Promise<Revi
     changedFiles,
     testFiles: budgetedTestFiles,
     issueBody: budgetedIssueBody,
+    prBody: budgetedPrBody,
     agentsMd: budgetedAgentsMd,
     conversation: budgetedConversation,
     truncated,
