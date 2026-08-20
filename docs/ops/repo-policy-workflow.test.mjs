@@ -127,3 +127,47 @@ test("agent-roles.yaml validator: malformed YAML fails closed", () => {
   assert.equal(result.ok, false);
   assert.match(result.stderr, /could not be read or parsed/);
 });
+
+// Behavior protected: dev.provider and review.provider are separate value
+// spaces (Issue #252) -- dev names the coding-agent TOOL, review names the
+// raw model API family AI Review's structured-output call targets. This is
+// the positive control for dev's own space: "antigravity" is not a real
+// model API `packages/llm` can dispatch to, so accepting it here only makes
+// sense because dev.provider means something different from review.provider.
+test("agent-roles.yaml validator: dev.provider accepts antigravity, the coding-agent tool", () => {
+  const result = runValidator(fixture({ devProvider: "antigravity" }));
+  assert.equal(result.ok, true, `expected pass, got failure: ${result.stderr}`);
+  assert.match(result.stdout, /dev=antigravity, review=openai/);
+});
+
+// NEGATIVE CONTROL for the space split. Behavior protected: "gemini" is
+// review's real-API identifier, not a valid dev-tool name -- there is no
+// "Gemini" coding-agent harness this repo dispatches dev work to. Defect
+// caught: a validator that still shares one VALID_PROVIDERS set across both
+// roles, which would let this pass and silently keep the old conflation
+// Issue #252 exists to remove.
+test("agent-roles.yaml validator: dev.provider rejects gemini -- that identifier belongs to review's API space, not dev's tool space", () => {
+  const result = runValidator(fixture({ devProvider: "gemini" }));
+  assert.equal(result.ok, false);
+  assert.match(result.stderr, /'dev\.provider' is 'gemini'/);
+  assert.match(result.stderr, /must be one of \['anthropic', 'antigravity', 'openai'\]/);
+});
+
+// NEGATIVE CONTROL, the mirror image. Behavior protected: "antigravity" is
+// dev's tool identifier, not a valid review-API name -- AI Review never runs
+// an agent harness, only a bare model call, and there is no "Antigravity"
+// model API `packages/llm` exposes. Defect caught: the same shared-set
+// regression as above, from the other direction.
+test("agent-roles.yaml validator: review.provider rejects antigravity -- that identifier belongs to dev's tool space, not review's API space", () => {
+  const result = runValidator(fixture({ reviewProvider: "antigravity" }));
+  assert.equal(result.ok, false);
+  assert.match(result.stderr, /'review\.provider' is 'antigravity'/);
+});
+
+// Behavior protected: review.provider keeps meaning the real Gemini API --
+// this fix must not remove a value review legitimately still supports.
+test("agent-roles.yaml validator: review.provider still accepts gemini, the real Gemini API", () => {
+  const result = runValidator(fixture({ reviewProvider: "gemini" }));
+  assert.equal(result.ok, true, `expected pass, got failure: ${result.stderr}`);
+  assert.match(result.stdout, /dev=anthropic, review=gemini/);
+});

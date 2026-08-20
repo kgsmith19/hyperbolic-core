@@ -18,11 +18,27 @@
 # with the CI-enforcement slice that follows this one, `repository-standards`
 # fails the whole PR Gate closed if it ever does — this is what guarantees
 # there is always exactly one dev, one reviewer, and the third vendor idle.
+#
+# dev.provider and review.provider are deliberately DIFFERENT value spaces,
+# not the same enum reused twice:
+#   - dev.provider names the coding-agent TOOL/HARNESS that writes code and
+#     drives pull requests: anthropic (Claude Code), openai (Codex), or
+#     antigravity (Google's agentic CLI, the deprecated Gemini CLI's
+#     successor). A full agent harness, not a bare API call.
+#   - review.provider names the raw model API family the structured-output
+#     review call targets: anthropic | openai | gemini. `AI Review` is one
+#     sandboxed LLM call via packages/llm (see packages/review/src/config.ts)
+#     -- it never runs an agent harness, so "gemini" here is the real
+#     Gemini API, the same one services/brain and services/llm-handler call
+#     for product features. Unrelated to Antigravity.
+# The two spaces only overlap on anthropic/openai, which is exactly where a
+# real collision (the same model family both writing and reviewing) can
+# still happen -- the collision check below stays a plain equality check.
 
 dev:
-  provider: anthropic # anthropic | openai | gemini (gemini = Antigravity)
+  provider: anthropic # anthropic | openai | antigravity
   model: claude-opus-5 # exact model id the dev dispatcher requests
 
 review:
-  provider: openai
+  provider: openai # anthropic | openai | gemini
   model: gpt-5-mini
