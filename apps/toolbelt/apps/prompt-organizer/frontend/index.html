@@ -163,8 +163,21 @@
     // flight from boot. That fetch's snapshot was taken BEFORE the insert, so
     // letting it land replaces allPrompts wholesale and wipes the just-saved
     // prompt out of the DOM for good -- nothing re-fetches afterwards, so the
-    // row never comes back (issue #249). Stamp each fetch and drop any result
-    // that is no longer the newest intent.
+    // row never comes back. Stamp each fetch and drop any result that is no
+    // longer the newest intent.
+    //
+    // Issue #249, measured -- not assumed -- from the failing run's own
+    // Playwright trace (CI run 32201373860, artifact prompt-organizer-e2e-
+    // evidence). Boot GET issued at 00:30:11.269 and took 364.5ms, finishing
+    // at .6335; the save POST was issued 114ms LATER at .383, returned 201,
+    // and finished at .6287. The GET therefore carried a snapshot predating
+    // the insert and landed 4.5ms after it, so the new row lived in the DOM
+    // for ~4ms before renderList() wiped it. The same run's failure snapshot
+    // corroborates both halves: the form is empty (save-form.reset() runs
+    // only on the success path below) and the list holds exactly the 9
+    // pre-existing prompts. Not Supabase write->read propagation latency --
+    // this client never re-reads after a save -- and not a too-tight 10s
+    // wait: the element is gone permanently, so no timeout would have helped.
     let listGeneration = 0;
 
     function renderList() {
