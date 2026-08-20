@@ -131,13 +131,23 @@ anything else in this session.
 - This is an instruction, not a technical lock — nothing stops a determined session from ignoring
   it. It exists because every agent capable of working in this repo is built to honor `AGENTS.md`,
   and honoring it here is exactly as mandatory as honoring any other rule in this file.
+- `dev.provider` and `review.provider` are different value spaces, not one enum reused twice.
+  `dev.provider` names the coding-agent **tool/harness** that writes code and drives pull
+  requests — `anthropic | openai | antigravity` (Claude Code, Codex, or Antigravity, Google's
+  agentic CLI and the deprecated Gemini CLI's successor). `review.provider` names the raw model
+  **API family** the structured-output review call targets — `anthropic | openai | gemini`.
+  `AI Review` is one sandboxed LLM call via `packages/llm` (see `packages/review/src/config.ts`);
+  it never runs an agent harness, so `gemini` there is the real Gemini API — the same one
+  `services/brain` and `services/llm-handler` call for product features, unrelated to Antigravity.
 - The two values in `agent-roles.yaml` must never be equal. `repository-standards` enforces this
   mechanically: `.github/actions/verify-repo-policy` validates the file on every PR — it must
-  parse, both `dev.provider` and `review.provider` must be one of `anthropic | openai | gemini`,
-  both must name a non-empty `model`, and the two providers must differ. Any violation fails the
-  whole `PR Gate` closed — a role collision or a malformed file blocks every PR, not just one that
-  touches this file. This is the first of three independent checks of the same constraint; the dev
-  dispatcher and the reviewer gate each re-verify it too, once those slices land.
+  parse, `dev.provider` and `review.provider` must each be valid for their own value space above,
+  both must name a non-empty `model`, and the two providers must differ (the spaces only overlap
+  on `anthropic`/`openai`, exactly where a real collision — the same family both writing and
+  reviewing — can still happen). Any violation fails the whole `PR Gate` closed — a role collision
+  or a malformed file blocks every PR, not just one that touches this file. This is the first of
+  three independent checks of the same constraint; the dev dispatcher and the reviewer gate each
+  re-verify it too, once those slices land.
 
 ## Provider-neutral roles
 

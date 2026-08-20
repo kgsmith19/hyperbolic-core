@@ -135,7 +135,19 @@ runs:
         import sys
         import yaml
 
-        VALID_PROVIDERS = {"anthropic", "openai", "gemini"}
+        # dev.provider and review.provider are deliberately different value
+        # spaces, not one enum reused twice -- see agent-roles.yaml's own
+        # comments. dev names the coding-agent TOOL (Claude Code / Codex /
+        # Antigravity); review names the raw model API family the
+        # structured-output review call targets (AI Review never runs an
+        # agent harness, so "gemini" there is the real Gemini API). They
+        # only overlap on anthropic/openai, which is exactly where a real
+        # collision -- the same family both writing and reviewing -- can
+        # still happen, so the equality check below needs no special-casing.
+        VALID_PROVIDERS_BY_ROLE = {
+            "dev": {"anthropic", "openai", "antigravity"},
+            "review": {"anthropic", "openai", "gemini"},
+        }
 
         try:
             with open("agent-roles.yaml") as f:
@@ -155,15 +167,16 @@ runs:
             if not isinstance(section, dict):
                 errors.append(f"'{role}' section is missing or not a mapping.")
                 continue
+            valid_providers = VALID_PROVIDERS_BY_ROLE[role]
             raw_provider = section.get("provider")
             # Canonicalize the same way packages/review/src/config.ts does
             # for REVIEW_PROVIDER: trim + lowercase before comparison, so
             # harmless casing ("OpenAI") never causes a spurious failure or,
             # worse, silently evades the collision check below.
             provider = raw_provider.strip().lower() if isinstance(raw_provider, str) else raw_provider
-            if provider not in VALID_PROVIDERS:
+            if provider not in valid_providers:
                 errors.append(
-                    f"'{role}.provider' is {raw_provider!r}; must be one of {sorted(VALID_PROVIDERS)}."
+                    f"'{role}.provider' is {raw_provider!r}; must be one of {sorted(valid_providers)}."
                 )
             else:
                 providers[role] = provider
