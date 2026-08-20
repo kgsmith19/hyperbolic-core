@@ -159,6 +159,13 @@
 
     let allPrompts = [];
     let selectedTag = null;
+    // A save renders optimistically (below) while a list fetch may still be in
+    // flight from boot. That fetch's snapshot was taken BEFORE the insert, so
+    // letting it land replaces allPrompts wholesale and wipes the just-saved
+    // prompt out of the DOM for good -- nothing re-fetches afterwards, so the
+    // row never comes back (issue #249). Stamp each fetch and drop any result
+    // that is no longer the newest intent.
+    let listGeneration = 0;
 
     function renderList() {
       const query = document.getElementById("search").value;
@@ -183,10 +190,12 @@
       // (every prompt has at least one the instant it is saved -- SL-004's
       // trigger fires on insert, not only update), so currentVersion is
       // always populated, one round trip, no extra query.
+      const generation = ++listGeneration;
       const rows = await api(
         "prompt?select=id,title,body,is_active,tag(tag),prompt_version(version_no),configuration(name,values,sections)" +
           "&order=created_at.desc&prompt_version.order=version_no.desc&prompt_version.limit=1"
       );
+      if (generation !== listGeneration) return;
       allPrompts = rows.map((row) => ({
         id: row.id,
         title: row.title,
@@ -266,6 +275,7 @@
           });
         }
         allPrompts.unshift({ id: saved.id, title: saved.title, body: saved.body, isActive: true, tags, currentVersion: 1, configurations: [] });
+        listGeneration++;
         document.getElementById("save-form").reset();
         renderList();
       } catch (err) {

@@ -62,6 +62,10 @@ const PROMPT_BODY = "Deploy {{REPO}} to production.";
 const VARIABLE_VALUE = "toolbelt";
 const EXPECTED_RENDERED = "Deploy toolbelt to production.";
 
+// Captured as soon as the run has a token so the afterEach below can archive
+// this run's row even when the journey dies before reaching its own teardown.
+let cleanupToken = null;
+
 // ---------------------------------------------------------------------------
 // T-E-001 — Critical prompt flow acceptance proof
 // ---------------------------------------------------------------------------
@@ -84,6 +88,7 @@ test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
   // ONCE, before navigating, then seed it into sessionStorage so
   // index.html's own boot check finds it already there.
   const token = ownerToken || (await login(user));
+  cleanupToken = token;
   await page.addInitScript(
     ([storageKey, value]) => {
       sessionStorage.setItem(storageKey, value);
@@ -102,17 +107,53 @@ test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
   await page.fill("#body", PROMPT_BODY);
   await page.click('#save-form button[type="submit"]');
 
-  // The new prompt's summary must appear in #prompt-list.
-  // Increased timeout to account for network latency and DOM rendering.
+  const saveError = page.locator("#save-error");
   const promptSummary = page.locator("#prompt-list summary", {
     hasText: PROMPT_TITLE,
   });
+
+  // Wait on the save actually SETTLING rather than on a fixed slice of time.
+  // When the POST is rejected -- an expired owner token, a 429 from a
+  // concurrent run, a unique-title conflict -- the client puts the real
+  // reason in #save-error and never adds a row, so waiting only on the
+  // summary reported a bare "element(s) not found" and threw the actual
+  // cause away (issue #249). Poll for either outcome, then assert which one
+  // it was, so a rejected save fails naming its own reason.
+  await expect
+    .poll(
+      async () => {
+        if ((await saveError.innerText()).trim() !== "") return "rejected";
+        return (await promptSummary.count()) > 0 ? "rendered" : "pending";
+      },
+      {
+        timeout: 15_000,
+        message: "the save neither rendered a row nor reported an error",
+      }
+    )
+    .not.toBe("pending");
+
+  await expect(saveError, "the save POST must not have been rejected").toHaveText("");
   await expect(promptSummary).toBeVisible({ timeout: 10_000 });
+
+  // ...and it must be in the database, not only in the client's optimistic
+  // in-memory copy: the save handler renders the new row without re-reading
+  // it back, so the DOM alone cannot distinguish "persisted" from "rendered
+  // from what we just posted". Read it back over REST -- a different
+  // transport than the one under test -- for an independent oracle.
+  const persisted = await rest(
+    `prompt?title=eq.${encodeURIComponent(PROMPT_TITLE)}&select=title,body`,
+    { token }
+  );
+  expect(persisted.status, "the saved prompt must be readable back over REST").toBeLessThan(400);
+  expect(persisted.json, "exactly one persisted row must carry this run's title and body").toEqual([
+    { title: PROMPT_TITLE, body: PROMPT_BODY },
+  ]);
 
   // ---- Step 3: Open the render panel ---------------------------------------
   // Clicking the <summary> expands the <details> which contains the panel.
-  // Small delay to ensure DOM has fully settled after the list update.
-  await page.waitForTimeout(200);
+  // No settle sleep: Playwright waits for actionability on its own, and the
+  // list no longer re-renders underneath this click now that a superseded
+  // fetch cannot replace it (issue #249).
   await promptSummary.click();
 
   // Scope every render-panel interaction to the prompt created by this run.
@@ -124,12 +165,9 @@ test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
     name: "REPO",
     exact: true,
   });
-  // Increased timeout to account for render panel initialization.
   await expect(repoInput).toBeVisible({ timeout: 5_000 });
 
   // ---- Step 4: Fill the variable and copy the rendered text ----------------
-  // Small delay to ensure input is fully interactive before filling.
-  await page.waitForTimeout(100);
   await repoInput.fill(VARIABLE_VALUE);
 
   await promptDetails.locator('button:has-text("Copy rendered text")').click();
@@ -151,13 +189,28 @@ test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
     path: `test-results/critical-flow-${RUN_ID}.png`,
     fullPage: false,
   });
+});
 
-  // ---- Teardown: archive the test prompt via the REST API ------------------
-  // Archiving (not hard-deleting) aligns with ADR-0002 soft-delete policy.
-  // No DELETE grant exists on prompt.prompt (AGENTS.md invariant). Reuse the
-  // exact same token this test unlocked with above.
-  await rest(
+// ---- Teardown: archive the test prompt via the REST API --------------------
+// Archiving (not hard-deleting) aligns with ADR-0002 soft-delete policy. No
+// DELETE grant exists on prompt.prompt (AGENTS.md invariant). Reuse the exact
+// same token this run unlocked with.
+//
+// An afterEach, not the last statement of the test: as the final line it was
+// skipped by every failing run, so each flake left a permanently is_active row
+// on the shared owner account forever. Nothing prunes prompt.prompt and the
+// list query is unfiltered and unbounded, so those rows are re-downloaded on
+// every page load thereafter -- a failing run made the next run slower, and a
+// silent PATCH failure did the same (issue #249). Assert the status so it
+// cannot fail quietly again.
+test.afterEach(async () => {
+  if (!cleanupToken) return;
+  const archived = await rest(
     `prompt?title=eq.${encodeURIComponent(PROMPT_TITLE)}`,
-    { token, method: "PATCH", body: { is_active: false } }
+    { token: cleanupToken, method: "PATCH", body: { is_active: false } }
   );
+  expect(
+    archived.status,
+    `this run's prompt must be archived, or it accumulates on the shared owner account forever (got ${archived.status})`
+  ).toBeLessThan(400);
 });
