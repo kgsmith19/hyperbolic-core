@@ -114,6 +114,18 @@ test("buildUserMessage: fences the issue, PR body, standard, diff, and test file
 // separate from LINKED ISSUE BODY, and actually reaches the rendered
 // payload. Defect caught: concatenating it into the Issue body (the exact
 // bug this closes) or dropping it silently.
+//
+// Not a duplicate of docs/ops/llm-review-dialogue-workflow.test.mjs's
+// "Issue-and-PR-body step" tests: those exercise the GitHub Actions script
+// that produces issue-body.md/pr-body.md as two independent files: a
+// different layer, where a completely different bug could live (the script
+// writing the wrong file, or conflating the two at the source). This test
+// exercises buildUserMessage's own rendering of an already-correct
+// ReviewContext into two separately-fenced sections -- a bug here (e.g. the
+// renderer merging two good inputs) would slip past the action-script tests
+// entirely. Same two-layer split this file already uses for `conversation`
+// (see the "conversation step" tests in the same docs/ops file, alongside
+// this file's own conversation-rendering tests below).
 test("buildUserMessage: the PR body is fenced separately from the linked Issue body, and both are present", () => {
   const message = buildUserMessage(context);
   const issueSection = message.slice(message.indexOf("<<<BEGIN LINKED ISSUE BODY"), message.indexOf("<<<END LINKED ISSUE BODY"));
