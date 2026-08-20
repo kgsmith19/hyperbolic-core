@@ -10,13 +10,23 @@
  *   npx playwright test tests/e2e/critical-flow.test.mjs \
  *     --config playwright.config.mjs
  *
- * Env vars (all optional; defaults match the shared fixture accounts used by
- * the integration suite):
+ * Env vars (optional locally; defaults match the shared fixture accounts used
+ * by the integration suite):
  *   PLAYWRIGHT_BASE_URL   — URL of the running app   (default: http://localhost:8812)
  *   USER_A_EMAIL          — fallback token source     (default: fixture user A)
  *   USER_A_PASSWORD       — fallback token source     (default: fixture user A)
  *   TOOLBELT_OWNER_TOKEN  — real owner session, see "Owner-credential
  *                           threading" below (default: unset)
+ *
+ * CI PRECONDITION: TOOLBELT_OWNER_TOKEN is REQUIRED when CI is set, and this
+ * spec fails immediately without it rather than falling back. The Toolbelt
+ * lane always exports it from its "E2E · Exchange and verify the owner
+ * session" step, so an unset value there means that step silently degraded.
+ * The fallback is not an equivalent substitute: prompt.* RLS is pinned to the
+ * real owner, so a fixture-A session is RLS-powerless and every write this
+ * journey depends on is denied -- the run would report an opaque failure while
+ * appearing to exercise the happy path (issue #249). Locally the fallback
+ * stays, and a local run without an owner token still cannot save.
  *
  * Owner-credential threading (toolbelt-ci.yml P1 finding): once prompt.* RLS
  * is pinned to the real owner (20260812180000_prompt_owner_pin.sql), a
