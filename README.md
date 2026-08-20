@@ -74,3 +74,6 @@ and engineering rules; [`project.yaml`](./project.yaml) for exact repository fac
 ## 📄 License
 
 [MIT](./LICENSE)
+
+<!-- diagnostic-only PR: verifying the review-gate Infisical OIDC identity against a real
+     pull_request-triggered token; safe to close without merging -->
