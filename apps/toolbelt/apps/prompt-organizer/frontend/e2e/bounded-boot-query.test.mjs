@@ -24,10 +24,10 @@ import { test, expect } from "@playwright/test";
 
 const TOKEN_STORAGE_KEY = "prompt-organizer-manual-check-token";
 
-const row = (id, title, isActive) => ({
+const row = (id, title, isActive, body = "unused") => ({
   id,
   title,
-  body: "unused",
+  body,
   is_active: isActive,
   tag: [],
   prompt_version: [{ version_no: 1 }],
@@ -90,4 +90,58 @@ test("boot fetches only active prompts, and Show archived loads archived rows ex
     listFilters,
     "a second Show-archived toggle must reuse the already-loaded archived rows, not re-fetch"
   ).toEqual(["eq.true", "eq.false"]);
+
+  // ---- a LATER refreshList() call (the version-history restore button)
+  // must also reuse the cache, not re-fetch archived rows again. This is
+  // the exact gap the first version of this fix left open: archivedLoaded
+  // gated the initial FETCH, but refreshList() itself still re-ran the
+  // archived query on every subsequent call once that flag was true. ----
+  await page.route("**/rest/v1/**", async (route) => {
+    const request = route.request();
+    const url = request.url();
+    if (request.method() === "GET" && url.includes("/prompt_version?prompt_id=")) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{ version_no: 1, body: "an older draft", created_at: "2026-01-01T00:00:00Z" }]),
+      });
+    }
+    if (request.method() === "PATCH" && url.includes("/prompt?id=")) {
+      return route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+    }
+    if (request.method() === "GET" && url.includes("/prompt?select=")) {
+      const filter = new URL(url).searchParams.get("is_active");
+      listFilters.push(filter);
+      const body = filter === "eq.true" ? ACTIVE : filter === "eq.false" ? ARCHIVED : ACTIVE.concat(ARCHIVED);
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    }
+    return route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+
+  const activeSummary = page.locator("#prompt-list summary", { hasText: "e2e-bounded-active-1" });
+  await activeSummary.click();
+  const historyPanel = page.locator("#prompt-list details", { has: page.locator("summary", { hasText: "e2e-bounded-active-1" }) })
+    .locator("details", { hasText: "Version history" });
+  await historyPanel.locator("summary").click(); // expands -> fires the {once:true} toggle fetch
+  await historyPanel.getByRole("button", { name: "Restore" }).click(); // PATCH, then refreshList()
+
+  // .click() only dispatches the event; it does not wait for the async
+  // click handler it triggers (PATCH, then refreshList()) to finish. Poll
+  // for that handler's network activity to land rather than asserting
+  // immediately against a listFilters snapshot that may predate it.
+  await expect
+    .poll(() => listFilters.length, {
+      timeout: 10_000,
+      message: "the restore's PATCH + refreshList() never completed",
+    })
+    .toBeGreaterThanOrEqual(3);
+  await expect(page.locator("#prompt-list summary", { hasText: "e2e-bounded-active-1" })).toBeVisible();
+  // A third request is expected -- refreshList() legitimately re-fetches
+  // ACTIVE prompts on every call, by design. What must NOT happen is a
+  // second "eq.false": that would mean archived rows were re-fetched
+  // instead of reused from the cache.
+  expect(
+    listFilters,
+    "a refreshList() triggered by restoring a version must re-fetch active prompts but reuse the cached archived rows, not re-fetch them (issue #261)"
+  ).toEqual(["eq.true", "eq.false", "eq.true"]);
 });
