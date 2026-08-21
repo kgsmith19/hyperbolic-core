@@ -544,6 +544,30 @@ whenever GitHub's own native linkage already did the job. All eight verification
 `if: github.event.action != 'closed'`, so this event costs only `PR Gate`'s own near-instant
 fallback check — never a second run of the full suite, and never a second `AI Review` call.
 
+That `closed`-event fallback turned out to be dead for its own primary scenario (Issue #283): GitHub
+Actions never creates a new workflow run for an event caused by an action taken with the default
+`GITHUB_TOKEN` (recursion prevention; `workflow_dispatch`/`repository_dispatch` are the only
+exceptions), and `armAutoMerge`'s `enablePullRequestAutoMerge` call is exactly that — the job's own
+default token. So when GitHub completes an armed merge, the resulting `pull_request: closed` event
+is attributed to that same token and never fires a new run at all — not merely "the native linkage
+sometimes doesn't fire," the workflow run itself never happens. Confirmed on this repository's own
+history: PR #280 (bot-armed auto-merge) has no `closed`-event run whatsoever and its linked Issue
+#264 sat open until closed manually; PR #282 (`kgsmith19` merged directly) fired the `closed` run in
+2 seconds and closed on time.
+
+The primary fix is an in-job poll, not a second workflow run: immediately after a successful
+`armAutoMerge` call, in the *same* script and the *same* run that just armed it, `pr-gate` polls
+`pulls.get` every 5 seconds for up to 2 minutes and, on observing `merged: true`, calls
+`handleIssueCloseFallback` directly against the freshly-polled PR object. No new run is triggered by
+this path, so the `GITHUB_TOKEN` recursion-prevention rule never comes into play, and no new
+credential is needed — it is the job's own existing write token doing one more thing before it ends.
+The original `closed`-event path is untouched and keeps working for manually-merged PRs, as PR #282
+already demonstrated. For the rare case a merge doesn't complete inside that 2-minute window, an
+hourly `schedule`-triggered `issue-close-sweep.yml` is the backstop: it scans PRs merged in roughly
+the last 24 hours, re-parses `Closes #N` the same way, and closes any still-open linked Issue
+idempotently — a `schedule` trigger is never "caused by" any token action, so it is never subject to
+the recursion-prevention rule either. It adds no PR check row and needs no new credential.
+
 `PR Gate` also fails closed — a real, visible check failure, not a quiet arm-skip like draft or
 hold — when any Issue the PR's body references with a closing keyword (`Closes`/`Fixes`/`Resolves
 #N`; every one referenced, not just the first) is still **open** and its body has at least one
