@@ -117,6 +117,47 @@ test("buildSystemPrompt: softens tone on later rounds once evidence lands, witho
   assert.match(prompt, /not applying more pressure every round/);
 });
 
+// Behavior protected (Issue #281, owner directive): round one raises a
+// blocking finding only when highly confident it is real and material, and
+// an uncertain issue goes to `advisory` instead. Defect caught: a prompt
+// edit that drops this instruction, which is exactly what let AI Review pad
+// round one with borderline findings that then became the scope-locked
+// ceiling for every later round.
+test("buildSystemPrompt: instructs round one to raise only high-confidence, material blocking findings", () => {
+  const prompt = buildSystemPrompt();
+  assert.match(prompt, /ROUND ONE DISCIPLINE/);
+  assert.match(prompt, /Raise a blocking finding only when you are highly confident it is real and material/);
+  assert.match(prompt, /When you are genuinely uncertain whether something is\s+a real defect, mark it `advisory`, not `blocking`/);
+});
+
+// Behavior protected (Issue #281, owner directive): a finding's ask must
+// never exceed what its own citation actually requires, and must never
+// demand evidence the author cannot produce. Defect caught: the exact drift
+// PR #270 hit -- round 1 wanted a root-cause report, round 2 wanted API
+// traces, round 3 wanted webhook delivery records the reviewer's own token
+// cannot retrieve. This test pins the instruction that names that history
+// so a prompt edit can't silently drop the cap while keeping other text.
+test("buildSystemPrompt: caps what a finding can demand to what its citation actually requires", () => {
+  const prompt = buildSystemPrompt();
+  assert.match(prompt, /PROPORTIONALITY/);
+  assert.match(prompt, /must never exceed what its own `citation` actually/);
+  assert.match(prompt, /Never demand evidence the PR author has no/);
+  assert.match(prompt, /webhook delivery records the reviewer's own token/);
+});
+
+// Behavior protected (Issue #281, owner directive): once ANY substantive,
+// on-topic response addresses a finding's original ask, the reviewer now
+// defaults to CLOSING it, reserving continued blocking for a response that
+// clearly still leaves the original ask unmet. Defect caught: a prompt that
+// still lets the model hold a finding open pending a "fuller" or "more
+// polished" response -- the old text allowed exactly that by only requiring
+// the model to "say so plainly" rather than actually resolve.
+test("buildSystemPrompt: defaults to resolving a finding once any substantive on-topic response addresses it", () => {
+  const prompt = buildSystemPrompt();
+  assert.match(prompt, /default to resolving/);
+  assert.match(prompt, /Do not keep a finding open by demanding a fuller, more polished, or more exhaustive version/);
+});
+
 // Behavior protected: the rule is repeated AFTER the untrusted payload, where
 // recency favours it. Defect caught: fencing the data but stating the rule only
 // once, far above it -- the arrangement injection attempts most reliably
@@ -170,8 +211,16 @@ test("buildUserMessage: fences the issue, PR body, standard, diff, and test file
 // this file's own conversation-rendering tests below).
 test("buildUserMessage: the PR body is fenced separately from the linked Issue body, and both are present", () => {
   const message = buildUserMessage(context);
-  const issueSection = message.slice(message.indexOf("<<<BEGIN LINKED ISSUE BODY"), message.indexOf("<<<END LINKED ISSUE BODY"));
-  const prSection = message.slice(message.indexOf("<<<BEGIN PULL REQUEST BODY"), message.indexOf("<<<END PULL REQUEST BODY"));
+  // Capture the CONTENT between a section's opening and closing fence via one
+  // regex with a capture group, rather than two separate indexOf calls -- a
+  // single expression makes it unambiguous that the opening and closing
+  // delimiters are distinct matches, not the same string reused.
+  const issueMatch = /<<<BEGIN LINKED ISSUE BODY[^>]*>>>\n([\s\S]*?)\n<<<END LINKED ISSUE BODY/.exec(message);
+  const prMatch = /<<<BEGIN PULL REQUEST BODY[^>]*>>>\n([\s\S]*?)\n<<<END PULL REQUEST BODY/.exec(message);
+  assert.ok(issueMatch?.[1], "expected a fenced LINKED ISSUE BODY section");
+  assert.ok(prMatch?.[1], "expected a fenced PULL REQUEST BODY section");
+  const issueSection = issueMatch[1];
+  const prSection = prMatch[1];
 
   assert.ok(issueSection.includes(context.issueBody), "the Issue body must appear in its own section");
   assert.ok(prSection.includes(context.prBody), "the PR body must appear in its own section");
