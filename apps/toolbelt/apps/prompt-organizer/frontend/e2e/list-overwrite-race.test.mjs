@@ -30,8 +30,34 @@
  * it, a check made before the client processed the stale response would see
  * the row still on screen and report a false green.
  *
- * Run: PLAYWRIGHT_BASE_URL=http://localhost:8812 \
- *        npx playwright test --config frontend/playwright.config.mjs
+ * Run (GREEN, the shipped client). From apps/toolbelt/apps/prompt-organizer,
+ * with the repo root's node_modules on hand for the playwright binary:
+ *
+ *   python3 -m http.server 8812 --directory frontend &
+ *   PLAYWRIGHT_BASE_URL=http://localhost:8812 \
+ *     npx playwright test --config frontend/playwright.config.mjs list-overwrite-race
+ *
+ * Run RED, to confirm this spec still has teeth. Serve a COPY of frontend/
+ * with issue #249's guard stripped back out -- delete these three lines from
+ * the copy's index.html, then point the command above at that copy:
+ *
+ *   const generation = ++listGeneration;          (in refreshList)
+ *   if (generation !== listGeneration) return;    (in refreshList)
+ *   listGeneration++;                             (in the save handler)
+ *
+ * Both cases were run while landing this change: 2 failed on the assertion
+ * naming issue #249 without the guard, 2 passed with it.
+ *
+ * Re-inspecting the original failing run's evidence, which is where the
+ * measurement quoted in index.html comes from (artifact retention is 14 days
+ * from 2026-08-19, so this is reproducible only until 2026-09-02):
+ *
+ *   gh api repos/kgsmith19/hyperbolic-core/actions/artifacts/9347661322/zip \
+ *     > evidence.zip && unzip evidence.zip -d evidence
+ *   # evidence/test-results/<test>/error-context.md  -- failure DOM snapshot
+ *   # evidence/test-results/<test>/trace.zip         -- unzip, then read the
+ *   #   *.network JSONL: each resource-snapshot carries startedDateTime and
+ *   #   time, which is where the GET/POST completion order comes from.
  */
 import { test, expect } from "@playwright/test";
 

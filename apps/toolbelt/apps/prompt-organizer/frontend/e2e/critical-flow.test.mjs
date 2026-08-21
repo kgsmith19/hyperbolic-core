@@ -166,6 +166,9 @@ test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
     .not.toBe("pending");
 
   await expect(saveError, "the save POST must not have been rejected").toHaveText("");
+  // Not redundant with the poll above, which only counts nodes: this is the
+  // one that asserts the row is actually VISIBLE, and it is what names the
+  // locator in the failure message when it is not.
   await expect(promptSummary).toBeVisible({ timeout: 10_000 });
 
   // ...and it must be in the database, not only in the client's optimistic
