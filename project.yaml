@@ -199,15 +199,21 @@ ci:
     per head) carrying a round counter, and — same discipline as PR Gate —
     holds pull-requests: write while performing no checkout and no shell
     over repository content.
-    .github/workflows/claude-dispatch.yml (on: repository_dispatch, fired
+    .github/workflows/dev-agent-dispatch.yml (on: repository_dispatch, fired
     by the dialogue workflow only for a blocking verdict on a
-    same-repository PR) hands the findings to the developer agent, which
-    fixes or rebuts them in place. Owner-provisioned prerequisites:
-    vars.LLM_REVIEW_ESCALATE_AFTER (round threshold, default 3) and one of
-    secrets.CLAUDE_CODE_OAUTH_TOKEN / secrets.ANTHROPIC_API_KEY — until
-    provisioned, the dialogue workflow still posts findings and escalates
-    to the owner immediately rather than waiting on a fixer that can never
-    start.
+    same-repository PR) hands the findings to the developer agent named by
+    agent-roles.yaml's dev.provider (read from the default branch), which
+    fixes or rebuts them in place. Only provider "anthropic" is implemented
+    today; any other value fails the job's own preflight closed rather than
+    guessing at an unverified action/SDK shape. Owner-provisioned
+    prerequisites: vars.LLM_REVIEW_ESCALATE_AFTER (round threshold, default
+    3); one of secrets.CLAUDE_CODE_OAUTH_TOKEN / secrets.ANTHROPIC_API_KEY;
+    and, so the dispatched agent authenticates as the dev GitHub App rather
+    than borrowing the vendor action's own bundled identity,
+    vars.INFISICAL_DEV_IDENTITY_ID plus Infisical /dev/ (env prod):
+    DEV_GITHUB_APP_ID / DEV_GITHUB_APP_PRIVATE_KEY — until provisioned, the
+    dialogue workflow still posts findings and escalates to the owner
+    immediately rather than waiting on a fixer that can never start.
 
 vendors:
   # Full detail (auth, secret paths, cost, rotation) lives in
