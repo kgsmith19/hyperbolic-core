@@ -111,16 +111,21 @@ jobs:
         env:
           OAUTH: ${{ env.DEV_CLAUDE_CODE_OAUTH_TOKEN }}
           API_KEY: ${{ env.DEV_ANTHROPIC_API_KEY }}
+          APP_ID: ${{ env.DEV_GITHUB_APP_ID }}
+          APP_PRIVATE_KEY: ${{ env.DEV_GITHUB_APP_PRIVATE_KEY }}
         with:
           script: |
             const { owner, repo } = context.repo;
 
             let provider = null;
+            let model = null;
             try {
               const { data } = await github.rest.repos.getContent({ owner, repo, path: "agent-roles.yaml" });
               const content = Buffer.from(data.content, data.encoding).toString("utf8");
-              const match = /\bdev:\s*\n(?:[^\n]*\n)*?\s*provider:\s*(\S+)/.exec(content);
-              provider = match ? match[1].trim().toLowerCase() : null;
+              const providerMatch = /\bdev:\s*\n(?:[^\n]*\n)*?\s*provider:\s*(\S+)/.exec(content);
+              provider = providerMatch ? providerMatch[1].trim().toLowerCase() : null;
+              const modelMatch = /\bdev:\s*\n(?:[^\n]*\n)*?\s*model:\s*(\S+)/.exec(content);
+              model = modelMatch ? modelMatch[1].trim() : null;
             } catch (error) {
               core.setFailed(`Could not read agent-roles.yaml from the default branch: ${error.message}`);
               return;
@@ -132,6 +137,12 @@ jobs:
             }
 
             core.setOutput("provider", provider);
+            // Sibling to `provider` above, for the same reason: the prompt
+            // footer below needs the model name, and agent-roles.yaml is its
+            // one source of truth (verify-repo-policy already fails the PR
+            // Gate closed if dev.model is ever empty, so this is expected to
+            // be non-null whenever provider resolved).
+            core.setOutput("model", model);
 
             if (provider !== "anthropic") {
               core.setFailed(
@@ -139,6 +150,20 @@ jobs:
                   `See this workflow's own header comment for why openai/antigravity fail closed instead of guessing at an ` +
                   `unverified action shape. Nothing will advance this pull request's fixer until either dev.provider is set ` +
                   `back to anthropic, or that provider's branch is actually implemented here.`
+              );
+              return;
+            }
+
+            // Named separately from the model-credential check below: a
+            // missing App credential used to fail opaquely inside the
+            // vendored actions/create-github-app-token step instead of with
+            // an actionable message here.
+            if (!process.env.APP_ID || !process.env.APP_PRIVATE_KEY) {
+              core.setFailed(
+                "dev.provider is anthropic, but the dev App's own posting/push identity is not provisioned. Add BOTH " +
+                  "DEV_GITHUB_APP_ID and DEV_GITHUB_APP_PRIVATE_KEY to Infisical's /dev/ secret path (env prod). Until " +
+                  "then llm-review-dialogue.yml escalates straight to the owner instead of waiting on a fixer that " +
+                  "cannot start -- see Issue #231."
               );
               return;
             }
@@ -153,7 +178,7 @@ jobs:
               return;
             }
 
-            core.info(`Dev provider resolved: ${provider}. Credential present.`);
+            core.info(`Dev provider resolved: ${provider} (model ${model}). Credentials present.`);
 
       # The dispatch carries the head it was raised against. If the branch has
       # moved since, that finding is already stale: a newer head means a newer
@@ -264,6 +289,12 @@ jobs:
 
             Never merge the pull request, never approve it, never change repository
             settings, and never use an administrative bypass.
+
+            End every comment or reply you post in this pull request with this exact
+            footer, on its own line, so a reader always knows which agent and model
+            posted it without opening the run log:
+
+            _Dev Agent — role `dev` · provider `${{ steps.preflight.outputs.provider }}` · model `${{ steps.preflight.outputs.model }}`_
 
       # A pushed commit already retriggers pr-verify.yml on its own via
       # pull_request:synchronize -- nothing further is needed for that case.
