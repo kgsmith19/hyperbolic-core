@@ -90,6 +90,19 @@ name: "PR Verification"
 # wall-clock equal to the slowest relevant lane, and concurrency below
 # (cancel-in-progress) keeps rapid successive edits from queueing runs.
 # Do not add an event here without weighing that cost.
+#
+# "closed" is the one exception to "every event here costs a full pipeline
+# run": it exists solely so PR Gate can run its issue-close fallback (see
+# its own job comment) at the exact moment a PR merges. GitHub's own
+# closing-keyword linkage ("Closes #N") reliably fires on a direct/manual
+# merge but was observed, across this repository's own history (Issue
+# #267), to silently NOT fire when the merge is instead completed
+# asynchronously by native auto-merge -- 8 of 8 auto-merge-completed merges
+# in this repo's history failed to close their linked Issue, while both
+# directly-merged ones succeeded. All eight verification lanes below carry
+# `if: github.event.action != 'closed'` so this event costs only PR Gate's
+# own near-instant fallback check, never a second run of the full suite
+# (including a second, wasted AI Review call).
 on:
   pull_request:
     types:
@@ -102,6 +115,7 @@ on:
       - labeled
       - unlabeled
       - auto_merge_disabled
+      - closed
 
 # Read-only by default. "PR Gate" raises its own permissions to what merge
 # orchestration needs; no job that executes pull-request-authored code ever
@@ -128,6 +142,10 @@ jobs:
   # and runs unconditionally.
   repository-standards:
     name: "Repository Standards"
+    # "closed" exists only to let PR Gate run its issue-close fallback after
+    # the PR has already merged and every lane here has already passed --
+    # re-running the full suite against a settled PR verifies nothing new.
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -188,6 +206,8 @@ jobs:
   # must exist and report on every PR so PR Gate can demand its success.
   toolbelt:
     name: "Toolbelt"
+    # See repository-standards above: skip the closed-PR fallback trigger.
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -217,6 +237,8 @@ jobs:
 
   acc-linux:
     name: "ACC Linux"
+    # See repository-standards above: skip the closed-PR fallback trigger.
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -252,6 +274,8 @@ jobs:
   # split is a platform constraint -- do not fake Windows coverage on Linux.
   acc-windows:
     name: "ACC Windows"
+    # See repository-standards above: skip the closed-PR fallback trigger.
+    if: github.event.action != 'closed'
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -279,6 +303,8 @@ jobs:
 
   brain:
     name: "Brain"
+    # See repository-standards above: skip the closed-PR fallback trigger.
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -309,6 +335,8 @@ jobs:
   # tooling (including this workflow's own contract test).
   platform:
     name: "Platform"
+    # See repository-standards above: skip the closed-PR fallback trigger.
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -336,6 +364,8 @@ jobs:
 
   lifeos:
     name: "LifeOS"
+    # See repository-standards above: skip the closed-PR fallback trigger.
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
@@ -392,6 +422,11 @@ jobs:
   ai-review:
     name: "AI Review"
     needs: [repository-standards]
+    # See repository-standards above: skip the closed-PR fallback trigger.
+    # (Redundant with the needs: skip cascade once repository-standards is
+    # itself skipped, but explicit here so this job's own trigger shape does
+    # not depend on a reader tracing that cascade through a sibling job.)
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -488,8 +523,19 @@ jobs:
 
             const WORK_STATE_MARKER =
               "<!-- agent-engineering-standard:work-state:v1 -->";
+            const ISSUE_CLOSE_FALLBACK_MARKER =
+              "<!-- agent-engineering-standard:issue-close-fallback:v1 -->";
             const DRAFT_LABEL = "owner:allow-draft";
             const HOLD_LABEL = "owner:hold-merge";
+
+            // "closed" only ever reaches this job so the fallback below can
+            // run at the exact moment a PR merges (see the on: block's own
+            // comment for why -- Issue #267). Every other branch in this
+            // script -- the gate verdict, arming, draft/hold policy, the
+            // Work State comment -- is meaningless once the PR is already
+            // closed, so this flag steers straight to the fallback and
+            // bypasses all of it, including the terminal setFailed check.
+            const isCloseEvent = context.payload.action === "closed";
 
             const summaryLines = [];
 
@@ -595,6 +641,90 @@ jobs:
             function parseLinkedIssue(body) {
               const match = /^closes\s+#(\d+)/im.exec(body || "");
               return match ? Number(match[1]) : null;
+            }
+
+            // Fallback for Issue #267: GitHub's own "Closes #N" linkage
+            // reliably closes the linked Issue on a direct/manual merge, but
+            // was observed -- 8 times out of 8 in this repository's history
+            // -- to silently NOT fire when the merge is instead completed
+            // asynchronously by native auto-merge (the only merge path this
+            // workflow ever arms). This replicates that one linkage as an
+            // explicit, idempotent close: it only acts when the Issue is
+            // still open, so it is a no-op whenever GitHub's own native
+            // linkage already did the job (as it did for both directly
+            // merged PRs in this repo's history).
+            async function handleIssueCloseFallback(pr, eligible) {
+              if (!pr.merged) {
+                summaryLines.push(
+                  "- Issue close fallback: PR closed without merging; nothing to do."
+                );
+                return;
+              }
+              if (!eligible) {
+                summaryLines.push(
+                  "- Issue close fallback: fork pull request or non-default base branch; skipped by directive."
+                );
+                return;
+              }
+              const linkedIssue = parseLinkedIssue(pr.body);
+              if (!linkedIssue) {
+                summaryLines.push(
+                  "- Issue close fallback: no linked issue found in the PR body."
+                );
+                return;
+              }
+              let issue;
+              try {
+                const { data } = await github.rest.issues.get({
+                  owner,
+                  repo,
+                  issue_number: linkedIssue,
+                });
+                issue = data;
+              } catch (error) {
+                summaryLines.push(
+                  `- Issue close fallback: could not read #${linkedIssue}: ${error.message}`
+                );
+                return;
+              }
+              if (issue.state !== "open") {
+                summaryLines.push(
+                  `- Issue close fallback: #${linkedIssue} already ${issue.state} -- GitHub's native closing-keyword linkage handled it.`
+                );
+                return;
+              }
+              try {
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: linkedIssue,
+                  state: "closed",
+                  state_reason: "completed",
+                });
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: linkedIssue,
+                  body: [
+                    ISSUE_CLOSE_FALLBACK_MARKER,
+                    `Closed automatically: linked pull request #${pr.number} merged, but GitHub's ` +
+                      "native closing-keyword linkage did not fire (a known platform gap on merges " +
+                      "completed by native auto-merge rather than a direct merge call -- see Issue " +
+                      "#267). This is a fallback close performed by PR Gate's merge orchestration, " +
+                      "not a manual or reviewed action.",
+                  ].join("\n"),
+                });
+                summaryLines.push(
+                  `- Issue close fallback: #${linkedIssue} was still open after the merge; closed via fallback (native linkage did not fire).`
+                );
+              } catch (error) {
+                core.warning(
+                  `PR Gate: issue close fallback failed for #${linkedIssue} on PR #${pr.number}: ${error.message}`
+                );
+                summaryLines.push(
+                  `- Issue close fallback: attempted to close #${linkedIssue} but failed: ${error.message}`
+                );
+              }
             }
 
             async function findCommentByMarker(issueNumber, marker) {
@@ -742,11 +872,6 @@ jobs:
               });
 
               summaryLines.push(`### PR #${pr.number}: ${pr.title}`);
-              summaryLines.push(
-                gatesGreen
-                  ? "- Gates: every verification lane succeeded."
-                  : `- Gates: NOT green -- ${failedGates.join(", ")}.`
-              );
 
               const targetsDefaultBranch =
                 Boolean(defaultBranch) && pr.base.ref === defaultBranch;
@@ -759,114 +884,124 @@ jobs:
               );
               const eligible = sameRepo && targetsDefaultBranch;
 
-              // Draft policy -- REST cannot un-draft a PR; GraphQL only.
-              let stillDraft = Boolean(pr.draft);
-              if (pr.draft) {
-                const draftAuthorized = await isLabelAuthorizedByOwner(
-                  pr.number,
-                  DRAFT_LABEL
+              if (isCloseEvent) {
+                await handleIssueCloseFallback(pr, eligible);
+              } else {
+                summaryLines.push(
+                  gatesGreen
+                    ? "- Gates: every verification lane succeeded."
+                    : `- Gates: NOT green -- ${failedGates.join(", ")}.`
                 );
-                if (!draftAuthorized) {
-                  await removeUnauthorizedLabel(pr, DRAFT_LABEL);
+
+                // Draft policy -- REST cannot un-draft a PR; GraphQL only.
+                let stillDraft = Boolean(pr.draft);
+                if (pr.draft) {
+                  const draftAuthorized = await isLabelAuthorizedByOwner(
+                    pr.number,
+                    DRAFT_LABEL
+                  );
+                  if (!draftAuthorized) {
+                    await removeUnauthorizedLabel(pr, DRAFT_LABEL);
+                    try {
+                      await github.graphql(
+                        `mutation($id: ID!) {
+                          markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+                            pullRequest { id }
+                          }
+                        }`,
+                        { id: pr.node_id }
+                      );
+                      stillDraft = false;
+                      summaryLines.push(
+                        "- Draft: unauthorized draft state cleared (marked ready for review)."
+                      );
+                    } catch (error) {
+                      core.warning(
+                        `PR Gate: failed to clear unauthorized draft state on PR #${pr.number}: ${error.message}`
+                      );
+                      summaryLines.push(
+                        `- Draft: failed to clear unauthorized draft state: ${error.message}`
+                      );
+                    }
+                  } else {
+                    summaryLines.push(
+                      "- Draft: preserved (owner:allow-draft is authorized)."
+                    );
+                  }
+                }
+
+                // Hold policy.
+                const holdAuthorized = await isLabelAuthorizedByOwner(
+                  pr.number,
+                  HOLD_LABEL
+                );
+                if (!holdAuthorized) {
+                  await removeUnauthorizedLabel(pr, HOLD_LABEL);
+                } else {
                   try {
                     await github.graphql(
                       `mutation($id: ID!) {
-                        markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+                        disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
                           pullRequest { id }
                         }
                       }`,
                       { id: pr.node_id }
                     );
-                    stillDraft = false;
                     summaryLines.push(
-                      "- Draft: unauthorized draft state cleared (marked ready for review)."
+                      "- Hold: owner:hold-merge is authorized; auto-merge disabled."
                     );
                   } catch (error) {
-                    core.warning(
-                      `PR Gate: failed to clear unauthorized draft state on PR #${pr.number}: ${error.message}`
-                    );
-                    summaryLines.push(
-                      `- Draft: failed to clear unauthorized draft state: ${error.message}`
-                    );
+                    const message = (error && error.message) || String(error);
+                    if (/not enabled/i.test(message)) {
+                      summaryLines.push(
+                        "- Hold: owner:hold-merge is authorized; auto-merge was already off."
+                      );
+                    } else {
+                      core.warning(
+                        `PR Gate: owner:hold-merge honored for PR #${pr.number} but disabling auto-merge failed: ${message}`
+                      );
+                      summaryLines.push(
+                        `- Hold: owner:hold-merge is authorized, but disabling auto-merge failed: ${message}`
+                      );
+                    }
                   }
+                }
+
+                // Arming is gated on the verdict this very job is about to
+                // report, so a merge can never be enabled ahead of the
+                // verification it depends on.
+                if (!gatesGreen) {
+                  summaryLines.push(
+                    "- Auto-merge: not armed -- verification did not pass."
+                  );
+                } else if (!eligible) {
+                  summaryLines.push(
+                    "- Eligibility: fork pull request or non-default base branch; auto-merge arming is skipped by directive -- same-repository PRs to the default branch only."
+                  );
+                } else if (holdAuthorized) {
+                  summaryLines.push(
+                    "- Auto-merge: skipped while owner:hold-merge is authorized."
+                  );
+                } else if (stillDraft) {
+                  summaryLines.push(
+                    "- Auto-merge: skipped while the PR remains a draft."
+                  );
                 } else {
-                  summaryLines.push(
-                    "- Draft: preserved (owner:allow-draft is authorized)."
-                  );
+                  await armAutoMerge(pr);
                 }
-              }
 
-              // Hold policy.
-              const holdAuthorized = await isLabelAuthorizedByOwner(
-                pr.number,
-                HOLD_LABEL
-              );
-              if (!holdAuthorized) {
-                await removeUnauthorizedLabel(pr, HOLD_LABEL);
-              } else {
-                try {
-                  await github.graphql(
-                    `mutation($id: ID!) {
-                      disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
-                        pullRequest { id }
-                      }
-                    }`,
-                    { id: pr.node_id }
-                  );
-                  summaryLines.push(
-                    "- Hold: owner:hold-merge is authorized; auto-merge disabled."
-                  );
-                } catch (error) {
-                  const message = (error && error.message) || String(error);
-                  if (/not enabled/i.test(message)) {
-                    summaryLines.push(
-                      "- Hold: owner:hold-merge is authorized; auto-merge was already off."
-                    );
-                  } else {
-                    core.warning(
-                      `PR Gate: owner:hold-merge honored for PR #${pr.number} but disabling auto-merge failed: ${message}`
-                    );
-                    summaryLines.push(
-                      `- Hold: owner:hold-merge is authorized, but disabling auto-merge failed: ${message}`
-                    );
-                  }
+                // Managed Work State comment, on the PR and its linked Issue.
+                const linkedIssue = parseLinkedIssue(pr.body);
+                const workStateBody = buildWorkStateBody(
+                  pr,
+                  linkedIssue,
+                  stillDraft,
+                  holdAuthorized
+                );
+                await upsertComment(pr.number, WORK_STATE_MARKER, workStateBody);
+                if (linkedIssue) {
+                  await upsertComment(linkedIssue, WORK_STATE_MARKER, workStateBody);
                 }
-              }
-
-              // Arming is gated on the verdict this very job is about to
-              // report, so a merge can never be enabled ahead of the
-              // verification it depends on.
-              if (!gatesGreen) {
-                summaryLines.push(
-                  "- Auto-merge: not armed -- verification did not pass."
-                );
-              } else if (!eligible) {
-                summaryLines.push(
-                  "- Eligibility: fork pull request or non-default base branch; auto-merge arming is skipped by directive -- same-repository PRs to the default branch only."
-                );
-              } else if (holdAuthorized) {
-                summaryLines.push(
-                  "- Auto-merge: skipped while owner:hold-merge is authorized."
-                );
-              } else if (stillDraft) {
-                summaryLines.push(
-                  "- Auto-merge: skipped while the PR remains a draft."
-                );
-              } else {
-                await armAutoMerge(pr);
-              }
-
-              // Managed Work State comment, on the PR and its linked Issue.
-              const linkedIssue = parseLinkedIssue(pr.body);
-              const workStateBody = buildWorkStateBody(
-                pr,
-                linkedIssue,
-                stillDraft,
-                holdAuthorized
-              );
-              await upsertComment(pr.number, WORK_STATE_MARKER, workStateBody);
-              if (linkedIssue) {
-                await upsertComment(linkedIssue, WORK_STATE_MARKER, workStateBody);
               }
             } catch (error) {
               // Orchestration problems must never mask the verdict, in
@@ -892,7 +1027,12 @@ jobs:
             }
 
             // THE verdict. Last, so the orchestration above always runs.
-            if (!gatesGreen) {
+            // Skipped on a close event: every lane above was deliberately
+            // skipped too (see the on: block's own comment), so gatesGreen
+            // reflects nothing meaningful once the PR has already merged --
+            // only the issue-close fallback above ran, and it never fails
+            // this job.
+            if (!isCloseEvent && !gatesGreen) {
               core.setFailed(
                 `One or more verification lanes did not succeed: ${failedGates.join(", ")}. See the individual lane rows on this PR.`
               );

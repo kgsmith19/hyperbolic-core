@@ -500,6 +500,17 @@ on the next run.
 > further — rapid successive edits cancel the superseded run rather than queueing another. Weigh
 > this before adding another event to `pr-verify.yml`'s `types:` list.
 
+`PR Gate` also arms itself on the `closed` event, added specifically for an issue-close fallback
+(Issue #267): GitHub's own `Closes #N` linkage reliably closes the linked Issue on a direct/manual
+merge, but this repository's own history showed 8 of 8 merges completed asynchronously by native
+auto-merge — the only merge path this workflow ever arms — silently failing to fire that linkage,
+while both directly-merged PRs in the same history succeeded. On a `closed`+merged event, `PR Gate`
+re-parses the same `Closes #N` reference it already uses for the Work State comment and, only if
+that Issue is still open, closes it itself with an auditable comment explaining why. It is a no-op
+whenever GitHub's own native linkage already did the job. All eight verification lanes carry
+`if: github.event.action != 'closed'`, so this event costs only `PR Gate`'s own near-instant
+fallback check — never a second run of the full suite, and never a second `AI Review` call.
+
 `.github/CODEOWNERS` requires `@kgsmith19` review for this repo's control-plane paths
 (`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`, `agent-roles.yaml`). `main` protection: pull request
 required, squash only, linear history, no force push, no deletion, code-owner approval required
