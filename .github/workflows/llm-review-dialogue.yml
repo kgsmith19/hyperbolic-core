@@ -47,9 +47,10 @@ name: "LLM Review Dialogue"
 # the triggering run's own head SHA before anything is posted.
 #
 # OPTIONAL owner-provisioned setting: vars.LLM_REVIEW_ESCALATE_AFTER (round
-# threshold before tagging the owner; defaults to 9 when unset or invalid --
-# raised from 3 by explicit owner directive, Issue #281, so the reviewer gets
-# more rounds to converge before escalating). Everything else this workflow
+# threshold before tagging the owner; defaults to 10 when unset or invalid --
+# raised from 9 by explicit owner directive, Issue #284 (itself raised from 3
+# by Issue #281), so the reviewer gets more rounds to converge before
+# escalating). Everything else this workflow
 # needs -- posting findings, counting rounds -- works with no setup at all;
 # only the developer-agent handoff in dev-agent-dispatch.yml needs a credential,
 # and only for whichever vendor agent-roles.yaml's dev.provider currently
@@ -232,7 +233,7 @@ jobs:
             const STATE_OPEN = "<!-- llm-review-state: ";
             const STATE_CLOSE = " -->";
             const OWNER_HANDLE = "kgsmith19";
-            const DEFAULT_ESCALATE_AFTER = 9;
+            const DEFAULT_ESCALATE_AFTER = 10;
 
             const escalateAfter = (() => {
               const raw = Number.parseInt(process.env.ESCALATE_AFTER || "", 10);
