@@ -181,8 +181,8 @@ change scoped to a single `apps/<name>/` or `services/<name>/` tree should gener
 that tree's own PR Gate's path filter.
 
 Standard labels: `status:ready`, `status:active`, `status:blocked`; `risk:R0` through `risk:R3`;
-`owner:allow-draft`, `owner:hold-merge`, `owner:policy-change`. Owner-prefixed labels are trusted
-only when applied by the owner.
+`owner:allow-draft`, `owner:hold-merge`, `owner:allow-incomplete-issue`, `owner:policy-change`.
+Owner-prefixed labels are trusted only when applied by the owner.
 
 Claim protocol:
 
@@ -509,6 +509,19 @@ on the next run.
 > to the slowest relevant lane rather than the sum of every suite. `cancel-in-progress` bounds it
 > further — rapid successive edits cancel the superseded run rather than queueing another. Weigh
 > this before adding another event to `pr-verify.yml`'s `types:` list.
+
+`PR Gate` also fails closed — a real, visible check failure, not a quiet arm-skip like draft or
+hold — when any Issue the PR's body references with a closing keyword (`Closes`/`Fixes`/`Resolves
+#N`; every one referenced, not just the first) is still **open** and its body has at least one
+unchecked `- [ ]` item (Issue #274). An Issue closed for any reason, including GitHub's native "not
+planned" state — this repo's own existing convention for superseded or no-longer-relevant work,
+see Releases and milestones above — is exempt entirely; only an open Issue with unchecked items
+blocks. The owner overrides per-PR with the `owner:allow-incomplete-issue` label, verified with the
+exact same timeline-provenance check as `owner:hold-merge`/`owner:allow-draft`: present without an
+authorizing `labeled` event from the owner, it is removed rather than honored. A per-Issue read
+failure (bad number, deleted Issue, a transient API error) does not itself block — it is reported
+in the job summary as unverifiable, matching this job's existing tolerance for orchestration
+errors elsewhere, rather than wedging every PR shut on a typo or a momentary API blip.
 
 `.github/CODEOWNERS` requires `@kgsmith19` review for this repo's control-plane paths
 (`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`, `agent-roles.yaml`). `main` protection: pull request
