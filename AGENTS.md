@@ -457,7 +457,7 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   is posted.
 - The comment carries a **round counter**: it increments when a new head still leaves a blocking
   finding open, holds steady on a same-head re-run, and resets on a passing verdict. A blocking
-  finding wakes the developer agent via `repository_dispatch` (`claude-dispatch.yml`) — the
+  finding wakes the developer agent via `repository_dispatch` (`dev-agent-dispatch.yml`) — the
   documented exception to `GITHUB_TOKEN`'s recursion prevention, needing no PAT or long-lived
   credential beyond the agent's own model key — which fixes the finding, pushes, and lets the
   gates re-run, or rebuts it in the same comment thread, argued from the work item, this standard,
