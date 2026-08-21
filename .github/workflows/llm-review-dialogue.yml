@@ -99,6 +99,11 @@ jobs:
       issues: write
       # Needed to read an artifact belonging to the triggering run.
       actions: read
+      # Needed only for the Infisical OIDC exchange below -- this job never
+      # gained this before because it never authenticated as anything but
+      # github.token. Scoped to this job like every other OIDC consumer in
+      # this repo (ai-review, dev-agent-dispatch).
+      id-token: write
     steps:
       # continue-on-error, not a hard failure: the artifact is absent for
       # every legitimate run where the reviewer never produced one -- most
@@ -117,6 +122,46 @@ jobs:
       - name: Dialogue · No verdict to report
         if: steps.fetch.outcome != 'success'
         run: 'echo "AI Review produced no verdict artifact for this run; nothing to post."'
+
+      # The reviewer's own posting identity (Issue #272). Reuses the same
+      # Infisical identity and /review/ secret path verify-llm-review already
+      # pulls REVIEW_GITHUB_APP_ID/REVIEW_GITHUB_APP_PRIVATE_KEY from -- that
+      # OIDC identity's access to this path is already proven live (the AI
+      # Review job exports these two alongside the model provider keys), so
+      # this reuses rather than provisions a second identity for the same
+      # role. continue-on-error: true is deliberate and asymmetric with how
+      # verify-llm-review's own preflight fails closed: THAT gate computes
+      # the actual pass/block verdict, so an unprovisioned credential there
+      # must never silently report green. THIS workflow only delivers
+      # findings someone else already computed -- posting under the generic
+      # identity is a real, correct outcome if the App credential is
+      # missing, never posting at all (because minting failed) is not. See
+      # REVIEW_APP_TOKEN_MINTED below for how the fallback is made visible
+      # rather than silent.
+      - name: Dialogue · Pull the reviewer App's credentials from Infisical
+        if: steps.fetch.outcome == 'success'
+        id: review-app-secrets
+        continue-on-error: true
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_REVIEW_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/review/"
+          domain: https://app.infisical.com
+
+      - name: Dialogue · Mint the reviewer App's installation token
+        if: steps.fetch.outcome == 'success' && steps.review-app-secrets.outcome == 'success'
+        id: review-app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ env.REVIEW_GITHUB_APP_ID }}
+          private-key: ${{ env.REVIEW_GITHUB_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
 
       - name: Dialogue · Post findings, count the round, escalate if unresolved
         if: steps.fetch.outcome == 'success'
@@ -139,7 +184,16 @@ jobs:
           # dev.provider === "anthropic" in addition to one of these.
           HAS_ANTHROPIC_OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
           HAS_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          # Visible-fallback signal for the summary (Issue #272) -- whether
+          # this run actually posted under the reviewer's own identity or
+          # fell back to github.token.
+          REVIEW_APP_TOKEN_MINTED: ${{ steps.review-app-token.outcome == 'success' }}
         with:
+          # Falls back to the job's own github.token when the App token
+          # could not be minted (unprovisioned credential, Infisical outage,
+          # or an invalid key) -- see the continue-on-error note above. Never
+          # empty: github.token always exists for a same-repository run.
+          github-token: ${{ steps.review-app-token.outputs.token || github.token }}
           script: |
             const fs = require("node:fs");
             const path = require("node:path");
@@ -159,6 +213,21 @@ jobs:
               const raw = Number.parseInt(process.env.ESCALATE_AFTER || "", 10);
               return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_ESCALATE_AFTER;
             })();
+
+            // Issue #272: this run's `github` client is authenticated as the
+            // reviewer's own App identity when that credential minted
+            // successfully, or falls back to github.token (posting under
+            // github-actions[bot]) when it did not. The fallback is a real,
+            // correct outcome -- findings must still reach the pull request
+            // -- so it is surfaced here rather than failing the job.
+            const reviewAppTokenMinted = process.env.REVIEW_APP_TOKEN_MINTED === "true";
+            if (!reviewAppTokenMinted) {
+              core.warning(
+                "Posting as github-actions[bot]: the reviewer's own App credential did not mint " +
+                  "(unprovisioned, an Infisical outage, or an invalid key). Findings are still " +
+                  "posted -- only the posting identity fell back."
+              );
+            }
 
             // Read agent-roles.yaml from the DEFAULT branch, never a pull
             // request's own branch -- this job never checks out repository
@@ -604,6 +673,7 @@ jobs:
                 `- Round: ${round} (escalates at ${escalateAfter})`,
                 `- Agent woken: ${blocking && agentProvisioned && !dispatchFailed ? "yes" : "no"}`,
                 `- Owner escalated: ${escalated ? "yes" : "no"}`,
+                `- Posted as: ${reviewAppTokenMinted ? "reviewer App identity" : "github-actions[bot] (fallback)"}`,
               ].join("\n"),
               true
             );
