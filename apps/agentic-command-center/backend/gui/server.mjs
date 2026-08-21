@@ -462,6 +462,31 @@ function readToken(file) {
   }
 }
 
+// The loser of the exclusive-create race below can read the winner's token
+// file before its writeFileSync + fsync land -- an empty file, which
+// validToken correctly rejects, so readToken throws "invalid ACC GUI token
+// file" for a token that is a few milliseconds from existing (issue #260,
+// observed once in CI: PR #258's ACC Linux run 32429231787). Same shape as
+// hooks/directive.mjs's and kernel/ledger.mjs's own same-file
+// exclusive-create races, retried here the same way: a bounded wait-and-
+// retry loop, so this converges on the winner's real token instead of
+// crashing. A genuinely malformed, wrong-permission, or symlinked token
+// file still fails exactly as before -- those never reach this branch at
+// all, since readToken throws on the very first, unretried call at the top
+// of loadOrCreateToken when the file already existed before this process
+// even attempted the exclusive create.
+function readTokenAfterConcurrentCreate(file) {
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    try {
+      return readToken(file);
+    } catch (error) {
+      if (Date.now() > deadline) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+}
+
 function loadOrCreateToken() {
   const file = tokenFile();
   secureTokenDirectory(file);
@@ -474,7 +499,7 @@ function loadOrCreateToken() {
     fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | noFollow, 0o600);
   } catch (error) {
     // Another concurrently starting ACC process won the exclusive create.
-    if (error?.code === "EEXIST") return readToken(file);
+    if (error?.code === "EEXIST") return readTokenAfterConcurrentCreate(file);
     throw error;
   }
   try {
