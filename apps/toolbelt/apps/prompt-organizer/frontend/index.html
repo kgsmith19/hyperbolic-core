@@ -198,18 +198,17 @@
       }
     }
 
-    async function refreshList() {
-      // SPEC-0008: prompt_version embed scoped to its latest row only
-      // (every prompt has at least one the instant it is saved -- SL-004's
-      // trigger fires on insert, not only update), so currentVersion is
-      // always populated, one round trip, no extra query.
-      const generation = ++listGeneration;
+    // SPEC-0008: prompt_version embed scoped to its latest row only (every
+    // prompt has at least one the instant it is saved -- SL-004's trigger
+    // fires on insert, not only update), so currentVersion is always
+    // populated, one round trip, no extra query.
+    async function fetchPrompts(isActive) {
       const rows = await api(
         "prompt?select=id,title,body,is_active,tag(tag),prompt_version(version_no),configuration(name,values,sections)" +
+          `&is_active=eq.${isActive}` +
           "&order=created_at.desc&prompt_version.order=version_no.desc&prompt_version.limit=1"
       );
-      if (generation !== listGeneration) return;
-      allPrompts = rows.map((row) => ({
+      return rows.map((row) => ({
         id: row.id,
         title: row.title,
         body: row.body,
@@ -218,11 +217,51 @@
         currentVersion: row.prompt_version[0].version_no,
         configurations: row.configuration || [],
       }));
+    }
+
+    // issue #261: the unfiltered boot query re-downloaded every prompt the
+    // owner had ever created, archived included -- and nothing ever deletes
+    // an archived row (ADR-0002 soft-delete; no DELETE grant on
+    // prompt.prompt), so that payload only ever grows. Active prompts alone
+    // are what a normal load needs to show; archivedCache holds the
+    // archived rows once this session has opted into seeing them (null
+    // until then), so a refresh after that point (e.g. the version-history
+    // restore button below) reuses what is already loaded instead of
+    // re-fetching the very payload this fix exists to stop downloading
+    // repeatedly. Known trade-off: restoring an old version's body onto a
+    // prompt that is CURRENTLY ARCHIVED updates the server but not this
+    // cache, so that one row's body stays stale in the "Show archived" view
+    // until the next full page load. Narrow (the archive/restore toggle
+    // above mutates its prompt object locally and is unaffected), and
+    // accepted rather than adding a second invalidation path for a
+    // maintenance-only edge case the Issue's own acceptance criteria do not
+    // call out.
+    let archivedCache = null;
+
+    async function refreshList() {
+      const generation = ++listGeneration;
+      const active = await fetchPrompts(true);
+      if (generation !== listGeneration) return;
+      allPrompts = archivedCache === null ? active : active.concat(archivedCache);
       renderList();
     }
 
     document.getElementById("search").addEventListener("input", renderList);
-    document.getElementById("show-archived").addEventListener("change", renderList);
+    document.getElementById("show-archived").addEventListener("change", async (e) => {
+      if (e.target.checked && archivedCache === null) {
+        // Fetched once per session, on first ask, and never again -- not on
+        // every load, not on every subsequent toggle, and not on every
+        // later refreshList() call either (the bug in the first version of
+        // this fix: archivedLoaded gated the FETCH but refreshList() still
+        // re-ran it on every call once true).
+        const generation = ++listGeneration;
+        const archived = await fetchPrompts(false);
+        if (generation !== listGeneration) return; // a newer save/refresh already superseded this
+        archivedCache = archived;
+        allPrompts = allPrompts.concat(archived);
+      }
+      renderList();
+    });
     document.addEventListener("keydown", (e) => {
       if (shouldFocusSearch(e.key, e.target.tagName)) {
         e.preventDefault();
