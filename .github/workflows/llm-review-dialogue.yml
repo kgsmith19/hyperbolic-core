@@ -46,11 +46,20 @@ name: "LLM Review Dialogue"
 # artifact, so it is treated as a claim, not a fact: it is verified against
 # the triggering run's own head SHA before anything is posted.
 #
-# OPTIONAL owner-provisioned setting: vars.LLM_REVIEW_ESCALATE_AFTER (round
-# threshold before tagging the owner; defaults to 10 when unset or invalid --
-# raised from 9 by explicit owner directive, Issue #284 (itself raised from 3
-# by Issue #281), so the reviewer gets more rounds to converge before
-# escalating). Everything else this workflow
+# OPTIONAL owner-provisioned settings:
+#   - vars.LLM_REVIEW_ESCALATE_AFTER (round threshold before tagging the
+#     owner over an unresolved review disagreement; defaults to 10 when
+#     unset or invalid -- raised from 9 by explicit owner directive, Issue
+#     #284 (itself raised from 3 by Issue #281), so the reviewer gets more
+#     rounds to converge before escalating).
+#   - vars.LLM_REVIEW_IDENTITY_ESCALATE_AFTER (consecutive-run threshold
+#     before tagging the owner over the reviewer's own App credential
+#     repeatedly failing to mint, i.e. posting as github-actions[bot]
+#     instead of the reviewer's own identity; defaults to 1 -- Issue #288.
+#     Independent of the round threshold above: minted-or-not is tracked on
+#     every run, blocking or passing, so it cannot hide behind a PR that
+#     keeps passing cleanly.)
+# Everything else this workflow
 # needs -- posting findings, counting rounds -- works with no setup at all;
 # only the developer-agent handoff in dev-agent-dispatch.yml needs a credential,
 # and only for whichever vendor agent-roles.yaml's dev.provider currently
@@ -198,6 +207,13 @@ jobs:
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           ESCALATE_AFTER: ${{ vars.LLM_REVIEW_ESCALATE_AFTER }}
+          # Independent of ESCALATE_AFTER above: this counts consecutive
+          # posting-identity fallbacks (App credential failed to mint), not
+          # rounds of an unresolved review disagreement. Defaults to 1 --
+          # minted-or-not is a binary infrastructure fact, not something that
+          # deserves a grace period, and the owner asked for this "every time
+          # without exception."
+          IDENTITY_ESCALATE_AFTER: ${{ vars.LLM_REVIEW_IDENTITY_ESCALATE_AFTER }}
           # Booleans only, computed at the expression level -- the actual
           # credential values never enter this script's env, matching this
           # job's own no-checkout/no-repository-content discipline (see TRUST
@@ -234,10 +250,16 @@ jobs:
             const STATE_CLOSE = " -->";
             const OWNER_HANDLE = "kgsmith19";
             const DEFAULT_ESCALATE_AFTER = 10;
+            const DEFAULT_IDENTITY_ESCALATE_AFTER = 1;
 
             const escalateAfter = (() => {
               const raw = Number.parseInt(process.env.ESCALATE_AFTER || "", 10);
               return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_ESCALATE_AFTER;
+            })();
+
+            const identityEscalateAfter = (() => {
+              const raw = Number.parseInt(process.env.IDENTITY_ESCALATE_AFTER || "", 10);
+              return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_IDENTITY_ESCALATE_AFTER;
             })();
 
             // Issue #272: this run's `github` client is authenticated as the
@@ -410,7 +432,14 @@ jobs:
             }
 
             const existing = await findManagedComment();
-            const prior = parseState(existing?.body) || { round: 0, headSha: null, escalated: false, deferredIssues: {} };
+            const prior = parseState(existing?.body) || {
+              round: 0,
+              headSha: null,
+              escalated: false,
+              identityFallbackStreak: 0,
+              identityEscalated: false,
+              deferredIssues: {},
+            };
 
             // ---------------------------------------------------------------
             // Classify this run.
@@ -493,6 +522,28 @@ jobs:
             const cannotAdvance = !agentProvisioned || dispatchFailed;
             const escalateNow = blocking && !escalated && (round >= escalateAfter || cannotAdvance);
             if (escalateNow) escalated = true;
+
+            // ---------------------------------------------------------------
+            // Identity-fallback escalation. Independent of round/escalated
+            // above on purpose: round only increments on `blocking &&
+            // !sameHead`, so a PR that keeps passing cleanly would never trip
+            // a shared counter -- exactly the case most likely to hide a
+            // permanently-broken reviewer App credential forever, since
+            // nothing else about a passing PR would ever surface it. This
+            // counter instead tracks every consecutive run (pass or block)
+            // that had to fall back to github-actions[bot], and resets the
+            // instant a mint succeeds.
+            let identityFallbackStreak = prior.identityFallbackStreak || 0;
+            let identityEscalated = Boolean(prior.identityEscalated);
+            if (reviewAppTokenMinted) {
+              identityFallbackStreak = 0;
+              identityEscalated = false;
+            } else {
+              identityFallbackStreak += 1;
+            }
+            const identityEscalateNow =
+              !reviewAppTokenMinted && !identityEscalated && identityFallbackStreak >= identityEscalateAfter;
+            if (identityEscalateNow) identityEscalated = true;
 
             // ---------------------------------------------------------------
             // File a non-blocking Issue for each finding the reviewer and the
@@ -580,7 +631,15 @@ jobs:
               }
             }
 
-            const state = { round, headSha, escalated, verdict: verdict.verdict, deferredIssues };
+            const state = {
+              round,
+              headSha,
+              escalated,
+              identityFallbackStreak,
+              identityEscalated,
+              verdict: verdict.verdict,
+              deferredIssues,
+            };
 
             // ---------------------------------------------------------------
             // Build the comment.
@@ -681,6 +740,18 @@ jobs:
               );
             }
 
+            if (identityEscalated) {
+              lines.push(
+                "> [!WARNING]",
+                `> @${OWNER_HANDLE} — the reviewer's own posting identity has not minted for ${identityFallbackStreak} consecutive run(s); findings above are posted as \`github-actions[bot]\` instead.`,
+                ">",
+                "> Check `REVIEW_GITHUB_APP_ID` / `REVIEW_GITHUB_APP_PRIVATE_KEY` under Infisical `/review/`, and that `vars.INFISICAL_REVIEW_IDENTITY_ID` still names a valid identity — see `docs/ops/runbook.md`'s \"LLM Review and Dev Agent identity setup\".",
+                ">",
+                "> This does not block the gate; it is a visibility fact about who is posting, not about the review's verdict.",
+                ""
+              );
+            }
+
             const body = lines.join("\n");
 
             // Exactly one comment, updated in place. A stream of new comments
@@ -700,6 +771,8 @@ jobs:
                 `- Agent woken: ${blocking && agentProvisioned && !dispatchFailed ? "yes" : "no"}`,
                 `- Owner escalated: ${escalated ? "yes" : "no"}`,
                 `- Posted as: ${reviewAppTokenMinted ? "reviewer App identity" : "github-actions[bot] (fallback)"}`,
+                `- Identity fallback streak: ${identityFallbackStreak} (escalates at ${identityEscalateAfter})`,
+                `- Identity escalated: ${identityEscalated ? "yes" : "no"}`,
               ].join("\n"),
               true
             );

@@ -628,6 +628,159 @@ test("dialogue: an unminted reviewer identity (unset, or the App credential fail
   );
 });
 
+// Issue #288: a separate, independent streak from round/escalated above --
+// round only increments on `blocking && !sameHead`, so a cleanly-passing PR
+// would never trip a shared counter, which is exactly the case most likely
+// to hide a permanently-broken reviewer App credential forever. This streak
+// instead counts every consecutive run (blocking or not) that had to fall
+// back to github-actions[bot].
+test("dialogue: identity-fallback streak escalates at the default threshold (1) with a distinct admonition, separate from round escalation", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  // REVIEW_APP_TOKEN_MINTED omitted -- first-ever fallback, no prior comment.
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "10",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  const body = calls.createComment[0].body;
+  assert.match(body, /"identityFallbackStreak":1/);
+  assert.match(body, /"identityEscalated":true/);
+  assert.match(body, /@kgsmith19 — the reviewer's own posting identity has not minted/);
+  // The round-escalation admonition must NOT also fire here -- round is only
+  // 1 of an ESCALATE_AFTER: 10 threshold, proving the two counters are
+  // genuinely independent rather than one leaking into the other.
+  assert.doesNotMatch(body, /this needs your decision/);
+});
+
+test("dialogue: a second consecutive identity fallback updates the streak in place, without a duplicate comment", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const priorState = {
+    round: 1,
+    headSha: HEAD,
+    escalated: false,
+    identityFallbackStreak: 1,
+    identityEscalated: true,
+    verdict: "block",
+  };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  // Same head as the prior run -- REVIEW_APP_TOKEN_MINTED still omitted.
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "2",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "10",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR, existingComment });
+
+  assert.equal(calls.updateComment.length, 1);
+  assert.equal(calls.createComment.length, 0, "the same managed comment must be updated, never a second one");
+  assert.match(calls.updateComment[0].body, /"identityFallbackStreak":2/);
+  assert.match(calls.updateComment[0].body, /"identityEscalated":true/);
+});
+
+test("dialogue: a successful mint resets the identity-fallback streak and clears the escalation, removing the admonition", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const newHead = "c".repeat(40);
+  const priorState = {
+    round: 1,
+    headSha: HEAD,
+    escalated: false,
+    identityFallbackStreak: 3,
+    identityEscalated: true,
+    verdict: "block",
+  };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "3",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: newHead,
+    ESCALATE_AFTER: "10",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    REVIEW_APP_TOKEN_MINTED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: newHead, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: { number: 230, head: { sha: newHead }, state: "open" }, existingComment });
+
+  const body = calls.updateComment[0].body;
+  assert.match(body, /"identityFallbackStreak":0/);
+  assert.match(body, /"identityEscalated":false/);
+  assert.doesNotMatch(body, /posting identity has not minted/);
+});
+
+// Mutation-sensitive: proves the two admonition blocks are built
+// independently, so one being rendered can never accidentally suppress or
+// overwrite the other -- the failure mode a shared `if` (or a single `return`
+// early) would produce.
+test("dialogue: round-escalation and identity-escalation admonitions can both render in the same comment without clobbering", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const newHead = "c".repeat(40);
+  const priorState = {
+    round: 2,
+    headSha: HEAD,
+    escalated: false,
+    identityFallbackStreak: 0,
+    identityEscalated: false,
+    verdict: "block",
+  };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  // REVIEW_APP_TOKEN_MINTED omitted -- this run both crosses ESCALATE_AFTER
+  // (round 2 -> 3, threshold 3) AND fails to mint the reviewer identity
+  // (default identity threshold 1), so both escalations must fire together.
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "4",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: newHead,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: newHead, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: { number: 230, head: { sha: newHead }, state: "open" }, existingComment });
+
+  const body = calls.updateComment[0].body;
+  assert.match(body, /"round":3/);
+  assert.match(body, /"escalated":true/);
+  assert.match(body, /"identityFallbackStreak":1/);
+  assert.match(body, /"identityEscalated":true/);
+  assert.match(body, /this needs your decision/);
+  assert.match(body, /posting identity has not minted/);
+});
+
 test("dialogue: a re-run on the same head updates the one comment in place without incrementing the round", async () => {
   const fs = await import("node:fs");
   const os = await import("node:os");
