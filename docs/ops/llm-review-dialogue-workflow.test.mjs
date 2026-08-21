@@ -261,6 +261,58 @@ test("llm-review-recheck.yml checks out only the exact dispatched head, and reus
   assert.match(recheckYaml, /uses: \.\/\.github\/actions\/verify-llm-review/);
 });
 
+// Extracts the `with:` block immediately following a verify-llm-review
+// `uses:` line into a plain key -> raw-expression-text map, using the same
+// indentation-bounded scan every other block extractor in this file uses.
+function extractVerifyLlmReviewInputs(yamlText) {
+  const usesIndex = yamlText.indexOf("uses: ./.github/actions/verify-llm-review");
+  assert.ok(usesIndex >= 0, "no verify-llm-review invocation found");
+  const withIndex = yamlText.indexOf("with:", usesIndex);
+  assert.ok(withIndex >= 0 && withIndex - usesIndex < 100, "no with: block immediately after the verify-llm-review uses: line");
+  const lines = yamlText.slice(withIndex + "with:".length).split("\n").slice(1);
+  const withIndent = lines[0].match(/^ */)[0].length;
+  const inputs = {};
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+    const indent = line.match(/^ */)[0].length;
+    if (indent < withIndent) break;
+    const pair = line.trim().match(/^([a-z_]+):\s*(.*)$/);
+    if (pair) inputs[pair[1]] = pair[2].trim();
+  }
+  return inputs;
+}
+
+// THE FIX for AI Review's blocking finding on this PR (round 1): acceptance
+// criterion 5 (Issue #268) requires the recheck job to invoke
+// verify-llm-review "with the same inputs ai-review passes" -- this was true
+// by construction but had no test proving it, so a future edit to either
+// job's `with:` block could silently drift the two apart with nothing to
+// catch it. pr_number/base_sha/head_sha necessarily use DIFFERENT
+// expressions in each trigger's own event context (a repository_dispatch
+// payload has no `pull_request` object to read from) -- everything else
+// must be byte-for-byte identical, since both invocations exist to
+// authenticate and configure the exact same reviewer.
+test("llm-review-recheck.yml invokes verify-llm-review with the exact same inputs ai-review passes, for every key not inherently trigger-specific", () => {
+  const prVerifyYaml = readFileSync(path.join(root, ".github/workflows/pr-verify.yml"), "utf8");
+  const aiReviewJobStart = prVerifyYaml.indexOf("\n  ai-review:");
+  const aiReviewJobEnd = prVerifyYaml.indexOf("\n  pr-gate:", aiReviewJobStart);
+  assert.ok(aiReviewJobStart >= 0 && aiReviewJobEnd > aiReviewJobStart, "pr-verify.yml: could not isolate the ai-review job block");
+  const aiReviewInputs = extractVerifyLlmReviewInputs(prVerifyYaml.slice(aiReviewJobStart, aiReviewJobEnd));
+  const recheckInputs = extractVerifyLlmReviewInputs(recheckYaml);
+
+  assert.deepEqual(
+    Object.keys(recheckInputs).sort(),
+    Object.keys(aiReviewInputs).sort(),
+    "the two invocations must pass the exact same set of input keys"
+  );
+
+  const contextSpecificKeys = new Set(["pr_number", "base_sha", "head_sha"]);
+  for (const key of Object.keys(aiReviewInputs)) {
+    if (contextSpecificKeys.has(key)) continue;
+    assert.equal(recheckInputs[key], aiReviewInputs[key], `input "${key}" must match ai-review's exactly`);
+  }
+});
+
 test("neither new workflow adds a second pull_request-triggered workflow to the repo", () => {
   // Reruns the same invariant docs/ops/pr-verify-workflow.test.mjs pins for
   // pr-verify.yml, scoped to the files this Issue and its slice 8 follow-on
