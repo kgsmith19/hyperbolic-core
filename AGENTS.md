@@ -500,6 +500,21 @@ on the next run.
 > further — rapid successive edits cancel the superseded run rather than queueing another. Weigh
 > this before adding another event to `pr-verify.yml`'s `types:` list.
 
+Arming auto-merge does not itself close the PR's linked Issue — GitHub performs the actual squash
+merge asynchronously, later, once it decides the PR is mergeable, and `pr-verify.yml` never
+triggers on `closed` (only the `pull_request` types above), so `PR Gate` cannot act at merge time
+even in principle. GitHub's own closing-keyword auto-close is supposed to handle it, but is
+observably unreliable for `PR Gate`-armed auto-merges specifically — Issue #267 recorded 4 of 5
+recent PRs whose Issue stayed open despite a correct `Closes #N` reference and a correctly-recorded
+`closed_by_pull_requests` link to the merged PR, ruling out a linkage problem this repo could fix.
+`.github/workflows/close-linked-issue.yml` is the deterministic fallback: it triggers on `push` to
+`main` (never `pull_request`/`pull_request_target` — `pr-verify.yml` is the only workflow permitted
+to trigger on those, mechanically enforced by its own workflow-contract test), resolves the merged
+PR(s) associated with the landed commit, and explicitly closes every Issue their bodies name via
+the same Closes/Fixes/Resolves convention `verify-pr-description` enforces — skipping anything
+already closed, so it covers for GitHub's mechanism rather than fighting it on the cases where that
+already works.
+
 `.github/CODEOWNERS` requires `@kgsmith19` review for this repo's control-plane paths
 (`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`, `agent-roles.yaml`). `main` protection: pull request
 required, squash only, linear history, no force push, no deletion, code-owner approval required

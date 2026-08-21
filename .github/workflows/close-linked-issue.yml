@@ -1,0 +1,124 @@
+name: "Close Linked Issue"
+
+# Fallback for a GitHub platform reliability gap (Issue #267): a PR whose
+# description contains a Closes/Fixes/Resolves reference, merged through
+# PR Gate's armed native squash auto-merge, does NOT reliably auto-close the
+# referenced Issue the way a manually-clicked "Squash and merge" in GitHub's
+# own UI does -- observed failing on 4 of 5 recent PRs in this repo's own
+# history (#245/#248, #250/#258, #260/#265, #261/#266 all needed a manual
+# close; only #249/#259 auto-closed correctly). This is not a linkage or
+# keyword-detection problem this repo can fix: the Issue's own
+# closed_by_pull_requests record correctly names the merged PR as its
+# closing reference in every failing case too -- GitHub's own close ACTION
+# just does not fire. This workflow closes the gap deterministically: for
+# every commit landing on main, explicitly close whichever Issue(s) the PR
+# that produced it named via the exact same Closes/Fixes/Resolves
+# convention verify-pr-description already enforces, skipping any Issue
+# that is already closed -- GitHub's own mechanism DOES work some of the
+# time (#249/#259), and this must cover for it, not fight it.
+#
+# WHY push, not pull_request(closed). AGENTS.md > PR Gate and merge
+# behavior is explicit and mechanically enforced (docs/ops/pr-verify-workflow
+# .test.mjs's own "pr-verify.yml is the only PR-triggered workflow" test):
+# pr-verify.yml is the ONLY workflow permitted to trigger on pull_request or
+# pull_request_target, because a second one adds an uncontrollable check
+# row to every PR. Folding a "closed" type into pr-verify.yml itself was
+# considered and rejected too: every job in that file already runs
+# unconditionally on every one of its own pull_request types with no
+# per-action filter (AGENTS.md's own "mandatory reporting, not a job-level
+# path condition"), so adding "closed" there would re-run the entire app
+# test fleet (Toolbelt, ACC Linux/Windows, Brain, Platform, LifeOS, AI
+# Review) on every PR close, merged or not -- pure waste for a rollup none
+# of those lanes need, and it would put closed-event bookkeeping inside
+# pr-gate's own hard contract (last job in the file, exactly one embedded
+# script block) for no reason connected to gate aggregation or auto-merge
+# arming. A push to main fires exactly once per landed merge commit, adds
+# no PR check row at all (a push-triggered run reports against the commit,
+# never the PR's own Checks tab), and is this repo's own established
+# pattern for post-merge automation -- every other push-triggered workflow
+# here (toolbelt-ci.yml, acc-ci.yml, brain-ci.yml, shell-ci.yml,
+# lifeos-ci.yml, llm-review.yml, and others) already uses `branches: [main]`
+# the same way.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: close-linked-issue-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  close-linked-issue:
+    name: "Close Linked Issue"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Close · Explicitly close every Issue the merged PR for this commit references
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const sha = context.sha;
+
+            // The commit that just landed on main names its own originating
+            // pull request(s) through this API -- reading the REAL merged
+            // PR's body directly, rather than parsing the squash commit
+            // message, is robust to whatever this repo's squash-message
+            // template setting happens to be (title-only, title+description,
+            // title+commit-details, ...) and needs no assumption about it.
+            const { data: associatedPrs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner,
+              repo,
+              commit_sha: sha,
+            });
+
+            const mergedPrs = associatedPrs.filter((pr) => pr.merged_at);
+            if (mergedPrs.length === 0) {
+              core.info(`Commit ${sha}: no merged pull request is associated with it; nothing to close.`);
+              return;
+            }
+
+            // Matches .github/actions/verify-pr-description/action.yml's own
+            // convention exactly: case-insensitive, any of
+            // Closes/Fixes/Resolves, not anchored to line start -- a PR body
+            // can name it anywhere, and can name more than one.
+            const pattern = /\b(?:closes|fixes|resolves)\s+#(\d+)\b/gi;
+            const issueNumbers = new Set();
+            for (const pr of mergedPrs) {
+              for (const match of (pr.body || "").matchAll(pattern)) {
+                issueNumbers.add(Number(match[1]));
+              }
+            }
+
+            if (issueNumbers.size === 0) {
+              core.info(`Commit ${sha}: no Closes/Fixes/Resolves reference in its merged pull request(s); nothing to close.`);
+              return;
+            }
+
+            for (const issueNumber of issueNumbers) {
+              try {
+                const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                if (issue.state === "closed") {
+                  core.info(`Issue #${issueNumber} is already closed (GitHub's own auto-close likely handled it) -- nothing to do.`);
+                  continue;
+                }
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  state: "closed",
+                  state_reason: "completed",
+                });
+                core.info(`Closed Issue #${issueNumber} (referenced by a pull request merged into commit ${sha}).`);
+              } catch (error) {
+                // Best-effort bookkeeping on an already-merged commit, not a
+                // gate -- a missing/inaccessible Issue number or a
+                // transient API error must not fail this job.
+                core.warning(`Could not close Issue #${issueNumber}: ${error.message}`);
+              }
+            }
