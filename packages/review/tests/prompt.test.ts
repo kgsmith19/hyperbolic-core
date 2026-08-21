@@ -211,8 +211,16 @@ test("buildUserMessage: fences the issue, PR body, standard, diff, and test file
 // this file's own conversation-rendering tests below).
 test("buildUserMessage: the PR body is fenced separately from the linked Issue body, and both are present", () => {
   const message = buildUserMessage(context);
-  const issueSection = message.slice(message.indexOf("<<<BEGIN LINKED ISSUE BODY"), message.indexOf("<<<END LINKED ISSUE BODY"));
-  const prSection = message.slice(message.indexOf("<<<BEGIN PULL REQUEST BODY"), message.indexOf("<<<END PULL REQUEST BODY"));
+  // Capture the CONTENT between a section's opening and closing fence via one
+  // regex with a capture group, rather than two separate indexOf calls -- a
+  // single expression makes it unambiguous that the opening and closing
+  // delimiters are distinct matches, not the same string reused.
+  const issueMatch = /<<<BEGIN LINKED ISSUE BODY[^>]*>>>\n([\s\S]*?)\n<<<END LINKED ISSUE BODY/.exec(message);
+  const prMatch = /<<<BEGIN PULL REQUEST BODY[^>]*>>>\n([\s\S]*?)\n<<<END PULL REQUEST BODY/.exec(message);
+  assert.ok(issueMatch, "expected a fenced LINKED ISSUE BODY section");
+  assert.ok(prMatch, "expected a fenced PULL REQUEST BODY section");
+  const issueSection = issueMatch[1];
+  const prSection = prMatch[1];
 
   assert.ok(issueSection.includes(context.issueBody), "the Issue body must appear in its own section");
   assert.ok(prSection.includes(context.prBody), "the PR body must appear in its own section");
