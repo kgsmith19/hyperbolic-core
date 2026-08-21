@@ -132,13 +132,16 @@ anything else in this session.
   it. It exists because every agent capable of working in this repo is built to honor `AGENTS.md`,
   and honoring it here is exactly as mandatory as honoring any other rule in this file.
 - `dev.provider` and `review.provider` are different value spaces, not one enum reused twice.
-  `dev.provider` names the coding-agent **tool/harness** that writes code and drives pull
-  requests — `anthropic | openai | antigravity` (Claude Code, Codex, or Antigravity, Google's
-  agentic CLI and the deprecated Gemini CLI's successor). `review.provider` names the raw model
-  **API family** the structured-output review call targets — `anthropic | openai | gemini`.
-  `AI Review` is one sandboxed LLM call via `packages/llm` (see `packages/review/src/config.ts`);
-  it never runs an agent harness, so `gemini` there is the real Gemini API — the same one
-  `services/brain` and `services/llm-handler` call for product features, unrelated to Antigravity.
+  `dev.provider` names the coding-agent **tool/harness's company**, consistently with every value
+  in both enums — `anthropic | openai | google` (Claude Code, Codex, or Antigravity — Google's
+  agentic CLI and the deprecated Gemini CLI's successor; the CLI name is informational detail,
+  never the enum value). `review.provider` names the raw model **API family** the
+  structured-output review call targets — `anthropic | openai | gemini`. `AI Review` is one
+  sandboxed LLM call via `packages/llm` (see `packages/review/src/config.ts`); it never runs an
+  agent harness, so `gemini` there is the real Gemini API — the same one `services/brain` and
+  `services/llm-handler` call for product features. `google` (dev) and `gemini` (review) naming
+  the same company differently is intentional: dev names the harness vendor, review names the
+  model API — not a collision, and not related to Antigravity.
 - The two values in `agent-roles.yaml` must never be equal. `repository-standards` enforces this
   mechanically: `.github/actions/verify-repo-policy` validates the file on every PR — it must
   parse, `dev.provider` and `review.provider` must each be valid for their own value space above,

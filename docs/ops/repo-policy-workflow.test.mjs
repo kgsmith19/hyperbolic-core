@@ -129,15 +129,30 @@ test("agent-roles.yaml validator: malformed YAML fails closed", () => {
 });
 
 // Behavior protected: dev.provider and review.provider are separate value
-// spaces (Issue #252) -- dev names the coding-agent TOOL, review names the
-// raw model API family AI Review's structured-output call targets. This is
-// the positive control for dev's own space: "antigravity" is not a real
-// model API `packages/llm` can dispatch to, so accepting it here only makes
-// sense because dev.provider means something different from review.provider.
-test("agent-roles.yaml validator: dev.provider accepts antigravity, the coding-agent tool", () => {
-  const result = runValidator(fixture({ devProvider: "antigravity" }));
+// spaces (Issue #252), and dev.provider's own values name COMPANIES,
+// consistently with every other value in both enums (Issue #264 -- #253
+// originally picked "antigravity", a product/CLI name, which was itself the
+// inconsistency). This is the positive control for dev's own space: "google"
+// is not a real model API `packages/llm` can dispatch to, so accepting it
+// here only makes sense because dev.provider means something different from
+// review.provider.
+test("agent-roles.yaml validator: dev.provider accepts google, the coding-agent tool's company", () => {
+  const result = runValidator(fixture({ devProvider: "google" }));
   assert.equal(result.ok, true, `expected pass, got failure: ${result.stderr}`);
-  assert.match(result.stdout, /dev=antigravity, review=openai/);
+  assert.match(result.stdout, /dev=google, review=openai/);
+});
+
+// NEGATIVE CONTROL for the rename itself (Issue #264's own acceptance
+// criterion: "dev: antigravity now fails -- the value it currently
+// accepts"). Behavior protected: the old product-name value is no longer
+// valid now that dev.provider's space names companies. Defect caught: a
+// validator edit that adds "google" without actually removing "antigravity",
+// silently leaving two ways to name the same harness.
+test("agent-roles.yaml validator: dev.provider rejects antigravity -- superseded by the company name google", () => {
+  const result = runValidator(fixture({ devProvider: "antigravity" }));
+  assert.equal(result.ok, false);
+  assert.match(result.stderr, /'dev\.provider' is 'antigravity'/);
+  assert.match(result.stderr, /must be one of \['anthropic', 'google', 'openai'\]/);
 });
 
 // NEGATIVE CONTROL for the space split. Behavior protected: "gemini" is
@@ -150,18 +165,19 @@ test("agent-roles.yaml validator: dev.provider rejects gemini -- that identifier
   const result = runValidator(fixture({ devProvider: "gemini" }));
   assert.equal(result.ok, false);
   assert.match(result.stderr, /'dev\.provider' is 'gemini'/);
-  assert.match(result.stderr, /must be one of \['anthropic', 'antigravity', 'openai'\]/);
+  assert.match(result.stderr, /must be one of \['anthropic', 'google', 'openai'\]/);
 });
 
-// NEGATIVE CONTROL, the mirror image. Behavior protected: "antigravity" is
-// dev's tool identifier, not a valid review-API name -- AI Review never runs
-// an agent harness, only a bare model call, and there is no "Antigravity"
-// model API `packages/llm` exposes. Defect caught: the same shared-set
-// regression as above, from the other direction.
-test("agent-roles.yaml validator: review.provider rejects antigravity -- that identifier belongs to dev's tool space, not review's API space", () => {
-  const result = runValidator(fixture({ reviewProvider: "antigravity" }));
+// NEGATIVE CONTROL, the mirror image. Behavior protected: "google" is dev's
+// tool-company identifier, not a valid review-API name -- AI Review never
+// runs an agent harness, only a bare model call, and there is no "google"
+// model API `packages/llm` exposes (the real API there is named "gemini").
+// Defect caught: the same shared-set regression as above, from the other
+// direction.
+test("agent-roles.yaml validator: review.provider rejects google -- that identifier belongs to dev's tool space, not review's API space", () => {
+  const result = runValidator(fixture({ reviewProvider: "google" }));
   assert.equal(result.ok, false);
-  assert.match(result.stderr, /'review\.provider' is 'antigravity'/);
+  assert.match(result.stderr, /'review\.provider' is 'google'/);
 });
 
 // Behavior protected: review.provider keeps meaning the real Gemini API --
