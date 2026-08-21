@@ -455,6 +455,16 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   `AI Review` itself stays read-only — the artifact is the only thing that crosses the boundary,
   and the PR number it names is verified against the triggering run's own head SHA before anything
   is posted.
+- The managed comment posts under the reviewer's **own GitHub App identity** (Issue #272), minted
+  from `REVIEW_GITHUB_APP_ID`/`REVIEW_GITHUB_APP_PRIVATE_KEY` in Infisical's `/review/` path —
+  the same identity and secret path `verify-llm-review` already reads model provider keys from —
+  via `actions/create-github-app-token`, the identical mechanism `dev-agent-dispatch.yml` uses for
+  the dev identity. This is a visibility improvement, not a gate: `llm-review-dialogue.yml` only
+  *delivers* findings someone else already computed, so an unprovisioned or failing App credential
+  degrades to posting under `github-actions[bot]` instead (`continue-on-error: true` on both the
+  Infisical pull and the token mint), logged loudly via `core.warning` and the run summary, never
+  silently. Findings reaching the pull request is the invariant that must never break; which
+  identity they post under is not.
 - The comment carries a **round counter**: it increments when a new head still leaves a blocking
   finding open, holds steady on a same-head re-run, and resets on a passing verdict. A blocking
   finding wakes the developer agent via `repository_dispatch` (`dev-agent-dispatch.yml`) — the
