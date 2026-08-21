@@ -684,6 +684,71 @@ test("dialogue: an unresolved finding surviving to a new head increments the rou
   assert.match(body, /@kgsmith19 — this needs your decision/);
 });
 
+// Behavior protected (Issue #281, owner directive): with ESCALATE_AFTER
+// unset, the workflow's own DEFAULT_ESCALATE_AFTER applies -- which must now
+// be 9, not the old 3. This is the true defect-sensitive half: it fails
+// against the pre-#281 default, where round 8 (>= 3) would already have
+// escalated. Paired with the positive control below (round 9 does escalate)
+// so this proves the exact boundary, not just "somewhere higher than 3".
+test("dialogue: with ESCALATE_AFTER unset, round 8 does NOT yet escalate -- the default is 9, not 3", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const newHead = "c".repeat(40);
+  const priorState = { round: 7, headSha: HEAD, escalated: false, verdict: "block" };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "8",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: newHead,
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: newHead, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: { number: 230, head: { sha: newHead }, state: "open" }, existingComment });
+
+  const body = calls.updateComment[0].body;
+  assert.match(body, /"round":8/);
+  assert.match(body, /"escalated":false/);
+  assert.doesNotMatch(body, /@kgsmith19 — this needs your decision/);
+});
+
+// POSITIVE CONTROL for the default itself: round 9 with ESCALATE_AFTER
+// unset does escalate, pinning the exact new default value rather than just
+// "greater than 3".
+test("dialogue: with ESCALATE_AFTER unset, round 9 escalates -- confirming the new default value", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const newHead = "c".repeat(40);
+  const priorState = { round: 8, headSha: HEAD, escalated: false, verdict: "block" };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "9",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: newHead,
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: newHead, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: { number: 230, head: { sha: newHead }, state: "open" }, existingComment });
+
+  const body = calls.updateComment[0].body;
+  assert.match(body, /"round":9/);
+  assert.match(body, /"escalated":true/);
+  assert.match(body, /@kgsmith19 — this needs your decision/);
+});
+
 test("dialogue: a passing verdict resets the round and clears any prior escalation", async () => {
   const fs = await import("node:fs");
   const os = await import("node:os");

@@ -456,6 +456,14 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   went three rounds, each demanding more without ever converging — round 1 wanted a root-cause
   report, round 2 wanted API traces, round 3 wanted webhook delivery records the reviewer's own
   token cannot retrieve.
+- **Round-one discipline and proportionality (Issue #281).** By explicit owner directive, round
+  one raises a blocking finding only when highly confident it is real and material — an uncertain
+  or minor issue is `advisory`, not `blocking` — because everything round one raises becomes the
+  ceiling every later round is locked to. Separately, every finding's ask is capped at what its own
+  `citation` actually requires: a finding may never demand evidence the PR author has no way to
+  produce, the same drift PR #270 hit. Once a reply supplies any substantive, on-topic response to a
+  finding's original ask, the reviewer now defaults to resolving it rather than holding out for a
+  fuller or more polished version of that same response.
 - **Fail-closed vs. fail-open:** infrastructure failure (missing credential, unset
   `REVIEW_MODEL`, invalid provider configuration, API error, timeout) fails the gate; a weak or
   malformed model answer does not.
@@ -491,8 +499,9 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   re-runs the identical `verify-llm-review` composite action `AI Review` uses — one source of
   review logic across both trigger paths — so a rebuttal or a deferral proposal gets scored without
   waiting for an unrelated commit to happen to land.
-- After a configurable number of unresolved rounds (`vars.LLM_REVIEW_ESCALATE_AFTER`, default 3)
-  with the gate still red, the comment tags `@kgsmith19` once and states the unresolved
+- After a configurable number of unresolved rounds (`vars.LLM_REVIEW_ESCALATE_AFTER`, default 9 —
+  raised from 3 by explicit owner directive, Issue #281) with the gate still red, the comment tags
+  `@kgsmith19` once and states the unresolved
   disagreement plainly — the documented rare escape hatch, not the normal path. The same
   escalation fires immediately, without waiting on the round threshold, if the agent-wake
   credential is unprovisioned or the dispatch itself fails: a loop that cannot advance must not
