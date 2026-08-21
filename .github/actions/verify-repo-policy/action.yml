@@ -137,15 +137,16 @@ runs:
 
         # dev.provider and review.provider are deliberately different value
         # spaces, not one enum reused twice -- see agent-roles.yaml's own
-        # comments. dev names the coding-agent TOOL (Claude Code / Codex /
-        # Antigravity); review names the raw model API family the
-        # structured-output review call targets (AI Review never runs an
-        # agent harness, so "gemini" there is the real Gemini API). They
-        # only overlap on anthropic/openai, which is exactly where a real
-        # collision -- the same family both writing and reviewing -- can
-        # still happen, so the equality check below needs no special-casing.
+        # comments. dev names the coding-agent TOOL's COMPANY (Claude Code =
+        # anthropic, Codex = openai, Antigravity = google); review names the
+        # raw model API family the structured-output review call targets (AI
+        # Review never runs an agent harness, so "gemini" there is the real
+        # Gemini API). They only overlap on anthropic/openai, which is
+        # exactly where a real collision -- the same family both writing and
+        # reviewing -- can still happen, so the equality check below needs no
+        # special-casing.
         VALID_PROVIDERS_BY_ROLE = {
-            "dev": {"anthropic", "openai", "antigravity"},
+            "dev": {"anthropic", "openai", "google"},
             "review": {"anthropic", "openai", "gemini"},
         }
 
