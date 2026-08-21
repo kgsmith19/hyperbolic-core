@@ -159,6 +159,26 @@
 
     let allPrompts = [];
     let selectedTag = null;
+    // A save renders optimistically (below) while a list fetch may still be in
+    // flight from boot. That fetch's snapshot was taken BEFORE the insert, so
+    // letting it land replaces allPrompts wholesale and wipes the just-saved
+    // prompt out of the DOM for good -- nothing re-fetches afterwards, so the
+    // row never comes back. Stamp each fetch and drop any result that is no
+    // longer the newest intent.
+    //
+    // Issue #249, measured -- not assumed -- from the failing run's own
+    // Playwright trace (CI run 32201373860, artifact prompt-organizer-e2e-
+    // evidence). Boot GET issued at 00:30:11.269 and took 364.5ms, finishing
+    // at .6335; the save POST was issued 114ms LATER at .383, returned 201,
+    // and finished at .6287. The GET therefore carried a snapshot predating
+    // the insert and landed 4.5ms after it, so the new row lived in the DOM
+    // for ~4ms before renderList() wiped it. The same run's failure snapshot
+    // corroborates both halves: the form is empty (save-form.reset() runs
+    // only on the success path below) and the list holds exactly the 9
+    // pre-existing prompts. Not Supabase write->read propagation latency --
+    // this client never re-reads after a save -- and not a too-tight 10s
+    // wait: the element is gone permanently, so no timeout would have helped.
+    let listGeneration = 0;
 
     function renderList() {
       const query = document.getElementById("search").value;
@@ -183,10 +203,12 @@
       // (every prompt has at least one the instant it is saved -- SL-004's
       // trigger fires on insert, not only update), so currentVersion is
       // always populated, one round trip, no extra query.
+      const generation = ++listGeneration;
       const rows = await api(
         "prompt?select=id,title,body,is_active,tag(tag),prompt_version(version_no),configuration(name,values,sections)" +
           "&order=created_at.desc&prompt_version.order=version_no.desc&prompt_version.limit=1"
       );
+      if (generation !== listGeneration) return;
       allPrompts = rows.map((row) => ({
         id: row.id,
         title: row.title,
@@ -266,6 +288,7 @@
           });
         }
         allPrompts.unshift({ id: saved.id, title: saved.title, body: saved.body, isActive: true, tags, currentVersion: 1, configurations: [] });
+        listGeneration++;
         document.getElementById("save-form").reset();
         renderList();
       } catch (err) {
