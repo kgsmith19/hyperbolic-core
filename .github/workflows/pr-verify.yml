@@ -769,7 +769,9 @@ jobs:
               }
               if (stillDraft) return "PR is a draft (owner:allow-draft honored)";
               if (checklistBlocked) {
-                const names = incompleteIssues.map((entry) => `#${entry.number}`).join(", ");
+                const names = incompleteIssues
+                  .map((entry) => `#${entry.number} (${entry.uncheckedCount} unchecked)`)
+                  .join(", ");
                 return `incomplete checklist on ${names}; override with \`${CHECKLIST_LABEL}\` if intentional`;
               }
               if (!gatesGreen) return failedGates.join("; ");
@@ -1001,7 +1003,9 @@ jobs:
                 reasons.push(`one or more verification lanes did not succeed: ${failedGates.join(", ")}`);
               }
               if (checklistBlocked) {
-                const names = incompleteIssues.map((entry) => `#${entry.number}`).join(", ");
+                const names = incompleteIssues
+                  .map((entry) => `#${entry.number} (${entry.uncheckedCount} unchecked)`)
+                  .join(", ");
                 reasons.push(
                   `linked Issue checklist incomplete on ${names} (override with the \`${CHECKLIST_LABEL}\` label if intentional)`
                 );

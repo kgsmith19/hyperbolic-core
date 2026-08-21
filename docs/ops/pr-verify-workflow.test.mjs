@@ -504,6 +504,7 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
   assert.ok(!m.calls.includes("ARM"), "an open Issue with an unchecked item must not arm");
   assert.notEqual(m.failed, null, "an incomplete checklist must fail PR Gate, not just skip arming");
   assert.match(m.failed || "", /checklist incomplete on #7/);
+  assert.match(m.failed || "", /#7 \(1 unchecked\)/, "the failure must say how many items remain unchecked");
 
   m = await run({ gates: GREEN, issueChecklists: { 7: { state: "closed", body: "- [ ] one" } } });
   assert.ok(m.calls.includes("ARM"), "a CLOSED Issue is exempt regardless of unchecked items -- covers superseded/not-planned work");
@@ -518,7 +519,7 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
     },
   });
   assert.ok(!m.calls.includes("ARM"), "ALL linked Issues must be complete -- one incomplete Issue among several still blocks");
-  assert.match(m.failed || "", /#9/, "the failure must name which Issue is incomplete");
+  assert.match(m.failed || "", /#9 \(1 unchecked\)/, "the failure must name the incomplete Issue and how many items remain unchecked");
   assert.doesNotMatch(m.failed || "", /#7/, "a complete Issue must not be named as a blocker");
 
   const checklistOverride = [
