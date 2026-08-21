@@ -18,8 +18,25 @@ runs:
         node-version: '22'
 
     - name: Test · Native test suite
+      # Reporter flags ride in NODE_OPTIONS so package.json's own
+      # test:windows stays untouched for local runs. They cannot be appended
+      # as npm `--` passthrough args: node parses no options after the test
+      # globs. Bare `node --test` defaults to TAP when stdout is not a TTY,
+      # and TAP buries nested-subtest failures -- the intermittent failures
+      # issue #211 chased were invisible in the log. `spec` names every
+      # failing subtest on stdout; `junit` writes the same names to a file
+      # the evidence step below can upload after the log is gone. The
+      # destination is `..`-relative because test:windows runs from
+      # backend/, so the report lands at
+      # apps/agentic-command-center/acc-windows-test-report.xml. Plain node
+      # child processes the tests spawn ignore these flags outside --test
+      # mode.
       shell: bash
       working-directory: apps/agentic-command-center
+      env:
+        NODE_OPTIONS: >-
+          --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=junit --test-reporter-destination=../acc-windows-test-report.xml
       run: npm run test:windows
 
     # A composite action skips every later step once one fails, so a single
@@ -48,3 +65,17 @@ runs:
       shell: pwsh
       working-directory: apps/agentic-command-center
       run: powershell -File backend/watcher/install-cap-watch-task.test.ps1
+
+    - name: Evidence · Upload native-suite failure report
+      if: failure()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: acc-windows-test-evidence
+        path: apps/agentic-command-center/acc-windows-test-report.xml
+        # `error`, not `ignore`: this step only runs on failure, and a failed
+        # native run that produced no report is itself a defect worth failing
+        # loudly on -- the same reasoning as verify-tests-shell's evidence
+        # step (#148). A PowerShell-suite failure still finds the report the
+        # native step already wrote.
+        if-no-files-found: error
+        retention-days: 14
