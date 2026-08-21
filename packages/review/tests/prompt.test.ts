@@ -217,8 +217,8 @@ test("buildUserMessage: the PR body is fenced separately from the linked Issue b
   // delimiters are distinct matches, not the same string reused.
   const issueMatch = /<<<BEGIN LINKED ISSUE BODY[^>]*>>>\n([\s\S]*?)\n<<<END LINKED ISSUE BODY/.exec(message);
   const prMatch = /<<<BEGIN PULL REQUEST BODY[^>]*>>>\n([\s\S]*?)\n<<<END PULL REQUEST BODY/.exec(message);
-  assert.ok(issueMatch, "expected a fenced LINKED ISSUE BODY section");
-  assert.ok(prMatch, "expected a fenced PULL REQUEST BODY section");
+  assert.ok(issueMatch?.[1], "expected a fenced LINKED ISSUE BODY section");
+  assert.ok(prMatch?.[1], "expected a fenced PULL REQUEST BODY section");
   const issueSection = issueMatch[1];
   const prSection = prMatch[1];
 
