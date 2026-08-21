@@ -303,10 +303,51 @@ test("issue #14: N concurrent appendCycle processes lose no update", async () =>
     const c = spawn(process.execPath, ["-e",
       `import(${JSON.stringify("file://" + mjs)}).then(d => d.appendCycle(${JSON.stringify(g.id)}, { text: "x" }))`],
       { env: { ...process.env, ACC_DIRECTIVES_DIR: DIRECTIVES_DIR, ACC_DIRECTIVE_MUTATE_DELAY_MS: "60" } });
-    c.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`exit ${code}`))));
+    // A child that dies takes its reason with it unless someone reads the pipe:
+    // spawn's default stdio is "pipe", so an unread stderr made a real failure
+    // arrive as a bare "exit 1" with no stack (issue #250 -- the EPERM above
+    // cost a full CI cycle to identify for exactly this reason). Fold stderr
+    // into the rejection, as kernel/ledger.test.mjs's lock-caller already does.
+    let err = "";
+    c.stderr.on("data", (d) => { err += d; });
+    c.on("error", (e) => reject(new Error(`spawn failed: ${e.message}`)));
+    c.on("close", (code) => (code === 0
+      ? resolve()
+      : reject(new Error(`exit ${code}: ${err.trim() || "(child wrote nothing to stderr)"}`))));
   }));
   await Promise.all(runs);
   assert.equal(m.readDirective(g.id).cycles, N, "every concurrent cycle increment must land — a lower count is a lost update");
+});
+
+// --- issue #250: Windows reports EPERM, not EEXIST, for exclusive-create contention ---
+// withLock() retried only EEXIST and rethrew everything else, so on windows-latest
+// a loser of the lock race threw straight out of appendCycle instead of waiting its
+// turn -- the concurrency test above then saw that child exit 1 and reported a lost
+// update that had not actually happened. kernel/ledger.mjs's lock already carries
+// this exact guard (and its own regression test); this is the directive lock's copy.
+// A Windows-only defect needs a platform-independent oracle to be verifiable at all,
+// so the contention is injected rather than raced for: the assertion is that the
+// SECOND attempt acquires, which is false on the unguarded code (it never retries).
+test("issue #250: exclusive-create EPERM contention is retried, not rethrown", () => {
+  const g = m.createDirective({ text: "t" });
+  const realOpenSync = fs.openSync;
+  let attempts = 0;
+  fs.openSync = (...args) => {
+    if (String(args[0]).endsWith(".lock") && attempts++ === 0) {
+      const error = new Error("simulated exclusive-create contention");
+      error.code = "EPERM";
+      throw error;
+    }
+    return realOpenSync(...args);
+  };
+  try {
+    m.appendCycle(g.id, { text: "x" });
+  } finally {
+    fs.openSync = realOpenSync;
+  }
+  assert.equal(attempts, 2, "the second exclusive-create attempt must acquire the lock");
+  assert.equal(m.readDirective(g.id).cycles, 1, "the retried mutation must still land");
+  assert.equal(fs.existsSync(path.join(DIRECTIVES_DIR, `${g.id}.lock`)), false, "the acquired lock must still be released");
 });
 
 test("CLI: main() 'log' swallows a log-write failure instead of throwing", () => {
