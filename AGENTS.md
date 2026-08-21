@@ -443,6 +443,16 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
 - **Every finding requires concrete evidence and a citation** to a specific acceptance criterion
   or a named section of this file. Uncited, evidence-free findings are discarded and **cannot
   block** — a confused model must never stall real work.
+- **One shot, then scope-locked (Issue #273).** Round one may raise whatever the diff and the
+  linked Issue support. Every round after that, a blocking finding must correspond to one already
+  in the PR conversation, judged against that finding's *original* wording — never a stricter or
+  larger version invented on a later pass. A regression in code pushed specifically in response to
+  a finding may still be raised; a fresh look at the rest of the diff may not. The reviewer's tone
+  softens once real evidence lands (say what's still missing against the original ask, or close
+  the finding) without loosening the underlying standard. This exists because PR #270's review
+  went three rounds, each demanding more without ever converging — round 1 wanted a root-cause
+  report, round 2 wanted API traces, round 3 wanted webhook delivery records the reviewer's own
+  token cannot retrieve.
 - **Fail-closed vs. fail-open:** infrastructure failure (missing credential, unset
   `REVIEW_MODEL`, invalid provider configuration, API error, timeout) fails the gate; a weak or
   malformed model answer does not.
