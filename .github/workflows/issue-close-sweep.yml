@@ -1,0 +1,173 @@
+name: "Issue Close Sweep"
+
+# The rare-case backstop for the issue-close fallback (Issue #267), which
+# itself needed a backstop of its own (Issue #283). pr-verify.yml's "PR
+# Gate" job polls briefly after arming auto-merge and runs the fallback
+# inline the moment it observes the merge complete (see that job's own
+# pollForMergeAfterArming) -- but that poll window is only 2 minutes. A
+# merge that finishes later than that leaves its linked Issue open with
+# nothing left to catch it in the SAME workflow run, because GitHub Actions
+# never fires a new `pull_request: closed` run for an event caused by the
+# job's own default GITHUB_TOKEN (recursion prevention -- the root cause
+# both fixes share).
+#
+# This workflow runs on its own schedule, independent of any pull-request
+# event, and re-parses `Closes/Fixes/Resolves #N` out of every PR merged in
+# roughly the last 24 hours, closing the linked Issue itself if it is still
+# open. It re-implements a small subset of pr-verify.yml's own
+# parseLinkedIssues/handleIssueCloseFallback logic rather than importing it
+# -- pr-gate stays checkout-free by design, and this is a deliberate small
+# duplication (see AGENTS.md's Global Constraints for this plan). It posts
+# under the SAME ISSUE_CLOSE_FALLBACK_MARKER comment marker pr-verify.yml
+# uses, with wording that names the scheduled sweep explicitly, so a future
+# debugging session can tell which of the two mechanisms closed a given
+# Issue from the comment text alone.
+#
+# schedule ONLY: no pull_request trigger, so this adds no PR check row and
+# sits entirely outside PR Gate's rollup.
+on:
+  schedule:
+    - cron: "0 * * * *"
+
+# Nothing broader than the two calls this job actually makes: reading
+# recently-merged PRs (pull-requests: read) and closing/commenting on their
+# linked Issues (issues: write). No contents grant -- this workflow never
+# checks out the repository, it only calls the GitHub API.
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  sweep:
+    name: "Issue close sweep"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Sweep · Close linked Issues that native linkage and PR Gate's poll both missed
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            // Same marker pr-verify.yml's own issue-close fallback uses
+            // (see handleIssueCloseFallback there) -- this workflow closes
+            // the same class of Issue through the same auditable marker,
+            // distinguished only by wording that names the scheduled sweep,
+            // so a future debugging session can tell the two mechanisms
+            // apart from the comment text alone.
+            const ISSUE_CLOSE_FALLBACK_MARKER =
+              "<!-- agent-engineering-standard:issue-close-fallback:v1 -->";
+
+            // A generous, rough window: this job runs hourly, so a PR that
+            // merged within the last 24 hours has had roughly 24 earlier
+            // chances to already be caught by a previous run -- this only
+            // widens the net for the rare case where PR Gate's own
+            // post-arm poll (a 2-minute window, see pr-verify.yml) missed
+            // the merge entirely.
+            const WINDOW_MS = 24 * 60 * 60 * 1000;
+
+            // Same keyword convention as pr-verify.yml's own
+            // parseLinkedIssues: case-insensitive, present-tense
+            // closes/fixes/resolves. Re-implemented here rather than
+            // imported -- see AGENTS.md's Global Constraints on why
+            // pr-gate stays checkout-free and this is a deliberate small
+            // duplication.
+            function parseLinkedIssues(body) {
+              const matches = [...(body || "").matchAll(/\b(?:closes|fixes|resolves)\s+#(\d+)\b/gi)];
+              return [...new Set(matches.map((entry) => Number(entry[1])))];
+            }
+
+            const summaryLines = [];
+            let closedCount = 0;
+
+            async function closeIssueIfStillOpen(issueNumber, pr) {
+              let issue;
+              try {
+                const { data } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                issue = data;
+              } catch (error) {
+                core.warning(
+                  `Issue Close Sweep: could not read #${issueNumber} (linked from PR #${pr.number}): ${error.message}`
+                );
+                summaryLines.push(`- #${issueNumber}: could not be read, skipped: ${error.message}`);
+                return;
+              }
+
+              // Idempotent no-op: GitHub's native linkage or PR Gate's own
+              // post-arm poll already closed it -- no duplicate close, no
+              // duplicate comment.
+              if (issue.state !== "open") return;
+
+              try {
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  state: "closed",
+                  state_reason: "completed",
+                });
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  body: [
+                    ISSUE_CLOSE_FALLBACK_MARKER,
+                    `Closed automatically: linked pull request #${pr.number} merged, but this Issue was still ` +
+                      "open roughly 24 hours later -- neither GitHub's native closing-keyword linkage nor PR " +
+                      "Gate's own post-arm merge poll (a 2-minute window; see Issue #283) caught it in time. " +
+                      "This is a scheduled sweep close, performed hourly by issue-close-sweep.yml, not PR " +
+                      "Gate's own in-job fallback.",
+                  ].join("\n"),
+                });
+                closedCount += 1;
+                summaryLines.push(
+                  `- #${issueNumber}: was still open after PR #${pr.number} merged; closed via scheduled sweep.`
+                );
+              } catch (error) {
+                core.warning(
+                  `Issue Close Sweep: failed to close #${issueNumber} (linked from PR #${pr.number}): ${error.message}`
+                );
+                summaryLines.push(`- #${issueNumber}: attempted close failed: ${error.message}`);
+              }
+            }
+
+            try {
+              const { data: pulls } = await github.rest.pulls.list({
+                owner,
+                repo,
+                state: "closed",
+                sort: "updated",
+                direction: "desc",
+                per_page: 100,
+              });
+
+              const cutoff = Date.now() - WINDOW_MS;
+              const recentlyMerged = pulls.filter((pr) => {
+                if (!pr.merged_at) return false;
+                const mergedAt = Date.parse(pr.merged_at);
+                return Number.isFinite(mergedAt) && mergedAt >= cutoff;
+              });
+
+              summaryLines.push(
+                `- Scanned ${pulls.length} closed PR(s); ${recentlyMerged.length} merged within roughly the last 24h.`
+              );
+
+              for (const pr of recentlyMerged) {
+                for (const issueNumber of parseLinkedIssues(pr.body)) {
+                  await closeIssueIfStillOpen(issueNumber, pr);
+                }
+              }
+
+              summaryLines.push(`- Closed ${closedCount} Issue(s) via the scheduled sweep.`);
+            } catch (error) {
+              core.error(`Issue Close Sweep: orchestration error: ${error.message}`);
+              summaryLines.push(`- Orchestration error: ${error.message}`);
+            } finally {
+              try {
+                core.summary.addHeading("Issue Close Sweep");
+                core.summary.addRaw(summaryLines.join("\n") || "_No actions recorded._", true);
+                await core.summary.write();
+              } catch (summaryError) {
+                core.warning(`Issue Close Sweep: failed to write job summary: ${summaryError.message}`);
+              }
+            }
