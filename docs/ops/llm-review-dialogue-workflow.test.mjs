@@ -277,6 +277,13 @@ test("llm-review-dialogue.yml sources the dev agent's Anthropic credential from 
   );
   assert.doesNotMatch(postingBlock, /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, "must not fall back to a raw GitHub secret");
   assert.doesNotMatch(postingBlock, /secrets\.ANTHROPIC_API_KEY/, "must not fall back to a raw GitHub secret");
+
+  // Whole-file, not just the sliced blocks above: a stray reference anywhere
+  // else in the file (a leftover comment, a second step) would otherwise go
+  // undetected -- the block-scoped assertions above prove the WIRING is
+  // correct, this proves the OLD path is gone entirely.
+  assert.doesNotMatch(dialogueYaml, /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, "no reference anywhere in the file");
+  assert.doesNotMatch(dialogueYaml, /secrets\.ANTHROPIC_API_KEY/, "no reference anywhere in the file");
 });
 
 // Mirrors the test above, for dev-agent-dispatch.yml's own consumption of the
@@ -303,6 +310,12 @@ test("dev-agent-dispatch.yml pulls its own Anthropic credential from Infisical's
   const resolveBlock = dispatchYaml.slice(resolveStart, dispatchYaml.indexOf("prompt:", resolveStart));
   assert.match(resolveBlock, /claude_code_oauth_token:\s*\$\{\{\s*env\.DEV_CLAUDE_CODE_OAUTH_TOKEN\s*\}\}/);
   assert.match(resolveBlock, /anthropic_api_key:\s*\$\{\{\s*env\.DEV_ANTHROPIC_API_KEY\s*\}\}/);
+
+  // Whole-file, not just the sliced blocks above -- see the sibling test's
+  // own comment for why this is the failure-sensitivity gap the block-scoped
+  // assertions alone leave open.
+  assert.doesNotMatch(dispatchYaml, /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, "no reference anywhere in the file");
+  assert.doesNotMatch(dispatchYaml, /secrets\.ANTHROPIC_API_KEY/, "no reference anywhere in the file");
 });
 
 test("llm-review-dialogue.yml refuses fork pull requests before doing anything", () => {
