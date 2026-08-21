@@ -246,6 +246,65 @@ test("llm-review-dialogue.yml mints the reviewer's own App identity from Infisic
   assert.match(githubTokenLine, /github-token:\s*\$\{\{\s*steps\.review-app-token\.outputs\.token\s*\|\|\s*github\.token\s*\}\}/);
 });
 
+// The dev agent's own Anthropic credential (model key, distinct from the App
+// identity above) is sourced from Infisical's /dev/ path, never a GitHub
+// secret -- one credential store per identity, matching the reviewer's own
+// model-key pattern (REVIEW_ANTHROPIC_API_KEY lives only in Infisical's
+// /review/ path). Defect caught: a future edit that reverts either the
+// HAS_ANTHROPIC_* expressions or the /dev/ pull step back to reading a raw
+// GitHub secret, silently reintroducing the exact duplicate-credential-copy
+// hazard AGENTS.md documents for the platform publishable key.
+test("llm-review-dialogue.yml sources the dev agent's Anthropic credential from Infisical, not a GitHub secret", () => {
+  const pullStart = dialogueYaml.indexOf("Dialogue · Check whether the dev agent's Anthropic credential is provisioned in Infisical");
+  assert.ok(pullStart >= 0, "no dev-agent Infisical presence-check step found");
+  const pullStepStart = dialogueYaml.lastIndexOf("- name:", pullStart);
+  const pullBlock = dialogueYaml.slice(pullStepStart, dialogueYaml.indexOf("- name:", pullStart));
+  assert.match(pullBlock, /continue-on-error:\s*true/, "an unprovisioned dev credential must not fail the posting job");
+  assert.match(pullBlock, /secret-path:\s*"\/dev\/"/, "must read the same /dev/ path dev-agent-dispatch.yml's own preflight reads");
+  assert.match(pullBlock, /identity-id:\s*\$\{\{\s*vars\.INFISICAL_DEV_IDENTITY_ID\s*\}\}/, "must authenticate as the dev identity, not the reviewer's");
+
+  const postingStart = dialogueYaml.indexOf("Dialogue · Post findings");
+  const postingBlock = dialogueYaml.slice(postingStart, dialogueYaml.indexOf("with:", postingStart));
+  assert.match(
+    postingBlock,
+    /HAS_ANTHROPIC_OAUTH:\s*\$\{\{\s*env\.DEV_CLAUDE_CODE_OAUTH_TOKEN\s*!=\s*''\s*\}\}/,
+    "HAS_ANTHROPIC_OAUTH must read the Infisical-sourced env var, not secrets.CLAUDE_CODE_OAUTH_TOKEN"
+  );
+  assert.match(
+    postingBlock,
+    /HAS_ANTHROPIC_API_KEY:\s*\$\{\{\s*env\.DEV_ANTHROPIC_API_KEY\s*!=\s*''\s*\}\}/,
+    "HAS_ANTHROPIC_API_KEY must read the Infisical-sourced env var, not secrets.ANTHROPIC_API_KEY"
+  );
+  assert.doesNotMatch(postingBlock, /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, "must not fall back to a raw GitHub secret");
+  assert.doesNotMatch(postingBlock, /secrets\.ANTHROPIC_API_KEY/, "must not fall back to a raw GitHub secret");
+});
+
+// Mirrors the test above, for dev-agent-dispatch.yml's own consumption of the
+// same Infisical-sourced credential (both the preflight presence-check and
+// the actual claude-code-action invocation).
+test("dev-agent-dispatch.yml pulls its own Anthropic credential from Infisical's /dev/ path, before preflight runs", () => {
+  const pullStart = dispatchYaml.indexOf("Setup · Pull the dev App's credentials from Infisical");
+  assert.ok(pullStart >= 0, "no dev App Infisical pull step found");
+  const preflightStart = dispatchYaml.indexOf("Preflight · Resolve the dev provider");
+  assert.ok(pullStart < preflightStart, "the Infisical pull must run BEFORE preflight, so preflight can see its env vars");
+
+  const pullStepStart = dispatchYaml.lastIndexOf("- name:", pullStart);
+  const pullBlock = dispatchYaml.slice(pullStepStart, dispatchYaml.indexOf("- name:", pullStart));
+  assert.match(pullBlock, /secret-path:\s*"\/dev\/"/);
+  assert.match(pullBlock, /identity-id:\s*\$\{\{\s*vars\.INFISICAL_DEV_IDENTITY_ID\s*\}\}/);
+
+  const preflightBlock = dispatchYaml.slice(preflightStart, dispatchYaml.indexOf("with:", preflightStart));
+  assert.match(preflightBlock, /OAUTH:\s*\$\{\{\s*env\.DEV_CLAUDE_CODE_OAUTH_TOKEN\s*\}\}/);
+  assert.match(preflightBlock, /API_KEY:\s*\$\{\{\s*env\.DEV_ANTHROPIC_API_KEY\s*\}\}/);
+  assert.doesNotMatch(preflightBlock, /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, "must not fall back to a raw GitHub secret");
+  assert.doesNotMatch(preflightBlock, /secrets\.ANTHROPIC_API_KEY/, "must not fall back to a raw GitHub secret");
+
+  const resolveStart = dispatchYaml.indexOf("Resolve · Hand the findings to the developer agent");
+  const resolveBlock = dispatchYaml.slice(resolveStart, dispatchYaml.indexOf("prompt:", resolveStart));
+  assert.match(resolveBlock, /claude_code_oauth_token:\s*\$\{\{\s*env\.DEV_CLAUDE_CODE_OAUTH_TOKEN\s*\}\}/);
+  assert.match(resolveBlock, /anthropic_api_key:\s*\$\{\{\s*env\.DEV_ANTHROPIC_API_KEY\s*\}\}/);
+});
+
 test("llm-review-dialogue.yml refuses fork pull requests before doing anything", () => {
   const jobStart = dialogueYaml.indexOf("jobs:");
   const ifLine = dialogueYaml.slice(jobStart, dialogueYaml.indexOf("permissions:", jobStart));
