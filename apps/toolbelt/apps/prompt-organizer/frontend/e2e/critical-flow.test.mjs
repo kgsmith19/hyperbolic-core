@@ -10,13 +10,23 @@
  *   npx playwright test tests/e2e/critical-flow.test.mjs \
  *     --config playwright.config.mjs
  *
- * Env vars (all optional; defaults match the shared fixture accounts used by
- * the integration suite):
+ * Env vars (optional locally; defaults match the shared fixture accounts used
+ * by the integration suite):
  *   PLAYWRIGHT_BASE_URL   — URL of the running app   (default: http://localhost:8812)
  *   USER_A_EMAIL          — fallback token source     (default: fixture user A)
  *   USER_A_PASSWORD       — fallback token source     (default: fixture user A)
  *   TOOLBELT_OWNER_TOKEN  — real owner session, see "Owner-credential
  *                           threading" below (default: unset)
+ *
+ * CI PRECONDITION: TOOLBELT_OWNER_TOKEN is REQUIRED when CI is set, and this
+ * spec fails immediately without it rather than falling back. The Toolbelt
+ * lane always exports it from its "E2E · Exchange and verify the owner
+ * session" step, so an unset value there means that step silently degraded.
+ * The fallback is not an equivalent substitute: prompt.* RLS is pinned to the
+ * real owner, so a fixture-A session is RLS-powerless and every write this
+ * journey depends on is denied -- the run would report an opaque failure while
+ * appearing to exercise the happy path (issue #249). Locally the fallback
+ * stays, and a local run without an owner token still cannot save.
  *
  * Owner-credential threading (toolbelt-ci.yml P1 finding): once prompt.* RLS
  * is pinned to the real owner (20260812180000_prompt_owner_pin.sql), a
@@ -46,6 +56,7 @@ import { test, expect } from "@playwright/test";
 // helpers.mjs lives at tests/helpers.mjs; from tests/e2e/ the relative path
 // is one level up. It exports login, rest, USER_A (and USER_B), all of which
 // are used by every integration test in tests/*.test.mjs.
+import { randomUUID } from "node:crypto";
 import { login, rest, USER_A } from "../../backend/tests/helpers.mjs";
 
 // Must match web/index.html's own TOKEN_STORAGE_KEY constant exactly --
@@ -56,11 +67,21 @@ const TOKEN_STORAGE_KEY = "prompt-organizer-manual-check-token";
 // ---------------------------------------------------------------------------
 // Fixture data — unique per run so concurrent CI runs don't collide.
 // ---------------------------------------------------------------------------
-const RUN_ID = Date.now();
+// Date.now() alone is not run-unique: concurrent CI runs share ONE owner
+// account and prompt.prompt carries a unique index on (user_id, lower(title)),
+// so two runners entering this millisecond collide -- one save 409s and fails
+// as an opaque "element(s) not found". A random suffix makes the title
+// genuinely per-run, which is what isolates concurrent runs from each other on
+// the write path and keeps each run's teardown scoped to its own row.
+const RUN_ID = `${Date.now()}-${randomUUID().slice(0, 8)}`;
 const PROMPT_TITLE = `e2e-critical-flow-${RUN_ID}`;
 const PROMPT_BODY = "Deploy {{REPO}} to production.";
 const VARIABLE_VALUE = "toolbelt";
 const EXPECTED_RENDERED = "Deploy toolbelt to production.";
+
+// Captured as soon as the run has a token so the afterEach below can archive
+// this run's row even when the journey dies before reaching its own teardown.
+let cleanupToken = null;
 
 // ---------------------------------------------------------------------------
 // T-E-001 — Critical prompt flow acceptance proof
@@ -83,7 +104,24 @@ test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
   // Owner-credential threading (see header comment): resolve the real token
   // ONCE, before navigating, then seed it into sessionStorage so
   // index.html's own boot check finds it already there.
+  // In CI the owner session is always exported by the lane's "Exchange and
+  // verify the owner session" step, so an unset token there means that step
+  // silently degraded -- and the fallback below is not equivalent. prompt.* RLS
+  // is pinned to the real owner (20260812180000_prompt_owner_pin.sql), so a
+  // fixture-A login yields a valid Supabase session whose every write is
+  // RLS-denied: the save fails, no row is added, and the journey reports the
+  // same opaque "element(s) not found" this Issue is about. Fail loudly rather
+  // than quietly proving nothing with a powerless identity. Locally the
+  // fallback stays, for the same reasons it always existed.
+  if (!ownerToken && process.env.CI) {
+    throw new Error(
+      "TOOLBELT_OWNER_TOKEN is unset in CI. prompt.* RLS is pinned to the real owner, so the " +
+        "fixture-A fallback cannot write and this journey would fail at the save without ever " +
+        "exercising the behaviour it exists to prove."
+    );
+  }
   const token = ownerToken || (await login(user));
+  cleanupToken = token;
   await page.addInitScript(
     ([storageKey, value]) => {
       sessionStorage.setItem(storageKey, value);
@@ -102,17 +140,56 @@ test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
   await page.fill("#body", PROMPT_BODY);
   await page.click('#save-form button[type="submit"]');
 
-  // The new prompt's summary must appear in #prompt-list.
-  // Increased timeout to account for network latency and DOM rendering.
+  const saveError = page.locator("#save-error");
   const promptSummary = page.locator("#prompt-list summary", {
     hasText: PROMPT_TITLE,
   });
+
+  // Wait on the save actually SETTLING rather than on a fixed slice of time.
+  // When the POST is rejected -- an expired owner token, a 429 from a
+  // concurrent run, a unique-title conflict -- the client puts the real
+  // reason in #save-error and never adds a row, so waiting only on the
+  // summary reported a bare "element(s) not found" and threw the actual
+  // cause away (issue #249). Poll for either outcome, then assert which one
+  // it was, so a rejected save fails naming its own reason.
+  await expect
+    .poll(
+      async () => {
+        if ((await saveError.innerText()).trim() !== "") return "rejected";
+        return (await promptSummary.count()) > 0 ? "rendered" : "pending";
+      },
+      {
+        timeout: 15_000,
+        message: "the save neither rendered a row nor reported an error",
+      }
+    )
+    .not.toBe("pending");
+
+  await expect(saveError, "the save POST must not have been rejected").toHaveText("");
+  // Not redundant with the poll above, which only counts nodes: this is the
+  // one that asserts the row is actually VISIBLE, and it is what names the
+  // locator in the failure message when it is not.
   await expect(promptSummary).toBeVisible({ timeout: 10_000 });
+
+  // ...and it must be in the database, not only in the client's optimistic
+  // in-memory copy: the save handler renders the new row without re-reading
+  // it back, so the DOM alone cannot distinguish "persisted" from "rendered
+  // from what we just posted". Read it back over REST -- a different
+  // transport than the one under test -- for an independent oracle.
+  const persisted = await rest(
+    `prompt?title=eq.${encodeURIComponent(PROMPT_TITLE)}&select=title,body`,
+    { token }
+  );
+  expect(persisted.status, "the saved prompt must be readable back over REST").toBeLessThan(400);
+  expect(persisted.json, "exactly one persisted row must carry this run's title and body").toEqual([
+    { title: PROMPT_TITLE, body: PROMPT_BODY },
+  ]);
 
   // ---- Step 3: Open the render panel ---------------------------------------
   // Clicking the <summary> expands the <details> which contains the panel.
-  // Small delay to ensure DOM has fully settled after the list update.
-  await page.waitForTimeout(200);
+  // No settle sleep: Playwright waits for actionability on its own, and the
+  // list no longer re-renders underneath this click now that a superseded
+  // fetch cannot replace it (issue #249).
   await promptSummary.click();
 
   // Scope every render-panel interaction to the prompt created by this run.
@@ -124,12 +201,9 @@ test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
     name: "REPO",
     exact: true,
   });
-  // Increased timeout to account for render panel initialization.
   await expect(repoInput).toBeVisible({ timeout: 5_000 });
 
   // ---- Step 4: Fill the variable and copy the rendered text ----------------
-  // Small delay to ensure input is fully interactive before filling.
-  await page.waitForTimeout(100);
   await repoInput.fill(VARIABLE_VALUE);
 
   await promptDetails.locator('button:has-text("Copy rendered text")').click();
@@ -151,13 +225,28 @@ test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
     path: `test-results/critical-flow-${RUN_ID}.png`,
     fullPage: false,
   });
+});
 
-  // ---- Teardown: archive the test prompt via the REST API ------------------
-  // Archiving (not hard-deleting) aligns with ADR-0002 soft-delete policy.
-  // No DELETE grant exists on prompt.prompt (AGENTS.md invariant). Reuse the
-  // exact same token this test unlocked with above.
-  await rest(
+// ---- Teardown: archive the test prompt via the REST API --------------------
+// Archiving (not hard-deleting) aligns with ADR-0002 soft-delete policy. No
+// DELETE grant exists on prompt.prompt (AGENTS.md invariant). Reuse the exact
+// same token this run unlocked with.
+//
+// An afterEach, not the last statement of the test: as the final line it was
+// skipped by every failing run, so each flake left a permanently is_active row
+// on the shared owner account forever. Nothing prunes prompt.prompt and the
+// list query is unfiltered and unbounded, so those rows are re-downloaded on
+// every page load thereafter -- a failing run made the next run slower, and a
+// silent PATCH failure did the same (issue #249). Assert the status so it
+// cannot fail quietly again.
+test.afterEach(async () => {
+  if (!cleanupToken) return;
+  const archived = await rest(
     `prompt?title=eq.${encodeURIComponent(PROMPT_TITLE)}`,
-    { token, method: "PATCH", body: { is_active: false } }
+    { token: cleanupToken, method: "PATCH", body: { is_active: false } }
   );
+  expect(
+    archived.status,
+    `this run's prompt must be archived, or it accumulates on the shared owner account forever (got ${archived.status})`
+  ).toBeLessThan(400);
 });
