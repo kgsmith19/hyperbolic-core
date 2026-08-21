@@ -280,346 +280,360 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
   const modulePath = loadPrGateModule();
   const prGate = (await import(`file://${modulePath}`)).default;
 
-  function makeMocks({
-    gates,
-    // Set to bypass JSON.stringify(gates) and hand the script a literal
-    // GATE_RESULTS -- or `null` to unset the variable entirely. Only the
-    // fail-closed cases at the bottom need it.
-    rawGateResults,
-    // Message GitHub's enablePullRequestAutoMerge mutation should reject with.
-    armError = null,
-    draft = false,
-    labels = [],
-    timeline = [],
-    mergeable_state = "unstable",
-    sameRepo = true,
-    // Issue #274: per-issue-number { state, body } for the checklist-gate
-    // check. Defaults every referenced issue (the fixture PR body links #7)
-    // to open with no checklist at all, so every pre-existing test in this
-    // file exercises the REAL checklist path (a lookup that finds nothing to
-    // block on) rather than relying on that check's own fail-open handling
-    // for an undefined mock method.
-    issueChecklists = {},
-    prBody = "closes #7",
-    // Issue #291: agent-roles.yaml's dev.provider, as read by the Work
-    // State comment's Controller/Builder lines. Defaults to "anthropic" to
-    // match this repo's actual live assignment, so every pre-existing test
-    // in this file that never mentions the Work State comment's body text
-    // is unaffected by this fixture existing at all.
-    devProvider = "anthropic",
-    getContentThrows = false,
-  }) {
-    const calls = [];
-    const commentsByIssue = new Map();
-    const github = {
-      paginate: async function (fn, args) {
-        if (fn === github.rest.issues.listEventsForTimeline) return timeline;
-        if (fn === github.rest.issues.listComments) {
-          return commentsByIssue.get(args.issue_number) || [];
-        }
-        return [];
-      },
-      rest: {
-        pulls: {
-          get: async () => ({
-            data: {
-              number: 42,
-              node_id: "PR_x",
-              title: "Test PR",
-              draft,
-              mergeable_state,
-              labels,
-              head: { sha: "dead", ref: "f", repo: { full_name: "kgsmith19/hyperbolic-core" } },
-              base: {
-                sha: "cafe",
-                ref: "main",
-                repo: { full_name: sameRepo ? "kgsmith19/hyperbolic-core" : "other/fork" },
-              },
-              body: prBody,
-            },
-          }),
-          updateBranch: async () => ({}),
-        },
-        issues: {
-          get: async (a) => {
-            calls.push("issues.get:" + a.issue_number);
-            const fixture = issueChecklists[a.issue_number] || { state: "open", body: "" };
-            return { data: { number: a.issue_number, ...fixture } };
-          },
-          listEventsForTimeline: async () => ({ data: timeline }),
-          listComments: async (a) => ({ data: commentsByIssue.get(a && a.issue_number) || [] }),
-          createComment: async (a) => {
-            calls.push("comment:" + a.issue_number);
-            const list = commentsByIssue.get(a.issue_number) || [];
-            list.push({ id: list.length + 1, body: a.body });
-            commentsByIssue.set(a.issue_number, list);
-          },
-          updateComment: async () => calls.push("updateComment"),
-          removeLabel: async (a) => calls.push("removeLabel:" + a.name),
-        },
-        repos: {
-          getContent: async () => {
-            if (getContentThrows) throw new Error("simulated getContent failure");
-            return {
-              data: {
-                encoding: "base64",
-                content: Buffer.from(`dev:\n  provider: ${devProvider}\n  model: x\n\nreview:\n  provider: openai\n  model: y\n`, "utf8").toString(
-                  "base64"
-                ),
-              },
-            };
-          },
-        },
-      },
-      graphql: async (q) => {
-        if (/enablePullRequestAutoMerge/.test(q)) {
-          calls.push("ARM-ATTEMPTED");
-          if (armError) throw new Error(armError);
-          return void calls.push("ARM") || {};
-        }
-        if (/disablePullRequestAutoMerge/.test(q)) return void calls.push("DISARM") || {};
-        if (/markPullRequestReadyForReview/.test(q)) return void calls.push("UNDRAFT") || {};
-        throw new Error("unexpected graphql mutation in test");
-      },
-    };
-    let failed = null;
-    const core = {
-      info() {},
-      warning() {},
-      error() {},
-      setFailed(m) {
-        failed = m;
-      },
-      summary: {
-        addHeading() {
-          return core.summary;
-        },
-        addRaw(t) {
-          core.summary._b = t;
-          return core.summary;
-        },
-        async write() {},
-      },
-    };
-    const context = {
-      repo: { owner: "kgsmith19", repo: "hyperbolic-core" },
-      payload: {
-        pull_request: { number: 42 },
-        repository: { owner: { login: "kgsmith19" }, default_branch: "main" },
-      },
-    };
-    const proc = {
-      env:
-        rawGateResults === undefined
-          ? { GATE_RESULTS: JSON.stringify(gates) }
-          : rawGateResults === null
-            ? {}
-            : { GATE_RESULTS: rawGateResults },
-    };
-    return {
-      github,
-      core,
-      context,
-      proc,
-      calls,
-      commentsByIssue,
-      get failed() {
-        return failed;
-      },
-    };
-  }
-
-  const run = async (opts) => {
-    const m = makeMocks(opts);
-    await prGate(m.context, m.github, m.core, m.proc);
-    return m;
+  // Issue #283: a successful arm now polls pulls.get on a real 5-second
+  // interval, up to 24 times. None of the outcomes this test cares about
+  // depend on wall-clock time, so every poll resolves on the next
+  // microtask instead of waiting out real time (24 x 5s per successful
+  // arm would otherwise make this test take minutes).
+  const originalSetTimeout = global.setTimeout;
+  global.setTimeout = (fn) => {
+    fn();
+    return 0;
   };
+  try {
+    function makeMocks({
+      gates,
+      // Set to bypass JSON.stringify(gates) and hand the script a literal
+      // GATE_RESULTS -- or `null` to unset the variable entirely. Only the
+      // fail-closed cases at the bottom need it.
+      rawGateResults,
+      // Message GitHub's enablePullRequestAutoMerge mutation should reject with.
+      armError = null,
+      draft = false,
+      labels = [],
+      timeline = [],
+      mergeable_state = "unstable",
+      sameRepo = true,
+      // Issue #274: per-issue-number { state, body } for the checklist-gate
+      // check. Defaults every referenced issue (the fixture PR body links #7)
+      // to open with no checklist at all, so every pre-existing test in this
+      // file exercises the REAL checklist path (a lookup that finds nothing to
+      // block on) rather than relying on that check's own fail-open handling
+      // for an undefined mock method.
+      issueChecklists = {},
+      prBody = "closes #7",
+      // Issue #291: agent-roles.yaml's dev.provider, as read by the Work
+      // State comment's Controller/Builder lines. Defaults to "anthropic" to
+      // match this repo's actual live assignment, so every pre-existing test
+      // in this file that never mentions the Work State comment's body text
+      // is unaffected by this fixture existing at all.
+      devProvider = "anthropic",
+      getContentThrows = false,
+    }) {
+      const calls = [];
+      const commentsByIssue = new Map();
+      const github = {
+        paginate: async function (fn, args) {
+          if (fn === github.rest.issues.listEventsForTimeline) return timeline;
+          if (fn === github.rest.issues.listComments) {
+            return commentsByIssue.get(args.issue_number) || [];
+          }
+          return [];
+        },
+        rest: {
+          pulls: {
+            get: async () => ({
+              data: {
+                number: 42,
+                node_id: "PR_x",
+                title: "Test PR",
+                draft,
+                mergeable_state,
+                labels,
+                head: { sha: "dead", ref: "f", repo: { full_name: "kgsmith19/hyperbolic-core" } },
+                base: {
+                  sha: "cafe",
+                  ref: "main",
+                  repo: { full_name: sameRepo ? "kgsmith19/hyperbolic-core" : "other/fork" },
+                },
+                body: prBody,
+              },
+            }),
+            updateBranch: async () => ({}),
+          },
+          issues: {
+            get: async (a) => {
+              calls.push("issues.get:" + a.issue_number);
+              const fixture = issueChecklists[a.issue_number] || { state: "open", body: "" };
+              return { data: { number: a.issue_number, ...fixture } };
+            },
+            listEventsForTimeline: async () => ({ data: timeline }),
+            listComments: async (a) => ({ data: commentsByIssue.get(a && a.issue_number) || [] }),
+            createComment: async (a) => {
+              calls.push("comment:" + a.issue_number);
+              const list = commentsByIssue.get(a.issue_number) || [];
+              list.push({ id: list.length + 1, body: a.body });
+              commentsByIssue.set(a.issue_number, list);
+            },
+            updateComment: async () => calls.push("updateComment"),
+            removeLabel: async (a) => calls.push("removeLabel:" + a.name),
+          },
+          repos: {
+            getContent: async () => {
+              if (getContentThrows) throw new Error("simulated getContent failure");
+              return {
+                data: {
+                  encoding: "base64",
+                  content: Buffer.from(`dev:\n  provider: ${devProvider}\n  model: x\n\nreview:\n  provider: openai\n  model: y\n`, "utf8").toString(
+                    "base64"
+                  ),
+                },
+              };
+            },
+          },
+        },
+        graphql: async (q) => {
+          if (/enablePullRequestAutoMerge/.test(q)) {
+            calls.push("ARM-ATTEMPTED");
+            if (armError) throw new Error(armError);
+            return void calls.push("ARM") || {};
+          }
+          if (/disablePullRequestAutoMerge/.test(q)) return void calls.push("DISARM") || {};
+          if (/markPullRequestReadyForReview/.test(q)) return void calls.push("UNDRAFT") || {};
+          throw new Error("unexpected graphql mutation in test");
+        },
+      };
+      let failed = null;
+      const core = {
+        info() {},
+        warning() {},
+        error() {},
+        setFailed(m) {
+          failed = m;
+        },
+        summary: {
+          addHeading() {
+            return core.summary;
+          },
+          addRaw(t) {
+            core.summary._b = t;
+            return core.summary;
+          },
+          async write() {},
+        },
+      };
+      const context = {
+        repo: { owner: "kgsmith19", repo: "hyperbolic-core" },
+        payload: {
+          pull_request: { number: 42 },
+          repository: { owner: { login: "kgsmith19" }, default_branch: "main" },
+        },
+      };
+      const proc = {
+        env:
+          rawGateResults === undefined
+            ? { GATE_RESULTS: JSON.stringify(gates) }
+            : rawGateResults === null
+              ? {}
+              : { GATE_RESULTS: rawGateResults },
+      };
+      return {
+        github,
+        core,
+        context,
+        proc,
+        calls,
+        commentsByIssue,
+        get failed() {
+          return failed;
+        },
+      };
+    }
 
-  function allSuccess(overrides = {}) {
-    const results = {};
-    for (const id of EXPECTED_WORKERS) results[id] = { result: "success" };
-    return { ...results, ...overrides };
+    const run = async (opts) => {
+      const m = makeMocks(opts);
+      await prGate(m.context, m.github, m.core, m.proc);
+      return m;
+    };
+
+    function allSuccess(overrides = {}) {
+      const results = {};
+      for (const id of EXPECTED_WORKERS) results[id] = { result: "success" };
+      return { ...results, ...overrides };
+    }
+
+    const GREEN = allSuccess();
+    const RED = allSuccess({ toolbelt: { result: "failure" } });
+    // Repository Standards failing is the realistic path to ai-review coming
+    // back "skipped" (GitHub skips a job whose own needs: failed) -- this is
+    // the exact case the header comment documents as the intended behavior.
+    const SKIPPED = allSuccess({ "repository-standards": { result: "failure" }, "ai-review": { result: "skipped" } });
+
+    let m = await run({ gates: GREEN });
+    assert.ok(m.calls.includes("ARM"), "green verdict must arm auto-merge");
+    assert.equal(m.failed, null, "green verdict must not fail the job");
+    assert.equal(
+      m.calls.filter((c) => c.startsWith("comment:")).length,
+      2,
+      "Work State must be posted on both the PR and its linked Issue"
+    );
+
+    m = await run({ gates: RED });
+    assert.ok(!m.calls.includes("ARM"), "must not arm when a lane failed");
+    assert.match(m.failed || "", /did not succeed/, "a failed lane must fail this job");
+
+    // A job that silently stops reporting (or was skipped because its own
+    // dependency failed) must turn the gate red, not green.
+    m = await run({ gates: SKIPPED });
+    assert.ok(!m.calls.includes("ARM"), "must not arm when a lane was skipped");
+    assert.notEqual(m.failed, null, "a skipped lane must fail this job, not count as a pass");
+
+    const heldByOwner = [
+      { event: "labeled", label: { name: "owner:hold-merge" }, actor: { login: "kgsmith19" } },
+    ];
+    m = await run({ gates: GREEN, labels: [{ name: "owner:hold-merge" }], timeline: heldByOwner });
+    assert.ok(m.calls.includes("DISARM"), "an authorized hold must disable auto-merge");
+    assert.ok(!m.calls.includes("ARM"), "an authorized hold must prevent arming");
+    assert.equal(m.failed, null, "a hold is not a verification failure");
+
+    const forgedHold = [
+      { event: "labeled", label: { name: "owner:hold-merge" }, actor: { login: "not-the-owner" } },
+    ];
+    m = await run({ gates: GREEN, labels: [{ name: "owner:hold-merge" }], timeline: forgedHold });
+    assert.ok(
+      m.calls.includes("removeLabel:owner:hold-merge"),
+      "a hold label without owner provenance must be removed"
+    );
+    assert.ok(m.calls.includes("ARM"), "a forged hold must not stop a green PR from arming");
+
+    m = await run({ gates: GREEN, sameRepo: false });
+    assert.ok(!m.calls.includes("ARM"), "fork pull requests must never be armed");
+
+    m = await run({ gates: GREEN, draft: true });
+    assert.ok(m.calls.includes("UNDRAFT"), "an unauthorized draft must be cleared");
+    assert.ok(m.calls.includes("ARM"), "a cleared draft must then arm");
+
+    // ---- an "unstable" arm-refusal is tolerated, not treated as fatal ------
+    //
+    // GitHub refuses the arming mutation outright on an unstable PR (some
+    // non-required check is red) rather than arming and waiting -- observed
+    // verbatim on PR #219. With every lane in this workflow already inside
+    // pr-gate's own needs:, this workflow's own rows cannot cause "unstable"
+    // any more; a red third-party check or a stale sibling run still can.
+    // Either way it must not fail the run and must not be reported as an
+    // unexpected error.
+    m = await run({ gates: GREEN, armError: "Pull request Pull request is in unstable status" });
+    assert.ok(m.calls.includes("ARM-ATTEMPTED"), "a green verdict must still attempt to arm");
+    assert.equal(m.failed, null, "an unstable-refusal is not a verification failure");
+    assert.match(
+      m.core.summary._b || "",
+      /unstable/i,
+      "the summary must say the PR was unstable, not report an unexpected error"
+    );
+    assert.doesNotMatch(
+      m.core.summary._b || "",
+      /unexpected error/i,
+      "an unstable-refusal must not be labelled an unexpected error"
+    );
+
+    // ---- Issue #274: incomplete linked-Issue checklists block, visibly -----
+    //
+    // Unlike hold/draft/fork above (which skip arming without failing the
+    // check), an incomplete checklist must fail THIS job outright -- the
+    // owner asked to see it as a reason for failure, not a silent arm-skip.
+
+    m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: "- [ ] one\n- [x] two" } } });
+    assert.ok(!m.calls.includes("ARM"), "an open Issue with an unchecked item must not arm");
+    assert.notEqual(m.failed, null, "an incomplete checklist must fail PR Gate, not just skip arming");
+    assert.match(m.failed || "", /checklist incomplete on #7/);
+    assert.match(m.failed || "", /#7 \(1 unchecked\)/, "the failure must say how many items remain unchecked");
+
+    m = await run({ gates: GREEN, issueChecklists: { 7: { state: "closed", body: "- [ ] one" } } });
+    assert.ok(m.calls.includes("ARM"), "a CLOSED Issue is exempt regardless of unchecked items -- covers superseded/not-planned work");
+    assert.equal(m.failed, null);
+
+    m = await run({
+      gates: GREEN,
+      prBody: "Closes #7\nFixes #9",
+      issueChecklists: {
+        7: { state: "open", body: "- [x] done" },
+        9: { state: "open", body: "- [ ] not done" },
+      },
+    });
+    assert.ok(!m.calls.includes("ARM"), "ALL linked Issues must be complete -- one incomplete Issue among several still blocks");
+    assert.match(m.failed || "", /#9 \(1 unchecked\)/, "the failure must name the incomplete Issue and how many items remain unchecked");
+    assert.doesNotMatch(m.failed || "", /#7/, "a complete Issue must not be named as a blocker");
+
+    const checklistOverride = [
+      { event: "labeled", label: { name: "owner:allow-incomplete-issue" }, actor: { login: "kgsmith19" } },
+    ];
+    m = await run({
+      gates: GREEN,
+      labels: [{ name: "owner:allow-incomplete-issue" }],
+      timeline: checklistOverride,
+      issueChecklists: { 7: { state: "open", body: "- [ ] one" } },
+    });
+    assert.ok(m.calls.includes("ARM"), "an owner-authorized override label must un-block an incomplete checklist");
+    assert.equal(m.failed, null);
+
+    const forgedChecklistOverride = [
+      { event: "labeled", label: { name: "owner:allow-incomplete-issue" }, actor: { login: "not-the-owner" } },
+    ];
+    m = await run({
+      gates: GREEN,
+      labels: [{ name: "owner:allow-incomplete-issue" }],
+      timeline: forgedChecklistOverride,
+      issueChecklists: { 7: { state: "open", body: "- [ ] one" } },
+    });
+    assert.ok(
+      m.calls.includes("removeLabel:owner:allow-incomplete-issue"),
+      "an override label without owner provenance must be removed"
+    );
+    assert.ok(!m.calls.includes("ARM"), "a forged override must not un-block an incomplete checklist");
+
+    m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: "no checklist here at all" } } });
+    assert.ok(m.calls.includes("ARM"), "an Issue with no checklist items is not incomplete -- nothing to check");
+    assert.equal(m.failed, null);
+
+    // ---- fail CLOSED when the needs payload says nothing ------------------
+    //
+    // The dangerous shape is not a red gate, it is NO gate. A "did anything
+    // fail?" test over an empty object is vacuously true, so before this was
+    // guarded, GATE_RESULTS="{}" made this job report SUCCESS and arm a merge
+    // having verified precisely nothing -- which is the exact failure class
+    // the whole required-check design exists to prevent. Each case below was
+    // observed arming auto-merge in the unguarded form.
+    //
+    // These are not hypothetical inputs: an edited-away needs: list, a
+    // renamed job id, or a truncated expression all produce one of them.
+    for (const [label, opts] of [
+      ["an empty needs object", { rawGateResults: "{}" }],
+      ["GATE_RESULTS unset entirely", { rawGateResults: null }],
+      ["a malformed GATE_RESULTS payload", { rawGateResults: "{not json" }],
+      ["a gate whose result is null", { gates: allSuccess({ toolbelt: { result: null } }) }],
+      [
+        "a renamed job id that no longer matches",
+        { gates: (() => { const g = allSuccess(); delete g.toolbelt; g["toolbelt-renamed"] = { result: "success" }; return g; })() },
+      ],
+    ]) {
+      m = await run(opts);
+      assert.ok(!m.calls.includes("ARM"), `${label} must never arm auto-merge`);
+      assert.notEqual(m.failed, null, `${label} must fail this job, not pass vacuously`);
+    }
+
+    // Issue #291: the Work State comment's Controller/Builder lines must
+    // reflect agent-roles.yaml's actual dev.provider, not a hardcoded
+    // "anthropic" literal -- a fixture naming a different provider is the
+    // defect-sensitive case: the old hardcoded literal would keep passing a
+    // same-provider fixture even after the source read was silently deleted.
+    m = await run({ gates: GREEN, devProvider: "openai" });
+    const workStateBody = m.commentsByIssue.get(42)?.[0]?.body || "";
+    assert.match(workStateBody, /- Controller: openai/);
+    assert.match(workStateBody, /- Builder: openai/);
+    assert.doesNotMatch(workStateBody, /anthropic/);
+
+    // A default-branch read failure must degrade the comment, not the verdict
+    // -- this job's own "orchestration problems must never mask the verdict"
+    // contract (see the outer try/catch's own comment in the workflow).
+    m = await run({ gates: GREEN, getContentThrows: true });
+    assert.ok(m.calls.includes("ARM"), "an unreadable agent-roles.yaml must not block a green verdict from arming");
+    assert.equal(m.failed, null);
+    const fallbackBody = m.commentsByIssue.get(42)?.[0]?.body || "";
+    assert.match(fallbackBody, /- Controller: unknown/);
+    assert.match(fallbackBody, /- Builder: unknown/);
+  } finally {
+    global.setTimeout = originalSetTimeout;
   }
-
-  const GREEN = allSuccess();
-  const RED = allSuccess({ toolbelt: { result: "failure" } });
-  // Repository Standards failing is the realistic path to ai-review coming
-  // back "skipped" (GitHub skips a job whose own needs: failed) -- this is
-  // the exact case the header comment documents as the intended behavior.
-  const SKIPPED = allSuccess({ "repository-standards": { result: "failure" }, "ai-review": { result: "skipped" } });
-
-  let m = await run({ gates: GREEN });
-  assert.ok(m.calls.includes("ARM"), "green verdict must arm auto-merge");
-  assert.equal(m.failed, null, "green verdict must not fail the job");
-  assert.equal(
-    m.calls.filter((c) => c.startsWith("comment:")).length,
-    2,
-    "Work State must be posted on both the PR and its linked Issue"
-  );
-
-  m = await run({ gates: RED });
-  assert.ok(!m.calls.includes("ARM"), "must not arm when a lane failed");
-  assert.match(m.failed || "", /did not succeed/, "a failed lane must fail this job");
-
-  // A job that silently stops reporting (or was skipped because its own
-  // dependency failed) must turn the gate red, not green.
-  m = await run({ gates: SKIPPED });
-  assert.ok(!m.calls.includes("ARM"), "must not arm when a lane was skipped");
-  assert.notEqual(m.failed, null, "a skipped lane must fail this job, not count as a pass");
-
-  const heldByOwner = [
-    { event: "labeled", label: { name: "owner:hold-merge" }, actor: { login: "kgsmith19" } },
-  ];
-  m = await run({ gates: GREEN, labels: [{ name: "owner:hold-merge" }], timeline: heldByOwner });
-  assert.ok(m.calls.includes("DISARM"), "an authorized hold must disable auto-merge");
-  assert.ok(!m.calls.includes("ARM"), "an authorized hold must prevent arming");
-  assert.equal(m.failed, null, "a hold is not a verification failure");
-
-  const forgedHold = [
-    { event: "labeled", label: { name: "owner:hold-merge" }, actor: { login: "not-the-owner" } },
-  ];
-  m = await run({ gates: GREEN, labels: [{ name: "owner:hold-merge" }], timeline: forgedHold });
-  assert.ok(
-    m.calls.includes("removeLabel:owner:hold-merge"),
-    "a hold label without owner provenance must be removed"
-  );
-  assert.ok(m.calls.includes("ARM"), "a forged hold must not stop a green PR from arming");
-
-  m = await run({ gates: GREEN, sameRepo: false });
-  assert.ok(!m.calls.includes("ARM"), "fork pull requests must never be armed");
-
-  m = await run({ gates: GREEN, draft: true });
-  assert.ok(m.calls.includes("UNDRAFT"), "an unauthorized draft must be cleared");
-  assert.ok(m.calls.includes("ARM"), "a cleared draft must then arm");
-
-  // ---- an "unstable" arm-refusal is tolerated, not treated as fatal ------
-  //
-  // GitHub refuses the arming mutation outright on an unstable PR (some
-  // non-required check is red) rather than arming and waiting -- observed
-  // verbatim on PR #219. With every lane in this workflow already inside
-  // pr-gate's own needs:, this workflow's own rows cannot cause "unstable"
-  // any more; a red third-party check or a stale sibling run still can.
-  // Either way it must not fail the run and must not be reported as an
-  // unexpected error.
-  m = await run({ gates: GREEN, armError: "Pull request Pull request is in unstable status" });
-  assert.ok(m.calls.includes("ARM-ATTEMPTED"), "a green verdict must still attempt to arm");
-  assert.equal(m.failed, null, "an unstable-refusal is not a verification failure");
-  assert.match(
-    m.core.summary._b || "",
-    /unstable/i,
-    "the summary must say the PR was unstable, not report an unexpected error"
-  );
-  assert.doesNotMatch(
-    m.core.summary._b || "",
-    /unexpected error/i,
-    "an unstable-refusal must not be labelled an unexpected error"
-  );
-
-  // ---- Issue #274: incomplete linked-Issue checklists block, visibly -----
-  //
-  // Unlike hold/draft/fork above (which skip arming without failing the
-  // check), an incomplete checklist must fail THIS job outright -- the
-  // owner asked to see it as a reason for failure, not a silent arm-skip.
-
-  m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: "- [ ] one\n- [x] two" } } });
-  assert.ok(!m.calls.includes("ARM"), "an open Issue with an unchecked item must not arm");
-  assert.notEqual(m.failed, null, "an incomplete checklist must fail PR Gate, not just skip arming");
-  assert.match(m.failed || "", /checklist incomplete on #7/);
-  assert.match(m.failed || "", /#7 \(1 unchecked\)/, "the failure must say how many items remain unchecked");
-
-  m = await run({ gates: GREEN, issueChecklists: { 7: { state: "closed", body: "- [ ] one" } } });
-  assert.ok(m.calls.includes("ARM"), "a CLOSED Issue is exempt regardless of unchecked items -- covers superseded/not-planned work");
-  assert.equal(m.failed, null);
-
-  m = await run({
-    gates: GREEN,
-    prBody: "Closes #7\nFixes #9",
-    issueChecklists: {
-      7: { state: "open", body: "- [x] done" },
-      9: { state: "open", body: "- [ ] not done" },
-    },
-  });
-  assert.ok(!m.calls.includes("ARM"), "ALL linked Issues must be complete -- one incomplete Issue among several still blocks");
-  assert.match(m.failed || "", /#9 \(1 unchecked\)/, "the failure must name the incomplete Issue and how many items remain unchecked");
-  assert.doesNotMatch(m.failed || "", /#7/, "a complete Issue must not be named as a blocker");
-
-  const checklistOverride = [
-    { event: "labeled", label: { name: "owner:allow-incomplete-issue" }, actor: { login: "kgsmith19" } },
-  ];
-  m = await run({
-    gates: GREEN,
-    labels: [{ name: "owner:allow-incomplete-issue" }],
-    timeline: checklistOverride,
-    issueChecklists: { 7: { state: "open", body: "- [ ] one" } },
-  });
-  assert.ok(m.calls.includes("ARM"), "an owner-authorized override label must un-block an incomplete checklist");
-  assert.equal(m.failed, null);
-
-  const forgedChecklistOverride = [
-    { event: "labeled", label: { name: "owner:allow-incomplete-issue" }, actor: { login: "not-the-owner" } },
-  ];
-  m = await run({
-    gates: GREEN,
-    labels: [{ name: "owner:allow-incomplete-issue" }],
-    timeline: forgedChecklistOverride,
-    issueChecklists: { 7: { state: "open", body: "- [ ] one" } },
-  });
-  assert.ok(
-    m.calls.includes("removeLabel:owner:allow-incomplete-issue"),
-    "an override label without owner provenance must be removed"
-  );
-  assert.ok(!m.calls.includes("ARM"), "a forged override must not un-block an incomplete checklist");
-
-  m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: "no checklist here at all" } } });
-  assert.ok(m.calls.includes("ARM"), "an Issue with no checklist items is not incomplete -- nothing to check");
-  assert.equal(m.failed, null);
-
-  // ---- fail CLOSED when the needs payload says nothing ------------------
-  //
-  // The dangerous shape is not a red gate, it is NO gate. A "did anything
-  // fail?" test over an empty object is vacuously true, so before this was
-  // guarded, GATE_RESULTS="{}" made this job report SUCCESS and arm a merge
-  // having verified precisely nothing -- which is the exact failure class
-  // the whole required-check design exists to prevent. Each case below was
-  // observed arming auto-merge in the unguarded form.
-  //
-  // These are not hypothetical inputs: an edited-away needs: list, a
-  // renamed job id, or a truncated expression all produce one of them.
-  for (const [label, opts] of [
-    ["an empty needs object", { rawGateResults: "{}" }],
-    ["GATE_RESULTS unset entirely", { rawGateResults: null }],
-    ["a malformed GATE_RESULTS payload", { rawGateResults: "{not json" }],
-    ["a gate whose result is null", { gates: allSuccess({ toolbelt: { result: null } }) }],
-    [
-      "a renamed job id that no longer matches",
-      { gates: (() => { const g = allSuccess(); delete g.toolbelt; g["toolbelt-renamed"] = { result: "success" }; return g; })() },
-    ],
-  ]) {
-    m = await run(opts);
-    assert.ok(!m.calls.includes("ARM"), `${label} must never arm auto-merge`);
-    assert.notEqual(m.failed, null, `${label} must fail this job, not pass vacuously`);
-  }
-
-  // Issue #291: the Work State comment's Controller/Builder lines must
-  // reflect agent-roles.yaml's actual dev.provider, not a hardcoded
-  // "anthropic" literal -- a fixture naming a different provider is the
-  // defect-sensitive case: the old hardcoded literal would keep passing a
-  // same-provider fixture even after the source read was silently deleted.
-  m = await run({ gates: GREEN, devProvider: "openai" });
-  const workStateBody = m.commentsByIssue.get(42)?.[0]?.body || "";
-  assert.match(workStateBody, /- Controller: openai/);
-  assert.match(workStateBody, /- Builder: openai/);
-  assert.doesNotMatch(workStateBody, /anthropic/);
-
-  // A default-branch read failure must degrade the comment, not the verdict
-  // -- this job's own "orchestration problems must never mask the verdict"
-  // contract (see the outer try/catch's own comment in the workflow).
-  m = await run({ gates: GREEN, getContentThrows: true });
-  assert.ok(m.calls.includes("ARM"), "an unreadable agent-roles.yaml must not block a green verdict from arming");
-  assert.equal(m.failed, null);
-  const fallbackBody = m.commentsByIssue.get(42)?.[0]?.body || "";
-  assert.match(fallbackBody, /- Controller: unknown/);
-  assert.match(fallbackBody, /- Builder: unknown/);
 });
 
 // Issue #267: GitHub's own "Closes #N" linkage reliably closes the linked
@@ -782,4 +796,194 @@ test("PR Gate issue-close fallback: closes the linked Issue on a closed+merged e
   // No closing keyword in the body -- an ordinary reference is not a link.
   m = await run({ body: "See #99 for context", issueState: "open" });
   assert.ok(!m.calls.some((c) => c.startsWith("get:")), "a non-closing reference must not trigger the fallback");
+});
+
+// Issue #283: the #267 fallback above only ever runs on a `closed` event, but
+// GitHub Actions never fires a NEW workflow run for an event caused by the
+// job's own default GITHUB_TOKEN (recursion prevention) -- and arming
+// auto-merge does exactly that. So the `closed` event this fallback depends
+// on never happens for the one scenario it exists to cover. The fix: the
+// SAME run that arms auto-merge polls pulls.get briefly afterward and calls
+// the existing fallback directly the moment it observes `merged: true`, with
+// no new workflow run required. These tests build a minimal mock harness
+// (arm success + the fallback's own issue read/update/comment calls) rather
+// than reusing either existing harness above, because this is the only test
+// in the file that needs both at once.
+function buildPostArmPollMocks({ pullsGetAfterArm }) {
+  const calls = [];
+  const issueFixtures = new Map([[77, { number: 77, state: "open" }]]);
+  const initialPr = {
+    number: 42,
+    node_id: "PR_x",
+    title: "Test PR",
+    draft: false,
+    mergeable_state: "clean",
+    labels: [],
+    head: { sha: "dead", ref: "f", repo: { full_name: "kgsmith19/hyperbolic-core" } },
+    base: { sha: "cafe", ref: "main", repo: { full_name: "kgsmith19/hyperbolic-core" } },
+    body: "closes #77",
+  };
+
+  let pullsGetCalls = 0;
+  const github = {
+    paginate: async () => [],
+    rest: {
+      pulls: {
+        get: async () => {
+          pullsGetCalls += 1;
+          // Call 1 is the job's own initial fetch, made before arming is
+          // even attempted. Every call after that is a post-arm poll
+          // attempt.
+          if (pullsGetCalls === 1) return { data: initialPr };
+          return { data: pullsGetAfterArm(pullsGetCalls - 1, initialPr) };
+        },
+      },
+      issues: {
+        get: async ({ issue_number }) => {
+          calls.push("issues.get:" + issue_number);
+          return { data: issueFixtures.get(issue_number) || { number: issue_number, state: "open" } };
+        },
+        update: async ({ issue_number, state, state_reason }) => {
+          calls.push(`issues.update:${issue_number}:${state}:${state_reason}`);
+          issueFixtures.set(issue_number, { ...issueFixtures.get(issue_number), state });
+        },
+        createComment: async (a) => calls.push("comment:" + a.issue_number),
+        updateComment: async () => calls.push("updateComment"),
+        removeLabel: async (a) => calls.push("removeLabel:" + a.name),
+        listEventsForTimeline: async () => ({ data: [] }),
+        listComments: async () => ({ data: [] }),
+      },
+    },
+    graphql: async (q) => {
+      if (/enablePullRequestAutoMerge/.test(q)) {
+        return void calls.push("ARM") || {};
+      }
+      throw new Error("unexpected graphql mutation in test: " + q);
+    },
+  };
+
+  let failed = null;
+  const core = {
+    info() {},
+    warning() {},
+    error() {},
+    setFailed(m) {
+      failed = m;
+    },
+    summary: {
+      addHeading() {
+        return core.summary;
+      },
+      addRaw(t) {
+        core.summary._b = t;
+        return core.summary;
+      },
+      async write() {},
+    },
+  };
+  const context = {
+    repo: { owner: "kgsmith19", repo: "hyperbolic-core" },
+    payload: {
+      pull_request: { number: 42 },
+      repository: { owner: { login: "kgsmith19" }, default_branch: "main" },
+    },
+  };
+  const gateResults = {};
+  for (const id of EXPECTED_WORKERS) gateResults[id] = { result: "success" };
+  const proc = { env: { GATE_RESULTS: JSON.stringify(gateResults) } };
+
+  return {
+    github,
+    core,
+    context,
+    proc,
+    calls,
+    get pullsGetCalls() {
+      return pullsGetCalls;
+    },
+    get failed() {
+      return failed;
+    },
+  };
+}
+
+test("PR Gate: post-arm poll observes the merge mid-window and runs the #267 fallback inline (Issue #283)", async () => {
+  const modulePath = loadPrGateModule();
+  const prGate = (await import(`file://${modulePath}`)).default;
+
+  const originalSetTimeout = global.setTimeout;
+  global.setTimeout = (fn) => {
+    fn();
+    return 0;
+  };
+  try {
+    // Poll attempts 1 and 2 report the PR still unmerged; attempt 3 reports
+    // it merged, carrying the same linked-issue body the fallback needs.
+    const MERGE_ON_ATTEMPT = 3;
+    const m = buildPostArmPollMocks({
+      pullsGetAfterArm: (attempt, initialPr) =>
+        attempt < MERGE_ON_ATTEMPT
+          ? { number: 42, merged: false }
+          : { ...initialPr, merged: true },
+    });
+
+    await prGate(m.context, m.github, m.core, m.proc);
+
+    assert.ok(m.calls.includes("ARM"), "a green verdict must still arm auto-merge");
+    assert.equal(
+      m.pullsGetCalls,
+      1 + MERGE_ON_ATTEMPT,
+      "the poll loop must stop as soon as it observes the merge, not keep polling"
+    );
+    assert.ok(
+      m.calls.includes("issues.update:77:closed:completed"),
+      "observing the merge via the post-arm poll must run the #267 fallback and close the linked Issue -- " +
+        "as a direct consequence of the poll, not merely because the function exists"
+    );
+    assert.ok(
+      m.calls.includes("comment:77"),
+      "the fallback's auditable comment must be posted on the linked Issue"
+    );
+    assert.equal(m.failed, null, "observing the merge and closing the issue must not fail the job");
+  } finally {
+    global.setTimeout = originalSetTimeout;
+  }
+});
+
+test("PR Gate: post-arm poll gives up gracefully once its window expires without observing a merge (Issue #283)", async () => {
+  const modulePath = loadPrGateModule();
+  const prGate = (await import(`file://${modulePath}`)).default;
+
+  const originalSetTimeout = global.setTimeout;
+  global.setTimeout = (fn) => {
+    fn();
+    return 0;
+  };
+  try {
+    const POLL_MAX_ATTEMPTS = 24;
+    const m = buildPostArmPollMocks({
+      pullsGetAfterArm: () => ({ number: 42, merged: false }),
+    });
+
+    await prGate(m.context, m.github, m.core, m.proc);
+
+    assert.ok(m.calls.includes("ARM"), "a green verdict must still arm auto-merge");
+    assert.equal(
+      m.pullsGetCalls,
+      1 + POLL_MAX_ATTEMPTS,
+      "the poll loop must terminate at its bounded attempt count (24), not run forever"
+    );
+    assert.ok(
+      !m.calls.some((c) => c.startsWith("issues.update")),
+      "a merge that is never observed must never trigger the issue-close fallback"
+    );
+    assert.equal(m.failed, null, "an expired poll window must not fail the job");
+    assert.match(
+      m.core.summary._b || "",
+      /poll window.*expired/i,
+      "the summary must record that the poll window expired without a merge"
+    );
+  } finally {
+    global.setTimeout = originalSetTimeout;
+  }
 });

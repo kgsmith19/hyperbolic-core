@@ -814,6 +814,12 @@ jobs:
               }
             }
 
+            // Returns true only when the enablePullRequestAutoMerge mutation
+            // itself did not throw -- every other outcome below (repository
+            // policy, an already-mergeable PR, "already enabled", an
+            // unstable refusal, or any unexpected error) returns false, so
+            // the caller only polls for a merge (below) when this run is
+            // actually the one that just armed it.
             async function armAutoMerge(pr) {
               if (pr.mergeable_state === "behind") {
                 try {
@@ -846,6 +852,7 @@ jobs:
                 summaryLines.push(
                   `- Auto-merge: armed (squash, expected head \`${pr.head.sha}\`).`
                 );
+                return true;
               } catch (error) {
                 const message = (error && error.message) || String(error);
                 if (/auto.?merge is not allowed|auto.?merge is disabled|not enabled for this repository/i.test(message)) {
@@ -881,6 +888,55 @@ jobs:
                   );
                 }
               }
+              return false;
+            }
+
+            function sleep(ms) {
+              return new Promise((resolve) => setTimeout(resolve, ms));
+            }
+
+            // Issue #283 root cause: GitHub Actions never fires a NEW
+            // workflow run for an event caused by the job's own default
+            // GITHUB_TOKEN (recursion prevention), and enabling auto-merge
+            // above does exactly that -- so the #267 fallback's own `closed`
+            // event never runs for the one scenario it exists to cover (an
+            // auto-merge-completed PR). The fix stays inside the SAME run
+            // that armed the merge: poll briefly for GitHub to report the
+            // merge complete, then call the existing fallback directly --
+            // sidestepping the recursion rule entirely, since no new run is
+            // triggered. If the window expires first, the scheduled sweep
+            // (issue-close-sweep.yml) is the backstop.
+            const POLL_INTERVAL_MS = 5000;
+            const POLL_MAX_ATTEMPTS = 24; // 24 * 5s = 2 minutes.
+
+            async function pollForMergeAfterArming(pr, eligible) {
+              for (let attempt = 1; attempt <= POLL_MAX_ATTEMPTS; attempt++) {
+                await sleep(POLL_INTERVAL_MS);
+                let polled;
+                try {
+                  const { data } = await github.rest.pulls.get({
+                    owner,
+                    repo,
+                    pull_number: pr.number,
+                  });
+                  polled = data;
+                } catch (error) {
+                  core.warning(
+                    `PR Gate: post-arm merge poll failed to read PR #${pr.number} (attempt ${attempt}/${POLL_MAX_ATTEMPTS}): ${error.message}`
+                  );
+                  continue;
+                }
+                if (polled.merged === true) {
+                  summaryLines.push(
+                    `- Issue close fallback: merge observed via post-arm poll (attempt ${attempt}/${POLL_MAX_ATTEMPTS}); running the fallback inline.`
+                  );
+                  await handleIssueCloseFallback(polled, eligible);
+                  return;
+                }
+              }
+              summaryLines.push(
+                "- Issue close fallback: post-arm poll window (2 minutes) expired without observing a merge; the scheduled sweep is the backstop."
+              );
             }
 
             function deriveStatus(pr, stillDraft, holdAuthorized, checklistBlocked) {
@@ -1112,7 +1168,10 @@ jobs:
                     "- Auto-merge: skipped while the PR remains a draft."
                   );
                 } else {
-                  await armAutoMerge(pr);
+                  const armed = await armAutoMerge(pr);
+                  if (armed) {
+                    await pollForMergeAfterArming(pr, eligible);
+                  }
                 }
 
                 // Managed Work State comment, on the PR and its linked Issue.
