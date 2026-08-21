@@ -101,6 +101,14 @@ function loadConversationScript() {
   return new AsyncFunction("require", "context", "core", "github", "process", extractScript(reviewActionYaml, marker));
 }
 
+// The Issue-and-PR-body step is the FIRST script: | block in this file, so
+// no starting index is needed -- extractScript's default fromIndex finds it.
+function loadIssueAndPrBodyScript() {
+  const marker = reviewActionYaml.indexOf("Context · Write the linked Issue body and the pull request body to files");
+  assert.ok(marker >= 0, "verify-llm-review/action.yml: Issue-and-PR-body step not found");
+  return new AsyncFunction("require", "context", "core", "github", "process", extractScript(reviewActionYaml, marker));
+}
+
 // ---------------------------------------------------------------------------
 // Structural: the token-placement invariant, mechanically enforced the same
 // way docs/ops/pr-verify-workflow.test.mjs enforces it for All Gates.
@@ -674,11 +682,93 @@ test("dispatch: a closed PR at the right head still stands down -- there is noth
 });
 
 // ---------------------------------------------------------------------------
-// verify-llm-review/action.yml's "Context · Write the pull request's
-// conversation to a file" step -- gives the reviewer everything posted on
-// the pull request so far, chronological, unfiltered, as
-// packages/review/src/prompt.ts's fenced DATA.
+// verify-llm-review/action.yml's "Context · Write the linked Issue body and
+// the pull request body to files" step -- Issue #251. Before this, the PR's
+// own body was only ever a fallback that got unconditionally overwritten the
+// moment an Issue number resolved (effectively always, since
+// verify-pr-description requires a Closes/Fixes/Resolves reference on every
+// PR), so the reviewer never actually saw a PR's own Verification section,
+// oracle-change disclosure, or scope reasoning in normal operation. These
+// tests pin the fix: both files exist, independently, every time.
 // ---------------------------------------------------------------------------
+
+async function runIssueAndPrBodyScript({ prNumber = 240, headRef = "some-branch", prBody = "", issue = null, issueThrows = false } = {}) {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const dir = fs.mkdtempSync(path_.join(os.tmpdir(), "llm-review-issue-pr-body-test-"));
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const github = {
+    rest: {
+      pulls: { get: async () => ({ data: { head: { ref: headRef }, body: prBody } }) },
+      issues: {
+        get: async () => {
+          if (issueThrows) throw new Error("simulated API failure");
+          return { data: issue ?? { title: "(missing fixture issue)", body: "" } };
+        },
+      },
+    },
+  };
+  const core = { info: () => {}, warning: () => {} };
+  const proc = { env: { PR_NUMBER: String(prNumber), RUNNER_TEMP: dir } };
+
+  await loadIssueAndPrBodyScript()(require, context, core, github, proc);
+
+  return {
+    issueBody: fs.readFileSync(path_.join(dir, "issue-body.md"), "utf8"),
+    prBody: fs.readFileSync(path_.join(dir, "pr-body.md"), "utf8"),
+  };
+}
+
+// THE EXACT BUG (Issue #251). Behavior protected: when an Issue resolves
+// (the normal case), the reviewer still gets the PR's own body -- not just
+// the Issue's. Defect caught: the old code path, where resolving an Issue
+// unconditionally overwrote the one `body` variable that the PR body was
+// ever assigned to, making it structurally invisible in exactly this case.
+test("Issue-and-PR-body step: the PR body is captured alongside a resolved Issue body, not overwritten by it", async () => {
+  const { issueBody, prBody } = await runIssueAndPrBodyScript({
+    headRef: "issue/42-configurable-rate",
+    prBody: "## Verification\nRan the full suite locally, all green.",
+    issue: { title: "Make the discount rate configurable", body: "Acceptance criterion 1: ..." },
+  });
+
+  assert.match(issueBody, /Issue #42: Make the discount rate configurable/);
+  assert.match(issueBody, /Acceptance criterion 1/);
+  assert.match(prBody, /Ran the full suite locally, all green/);
+  assert.ok(!issueBody.includes("Ran the full suite locally"), "the PR body must not leak into the Issue body file");
+});
+
+// Behavior protected: the Issue number resolves from the branch name first,
+// via this standard's own issue/<n>-<slug> convention.
+test("Issue-and-PR-body step: the Issue number resolves from the branch name", async () => {
+  const { issueBody } = await runIssueAndPrBodyScript({
+    headRef: "issue/251-pr-body-invisible",
+    issue: { title: "AI Review never sees the PR body", body: "..." },
+  });
+  assert.match(issueBody, /Issue #251:/);
+});
+
+// Behavior protected: when no Issue can be identified, the Issue-body file
+// says so plainly, and the PR body is still written -- it is no longer
+// pressed into service as a fallback substitute for the missing Issue body.
+test("Issue-and-PR-body step: no linked Issue still writes the PR's own body, unmixed with a fallback notice", async () => {
+  const { issueBody, prBody } = await runIssueAndPrBodyScript({
+    headRef: "some-unrelated-branch-name",
+    prBody: "Just a quick fix.",
+  });
+
+  assert.match(issueBody, /no linked Issue could be identified/);
+  assert.equal(prBody, "Just a quick fix.");
+  assert.ok(!issueBody.includes("Just a quick fix"), "the PR body must not be folded into the Issue-body placeholder");
+});
+
+// Behavior protected: a PR with no description at all writes an explicit
+// placeholder rather than an empty file, so "no description" and "review
+// error" cannot be confused downstream.
+test("Issue-and-PR-body step: a pull request with no body writes an explicit placeholder", async () => {
+  const { prBody } = await runIssueAndPrBodyScript({ prBody: null });
+  assert.match(prBody, /this pull request has no description/);
+});
 
 async function runConversationScript(issueComments, reviewComments = []) {
   const fs = await import("node:fs");

@@ -153,7 +153,18 @@ runs:
         secret-path: "/review/"
         domain: https://app.infisical.com
 
-    - name: Context · Write the linked Issue body to a file
+    # Writes TWO files: the linked Issue's body (intent, acceptance criteria)
+    # and the pull request's own body (the author's claimed evidence). These
+    # used to be one variable, with the PR body only ever a silent fallback
+    # that got unconditionally overwritten the moment an Issue number
+    # resolved -- which is effectively always, since verify-pr-description
+    # requires every PR body to carry a Closes/Fixes/Resolves reference. That
+    # meant the reviewer never actually saw a PR's own Verification section,
+    # oracle-change disclosure, or scope reasoning in normal operation
+    # (Issue #251). They are two different kinds of claim -- the Issue states
+    # intent, the PR states evidence -- so they are now two files, and
+    # prompt.ts fences them as two separately-labelled sections.
+    - name: Context · Write the linked Issue body and the pull request body to files
       if: inputs.pr_number != ''
       uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
       env:
@@ -172,7 +183,7 @@ runs:
           // The Issue number is derived from data only -- the deterministic
           // branch name this standard mandates (issue/<n>-<slug>), then the
           // PR body's closing keyword as a fallback. Both values are used as
-          // a NUMBER, never interpolated into a shell command, and the body
+          // a NUMBER, never interpolated into a shell command, and every body
           // is written straight to a file rather than echoed.
           let issueNumber = null;
           const fromBranch = /^issue\/(\d+)-/.exec(pr.head.ref ?? "");
@@ -185,23 +196,24 @@ runs:
             }
           }
 
-          let body =
-            "(no linked Issue could be identified from the branch name or the pull request body; " +
-            "judge acceptance criteria from the pull request description below instead)\n\n" +
-            (pr.body ?? "");
-
+          let issueBody = "(no linked Issue could be identified from the branch name or the pull request body)";
           if (issueNumber !== null) {
             try {
               const issue = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
-              body = `Issue #${issueNumber}: ${issue.data.title}\n\n${issue.data.body ?? "(empty body)"}`;
+              issueBody = `Issue #${issueNumber}: ${issue.data.title}\n\n${issue.data.body ?? "(empty body)"}`;
             } catch (error) {
               core.warning(`Could not read issue #${issueNumber}: ${error.message}`);
             }
           }
 
+          // Always the PR's own body, independent of whether an Issue was
+          // found -- never a fallback substitute for issueBody above.
+          const prBody = pr.body ?? "(this pull request has no description)";
+
           fs.mkdirSync(process.env.RUNNER_TEMP, { recursive: true });
-          fs.writeFileSync(`${process.env.RUNNER_TEMP}/issue-body.md`, body, "utf8");
-          core.info(`Wrote ${body.length} chars of Issue context for the reviewer.`);
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/issue-body.md`, issueBody, "utf8");
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/pr-body.md`, prBody, "utf8");
+          core.info(`Wrote ${issueBody.length} chars of Issue context and ${prBody.length} chars of PR body for the reviewer.`);
 
     # Every comment on the pull request, chronological -- the reviewer's own
     # prior verdict (continuity across rounds) and any reply since (a fix
@@ -267,6 +279,7 @@ runs:
           --base "$BASE_SHA" \
           --head "$HEAD_SHA" \
           --issue-body-file "$RUNNER_TEMP/issue-body.md" \
+          --pr-body-file "$RUNNER_TEMP/pr-body.md" \
           --conversation-file "$RUNNER_TEMP/pr-conversation.md" \
           --out "$RUNNER_TEMP/review-verdict.json"
 

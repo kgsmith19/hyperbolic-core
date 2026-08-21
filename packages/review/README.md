@@ -40,6 +40,7 @@ node packages/review/bin/review.mjs \
   --base "$(git merge-base main HEAD)" \
   --head HEAD \
   --issue-body-file /tmp/issue.md \
+  --pr-body-file /tmp/pr-body.md \
   --out /tmp/review.json
 ```
 
