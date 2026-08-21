@@ -1,0 +1,114 @@
+name: "LLM Review Recheck"
+
+# Re-runs AI Review's exact verification for a pull request whose dev agent
+# replied with a comment-only rebuttal or out-of-scope proposal WITHOUT
+# pushing a new commit. A pushed commit already retriggers pr-verify.yml on
+# its own via pull_request:synchronize -- this workflow exists only for the
+# other case, where nothing about the tree changed, so nothing would
+# otherwise cause AI Review to look at what the agent just posted. Issue
+# #262's follow-on slice 8.
+#
+# WHY repository_dispatch. Same reason dev-agent-dispatch.yml itself uses it:
+# a comment posted with GITHUB_TOKEN cannot retrigger a pull_request
+# workflow -- GitHub suppresses workflow runs from events its own token
+# authored, to prevent recursion -- and repository_dispatch is one of the
+# two documented exceptions. dev-agent-dispatch.yml fires this as its own
+# last step, after confirming the agent's run did NOT move the PR's head
+# (see that workflow's own final step for how it decides).
+#
+# TRUST SHAPE matches ai-review exactly, regardless of trigger path: no
+# checkout ref outside the pull request's own head, id-token: write for the
+# Infisical OIDC exchange, and NEVER a write token -- the reviewer must
+# never be able to write code no matter what invoked it. This job reuses the
+# exact same composite action ai-review does
+# (.github/actions/verify-llm-review), so review logic has one source
+# despite two trigger paths, the same discipline AGENTS.md documents for
+# pr-verify.yml's own lanes and llm-review.yml's standalone trigger.
+#
+# Adds no pull-request check row: repository_dispatch-triggered runs never
+# do, the same as dev-agent-dispatch.yml's own runs today.
+on:
+  repository_dispatch:
+    types: [llm-review-recheck]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keyed on the PR, not the run: a second recheck fired before the first
+  # finishes should replace it, not race it -- both would be judging the
+  # same unchanged head anyway.
+  group: llm-review-recheck-${{ github.event.client_payload.prNumber }}
+  cancel-in-progress: true
+
+jobs:
+  recheck:
+    name: "Recheck"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+    steps:
+      # The dispatch carries the head it was raised against. If the PR has
+      # moved since (a genuinely new commit landed in the gap between the
+      # firing step's own head-check and this job starting), that recheck is
+      # already redundant: a newer head means pull_request:synchronize
+      # already retriggered pr-verify.yml's own AI Review on it.
+      - name: Context · Resolve the pull request, and stop if it moved on
+        id: pr
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          PR_NUMBER: ${{ github.event.client_payload.prNumber }}
+          DISPATCH_HEAD_SHA: ${{ github.event.client_payload.headSha }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (pr.head.sha !== process.env.DISPATCH_HEAD_SHA) {
+              core.info(
+                `PR #${pr.number} has moved to ${pr.head.sha}; this recheck was raised for ${process.env.DISPATCH_HEAD_SHA}. ` +
+                  "A newer head means pr-verify.yml already re-ran AI Review on it. Standing down."
+              );
+              core.setOutput("stale", "true");
+              return;
+            }
+            if (pr.state !== "open") {
+              core.info(`PR #${pr.number} is ${pr.state}; nothing to recheck.`);
+              core.setOutput("stale", "true");
+              return;
+            }
+            core.setOutput("stale", "false");
+            core.setOutput("base_sha", pr.base.sha);
+
+      - name: Setup · Checkout repository
+        if: steps.pr.outputs.stale == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.client_payload.headSha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Recheck · Run the adversarial LLM reviewer
+        if: steps.pr.outputs.stale == 'false'
+        uses: ./.github/actions/verify-llm-review
+        with:
+          pr_number: ${{ github.event.client_payload.prNumber }}
+          base_sha: ${{ steps.pr.outputs.base_sha }}
+          head_sha: ${{ github.event.client_payload.headSha }}
+          github_token: ${{ github.token }}
+          infisical_identity_id: ${{ vars.INFISICAL_REVIEW_IDENTITY_ID }}
+          infisical_project_slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          review_provider: ${{ vars.REVIEW_PROVIDER }}
+          review_model: ${{ vars.REVIEW_MODEL }}
+          review_builder_provider: ${{ vars.REVIEW_BUILDER_PROVIDER }}
+
+      - name: Recheck · Not applicable, the pull request moved on
+        if: steps.pr.outputs.stale == 'true'
+        shell: bash
+        run: echo "This recheck was raised for a head that is no longer current; nothing to do."

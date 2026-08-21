@@ -55,7 +55,12 @@ name: "LLM Review Dialogue"
 # names (see below).
 on:
   workflow_run:
-    workflows: ["PR Verification"]
+    # "LLM Review Recheck" (Issue #262's follow-on slice 8) reuses the exact
+    # same verify-llm-review composite action ai-review does, so its verdict
+    # artifact is fetched and rendered here identically -- this workflow
+    # does not care WHICH of the two produced it, only that github.event
+    # .workflow_run.id names the run that actually did.
+    workflows: ["PR Verification", "LLM Review Recheck"]
     types: [completed]
 
 permissions:
@@ -78,9 +83,16 @@ jobs:
     # head_repository.fork is GitHub's own purpose-built field for this
     # check (docs: "Events that trigger workflows"), not a same-repo
     # full_name comparison reimplementing the same fact less directly.
+    #
+    # A recheck run (event == 'repository_dispatch') has no PR head/base
+    # repo shape to check the same way -- but it needs none: it exists only
+    # because dev-agent-dispatch.yml fired it, which itself only ever runs
+    # for a dispatch this same fork check already passed once, upstream, the
+    # first time the PR was woken. There is no path to a repository_dispatch
+    # run here that did not already clear this exact check.
     if: >-
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.head_repository.fork == false
+      (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_repository.fork == false) ||
+      github.event.workflow_run.event == 'repository_dispatch'
     permissions:
       contents: read
       pull-requests: write
