@@ -579,3 +579,165 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
     assert.notEqual(m.failed, null, `${label} must fail this job, not pass vacuously`);
   }
 });
+
+// Issue #267: GitHub's own "Closes #N" linkage reliably closes the linked
+// Issue on a direct/manual merge, but was observed -- 8 times out of 8 in
+// this repository's own history -- to silently NOT fire when the merge is
+// instead completed asynchronously by native auto-merge (the only merge
+// path this workflow ever arms). "closed" was added to this workflow's
+// pull_request types specifically so PR Gate can run this fallback at the
+// exact moment a PR merges; every worker lane carries its own
+// `if: github.event.action != 'closed'` so this event never re-runs the
+// full suite (see the on: block's own comment).
+test("PR Gate issue-close fallback: closes the linked Issue on a closed+merged event, and only when GitHub's native linkage did not already do it", async () => {
+  const modulePath = loadPrGateModule();
+  const prGate = (await import(`file://${modulePath}`)).default;
+
+  function makeMocks({
+    merged = true,
+    body = "closes #99",
+    issueState = "open",
+    sameRepo = true,
+    baseRef = "main",
+  }) {
+    const calls = [];
+    const issues = new Map([[99, { number: 99, state: issueState }]]);
+    const github = {
+      paginate: async () => {
+        calls.push("PAGINATE");
+        return [];
+      },
+      rest: {
+        pulls: {
+          get: async () => ({
+            data: {
+              number: 42,
+              node_id: "PR_x",
+              title: "Test PR",
+              merged,
+              draft: false,
+              mergeable_state: "clean",
+              labels: [],
+              head: { sha: "dead", ref: "f", repo: { full_name: "kgsmith19/hyperbolic-core" } },
+              base: {
+                sha: "cafe",
+                ref: baseRef,
+                repo: { full_name: sameRepo ? "kgsmith19/hyperbolic-core" : "other/fork" },
+              },
+              body,
+            },
+          }),
+        },
+        issues: {
+          get: async ({ issue_number }) => {
+            calls.push("get:" + issue_number);
+            const issue = issues.get(issue_number);
+            if (!issue) throw new Error(`no fixture issue #${issue_number}`);
+            return { data: issue };
+          },
+          update: async ({ issue_number, state, state_reason }) => {
+            calls.push(`update:${issue_number}:${state}:${state_reason}`);
+            issues.set(issue_number, { ...issues.get(issue_number), state });
+          },
+          createComment: async (a) => {
+            calls.push("comment:" + a.issue_number);
+          },
+        },
+      },
+      graphql: async (q) => {
+        // The close-event branch must never reach arm/hold/draft logic --
+        // any graphql call at all is a structural bug, so this both proves
+        // that (the pushed call survives the throw) and refuses to silently
+        // succeed as if auto-merge were armed on an already-merged PR.
+        calls.push("GRAPHQL:" + (q.match(/\w+/) || [""])[0]);
+        throw new Error("the close-event path must never call a graphql mutation");
+      },
+    };
+    let failed = null;
+    const core = {
+      info() {},
+      warning() {},
+      error() {},
+      setFailed(m) {
+        failed = m;
+      },
+      summary: {
+        addHeading() {
+          return core.summary;
+        },
+        addRaw(t) {
+          core.summary._b = t;
+          return core.summary;
+        },
+        async write() {},
+      },
+    };
+    const context = {
+      repo: { owner: "kgsmith19", repo: "hyperbolic-core" },
+      payload: {
+        action: "closed",
+        pull_request: { number: 42 },
+        repository: { owner: { login: "kgsmith19" }, default_branch: "main" },
+      },
+    };
+    // Every worker lane carries its own if: github.event.action != 'closed',
+    // so on a real closed event every one of them reports "skipped" -- this
+    // must never be mistaken for a real gate failure.
+    const proc = { env: { GATE_RESULTS: JSON.stringify({}) } };
+    return {
+      github,
+      core,
+      context,
+      proc,
+      calls,
+      get failed() {
+        return failed;
+      },
+    };
+  }
+
+  const run = async (opts) => {
+    const m = makeMocks(opts);
+    await prGate(m.context, m.github, m.core, m.proc);
+    return m;
+  };
+
+  // The exact bug this fallback exists for: native linkage silently failed
+  // to fire, so the linked Issue is still open after the PR merged.
+  let m = await run({ issueState: "open" });
+  assert.ok(m.calls.includes("get:99"), "must check the linked issue's current state");
+  assert.ok(
+    m.calls.includes("update:99:closed:completed"),
+    "must close the still-open linked issue"
+  );
+  assert.ok(m.calls.includes("comment:99"), "must leave an auditable comment explaining the fallback close");
+  assert.equal(m.failed, null, "a close event must never fail the job");
+  assert.ok(!m.calls.some((c) => c.startsWith("GRAPHQL")), "must never attempt to arm auto-merge on an already-merged PR");
+
+  // Native linkage succeeded (the direct-merge path) -- the fallback must
+  // be a no-op, not a redundant re-close or a duplicate comment.
+  m = await run({ issueState: "closed" });
+  assert.ok(m.calls.includes("get:99"), "must still check state before acting");
+  assert.ok(
+    !m.calls.some((c) => c.startsWith("update:")),
+    "must not re-close an issue GitHub's own linkage already closed"
+  );
+  assert.ok(!m.calls.some((c) => c.startsWith("comment:")), "must not post a redundant fallback comment");
+
+  // PR closed without merging -- nothing to do.
+  m = await run({ merged: false, issueState: "open" });
+  assert.ok(!m.calls.some((c) => c.startsWith("get:")), "an unmerged close must never inspect the linked issue");
+  assert.equal(m.failed, null);
+
+  // Fork PR -- eligibility mirrors the arm-auto-merge eligibility rule.
+  m = await run({ sameRepo: false, issueState: "open" });
+  assert.ok(!m.calls.some((c) => c.startsWith("get:")), "a fork PR must not trigger the fallback");
+
+  // Merge into a non-default branch -- same eligibility rule.
+  m = await run({ baseRef: "not-main", issueState: "open" });
+  assert.ok(!m.calls.some((c) => c.startsWith("get:")), "a non-default base branch must not trigger the fallback");
+
+  // No closing keyword in the body -- an ordinary reference is not a link.
+  m = await run({ body: "See #99 for context", issueState: "open" });
+  assert.ok(!m.calls.some((c) => c.startsWith("get:")), "a non-closing reference must not trigger the fallback");
+});
