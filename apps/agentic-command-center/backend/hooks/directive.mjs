@@ -117,6 +117,14 @@ function write(directive) {
   return directive;
 }
 
+// Under same-file exclusive-create contention, Windows can report EPERM
+// instead of EEXIST -- a loser of the race, not a permission problem. Both
+// mean another process currently owns the lock, so both are retried inside
+// the bounded, fail-closed wait loop below; rethrowing EPERM instead made a
+// contending mutator throw straight out of appendCycle on windows-latest
+// (issue #250). kernel/ledger.mjs's lock carries the identical guard.
+const lockContention = (error) => error?.code === "EEXIST" || error?.code === "EPERM";
+
 // SessionStart, Stop, the runner, and a model run can all touch the same
 // directive at once, and every mutator below was a bare read -> change ->
 // write with nothing serializing it across processes -- a lost update looks
@@ -132,7 +140,7 @@ function withLock(id, fn) {
   const deadline = Date.now() + 4000;
   for (;;) {
     try { fs.closeSync(fs.openSync(file, "wx")); break; } catch (e) {
-      if (e.code !== "EEXIST") throw e;
+      if (!lockContention(e)) throw e;
       try { if (Date.now() - fs.statSync(file).mtimeMs > 5000) { fs.rmSync(file, { force: true }); continue; } } catch {}
       if (Date.now() > deadline) throw new Error(`timed out waiting for the "${id}" directive lock`);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);

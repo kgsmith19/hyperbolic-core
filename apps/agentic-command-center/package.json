@@ -7,7 +7,7 @@
   },
   "scripts": {
     "test": "cd backend && ACC_ROUTING_MD=hooks/fixtures/ROUTING.md node --test --test-concurrency=1 \"hooks/*.test.mjs\" \"runner/*.test.mjs\" \"kernel/*.test.mjs\" \"kernel/adapters/*.test.mjs\" \"gui/*.test.mjs\"",
-    "test:windows": "cd backend && node --test \"hooks/!(lane).test.mjs\" \"runner/*.test.mjs\" \"kernel/*.test.mjs\" \"kernel/adapters/*.test.mjs\" \"gui/*.test.mjs\"",
+    "test:windows": "cd backend && node --test --test-concurrency=1 \"hooks/!(lane).test.mjs\" \"runner/*.test.mjs\" \"kernel/*.test.mjs\" \"kernel/adapters/*.test.mjs\" \"gui/*.test.mjs\"",
     "covgate": "cd backend && ACC_ROUTING_MD=hooks/fixtures/ROUTING.md node hooks/covgate.mjs",
     "gui": "node backend/gui/server.mjs --port 43117"
   }
