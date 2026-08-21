@@ -66,7 +66,7 @@ test("issue-close-sweep.yml triggers on schedule only -- no pull_request trigger
   const endMatch = /\n(?=[A-Za-z_-]+:)/.exec(rest.slice(3));
   const onBlock = endMatch ? rest.slice(0, 3 + endMatch.index) : rest;
 
-  assert.match(onBlock, /\n {2}schedule:\n/, "must trigger on schedule:");
+  assert.match(onBlock, /\r?\n {2}schedule:\r?\n/, "must trigger on schedule:");
   assert.match(onBlock, /cron:\s*"0 \* \* \* \*"/, "must run hourly at minute 0");
   assert.doesNotMatch(onBlock, /pull_request/, "must never trigger on pull_request or pull_request_target");
 });
@@ -78,8 +78,8 @@ test("issue-close-sweep.yml permissions are exactly issues: write and pull-reque
   const endMatch = /\n(?=[A-Za-z_-]+:)/.exec(rest.slice(11));
   const permsBlock = endMatch ? rest.slice(0, 11 + endMatch.index) : rest;
 
-  assert.match(permsBlock, /\n {2}issues: write\n/);
-  assert.match(permsBlock, /\n {2}pull-requests: read\n/);
+  assert.match(permsBlock, /\r?\n {2}issues: write\r?\n/);
+  assert.match(permsBlock, /\r?\n {2}pull-requests: read\r?\n/);
   assert.doesNotMatch(permsBlock, /contents:/, "must not grant any contents permission -- this workflow never checks out");
   // Exactly two scoped permissions, nothing else snuck in.
   const grantLines = permsBlock.split("\n").filter((line) => /^ {2}[a-z-]+: \w+/.test(line));
