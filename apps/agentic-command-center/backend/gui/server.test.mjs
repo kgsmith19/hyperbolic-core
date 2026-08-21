@@ -1235,6 +1235,61 @@ test("ACC-5: concurrent process startups converge on the single exclusively-crea
   })
 );
 
+test("issue #260: a concurrent exclusive-create loser retries past the winner's still-landing write", () =>
+  withTempAccRoot(async (root) => {
+    // Deterministic reproduction of the race behind the ACC-5 concurrent-
+    // process test's one observed failure (PR #258, ACC Linux run
+    // 32429231787): the loser of the O_EXCL create read the winner's token
+    // file before its writeFileSync+fsync landed, saw zero bytes, and threw
+    // "invalid ACC GUI token file" instead of converging on the real token.
+    // The real race is sub-millisecond and not reliably reproducible by
+    // actually racing two processes (proven by how rarely it fired in CI),
+    // so this test owns the interleaving directly by patching fs.openSync:
+    // the exclusive-create attempt is answered with EEXIST against an
+    // empty placeholder file (exactly what a winner that has created but
+    // not yet written looks like), and the winner's real content lands only
+    // partway through the loser's own retries -- proving the loser actually
+    // retried, not merely got lucky on its first read.
+    const tokenPath = path.join(root, ".acc", "gui-token");
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true, mode: 0o700 });
+    const winnerToken = "A".repeat(43); // NOT an arbitrary fixture: TOKEN_RE only requires 43 base64url chars, but validToken also demands the last char round-trip canonically through base64url decode/encode -- "A" (value 0) does; "B"/"C"/"D" do not, hence "A" alone appears elsewhere in this file exercised through a full successful load.
+    const READ_ATTEMPTS_BEFORE_WRITE_LANDS = 3;
+
+    const realOpenSync = fs.openSync;
+    let readAttempts = 0;
+    fs.openSync = (...args) => {
+      const [target, flags] = args;
+      if (target !== tokenPath) return realOpenSync(...args);
+      if (typeof flags === "number" && (flags & fs.constants.O_EXCL) !== 0) {
+        // The exclusive-create attempt: simulate another process winning
+        // it, having created the file but not yet written its content.
+        fs.writeFileSync(tokenPath, "", { mode: 0o600 });
+        const error = new Error("simulated concurrent exclusive-create winner");
+        error.code = "EEXIST";
+        throw error;
+      }
+      // readToken's own O_RDONLY open, retried on every attempt.
+      readAttempts++;
+      if (readAttempts === READ_ATTEMPTS_BEFORE_WRITE_LANDS) {
+        fs.writeFileSync(tokenPath, `${winnerToken}\n`, { mode: 0o600 });
+      }
+      return realOpenSync(...args);
+    };
+    try {
+      const s = await startServer({ port: 0 });
+      try {
+        assert.ok(
+          readAttempts >= READ_ATTEMPTS_BEFORE_WRITE_LANDS,
+          `must have actually retried the read (saw ${readAttempts} attempts) rather than getting lucky once`
+        );
+        assert.equal(s.token, winnerToken, "the loser must converge on the winner's real token once its write lands, not throw");
+      } finally { s.server.close(); }
+    } finally {
+      fs.openSync = realOpenSync;
+    }
+  })
+);
+
 test("ACC-5: ACC_GUI_TOKEN_FILE redirects the token path, mirroring the ACC_ROOT/ACC_POLICY seam style", () =>
   withTempAccRoot(async (root) => {
     const customPath = path.join(BASE, "custom-gui-token");
