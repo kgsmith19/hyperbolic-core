@@ -1,5 +1,5 @@
 // Structural + behavioral assertions over the LLM Review dialogue machinery:
-// .github/workflows/llm-review-dialogue.yml, .github/workflows/claude-dispatch.yml,
+// .github/workflows/llm-review-dialogue.yml, .github/workflows/dev-agent-dispatch.yml,
 // and the artifact-staging steps in .github/actions/verify-llm-review/action.yml.
 //
 // Issue #231. This closes the gap AGENTS.md used to name explicitly:
@@ -41,7 +41,7 @@ const require = createRequire(import.meta.url);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const dialoguePath = path.join(root, ".github/workflows/llm-review-dialogue.yml");
-const dispatchPath = path.join(root, ".github/workflows/claude-dispatch.yml");
+const dispatchPath = path.join(root, ".github/workflows/dev-agent-dispatch.yml");
 const reviewActionPath = path.join(root, ".github/actions/verify-llm-review/action.yml");
 const dialogueYaml = readFileSync(dialoguePath, "utf8");
 const dispatchYaml = readFileSync(dispatchPath, "utf8");
@@ -49,7 +49,7 @@ const reviewActionYaml = readFileSync(reviewActionPath, "utf8");
 
 // General "script: |" block extractor. Unlike pr-verify-workflow.test.mjs's
 // version, this does not assume the block is the last thing in the file --
-// claude-dispatch.yml's script step is followed by a checkout and an action
+// dev-agent-dispatch.yml's script step is followed by a checkout and an action
 // step -- so it stops at the first line whose indentation drops below the
 // block's own, which is exactly what ends a YAML block scalar.
 function extractScript(yamlText, fromIndex = 0) {
@@ -86,9 +86,21 @@ function loadDialogueScript() {
   return new AsyncFunction("require", "context", "core", "github", "process", extractScript(dialogueYaml));
 }
 
+// The preflight step is the FIRST script: | block in dev-agent-dispatch.yml,
+// so extractScript's default fromIndex finds it directly.
+function loadPreflightScript() {
+  const marker = dispatchYaml.indexOf("Preflight · Resolve the dev provider");
+  assert.ok(marker >= 0, "dev-agent-dispatch.yml: preflight step not found");
+  return new AsyncFunction("require", "context", "core", "github", "process", extractScript(dispatchYaml, marker));
+}
+
 function loadDispatchPrCheckScript() {
-  const marker = dispatchYaml.indexOf("id: pr");
-  assert.ok(marker >= 0, "claude-dispatch.yml: no `id: pr` step found");
+  // Newline-terminated: "id: pr" is also a PREFIX of the earlier preflight
+  // step's own "id: preflight", so a bare substring search would now match
+  // that step instead (Issue #252's follow-on slice 7 added it ahead of this
+  // one) and hand back the wrong script entirely.
+  const marker = dispatchYaml.indexOf("id: pr\n");
+  assert.ok(marker >= 0, "dev-agent-dispatch.yml: no `id: pr` step found");
   return new AsyncFunction("context", "core", "github", "process", extractScript(dispatchYaml, marker));
 }
 
@@ -185,7 +197,7 @@ test("llm-review-dialogue.yml refuses fork pull requests before doing anything",
   assert.match(ifLine, /head_repository\.fork == false/);
 });
 
-test("claude-dispatch.yml triggers on repository_dispatch only, and is the one workflow allowed to check out and write at once", () => {
+test("dev-agent-dispatch.yml triggers on repository_dispatch only, and is the one workflow allowed to check out and write at once", () => {
   const onBlock = dispatchYaml.slice(dispatchYaml.indexOf("\non:"), dispatchYaml.indexOf("\npermissions:"));
   assert.match(onBlock, /repository_dispatch:/);
   assert.doesNotMatch(onBlock, /pull_request(_target)?:/);
@@ -211,7 +223,7 @@ test("every action reference in the new workflows is pinned to a 40-hex SHA with
   const pattern = /^\s*uses:\s*(\S+)/gm;
   for (const [name, text] of [
     ["llm-review-dialogue.yml", dialogueYaml],
-    ["claude-dispatch.yml", dispatchYaml],
+    ["dev-agent-dispatch.yml", dispatchYaml],
   ]) {
     for (const match of text.matchAll(pattern)) {
       const ref = match[1];
@@ -235,7 +247,17 @@ function makeArtifact(fs, path_, dir, files) {
   return dir;
 }
 
-function makeGithub({ pr, existingComment = null, dispatchThrows = false, searchResults = [], createIssueThrows = false }) {
+function makeGithub({
+  pr,
+  existingComment = null,
+  dispatchThrows = false,
+  searchResults = [],
+  createIssueThrows = false,
+  // Fixture for the default-branch agent-roles.yaml the dialogue script now
+  // reads to decide whether the assigned dev provider is the one this
+  // repository's dispatcher actually implements (anthropic, today).
+  devProvider = "anthropic",
+}) {
   const calls = { updateComment: [], createComment: [], createDispatchEvent: [], createIssue: [], search: [] };
   let nextIssueNumber = 300;
   const api = {
@@ -262,6 +284,14 @@ function makeGithub({ pr, existingComment = null, dispatchThrows = false, search
           calls.createDispatchEvent.push(args);
           if (dispatchThrows) throw new Error("simulated dispatch failure");
         },
+        getContent: async () => ({
+          data: {
+            encoding: "base64",
+            content: Buffer.from(`dev:\n  provider: ${devProvider}\n  model: x\n\nreview:\n  provider: openai\n  model: y\n`, "utf8").toString(
+              "base64"
+            ),
+          },
+        }),
       },
       search: {
         issuesAndPullRequests: async (args) => {
@@ -287,11 +317,11 @@ function makeCore() {
   };
 }
 
-async function runDialogue(fs, os, path_, env, { pr, existingComment, dispatchThrows, searchResults, createIssueThrows } = {}) {
+async function runDialogue(fs, os, path_, env, { pr, existingComment, dispatchThrows, searchResults, createIssueThrows, devProvider } = {}) {
   const dir = fs.mkdtempSync(path_.join(os.tmpdir(), "llm-review-dialogue-test-"));
   makeArtifact(fs, path_, dir, env.__files);
   delete env.__files;
-  const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows, searchResults, createIssueThrows });
+  const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows, searchResults, createIssueThrows, devProvider });
   const core = makeCore();
   const proc = { env: { ...env, ARTIFACT_DIR: dir } };
   const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
@@ -317,7 +347,8 @@ test("dialogue: a fresh blocking verdict opens round 1, posts one new comment, a
     RUN_URL: "http://x",
     RUN_HEAD_SHA: HEAD,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "true",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
       "review-verdict.json": BLOCKING_VERDICT,
@@ -348,7 +379,8 @@ test("dialogue: a re-run on the same head updates the one comment in place witho
     RUN_URL: "http://x",
     RUN_HEAD_SHA: HEAD,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "true",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
       "review-verdict.json": BLOCKING_VERDICT,
@@ -375,7 +407,8 @@ test("dialogue: an unresolved finding surviving to a new head increments the rou
     RUN_URL: "http://x",
     RUN_HEAD_SHA: newHead,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "true",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: newHead, reviewOutcome: "failure", verdictPresent: true },
       "review-verdict.json": BLOCKING_VERDICT,
@@ -403,7 +436,8 @@ test("dialogue: a passing verdict resets the round and clears any prior escalati
     RUN_URL: "http://x",
     RUN_HEAD_SHA: newHead,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "true",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: newHead, reviewOutcome: "success", verdictPresent: true },
       "review-verdict.json": { verdict: "pass", findings: [], discarded: [], summary: "clean" },
@@ -426,7 +460,8 @@ test("dialogue SECURITY: refuses to post when the artifact's claimed PR head doe
     RUN_URL: "http://x",
     RUN_HEAD_SHA: HEAD,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "true",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
       "review-verdict.json": BLOCKING_VERDICT,
@@ -448,7 +483,8 @@ test("dialogue: no verdict artifact (unprovisioned preflight or infrastructure f
     RUN_URL: "http://x",
     RUN_HEAD_SHA: HEAD,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "true",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: false },
     },
@@ -467,12 +503,44 @@ test("dialogue: an unprovisioned agent escalates to the owner immediately, witho
     RUN_URL: "http://x",
     RUN_HEAD_SHA: HEAD,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "false",
+    HAS_ANTHROPIC_OAUTH: "false",
+    HAS_ANTHROPIC_API_KEY: "false",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
       "review-verdict.json": BLOCKING_VERDICT,
     },
   }, { pr: BASE_PR });
+
+  assert.equal(calls.createDispatchEvent.length, 0);
+  const body = calls.createComment[0].body;
+  assert.match(body, /@kgsmith19 — this needs your decision/);
+  assert.match(body, /is not provisioned/);
+});
+
+// Behavior protected: dev-agent-dispatch.yml only implements dev.provider
+// "anthropic" today (Issue #252's slice 7). Firing the dispatch anyway when
+// agent-roles.yaml names something else would just wake a job whose own
+// preflight fails immediately -- worse than not firing it, since it burns a
+// dispatch and still needs the owner. This must escalate the same way an
+// unprovisioned credential does, even though the anthropic credentials ARE
+// present here: the assigned provider is what governs, not what happens to
+// be configured.
+test("dialogue: dev.provider naming an unimplemented vendor escalates immediately, even with anthropic credentials present", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "9",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR, devProvider: "openai" });
 
   assert.equal(calls.createDispatchEvent.length, 0);
   const body = calls.createComment[0].body;
@@ -489,7 +557,8 @@ test("dialogue: a dispatch that throws escalates immediately -- a loop that cann
     RUN_URL: "http://x",
     RUN_HEAD_SHA: HEAD,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "true",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
       "review-verdict.json": BLOCKING_VERDICT,
@@ -510,7 +579,8 @@ test("dialogue: model-authored @mentions and issue refs inside findings are defu
     RUN_URL: "http://x",
     RUN_HEAD_SHA: HEAD,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "true",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
       "review-verdict.json": {
@@ -556,7 +626,8 @@ test("dialogue: a hyphenated @mention is defused, not just a single-word one", a
     RUN_URL: "http://x",
     RUN_HEAD_SHA: HEAD,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "true",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
       "review-verdict.json": {
@@ -607,7 +678,8 @@ test("dialogue: an entry in verdict.discarded never counts toward blocking, even
     RUN_URL: "http://x",
     RUN_HEAD_SHA: HEAD,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "true",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
       "review-verdict.json": {
@@ -640,7 +712,93 @@ test("dialogue: an entry in verdict.discarded never counts toward blocking, even
 });
 
 // ---------------------------------------------------------------------------
-// Behavioral: claude-dispatch.yml's staleness guard.
+// Behavioral: dev-agent-dispatch.yml's preflight -- resolves dev.provider
+// from the DEFAULT branch's agent-roles.yaml and confirms that provider's
+// credential is provisioned, before ever checking out a pull request.
+// ---------------------------------------------------------------------------
+
+function agentRolesFixture(devProvider) {
+  return Buffer.from(`dev:\n  provider: ${devProvider}\n  model: x\n\nreview:\n  provider: openai\n  model: y\n`, "utf8").toString("base64");
+}
+
+async function runPreflightScript({ devProvider = "anthropic", oauth = "", apiKey = "", getContentThrows = false, agentRolesRaw = null } = {}) {
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const outputs = {};
+  let failure = null;
+  const core = {
+    setOutput: (k, v) => (outputs[k] = v),
+    setFailed: (message) => (failure = message),
+    info: () => {},
+  };
+  const github = {
+    rest: {
+      repos: {
+        getContent: async () => {
+          if (getContentThrows) throw new Error("simulated getContent failure");
+          return { data: { encoding: "base64", content: agentRolesRaw !== null ? agentRolesRaw : agentRolesFixture(devProvider) } };
+        },
+      },
+    },
+  };
+  const proc = { env: { OAUTH: oauth, API_KEY: apiKey } };
+  await loadPreflightScript()(require, context, core, github, proc);
+  return { outputs, failure };
+}
+
+// POSITIVE CONTROL. Behavior protected: the common, currently-live case --
+// dev.provider is anthropic and a credential exists -- resolves cleanly.
+test("preflight: dev.provider=anthropic with a credential present resolves without failing", async () => {
+  const { outputs, failure } = await runPreflightScript({ devProvider: "anthropic", oauth: "token-value" });
+  assert.equal(failure, null);
+  assert.equal(outputs.provider, "anthropic");
+});
+
+// Behavior protected: dev.provider=anthropic but NEITHER credential secret
+// is set fails closed, naming exactly which two secrets would satisfy it --
+// the same fail-loud contract the pre-generalization preflight had.
+test("preflight: dev.provider=anthropic with no credential fails closed and names both accepted secrets", async () => {
+  const { outputs, failure } = await runPreflightScript({ devProvider: "anthropic", oauth: "", apiKey: "" });
+  assert.equal(outputs.provider, "anthropic");
+  assert.match(failure, /CLAUDE_CODE_OAUTH_TOKEN/);
+  assert.match(failure, /ANTHROPIC_API_KEY/);
+});
+
+// THE CORE NEW BEHAVIOR (Issue #252's slice 7). Behavior protected: an
+// unimplemented provider fails closed with a reason naming the provider,
+// rather than either guessing at an unverified action/SDK shape or silently
+// falling back to anthropic. Defect caught: a generalization that only LOOKS
+// provider-aware but still runs the anthropic branch regardless of what
+// agent-roles.yaml actually says.
+test("preflight: dev.provider=openai fails closed without ever checking a credential", async () => {
+  const { outputs, failure } = await runPreflightScript({ devProvider: "openai", oauth: "token-value", apiKey: "key-value" });
+  assert.equal(outputs.provider, "openai");
+  assert.match(failure, /dev\.provider="openai"/);
+  assert.match(failure, /only implements "anthropic"/);
+});
+
+test("preflight: dev.provider=antigravity fails closed the same way as openai", async () => {
+  const { failure } = await runPreflightScript({ devProvider: "antigravity" });
+  assert.match(failure, /dev\.provider="antigravity"/);
+});
+
+// Behavior protected: a agent-roles.yaml this script cannot find a
+// dev.provider line in fails closed rather than defaulting to anthropic --
+// defaulting would silently run the wrong (or right, by luck) branch instead
+// of surfacing that the file's shape changed underneath this parser.
+test("preflight: agent-roles.yaml with no parseable dev.provider fails closed rather than guessing", async () => {
+  const { failure } = await runPreflightScript({ agentRolesRaw: Buffer.from("not: a\nrecognizable: shape\n", "utf8").toString("base64") });
+  assert.match(failure, /Could not find dev\.provider/);
+});
+
+// Behavior protected: the default branch being unreadable (API error, rare
+// but real) fails closed with the actual error, not a silent fallback.
+test("preflight: agent-roles.yaml unreadable from the default branch fails closed with the real error", async () => {
+  const { failure } = await runPreflightScript({ getContentThrows: true });
+  assert.match(failure, /simulated getContent failure/);
+});
+
+// ---------------------------------------------------------------------------
+// Behavioral: dev-agent-dispatch.yml's staleness guard.
 // ---------------------------------------------------------------------------
 
 test("dispatch: a PR that has moved past the dispatched head stands down instead of acting on stale findings", async () => {
@@ -888,7 +1046,8 @@ function deferredEnv(overrides = {}) {
     RUN_URL: "http://x",
     RUN_HEAD_SHA: HEAD,
     ESCALATE_AFTER: "3",
-    AGENT_PROVISIONED: "true",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "success", verdictPresent: true },
       "review-verdict.json": DEFERRED_ONLY_VERDICT,
@@ -994,7 +1153,8 @@ test("dialogue: deferredIssues survives the round/escalated reset on a resolved 
       RUN_URL: "http://x",
       RUN_HEAD_SHA: HEAD,
       ESCALATE_AFTER: "3",
-      AGENT_PROVISIONED: "true",
+      HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
       __files: {
         "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "success", verdictPresent: true },
         "review-verdict.json": { verdict: "pass", findings: [], discarded: [], summary: "clean" },
