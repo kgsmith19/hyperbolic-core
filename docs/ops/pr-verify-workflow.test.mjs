@@ -301,6 +301,13 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
     // for an undefined mock method.
     issueChecklists = {},
     prBody = "closes #7",
+    // Issue #291: agent-roles.yaml's dev.provider, as read by the Work
+    // State comment's Controller/Builder lines. Defaults to "anthropic" to
+    // match this repo's actual live assignment, so every pre-existing test
+    // in this file that never mentions the Work State comment's body text
+    // is unaffected by this fixture existing at all.
+    devProvider = "anthropic",
+    getContentThrows = false,
   }) {
     const calls = [];
     const commentsByIssue = new Map();
@@ -349,6 +356,19 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
           },
           updateComment: async () => calls.push("updateComment"),
           removeLabel: async (a) => calls.push("removeLabel:" + a.name),
+        },
+        repos: {
+          getContent: async () => {
+            if (getContentThrows) throw new Error("simulated getContent failure");
+            return {
+              data: {
+                encoding: "base64",
+                content: Buffer.from(`dev:\n  provider: ${devProvider}\n  model: x\n\nreview:\n  provider: openai\n  model: y\n`, "utf8").toString(
+                  "base64"
+                ),
+              },
+            };
+          },
         },
       },
       graphql: async (q) => {
@@ -402,6 +422,7 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
       context,
       proc,
       calls,
+      commentsByIssue,
       get failed() {
         return failed;
       },
@@ -578,6 +599,27 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
     assert.ok(!m.calls.includes("ARM"), `${label} must never arm auto-merge`);
     assert.notEqual(m.failed, null, `${label} must fail this job, not pass vacuously`);
   }
+
+  // Issue #291: the Work State comment's Controller/Builder lines must
+  // reflect agent-roles.yaml's actual dev.provider, not a hardcoded
+  // "anthropic" literal -- a fixture naming a different provider is the
+  // defect-sensitive case: the old hardcoded literal would keep passing a
+  // same-provider fixture even after the source read was silently deleted.
+  m = await run({ gates: GREEN, devProvider: "openai" });
+  const workStateBody = m.commentsByIssue.get(42)?.[0]?.body || "";
+  assert.match(workStateBody, /- Controller: openai/);
+  assert.match(workStateBody, /- Builder: openai/);
+  assert.doesNotMatch(workStateBody, /anthropic/);
+
+  // A default-branch read failure must degrade the comment, not the verdict
+  // -- this job's own "orchestration problems must never mask the verdict"
+  // contract (see the outer try/catch's own comment in the workflow).
+  m = await run({ gates: GREEN, getContentThrows: true });
+  assert.ok(m.calls.includes("ARM"), "an unreadable agent-roles.yaml must not block a green verdict from arming");
+  assert.equal(m.failed, null);
+  const fallbackBody = m.commentsByIssue.get(42)?.[0]?.body || "";
+  assert.match(fallbackBody, /- Controller: unknown/);
+  assert.match(fallbackBody, /- Builder: unknown/);
 });
 
 // Issue #267: GitHub's own "Closes #N" linkage reliably closes the linked
