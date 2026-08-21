@@ -198,18 +198,17 @@
       }
     }
 
-    async function refreshList() {
-      // SPEC-0008: prompt_version embed scoped to its latest row only
-      // (every prompt has at least one the instant it is saved -- SL-004's
-      // trigger fires on insert, not only update), so currentVersion is
-      // always populated, one round trip, no extra query.
-      const generation = ++listGeneration;
+    // SPEC-0008: prompt_version embed scoped to its latest row only (every
+    // prompt has at least one the instant it is saved -- SL-004's trigger
+    // fires on insert, not only update), so currentVersion is always
+    // populated, one round trip, no extra query.
+    async function fetchPrompts(isActive) {
       const rows = await api(
         "prompt?select=id,title,body,is_active,tag(tag),prompt_version(version_no),configuration(name,values,sections)" +
+          `&is_active=eq.${isActive}` +
           "&order=created_at.desc&prompt_version.order=version_no.desc&prompt_version.limit=1"
       );
-      if (generation !== listGeneration) return;
-      allPrompts = rows.map((row) => ({
+      return rows.map((row) => ({
         id: row.id,
         title: row.title,
         body: row.body,
@@ -218,11 +217,41 @@
         currentVersion: row.prompt_version[0].version_no,
         configurations: row.configuration || [],
       }));
+    }
+
+    // issue #261: the unfiltered boot query re-downloaded every prompt the
+    // owner had ever created, archived included -- and nothing ever deletes
+    // an archived row (ADR-0002 soft-delete; no DELETE grant on
+    // prompt.prompt), so that payload only ever grows. Active prompts alone
+    // are what a normal load needs to show; archivedLoaded tracks whether
+    // this session has already opted into paying the archived cost, so a
+    // refresh after that point (e.g. the version-history restore button
+    // below) keeps showing what the user already chose to see instead of
+    // silently narrowing it.
+    let archivedLoaded = false;
+
+    async function refreshList() {
+      const generation = ++listGeneration;
+      const active = await fetchPrompts(true);
+      const archived = archivedLoaded ? await fetchPrompts(false) : [];
+      if (generation !== listGeneration) return;
+      allPrompts = active.concat(archived);
       renderList();
     }
 
     document.getElementById("search").addEventListener("input", renderList);
-    document.getElementById("show-archived").addEventListener("change", renderList);
+    document.getElementById("show-archived").addEventListener("change", async (e) => {
+      if (e.target.checked && !archivedLoaded) {
+        // Fetched once per session, on first ask, not on every load and not
+        // on every subsequent toggle -- the whole point of #261.
+        const generation = ++listGeneration;
+        archivedLoaded = true;
+        const archived = await fetchPrompts(false);
+        if (generation !== listGeneration) return; // a newer save/refresh already superseded this
+        allPrompts = allPrompts.concat(archived);
+      }
+      renderList();
+    });
     document.addEventListener("keydown", (e) => {
       if (shouldFocusSearch(e.key, e.target.tagName)) {
         e.preventDefault();
