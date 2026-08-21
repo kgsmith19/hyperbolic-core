@@ -499,8 +499,9 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   re-runs the identical `verify-llm-review` composite action `AI Review` uses — one source of
   review logic across both trigger paths — so a rebuttal or a deferral proposal gets scored without
   waiting for an unrelated commit to happen to land.
-- After a configurable number of unresolved rounds (`vars.LLM_REVIEW_ESCALATE_AFTER`, default 9 —
-  raised from 3 by explicit owner directive, Issue #281) with the gate still red, the comment tags
+- After a configurable number of unresolved rounds (`vars.LLM_REVIEW_ESCALATE_AFTER`, default 10 —
+  raised from 9 by explicit owner directive, Issue #284, itself raised from 3 by Issue #281) with
+  the gate still red, the comment tags
   `@kgsmith19` once and states the unresolved
   disagreement plainly — the documented rare escape hatch, not the normal path. The same
   escalation fires immediately, without waiting on the round threshold, if the agent-wake
