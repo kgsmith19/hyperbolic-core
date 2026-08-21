@@ -181,8 +181,8 @@ change scoped to a single `apps/<name>/` or `services/<name>/` tree should gener
 that tree's own PR Gate's path filter.
 
 Standard labels: `status:ready`, `status:active`, `status:blocked`; `risk:R0` through `risk:R3`;
-`owner:allow-draft`, `owner:hold-merge`, `owner:policy-change`. Owner-prefixed labels are trusted
-only when applied by the owner.
+`owner:allow-draft`, `owner:hold-merge`, `owner:allow-incomplete-issue`, `owner:policy-change`.
+Owner-prefixed labels are trusted only when applied by the owner.
 
 Claim protocol:
 
@@ -443,6 +443,16 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
 - **Every finding requires concrete evidence and a citation** to a specific acceptance criterion
   or a named section of this file. Uncited, evidence-free findings are discarded and **cannot
   block** — a confused model must never stall real work.
+- **One shot, then scope-locked (Issue #273).** Round one may raise whatever the diff and the
+  linked Issue support. Every round after that, a blocking finding must correspond to one already
+  in the PR conversation, judged against that finding's *original* wording — never a stricter or
+  larger version invented on a later pass. A regression in code pushed specifically in response to
+  a finding may still be raised; a fresh look at the rest of the diff may not. The reviewer's tone
+  softens once real evidence lands (say what's still missing against the original ask, or close
+  the finding) without loosening the underlying standard. This exists because PR #270's review
+  went three rounds, each demanding more without ever converging — round 1 wanted a root-cause
+  report, round 2 wanted API traces, round 3 wanted webhook delivery records the reviewer's own
+  token cannot retrieve.
 - **Fail-closed vs. fail-open:** infrastructure failure (missing credential, unset
   `REVIEW_MODEL`, invalid provider configuration, API error, timeout) fails the gate; a weak or
   malformed model answer does not.
@@ -455,6 +465,16 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   `AI Review` itself stays read-only — the artifact is the only thing that crosses the boundary,
   and the PR number it names is verified against the triggering run's own head SHA before anything
   is posted.
+- The managed comment posts under the reviewer's **own GitHub App identity** (Issue #272), minted
+  from `REVIEW_GITHUB_APP_ID`/`REVIEW_GITHUB_APP_PRIVATE_KEY` in Infisical's `/review/` path —
+  the same identity and secret path `verify-llm-review` already reads model provider keys from —
+  via `actions/create-github-app-token`, the identical mechanism `dev-agent-dispatch.yml` uses for
+  the dev identity. This is a visibility improvement, not a gate: `llm-review-dialogue.yml` only
+  *delivers* findings someone else already computed, so an unprovisioned or failing App credential
+  degrades to posting under `github-actions[bot]` instead (`continue-on-error: true` on both the
+  Infisical pull and the token mint), logged loudly via `core.warning` and the run summary, never
+  silently. Findings reaching the pull request is the invariant that must never break; which
+  identity they post under is not.
 - The comment carries a **round counter**: it increments when a new head still leaves a blocking
   finding open, holds steady on a same-head re-run, and resets on a passing verdict. A blocking
   finding wakes the developer agent via `repository_dispatch` (`dev-agent-dispatch.yml`) — the
@@ -510,6 +530,19 @@ that Issue is still open, closes it itself with an auditable comment explaining 
 whenever GitHub's own native linkage already did the job. All eight verification lanes carry
 `if: github.event.action != 'closed'`, so this event costs only `PR Gate`'s own near-instant
 fallback check — never a second run of the full suite, and never a second `AI Review` call.
+
+`PR Gate` also fails closed — a real, visible check failure, not a quiet arm-skip like draft or
+hold — when any Issue the PR's body references with a closing keyword (`Closes`/`Fixes`/`Resolves
+#N`; every one referenced, not just the first) is still **open** and its body has at least one
+unchecked `- [ ]` item (Issue #274). An Issue closed for any reason, including GitHub's native "not
+planned" state — this repo's own existing convention for superseded or no-longer-relevant work,
+see Releases and milestones above — is exempt entirely; only an open Issue with unchecked items
+blocks. The owner overrides per-PR with the `owner:allow-incomplete-issue` label, verified with the
+exact same timeline-provenance check as `owner:hold-merge`/`owner:allow-draft`: present without an
+authorizing `labeled` event from the owner, it is removed rather than honored. A per-Issue read
+failure (bad number, deleted Issue, a transient API error) does not itself block — it is reported
+in the job summary as unverifiable, matching this job's existing tolerance for orchestration
+errors elsewhere, rather than wedging every PR shut on a typo or a momentary API blip.
 
 `.github/CODEOWNERS` requires `@kgsmith19` review for this repo's control-plane paths
 (`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`, `agent-roles.yaml`). `main` protection: pull request

@@ -217,6 +217,35 @@ test("llm-review-dialogue.yml triggers on workflow_run, not on any PR event, and
   assert.doesNotMatch(onBlock, /pull_request(_target)?:/);
 });
 
+// Issue #272: the reviewer posts under its own App identity when that
+// credential is available, and degrades to github.token -- never fails the
+// job -- when it is not. Structural, not behavioral: the actual fallback
+// logic is covered by the behavioral tests below.
+test("llm-review-dialogue.yml mints the reviewer's own App identity from Infisical, with a github.token fallback if it can't", () => {
+  assert.match(dialogueYaml, /id-token:\s*write/, "needs id-token: write for the Infisical OIDC exchange");
+
+  const secretsStart = dialogueYaml.indexOf("Infisical/secrets-action");
+  assert.ok(secretsStart >= 0, "no Infisical/secrets-action step found");
+  const secretsStepStart = dialogueYaml.lastIndexOf("- name:", secretsStart);
+  const secretsBlock = dialogueYaml.slice(secretsStepStart, dialogueYaml.indexOf("- name:", secretsStart));
+  assert.match(secretsBlock, /continue-on-error:\s*true/, "an unprovisioned reviewer identity must not fail the job");
+  assert.match(secretsBlock, /secret-path:\s*"\/review\/"/, "must read the same /review/ path verify-llm-review already reads");
+
+  const tokenStart = dialogueYaml.indexOf("create-github-app-token");
+  assert.ok(tokenStart >= 0, "no actions/create-github-app-token step found");
+  const tokenStepStart = dialogueYaml.lastIndexOf("- name:", tokenStart);
+  const tokenBlock = dialogueYaml.slice(tokenStepStart, dialogueYaml.indexOf("script: |", tokenStart));
+  assert.match(tokenBlock, /continue-on-error:\s*true/);
+  assert.match(tokenBlock, /app-id:\s*\$\{\{\s*env\.REVIEW_GITHUB_APP_ID\s*\}\}/);
+  assert.match(tokenBlock, /private-key:\s*\$\{\{\s*env\.REVIEW_GITHUB_APP_PRIVATE_KEY\s*\}\}/);
+
+  // The posting step's own github-token: input must fall back to github.token
+  // rather than leaving the whole step unable to authenticate at all.
+  const postingStart = dialogueYaml.indexOf("Dialogue · Post findings");
+  const githubTokenLine = dialogueYaml.slice(postingStart, dialogueYaml.indexOf("script: |", postingStart));
+  assert.match(githubTokenLine, /github-token:\s*\$\{\{\s*steps\.review-app-token\.outputs\.token\s*\|\|\s*github\.token\s*\}\}/);
+});
+
 test("llm-review-dialogue.yml refuses fork pull requests before doing anything", () => {
   const jobStart = dialogueYaml.indexOf("jobs:");
   const ifLine = dialogueYaml.slice(jobStart, dialogueYaml.indexOf("permissions:", jobStart));
@@ -472,6 +501,59 @@ test("dialogue: a fresh blocking verdict opens round 1, posts one new comment, a
   assert.doesNotMatch(body, /needs your decision/);
   assert.equal(calls.createDispatchEvent.length, 1);
   assert.equal(calls.createDispatchEvent[0].client_payload.round, 1);
+});
+
+test("dialogue: REVIEW_APP_TOKEN_MINTED=true posts findings with no fallback-identity warning", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls, core } = await runDialogue(fs, os, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    REVIEW_APP_TOKEN_MINTED: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  assert.equal(calls.createComment.length, 1, "findings must still post");
+  assert.ok(
+    !core.warnings.some((w) => w.includes("github-actions[bot]")),
+    "a successfully minted identity must not warn about a fallback that didn't happen"
+  );
+});
+
+test("dialogue: an unminted reviewer identity (unset, or the App credential failed) still posts findings, with a visible fallback warning", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  // REVIEW_APP_TOKEN_MINTED deliberately omitted -- this is the real shape a
+  // run takes when the Infisical pull or the token mint step fails
+  // (continue-on-error: true means the job proceeds, but the env var this
+  // step reads is simply never set to "true").
+  const { calls, core } = await runDialogue(fs, os, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  assert.equal(calls.createComment.length, 1, "an identity fallback must never stop findings from posting");
+  assert.ok(
+    core.warnings.some((w) => w.includes("github-actions[bot]")),
+    "the fallback must be visible in the run log, not silent"
+  );
 });
 
 test("dialogue: a re-run on the same head updates the one comment in place without incrementing the round", async () => {

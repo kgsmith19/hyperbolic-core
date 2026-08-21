@@ -75,6 +75,48 @@ test("buildSystemPrompt: restricts outOfScope to an explicit prior proposal, nev
   assert.match(prompt, /in response to an explicit proposal/);
 });
 
+// Behavior protected: after round one, the model may not introduce a
+// blocking finding absent from the prior conversation, and must judge a
+// finding's resolution against its ORIGINAL wording, not a stricter one
+// invented on a later pass. Defect caught: a PR (#270) where three review
+// rounds each added real, responsive evidence and the reviewer kept
+// re-shaping what it demanded instead of converging -- round 1 wanted a
+// root-cause report, round 2 wanted API traces, round 3 wanted webhook
+// delivery records the reviewer's own token cannot retrieve. This rubric
+// text exists so that class of drift is instructed against, not merely
+// hoped against.
+test("buildSystemPrompt: locks blocking findings to the prior round's conversation, judged against their original ask", () => {
+  const prompt = buildSystemPrompt();
+  assert.match(prompt, /SCOPE LOCK -- ONE SHOT/);
+  assert.match(prompt, /EMPTY means this is round one/);
+  assert.match(prompt, /Every blocking finding you return must correspond to a finding already present/);
+  assert.match(prompt, /Do not raise a blocking finding whose claim has no match/);
+  assert.match(prompt, /ORIGINALLY ASKED FOR/);
+  assert.match(prompt, /never a stricter or larger version of that ask invented now/);
+});
+
+// Behavior protected: the carve-out for a genuine regression in code pushed
+// specifically in response to a finding is scoped to that responsive code --
+// it must not read as general licence to re-scan the rest of the diff for
+// new problems on a later round.
+test("buildSystemPrompt: the regression carve-out is scoped to code pushed in response to a finding, not a general re-scan", () => {
+  const prompt = buildSystemPrompt();
+  assert.match(prompt, /the code touched in response to a finding/);
+  assert.match(prompt, /not license to.*re-scan the rest of the diff/s);
+});
+
+// Behavior protected: tone softens once real evidence lands, without
+// abandoning the adversarial, evidence-based standard. Defect caught: a
+// prompt edit that reads as "be nicer" broadly, which would blunt round-one
+// scrutiny too -- these assertions pin that the tone instruction is scoped
+// to LATER rounds and stays explicit that it is a scope rule, not leniency.
+test("buildSystemPrompt: softens tone on later rounds once evidence lands, without becoming a leniency rule", () => {
+  const prompt = buildSystemPrompt();
+  assert.match(prompt, /TONE ON LATER ROUNDS/);
+  assert.match(prompt, /this is a scope rule, not a leniency one/);
+  assert.match(prompt, /not applying more pressure every round/);
+});
+
 // Behavior protected: the rule is repeated AFTER the untrusted payload, where
 // recency favours it. Defect caught: fencing the data but stating the rule only
 // once, far above it -- the arrangement injection attempts most reliably
