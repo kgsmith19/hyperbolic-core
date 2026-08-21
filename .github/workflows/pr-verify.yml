@@ -490,6 +490,7 @@ jobs:
               "<!-- agent-engineering-standard:work-state:v1 -->";
             const DRAFT_LABEL = "owner:allow-draft";
             const HOLD_LABEL = "owner:hold-merge";
+            const CHECKLIST_LABEL = "owner:allow-incomplete-issue";
 
             const summaryLines = [];
 
@@ -597,6 +598,63 @@ jobs:
               return match ? Number(match[1]) : null;
             }
 
+            // Plural sibling of parseLinkedIssue above: that one is anchored
+            // to the start of a line (the Work State comment's single
+            // "primary" Issue) and stops at the first match. This finds
+            // EVERY closing-keyword reference anywhere in the body, because
+            // Issue #274 must fail on ANY incomplete linked Issue, not just
+            // the first -- a PR closing three Issues is not "done" because
+            // the first one happens to be. Same keyword set this repo
+            // already uses elsewhere for the same purpose (verify-pr-description,
+            // llm-review-dialogue.yml's own PR-body fallback): closes/fixes/resolves,
+            // present tense. A comma-compressed list after one keyword
+            // ("Closes #260, #261") is not expanded -- neither is the
+            // existing singular parser -- only distinct "<keyword> #N"
+            // occurrences are recognized.
+            function parseLinkedIssues(body) {
+              const matches = [...(body || "").matchAll(/\b(?:closes|fixes|resolves)\s+#(\d+)\b/gi)];
+              return [...new Set(matches.map((entry) => Number(entry[1])))];
+            }
+
+            // Issue #274: block auto-merge (and fail this check row visibly,
+            // not just skip arming) when a linked Issue is still open and its
+            // body has at least one unchecked "- [ ]" item. Closed for ANY
+            // reason -- completed, or GitHub's native "not planned" (this
+            // repo's own existing convention for superseded/no-longer-relevant
+            // work; see AGENTS.md > Releases and milestones) -- exempts an
+            // Issue entirely; only an OPEN Issue with unchecked items blocks.
+            //
+            // Fails OPEN on a read error for one Issue (bad number, deleted,
+            // a transient API problem): that Issue is reported as
+            // unverifiable in the summary and does not itself block, matching
+            // this job's existing orchestration-error tolerance elsewhere
+            // (armAutoMerge's own catch blocks warn and continue). A typo'd
+            // issue number or a momentary API blip must not wedge every PR
+            // shut, and PR Gate re-evaluates on every subsequent event, so a
+            // transient failure does not persist past the run that hit it.
+            async function checkLinkedIssueChecklists(pr) {
+              const issueNumbers = parseLinkedIssues(pr.body);
+              const incomplete = [];
+              for (const issueNumber of issueNumbers) {
+                let issue;
+                try {
+                  const { data } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                  issue = data;
+                } catch (error) {
+                  summaryLines.push(
+                    `- Issue checklist: could not read #${issueNumber}, not counted as incomplete: ${error.message}`
+                  );
+                  continue;
+                }
+                if (issue.state !== "open") continue;
+                const uncheckedCount = ((issue.body || "").match(/^\s*-\s*\[\s?\]/gim) || []).length;
+                if (uncheckedCount > 0) {
+                  incomplete.push({ number: issueNumber, uncheckedCount });
+                }
+              }
+              return incomplete;
+            }
+
             async function findCommentByMarker(issueNumber, marker) {
               const comments = await github.paginate(github.rest.issues.listComments, {
                 owner,
@@ -695,25 +753,30 @@ jobs:
               }
             }
 
-            function deriveStatus(pr, stillDraft, holdAuthorized) {
+            function deriveStatus(pr, stillDraft, holdAuthorized, checklistBlocked) {
               if (stillDraft) return "draft (owner:allow-draft honored)";
               if (holdAuthorized) return "held (owner:hold-merge honored)";
               if (pr.mergeable_state === "dirty") return "blocked: merge conflict against base";
+              if (checklistBlocked) return "blocked: incomplete linked-Issue checklist";
               if (!gatesGreen) return "waiting on verification lanes";
               return "ready";
             }
 
-            function deriveBlocker(pr, stillDraft, holdAuthorized) {
+            function deriveBlocker(pr, stillDraft, holdAuthorized, checklistBlocked, incompleteIssues) {
               if (holdAuthorized) return "owner:hold-merge is in effect";
               if (pr.mergeable_state === "dirty") {
                 return "merge conflict against base; resolve manually, this workflow never resolves conflicts";
               }
               if (stillDraft) return "PR is a draft (owner:allow-draft honored)";
+              if (checklistBlocked) {
+                const names = incompleteIssues.map((entry) => `#${entry.number}`).join(", ");
+                return `incomplete checklist on ${names}; override with \`${CHECKLIST_LABEL}\` if intentional`;
+              }
               if (!gatesGreen) return failedGates.join("; ");
               return "none";
             }
 
-            function buildWorkStateBody(pr, linkedIssue, stillDraft, holdAuthorized) {
+            function buildWorkStateBody(pr, linkedIssue, stillDraft, holdAuthorized, checklistBlocked, incompleteIssues) {
               return [
                 WORK_STATE_MARKER,
                 "## Work State",
@@ -726,10 +789,19 @@ jobs:
                 "- Controller: anthropic",
                 "- Builder: anthropic",
                 `- Pull request: #${pr.number}`,
-                `- Status: ${deriveStatus(pr, stillDraft, holdAuthorized)}`,
-                `- Blocker: ${deriveBlocker(pr, stillDraft, holdAuthorized)}`,
+                `- Status: ${deriveStatus(pr, stillDraft, holdAuthorized, checklistBlocked)}`,
+                `- Blocker: ${deriveBlocker(pr, stillDraft, holdAuthorized, checklistBlocked, incompleteIssues)}`,
               ].join("\n");
             }
+
+            // Declared outside the try block, like gatesGreen/failedGates,
+            // so the terminal verdict below can see them even if an
+            // orchestration error interrupts the try block before they are
+            // computed -- the safe default (unblocked) matches this job's
+            // existing "orchestration problems must never mask the verdict"
+            // handling for every other check in here.
+            let checklistBlocked = false;
+            let incompleteIssues = [];
 
             try {
               // Always re-fetch: it is the only shape carrying
@@ -758,6 +830,31 @@ jobs:
                   pr.head.repo.full_name === pr.base.repo.full_name
               );
               const eligible = sameRepo && targetsDefaultBranch;
+
+              // Issue #274: every linked Issue's checklist, checked
+              // unconditionally -- relevance comes from whether the PR
+              // links an Issue with a checklist, never from fork/base-branch
+              // eligibility (a fork PR still deserves an accurate status,
+              // even though it could never auto-merge regardless).
+              incompleteIssues = await checkLinkedIssueChecklists(pr);
+              const checklistOverrideAuthorized = await isLabelAuthorizedByOwner(
+                pr.number,
+                CHECKLIST_LABEL
+              );
+              if (!checklistOverrideAuthorized) {
+                await removeUnauthorizedLabel(pr, CHECKLIST_LABEL);
+              }
+              checklistBlocked = incompleteIssues.length > 0 && !checklistOverrideAuthorized;
+              if (incompleteIssues.length > 0) {
+                const names = incompleteIssues
+                  .map((entry) => `#${entry.number} (${entry.uncheckedCount} unchecked)`)
+                  .join(", ");
+                summaryLines.push(
+                  checklistBlocked
+                    ? `- Issue checklist: NOT complete -- ${names}. Blocking. Override with \`${CHECKLIST_LABEL}\` if intentional.`
+                    : `- Issue checklist: incomplete on ${names}, but \`${CHECKLIST_LABEL}\` is authorized -- not blocking.`
+                );
+              }
 
               // Draft policy -- REST cannot un-draft a PR; GraphQL only.
               let stillDraft = Boolean(pr.draft);
@@ -840,6 +937,10 @@ jobs:
                 summaryLines.push(
                   "- Auto-merge: not armed -- verification did not pass."
                 );
+              } else if (checklistBlocked) {
+                summaryLines.push(
+                  "- Auto-merge: not armed -- an incomplete linked-Issue checklist is blocking (see above)."
+                );
               } else if (!eligible) {
                 summaryLines.push(
                   "- Eligibility: fork pull request or non-default base branch; auto-merge arming is skipped by directive -- same-repository PRs to the default branch only."
@@ -862,7 +963,9 @@ jobs:
                 pr,
                 linkedIssue,
                 stillDraft,
-                holdAuthorized
+                holdAuthorized,
+                checklistBlocked,
+                incompleteIssues
               );
               await upsertComment(pr.number, WORK_STATE_MARKER, workStateBody);
               if (linkedIssue) {
@@ -892,8 +995,16 @@ jobs:
             }
 
             // THE verdict. Last, so the orchestration above always runs.
-            if (!gatesGreen) {
-              core.setFailed(
-                `One or more verification lanes did not succeed: ${failedGates.join(", ")}. See the individual lane rows on this PR.`
-              );
+            if (!gatesGreen || checklistBlocked) {
+              const reasons = [];
+              if (!gatesGreen) {
+                reasons.push(`one or more verification lanes did not succeed: ${failedGates.join(", ")}`);
+              }
+              if (checklistBlocked) {
+                const names = incompleteIssues.map((entry) => `#${entry.number}`).join(", ");
+                reasons.push(
+                  `linked Issue checklist incomplete on ${names} (override with the \`${CHECKLIST_LABEL}\` label if intentional)`
+                );
+              }
+              core.setFailed(`${reasons.join("; ")}. See the individual lane rows and this job's summary.`);
             }
