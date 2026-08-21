@@ -293,6 +293,14 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
     timeline = [],
     mergeable_state = "unstable",
     sameRepo = true,
+    // Issue #274: per-issue-number { state, body } for the checklist-gate
+    // check. Defaults every referenced issue (the fixture PR body links #7)
+    // to open with no checklist at all, so every pre-existing test in this
+    // file exercises the REAL checklist path (a lookup that finds nothing to
+    // block on) rather than relying on that check's own fail-open handling
+    // for an undefined mock method.
+    issueChecklists = {},
+    prBody = "closes #7",
   }) {
     const calls = [];
     const commentsByIssue = new Map();
@@ -320,12 +328,17 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
                 ref: "main",
                 repo: { full_name: sameRepo ? "kgsmith19/hyperbolic-core" : "other/fork" },
               },
-              body: "closes #7",
+              body: prBody,
             },
           }),
           updateBranch: async () => ({}),
         },
         issues: {
+          get: async (a) => {
+            calls.push("issues.get:" + a.issue_number);
+            const fixture = issueChecklists[a.issue_number] || { state: "open", body: "" };
+            return { data: { number: a.issue_number, ...fixture } };
+          },
           listEventsForTimeline: async () => ({ data: timeline }),
           listComments: async (a) => ({ data: commentsByIssue.get(a && a.issue_number) || [] }),
           createComment: async (a) => {
@@ -480,6 +493,65 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
     /unexpected error/i,
     "an unstable-refusal must not be labelled an unexpected error"
   );
+
+  // ---- Issue #274: incomplete linked-Issue checklists block, visibly -----
+  //
+  // Unlike hold/draft/fork above (which skip arming without failing the
+  // check), an incomplete checklist must fail THIS job outright -- the
+  // owner asked to see it as a reason for failure, not a silent arm-skip.
+
+  m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: "- [ ] one\n- [x] two" } } });
+  assert.ok(!m.calls.includes("ARM"), "an open Issue with an unchecked item must not arm");
+  assert.notEqual(m.failed, null, "an incomplete checklist must fail PR Gate, not just skip arming");
+  assert.match(m.failed || "", /checklist incomplete on #7/);
+  assert.match(m.failed || "", /#7 \(1 unchecked\)/, "the failure must say how many items remain unchecked");
+
+  m = await run({ gates: GREEN, issueChecklists: { 7: { state: "closed", body: "- [ ] one" } } });
+  assert.ok(m.calls.includes("ARM"), "a CLOSED Issue is exempt regardless of unchecked items -- covers superseded/not-planned work");
+  assert.equal(m.failed, null);
+
+  m = await run({
+    gates: GREEN,
+    prBody: "Closes #7\nFixes #9",
+    issueChecklists: {
+      7: { state: "open", body: "- [x] done" },
+      9: { state: "open", body: "- [ ] not done" },
+    },
+  });
+  assert.ok(!m.calls.includes("ARM"), "ALL linked Issues must be complete -- one incomplete Issue among several still blocks");
+  assert.match(m.failed || "", /#9 \(1 unchecked\)/, "the failure must name the incomplete Issue and how many items remain unchecked");
+  assert.doesNotMatch(m.failed || "", /#7/, "a complete Issue must not be named as a blocker");
+
+  const checklistOverride = [
+    { event: "labeled", label: { name: "owner:allow-incomplete-issue" }, actor: { login: "kgsmith19" } },
+  ];
+  m = await run({
+    gates: GREEN,
+    labels: [{ name: "owner:allow-incomplete-issue" }],
+    timeline: checklistOverride,
+    issueChecklists: { 7: { state: "open", body: "- [ ] one" } },
+  });
+  assert.ok(m.calls.includes("ARM"), "an owner-authorized override label must un-block an incomplete checklist");
+  assert.equal(m.failed, null);
+
+  const forgedChecklistOverride = [
+    { event: "labeled", label: { name: "owner:allow-incomplete-issue" }, actor: { login: "not-the-owner" } },
+  ];
+  m = await run({
+    gates: GREEN,
+    labels: [{ name: "owner:allow-incomplete-issue" }],
+    timeline: forgedChecklistOverride,
+    issueChecklists: { 7: { state: "open", body: "- [ ] one" } },
+  });
+  assert.ok(
+    m.calls.includes("removeLabel:owner:allow-incomplete-issue"),
+    "an override label without owner provenance must be removed"
+  );
+  assert.ok(!m.calls.includes("ARM"), "a forged override must not un-block an incomplete checklist");
+
+  m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: "no checklist here at all" } } });
+  assert.ok(m.calls.includes("ARM"), "an Issue with no checklist items is not incomplete -- nothing to check");
+  assert.equal(m.failed, null);
 
   // ---- fail CLOSED when the needs payload says nothing ------------------
   //
