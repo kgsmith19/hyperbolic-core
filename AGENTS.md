@@ -461,7 +461,13 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   documented exception to `GITHUB_TOKEN`'s recursion prevention, needing no PAT or long-lived
   credential beyond the agent's own model key — which fixes the finding, pushes, and lets the
   gates re-run, or rebuts it in the same comment thread, argued from the work item, this standard,
-  and the diff, objectively and never from taste.
+  and the diff, objectively and never from taste. A comment-only reply pushes no commit, so
+  `pull_request:synchronize` never fires to retrigger `AI Review` on its own; `dev-agent-dispatch.yml`'s
+  own last step detects that its dispatched head is still current at the end of its run and fires a
+  second `repository_dispatch` (`llm-review-recheck.yml`), the same documented exception, which
+  re-runs the identical `verify-llm-review` composite action `AI Review` uses — one source of
+  review logic across both trigger paths — so a rebuttal or a deferral proposal gets scored without
+  waiting for an unrelated commit to happen to land.
 - After a configurable number of unresolved rounds (`vars.LLM_REVIEW_ESCALATE_AFTER`, default 3)
   with the gate still red, the comment tags `@kgsmith19` once and states the unresolved
   disagreement plainly — the documented rare escape hatch, not the normal path. The same

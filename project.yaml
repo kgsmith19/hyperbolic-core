@@ -214,6 +214,16 @@ ci:
     DEV_GITHUB_APP_ID / DEV_GITHUB_APP_PRIVATE_KEY — until provisioned, the
     dialogue workflow still posts findings and escalates to the owner
     immediately rather than waiting on a fixer that can never start.
+    .github/workflows/llm-review-recheck.yml (on: repository_dispatch, fired
+    by dev-agent-dispatch.yml's own last step when its dispatched head is
+    still current at the end of its run — i.e. the agent replied without
+    pushing a commit, so pull_request:synchronize never fired on its own)
+    re-verifies the PR hasn't moved on again and, if not, re-runs the exact
+    same verify-llm-review composite action AI Review uses — one source of
+    review logic across every trigger path. Same trust shape as AI Review
+    regardless of path: contents: read, pull-requests: read, id-token: write,
+    never a write token. No owner-provisioned prerequisites beyond what AI
+    Review itself already needs — it authenticates identically.
 
 vendors:
   # Full detail (auth, secret paths, cost, rotation) lives in

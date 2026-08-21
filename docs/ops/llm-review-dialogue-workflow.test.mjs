@@ -1,26 +1,32 @@
 // Structural + behavioral assertions over the LLM Review dialogue machinery:
 // .github/workflows/llm-review-dialogue.yml, .github/workflows/dev-agent-dispatch.yml,
-// and the artifact-staging steps in .github/actions/verify-llm-review/action.yml.
+// .github/workflows/llm-review-recheck.yml, and the artifact-staging steps in
+// .github/actions/verify-llm-review/action.yml.
 //
 // Issue #231. This closes the gap AGENTS.md used to name explicitly:
 // "Posting findings into the PR discussion itself, with a round counter and
 // owner escalation after repeated unresolved rounds ... is tracked
 // separately and is not yet implemented." Three invariants make this a
-// three-workflow design rather than one, and getting any of them wrong is a
+// multi-workflow design rather than one, and getting any of them wrong is a
 // security bug, not a style issue:
 //
-//   1. ai-review (pr-verify.yml) executes pull-request-authored code while
-//      holding a provider credential, so it must NEVER hold a token that
-//      can write to the pull request -- unaffected by it also being a
-//      mandatory needs: dependency of PR Gate (#232): "required in
-//      substance" says nothing about which job is safe to trust with write
-//      access.
+//   1. ai-review (pr-verify.yml) and llm-review-recheck.yml both execute
+//      pull-request-authored code while holding a provider credential, so
+//      neither may EVER hold a token that can write to the pull request --
+//      unaffected by ai-review also being a mandatory needs: dependency of
+//      PR Gate (#232): "required in substance" says nothing about which job
+//      is safe to trust with write access.
 //   2. The posting job (llm-review-dialogue.yml) holds pull-requests: write,
 //      so it must NEVER check out or execute repository content -- same
 //      discipline as pr-verify.yml's own "PR Gate".
-//   3. Neither new workflow may add a pull-request check row -- workflow_run
-//      and repository_dispatch report none, which is exactly why they were
-//      chosen over a new job in pr-verify.yml.
+//   3. No new workflow may add a pull-request check row -- workflow_run and
+//      repository_dispatch report none, which is exactly why they were
+//      chosen over a new job in pr-verify.yml. llm-review-recheck.yml
+//      (Issue #262's follow-on slice 8) reuses the same repository_dispatch
+//      mechanism dev-agent-dispatch.yml itself uses, for the same reason:
+//      a comment posted with GITHUB_TOKEN cannot retrigger a pull_request
+//      workflow, and repository_dispatch is one of the two documented
+//      exceptions.
 //
 // The behavioral tests extract the real embedded scripts and execute them
 // against a mocked GitHub API, for the same reason pr-verify-workflow.test.mjs
@@ -42,9 +48,11 @@ const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const dialoguePath = path.join(root, ".github/workflows/llm-review-dialogue.yml");
 const dispatchPath = path.join(root, ".github/workflows/dev-agent-dispatch.yml");
+const recheckPath = path.join(root, ".github/workflows/llm-review-recheck.yml");
 const reviewActionPath = path.join(root, ".github/actions/verify-llm-review/action.yml");
 const dialogueYaml = readFileSync(dialoguePath, "utf8");
 const dispatchYaml = readFileSync(dispatchPath, "utf8");
+const recheckYaml = readFileSync(recheckPath, "utf8");
 const reviewActionYaml = readFileSync(reviewActionPath, "utf8");
 
 // General "script: |" block extractor. Unlike pr-verify-workflow.test.mjs's
@@ -102,6 +110,25 @@ function loadDispatchPrCheckScript() {
   const marker = dispatchYaml.indexOf("id: pr\n");
   assert.ok(marker >= 0, "dev-agent-dispatch.yml: no `id: pr` step found");
   return new AsyncFunction("context", "core", "github", "process", extractScript(dispatchYaml, marker));
+}
+
+// dev-agent-dispatch.yml's LAST script: | block (Issue #262's follow-on
+// slice 8) -- fires llm-review-recheck for a PR the agent replied to
+// without pushing. Located by its own step name, same as every other
+// multi-block extractor in this file.
+function loadRecheckFireScript() {
+  const marker = dispatchYaml.indexOf("Recheck · Fire a recheck if the agent replied without pushing a commit");
+  assert.ok(marker >= 0, "dev-agent-dispatch.yml: recheck-fire step not found");
+  return new AsyncFunction("context", "core", "github", "process", extractScript(dispatchYaml, marker));
+}
+
+// llm-review-recheck.yml's own staleness guard -- the FIRST (and only)
+// script: | block in that file, mirroring loadDispatchPrCheckScript()'s
+// shape for dev-agent-dispatch.yml's own PR-check step.
+function loadRecheckContextScript() {
+  const marker = recheckYaml.indexOf("Context · Resolve the pull request, and stop if it moved on");
+  assert.ok(marker >= 0, "llm-review-recheck.yml: context step not found");
+  return new AsyncFunction("context", "core", "github", "process", extractScript(recheckYaml, marker));
 }
 
 // The conversation step is the SECOND script: | block in this file (after
@@ -205,12 +232,93 @@ test("dev-agent-dispatch.yml triggers on repository_dispatch only, and is the on
   assert.match(dispatchYaml, /contents:\s*write/);
 });
 
+// ---------------------------------------------------------------------------
+// Structural: llm-review-recheck.yml (Issue #262's follow-on slice 8) --
+// same trust shape as ai-review regardless of trigger path: it executes no
+// pull-request-authored code while holding write access, because it never
+// holds any write access at all.
+// ---------------------------------------------------------------------------
+
+test("llm-review-recheck.yml triggers on repository_dispatch(llm-review-recheck) only, never a PR event, and adds no PR check row", () => {
+  const onBlock = recheckYaml.slice(recheckYaml.indexOf("\non:"), recheckYaml.indexOf("\npermissions:"));
+  assert.match(onBlock, /repository_dispatch:/);
+  assert.match(onBlock, /llm-review-recheck/);
+  assert.doesNotMatch(onBlock, /pull_request(_target)?:/);
+});
+
+test("llm-review-recheck.yml never holds a write token anywhere -- same trust shape as ai-review, regardless of trigger path", () => {
+  for (const block of permissionsBlocks(recheckYaml)) {
+    assert.doesNotMatch(block, /pull-requests:\s*write/);
+    assert.doesNotMatch(block, /contents:\s*write/);
+    assert.doesNotMatch(block, /issues:\s*write/);
+  }
+  assert.match(recheckYaml, /id-token:\s*write/, "needs id-token: write for the Infisical OIDC exchange, same as ai-review");
+});
+
+test("llm-review-recheck.yml checks out only the exact dispatched head, and reuses the same verify-llm-review composite action ai-review does", () => {
+  assert.match(recheckYaml, /uses: actions\/checkout/);
+  assert.match(recheckYaml, /ref: \$\{\{ github\.event\.client_payload\.headSha \}\}/);
+  assert.match(recheckYaml, /uses: \.\/\.github\/actions\/verify-llm-review/);
+});
+
+// Extracts the `with:` block immediately following a verify-llm-review
+// `uses:` line into a plain key -> raw-expression-text map, using the same
+// indentation-bounded scan every other block extractor in this file uses.
+function extractVerifyLlmReviewInputs(yamlText) {
+  const usesIndex = yamlText.indexOf("uses: ./.github/actions/verify-llm-review");
+  assert.ok(usesIndex >= 0, "no verify-llm-review invocation found");
+  const withIndex = yamlText.indexOf("with:", usesIndex);
+  assert.ok(withIndex >= 0 && withIndex - usesIndex < 100, "no with: block immediately after the verify-llm-review uses: line");
+  const lines = yamlText.slice(withIndex + "with:".length).split("\n").slice(1);
+  const withIndent = lines[0].match(/^ */)[0].length;
+  const inputs = {};
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+    const indent = line.match(/^ */)[0].length;
+    if (indent < withIndent) break;
+    const pair = line.trim().match(/^([a-z_]+):\s*(.*)$/);
+    if (pair) inputs[pair[1]] = pair[2].trim();
+  }
+  return inputs;
+}
+
+// THE FIX for AI Review's blocking finding on this PR (round 1): acceptance
+// criterion 5 (Issue #268) requires the recheck job to invoke
+// verify-llm-review "with the same inputs ai-review passes" -- this was true
+// by construction but had no test proving it, so a future edit to either
+// job's `with:` block could silently drift the two apart with nothing to
+// catch it. pr_number/base_sha/head_sha necessarily use DIFFERENT
+// expressions in each trigger's own event context (a repository_dispatch
+// payload has no `pull_request` object to read from) -- everything else
+// must be byte-for-byte identical, since both invocations exist to
+// authenticate and configure the exact same reviewer.
+test("llm-review-recheck.yml invokes verify-llm-review with the exact same inputs ai-review passes, for every key not inherently trigger-specific", () => {
+  const prVerifyYaml = readFileSync(path.join(root, ".github/workflows/pr-verify.yml"), "utf8");
+  const aiReviewJobStart = prVerifyYaml.indexOf("\n  ai-review:");
+  const aiReviewJobEnd = prVerifyYaml.indexOf("\n  pr-gate:", aiReviewJobStart);
+  assert.ok(aiReviewJobStart >= 0 && aiReviewJobEnd > aiReviewJobStart, "pr-verify.yml: could not isolate the ai-review job block");
+  const aiReviewInputs = extractVerifyLlmReviewInputs(prVerifyYaml.slice(aiReviewJobStart, aiReviewJobEnd));
+  const recheckInputs = extractVerifyLlmReviewInputs(recheckYaml);
+
+  assert.deepEqual(
+    Object.keys(recheckInputs).sort(),
+    Object.keys(aiReviewInputs).sort(),
+    "the two invocations must pass the exact same set of input keys"
+  );
+
+  const contextSpecificKeys = new Set(["pr_number", "base_sha", "head_sha"]);
+  for (const key of Object.keys(aiReviewInputs)) {
+    if (contextSpecificKeys.has(key)) continue;
+    assert.equal(recheckInputs[key], aiReviewInputs[key], `input "${key}" must match ai-review's exactly`);
+  }
+});
+
 test("neither new workflow adds a second pull_request-triggered workflow to the repo", () => {
   // Reruns the same invariant docs/ops/pr-verify-workflow.test.mjs pins for
-  // pr-verify.yml, scoped to just the two files this Issue adds -- a second
-  // pull_request(_target) trigger anywhere defeats the whole point of using
-  // workflow_run/repository_dispatch to avoid a fifth check row.
-  for (const text of [dialogueYaml, dispatchYaml]) {
+  // pr-verify.yml, scoped to the files this Issue and its slice 8 follow-on
+  // add -- a second pull_request(_target) trigger anywhere defeats the whole
+  // point of using workflow_run/repository_dispatch to avoid another check row.
+  for (const text of [dialogueYaml, dispatchYaml, recheckYaml]) {
     const start = text.indexOf("\non:");
     const rest = text.slice(start + 1);
     const endMatch = /\n(?=[A-Za-z_-]+:)/.exec(rest.slice(3));
@@ -224,6 +332,7 @@ test("every action reference in the new workflows is pinned to a 40-hex SHA with
   for (const [name, text] of [
     ["llm-review-dialogue.yml", dialogueYaml],
     ["dev-agent-dispatch.yml", dispatchYaml],
+    ["llm-review-recheck.yml", recheckYaml],
   ]) {
     for (const match of text.matchAll(pattern)) {
       const ref = match[1];
@@ -837,6 +946,144 @@ test("dispatch: a closed PR at the right head still stands down -- there is noth
   await loadDispatchPrCheckScript()(context, core, github, proc);
 
   assert.equal(outputs.stale, "true");
+});
+
+// ---------------------------------------------------------------------------
+// Behavioral: dev-agent-dispatch.yml's last step -- firing llm-review-recheck
+// when the agent replied without pushing a commit (Issue #262's follow-on
+// slice 8).
+// ---------------------------------------------------------------------------
+
+// THE CORE NEW BEHAVIOR. Behavior protected: an unchanged head (the agent
+// only commented -- a rebuttal or an out-of-scope proposal) fires the
+// recheck dispatch with the PR's own current head. Defect caught: never
+// firing at all, which would leave a comment-only reply invisible to AI
+// Review forever, since pull_request:synchronize only fires on an actual push.
+test("recheck-fire: dispatches llm-review-recheck when the PR head is unchanged", async () => {
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const core = { info: () => {}, warning: () => {} };
+  const calls = [];
+  const github = {
+    rest: {
+      pulls: { get: async () => ({ data: { head: { sha: HEAD } } }) },
+      repos: { createDispatchEvent: async (args) => calls.push(args) },
+    },
+  };
+  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
+
+  await loadRecheckFireScript()(context, core, github, proc);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].event_type, "llm-review-recheck");
+  assert.deepEqual(calls[0].client_payload, { prNumber: 230, headSha: HEAD });
+});
+
+// Behavior protected: a head that moved during the dispatcher's own run (the
+// agent pushed a commit) skips the recheck entirely -- pull_request:synchronize
+// already retriggered AI Review on the real pr-verify.yml path, so firing a
+// second, redundant recheck against a now-stale head would be pure waste.
+test("recheck-fire: does not dispatch when the PR head has moved -- the agent's own push already retriggers AI Review", async () => {
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const infos = [];
+  const core = { info: (message) => infos.push(message), warning: () => {} };
+  const calls = [];
+  const github = {
+    rest: {
+      pulls: { get: async () => ({ data: { head: { sha: "moved".padEnd(40, "0") } } }) },
+      repos: { createDispatchEvent: async (args) => calls.push(args) },
+    },
+  };
+  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
+
+  await loadRecheckFireScript()(context, core, github, proc);
+
+  assert.equal(calls.length, 0);
+  assert.ok(infos.some((message) => message.includes("Not firing a recheck")));
+});
+
+// Behavior protected: a dispatch failure warns rather than throwing --
+// this step runs after the agent's own reply already posted, so a transient
+// dispatch-API failure must not fail the whole job and hide that the reply
+// itself succeeded.
+test("recheck-fire: a dispatch failure warns instead of throwing", async () => {
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const warnings = [];
+  const core = { info: () => {}, warning: (message) => warnings.push(message) };
+  const github = {
+    rest: {
+      pulls: { get: async () => ({ data: { head: { sha: HEAD } } }) },
+      repos: {
+        createDispatchEvent: async () => {
+          throw new Error("simulated dispatch failure");
+        },
+      },
+    },
+  };
+  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
+
+  await loadRecheckFireScript()(context, core, github, proc);
+
+  assert.match(warnings[0], /simulated dispatch failure/);
+});
+
+// ---------------------------------------------------------------------------
+// Behavioral: llm-review-recheck.yml's own staleness guard -- the mirror
+// image of dev-agent-dispatch.yml's PR-check step, run a second time inside
+// the recheck job itself since the PR could have moved again in the gap
+// between the firing step above and this job actually starting.
+// ---------------------------------------------------------------------------
+
+test("recheck context: a PR that moved past the dispatched head stands down", async () => {
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const outputs = {};
+  const core = { setOutput: (key, value) => (outputs[key] = value), info: () => {} };
+  const github = {
+    rest: {
+      pulls: {
+        get: async () => ({ data: { number: 230, head: { sha: "moved".padEnd(40, "0") }, state: "open", base: { sha: "b".repeat(40) } } }),
+      },
+    },
+  };
+  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
+
+  await loadRecheckContextScript()(context, core, github, proc);
+
+  assert.equal(outputs.stale, "true");
+  assert.equal(outputs.base_sha, undefined);
+});
+
+test("recheck context: a closed PR at the right head still stands down -- there is nothing left to recheck", async () => {
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const outputs = {};
+  const core = { setOutput: (key, value) => (outputs[key] = value), info: () => {} };
+  const github = {
+    rest: {
+      pulls: { get: async () => ({ data: { number: 230, head: { sha: HEAD }, state: "closed", base: { sha: "b".repeat(40) } } }) },
+    },
+  };
+  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
+
+  await loadRecheckContextScript()(context, core, github, proc);
+
+  assert.equal(outputs.stale, "true");
+});
+
+test("recheck context: a still-current, still-open PR proceeds and exposes the base sha for verify-llm-review", async () => {
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const outputs = {};
+  const core = { setOutput: (key, value) => (outputs[key] = value), info: () => {} };
+  const baseSha = "b".repeat(40);
+  const github = {
+    rest: {
+      pulls: { get: async () => ({ data: { number: 230, head: { sha: HEAD }, state: "open", base: { sha: baseSha } } }) },
+    },
+  };
+  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
+
+  await loadRecheckContextScript()(context, core, github, proc);
+
+  assert.equal(outputs.stale, "false");
+  assert.equal(outputs.base_sha, baseSha);
 });
 
 // ---------------------------------------------------------------------------
