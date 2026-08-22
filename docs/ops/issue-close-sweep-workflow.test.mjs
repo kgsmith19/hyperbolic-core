@@ -117,6 +117,22 @@ function makeMocks({
   const stateByIssue = new Map(Object.entries(issuesByNumber).map(([k, v]) => [Number(k), v.state]));
 
   const github = {
+    // Real Octokit's github.paginate(method, args) drives `method` across
+    // every page and concatenates .data -- mirrored here (not stubbed to a
+    // single call) so a test can prove the real script's pagination call
+    // actually walks multiple pages instead of trusting page 1 alone.
+    paginate: async (method, args) => {
+      const perPage = args.per_page || 30;
+      let page = 1;
+      let all = [];
+      while (true) {
+        const { data } = await method({ ...args, page });
+        all = all.concat(data);
+        if (data.length < perPage) break;
+        page += 1;
+      }
+      return all;
+    },
     rest: {
       repos: {
         get: async (args) => {
@@ -133,7 +149,13 @@ function makeMocks({
           assert.equal(args.sort, "updated");
           assert.equal(args.direction, "desc");
           if (pullsListError) throw pullsListError;
-          return { data: pulls };
+          // Real per_page/page semantics, so a fixture with more than one
+          // page's worth of PRs proves github.paginate below actually
+          // fetches every page rather than trusting a single response.
+          const perPage = args.per_page || 30;
+          const page = args.page || 1;
+          const start = (page - 1) * perPage;
+          return { data: pulls.slice(start, start + perPage) };
         },
       },
       issues: {
@@ -246,6 +268,34 @@ test("issue-close-sweep: a PR merged outside the ~24h window is excluded from co
   });
 
   assert.ok(!m.calls.some((c) => c.startsWith("issues.get")), "a PR merged ~48h ago must be excluded by the window filter");
+});
+
+// Defect-sensitive: 130 closed PRs (more than one page at per_page: 100),
+// most of them old/irrelevant filler, with the one recently-merged,
+// closing-keyword PR sitting on page 2. A sweep that reads only page 1
+// (github.rest.pulls.list called directly, not paginated) would see 100
+// filler PRs, never see this one, and silently miss it.
+test("issue-close-sweep: a PR merged within the window is found even when it sits on the second page of closed PRs (pagination)", async () => {
+  const filler = Array.from({ length: 129 }, (_, i) => ({
+    number: 1000 + i,
+    merged_at: recentIso(60 * 24 * 30), // 30 days ago, well outside the window
+    body: "no closing keyword here",
+    base: { ref: "main" },
+  }));
+  const pulls = [
+    ...filler.slice(0, 99),
+    { number: 507, merged_at: recentIso(10), body: "closes #906", base: { ref: "main" } },
+    ...filler.slice(99),
+  ];
+  assert.equal(pulls.length, 130, "fixture must exceed one page (per_page: 100)");
+
+  const m = await run({
+    pulls,
+    issuesByNumber: { 906: { state: "open" } },
+  });
+
+  assert.ok(m.calls.filter((c) => c === "pulls.list").length >= 2, "must have fetched more than one page");
+  assert.ok(m.calls.includes("issues.update:906:closed:completed"), "the page-2 PR's linked Issue must still be closed");
 });
 
 test("issue-close-sweep: an API error for one Issue is logged and does not abort the run for the rest of the batch", async () => {

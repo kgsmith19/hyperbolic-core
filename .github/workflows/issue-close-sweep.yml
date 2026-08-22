@@ -147,7 +147,13 @@ jobs:
               const { data: repoData } = await github.rest.repos.get({ owner, repo });
               const defaultBranch = repoData.default_branch;
 
-              const { data: pulls } = await github.rest.pulls.list({
+              // Paginated, not a single page: a repository with more than
+              // 100 closed PRs since the last merge inside the window would
+              // otherwise silently drop PRs merged in that window once they
+              // fall past page 1, breaking the "scans PRs merged within
+              // roughly the last 24 hours" acceptance criterion for no
+              // reason a reader of this file could see.
+              const pulls = await github.paginate(github.rest.pulls.list, {
                 owner,
                 repo,
                 state: "closed",
