@@ -58,6 +58,10 @@ const reviewActionYaml = readFileSync(reviewActionPath, "utf8");
 const runbook = readFileSync(runbookPath, "utf8");
 
 test("runbook pins the reviewer and developer identities to their exact OIDC subject sets", () => {
+  // These are deliberately repository-specific, immutable GitHub OIDC IDs,
+  // captured by the live run linked in the runbook. A fork should fail this
+  // repository-policy test until its owner records that fork's own prefix;
+  // silently deriving names would weaken the rename-resistant trust lock.
   const immutablePrefix = "repo:kgsmith19@64936641/hyperbolic-core@1331401739:";
 
   assert.match(

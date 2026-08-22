@@ -137,6 +137,17 @@ signup, same as any other SaaS org. Everything after that is scriptable.
    non-PR subject above; the `pull_request` half is independently exercised
    by every provisioned `AI Review` job.
 
+   Sanitized excerpt from that run (the JWT itself was never logged):
+
+   ```text
+   Relevant OIDC claims:
+     "sub": "repo:kgsmith19@64936641/hyperbolic-core@1331401739:ref:refs/heads/main"
+     "aud": "https://github.com/kgsmith19"
+     "repository": "kgsmith19/hyperbolic-core"
+     "ref": "refs/heads/main"
+     "event_name": "workflow_run"
+   ```
+
    [`llm-review-dialogue.yml` run
    32545881404](https://github.com/kgsmith19/hyperbolic-core/actions/runs/32545881404)
    then successfully exchanged **both** the `review-gate` and `dev-agent`
