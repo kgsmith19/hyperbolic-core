@@ -1,0 +1,192 @@
+name: "Dev Agent Post"
+
+# Backstop for an interactive Claude Code session working in this repo as
+# the dev role: posts a PR/Issue comment under the dev App identity on
+# request, instead of the live session's own ambient GitHub credential --
+# which today resolves to the owner's own personal account, confirmed
+# directly on PR #282 (author_association: "OWNER" on every comment posted
+# that way). Issue #292 (Epic #286's slice F).
+#
+# WHY THIS EXISTS, SEPARATELY FROM dev-agent-dispatch.yml. That workflow
+# already mints and posts under the dev App identity, but only for its own
+# repository_dispatch wake from llm-review-dialogue.yml -- a CI-triggered
+# handoff. An interactive session driving "dev" work live has no such CI
+# event to piggyback on; it IS the human-facing loop. The real, structural
+# fix -- a dedicated bot identity connected to this Claude Code
+# environment's own connector -- is an account-level setting entirely
+# outside this repo (see AGENTS.md > Active agent roles, and Epic #286's
+# own manual-actions list). This workflow is the repo-side backstop that
+# works today regardless of whether that account-level fix has happened.
+#
+# NO continue-on-error ANYWHERE HERE -- the one deliberate difference from
+# llm-review-dialogue.yml's own reviewer-identity mint. That workflow's
+# github.token fallback is a real, correct outcome for a gate that only
+# DELIVERS findings someone else already computed; posting under the
+# generic identity there is strictly better than not posting at all. This
+# workflow's entire purpose IS the identity itself -- a silent fallback
+# here would silently reproduce the exact bug this whole Epic exists to
+# fix. If the identity cannot be minted, this job fails loudly and posts
+# nothing.
+#
+# WHY workflow_dispatch. It is the other documented exception (alongside
+# repository_dispatch) to GitHub's GITHUB_TOKEN recursion-prevention rule,
+# and the one an interactive session can trigger directly via the Actions
+# API on its own schedule, rather than in response to a machine-fired
+# event. Adds no PR/Issue check row, same reasoning as
+# dev-agent-dispatch.yml and llm-review-dialogue.yml.
+#
+# OWNER-PROVISIONED PREREQUISITES, identical to dev-agent-dispatch.yml's
+# own: vars.INFISICAL_DEV_IDENTITY_ID, vars.INFISICAL_PROJECT_SLUG, and
+# Infisical /dev/ (env prod): DEV_GITHUB_APP_ID, DEV_GITHUB_APP_PRIVATE_KEY.
+# Until those exist, this workflow fails closed with a named error rather
+# than posting under any other identity.
+on:
+  workflow_dispatch:
+    inputs:
+      issue_or_pr_number:
+        description: "Issue or pull request number to comment on"
+        required: true
+      body:
+        description: "Comment body (markdown). The role/provider/model footer is appended automatically -- do not include your own."
+        required: true
+      comment_id:
+        description: "Optional: an existing comment ID to update instead of posting a new one."
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    name: "Post as the dev App identity"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # No continue-on-error -- see the header comment. A failed pull here
+      # must fail the whole job, never fall through to an unauthenticated
+      # posting attempt.
+      - name: Setup · Pull the dev App's credentials from Infisical
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_DEV_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/dev/"
+          domain: https://app.infisical.com
+
+      # Reads agent-roles.yaml from the DEFAULT branch -- this workflow
+      # never checks out repository content at all, so there is no PR
+      # branch to prefer over it anyway, but the principle is the same one
+      # dev-agent-dispatch.yml's own preflight states: role assignment is
+      # an owner decision, read from the CODEOWNERS-gated copy only.
+      - name: Preflight · Resolve the dev provider/model and confirm the App identity is provisioned
+        id: preflight
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          APP_ID: ${{ env.DEV_GITHUB_APP_ID }}
+          APP_PRIVATE_KEY: ${{ env.DEV_GITHUB_APP_PRIVATE_KEY }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            let provider = null;
+            let model = null;
+            try {
+              const { data } = await github.rest.repos.getContent({ owner, repo, path: "agent-roles.yaml" });
+              const content = Buffer.from(data.content, data.encoding).toString("utf8");
+              const providerMatch = /\bdev:\s*\n(?:[^\n]*\n)*?\s*provider:\s*(\S+)/.exec(content);
+              provider = providerMatch ? providerMatch[1].trim().toLowerCase() : null;
+              const modelMatch = /\bdev:\s*\n(?:[^\n]*\n)*?\s*model:\s*(\S+)/.exec(content);
+              model = modelMatch ? modelMatch[1].trim() : null;
+            } catch (error) {
+              core.setFailed(`Could not read agent-roles.yaml from the default branch: ${error.message}`);
+              return;
+            }
+            if (provider === null) {
+              core.setFailed("Could not find dev.provider in agent-roles.yaml -- refusing to guess which vendor is posting.");
+              return;
+            }
+            core.setOutput("provider", provider);
+            core.setOutput("model", model);
+
+            // Named separately from a hypothetical model-credential check:
+            // this workflow never runs a model itself, only posts on an
+            // already-running session's behalf, so the App identity is the
+            // only credential it needs to confirm.
+            if (!process.env.APP_ID || !process.env.APP_PRIVATE_KEY) {
+              core.setFailed(
+                "The dev App's posting identity is not provisioned. Add BOTH DEV_GITHUB_APP_ID and " +
+                  "DEV_GITHUB_APP_PRIVATE_KEY to Infisical's /dev/ secret path (env prod) -- see Issue #292. " +
+                  "This workflow has no fallback identity by design; nothing is posted until this is fixed."
+              );
+              return;
+            }
+            core.info(`Dev provider resolved: ${provider} (model ${model}). App identity present.`);
+
+      # No continue-on-error here either -- same reasoning as the Infisical
+      # pull above.
+      - name: Setup · Mint the dev App's installation token
+        id: dev-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ env.DEV_GITHUB_APP_ID }}
+          private-key: ${{ env.DEV_GITHUB_APP_PRIVATE_KEY }}
+          permission-issues: write
+          permission-pull-requests: write
+
+      - name: Post · Comment under the dev App identity
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          ISSUE_OR_PR_NUMBER: ${{ inputs.issue_or_pr_number }}
+          COMMENT_ID: ${{ inputs.comment_id }}
+          BODY: ${{ inputs.body }}
+          PROVIDER: ${{ steps.preflight.outputs.provider }}
+          MODEL: ${{ steps.preflight.outputs.model }}
+        with:
+          github-token: ${{ steps.dev-app-token.outputs.token }}
+          script: |
+            const { owner, repo } = context.repo;
+
+            // Same fence-marker defusal llm-review-dialogue.yml already
+            // applies to model-authored content -- here the untrusted input
+            // is operator/session-pasted PR or Issue content, which may
+            // itself carry forged mention/issue-reference text. Duplicated
+            // rather than imported: no import mechanism exists between two
+            // workflow files' embedded scripts (the same reasoning
+            // dev-agent-dispatch.yml's own duplicated agent-roles.yaml
+            // parse already documents).
+            function neutralize(value, cap = 60000) {
+              let text = typeof value === "string" ? value : String(value ?? "");
+              text = text.replace(/\r/g, "");
+              if (text.length > cap) text = `${text.slice(0, cap)}\n…[truncated]`;
+              text = text.replace(/@([A-Za-z0-9-])/g, "@​$1");
+              text = text.replace(/(^|[^\w`])#(\d)/g, "$1#​$2");
+              return text;
+            }
+
+            const issueNumber = Number(process.env.ISSUE_OR_PR_NUMBER);
+            if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+              core.setFailed(`issue_or_pr_number must be a positive integer, got: ${JSON.stringify(process.env.ISSUE_OR_PR_NUMBER)}`);
+              return;
+            }
+
+            const footer = `_Dev Agent — role \`dev\` · provider \`${process.env.PROVIDER}\` · model \`${process.env.MODEL}\`_`;
+            const body = [neutralize(process.env.BODY), "", footer].join("\n");
+
+            // issues.createComment/updateComment both work for a PR
+            // conversation as well as a plain Issue -- a pull request IS an
+            // Issue for commenting purposes, matching this repo's existing
+            // convention (llm-review-dialogue.yml's own managed comment
+            // uses the same API for both).
+            const commentId = process.env.COMMENT_ID ? Number(process.env.COMMENT_ID) : null;
+            if (commentId !== null) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: commentId, body });
+              core.info(`Updated comment ${commentId} on #${issueNumber} under the dev App identity.`);
+            } else {
+              const { data: comment } = await github.rest.issues.createComment({ owner, repo, issue_number: issueNumber, body });
+              core.info(`Posted ${comment.html_url} under the dev App identity.`);
+            }

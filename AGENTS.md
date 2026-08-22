@@ -151,6 +151,14 @@ anything else in this session.
   or a malformed file blocks every PR, not just one that touches this file. This is the first of
   three independent checks of the same constraint; the dev dispatcher and the reviewer gate each
   re-verify it too, once those slices land.
+- **An interactive session driving the `dev` role in this repo posts PR/Issue comments via
+  `.github/workflows/dev-agent-post.yml` (`workflow_dispatch`), not directly through its own
+  ambient GitHub credential.** That credential resolves to whichever account is connected to the
+  session's own environment — today, absent a dedicated bot identity connected there, that is the
+  owner's personal account — and dispatching this workflow instead posts under the dev App's own
+  identity, with the same role/provider/model footer `dev-agent-dispatch.yml`'s CI-triggered
+  comments already carry. Same caveat as every rule in this section: an instruction, not a
+  technical lock — nothing stops a session from posting directly regardless.
 
 ## Provider-neutral roles
 
