@@ -170,6 +170,8 @@ jobs:
         uses: ./.github/actions/verify-repo-policy
         with:
           base_sha: ${{ github.event.pull_request.base.sha }}
+          review_provider: ${{ vars.REVIEW_PROVIDER }}
+          review_model: ${{ vars.REVIEW_MODEL }}
 
       - name: Standards · PR description
         uses: ./.github/actions/verify-pr-description

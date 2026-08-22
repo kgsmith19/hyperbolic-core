@@ -19,6 +19,19 @@ inputs:
     description: Base commit SHA to diff against for the whitespace check. Empty skips that one check only.
     required: false
     default: ""
+  review_provider:
+    description: >-
+      Live vars.REVIEW_PROVIDER, cross-checked against agent-roles.yaml's
+      review.provider (Issue #289). Empty skips that one check only -- e.g.
+      before the repo variable is first provisioned.
+    required: false
+    default: ""
+  review_model:
+    description: >-
+      Live vars.REVIEW_MODEL, cross-checked against agent-roles.yaml's
+      review.model (Issue #289). Empty skips that one check only.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -129,9 +142,13 @@ runs:
     # trust a single check alone.
     - name: Policy · Confirm agent-roles.yaml is valid and dev/review providers differ
       shell: bash
+      env:
+        LIVE_REVIEW_PROVIDER: ${{ inputs.review_provider }}
+        LIVE_REVIEW_MODEL: ${{ inputs.review_model }}
       run: |
         set -euo pipefail
         python3 <<'PYEOF'
+        import os
         import sys
         import yaml
 
@@ -189,6 +206,32 @@ runs:
                 f"dev.provider and review.provider are both {providers['dev']!r}. "
                 "They must never be equal -- see AGENTS.md > Active agent roles."
             )
+
+        # Issue #289: agent-roles.yaml declares review.provider/review.model
+        # as this repo's stated source of truth, but nothing previously
+        # confirmed they match vars.REVIEW_PROVIDER/REVIEW_MODEL -- the
+        # values that actually drive the live review call in
+        # verify-llm-review, and what the new AI Review footer states. If
+        # they drift, the footer would state a provider/model that isn't
+        # the one that actually ran. Empty inputs (the var not provisioned
+        # yet) skip this check rather than failing closed on nothing to
+        # compare against -- matching this action's own base_sha input.
+        live_review_provider = os.environ.get("LIVE_REVIEW_PROVIDER", "").strip()
+        live_review_model = os.environ.get("LIVE_REVIEW_MODEL", "").strip()
+        if live_review_provider:
+            declared = providers.get("review")
+            if declared is not None and declared != live_review_provider.strip().lower():
+                errors.append(
+                    f"agent-roles.yaml's review.provider ({declared!r}) does not match the live "
+                    f"vars.REVIEW_PROVIDER ({live_review_provider!r}) that actually drives the review call."
+                )
+        if live_review_model:
+            declared_model = data.get("review", {}).get("model") if isinstance(data.get("review"), dict) else None
+            if declared_model is not None and declared_model.strip() != live_review_model.strip():
+                errors.append(
+                    f"agent-roles.yaml's review.model ({declared_model!r}) does not match the live "
+                    f"vars.REVIEW_MODEL ({live_review_model!r}) that actually drives the review call."
+                )
 
         if errors:
             print("agent-roles.yaml failed validation:", file=sys.stderr)

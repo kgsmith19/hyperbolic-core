@@ -285,18 +285,34 @@ jobs:
             // dev-agent-dispatch.yml's own preflight step rather than shared:
             // there is no import mechanism between two workflow files' embedded
             // scripts, and the parse is eight lines against one fixed shape.
-            async function readDevProvider() {
+            //
+            // Also the source for the review.provider/review.model footer
+            // below (Issue #289) -- one fetch, two sibling regexes, so
+            // reading the footer's own values costs no additional API call.
+            // verify-repo-policy's own agent-roles.yaml validation (extended
+            // in the same Issue) is what keeps these two fields honest
+            // against the vars.REVIEW_PROVIDER/REVIEW_MODEL that actually
+            // drive the live review call -- this job trusts that gate rather
+            // than re-deriving the live values itself.
+            async function readAgentRoles() {
               try {
                 const { data } = await github.rest.repos.getContent({ owner, repo, path: "agent-roles.yaml" });
                 const content = Buffer.from(data.content, data.encoding).toString("utf8");
-                const match = /\bdev:\s*\n(?:[^\n]*\n)*?\s*provider:\s*(\S+)/.exec(content);
-                return match ? match[1].trim().toLowerCase() : null;
+                const devProviderMatch = /\bdev:\s*\n(?:[^\n]*\n)*?\s*provider:\s*(\S+)/.exec(content);
+                const reviewProviderMatch = /\breview:\s*\n(?:[^\n]*\n)*?\s*provider:\s*(\S+)/.exec(content);
+                const reviewModelMatch = /\breview:\s*\n(?:[^\n]*\n)*?\s*model:\s*(\S+)/.exec(content);
+                return {
+                  devProvider: devProviderMatch ? devProviderMatch[1].trim().toLowerCase() : null,
+                  reviewProvider: reviewProviderMatch ? reviewProviderMatch[1].trim().toLowerCase() : null,
+                  reviewModel: reviewModelMatch ? reviewModelMatch[1].trim() : null,
+                };
               } catch (error) {
                 core.warning(`Could not read agent-roles.yaml: ${error.message}`);
-                return null;
+                return { devProvider: null, reviewProvider: null, reviewModel: null };
               }
             }
-            const devProvider = await readDevProvider();
+            const { devProvider, reviewProvider, reviewModel } = await readAgentRoles();
+            const reviewFooter = `_AI Review — role \`review\` · provider \`${reviewProvider ?? "unknown"}\` · model \`${reviewModel ?? "unknown"}\`_`;
 
             // dev-agent-dispatch.yml only implements anthropic today (its own
             // header comment explains why openai/antigravity fail closed
@@ -619,6 +635,8 @@ jobs:
                     `**Requested change.** ${neutralize(finding.requestedChange, 1200)}`,
                     "",
                     `**Cites.** ${neutralize(finding.citation, 300)}`,
+                    "",
+                    reviewFooter,
                   ]
                     .filter((line) => line !== "")
                     .join("\n"),
@@ -751,6 +769,8 @@ jobs:
                 ""
               );
             }
+
+            lines.push(reviewFooter, "");
 
             const body = lines.join("\n");
 
