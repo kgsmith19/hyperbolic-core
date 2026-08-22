@@ -281,10 +281,11 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
   const prGate = (await import(`file://${modulePath}`)).default;
 
   // Issue #283: a successful arm now polls pulls.get on a real 5-second
-  // interval, up to 24 times. None of the outcomes this test cares about
-  // depend on wall-clock time, so every poll resolves on the next
-  // microtask instead of waiting out real time (24 x 5s per successful
-  // arm would otherwise make this test take minutes).
+  // interval, up to 3 times (a deliberately short 15-second window -- see
+  // pr-verify.yml's own comment above pollForMergeAfterArming for why).
+  // None of the outcomes this test cares about depend on wall-clock time,
+  // so every poll resolves on the next microtask instead of waiting out
+  // real time.
   const originalSetTimeout = global.setTimeout;
   global.setTimeout = (fn) => {
     fn();
@@ -917,9 +918,12 @@ test("PR Gate: post-arm poll observes the merge mid-window and runs the #267 fal
     return 0;
   };
   try {
-    // Poll attempts 1 and 2 report the PR still unmerged; attempt 3 reports
-    // it merged, carrying the same linked-issue body the fallback needs.
-    const MERGE_ON_ATTEMPT = 3;
+    // Poll attempt 1 reports the PR still unmerged; attempt 2 reports it
+    // merged, carrying the same linked-issue body the fallback needs. With
+    // POLL_MAX_ATTEMPTS now 3, attempt 2 is clearly mid-window (neither the
+    // first nor the last attempt), distinct from the window-expires case
+    // below.
+    const MERGE_ON_ATTEMPT = 2;
     const m = buildPostArmPollMocks({
       pullsGetAfterArm: (attempt, initialPr) =>
         attempt < MERGE_ON_ATTEMPT
@@ -960,7 +964,7 @@ test("PR Gate: post-arm poll gives up gracefully once its window expires without
     return 0;
   };
   try {
-    const POLL_MAX_ATTEMPTS = 24;
+    const POLL_MAX_ATTEMPTS = 3;
     const m = buildPostArmPollMocks({
       pullsGetAfterArm: () => ({ number: 42, merged: false }),
     });
@@ -971,7 +975,7 @@ test("PR Gate: post-arm poll gives up gracefully once its window expires without
     assert.equal(
       m.pullsGetCalls,
       1 + POLL_MAX_ATTEMPTS,
-      "the poll loop must terminate at its bounded attempt count (24), not run forever"
+      "the poll loop must terminate at its bounded attempt count (3), not run forever"
     );
     assert.ok(
       !m.calls.some((c) => c.startsWith("issues.update")),

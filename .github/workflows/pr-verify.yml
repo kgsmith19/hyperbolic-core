@@ -902,14 +902,46 @@ jobs:
             // GITHUB_TOKEN (recursion prevention), and enabling auto-merge
             // above does exactly that -- so the #267 fallback's own `closed`
             // event never runs for the one scenario it exists to cover (an
-            // auto-merge-completed PR). The fix stays inside the SAME run
-            // that armed the merge: poll briefly for GitHub to report the
-            // merge complete, then call the existing fallback directly --
-            // sidestepping the recursion rule entirely, since no new run is
-            // triggered. If the window expires first, the scheduled sweep
-            // (issue-close-sweep.yml) is the backstop.
+            // auto-merge-completed PR).
+            //
+            // This poll is deliberately short (15 seconds, not minutes) and
+            // is NOT what resolves that recursion problem for the merge THIS
+            // job's own armAutoMerge call just armed -- structurally, it
+            // cannot be. `pr-gate` is the SOLE required status check in this
+            // repo's branch ruleset (see AGENTS.md's PR Gate table), and a
+            // GitHub Actions check-run only transitions to `completed` once
+            // every step of the job has finished running. Native auto-merge
+            // only completes the actual merge once every required check
+            // reports `completed`+`success`. So the merge armed a few lines
+            // above cannot complete until THIS job's own check-run reports
+            // done -- which requires this poll (and the rest of the job) to
+            // finish first. A poll waiting on an event gated on its own
+            // completion can never observe that event.
+            //
+            // This is confirmed against this repo's own history, not just
+            // theory: PR #280's `PR Gate` job (run 32458751359) completed at
+            // 2026-08-21T07:32:46Z; the PR's actual merge happened at
+            // 2026-08-21T07:32:49Z -- three seconds AFTER the job's own
+            // check concluded, not during it. PR #285 shows the same
+            // pattern (armed, then merged seconds after the job had already
+            // finished). The merge always follows job completion, never
+            // happens while the job -- including this poll -- is still
+            // running.
+            //
+            // So what is this poll actually for? Cheap insurance for the
+            // rare case a DIFFERENT event completes the merge while this job
+            // happens to still be running -- e.g. the owner manually
+            // completing the merge through the GitHub UI concurrently with
+            // this run. It is not, and cannot be, the primary fix for the
+            // auto-merge this job itself just armed. Do NOT "fix" this
+            // window back to something long thinking the short window is a
+            // bug -- read this comment and PR #280's timing evidence first.
+            // The documented primary mechanism is the scheduled sweep
+            // (issue-close-sweep.yml, every 15 minutes), which runs
+            // independently of this job's own lifecycle and so is not
+            // subject to the same structural gate.
             const POLL_INTERVAL_MS = 5000;
-            const POLL_MAX_ATTEMPTS = 24; // 24 * 5s = 2 minutes.
+            const POLL_MAX_ATTEMPTS = 3; // 3 * 5s = 15 seconds.
 
             async function pollForMergeAfterArming(pr, eligible) {
               for (let attempt = 1; attempt <= POLL_MAX_ATTEMPTS; attempt++) {
@@ -937,7 +969,7 @@ jobs:
                 }
               }
               summaryLines.push(
-                "- Issue close fallback: post-arm poll window (2 minutes) expired without observing a merge; the scheduled sweep is the backstop."
+                "- Issue close fallback: post-arm poll window (15 seconds) expired without observing a merge; the scheduled sweep is the documented primary mechanism."
               );
             }
 
