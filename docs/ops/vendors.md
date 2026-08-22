@@ -90,7 +90,8 @@ identity's blast radius is that pipeline's secrets alone. Live paths:
 | `/platform/` | Platform migrations (`SUPABASE_DB_URL`, table-owner privileged) |
 | `/toolbelt/` | Platform backup |
 | `/platform/lifeos-deploy/` | LifeOS deploy, LifeOS backup, LifeOS ops |
-| `/review/` | LLM Review gate |
+| `/review/` | LLM Review gate, LLM Review Dialogue |
+| `/dev/` | Dev Agent Dispatch |
 | `/platform/backup/` *(planned, #166)* | restic → Storage Box credentials |
 | `/platform/edge/` *(pipeline built #169, awaiting owner's tunnel token)* | Cloudflare tunnel token |
 
@@ -197,6 +198,8 @@ public half, keep the old private key offline until every artifact encrypted und
 | LifeOS `DATABASE_URL` | `/platform/lifeos-deploy/` | Supabase dashboard; update the one path |
 | Brain Anthropic API key | `/brain/` | Anthropic console; update the one path |
 | LLM Review provider keys | `/review/` | Provider console; update the one path |
+| Review GitHub App credentials | `/review/` | GitHub App settings; regenerate private key, update the one path |
+| Dev GitHub App credentials | `/dev/` | GitHub App settings; regenerate private key, update the one path |
 | age recipient keypairs (×2) | repo vars (public) + owner-held (private) | `age-keygen`; retire old private key after retention window |
 | SSH deploy keys (×4, platform pipeline only) | Infisical, per-pipeline paths | `bootstrap-vps.sh`; planned unification onto keyless Tailscale SSH (not yet scheduled) |
 | restic repository password + SFTP key *(pipeline built #164/#166/#167, awaiting Storage Box)* | `/platform/backup/` | Storage Box console + `restic key` |

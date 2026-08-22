@@ -82,11 +82,11 @@ signup, same as any other SaaS org. Everything after that is scriptable.
 3. Create one GitHub-OIDC machine identity per pipeline that needs one
    (`shell-deploy`, `llm-handler-deploy`, `brain-deploy`, `broker-deploy`,
    `platform-migrations`, `platform-backup`, `lifeos-backend-deploy`,
-   `lifeos-ui-deploy`, `lifeos-backup`, `ops-edge`, `ops-serve-apply`, and
-   `review-gate`), each scoped by ACL to read only its own secret path
-   below -- confirm that scoping in the console; it cannot be verified from
-   this repository (see "Operator evidence still required" under Brain
-   deployment).
+   `lifeos-ui-deploy`, `lifeos-backup`, `ops-edge`, `ops-serve-apply`,
+   `review-gate`, and `dev-agent`), each scoped by ACL to read only its own
+   secret path below -- confirm that scoping in the console; it cannot be
+   verified from this repository (see "Operator evidence still required"
+   under Brain deployment).
 
    Every identity uses the same three connection values:
 
@@ -115,17 +115,42 @@ signup, same as any other SaaS org. Everything after that is scriptable.
    | --- | --- | --- |
    | declares `environment: <name>` | `environment:<name>` | `...:environment:platform-migrations-production` |
    | is `pull_request`-triggered with no environment | `pull_request` | `...:pull_request` |
+   | is `workflow_run`-triggered with no environment | `workflow_run` | `...:workflow_run` |
+   | is `repository_dispatch`-triggered with no environment | `repository_dispatch` | `...:repository_dispatch` |
 
    Every OIDC job in this repository takes the first row -- each declares its
-   own `<pipeline>-production` environment -- **except** the `ai-review` job
-   (displayed as check `AI Review`) in `pr-verify.yml`, which takes the
-   second. Do not "fix" that asymmetry by
-   giving the review gate an environment: an environment on a
-   `pull_request`-triggered job inherits that environment's protection rules,
-   so a required-reviewer rule would stall every pull request awaiting manual
-   approval before the gate could run, and a deployment-branch policy pinned
-   to `main` would block pull-request branches outright. The review gate is
-   not prod-touching and deliberately carries none of that machinery.
+   own `<pipeline>-production` environment -- **except** two identities that
+   are deliberately shared across more than one trigger shape, and so need
+   more than one trusted subject:
+
+   - **`review-gate`** is exchanged both by the `ai-review` job (displayed as
+     check `AI Review`) in `pr-verify.yml`, which is `pull_request`-triggered
+     (second row), and by `llm-review-dialogue.yml`'s own Infisical pull for
+     the reviewer's GitHub App credential, which is `workflow_run`-triggered
+     (third row) -- a different subject shape from the first. **Not yet
+     empirically confirmed**: this identity's trust config may only cover
+     `pull_request` today, in which case `llm-review-dialogue.yml`'s pull
+     would silently fail its OIDC exchange (harmless in effect, since that
+     step's own `continue-on-error: true` degrades it to posting as
+     `github-actions[bot]` rather than failing the job -- see root
+     `AGENTS.md`'s "Independent LLM Review" section) and never actually mint
+     the reviewer's own identity. Verify the exact subject a real
+     `workflow_run` job presents (Infisical's own auth log for a live run is
+     the reliable source) and add it as a second trusted subject if missing.
+   - **`dev-agent`** is exchanged by `dev-agent-dispatch.yml`, which is
+     `repository_dispatch`-triggered (fourth row). If a `dev-agent-post.yml`
+     backstop workflow is ever added (`workflow_dispatch`-triggered), it
+     needs its own trusted subject too -- `workflow_dispatch` is not listed
+     above because no job in this repository uses it yet; add that row here
+     the day one does, with its subject verified the same empirical way.
+
+   Do not "fix" the review gate's asymmetry by giving either of its jobs an
+   `environment:`: an environment on a `pull_request`- or `workflow_run`-
+   triggered job inherits that environment's protection rules, so a
+   required-reviewer rule would stall the job awaiting manual approval, and a
+   deployment-branch policy pinned to `main` would block pull-request
+   branches outright. Neither the review gate nor the dev agent dispatcher is
+   prod-touching, and both deliberately carry none of that machinery.
 
    Note also that `llm-review.yml`'s own `push`/`workflow_dispatch` triggers
    pass no PR number, and the composite action guards its Infisical step on
@@ -143,7 +168,8 @@ signup, same as any other SaaS org. Everything after that is scriptable.
    | `/brain/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `BRAIN_DEPLOY_SSH_KEY` (from the VPS script's output), `BRAIN_ANTHROPIC_API_KEY` |
    | `/platform/` | `SUPABASE_DB_URL` (table-owner Postgres connection string -- read by `platform-migrations.yml`, which sets `secret-path: "/platform/"`) |
    | `/toolbelt/` | `SUPABASE_DB_URL` (same connection string, a second copy -- read by `platform-backup.yml`, which sets `secret-path: "/toolbelt/"`; the two pipelines deliberately read different paths so their identities' grants stay disjoint) |
-   | `/review/` | Exactly one of `REVIEW_ANTHROPIC_API_KEY` / `REVIEW_OPENAI_API_KEY` / `REVIEW_GEMINI_API_KEY` -- the reviewer credential for the LLM Review gate (#128). Only the key matching `vars.REVIEW_PROVIDER` is read; the others need not exist. Because `packages/review/src/config.ts` refuses to run when `REVIEW_PROVIDER` equals `REVIEW_BUILDER_PROVIDER` (default `anthropic`), the reviewer family here must be `openai` or `gemini` -- provider separation on R2/R3 work is enforced in code, not by convention. Kept off `/platform/llm-handler/` deliberately: that path's `LLM_KEYS_*` are the *product's* provider keys, and the gate that judges a change must not share a grant with the service under change. |
+   | `/review/` | Exactly one of `REVIEW_ANTHROPIC_API_KEY` / `REVIEW_OPENAI_API_KEY` / `REVIEW_GEMINI_API_KEY` -- the reviewer credential for the LLM Review gate (#128). Only the key matching `vars.REVIEW_PROVIDER` is read; the others need not exist. Because `packages/review/src/config.ts` refuses to run when `REVIEW_PROVIDER` equals `REVIEW_BUILDER_PROVIDER` (default `anthropic`), the reviewer family here must be `openai` or `gemini` -- provider separation on R2/R3 work is enforced in code, not by convention. Kept off `/platform/llm-handler/` deliberately: that path's `LLM_KEYS_*` are the *product's* provider keys, and the gate that judges a change must not share a grant with the service under change. Also: `REVIEW_GITHUB_APP_ID` / `REVIEW_GITHUB_APP_PRIVATE_KEY` -- the reviewer's own GitHub App identity (Issue #272), minted via `actions/create-github-app-token` by `llm-review-dialogue.yml` so the managed review comment posts as that App rather than `github-actions[bot]`. |
+   | `/dev/` | `DEV_GITHUB_APP_ID` / `DEV_GITHUB_APP_PRIVATE_KEY` -- the dev agent's own GitHub App identity, minted the same way by `dev-agent-dispatch.yml` and handed to `claude-code-action` as its `github_token`, so dispatched commits and comments post as that App rather than borrowing the vendor action's own bundled identity. Also exactly one of `DEV_ANTHROPIC_API_KEY` / `DEV_CLAUDE_CODE_OAUTH_TOKEN` -- the model-API credential the dispatched agent authenticates with; unrelated to the App credential above (one is a GitHub identity, the other is how the agent talks to its own model provider). |
 
 **One script**, run once locally with `gh auth login` already done as an
 account holding admin on the repo, sets every repository variable this
@@ -194,6 +220,43 @@ this runbook can't stand in for is `TOOLBELT_OWNER_TOKEN`: set it once
 m1-07's owner setup produces a real owner access token (`12-risk-register.md`
 section 5's Out-of-Brief Register has the full writeup of why
 `toolbelt-ci.yml` needs it).
+
+## LLM Review and Dev Agent identity setup
+
+Two identities that never deploy anything, but do write to pull requests and
+Issues under their own name: the `review-gate` identity (Infisical `/review/`)
+mints the reviewer's own GitHub App token so `llm-review-dialogue.yml`'s
+managed comment posts as that App rather than `github-actions[bot]`; the
+`dev-agent` identity (Infisical `/dev/`) mints the dev agent's own GitHub App
+token so `dev-agent-dispatch.yml`'s commits and comments post as that App
+rather than borrowing `claude-code-action`'s own bundled identity. Both App
+registrations and their private keys already exist; what follows is wiring
+them into this repository, not creating them.
+
+Configure these repository variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `INFISICAL_REVIEW_IDENTITY_ID` | The `review-gate` OIDC identity's ID -- read by both `ai-review` (`pr-verify.yml`) and `llm-review-dialogue.yml`. |
+| `INFISICAL_DEV_IDENTITY_ID` | The `dev-agent` OIDC identity's ID -- read by `dev-agent-dispatch.yml`. |
+| `LLM_REVIEW_IDENTITY_ESCALATE_AFTER` *(optional, planned #288)* | Consecutive identity-mint failures before `llm-review-dialogue.yml` tags the owner in the PR itself; will default to 1 (escalate on the first failure) when unset. |
+
+Both `/review/` and `/dev/` must additionally hold `*_GITHUB_APP_ID` /
+`*_GITHUB_APP_PRIVATE_KEY` for their respective App -- see the key tables
+above (`/review/`, `/dev/`) and [`docs/ops/vendors.md`](vendors.md#infisical)
+for the full path list.
+
+**Verify, don't assume, the OIDC trust config actually covers these jobs.**
+See "Infisical and GitHub configuration" above for why `review-gate` and
+`dev-agent` each need more than one trusted subject (the `workflow_run` and
+`repository_dispatch` context rows) -- this repository's docs have
+historically lagged the code here, so confirm against a live run's own
+Infisical auth log rather than trusting this table alone.
+
+`docs/ops/bootstrap-github.sh` accepts these as optional flags
+(`--infisical-review-identity=<id>`, `--infisical-dev-identity=<id>`),
+alongside its existing required deploy-identity flags -- see "Infisical and
+GitHub configuration" above for the full invocation.
 
 ## Single-origin Tailscale Serve routes
 

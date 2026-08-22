@@ -96,6 +96,34 @@ test("apply: --enable-deploy and --enable-backup are opt-in go-live switches", (
   assert.match(log, /gh variable set PLATFORM_BACKUP_ENABLED --repo kgsmith19\/hyperbolic-core --body true/);
 });
 
+// Issue #287. Behavior protected: --infisical-review-identity and
+// --infisical-dev-identity are OPTIONAL -- unlike every REQUIRED_ARGS flag
+// above, neither belongs in the missing+=() required-arg check, so a re-run
+// to fix an unrelated value never has to also carry these (see this
+// script's own header comment). Providing them sets the corresponding repo
+// variable; omitting them leaves it untouched.
+test("apply: --infisical-review-identity and --infisical-dev-identity set INFISICAL_REVIEW_IDENTITY_ID and INFISICAL_DEV_IDENTITY_ID when provided", () => {
+  const env = fakeGh();
+  const result = spawnSync(
+    script,
+    ["--apply", ...REQUIRED_ARGS, "--infisical-review-identity=id-review", "--infisical-dev-identity=id-dev"],
+    { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin` } }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const log = readFileSync(env.log, "utf8");
+  assert.match(log, /gh variable set INFISICAL_REVIEW_IDENTITY_ID --repo kgsmith19\/hyperbolic-core --body id-review/);
+  assert.match(log, /gh variable set INFISICAL_DEV_IDENTITY_ID --repo kgsmith19\/hyperbolic-core --body id-dev/);
+});
+
+test("apply: omitting --infisical-review-identity and --infisical-dev-identity leaves those variables untouched, and does not fail", () => {
+  const env = fakeGh();
+  const result = spawnSync(script, ["--apply", ...REQUIRED_ARGS], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin` } });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readFileSync(env.log, "utf8");
+  assert.doesNotMatch(log, /INFISICAL_REVIEW_IDENTITY_ID/, "must not set a review identity var that was never provided");
+  assert.doesNotMatch(log, /INFISICAL_DEV_IDENTITY_ID/, "must not set a dev identity var that was never provided");
+});
+
 test("--branch-protection without --main-ruleset-id fails closed", () => {
   const env = fakeGh();
   const result = run(env, ...REQUIRED_ARGS, "--branch-protection");

@@ -31,6 +31,12 @@ these two just flip the gates deploy.yml/platform-backup.yml check):
   --enable-deploy      also sets DEPLOY_ENABLED=true
   --enable-backup      also sets PLATFORM_BACKUP_ENABLED=true
 
+Optional -- only set if provided, so a re-run to fix an unrelated value
+never has to also carry these (see runbook.md's "LLM Review and Dev Agent
+identity setup"):
+  --infisical-review-identity=ID   sets INFISICAL_REVIEW_IDENTITY_ID
+  --infisical-dev-identity=ID      sets INFISICAL_DEV_IDENTITY_ID
+
 Optional:
   --branch-protection    also set the required-status-checks rule on main's
                           Ruleset to the single "PR Gate" rollup check
@@ -50,6 +56,7 @@ EOF
 mode="--dry-run"
 repo="" deploy_host="" project_slug=""
 shell_id="" llm_handler_id="" brain_id="" migrations_id="" backup_id=""
+review_identity_id="" dev_identity_id=""
 age_key="" main_ruleset_id=""
 enable_deploy=0 enable_backup=0 branch_protection=0
 
@@ -64,6 +71,8 @@ for arg in "$@"; do
     --infisical-brain-deploy-identity=*) brain_id="${arg#--infisical-brain-deploy-identity=}" ;;
     --infisical-platform-migrations-identity=*) migrations_id="${arg#--infisical-platform-migrations-identity=}" ;;
     --infisical-platform-backup-identity=*) backup_id="${arg#--infisical-platform-backup-identity=}" ;;
+    --infisical-review-identity=*) review_identity_id="${arg#--infisical-review-identity=}" ;;
+    --infisical-dev-identity=*) dev_identity_id="${arg#--infisical-dev-identity=}" ;;
     --platform-age-public-key=*) age_key="${arg#--platform-age-public-key=}" ;;
     --enable-deploy) enable_deploy=1 ;;
     --enable-backup) enable_backup=1 ;;
@@ -127,6 +136,18 @@ set_var INFISICAL_BRAIN_DEPLOY_IDENTITY_ID "$brain_id"
 set_var INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID "$migrations_id"
 set_var INFISICAL_PLATFORM_BACKUP_IDENTITY_ID "$backup_id"
 set_var PLATFORM_AGE_PUBLIC_KEY "$age_key"
+
+# Optional -- unlike the deploy/backup identities above, these are not
+# required: neither the LLM Review gate nor the dev agent dispatcher needs
+# provisioning before the rest of this script's variables are useful, and a
+# re-run to fix one of those unrelated values must not be forced to also
+# carry these.
+if [[ -n "$review_identity_id" ]]; then
+  set_var INFISICAL_REVIEW_IDENTITY_ID "$review_identity_id"
+fi
+if [[ -n "$dev_identity_id" ]]; then
+  set_var INFISICAL_DEV_IDENTITY_ID "$dev_identity_id"
+fi
 
 if ((enable_deploy)); then
   set_var DEPLOY_ENABLED true
