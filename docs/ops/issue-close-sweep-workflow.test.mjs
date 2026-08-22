@@ -1,15 +1,17 @@
 // Structural + behavioral assertions over .github/workflows/issue-close-sweep.yml.
 //
-// This workflow is the rare-case backstop for pr-verify.yml's "PR Gate"
-// issue-close fallback (Issue #267, extended by Issue #283's post-arm poll):
-// PR Gate polls for a merge inline for up to 2 minutes after arming
-// auto-merge, but a merge that completes later than that leaves its linked
-// Issue open with nothing left to catch it in that same run, because GitHub
-// Actions never fires a new pull_request: closed run for an event caused by
-// the job's own default GITHUB_TOKEN. This workflow runs hourly, independent
-// of any pull-request event, and re-parses Closes/Fixes/Resolves #N out of
-// every PR merged in roughly the last 24 hours, closing the linked Issue
-// itself if it is still open.
+// This workflow is the DOCUMENTED PRIMARY MECHANISM for closing an Issue
+// after a GITHUB_TOKEN-armed auto-merge (Issue #283). pr-verify.yml's "PR
+// Gate" job also polls inline for up to 15 seconds after arming auto-merge,
+// but that poll structurally cannot observe the merge its own arming call
+// just armed -- `pr-gate` is the sole required status check in this repo's
+// branch ruleset, so the merge cannot complete until that job's own
+// check-run reports done, which requires the poll to finish first (see
+// pr-verify.yml's own comment above pollForMergeAfterArming, and PR #280's
+// timing evidence). This workflow runs every 15 minutes, independent of any
+// pull-request event or any single job's lifecycle, and re-parses
+// Closes/Fixes/Resolves #N out of every PR merged in roughly the last 24
+// hours, closing the linked Issue itself if it is still open.
 //
 // Two invariants matter here, same reasoning as pr-verify-workflow.test.mjs:
 //
@@ -67,7 +69,7 @@ test("issue-close-sweep.yml triggers on schedule only -- no pull_request trigger
   const onBlock = endMatch ? rest.slice(0, 3 + endMatch.index) : rest;
 
   assert.match(onBlock, /\r?\n {2}schedule:\r?\n/, "must trigger on schedule:");
-  assert.match(onBlock, /cron:\s*"0 \* \* \* \*"/, "must run hourly at minute 0");
+  assert.match(onBlock, /cron:\s*"\*\/15 \* \* \* \*"/, "must run every 15 minutes -- the documented primary mechanism's cadence (Issue #283)");
   assert.doesNotMatch(onBlock, /pull_request/, "must never trigger on pull_request or pull_request_target");
 });
 
@@ -101,20 +103,36 @@ test("issue-close-sweep.yml contains exactly one embedded script block", () => {
   assert.equal(scriptOccurrences, 1, "issue-close-sweep.yml must contain exactly one `script: |` block");
 });
 
-function makeMocks({ pulls, issuesByNumber = {}, issuesGetErrorFor = [] }) {
+function makeMocks({
+  pulls,
+  issuesByNumber = {},
+  issuesGetErrorFor = [],
+  defaultBranch = "main",
+  pullsListError = null,
+}) {
   const calls = [];
   const warnings = [];
+  const failures = [];
   const commentsByIssue = new Map();
   const stateByIssue = new Map(Object.entries(issuesByNumber).map(([k, v]) => [Number(k), v.state]));
 
   const github = {
     rest: {
+      repos: {
+        get: async (args) => {
+          calls.push("repos.get");
+          assert.equal(args.owner, "kgsmith19");
+          assert.equal(args.repo, "hyperbolic-core");
+          return { data: { default_branch: defaultBranch } };
+        },
+      },
       pulls: {
         list: async (args) => {
           calls.push("pulls.list");
           assert.equal(args.state, "closed");
           assert.equal(args.sort, "updated");
           assert.equal(args.direction, "desc");
+          if (pullsListError) throw pullsListError;
           return { data: pulls };
         },
       },
@@ -147,6 +165,9 @@ function makeMocks({ pulls, issuesByNumber = {}, issuesGetErrorFor = [] }) {
       warnings.push(message);
     },
     error() {},
+    setFailed(message) {
+      failures.push(message);
+    },
     summary: {
       addHeading() {
         return core.summary;
@@ -161,7 +182,7 @@ function makeMocks({ pulls, issuesByNumber = {}, issuesGetErrorFor = [] }) {
 
   const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
 
-  return { github, core, context, calls, warnings, commentsByIssue };
+  return { github, core, context, calls, warnings, failures, commentsByIssue };
 }
 
 const run = async (opts) => {
@@ -180,10 +201,11 @@ const recentIso = (minutesAgo) => new Date(NOW - minutesAgo * 60 * 1000).toISOSt
 
 test("issue-close-sweep: closes a still-open linked Issue from a recently-merged PR, posting the sweep's marker and wording", async () => {
   const m = await run({
-    pulls: [{ number: 501, merged_at: recentIso(10), body: "Closes #900" }],
+    pulls: [{ number: 501, merged_at: recentIso(10), body: "Closes #900", base: { ref: "main" } }],
     issuesByNumber: { 900: { state: "open" } },
   });
 
+  assert.ok(m.calls.includes("repos.get"), "must read the repository's default branch to determine eligibility");
   assert.ok(m.calls.includes("issues.get:900"), "must read the linked issue's current state");
   assert.ok(m.calls.includes("issues.update:900:closed:completed"), "must close the still-open linked issue");
   assert.ok(m.calls.includes("comment:900"), "must leave an auditable comment");
@@ -200,7 +222,7 @@ test("issue-close-sweep: closes a still-open linked Issue from a recently-merged
 
 test("issue-close-sweep: idempotent -- an already-closed linked Issue is skipped silently, no duplicate close or comment", async () => {
   const m = await run({
-    pulls: [{ number: 502, merged_at: recentIso(10), body: "closes #901" }],
+    pulls: [{ number: 502, merged_at: recentIso(10), body: "closes #901", base: { ref: "main" } }],
     issuesByNumber: { 901: { state: "closed" } },
   });
 
@@ -211,7 +233,7 @@ test("issue-close-sweep: idempotent -- an already-closed linked Issue is skipped
 
 test("issue-close-sweep: a PR body with no closing keyword triggers nothing", async () => {
   const m = await run({
-    pulls: [{ number: 503, merged_at: recentIso(10), body: "See #902 for context, but does not close it" }],
+    pulls: [{ number: 503, merged_at: recentIso(10), body: "See #902 for context, but does not close it", base: { ref: "main" } }],
   });
 
   assert.ok(!m.calls.some((c) => c.startsWith("issues.get")), "a non-closing reference must never be looked up");
@@ -219,7 +241,7 @@ test("issue-close-sweep: a PR body with no closing keyword triggers nothing", as
 
 test("issue-close-sweep: a PR merged outside the ~24h window is excluded from consideration", async () => {
   const m = await run({
-    pulls: [{ number: 504, merged_at: recentIso(48 * 60), body: "closes #903" }],
+    pulls: [{ number: 504, merged_at: recentIso(48 * 60), body: "closes #903", base: { ref: "main" } }],
     issuesByNumber: { 903: { state: "open" } },
   });
 
@@ -229,8 +251,8 @@ test("issue-close-sweep: a PR merged outside the ~24h window is excluded from co
 test("issue-close-sweep: an API error for one Issue is logged and does not abort the run for the rest of the batch", async () => {
   const m = await run({
     pulls: [
-      { number: 505, merged_at: recentIso(10), body: "closes #904" },
-      { number: 506, merged_at: recentIso(5), body: "closes #905" },
+      { number: 505, merged_at: recentIso(10), body: "closes #904", base: { ref: "main" } },
+      { number: 506, merged_at: recentIso(5), body: "closes #905", base: { ref: "main" } },
     ],
     issuesGetErrorFor: [904],
     issuesByNumber: { 905: { state: "open" } },
@@ -252,4 +274,72 @@ test("issue-close-sweep: an API error for one Issue is logged and does not abort
   // above must not have aborted the whole run.
   assert.ok(m.calls.includes("issues.update:905:closed:completed"), "later PRs/Issues in the batch must still be processed");
   assert.ok(m.calls.includes("comment:905"));
+
+  // A per-Issue read failure is exactly the kind of tolerated, expected
+  // condition (a deleted Issue, a transient blip) that must never fail the
+  // whole scheduled run -- only a real orchestration failure should (see the
+  // dedicated setFailed test below). This is the outer/inner tolerance
+  // boundary Issue #283's final review drew: the inner per-Issue catch stays
+  // tolerant, only the outer catch escalates.
+  assert.deepEqual(m.failures, [], "a single bad Issue inside the loop must never call core.setFailed");
+});
+
+// Issue #283 final review, finding 2: the sweep must not be broader than
+// both GitHub's native `Closes #N` linkage and the in-job fallback it
+// backstops -- handleIssueCloseFallback in pr-verify.yml only acts when
+// `sameRepo && pr.base.ref === defaultBranch`. Before the fix, this filter
+// did not exist at all, so a PR merged into a non-default base branch with
+// `Closes #N` in its body would have its linked Issue closed by the sweep
+// even though neither GitHub's native linkage nor PR Gate's own fallback
+// would ever have closed it for that PR.
+test("issue-close-sweep: a PR merged into a non-default base branch is excluded, even with a closing keyword in its body", async () => {
+  const m = await run({
+    pulls: [{ number: 507, merged_at: recentIso(10), body: "Closes #906", base: { ref: "release/1.0" } }],
+    issuesByNumber: { 906: { state: "open" } },
+    defaultBranch: "main",
+  });
+
+  assert.ok(m.calls.includes("repos.get"), "must read the repository's default branch to determine eligibility");
+  assert.ok(
+    !m.calls.some((c) => c.startsWith("issues.get")),
+    "a PR merged into a non-default base branch must never be considered eligible, matching pr-verify.yml's own " +
+      "eligibility check (sameRepo && pr.base.ref === defaultBranch)"
+  );
+  assert.deepEqual(m.failures, [], "an ineligible PR is a normal, expected outcome -- it must never fail the run");
+});
+
+test("issue-close-sweep: a PR merged into the actual default branch is still eligible when the default branch is not literally \"main\"", async () => {
+  const m = await run({
+    pulls: [{ number: 508, merged_at: recentIso(10), body: "closes #907", base: { ref: "trunk" } }],
+    issuesByNumber: { 907: { state: "open" } },
+    defaultBranch: "trunk",
+  });
+
+  assert.ok(
+    m.calls.includes("issues.update:907:closed:completed"),
+    "eligibility must compare against the repository's REAL default branch, not a hardcoded 'main'"
+  );
+});
+
+// Issue #283 final review, finding 3: the outer catch previously called only
+// core.error, so if pulls.list (or repos.get) throws -- a permission change,
+// an API outage, a future edit that breaks the script -- the sweep run
+// reported green while doing nothing. Nothing else watches this workflow (no
+// PR check row), so a silently-green broken sweep would go unnoticed
+// indefinitely. This test fails against the pre-fix code (core.error alone
+// never calls core.setFailed) and passes once the outer catch also calls
+// core.setFailed.
+test("issue-close-sweep: an orchestration failure (pulls.list throwing) fails the scheduled run via core.setFailed, not just core.error", async () => {
+  const m = await run({
+    pulls: [],
+    pullsListError: new Error("simulated API outage"),
+  });
+
+  assert.ok(m.calls.includes("pulls.list"), "must have attempted the call that failed");
+  assert.equal(m.failures.length, 1, "a real orchestration failure must call core.setFailed exactly once");
+  assert.match(
+    m.failures[0],
+    /simulated API outage/,
+    "the setFailed message must carry the underlying error, for a diagnosable failed-run log"
+  );
 });
