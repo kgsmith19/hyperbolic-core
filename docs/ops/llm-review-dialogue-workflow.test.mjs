@@ -91,7 +91,14 @@ function extractScript(yamlText, fromIndex = 0) {
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
 function loadDialogueScript() {
-  return new AsyncFunction("require", "context", "core", "github", "process", extractScript(dialogueYaml));
+  // Anchored rather than defaulting to the first `script: |` block in the
+  // file: a temporary OIDC-subject debug step (see llm-review-dialogue.yml's
+  // own header comment on it) now runs earlier in the job and has a
+  // `script: |` block of its own, which a bare fromIndex=0 search would grab
+  // instead of the real posting script.
+  const marker = dialogueYaml.indexOf("Dialogue · Post findings");
+  assert.ok(marker >= 0, "llm-review-dialogue.yml: posting step not found");
+  return new AsyncFunction("require", "context", "core", "github", "process", extractScript(dialogueYaml, marker));
 }
 
 // The preflight step is the FIRST script: | block in dev-agent-dispatch.yml,
