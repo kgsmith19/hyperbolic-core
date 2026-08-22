@@ -73,6 +73,11 @@ test("runbook pins the reviewer and developer identities to their exact OIDC sub
   assert.doesNotMatch(runbook, /\.\.\.:workflow_run|\.\.\.:repository_dispatch|\.\.\.:workflow_dispatch/);
 });
 
+test("the temporary OIDC claim diagnostic is removed after live subject confirmation", () => {
+  assert.doesNotMatch(dialogueYaml, /DEBUG · Print this job's OIDC subject claim/);
+  assert.doesNotMatch(dialogueYaml, /core\.getIDToken\(\)/);
+});
+
 // General "script: |" block extractor. Unlike pr-verify-workflow.test.mjs's
 // version, this does not assume the block is the last thing in the file --
 // dev-agent-dispatch.yml's script step is followed by a checkout and an action
