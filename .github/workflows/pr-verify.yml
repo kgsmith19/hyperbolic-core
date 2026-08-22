@@ -816,6 +816,12 @@ jobs:
               }
             }
 
+            // Returns true only when the enablePullRequestAutoMerge mutation
+            // itself did not throw -- every other outcome below (repository
+            // policy, an already-mergeable PR, "already enabled", an
+            // unstable refusal, or any unexpected error) returns false, so
+            // the caller only polls for a merge (below) when this run is
+            // actually the one that just armed it.
             async function armAutoMerge(pr) {
               if (pr.mergeable_state === "behind") {
                 try {
@@ -848,6 +854,7 @@ jobs:
                 summaryLines.push(
                   `- Auto-merge: armed (squash, expected head \`${pr.head.sha}\`).`
                 );
+                return true;
               } catch (error) {
                 const message = (error && error.message) || String(error);
                 if (/auto.?merge is not allowed|auto.?merge is disabled|not enabled for this repository/i.test(message)) {
@@ -883,6 +890,87 @@ jobs:
                   );
                 }
               }
+              return false;
+            }
+
+            function sleep(ms) {
+              return new Promise((resolve) => setTimeout(resolve, ms));
+            }
+
+            // Issue #283 root cause: GitHub Actions never fires a NEW
+            // workflow run for an event caused by the job's own default
+            // GITHUB_TOKEN (recursion prevention), and enabling auto-merge
+            // above does exactly that -- so the #267 fallback's own `closed`
+            // event never runs for the one scenario it exists to cover (an
+            // auto-merge-completed PR).
+            //
+            // This poll is deliberately short (15 seconds, not minutes) and
+            // is NOT what resolves that recursion problem for the merge THIS
+            // job's own armAutoMerge call just armed -- structurally, it
+            // cannot be. `pr-gate` is the SOLE required status check in this
+            // repo's branch ruleset (see AGENTS.md's PR Gate table), and a
+            // GitHub Actions check-run only transitions to `completed` once
+            // every step of the job has finished running. Native auto-merge
+            // only completes the actual merge once every required check
+            // reports `completed`+`success`. So the merge armed a few lines
+            // above cannot complete until THIS job's own check-run reports
+            // done -- which requires this poll (and the rest of the job) to
+            // finish first. A poll waiting on an event gated on its own
+            // completion can never observe that event.
+            //
+            // This is confirmed against this repo's own history, not just
+            // theory: PR #280's `PR Gate` job (run 32458751359) completed at
+            // 2026-08-21T07:32:46Z; the PR's actual merge happened at
+            // 2026-08-21T07:32:49Z -- three seconds AFTER the job's own
+            // check concluded, not during it. PR #285 shows the same
+            // pattern (armed, then merged seconds after the job had already
+            // finished). The merge always follows job completion, never
+            // happens while the job -- including this poll -- is still
+            // running.
+            //
+            // So what is this poll actually for? Cheap insurance for the
+            // rare case a DIFFERENT event completes the merge while this job
+            // happens to still be running -- e.g. the owner manually
+            // completing the merge through the GitHub UI concurrently with
+            // this run. It is not, and cannot be, the primary fix for the
+            // auto-merge this job itself just armed. Do NOT "fix" this
+            // window back to something long thinking the short window is a
+            // bug -- read this comment and PR #280's timing evidence first.
+            // The documented primary mechanism is the scheduled sweep
+            // (issue-close-sweep.yml, every 15 minutes), which runs
+            // independently of this job's own lifecycle and so is not
+            // subject to the same structural gate.
+            const POLL_INTERVAL_MS = 5000;
+            const POLL_MAX_ATTEMPTS = 3; // 3 * 5s = 15 seconds.
+
+            async function pollForMergeAfterArming(pr, eligible) {
+              for (let attempt = 1; attempt <= POLL_MAX_ATTEMPTS; attempt++) {
+                await sleep(POLL_INTERVAL_MS);
+                let polled;
+                try {
+                  const { data } = await github.rest.pulls.get({
+                    owner,
+                    repo,
+                    pull_number: pr.number,
+                  });
+                  polled = data;
+                } catch (error) {
+                  core.warning(
+                    `PR Gate: post-arm merge poll failed to read PR #${pr.number} (attempt ${attempt}/${POLL_MAX_ATTEMPTS}): ${error.message}`
+                  );
+                  continue;
+                }
+                if (polled.merged === true) {
+                  summaryLines.push(
+                    `- Issue close fallback: merge observed via post-arm poll (attempt ${attempt}/${POLL_MAX_ATTEMPTS}); running the fallback inline.`
+                  );
+                  await handleIssueCloseFallback(polled, eligible);
+                  return;
+                }
+              }
+              summaryLines.push(
+                "- Issue close fallback: post-arm poll window (15 seconds) expired without observing a merge; the scheduled sweep is the documented primary mechanism."
+              );
             }
 
             function deriveStatus(pr, stillDraft, holdAuthorized, checklistBlocked) {
@@ -1114,7 +1202,10 @@ jobs:
                     "- Auto-merge: skipped while the PR remains a draft."
                   );
                 } else {
-                  await armAutoMerge(pr);
+                  const armed = await armAutoMerge(pr);
+                  if (armed) {
+                    await pollForMergeAfterArming(pr, eligible);
+                  }
                 }
 
                 // Managed Work State comment, on the PR and its linked Issue.

@@ -544,6 +544,53 @@ whenever GitHub's own native linkage already did the job. All eight verification
 `if: github.event.action != 'closed'`, so this event costs only `PR Gate`'s own near-instant
 fallback check — never a second run of the full suite, and never a second `AI Review` call.
 
+That `closed`-event fallback turned out to be dead for its own primary scenario (Issue #283): GitHub
+Actions never creates a new workflow run for an event caused by an action taken with the default
+`GITHUB_TOKEN` (recursion prevention; `workflow_dispatch`/`repository_dispatch` are the only
+exceptions), and `armAutoMerge`'s `enablePullRequestAutoMerge` call is exactly that — the job's own
+default token. So when GitHub completes an armed merge, the resulting `pull_request: closed` event
+is attributed to that same token and never fires a new run at all — not merely "the native linkage
+sometimes doesn't fire," the workflow run itself never happens. Confirmed on this repository's own
+history: PR #280 (bot-armed auto-merge) has no `closed`-event run whatsoever and its linked Issue
+#264 sat open until closed manually; PR #282 (`kgsmith19` merged directly) fired the `closed` run in
+2 seconds and closed on time.
+
+The documented **primary** mechanism is a `schedule`-triggered workflow, `issue-close-sweep.yml`,
+running every 15 minutes independent of any pull-request event or any single job's lifecycle: it
+scans PRs merged in roughly the last 24 hours, re-parses every `Closes`/`Fixes`/`Resolves #N`
+reference (the broader plural form `PR Gate` also uses for its own linked-Issue checklist gate,
+not just the single line-anchored `Closes #N` the in-job fallback below checks), and closes any
+still-open linked Issue idempotently — filtered to the same eligibility `handleIssueCloseFallback`
+requires (same repository, merged into the actual default branch), so it is never broader than
+either GitHub's native linkage or the in-job fallback it backstops. A `schedule` trigger is never
+"caused by" any token action, so it is never subject to the recursion-prevention rule either. It
+adds no PR check row and needs no new credential. Worst-case latency for this path is therefore
+bounded by its own cadence: roughly 15 minutes, not the 24-hour scan window (which only widens the
+net for the rare case a PR sat unswept for several prior runs).
+
+`pr-gate` also polls after arming, but this poll is a short (15-second), best-effort check for a
+different, narrower case — it is not what resolves the recursion problem for the merge THIS job's
+own `armAutoMerge` call just armed, and structurally cannot be. `pr-gate` is the SOLE required
+status check in this repo's branch ruleset (see the PR Gate table above), and a GitHub Actions
+check-run only transitions to `completed` once every step of the job has finished running. Native
+auto-merge only completes the actual merge once every required check reports
+`completed`+`success`. So the merge armed a few lines above cannot complete until THIS job's own
+check-run reports done — which requires the poll (and the rest of the job) to finish first. A poll
+waiting on an event gated on its own completion can never observe that event. This is confirmed
+against this repo's own history, not just theory: PR #280's `PR Gate` job (run 32458751359)
+completed at `2026-08-21T07:32:46Z`; the PR's actual merge happened at `2026-08-21T07:32:49Z` —
+three seconds *after* the job's own check concluded, not during it. PR #285 shows the same
+pattern. The merge always follows job completion, never happens while the job — including this
+poll — is still running. So what the poll is actually for: cheap insurance for the rare case a
+*different* event completes the merge while this job happens to still be running — e.g. the owner
+manually completing the merge through the GitHub UI concurrently with this run. Immediately after
+a successful `armAutoMerge` call, in the *same* script and the *same* run that just armed it,
+`pr-gate` polls `pulls.get` every 5 seconds for up to 15 seconds and, on observing `merged: true`,
+calls `handleIssueCloseFallback` directly against the freshly-polled PR object — no new run is
+triggered, so the recursion-prevention rule never comes into play there either, and no new
+credential is needed. The original `closed`-event path is untouched and keeps working for
+manually-merged PRs, as PR #282 already demonstrated.
+
 `PR Gate` also fails closed — a real, visible check failure, not a quiet arm-skip like draft or
 hold — when any Issue the PR's body references with a closing keyword (`Closes`/`Fixes`/`Resolves
 #N`; every one referenced, not just the first) is still **open** and its body has at least one
