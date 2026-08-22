@@ -484,6 +484,13 @@ function makeGithub({
   // reads to decide whether the assigned dev provider is the one this
   // repository's dispatcher actually implements (anthropic, today).
   devProvider = "anthropic",
+  // Issue #289: the same fixture also backs the review.provider/model
+  // footer. Defaults match this repo's actual live agent-roles.yaml
+  // assignment (openai/gpt-5-mini is the real pair; "y" here is an
+  // arbitrary distinct-from-devProvider placeholder pre-dating #289, kept
+  // as the default so no pre-existing test's behavior changes).
+  reviewProvider = "openai",
+  reviewModel = "y",
 }) {
   const calls = { updateComment: [], createComment: [], createDispatchEvent: [], createIssue: [], search: [] };
   let nextIssueNumber = 300;
@@ -514,9 +521,10 @@ function makeGithub({
         getContent: async () => ({
           data: {
             encoding: "base64",
-            content: Buffer.from(`dev:\n  provider: ${devProvider}\n  model: x\n\nreview:\n  provider: openai\n  model: y\n`, "utf8").toString(
-              "base64"
-            ),
+            content: Buffer.from(
+              `dev:\n  provider: ${devProvider}\n  model: x\n\nreview:\n  provider: ${reviewProvider}\n  model: ${reviewModel}\n`,
+              "utf8"
+            ).toString("base64"),
           },
         }),
       },
@@ -544,11 +552,17 @@ function makeCore() {
   };
 }
 
-async function runDialogue(fs, os, path_, env, { pr, existingComment, dispatchThrows, searchResults, createIssueThrows, devProvider } = {}) {
+async function runDialogue(
+  fs,
+  os,
+  path_,
+  env,
+  { pr, existingComment, dispatchThrows, searchResults, createIssueThrows, devProvider, reviewProvider, reviewModel } = {}
+) {
   const dir = fs.mkdtempSync(path_.join(os.tmpdir(), "llm-review-dialogue-test-"));
   makeArtifact(fs, path_, dir, env.__files);
   delete env.__files;
-  const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows, searchResults, createIssueThrows, devProvider });
+  const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows, searchResults, createIssueThrows, devProvider, reviewProvider, reviewModel });
   const core = makeCore();
   const proc = { env: { ...env, ARTIFACT_DIR: dir } };
   const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
@@ -590,6 +604,62 @@ test("dialogue: a fresh blocking verdict opens round 1, posts one new comment, a
   assert.doesNotMatch(body, /needs your decision/);
   assert.equal(calls.createDispatchEvent.length, 1);
   assert.equal(calls.createDispatchEvent[0].client_payload.round, 1);
+});
+
+// Issue #289. Behavior protected: the managed comment ends with a footer
+// stating role/provider/model, sourced from agent-roles.yaml's review.*
+// fields specifically -- not dev.* -- so an implementation that misread the
+// wrong half of the file is caught. Distinct provider/model values from
+// devProvider (fixed at "anthropic" by BLOCKING_VERDICT's own default)
+// make that mix-up impossible to pass accidentally.
+test("dialogue: the managed comment ends with a role/provider/model footer sourced from agent-roles.yaml's review fields", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR, reviewProvider: "gemini", reviewModel: "gemini-3-pro" });
+
+  const body = calls.createComment[0].body;
+  assert.match(body, /_AI Review — role `review` · provider `gemini` · model `gemini-3-pro`_/);
+});
+
+// Behavior protected: a PASSING verdict's comment also carries the footer --
+// the footer is not conditional on `blocking`, unlike the round/identity
+// escalation admonitions.
+test("dialogue: a passing verdict's comment also carries the role/provider/model footer", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const newHead = "d".repeat(40);
+  const priorState = { round: 1, headSha: HEAD, escalated: false, verdict: "block" };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "5",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: newHead,
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: newHead, reviewOutcome: "success", verdictPresent: true },
+      "review-verdict.json": { verdict: "pass", findings: [], discarded: [], summary: "all good" },
+    },
+  }, { pr: { number: 230, head: { sha: newHead }, state: "open" }, existingComment, reviewProvider: "openai", reviewModel: "gpt-5-mini" });
+
+  const body = calls.updateComment[0].body;
+  assert.match(body, /_AI Review — role `review` · provider `openai` · model `gpt-5-mini`_/);
 });
 
 test("dialogue: REVIEW_APP_TOKEN_MINTED=true posts findings with no fallback-identity warning", async () => {
@@ -1768,6 +1838,27 @@ test("dialogue: a fresh outOfScope finding renders as deferred, not blocking, an
   assert.doesNotMatch(body, /### Blocking findings/);
   assert.match(body, /\*\*Tracked in\.\*\* #300/);
   assert.match(body, /"verdict":"pass"/);
+});
+
+// Issue #289. Behavior protected: the deferred-finding Issue body ALSO ends
+// with the role/provider/model footer, independently of the managed PR
+// comment's own footer -- both call sites build this string, so a fix to
+// one alone (or a copy-paste that reads dev.* here by mistake) is caught.
+test("dialogue: the deferred-finding Issue body also carries the role/provider/model footer", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, deferredEnv(), {
+    pr: BASE_PR,
+    reviewProvider: "anthropic",
+    reviewModel: "claude-opus-5",
+  });
+
+  assert.match(
+    calls.createIssue[0].body,
+    /_AI Review — role `review` · provider `anthropic` · model `claude-opus-5`_$/,
+    "footer must be the last thing in the deferred Issue's body"
+  );
 });
 
 // NEGATIVE CONTROL / idempotency. Behavior protected: re-running the SAME

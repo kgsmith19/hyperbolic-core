@@ -50,13 +50,13 @@ function extractValidatorScript() {
   return lines.map((line) => line.slice(commonIndent)).join("\n");
 }
 
-function runValidator(agentRolesYaml) {
+function runValidator(agentRolesYaml, env = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "repo-policy-validate-"));
   const scriptFile = path.join(dir, "validate.py");
   writeFileSync(scriptFile, extractValidatorScript());
   writeFileSync(path.join(dir, "agent-roles.yaml"), agentRolesYaml);
   try {
-    const stdout = execFileSync("python3", [scriptFile], { cwd: dir, encoding: "utf8" });
+    const stdout = execFileSync("python3", [scriptFile], { cwd: dir, encoding: "utf8", env: { ...process.env, ...env } });
     return { ok: true, stdout };
   } catch (error) {
     return { ok: false, stderr: error.stderr?.toString() ?? "", status: error.status };
@@ -71,6 +71,26 @@ function fixture({ devProvider = "anthropic", devModel = "claude-opus-5", review
 
 test("verify-repo-policy: the agent-roles.yaml validation step exists with the exact name AGENTS.md and the Issue reference it", () => {
   assert.ok(action.includes(`name: ${STEP_NAME}`));
+});
+
+// Issue #289. The behavioral tests below prove the cross-check LOGIC is
+// correct when review_provider/review_model are passed in -- they cannot
+// prove either caller actually passes them. Structural check for that half:
+// both pr-verify.yml's native job and repo-policy.yml's own standalone
+// trigger must wire the same live vars into verify-repo-policy, or the
+// cross-check silently never runs on either trigger path.
+test("both verify-repo-policy call sites wire vars.REVIEW_PROVIDER/REVIEW_MODEL into review_provider/review_model", () => {
+  for (const file of ["pr-verify.yml", "repo-policy.yml"]) {
+    const workflowPath = path.join(root, ".github/workflows", file);
+    const text = readFileSync(workflowPath, "utf8");
+    const usesIndex = text.indexOf("uses: ./.github/actions/verify-repo-policy");
+    assert.ok(usesIndex >= 0, `${file}: no verify-repo-policy invocation found`);
+    const withIndex = text.indexOf("with:", usesIndex);
+    const nextStepIndex = text.indexOf("\n      - name:", withIndex);
+    const withBlock = text.slice(withIndex, nextStepIndex > 0 ? nextStepIndex : withIndex + 300);
+    assert.match(withBlock, /review_provider:\s*\$\{\{\s*vars\.REVIEW_PROVIDER\s*\}\}/, `${file}: review_provider not wired from vars.REVIEW_PROVIDER`);
+    assert.match(withBlock, /review_model:\s*\$\{\{\s*vars\.REVIEW_MODEL\s*\}\}/, `${file}: review_model not wired from vars.REVIEW_MODEL`);
+  }
 });
 
 // POSITIVE CONTROL. Behavior protected: a well-formed, non-colliding file
@@ -186,4 +206,50 @@ test("agent-roles.yaml validator: review.provider still accepts gemini, the real
   const result = runValidator(fixture({ reviewProvider: "gemini" }));
   assert.equal(result.ok, true, `expected pass, got failure: ${result.stderr}`);
   assert.match(result.stdout, /dev=anthropic, review=gemini/);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #289: agent-roles.yaml's review.provider/review.model, cross-checked
+// against the live vars.REVIEW_PROVIDER/REVIEW_MODEL that actually drive the
+// review call (verify-llm-review's real inputs) -- so the new AI Review
+// footer, which is sourced from agent-roles.yaml alone, cannot silently
+// state a provider/model that drifted from what actually ran.
+// ---------------------------------------------------------------------------
+
+// POSITIVE CONTROL. Behavior protected: matching live vars pass, alongside
+// the pre-existing checks -- without this, every negative test below could
+// be satisfied by a validator that always fails once the env vars are set.
+test("agent-roles.yaml validator: matching live REVIEW_PROVIDER/REVIEW_MODEL pass", () => {
+  const result = runValidator(fixture(), { LIVE_REVIEW_PROVIDER: "openai", LIVE_REVIEW_MODEL: "gpt-5-mini" });
+  assert.equal(result.ok, true, `expected pass, got failure: ${result.stderr}`);
+});
+
+// NEGATIVE CONTROL. Behavior protected: the whole point of this check --
+// agent-roles.yaml declaring one provider while the live var that actually
+// drives the review call says another. Defect caught: a cross-check that
+// only compares model, never provider.
+test("agent-roles.yaml validator: a mismatched live REVIEW_PROVIDER fails closed", () => {
+  const result = runValidator(fixture({ reviewProvider: "openai" }), { LIVE_REVIEW_PROVIDER: "gemini", LIVE_REVIEW_MODEL: "gpt-5-mini" });
+  assert.equal(result.ok, false, "expected the validator to fail on a provider mismatch");
+  assert.match(result.stderr, /review\.provider \('openai'\) does not match the live vars\.REVIEW_PROVIDER \('gemini'\)/);
+});
+
+// NEGATIVE CONTROL, the model half. Defect caught: a cross-check that only
+// compares provider, never model -- the exact drift Issue #289's own
+// context describes (agent-roles.yaml and the live var disagreeing).
+test("agent-roles.yaml validator: a mismatched live REVIEW_MODEL fails closed", () => {
+  const result = runValidator(fixture({ reviewModel: "gpt-5-mini" }), { LIVE_REVIEW_PROVIDER: "openai", LIVE_REVIEW_MODEL: "gpt-4o" });
+  assert.equal(result.ok, false, "expected the validator to fail on a model mismatch");
+  assert.match(result.stderr, /review\.model \('gpt-5-mini'\) does not match the live vars\.REVIEW_MODEL \('gpt-4o'\)/);
+});
+
+// Behavior protected: an unprovisioned live var (empty string, e.g. before
+// vars.REVIEW_PROVIDER/REVIEW_MODEL are first set) skips this specific
+// check rather than failing closed on nothing to compare against -- the
+// same tolerance this action's own base_sha input already has. Defect
+// caught: a cross-check that treats an empty/unset var as a literal
+// mismatch and blocks every PR before the repo variables exist.
+test("agent-roles.yaml validator: unset live REVIEW_PROVIDER/REVIEW_MODEL skip the cross-check entirely", () => {
+  const result = runValidator(fixture(), { LIVE_REVIEW_PROVIDER: "", LIVE_REVIEW_MODEL: "" });
+  assert.equal(result.ok, true, `expected pass (check skipped), got failure: ${result.stderr}`);
 });

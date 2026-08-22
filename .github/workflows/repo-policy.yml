@@ -39,3 +39,5 @@ jobs:
       - uses: ./.github/actions/verify-repo-policy
         with:
           base_sha: ${{ github.event.merge_group.base_sha }}
+          review_provider: ${{ vars.REVIEW_PROVIDER }}
+          review_model: ${{ vars.REVIEW_MODEL }}
