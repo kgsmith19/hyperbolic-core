@@ -259,6 +259,8 @@ jobs:
           # addition to one of these.
           HAS_ANTHROPIC_OAUTH: ${{ env.DEV_CLAUDE_CODE_OAUTH_TOKEN != '' }}
           HAS_ANTHROPIC_API_KEY: ${{ env.DEV_ANTHROPIC_API_KEY != '' }}
+          HAS_DEV_APP_ID: ${{ env.DEV_GITHUB_APP_ID != '' }}
+          HAS_DEV_APP_PRIVATE_KEY: ${{ env.DEV_GITHUB_APP_PRIVATE_KEY != '' }}
           # Visible-fallback signal for the summary (Issue #272) -- whether
           # this run actually posted under the reviewer's own identity or
           # fell back to github.token.
@@ -356,7 +358,9 @@ jobs:
             // immediately instead of waiting out a dispatch doomed to fail.
             const agentProvisioned =
               devProvider === "anthropic" &&
-              (process.env.HAS_ANTHROPIC_OAUTH === "true" || process.env.HAS_ANTHROPIC_API_KEY === "true");
+              (process.env.HAS_ANTHROPIC_OAUTH === "true" || process.env.HAS_ANTHROPIC_API_KEY === "true") &&
+              process.env.HAS_DEV_APP_ID === "true" &&
+              process.env.HAS_DEV_APP_PRIVATE_KEY === "true";
 
             // ---------------------------------------------------------------
             // Read the artifact. It is DATA: parsed, never executed.

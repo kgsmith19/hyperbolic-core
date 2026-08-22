@@ -282,6 +282,16 @@ test("llm-review-dialogue.yml sources the dev agent's Anthropic credential from 
     /HAS_ANTHROPIC_API_KEY:\s*\$\{\{\s*env\.DEV_ANTHROPIC_API_KEY\s*!=\s*''\s*\}\}/,
     "HAS_ANTHROPIC_API_KEY must read the Infisical-sourced env var, not secrets.ANTHROPIC_API_KEY"
   );
+  assert.match(
+    postingBlock,
+    /HAS_DEV_APP_ID:\s*\$\{\{\s*env\.DEV_GITHUB_APP_ID\s*!=\s*''\s*\}\}/,
+    "the dialogue preflight must include the dev App ID in its provisioned decision"
+  );
+  assert.match(
+    postingBlock,
+    /HAS_DEV_APP_PRIVATE_KEY:\s*\$\{\{\s*env\.DEV_GITHUB_APP_PRIVATE_KEY\s*!=\s*''\s*\}\}/,
+    "the dialogue preflight must include the dev App private key in its provisioned decision"
+  );
   assert.doesNotMatch(postingBlock, /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, "must not fall back to a raw GitHub secret");
   assert.doesNotMatch(postingBlock, /secrets\.ANTHROPIC_API_KEY/, "must not fall back to a raw GitHub secret");
 
@@ -317,6 +327,11 @@ test("dev-agent-dispatch.yml pulls its own Anthropic credential from Infisical's
   const resolveBlock = dispatchYaml.slice(resolveStart, dispatchYaml.indexOf("prompt:", resolveStart));
   assert.match(resolveBlock, /claude_code_oauth_token:\s*\$\{\{\s*env\.DEV_CLAUDE_CODE_OAUTH_TOKEN\s*\}\}/);
   assert.match(resolveBlock, /anthropic_api_key:\s*\$\{\{\s*env\.DEV_ANTHROPIC_API_KEY\s*\}\}/);
+  assert.match(
+    resolveBlock,
+    /claude_args:\s*\|[\s\S]*--model\s+\$\{\{\s*steps\.preflight\.outputs\.model\s*\}\}/,
+    "the declared dev.model must be passed to Claude Code, not merely printed in a footer"
+  );
 
   // Whole-file, not just the sliced blocks above -- see the sibling test's
   // own comment for why this is the failure-sensitivity gap the block-scoped
@@ -571,7 +586,14 @@ async function runDialogue(
   delete env.__files;
   const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows, searchResults, createIssueThrows, devProvider, reviewProvider, reviewModel });
   const core = makeCore();
-  const proc = { env: { ...env, ARTIFACT_DIR: dir } };
+  const proc = {
+    env: {
+      HAS_DEV_APP_ID: "true",
+      HAS_DEV_APP_PRIVATE_KEY: "true",
+      ...env,
+      ARTIFACT_DIR: dir,
+    },
+  };
   const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
   await loadDialogueScript()(require, context, core, api, proc);
   return { calls, core };
@@ -1081,6 +1103,31 @@ test("dialogue: an unprovisioned agent escalates to the owner immediately, witho
     ESCALATE_AFTER: "3",
     HAS_ANTHROPIC_OAUTH: "false",
     HAS_ANTHROPIC_API_KEY: "false",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  assert.equal(calls.createDispatchEvent.length, 0);
+  const body = calls.createComment[0].body;
+  assert.match(body, /@kgsmith19 — this needs your decision/);
+  assert.match(body, /is not provisioned/);
+});
+
+test("dialogue: a model credential without both dev App credentials never dispatches a fixer", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "7-app-missing",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "false",
+    HAS_DEV_APP_ID: "true",
+    HAS_DEV_APP_PRIVATE_KEY: "false",
     __files: {
       "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
       "review-verdict.json": BLOCKING_VERDICT,
