@@ -50,10 +50,28 @@ const dialoguePath = path.join(root, ".github/workflows/llm-review-dialogue.yml"
 const dispatchPath = path.join(root, ".github/workflows/dev-agent-dispatch.yml");
 const recheckPath = path.join(root, ".github/workflows/llm-review-recheck.yml");
 const reviewActionPath = path.join(root, ".github/actions/verify-llm-review/action.yml");
+const runbookPath = path.join(root, "docs/ops/runbook.md");
 const dialogueYaml = readFileSync(dialoguePath, "utf8");
 const dispatchYaml = readFileSync(dispatchPath, "utf8");
 const recheckYaml = readFileSync(recheckPath, "utf8");
 const reviewActionYaml = readFileSync(reviewActionPath, "utf8");
+const runbook = readFileSync(runbookPath, "utf8");
+
+test("runbook pins the reviewer and developer identities to their exact OIDC subject sets", () => {
+  const immutablePrefix = "repo:kgsmith19@64936641/hyperbolic-core@1331401739:";
+
+  assert.match(
+    runbook,
+    new RegExp(`${immutablePrefix.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\{pull_request,ref:refs/heads/main\\}`),
+    "the reviewer must trust the PR token and the main-ref token used by its non-PR workflows"
+  );
+  assert.match(
+    runbook,
+    new RegExp(`${immutablePrefix.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}ref:refs/heads/main`),
+    "the developer must trust only the main-ref token used by repository/workflow dispatch"
+  );
+  assert.doesNotMatch(runbook, /\.\.\.:workflow_run|\.\.\.:repository_dispatch|\.\.\.:workflow_dispatch/);
+});
 
 // General "script: |" block extractor. Unlike pr-verify-workflow.test.mjs's
 // version, this does not assume the block is the last thing in the file --
