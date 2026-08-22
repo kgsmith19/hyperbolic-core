@@ -165,6 +165,20 @@ jobs:
               if (text.length > cap) text = `${text.slice(0, cap)}\n…[truncated]`;
               text = text.replace(/@([A-Za-z0-9-])/g, "@​$1");
               text = text.replace(/(^|[^\w`])#(\d)/g, "$1#​$2");
+              // Fence-marker defusal (Issue #292's own acceptance criteria):
+              // pasted PR/Issue content in `body` may itself carry forged
+              // fence-like text. A triple-backtick run is broken with a
+              // zero-width space so it can never open or close a Markdown
+              // code fence around the rest of the comment.
+              text = text.replace(/```/g, "`​`​`");
+              // This repo's own managed comments are found by
+              // `body.startsWith(MARKER)` on an exact HTML-comment string
+              // (llm-review-dialogue.yml's `<!-- agent-engineering-standard:
+              // llm-review:v1 -->`, pr-verify.yml's `...work-state:v1 -->`).
+              // Defusing every HTML comment opener means pasted content can
+              // never forge one of those markers and be mistaken for the
+              // real managed comment by that startsWith() check.
+              text = text.replace(/<!--/g, "&lt;!--");
               return text;
             }
 
