@@ -1,33 +1,38 @@
 name: "Issue Close Sweep"
 
-# The rare-case backstop for the issue-close fallback (Issue #267), which
-# itself needed a backstop of its own (Issue #283). pr-verify.yml's "PR
-# Gate" job polls briefly after arming auto-merge and runs the fallback
-# inline the moment it observes the merge complete (see that job's own
-# pollForMergeAfterArming) -- but that poll window is only 2 minutes. A
-# merge that finishes later than that leaves its linked Issue open with
-# nothing left to catch it in the SAME workflow run, because GitHub Actions
-# never fires a new `pull_request: closed` run for an event caused by the
-# job's own default GITHUB_TOKEN (recursion prevention -- the root cause
-# both fixes share).
+# The DOCUMENTED PRIMARY MECHANISM for closing an Issue after a
+# GITHUB_TOKEN-armed auto-merge (Issue #283). pr-verify.yml's "PR Gate" job
+# also polls briefly after arming auto-merge and runs the fallback inline if
+# it observes the merge complete (see that job's own pollForMergeAfterArming)
+# -- but that poll is deliberately only 15 seconds, and structurally cannot
+# observe the merge THIS job's own arming call just armed: `pr-gate` is the
+# sole required status check in this repo's branch ruleset, so the merge
+# cannot complete until that job's own check-run reports done, which
+# requires the poll (and the rest of the job) to finish first. See
+# pr-verify.yml's own comment above `pollForMergeAfterArming` for the full
+# reasoning and the PR #280 timing evidence. That poll exists only as cheap
+# insurance for the rare case a DIFFERENT event completes the merge while
+# that job happens to still be running.
 #
 # This workflow runs on its own schedule, independent of any pull-request
-# event, and re-parses `Closes/Fixes/Resolves #N` out of every PR merged in
-# roughly the last 24 hours, closing the linked Issue itself if it is still
-# open. It re-implements a small subset of pr-verify.yml's own
-# parseLinkedIssues/handleIssueCloseFallback logic rather than importing it
-# -- pr-gate stays checkout-free by design, and this is a deliberate small
-# duplication (see AGENTS.md's Global Constraints for this plan). It posts
-# under the SAME ISSUE_CLOSE_FALLBACK_MARKER comment marker pr-verify.yml
-# uses, with wording that names the scheduled sweep explicitly, so a future
-# debugging session can tell which of the two mechanisms closed a given
-# Issue from the comment text alone.
+# event and of any single job's lifecycle, and re-parses
+# `Closes/Fixes/Resolves #N` out of every PR merged in roughly the last 24
+# hours, closing the linked Issue itself if it is still open. Because it is
+# the primary mechanism, its cadence directly bounds worst-case Issue-close
+# latency: every 15 minutes, not hourly. It re-implements a small subset of
+# pr-verify.yml's own parseLinkedIssues/handleIssueCloseFallback logic rather
+# than importing it -- pr-gate stays checkout-free by design, and this is a
+# deliberate small duplication (see AGENTS.md's Global Constraints for this
+# plan). It posts under the SAME ISSUE_CLOSE_FALLBACK_MARKER comment marker
+# pr-verify.yml uses, with wording that names the scheduled sweep explicitly,
+# so a future debugging session can tell which of the two mechanisms closed a
+# given Issue from the comment text alone.
 #
 # schedule ONLY: no pull_request trigger, so this adds no PR check row and
 # sits entirely outside PR Gate's rollup.
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "*/15 * * * *"
 
 # Nothing broader than the two calls this job actually makes: reading
 # recently-merged PRs (pull-requests: read) and closing/commenting on their
@@ -58,11 +63,11 @@ jobs:
             const ISSUE_CLOSE_FALLBACK_MARKER =
               "<!-- agent-engineering-standard:issue-close-fallback:v1 -->";
 
-            // A generous, rough window: this job runs hourly, so a PR that
-            // merged within the last 24 hours has had roughly 24 earlier
-            // chances to already be caught by a previous run -- this only
-            // widens the net for the rare case where PR Gate's own
-            // post-arm poll (a 2-minute window, see pr-verify.yml) missed
+            // A generous, rough window: this job runs every 15 minutes, so a
+            // PR that merged within the last 24 hours has had roughly 96
+            // earlier chances to already be caught by a previous run -- this
+            // only widens the net for the rare case where PR Gate's own
+            // post-arm poll (a 15-second window, see pr-verify.yml) missed
             // the merge entirely.
             const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -114,9 +119,9 @@ jobs:
                     ISSUE_CLOSE_FALLBACK_MARKER,
                     `Closed automatically: linked pull request #${pr.number} merged, but this Issue was still ` +
                       "open roughly 24 hours later -- neither GitHub's native closing-keyword linkage nor PR " +
-                      "Gate's own post-arm merge poll (a 2-minute window; see Issue #283) caught it in time. " +
-                      "This is a scheduled sweep close, performed hourly by issue-close-sweep.yml, not PR " +
-                      "Gate's own in-job fallback.",
+                      "Gate's own post-arm merge poll (a 15-second window; see Issue #283) caught it in time. " +
+                      "This is a scheduled sweep close, performed every 15 minutes by issue-close-sweep.yml, " +
+                      "the documented primary mechanism for this scenario, not PR Gate's own in-job fallback.",
                   ].join("\n"),
                 });
                 closedCount += 1;
@@ -132,6 +137,16 @@ jobs:
             }
 
             try {
+              // Same eligibility check as pr-verify.yml's own
+              // handleIssueCloseFallback (`sameRepo && targetsDefaultBranch`
+              // there): a PR merged into a non-default base branch is never
+              // eligible for either mechanism, so the sweep must not close
+              // an Issue neither GitHub's native linkage nor PR Gate's own
+              // fallback would ever have closed for that PR. Fetched once
+              // per run, not once per PR.
+              const { data: repoData } = await github.rest.repos.get({ owner, repo });
+              const defaultBranch = repoData.default_branch;
+
               const { data: pulls } = await github.rest.pulls.list({
                 owner,
                 repo,
@@ -144,12 +159,13 @@ jobs:
               const cutoff = Date.now() - WINDOW_MS;
               const recentlyMerged = pulls.filter((pr) => {
                 if (!pr.merged_at) return false;
+                if (!pr.base || pr.base.ref !== defaultBranch) return false;
                 const mergedAt = Date.parse(pr.merged_at);
                 return Number.isFinite(mergedAt) && mergedAt >= cutoff;
               });
 
               summaryLines.push(
-                `- Scanned ${pulls.length} closed PR(s); ${recentlyMerged.length} merged within roughly the last 24h.`
+                `- Scanned ${pulls.length} closed PR(s); ${recentlyMerged.length} merged into ${defaultBranch} within roughly the last 24h.`
               );
 
               for (const pr of recentlyMerged) {
@@ -161,6 +177,16 @@ jobs:
               summaryLines.push(`- Closed ${closedCount} Issue(s) via the scheduled sweep.`);
             } catch (error) {
               core.error(`Issue Close Sweep: orchestration error: ${error.message}`);
+              // Nothing else watches this workflow -- it has no PR check row
+              // by design (see the on: block's own comment) -- so a real
+              // orchestration failure (pulls.list/repos.get throwing, a
+              // permission change, an API outage, a future edit that breaks
+              // this script) must fail the run loudly via setFailed, not
+              // just log via core.error, or this scheduled run reports green
+              // while doing nothing. This is the outer, whole-run catch;
+              // the per-Issue/per-PR inner try/catch above (closeIssueIfStillOpen)
+              // is intentionally more tolerant and must stay that way.
+              core.setFailed(`Issue Close Sweep: orchestration error: ${error.message}`);
               summaryLines.push(`- Orchestration error: ${error.message}`);
             } finally {
               try {
