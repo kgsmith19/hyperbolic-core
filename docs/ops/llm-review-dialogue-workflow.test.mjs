@@ -333,6 +333,23 @@ test("dev-agent-dispatch.yml triggers on repository_dispatch only, and is the on
   assert.match(dispatchYaml, /contents:\s*write/);
 });
 
+// Issue #290. Structural, not behavioral -- this proves the instruction is
+// PRESENT in the prompt handed to the dispatched agent, not that the agent
+// actually complies with it. That is real but weaker evidence than the
+// behavioral preflight tests above: nothing here can catch a dispatched
+// agent ignoring its own instructions. Kept anyway because the instruction
+// existing at all is a real, checkable precondition for compliance, and the
+// interpolated provider/model expressions are exactly the kind of typo a
+// structural assertion does catch.
+test("dev-agent-dispatch.yml's prompt instructs the agent to footer every comment with role/provider/model", () => {
+  const promptStart = dispatchYaml.indexOf("prompt: |");
+  assert.ok(promptStart >= 0, "no prompt: | block found");
+  assert.match(dispatchYaml.slice(promptStart), /footer/i);
+  assert.match(dispatchYaml.slice(promptStart), /role `dev`/);
+  assert.match(dispatchYaml.slice(promptStart), /\$\{\{\s*steps\.preflight\.outputs\.provider\s*\}\}/);
+  assert.match(dispatchYaml.slice(promptStart), /\$\{\{\s*steps\.preflight\.outputs\.model\s*\}\}/);
+});
+
 // ---------------------------------------------------------------------------
 // Structural: llm-review-recheck.yml (Issue #262's follow-on slice 8) --
 // same trust shape as ai-review regardless of trigger path: it executes no
@@ -1050,7 +1067,19 @@ function agentRolesFixture(devProvider) {
   return Buffer.from(`dev:\n  provider: ${devProvider}\n  model: x\n\nreview:\n  provider: openai\n  model: y\n`, "utf8").toString("base64");
 }
 
-async function runPreflightScript({ devProvider = "anthropic", oauth = "", apiKey = "", getContentThrows = false, agentRolesRaw = null } = {}) {
+async function runPreflightScript({
+  devProvider = "anthropic",
+  oauth = "",
+  apiKey = "",
+  // Default to present: the App-credential check is independent of, and
+  // runs before, the model-credential check exercised by most of these
+  // tests -- defaulting them truthy keeps every pre-existing test exercising
+  // only the model-credential path unaffected by that addition.
+  appId = "app-id-value",
+  appPrivateKey = "app-private-key-value",
+  getContentThrows = false,
+  agentRolesRaw = null,
+} = {}) {
   const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
   const outputs = {};
   let failure = null;
@@ -1069,7 +1098,7 @@ async function runPreflightScript({ devProvider = "anthropic", oauth = "", apiKe
       },
     },
   };
-  const proc = { env: { OAUTH: oauth, API_KEY: apiKey } };
+  const proc = { env: { OAUTH: oauth, API_KEY: apiKey, APP_ID: appId, APP_PRIVATE_KEY: appPrivateKey } };
   await loadPreflightScript()(require, context, core, github, proc);
   return { outputs, failure };
 }
@@ -1090,6 +1119,46 @@ test("preflight: dev.provider=anthropic with no credential fails closed and name
   assert.equal(outputs.provider, "anthropic");
   assert.match(failure, /CLAUDE_CODE_OAUTH_TOKEN/);
   assert.match(failure, /ANTHROPIC_API_KEY/);
+});
+
+// Issue #290. Behavior protected: a missing dev App credential (the
+// posting/push identity, distinct from the model credential above) used to
+// fail opaquely inside the vendored actions/create-github-app-token step
+// instead of naming the exact secret to provision -- fails closed here with
+// a named message instead, before that step ever runs. Regression-sensitive:
+// mutating the new `if (!process.env.APP_ID || !process.env.APP_PRIVATE_KEY)`
+// check away restores the old opaque-failure behavior and this test catches it.
+test("preflight: dev.provider=anthropic with a model credential but no dev App credential fails closed and names both App secrets", async () => {
+  const { outputs, failure } = await runPreflightScript({
+    devProvider: "anthropic",
+    oauth: "token-value",
+    appId: "",
+    appPrivateKey: "",
+  });
+  assert.equal(outputs.provider, "anthropic");
+  assert.match(failure, /DEV_GITHUB_APP_ID/);
+  assert.match(failure, /DEV_GITHUB_APP_PRIVATE_KEY/);
+});
+
+test("preflight: one dev App secret present but not the other still fails closed", async () => {
+  const { failure } = await runPreflightScript({
+    devProvider: "anthropic",
+    oauth: "token-value",
+    appId: "app-id-value",
+    appPrivateKey: "",
+  });
+  assert.match(failure, /DEV_GITHUB_APP_ID/);
+  assert.match(failure, /DEV_GITHUB_APP_PRIVATE_KEY/);
+});
+
+// Issue #290. Behavior protected: preflight's `model` output resolves from
+// agent-roles.yaml's dev.model, the same source and the same way `provider`
+// already does -- the footer instruction in the prompt below depends on it.
+test("preflight: dev.provider=anthropic resolves a sibling model output from agent-roles.yaml", async () => {
+  const { outputs, failure } = await runPreflightScript({ devProvider: "anthropic", oauth: "token-value" });
+  assert.equal(failure, null);
+  assert.equal(outputs.provider, "anthropic");
+  assert.equal(outputs.model, "x", "agentRolesFixture() sets dev.model: x");
 });
 
 // THE CORE NEW BEHAVIOR (Issue #252's slice 7). Behavior protected: an
