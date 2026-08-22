@@ -115,34 +115,63 @@ signup, same as any other SaaS org. Everything after that is scriptable.
    | --- | --- | --- |
    | declares `environment: <name>` | `environment:<name>` | `...:environment:platform-migrations-production` |
    | is `pull_request`-triggered with no environment | `pull_request` | `...:pull_request` |
-   | is `workflow_run`-triggered with no environment | `workflow_run` | `...:workflow_run` |
-   | is `repository_dispatch`-triggered with no environment | `repository_dispatch` | `...:repository_dispatch` |
+   | is any non-PR run with no environment | `ref:refs/heads/<branch>` | `...:ref:refs/heads/main` |
 
-   Every OIDC job in this repository takes the first row -- each declares its
-   own `<pipeline>-production` environment -- **except** two identities that
-   are deliberately shared across more than one trigger shape, and so need
-   more than one trusted subject:
+   Every production OIDC job in this repository takes the first row -- each
+   declares its own `<pipeline>-production` environment. The two agent
+   identities deliberately have no environment and use these exact subject
+   patterns (Infisical supports brace expansion):
+
+   | Identity | Exact Infisical subject | Workflows covered |
+   | --- | --- | --- |
+   | `review-gate` | `repo:kgsmith19@64936641/hyperbolic-core@1331401739:{pull_request,ref:refs/heads/main}` | `pr-verify.yml` (`pull_request`), plus `llm-review-dialogue.yml` (`workflow_run`) and `llm-review-recheck.yml` (`repository_dispatch`) on `main` |
+   | `dev-agent` | `repo:kgsmith19@64936641/hyperbolic-core@1331401739:ref:refs/heads/main` | `llm-review-dialogue.yml` (`workflow_run`), `dev-agent-dispatch.yml` (`repository_dispatch`), and `dev-agent-post.yml` (`workflow_dispatch`) on `main` |
+
+   **Live evidence (2026-08-21):** [`llm-review-dialogue.yml` run
+   32545529951](https://github.com/kgsmith19/hyperbolic-core/actions/runs/32545529951)
+   decoded its GitHub-issued token before the temporary diagnostic was
+   removed. It reported `sub` =
+   `repo:kgsmith19@64936641/hyperbolic-core@1331401739:ref:refs/heads/main`
+   and `aud` = `https://github.com/kgsmith19`. The run printed claims only,
+   never the raw token. This is the authoritative evidence for the shared
+   non-PR subject above; the `pull_request` half is independently exercised
+   by every provisioned `AI Review` job.
+
+   Sanitized excerpt from that run (the JWT itself was never logged):
+
+   ```text
+   Relevant OIDC claims:
+     "sub": "repo:kgsmith19@64936641/hyperbolic-core@1331401739:ref:refs/heads/main"
+     "aud": "https://github.com/kgsmith19"
+     "repository": "kgsmith19/hyperbolic-core"
+     "ref": "refs/heads/main"
+     "event_name": "workflow_run"
+   ```
+
+   [`llm-review-dialogue.yml` run
+   32545881404](https://github.com/kgsmith19/hyperbolic-core/actions/runs/32545881404)
+   then successfully exchanged **both** the `review-gate` and `dev-agent`
+   identities from that `main`-ref context, proving both Infisical trust
+   updates were live. Its next reviewer-App mint failed with `Invalid
+   keyData`; that is a separate secret-content problem, not an OIDC subject
+   failure. Replace `/review/REVIEW_GITHUB_APP_PRIVATE_KEY` with the complete
+   PEM downloaded for the reviewer App, including its `BEGIN`/`END` lines
+   and real newlines, then re-run a pull request to prove the custom posting
+   identity.
 
    - **`review-gate`** is exchanged both by the `ai-review` job (displayed as
      check `AI Review`) in `pr-verify.yml`, which is `pull_request`-triggered
      (second row), and by `llm-review-dialogue.yml`'s own Infisical pull for
-     the reviewer's GitHub App credential, which is `workflow_run`-triggered
-     (third row) -- a different subject shape from the first. **Not yet
-     empirically confirmed**: this identity's trust config may only cover
-     `pull_request` today, in which case `llm-review-dialogue.yml`'s pull
-     would silently fail its OIDC exchange (harmless in effect, since that
-     step's own `continue-on-error: true` degrades it to posting as
-     `github-actions[bot]` rather than failing the job -- see root
-     `AGENTS.md`'s "Independent LLM Review" section) and never actually mint
-     the reviewer's own identity. Verify the exact subject a real
-     `workflow_run` job presents (Infisical's own auth log for a live run is
-     the reliable source) and add it as a second trusted subject if missing.
-   - **`dev-agent`** is exchanged by `dev-agent-dispatch.yml`, which is
-     `repository_dispatch`-triggered (fourth row). If a `dev-agent-post.yml`
-     backstop workflow is ever added (`workflow_dispatch`-triggered), it
-     needs its own trusted subject too -- `workflow_dispatch` is not listed
-     above because no job in this repository uses it yet; add that row here
-     the day one does, with its subject verified the same empirical way.
+     the reviewer's GitHub App credential, which is `workflow_run`-triggered,
+     and by the `repository_dispatch` recheck. The latter two are non-PR
+     workflows on the default branch, so both present the same
+     `ref:refs/heads/main` context. The brace pattern allows exactly those two
+     contexts without granting all repository contexts.
+   - **`dev-agent`** is exchanged by the dialogue's provisioning check, the
+     repository-dispatched fixer, and the workflow-dispatched comment
+     backstop. All three run from the default branch without an environment,
+     so one exact `ref:refs/heads/main` subject covers them. Do not grant this
+     identity `pull_request`; no developer workflow needs that context.
 
    Do not "fix" the review gate's asymmetry by giving either of its jobs an
    `environment:`: an environment on a `pull_request`- or `workflow_run`-
@@ -247,11 +276,11 @@ above (`/review/`, `/dev/`) and [`docs/ops/vendors.md`](vendors.md#infisical)
 for the full path list.
 
 **Verify, don't assume, the OIDC trust config actually covers these jobs.**
-See "Infisical and GitHub configuration" above for why `review-gate` and
-`dev-agent` each need more than one trusted subject (the `workflow_run` and
-`repository_dispatch` context rows) -- this repository's docs have
-historically lagged the code here, so confirm against a live run's own
-Infisical auth log rather than trusting this table alone.
+See "Infisical and GitHub configuration" above for the exact subject matrix.
+`review-gate` needs the `pull_request` and default-branch `ref` contexts;
+`dev-agent` needs only the default-branch `ref` context. This repository's
+docs have historically lagged the code here, so confirm against a live run's
+own OIDC claims or Infisical auth log rather than broadening either pattern.
 
 `docs/ops/bootstrap-github.sh` accepts these as optional flags
 (`--infisical-review-identity=<id>`, `--infisical-dev-identity=<id>`),

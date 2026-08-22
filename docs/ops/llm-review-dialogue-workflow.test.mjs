@@ -50,10 +50,37 @@ const dialoguePath = path.join(root, ".github/workflows/llm-review-dialogue.yml"
 const dispatchPath = path.join(root, ".github/workflows/dev-agent-dispatch.yml");
 const recheckPath = path.join(root, ".github/workflows/llm-review-recheck.yml");
 const reviewActionPath = path.join(root, ".github/actions/verify-llm-review/action.yml");
+const runbookPath = path.join(root, "docs/ops/runbook.md");
 const dialogueYaml = readFileSync(dialoguePath, "utf8");
 const dispatchYaml = readFileSync(dispatchPath, "utf8");
 const recheckYaml = readFileSync(recheckPath, "utf8");
 const reviewActionYaml = readFileSync(reviewActionPath, "utf8");
+const runbook = readFileSync(runbookPath, "utf8");
+
+test("runbook pins the reviewer and developer identities to their exact OIDC subject sets", () => {
+  // These are deliberately repository-specific, immutable GitHub OIDC IDs,
+  // captured by the live run linked in the runbook. A fork should fail this
+  // repository-policy test until its owner records that fork's own prefix;
+  // silently deriving names would weaken the rename-resistant trust lock.
+  const immutablePrefix = "repo:kgsmith19@64936641/hyperbolic-core@1331401739:";
+
+  assert.match(
+    runbook,
+    new RegExp(`${immutablePrefix.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\{pull_request,ref:refs/heads/main\\}`),
+    "the reviewer must trust the PR token and the main-ref token used by its non-PR workflows"
+  );
+  assert.match(
+    runbook,
+    new RegExp(`${immutablePrefix.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}ref:refs/heads/main`),
+    "the developer must trust only the main-ref token used by repository/workflow dispatch"
+  );
+  assert.doesNotMatch(runbook, /\.\.\.:workflow_run|\.\.\.:repository_dispatch|\.\.\.:workflow_dispatch/);
+});
+
+test("the temporary OIDC claim diagnostic is removed after live subject confirmation", () => {
+  assert.doesNotMatch(dialogueYaml, /DEBUG · Print this job's OIDC subject claim/);
+  assert.doesNotMatch(dialogueYaml, /core\.getIDToken\(\)/);
+});
 
 // General "script: |" block extractor. Unlike pr-verify-workflow.test.mjs's
 // version, this does not assume the block is the last thing in the file --
@@ -282,6 +309,16 @@ test("llm-review-dialogue.yml sources the dev agent's Anthropic credential from 
     /HAS_ANTHROPIC_API_KEY:\s*\$\{\{\s*env\.DEV_ANTHROPIC_API_KEY\s*!=\s*''\s*\}\}/,
     "HAS_ANTHROPIC_API_KEY must read the Infisical-sourced env var, not secrets.ANTHROPIC_API_KEY"
   );
+  assert.match(
+    postingBlock,
+    /HAS_DEV_APP_ID:\s*\$\{\{\s*env\.DEV_GITHUB_APP_ID\s*!=\s*''\s*\}\}/,
+    "the dialogue preflight must include the dev App ID in its provisioned decision"
+  );
+  assert.match(
+    postingBlock,
+    /HAS_DEV_APP_PRIVATE_KEY:\s*\$\{\{\s*env\.DEV_GITHUB_APP_PRIVATE_KEY\s*!=\s*''\s*\}\}/,
+    "the dialogue preflight must include the dev App private key in its provisioned decision"
+  );
   assert.doesNotMatch(postingBlock, /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, "must not fall back to a raw GitHub secret");
   assert.doesNotMatch(postingBlock, /secrets\.ANTHROPIC_API_KEY/, "must not fall back to a raw GitHub secret");
 
@@ -317,6 +354,11 @@ test("dev-agent-dispatch.yml pulls its own Anthropic credential from Infisical's
   const resolveBlock = dispatchYaml.slice(resolveStart, dispatchYaml.indexOf("prompt:", resolveStart));
   assert.match(resolveBlock, /claude_code_oauth_token:\s*\$\{\{\s*env\.DEV_CLAUDE_CODE_OAUTH_TOKEN\s*\}\}/);
   assert.match(resolveBlock, /anthropic_api_key:\s*\$\{\{\s*env\.DEV_ANTHROPIC_API_KEY\s*\}\}/);
+  assert.match(
+    resolveBlock,
+    /claude_args:\s*\|[\s\S]*--model\s+\$\{\{\s*steps\.preflight\.outputs\.model\s*\}\}/,
+    "the declared dev.model must be passed to Claude Code, not merely printed in a footer"
+  );
 
   // Whole-file, not just the sliced blocks above -- see the sibling test's
   // own comment for why this is the failure-sensitivity gap the block-scoped
@@ -571,7 +613,18 @@ async function runDialogue(
   delete env.__files;
   const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows, searchResults, createIssueThrows, devProvider, reviewProvider, reviewModel });
   const core = makeCore();
-  const proc = { env: { ...env, ARTIFACT_DIR: dir } };
+  // Most dialogue tests exercise behavior after successful provisioning, so
+  // App presence defaults true. A test for incomplete identity provisioning
+  // must override the relevant flag explicitly; the regression test below
+  // does so for the private-key-missing case.
+  const proc = {
+    env: {
+      HAS_DEV_APP_ID: "true",
+      HAS_DEV_APP_PRIVATE_KEY: "true",
+      ...env,
+      ARTIFACT_DIR: dir,
+    },
+  };
   const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
   await loadDialogueScript()(require, context, core, api, proc);
   return { calls, core };
@@ -1093,6 +1146,37 @@ test("dialogue: an unprovisioned agent escalates to the owner immediately, witho
   assert.match(body, /is not provisioned/);
 });
 
+test("dialogue: a model credential without both dev App credentials never dispatches a fixer", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const oneSidedCredentials = [
+    { HAS_DEV_APP_ID: "true", HAS_DEV_APP_PRIVATE_KEY: "false" },
+    { HAS_DEV_APP_ID: "false", HAS_DEV_APP_PRIVATE_KEY: "true" },
+  ];
+
+  for (const credentials of oneSidedCredentials) {
+    const { calls } = await runDialogue(fs, os, path_, {
+      RUN_ID: `7-app-missing-${credentials.HAS_DEV_APP_ID}`,
+      RUN_URL: "http://x",
+      RUN_HEAD_SHA: HEAD,
+      ESCALATE_AFTER: "3",
+      HAS_ANTHROPIC_OAUTH: "true",
+      HAS_ANTHROPIC_API_KEY: "false",
+      ...credentials,
+      __files: {
+        "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+        "review-verdict.json": BLOCKING_VERDICT,
+      },
+    }, { pr: BASE_PR });
+
+    assert.equal(calls.createDispatchEvent.length, 0);
+    const body = calls.createComment[0].body;
+    assert.match(body, /@kgsmith19 — this needs your decision/);
+    assert.match(body, /is not provisioned/);
+  }
+});
+
 // Behavior protected: dev-agent-dispatch.yml only implements dev.provider
 // "anthropic" today (Issue #252's slice 7). Firing the dispatch anyway when
 // agent-roles.yaml names something else would just wake a job whose own
@@ -1371,14 +1455,18 @@ test("preflight: dev.provider=anthropic with a model credential but no dev App c
 });
 
 test("preflight: one dev App secret present but not the other still fails closed", async () => {
-  const { failure } = await runPreflightScript({
-    devProvider: "anthropic",
-    oauth: "token-value",
-    appId: "app-id-value",
-    appPrivateKey: "",
-  });
-  assert.match(failure, /DEV_GITHUB_APP_ID/);
-  assert.match(failure, /DEV_GITHUB_APP_PRIVATE_KEY/);
+  for (const credentials of [
+    { appId: "app-id-value", appPrivateKey: "" },
+    { appId: "", appPrivateKey: "app-private-key-value" },
+  ]) {
+    const { failure } = await runPreflightScript({
+      devProvider: "anthropic",
+      oauth: "token-value",
+      ...credentials,
+    });
+    assert.match(failure, /DEV_GITHUB_APP_ID/);
+    assert.match(failure, /DEV_GITHUB_APP_PRIVATE_KEY/);
+  }
 });
 
 // Issue #290. Behavior protected: preflight's `model` output resolves from
