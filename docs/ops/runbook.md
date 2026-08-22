@@ -127,6 +127,27 @@ signup, same as any other SaaS org. Everything after that is scriptable.
    | `review-gate` | `repo:kgsmith19@64936641/hyperbolic-core@1331401739:{pull_request,ref:refs/heads/main}` | `pr-verify.yml` (`pull_request`), plus `llm-review-dialogue.yml` (`workflow_run`) and `llm-review-recheck.yml` (`repository_dispatch`) on `main` |
    | `dev-agent` | `repo:kgsmith19@64936641/hyperbolic-core@1331401739:ref:refs/heads/main` | `llm-review-dialogue.yml` (`workflow_run`), `dev-agent-dispatch.yml` (`repository_dispatch`), and `dev-agent-post.yml` (`workflow_dispatch`) on `main` |
 
+   **Live evidence (2026-08-21):** [`llm-review-dialogue.yml` run
+   32545529951](https://github.com/kgsmith19/hyperbolic-core/actions/runs/32545529951)
+   decoded its GitHub-issued token before the temporary diagnostic was
+   removed. It reported `sub` =
+   `repo:kgsmith19@64936641/hyperbolic-core@1331401739:ref:refs/heads/main`
+   and `aud` = `https://github.com/kgsmith19`. The run printed claims only,
+   never the raw token. This is the authoritative evidence for the shared
+   non-PR subject above; the `pull_request` half is independently exercised
+   by every provisioned `AI Review` job.
+
+   [`llm-review-dialogue.yml` run
+   32545881404](https://github.com/kgsmith19/hyperbolic-core/actions/runs/32545881404)
+   then successfully exchanged **both** the `review-gate` and `dev-agent`
+   identities from that `main`-ref context, proving both Infisical trust
+   updates were live. Its next reviewer-App mint failed with `Invalid
+   keyData`; that is a separate secret-content problem, not an OIDC subject
+   failure. Replace `/review/REVIEW_GITHUB_APP_PRIVATE_KEY` with the complete
+   PEM downloaded for the reviewer App, including its `BEGIN`/`END` lines
+   and real newlines, then re-run a pull request to prove the custom posting
+   identity.
+
    - **`review-gate`** is exchanged both by the `ai-review` job (displayed as
      check `AI Review`) in `pr-verify.yml`, which is `pull_request`-triggered
      (second row), and by `llm-review-dialogue.yml`'s own Infisical pull for

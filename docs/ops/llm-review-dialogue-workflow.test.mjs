@@ -609,6 +609,10 @@ async function runDialogue(
   delete env.__files;
   const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows, searchResults, createIssueThrows, devProvider, reviewProvider, reviewModel });
   const core = makeCore();
+  // Most dialogue tests exercise behavior after successful provisioning, so
+  // App presence defaults true. A test for incomplete identity provisioning
+  // must override the relevant flag explicitly; the regression test below
+  // does so for the private-key-missing case.
   const proc = {
     env: {
       HAS_DEV_APP_ID: "true",
@@ -1142,25 +1146,31 @@ test("dialogue: a model credential without both dev App credentials never dispat
   const fs = await import("node:fs");
   const os = await import("node:os");
   const path_ = await import("node:path");
-  const { calls } = await runDialogue(fs, os, path_, {
-    RUN_ID: "7-app-missing",
-    RUN_URL: "http://x",
-    RUN_HEAD_SHA: HEAD,
-    ESCALATE_AFTER: "3",
-    HAS_ANTHROPIC_OAUTH: "true",
-    HAS_ANTHROPIC_API_KEY: "false",
-    HAS_DEV_APP_ID: "true",
-    HAS_DEV_APP_PRIVATE_KEY: "false",
-    __files: {
-      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
-      "review-verdict.json": BLOCKING_VERDICT,
-    },
-  }, { pr: BASE_PR });
+  const oneSidedCredentials = [
+    { HAS_DEV_APP_ID: "true", HAS_DEV_APP_PRIVATE_KEY: "false" },
+    { HAS_DEV_APP_ID: "false", HAS_DEV_APP_PRIVATE_KEY: "true" },
+  ];
 
-  assert.equal(calls.createDispatchEvent.length, 0);
-  const body = calls.createComment[0].body;
-  assert.match(body, /@kgsmith19 — this needs your decision/);
-  assert.match(body, /is not provisioned/);
+  for (const credentials of oneSidedCredentials) {
+    const { calls } = await runDialogue(fs, os, path_, {
+      RUN_ID: `7-app-missing-${credentials.HAS_DEV_APP_ID}`,
+      RUN_URL: "http://x",
+      RUN_HEAD_SHA: HEAD,
+      ESCALATE_AFTER: "3",
+      HAS_ANTHROPIC_OAUTH: "true",
+      HAS_ANTHROPIC_API_KEY: "false",
+      ...credentials,
+      __files: {
+        "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+        "review-verdict.json": BLOCKING_VERDICT,
+      },
+    }, { pr: BASE_PR });
+
+    assert.equal(calls.createDispatchEvent.length, 0);
+    const body = calls.createComment[0].body;
+    assert.match(body, /@kgsmith19 — this needs your decision/);
+    assert.match(body, /is not provisioned/);
+  }
 });
 
 // Behavior protected: dev-agent-dispatch.yml only implements dev.provider
@@ -1441,14 +1451,18 @@ test("preflight: dev.provider=anthropic with a model credential but no dev App c
 });
 
 test("preflight: one dev App secret present but not the other still fails closed", async () => {
-  const { failure } = await runPreflightScript({
-    devProvider: "anthropic",
-    oauth: "token-value",
-    appId: "app-id-value",
-    appPrivateKey: "",
-  });
-  assert.match(failure, /DEV_GITHUB_APP_ID/);
-  assert.match(failure, /DEV_GITHUB_APP_PRIVATE_KEY/);
+  for (const credentials of [
+    { appId: "app-id-value", appPrivateKey: "" },
+    { appId: "", appPrivateKey: "app-private-key-value" },
+  ]) {
+    const { failure } = await runPreflightScript({
+      devProvider: "anthropic",
+      oauth: "token-value",
+      ...credentials,
+    });
+    assert.match(failure, /DEV_GITHUB_APP_ID/);
+    assert.match(failure, /DEV_GITHUB_APP_PRIVATE_KEY/);
+  }
 });
 
 // Issue #290. Behavior protected: preflight's `model` output resolves from
