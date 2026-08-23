@@ -116,39 +116,6 @@ jobs:
       # this repo (ai-review, dev-agent-dispatch).
       id-token: write
     steps:
-      # TEMPORARY DIAGNOSTIC -- both Infisical OIDC pulls below (the reviewer
-      # App credentials at /review/ and the dev-agent presence check at
-      # /dev/) are failing with "Access denied: OIDC subject not allowed."
-      # Infisical's 403 doesn't echo the rejected subject, so this decodes
-      # GitHub's own ID token directly (no Infisical involved) to print the
-      # exact `sub` claim this job presents, so the Infisical machine
-      # identities' trusted-subject lists can be updated to match reality
-      # instead of a guess. Prints decoded claims only, never the raw token.
-      # Safe to delete once the subject is confirmed and Infisical is fixed.
-      - name: DEBUG · Print this job's OIDC subject claim
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
-        with:
-          script: |
-            const token = await core.getIDToken();
-            const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"));
-            core.notice(`OIDC subject for this job: ${payload.sub}`);
-            core.info(
-              "Relevant OIDC claims:\n" +
-                JSON.stringify(
-                  {
-                    sub: payload.sub,
-                    aud: payload.aud,
-                    repository: payload.repository,
-                    ref: payload.ref,
-                    event_name: payload.event_name,
-                    workflow_ref: payload.workflow_ref,
-                    job_workflow_ref: payload.job_workflow_ref,
-                  },
-                  null,
-                  2
-                )
-            );
-
       # continue-on-error, not a hard failure: the artifact is absent for
       # every legitimate run where the reviewer never produced one -- most
       # commonly because Repository Standards failed, so AI Review was
@@ -259,6 +226,8 @@ jobs:
           # addition to one of these.
           HAS_ANTHROPIC_OAUTH: ${{ env.DEV_CLAUDE_CODE_OAUTH_TOKEN != '' }}
           HAS_ANTHROPIC_API_KEY: ${{ env.DEV_ANTHROPIC_API_KEY != '' }}
+          HAS_DEV_APP_ID: ${{ env.DEV_GITHUB_APP_ID != '' }}
+          HAS_DEV_APP_PRIVATE_KEY: ${{ env.DEV_GITHUB_APP_PRIVATE_KEY != '' }}
           # Visible-fallback signal for the summary (Issue #272) -- whether
           # this run actually posted under the reviewer's own identity or
           # fell back to github.token.
@@ -356,7 +325,9 @@ jobs:
             // immediately instead of waiting out a dispatch doomed to fail.
             const agentProvisioned =
               devProvider === "anthropic" &&
-              (process.env.HAS_ANTHROPIC_OAUTH === "true" || process.env.HAS_ANTHROPIC_API_KEY === "true");
+              (process.env.HAS_ANTHROPIC_OAUTH === "true" || process.env.HAS_ANTHROPIC_API_KEY === "true") &&
+              process.env.HAS_DEV_APP_ID === "true" &&
+              process.env.HAS_DEV_APP_PRIVATE_KEY === "true";
 
             // ---------------------------------------------------------------
             // Read the artifact. It is DATA: parsed, never executed.
