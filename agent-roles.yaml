@@ -40,9 +40,9 @@
 # same-company pairing even though the raw identifiers differ.
 
 dev:
-  provider: anthropic # anthropic | openai | google
-  model: claude-opus-5 # exact model id the dev dispatcher requests
+  provider: openai # anthropic | openai | google
+  model: gpt-5 # exact model id the dev dispatcher requests
 
 review:
-  provider: openai # anthropic | openai | gemini
-  model: gpt-5-mini
+  provider: anthropic # anthropic | openai | gemini
+  model: claude-sonnet-5
