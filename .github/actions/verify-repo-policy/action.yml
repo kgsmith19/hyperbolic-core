@@ -133,10 +133,10 @@ runs:
         python3 -c "import yaml; yaml.safe_load(open('standard.lock'))"
         echo "project.yaml and standard.lock parse as valid YAML."
 
-    # This is the mechanical half of the "dev.provider != review.provider"
-    # rule AGENTS.md > Active agent roles states in prose: fail the whole
-    # PR Gate closed rather than let a misconfigured file quietly leave both
-    # roles on the same vendor. This is one of three independent checks of
+    # This is the mechanical half of the provider-company separation rule
+    # AGENTS.md > Active agent roles states in prose: fail the whole PR Gate
+    # closed rather than let a misconfigured file quietly leave both roles on
+    # the same vendor. This is one of three independent checks of
     # the same constraint (the dev dispatcher and the reviewer gate each
     # re-verify it too, once those slices land) -- defense in depth, never
     # trust a single check alone.
@@ -158,13 +158,18 @@ runs:
         # anthropic, Codex = openai, Antigravity = google); review names the
         # raw model API family the structured-output review call targets (AI
         # Review never runs an agent harness, so "gemini" there is the real
-        # Gemini API). They only overlap on anthropic/openai, which is
-        # exactly where a real collision -- the same family both writing and
-        # reviewing -- can still happen, so the equality check below needs no
-        # special-casing.
+        # Gemini API). The raw values stay role-specific, but google (dev) and
+        # gemini (review) both resolve to the Google company family before the
+        # separation comparison.
         VALID_PROVIDERS_BY_ROLE = {
             "dev": {"anthropic", "openai", "google"},
             "review": {"anthropic", "openai", "gemini"},
+        }
+        PROVIDER_FAMILIES = {
+            "anthropic": "anthropic",
+            "openai": "openai",
+            "google": "google",
+            "gemini": "google",
         }
 
         try:
@@ -201,11 +206,23 @@ runs:
             if not isinstance(section.get("model"), str) or not section.get("model", "").strip():
                 errors.append(f"'{role}.model' is missing or empty.")
 
-        if "dev" in providers and "review" in providers and providers["dev"] == providers["review"]:
-            errors.append(
-                f"dev.provider and review.provider are both {providers['dev']!r}. "
-                "They must never be equal -- see AGENTS.md > Active agent roles."
-            )
+        if "dev" in providers and "review" in providers:
+            dev_family = PROVIDER_FAMILIES[providers["dev"]]
+            review_family = PROVIDER_FAMILIES[providers["review"]]
+            if dev_family == review_family:
+                if providers["dev"] == providers["review"]:
+                    role_detail = (
+                        f"dev.provider and review.provider are both {providers['dev']!r}."
+                    )
+                else:
+                    role_detail = (
+                        f"dev.provider is {providers['dev']!r} and review.provider is "
+                        f"{providers['review']!r}."
+                    )
+                errors.append(
+                    f"{role_detail} They resolve to same provider family {dev_family!r}; "
+                    "different provider companies are required -- see AGENTS.md > Active agent roles."
+                )
 
         # Issue #289: agent-roles.yaml declares review.provider/review.model
         # as this repo's stated source of truth, but nothing previously

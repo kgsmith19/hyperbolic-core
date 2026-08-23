@@ -23,9 +23,10 @@ description: >-
   fenced DATA with an explicit instruction that it is never to be obeyed --
   see packages/review/src/prompt.ts, whose injection-resistance clause is
   pinned by a test. Provider separation is mechanically enforced:
-  packages/review/src/config.ts REFUSES to run when REVIEW_PROVIDER equals
-  REVIEW_BUILDER_PROVIDER, so this gate cannot degrade into one model family
-  grading its own work (AGENTS.md > Risk classification, R2/R3).
+  packages/review/src/config.ts REFUSES to run when REVIEW_PROVIDER and
+  REVIEW_BUILDER_PROVIDER resolve to the same provider company, so this gate
+  cannot degrade into one model family grading its own work (AGENTS.md > Risk
+  classification, R2/R3).
 
 inputs:
   pr_number:
@@ -61,13 +62,60 @@ inputs:
     required: false
     default: ""
   review_builder_provider:
-    description: Family that writes code here (vars.REVIEW_BUILDER_PROVIDER); must differ from review_provider.
+    description: Legacy vars.REVIEW_BUILDER_PROVIDER mirror. If set, it must match agent-roles.yaml's dev.provider.
     required: false
     default: ""
 
 runs:
   using: composite
   steps:
+    # Node must be available before the credential-free configuration
+    # preflight imports packages/review's canonical provider validator. No npm
+    # install is needed: config.ts has only type imports, which Node strips.
+    - name: Setup · Install Node
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 24
+        cache: npm
+        cache-dependency-path: package-lock.json
+
+    # Read the default branch rather than the pull-request checkout: a PR must
+    # not be able to claim a different builder family for its own review. This
+    # is the same source-of-truth boundary used by the dev dispatcher.
+    - name: Preflight · Resolve the builder provider from agent-roles.yaml
+      id: roles
+      if: inputs.pr_number != ''
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const { owner, repo } = context.repo;
+          const { data } = await github.rest.repos.getContent({
+            owner,
+            repo,
+            path: "agent-roles.yaml",
+          });
+          if (Array.isArray(data) || data.type !== "file" || !data.content) {
+            core.setFailed("Could not read agent-roles.yaml from the default branch as a file.");
+            return;
+          }
+
+          const content = Buffer.from(data.content, data.encoding).toString("utf8");
+          const devSection = /(?:^|\n)dev:\s*(?:#.*)?\n((?:[ \t]+[^\n]*(?:\n|$))*)/.exec(content);
+          const providerMatch = devSection?.[1].match(
+            /^[ \t]+provider:\s*(?:"([^"]+)"|'([^']+)'|([^\s#]+))/m
+          );
+          const provider = (providerMatch?.[1] ?? providerMatch?.[2] ?? providerMatch?.[3] ?? "")
+            .trim()
+            .toLowerCase();
+          if (!new Set(["anthropic", "openai", "google"]).has(provider)) {
+            core.setFailed(
+              "Could not resolve a valid dev.provider from default-branch agent-roles.yaml; refusing to guess the builder family."
+            );
+            return;
+          }
+          core.setOutput("builder_provider", provider);
+
     # Runs first so an unprovisioned gate says WHICH knob is missing rather
     # than dying inside Infisical/secrets-action with "Missing identity ID
     # for OIDC auth" -- an error that names neither the GitHub variable that
@@ -82,7 +130,8 @@ runs:
         PROJECT_SLUG: ${{ inputs.infisical_project_slug }}
         REVIEW_PROVIDER: ${{ inputs.review_provider }}
         REVIEW_MODEL: ${{ inputs.review_model }}
-        REVIEW_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
+        REVIEW_BUILDER_PROVIDER: ${{ steps.roles.outputs.builder_provider }}
+        DECLARED_REVIEW_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
       run: |
         set -euo pipefail
         missing=()
@@ -111,30 +160,32 @@ runs:
           exit 1
         fi
 
-        # packages/review/src/config.ts throws when these match, defaulting the
-        # builder to anthropic -- caught here so the reason is stated up front
-        # rather than surfacing as a reviewer crash after credentials are pulled.
-        # Compare the same way config.ts does: provider identifiers are
-        # case-insensitive and canonicalized to lowercase at the boundary, so
-        # this preflight must not disagree with the library about equality.
-        reviewer="$(printf '%s' "$REVIEW_PROVIDER" | tr '[:upper:]' '[:lower:]')"
-        builder="$(printf '%s' "${REVIEW_BUILDER_PROVIDER:-anthropic}" | tr '[:upper:]' '[:lower:]')"
-        if [ "$reviewer" = "$builder" ]; then
-          echo "REVIEW_PROVIDER and the builder family are both \"$builder\"." >&2
-          echo "packages/review refuses to let one model family grade its own work, so the" >&2
-          echo "reviewer must be a different family (AGENTS.md, R2/R3 provider separation)." >&2
-          echo "With the builder defaulting to anthropic, set REVIEW_PROVIDER to openai or gemini." >&2
-          exit 1
-        fi
+        # Reuse the exact runtime validator before any credential is imported.
+        # This keeps role-specific raw values while rejecting company-family
+        # collisions, including dev google plus review gemini, at the earliest
+        # security boundary instead of after Infisical has already run.
+        node --input-type=module <<'NODE'
+        import { resolveConfig } from "./packages/review/src/config.ts";
 
-        echo "Reviewer configuration present: provider=$REVIEW_PROVIDER model=$REVIEW_MODEL builder=$builder"
-
-    - name: Setup · Install Node
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-      with:
-        node-version: 24
-        cache: npm
-        cache-dependency-path: package-lock.json
+        try {
+          const config = resolveConfig(process.env);
+          const declaredBuilder = (process.env.DECLARED_REVIEW_BUILDER_PROVIDER ?? "")
+            .trim()
+            .toLowerCase();
+          if (declaredBuilder !== "" && declaredBuilder !== config.builderProvider) {
+            throw new Error(
+              `vars.REVIEW_BUILDER_PROVIDER (${declaredBuilder}) does not match ` +
+                `agent-roles.yaml dev.provider (${config.builderProvider}).`
+            );
+          }
+          console.log(
+            `Reviewer configuration present: provider=${config.reviewerProvider} model=${config.reviewerModel} builder=${config.builderProvider}`
+          );
+        } catch (error) {
+          console.error(error instanceof Error ? error.message : String(error));
+          process.exit(1);
+        }
+        NODE
 
     # npm ci runs BEFORE credentials are pulled, so install lifecycle
     # scripts never execute with a provider key in the environment.
@@ -270,7 +321,7 @@ runs:
       env:
         REVIEW_PROVIDER: ${{ inputs.review_provider }}
         REVIEW_MODEL: ${{ inputs.review_model }}
-        REVIEW_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
+        REVIEW_BUILDER_PROVIDER: ${{ steps.roles.outputs.builder_provider }}
         BASE_SHA: ${{ inputs.base_sha }}
         HEAD_SHA: ${{ inputs.head_sha }}
       run: |

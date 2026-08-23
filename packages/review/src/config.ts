@@ -9,13 +9,16 @@
  */
 
 import type { Provider } from "@hyperbolic/llm";
-import type { ReviewConfig } from "./types.ts";
+import type { BuilderProvider, ReviewConfig } from "./types.ts";
 
-/** The provider families `@hyperbolic/llm` can actually dispatch to. */
+/** The review API provider identifiers `@hyperbolic/llm` can dispatch to. */
 export const VALID_PROVIDERS: readonly Provider[] = ["anthropic", "openai", "gemini"];
 
-/** Assumed author family when the caller does not state one. */
-export const DEFAULT_BUILDER_PROVIDER: Provider = "anthropic";
+/** The coding-agent harness companies accepted for the builder role. */
+const VALID_BUILDER_PROVIDERS: readonly BuilderProvider[] = ["anthropic", "openai", "google"];
+
+/** Assumed raw builder provider when the caller does not state one. */
+export const DEFAULT_BUILDER_PROVIDER: BuilderProvider = "anthropic";
 
 /**
  * Generous enough for a long verdict on a large diff; the tool schema, not
@@ -53,6 +56,16 @@ function isProvider(value: string): value is Provider {
   return (VALID_PROVIDERS as readonly string[]).includes(value);
 }
 
+function isBuilderProvider(value: string): value is BuilderProvider {
+  return (VALID_BUILDER_PROVIDERS as readonly string[]).includes(value);
+}
+
+type ProviderFamily = "anthropic" | "openai" | "google";
+
+function providerFamily(provider: Provider | BuilderProvider): ProviderFamily {
+  return provider === "gemini" ? "google" : provider;
+}
+
 /**
  * One canonical representation: provider identifiers are lowercase. This is
  * the single place case is normalized -- "OPENAI" in a repository variable
@@ -73,8 +86,8 @@ function normalizeProvider(value: string): string {
  * downstream ever sees a mixed-case provider name.
  *
  * Throws -- never returns a partial or defaulted config -- when a required
- * variable is missing, when a provider name is not one of the three supported
- * families, or when the reviewer and builder families are the same.
+ * variable is missing, when a provider name is not valid for its role, or
+ * when the reviewer and builder resolve to the same company family.
  */
 export function resolveConfig(env: ReviewEnv): ReviewConfig {
   const rawProvider = required(
@@ -101,18 +114,20 @@ export function resolveConfig(env: ReviewEnv): ReviewConfig {
   const rawBuilder = (env.REVIEW_BUILDER_PROVIDER ?? "").trim();
   const builderCandidate =
     rawBuilder === "" ? DEFAULT_BUILDER_PROVIDER : normalizeProvider(rawBuilder);
-  if (!isProvider(builderCandidate)) {
+  if (!isBuilderProvider(builderCandidate)) {
     throw new Error(
-      `REVIEW_BUILDER_PROVIDER="${rawBuilder}" is not a supported provider. Valid providers are: ${VALID_PROVIDERS.join(", ")}.`
+      `REVIEW_BUILDER_PROVIDER="${rawBuilder}" is not a supported provider. Valid providers are: ${VALID_BUILDER_PROVIDERS.join(", ")}.`
     );
   }
 
-  if (reviewerProvider === builderCandidate) {
+  const reviewerFamily = providerFamily(reviewerProvider);
+  const builderFamily = providerFamily(builderCandidate);
+  if (reviewerFamily === builderFamily) {
     throw new Error(
-      `Provider separation is required: REVIEW_PROVIDER and REVIEW_BUILDER_PROVIDER are both "${reviewerProvider}". ` +
+      `Provider separation is required: REVIEW_PROVIDER and REVIEW_BUILDER_PROVIDER resolve to the same provider family "${reviewerFamily}". ` +
         `The reviewer must come from a different provider family than the one that wrote the code, so the review is not a model ` +
         `family grading its own work and re-deriving its own blind spots. Set REVIEW_PROVIDER to one of: ` +
-        `${VALID_PROVIDERS.filter((provider) => provider !== reviewerProvider).join(", ")}.`
+        `${VALID_PROVIDERS.filter((provider) => providerFamily(provider) !== reviewerFamily).join(", ")}.`
     );
   }
 
