@@ -160,15 +160,14 @@ runs:
           exit 1
         fi
 
-        # Install before the preflight so its pinned TypeScript runtime is
-        # available while no provider credential is present in the environment.
-        npm ci --ignore-scripts
-
         # Reuse the exact runtime validator before any credential is imported.
         # This keeps role-specific raw values while rejecting company-family
         # collisions, including dev google plus review gemini, at the earliest
         # security boundary instead of after Infisical has already run.
-        npx --no-install tsx --eval <<'NODE'
+        # The workflow runner supplies Node 22; --experimental-strip-types is
+        # explicit here so this boundary does not depend on implicit loader
+        # behavior or an unpinned npx download.
+        node --experimental-strip-types --input-type=module <<'NODE'
         import { resolveConfig } from "./packages/review/src/config.ts";
 
         try {
@@ -190,6 +189,12 @@ runs:
           process.exit(1);
         }
         NODE
+
+    # Install dependencies after the credential-free preflight; lifecycle
+    # scripts therefore never run with provider keys in the environment.
+    - name: Setup · Install workspace dependencies
+      shell: bash
+      run: npm ci
 
     - name: Setup · Pull reviewer credentials from Infisical
       if: inputs.pr_number != ''
