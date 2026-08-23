@@ -24,18 +24,10 @@ export const DEFAULT_BUILDER_PROVIDER: BuilderProvider = "anthropic";
  * Generous enough for a long verdict on a large diff; the tool schema, not
  * this number, is what keeps the answer structured.
  *
- * Sized for OpenAI reasoning models (o1/o3/o4/gpt-5), not just the visible
- * verdict: `max_completion_tokens` there is a shared budget that internal
- * reasoning tokens spend from before any output text or tool call is
- * emitted (see openai.ts's TEMPERATURE_LOCKED_MODEL_PREFIXES for the same
- * model family). Observed live on gpt-5-mini reviewing a real PR diff --
- * 8000 was tight enough that the model exhausted the whole budget on
- * reasoning and hit stopReason "max_tokens" with no submit_review call at
- * all (runReview's own ReviewInfrastructureError branch for exactly this).
- * Anthropic and Gemini pay only for tokens actually generated, so a higher
- * ceiling costs nothing extra when it's Claude or Gemini reviewing instead.
+ * Kept below the Anthropic SDK's long-request threshold for non-streaming
+ * calls; the structured verdict and evidence citations fit comfortably here.
  */
-export const DEFAULT_MAX_TOKENS = 32_000;
+export const DEFAULT_MAX_TOKENS = 8_000;
 
 /** Hard wall per attempt. A review that hangs must fail, not stall CI. */
 export const DEFAULT_TIMEOUT_MS = 180_000;
