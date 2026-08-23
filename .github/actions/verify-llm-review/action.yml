@@ -160,34 +160,26 @@ runs:
           exit 1
         fi
 
-        # Reuse the exact runtime validator before any credential is imported.
-        # This keeps role-specific raw values while rejecting company-family
-        # collisions, including dev google plus review gemini, at the earliest
-        # security boundary instead of after Infisical has already run.
-        # The workflow runner supplies Node 22; --experimental-strip-types is
-        # explicit here so this boundary does not depend on implicit loader
-        # behavior or an unpinned npx download.
-        node --experimental-strip-types --input-type=module <<'NODE'
-        import { resolveConfig } from "./packages/review/src/config.ts";
-
-        try {
-          const config = resolveConfig(process.env);
-          const declaredBuilder = (process.env.DECLARED_REVIEW_BUILDER_PROVIDER ?? "")
-            .trim()
-            .toLowerCase();
-          if (declaredBuilder !== "" && declaredBuilder !== config.builderProvider) {
-            throw new Error(
-              `vars.REVIEW_BUILDER_PROVIDER (${declaredBuilder}) does not match ` +
-                `agent-roles.yaml dev.provider (${config.builderProvider}).`
-            );
-          }
-          console.log(
-            `Reviewer configuration present: provider=${config.reviewerProvider} model=${config.reviewerModel} builder=${config.builderProvider}`
-          );
-        } catch (error) {
-          console.error(error instanceof Error ? error.message : String(error));
-          process.exit(1);
+        # Keep this boundary plain JavaScript: it runs before credentials and
+        # must not depend on a TypeScript loader or a generated build artifact.
+        node --input-type=module <<'NODE'
+        const env = process.env;
+        const reviewerProvider = (env.REVIEW_PROVIDER ?? "").trim().toLowerCase();
+        const reviewerModel = (env.REVIEW_MODEL ?? "").trim();
+        const builderProvider = (env.REVIEW_BUILDER_PROVIDER ?? "").trim().toLowerCase();
+        const declaredBuilder = (env.DECLARED_REVIEW_BUILDER_PROVIDER ?? "").trim().toLowerCase();
+        const validReview = new Set(["anthropic", "openai", "gemini"]);
+        const validBuilder = new Set(["anthropic", "openai", "google"]);
+        const family = (provider) => provider === "gemini" ? "google" : provider;
+        const fail = (message) => { throw new Error(message); };
+        if (!reviewerModel) fail("REVIEW_MODEL is required.");
+        if (!validReview.has(reviewerProvider)) fail(`REVIEW_PROVIDER must be one of anthropic, openai, gemini; got ${reviewerProvider || "<unset>"}.`);
+        if (!validBuilder.has(builderProvider)) fail(`REVIEW_BUILDER_PROVIDER must be one of anthropic, openai, google; got ${builderProvider || "<unset>"}.`);
+        if (family(reviewerProvider) === family(builderProvider)) fail(`Reviewer and builder resolve to the same provider family (${family(reviewerProvider)}).`);
+        if (declaredBuilder !== "" && declaredBuilder !== builderProvider) {
+          fail(`vars.REVIEW_BUILDER_PROVIDER (${declaredBuilder}) does not match agent-roles.yaml dev.provider (${builderProvider}).`);
         }
+        console.log(`Reviewer configuration present: provider=${reviewerProvider} model=${reviewerModel} builder=${builderProvider}`);
         NODE
 
     # Install dependencies after the credential-free preflight; lifecycle
