@@ -106,7 +106,8 @@ jobs:
           infisical_project_slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           review_provider: ${{ vars.REVIEW_PROVIDER }}
           review_model: ${{ vars.REVIEW_MODEL }}
-          review_builder_provider: ${{ vars.REVIEW_BUILDER_PROVIDER }}
+          review_builder_provider: ${{ vars.DEV_PROVIDER }}
+          dev_model: ${{ vars.DEV_MODEL }}
 
       - name: Recheck · Not applicable, the pull request moved on
         if: steps.pr.outputs.stale == 'true'

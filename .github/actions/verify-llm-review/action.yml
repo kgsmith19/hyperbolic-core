@@ -62,7 +62,11 @@ inputs:
     required: false
     default: ""
   review_builder_provider:
-    description: Legacy vars.REVIEW_BUILDER_PROVIDER mirror. If set, it must match agent-roles.yaml's dev.provider.
+    description: Coding-agent provider family from vars.DEV_PROVIDER.
+    required: false
+    default: ""
+  dev_model:
+    description: Coding-agent model from vars.DEV_MODEL.
     required: false
     default: ""
 
@@ -79,43 +83,6 @@ runs:
         cache: npm
         cache-dependency-path: package-lock.json
 
-    # Read the default branch rather than the pull-request checkout: a PR must
-    # not be able to claim a different builder family for its own review. This
-    # is the same source-of-truth boundary used by the dev dispatcher.
-    - name: Preflight · Resolve the builder provider from agent-roles.yaml
-      id: roles
-      if: inputs.pr_number != ''
-      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
-      with:
-        github-token: ${{ inputs.github_token }}
-        script: |
-          const { owner, repo } = context.repo;
-          const { data } = await github.rest.repos.getContent({
-            owner,
-            repo,
-            path: "agent-roles.yaml",
-          });
-          if (Array.isArray(data) || data.type !== "file" || !data.content) {
-            core.setFailed("Could not read agent-roles.yaml from the default branch as a file.");
-            return;
-          }
-
-          const content = Buffer.from(data.content, data.encoding).toString("utf8");
-          const devSection = /(?:^|\n)dev:\s*(?:#.*)?\n((?:[ \t]+[^\n]*(?:\n|$))*)/.exec(content);
-          const providerMatch = devSection?.[1].match(
-            /^[ \t]+provider:\s*(?:"([^"]+)"|'([^']+)'|([^\s#]+))/m
-          );
-          const provider = (providerMatch?.[1] ?? providerMatch?.[2] ?? providerMatch?.[3] ?? "")
-            .trim()
-            .toLowerCase();
-          if (!new Set(["anthropic", "openai", "google"]).has(provider)) {
-            core.setFailed(
-              "Could not resolve a valid dev.provider from default-branch agent-roles.yaml; refusing to guess the builder family."
-            );
-            return;
-          }
-          core.setOutput("builder_provider", provider);
-
     # Runs first so an unprovisioned gate says WHICH knob is missing rather
     # than dying inside Infisical/secrets-action with "Missing identity ID
     # for OIDC auth" -- an error that names neither the GitHub variable that
@@ -130,8 +97,8 @@ runs:
         PROJECT_SLUG: ${{ inputs.infisical_project_slug }}
         REVIEW_PROVIDER: ${{ inputs.review_provider }}
         REVIEW_MODEL: ${{ inputs.review_model }}
-        REVIEW_BUILDER_PROVIDER: ${{ steps.roles.outputs.builder_provider }}
-        DECLARED_REVIEW_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
+        REVIEW_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
+        DEV_MODEL: ${{ inputs.dev_model }}
       run: |
         set -euo pipefail
         missing=()
@@ -168,10 +135,6 @@ runs:
         npx --no-install tsx --eval <<'NODE'
         import { resolveConfig } from "./packages/review/src/config.ts";
         const config = resolveConfig(process.env);
-        const declaredBuilder = (process.env.DECLARED_REVIEW_BUILDER_PROVIDER ?? "").trim().toLowerCase();
-        if (declaredBuilder !== "" && declaredBuilder !== config.builderProvider) {
-          throw new Error(`vars.REVIEW_BUILDER_PROVIDER (${declaredBuilder}) does not match agent-roles.yaml dev.provider (${config.builderProvider}).`);
-        }
         console.log(`Reviewer configuration present: provider=${config.reviewerProvider} model=${config.reviewerModel} builder=${config.builderProvider}`);
         NODE
 
