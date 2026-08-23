@@ -272,7 +272,7 @@ runs:
       env:
         REVIEW_PROVIDER: ${{ inputs.review_provider }}
         REVIEW_MODEL: ${{ inputs.review_model }}
-        REVIEW_BUILDER_PROVIDER: ${{ steps.roles.outputs.builder_provider }}
+        REVIEW_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
         BASE_SHA: ${{ inputs.base_sha }}
         HEAD_SHA: ${{ inputs.head_sha }}
       run: |
