@@ -26,6 +26,14 @@ inputs:
       before the repo variable is first provisioned.
     required: false
     default: ""
+  dev_provider:
+    description: Live vars.DEV_PROVIDER, the coding-agent provider family.
+    required: false
+    default: ""
+  dev_model:
+    description: Live vars.DEV_MODEL, the coding-agent model.
+    required: false
+    default: ""
   review_model:
     description: >-
       Live vars.REVIEW_MODEL, cross-checked against agent-roles.yaml's
@@ -133,16 +141,18 @@ runs:
         python3 -c "import yaml; yaml.safe_load(open('standard.lock'))"
         echo "project.yaml and standard.lock parse as valid YAML."
 
-    # This is the mechanical half of the "dev.provider != review.provider"
-    # rule AGENTS.md > Active agent roles states in prose: fail the whole
-    # PR Gate closed rather than let a misconfigured file quietly leave both
-    # roles on the same vendor. This is one of three independent checks of
+    # This is the mechanical half of the provider-company separation rule
+    # AGENTS.md > Active agent roles states in prose: fail the whole PR Gate
+    # closed rather than let a misconfigured file quietly leave both roles on
+    # the same vendor. This is one of three independent checks of
     # the same constraint (the dev dispatcher and the reviewer gate each
     # re-verify it too, once those slices land) -- defense in depth, never
     # trust a single check alone.
     - name: Policy · Confirm agent-roles.yaml is valid and dev/review providers differ
       shell: bash
       env:
+        LIVE_DEV_PROVIDER: ${{ inputs.dev_provider }}
+        LIVE_DEV_MODEL: ${{ inputs.dev_model }}
         LIVE_REVIEW_PROVIDER: ${{ inputs.review_provider }}
         LIVE_REVIEW_MODEL: ${{ inputs.review_model }}
       run: |
@@ -158,13 +168,18 @@ runs:
         # anthropic, Codex = openai, Antigravity = google); review names the
         # raw model API family the structured-output review call targets (AI
         # Review never runs an agent harness, so "gemini" there is the real
-        # Gemini API). They only overlap on anthropic/openai, which is
-        # exactly where a real collision -- the same family both writing and
-        # reviewing -- can still happen, so the equality check below needs no
-        # special-casing.
+        # Gemini API). The raw values stay role-specific, but google (dev) and
+        # gemini (review) both resolve to the Google company family before the
+        # separation comparison.
         VALID_PROVIDERS_BY_ROLE = {
             "dev": {"anthropic", "openai", "google"},
             "review": {"anthropic", "openai", "gemini"},
+        }
+        PROVIDER_FAMILIES = {
+            "anthropic": "anthropic",
+            "openai": "openai",
+            "google": "google",
+            "gemini": "google",
         }
 
         try:
@@ -173,6 +188,42 @@ runs:
         except (OSError, yaml.YAMLError) as error:
             print(f"agent-roles.yaml could not be read or parsed: {error}", file=sys.stderr)
             sys.exit(1)
+
+        # Provider and model assignments come from repository vars, not this
+        # file. Keep parsing the tracked file for structural-policy checks,
+        # but validate the live four-variable role configuration below.
+        live_role_values = {
+            "dev_provider": os.environ.get("LIVE_DEV_PROVIDER", "").strip(),
+            "dev_model": os.environ.get("LIVE_DEV_MODEL", "").strip(),
+            "review_provider": os.environ.get("LIVE_REVIEW_PROVIDER", "").strip(),
+            "review_model": os.environ.get("LIVE_REVIEW_MODEL", "").strip(),
+        }
+        if all(live_role_values.values()):
+            data = {
+                "dev": {"provider": live_role_values["dev_provider"], "model": live_role_values["dev_model"]},
+                "review": {"provider": live_role_values["review_provider"], "model": live_role_values["review_model"]},
+            }
+        else:
+            live_review_provider = live_role_values["review_provider"]
+            live_review_model = live_role_values["review_model"]
+            if live_review_provider:
+                declared = data.get("review", {}).get("provider") if isinstance(data.get("review"), dict) else None
+                if isinstance(declared, str) and declared.strip().lower() != live_review_provider.lower():
+                    print(
+                        f"agent-roles.yaml's review.provider ({declared.strip().lower()!r}) does not match the live "
+                        f"vars.REVIEW_PROVIDER ({live_review_provider!r}) that actually drives the review call.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+            if live_review_model:
+                declared_model = data.get("review", {}).get("model") if isinstance(data.get("review"), dict) else None
+                if isinstance(declared_model, str) and declared_model.strip() != live_review_model:
+                    print(
+                        f"agent-roles.yaml's review.model ({declared_model.strip()!r}) does not match the live "
+                        f"vars.REVIEW_MODEL ({live_review_model!r}) that actually drives the review call.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
 
         if not isinstance(data, dict):
             print("agent-roles.yaml must parse to a mapping with 'dev' and 'review' keys.", file=sys.stderr)
@@ -201,36 +252,22 @@ runs:
             if not isinstance(section.get("model"), str) or not section.get("model", "").strip():
                 errors.append(f"'{role}.model' is missing or empty.")
 
-        if "dev" in providers and "review" in providers and providers["dev"] == providers["review"]:
-            errors.append(
-                f"dev.provider and review.provider are both {providers['dev']!r}. "
-                "They must never be equal -- see AGENTS.md > Active agent roles."
-            )
-
-        # Issue #289: agent-roles.yaml declares review.provider/review.model
-        # as this repo's stated source of truth, but nothing previously
-        # confirmed they match vars.REVIEW_PROVIDER/REVIEW_MODEL -- the
-        # values that actually drive the live review call in
-        # verify-llm-review, and what the new AI Review footer states. If
-        # they drift, the footer would state a provider/model that isn't
-        # the one that actually ran. Empty inputs (the var not provisioned
-        # yet) skip this check rather than failing closed on nothing to
-        # compare against -- matching this action's own base_sha input.
-        live_review_provider = os.environ.get("LIVE_REVIEW_PROVIDER", "").strip()
-        live_review_model = os.environ.get("LIVE_REVIEW_MODEL", "").strip()
-        if live_review_provider:
-            declared = providers.get("review")
-            if declared is not None and declared != live_review_provider.strip().lower():
+        if "dev" in providers and "review" in providers:
+            dev_family = PROVIDER_FAMILIES[providers["dev"]]
+            review_family = PROVIDER_FAMILIES[providers["review"]]
+            if dev_family == review_family:
+                if providers["dev"] == providers["review"]:
+                    role_detail = (
+                        f"dev.provider and review.provider are both {providers['dev']!r}."
+                    )
+                else:
+                    role_detail = (
+                        f"dev.provider is {providers['dev']!r} and review.provider is "
+                        f"{providers['review']!r}."
+                    )
                 errors.append(
-                    f"agent-roles.yaml's review.provider ({declared!r}) does not match the live "
-                    f"vars.REVIEW_PROVIDER ({live_review_provider!r}) that actually drives the review call."
-                )
-        if live_review_model:
-            declared_model = data.get("review", {}).get("model") if isinstance(data.get("review"), dict) else None
-            if declared_model is not None and declared_model.strip() != live_review_model.strip():
-                errors.append(
-                    f"agent-roles.yaml's review.model ({declared_model!r}) does not match the live "
-                    f"vars.REVIEW_MODEL ({live_review_model!r}) that actually drives the review call."
+                    f"{role_detail} They resolve to same provider family {dev_family!r}; "
+                    "different provider companies are required -- see AGENTS.md > Active agent roles."
                 )
 
         if errors:
@@ -240,7 +277,7 @@ runs:
             sys.exit(1)
 
         print(
-            f"agent-roles.yaml is valid: dev={providers['dev']}, review={providers['review']}."
+            f"Repository role variables are valid: dev={providers['dev']}, review={providers['review']}."
         )
         PYEOF
 

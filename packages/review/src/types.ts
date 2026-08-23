@@ -13,6 +13,9 @@ import type { Provider } from "@hyperbolic/llm";
 
 export type { Provider };
 
+/** Raw provider identifiers accepted for the coding-agent harness role. */
+export type BuilderProvider = Exclude<Provider, "gemini"> | "google";
+
 /**
  * `blocking` fails the gate; `advisory` is reported and does not. There is no
  * third "info" tier on purpose: a finding either changes the merge decision or
@@ -87,7 +90,7 @@ export interface ReviewVerdict {
 export interface ReviewConfig {
   reviewerProvider: Provider;
   reviewerModel: string;
-  builderProvider: Provider;
+  builderProvider: BuilderProvider;
   maxTokens: number;
   timeoutMs: number;
 }

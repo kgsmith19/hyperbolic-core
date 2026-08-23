@@ -112,6 +112,23 @@ test("agent-roles.yaml validator: dev.provider === review.provider fails closed"
   assert.match(result.stderr, /dev\.provider and review\.provider are both 'anthropic'/);
 });
 
+// Cross-enum negative control. The role-specific values intentionally name
+// different surfaces, but Google/Antigravity dev and Gemini API review still
+// belong to one company family and therefore are not independent.
+test("agent-roles.yaml validator: google dev and gemini review are one provider family", () => {
+  const result = runValidator(
+    fixture({
+      devProvider: "google",
+      devModel: "gemini-2.5-pro",
+      reviewProvider: "gemini",
+      reviewModel: "gemini-2.5-pro",
+    })
+  );
+
+  assert.equal(result.ok, false, "expected the validator to fail on a Google-family collision");
+  assert.match(result.stderr, /same provider family 'google'/i);
+});
+
 // Behavior protected: an invalid provider name fails closed rather than
 // silently passing as "not a collision because they're both garbage".
 test("agent-roles.yaml validator: an unrecognized provider fails closed", () => {

@@ -14,10 +14,10 @@
 # .github/CODEOWNERS requires @kgsmith19's own approval on this file, so a
 # dev-role agent can never edit itself into also being the review role.
 #
-# HARD CONSTRAINT: dev.provider must never equal review.provider. Starting
-# with the CI-enforcement slice that follows this one, `repository-standards`
-# fails the whole PR Gate closed if it ever does — this is what guarantees
-# there is always exactly one dev, one reviewer, and the third vendor idle.
+# HARD CONSTRAINT: dev and review must resolve to different provider
+# companies. `repository-standards` fails the whole PR Gate closed when they
+# do not — this is what guarantees there is always exactly one dev, one
+# reviewer, and the third provider company idle.
 #
 # dev.provider and review.provider are deliberately DIFFERENT value spaces,
 # not the same enum reused twice:
@@ -32,10 +32,12 @@
 #     sandboxed LLM call via packages/llm (see packages/review/src/config.ts)
 #     -- it never runs an agent harness, so "gemini" here is the real
 #     Gemini API, the same one services/brain and services/llm-handler call
-#     for product features. Unrelated to Antigravity.
-# The two spaces only overlap on anthropic/openai, which is exactly where a
-# real collision (the same model family both writing and reviewing) can
-# still happen -- the collision check below stays a plain equality check.
+#     for product features. It is a distinct execution surface from
+#     Antigravity but belongs to the same provider company for separation.
+# The raw spaces remain distinct, but separation compares canonical company
+# families: anthropic -> anthropic, openai -> openai, google -> google, and
+# gemini -> google. Thus dev google plus review gemini is a forbidden
+# same-company pairing even though the raw identifiers differ.
 
 dev:
   provider: anthropic # anthropic | openai | google

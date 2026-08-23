@@ -17,8 +17,8 @@ name: "Verify: LLM Review"
 # created all of the following; none of them is agent-settable:
 #   - vars.REVIEW_PROVIDER              reviewer family: anthropic|openai|gemini
 #   - vars.REVIEW_MODEL                 exact model id served by that family
-#   - vars.REVIEW_BUILDER_PROVIDER      family that writes code here (optional;
-#                                       packages/review defaults to anthropic)
+#   - vars.REVIEW_BUILDER_PROVIDER      legacy mirror of agent-roles.yaml's
+#                                       dev.provider (optional; mismatches fail)
 #   - vars.INFISICAL_REVIEW_IDENTITY_ID Infisical machine identity for OIDC
 #   - vars.INFISICAL_PROJECT_SLUG       (already used by deploy.yml)
 #   - Infisical secrets at path /review/ (env prod), named exactly
@@ -114,4 +114,5 @@ jobs:
           infisical_project_slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           review_provider: ${{ vars.REVIEW_PROVIDER }}
           review_model: ${{ vars.REVIEW_MODEL }}
-          review_builder_provider: ${{ vars.REVIEW_BUILDER_PROVIDER }}
+          review_builder_provider: ${{ vars.DEV_PROVIDER }}
+          dev_model: ${{ vars.DEV_MODEL }}

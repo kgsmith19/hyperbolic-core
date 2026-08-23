@@ -23,9 +23,10 @@ description: >-
   fenced DATA with an explicit instruction that it is never to be obeyed --
   see packages/review/src/prompt.ts, whose injection-resistance clause is
   pinned by a test. Provider separation is mechanically enforced:
-  packages/review/src/config.ts REFUSES to run when REVIEW_PROVIDER equals
-  REVIEW_BUILDER_PROVIDER, so this gate cannot degrade into one model family
-  grading its own work (AGENTS.md > Risk classification, R2/R3).
+  packages/review/src/config.ts REFUSES to run when REVIEW_PROVIDER and
+  REVIEW_BUILDER_PROVIDER resolve to the same provider company, so this gate
+  cannot degrade into one model family grading its own work (AGENTS.md > Risk
+  classification, R2/R3).
 
 inputs:
   pr_number:
@@ -61,13 +62,27 @@ inputs:
     required: false
     default: ""
   review_builder_provider:
-    description: Family that writes code here (vars.REVIEW_BUILDER_PROVIDER); must differ from review_provider.
+    description: Coding-agent provider family from vars.DEV_PROVIDER.
+    required: false
+    default: ""
+  dev_model:
+    description: Coding-agent model from vars.DEV_MODEL.
     required: false
     default: ""
 
 runs:
   using: composite
   steps:
+    # Node must be available before the credential-free configuration
+    # preflight imports packages/review's canonical provider validator. No npm
+    # install is needed: config.ts has only type imports, which Node strips.
+    - name: Setup · Install Node
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 24
+        cache: npm
+        cache-dependency-path: package-lock.json
+
     # Runs first so an unprovisioned gate says WHICH knob is missing rather
     # than dying inside Infisical/secrets-action with "Missing identity ID
     # for OIDC auth" -- an error that names neither the GitHub variable that
@@ -83,6 +98,7 @@ runs:
         REVIEW_PROVIDER: ${{ inputs.review_provider }}
         REVIEW_MODEL: ${{ inputs.review_model }}
         REVIEW_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
+        DEV_MODEL: ${{ inputs.dev_model }}
       run: |
         set -euo pipefail
         missing=()
@@ -111,33 +127,19 @@ runs:
           exit 1
         fi
 
-        # packages/review/src/config.ts throws when these match, defaulting the
-        # builder to anthropic -- caught here so the reason is stated up front
-        # rather than surfacing as a reviewer crash after credentials are pulled.
-        # Compare the same way config.ts does: provider identifiers are
-        # case-insensitive and canonicalized to lowercase at the boundary, so
-        # this preflight must not disagree with the library about equality.
-        reviewer="$(printf '%s' "$REVIEW_PROVIDER" | tr '[:upper:]' '[:lower:]')"
-        builder="$(printf '%s' "${REVIEW_BUILDER_PROVIDER:-anthropic}" | tr '[:upper:]' '[:lower:]')"
-        if [ "$reviewer" = "$builder" ]; then
-          echo "REVIEW_PROVIDER and the builder family are both \"$builder\"." >&2
-          echo "packages/review refuses to let one model family grade its own work, so the" >&2
-          echo "reviewer must be a different family (AGENTS.md, R2/R3 provider separation)." >&2
-          echo "With the builder defaulting to anthropic, set REVIEW_PROVIDER to openai or gemini." >&2
-          exit 1
-        fi
+        npm ci --ignore-scripts
 
-        echo "Reviewer configuration present: provider=$REVIEW_PROVIDER model=$REVIEW_MODEL builder=$builder"
+        # Reuse the canonical package validator before any credential is
+        # imported. The pinned workspace tsx dependency makes this explicit
+        # and reproducible on the vanilla CI runner.
+        npx --no-install tsx --eval <<'NODE'
+        import { resolveConfig } from "./packages/review/src/config.ts";
+        const config = resolveConfig(process.env);
+        console.log(`Reviewer configuration present: provider=${config.reviewerProvider} model=${config.reviewerModel} builder=${config.builderProvider}`);
+        NODE
 
-    - name: Setup · Install Node
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-      with:
-        node-version: 24
-        cache: npm
-        cache-dependency-path: package-lock.json
-
-    # npm ci runs BEFORE credentials are pulled, so install lifecycle
-    # scripts never execute with a provider key in the environment.
+    # Install dependencies after the credential-free preflight; lifecycle
+    # scripts therefore never run with provider keys in the environment.
     - name: Setup · Install workspace dependencies
       shell: bash
       run: npm ci

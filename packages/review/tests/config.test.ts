@@ -76,7 +76,9 @@ test("resolveConfig: an invalid REVIEW_PROVIDER throws and names every valid pro
 // blind spots as the author. Without this test nothing in the system would
 // notice.
 test("resolveConfig: reviewer and builder from the same family is rejected", () => {
-  for (const provider of VALID_PROVIDERS) {
+  // These are the raw identifiers shared by both role-specific enums. The
+  // Google family uses distinct raw values and has its own control below.
+  for (const provider of ["anthropic", "openai"] as const) {
     assert.throws(
       () =>
         resolveConfig({
@@ -93,6 +95,34 @@ test("resolveConfig: reviewer and builder from the same family is rejected", () 
       `same-family review must be rejected for provider "${provider}"`
     );
   }
+});
+
+// Cross-enum negative control. Dev calls Google's harness provider `google`,
+// while review calls the raw model API `gemini`; comparing the raw strings
+// would incorrectly treat one company as two independent families.
+test("resolveConfig: google builder and gemini reviewer are the same company family", () => {
+  assert.throws(
+    () =>
+      resolveConfig({
+        REVIEW_PROVIDER: "gemini",
+        REVIEW_MODEL: "gemini-2.5-pro",
+        REVIEW_BUILDER_PROVIDER: "google",
+      }),
+    /same provider family.*google/i
+  );
+});
+
+// Positive control: `google` is a valid raw dev provider when the reviewer
+// belongs to another company, and the raw role identifier must be preserved.
+test("resolveConfig: google builder is valid with a non-google reviewer", () => {
+  const config = resolveConfig({
+    REVIEW_PROVIDER: "openai",
+    REVIEW_MODEL: "gpt-5-mini",
+    REVIEW_BUILDER_PROVIDER: "google",
+  });
+
+  assert.equal(config.reviewerProvider, "openai");
+  assert.equal(config.builderProvider, "google");
 });
 
 // The default builder is anthropic, so an anthropic reviewer with NO explicit
