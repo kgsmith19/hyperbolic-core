@@ -165,7 +165,7 @@ runs:
         # Reuse the canonical package validator before any credential is
         # imported. The pinned workspace tsx dependency makes this explicit
         # and reproducible on the vanilla CI runner.
-        npx --no-install --workspace=@hyperbolic/review tsx --eval <<'NODE'
+        npx --no-install tsx --eval <<'NODE'
         import { resolveConfig } from "./packages/review/src/config.ts";
         const config = resolveConfig(process.env);
         const declaredBuilder = (process.env.DECLARED_REVIEW_BUILDER_PROVIDER ?? "").trim().toLowerCase();
