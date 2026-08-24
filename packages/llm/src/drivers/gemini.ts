@@ -48,7 +48,7 @@ import type {
 } from "../types.ts";
 import type { LlmDriver } from "./types.ts";
 
-const PROVIDER = "gemini" as const;
+const PROVIDER = "google" as const;
 
 // ---------------------------------------------------------------------------
 // Request mapping: our provider-agnostic shapes -> Gemini wire params.

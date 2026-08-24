@@ -424,7 +424,7 @@ test("stream(): a signal that fires DURING backoff cuts the wait short (proves r
 // ---------------------------------------------------------------------------
 
 test("complete(): naming a provider with no registered driver is invalid_request, not a crash", async () => {
-  const request: LlmRequest = { ...BASE_REQUEST, provider: "gemini", model: "whatever", fallback: undefined };
+  const request: LlmRequest = { ...BASE_REQUEST, provider: "google", model: "whatever", fallback: undefined };
   await assert.rejects(
     () => complete(request, CREDENTIALS, { drivers: { anthropic: fakeDriver("anthropic", {}) } }),
     (error: { class: string }) => error.class === "invalid_request",

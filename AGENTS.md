@@ -136,17 +136,17 @@ anything else in this session.
   in both enums — `anthropic | openai | google` (Claude Code, Codex, or Antigravity — Google's
   agentic CLI and the deprecated Gemini CLI's successor; the CLI name is informational detail,
   never the enum value). `review.provider` names the raw model **API family** the
-  structured-output review call targets — `anthropic | openai | gemini`. `AI Review` is one
+  structured-output review call targets — `anthropic | openai | google`. `AI Review` is one
   sandboxed LLM call via `packages/llm` (see `packages/review/src/config.ts`); it never runs an
-  agent harness, so `gemini` there is the real Gemini API — the same one `services/brain` and
-  `services/llm-handler` call for product features. `google` (dev) and `gemini` (review) naming
-  the same company differently is intentional: dev names the harness vendor, review names the
-  model API. They are different execution surfaces but the same provider company for separation.
+  agent harness, so `google` there is the Gemini API — the same one `services/brain` and
+  `services/llm-handler` call for product features. Both dev and review use `google` to identify
+  the same provider company; dev names the harness vendor, review names the model API. They are
+  different execution surfaces but the same provider company for separation.
 - The active roles must resolve to different provider companies. Validation preserves the
   role-specific raw identifiers but compares canonical families: `anthropic → anthropic`,
-  `openai → openai`, `google → google`, and `gemini → google`. Therefore dev `google` plus review
-  `gemini` is a forbidden same-company pairing even though the raw values differ.
-  `repository-standards` enforces this mechanically: `.github/actions/verify-repo-policy`
+  `openai → openai`, and `google → google`. Therefore dev and review cannot both be assigned `google`
+  — different provider companies are required. `repository-standards` enforces this mechanically:
+  `.github/actions/verify-repo-policy`
   validates the file on every PR — it must parse, `dev.provider` and `review.provider` must each
   be valid for their own value space above, both must name a non-empty `model`, and the resolved
   companies must differ. Any violation fails the whole `PR Gate` closed — a role collision
@@ -447,10 +447,9 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
 - **Provider separation is enforced, not preferred.** The reviewer's provider family must differ
   from the builder's; the gate fails closed when they match. Provider identifiers are
   case-insensitive and canonicalized to lowercase at one boundary (`packages/review/src/config.ts`),
-  then `google` and `gemini` both map to the Google company family for comparison. A repository
-  variable like `REVIEW_PROVIDER=OPENAI` cannot slip past validation on casing alone, and neither
-  casing nor the role-specific Google/Gemini names can smuggle a same-family pairing past the
-  separation guard.
+  for comparison against canonical families. A repository variable like `REVIEW_PROVIDER=OPENAI`
+  cannot slip past validation on casing alone, and the separation guard prevents both roles from
+  resolving to the same provider company.
 - **The model receives a structured-output tool and nothing else** — no shell, filesystem-write,
   or network access. Repository content under review is data, never instructions. Injected text
   can at worst skew a verdict; it cannot execute anything or reach a credential.

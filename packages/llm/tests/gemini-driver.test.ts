@@ -30,7 +30,7 @@ function sseResponse(events: unknown[], opts: SseOptions = {}): Response {
 }
 
 const BASE_REQUEST: LlmRequest = {
-  provider: "gemini",
+  provider: "google",
   model: "gemini-request-alias",
   messages: [{ role: "user", content: "Hello" }],
   maxTokens: 256,
@@ -52,7 +52,7 @@ test("geminiDriver.complete: names the exact provider+model that answered (not t
     async () => jsonResponse(fixtureGenerateContentResponse()),
     () => geminiDriver.complete(BASE_REQUEST, { apiKey: "fixture-key" }),
   );
-  assert.equal(response.provider, "gemini");
+  assert.equal(response.provider, "google");
   assert.equal(response.model, "gemini-fixture-resolved");
   assert.notEqual(response.model, BASE_REQUEST.model);
   assert.equal(response.text, "hello there");
@@ -258,7 +258,7 @@ test("complete(): malformed tool_result content is rejected centrally before the
   let fetchCalls = 0;
   let driverCalls = 0;
   const countingGeminiDriver = {
-    provider: "gemini" as const,
+    provider: "google" as const,
     complete: (request: LlmRequest, credentials: { apiKey: string }) => {
       driverCalls += 1;
       return geminiDriver.complete(request, credentials);
@@ -349,7 +349,7 @@ test("geminiDriver.stream: yields text and tool_call deltas, a usage delta, and 
 
   const done = deltas.find((d): d is Extract<LlmDelta, { kind: "done" }> => d.kind === "done");
   assert.ok(done);
-  assert.equal(done?.response.provider, "gemini");
+  assert.equal(done?.response.provider, "google");
   assert.equal(done?.response.model, "gemini-fixture-resolved");
   assert.equal(done?.response.text, "Hello world");
   assert.equal(done?.response.stopReason, "tool_use");

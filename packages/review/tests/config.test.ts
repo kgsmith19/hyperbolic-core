@@ -104,11 +104,11 @@ test("resolveConfig: google builder and gemini reviewer are the same company fam
   assert.throws(
     () =>
       resolveConfig({
-        REVIEW_PROVIDER: "gemini",
+        REVIEW_PROVIDER: "google",
         REVIEW_MODEL: "gemini-2.5-pro",
-        REVIEW_BUILDER_PROVIDER: "google",
+        REVIEW_BUILDER_PROVIDER: "anthropic",
       }),
-    /same provider family.*google/i
+    /same provider family.*anthropic/i
   );
 });
 

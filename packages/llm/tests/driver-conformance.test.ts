@@ -55,7 +55,7 @@ function baseRequest(provider: LlmRequest["provider"], model: string): LlmReques
 
 const ANTHROPIC_REQUEST = baseRequest("anthropic", "claude-request-alias");
 const OPENAI_REQUEST = baseRequest("openai", "gpt-request-alias");
-const GEMINI_REQUEST = baseRequest("gemini", "gemini-request-alias");
+const GEMINI_REQUEST = baseRequest("google", "gemini-request-alias");
 
 const CONTRACTS: DriverContract[] = [
   {
@@ -96,10 +96,10 @@ const CONTRACTS: DriverContract[] = [
     ],
   },
   {
-    name: "gemini",
+    name: "google",
     driver: geminiDriver,
     request: GEMINI_REQUEST,
-    run: () => complete(GEMINI_REQUEST, { gemini: { apiKey: "fixture-key" } }, { drivers: { gemini: geminiDriver } }),
+    run: () => complete(GEMINI_REQUEST, { google: { apiKey: "fixture-key" } }, { drivers: { google: geminiDriver } }),
     errorResponse: (c) => jsonResponse({ error: { code: c.status, message: `status ${c.status} fixture`, status: "FIXTURE" } }, c.status),
     classificationCases: [
       { status: 400, expectClass: "invalid_request", expectRetryable: false },

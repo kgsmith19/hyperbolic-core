@@ -235,7 +235,7 @@ const VALID_MESSAGE_CASES: Array<{ name: string; messages: Message[] }> = [
   },
 ];
 
-for (const provider of ["anthropic", "openai", "gemini"] as const) {
+for (const provider of ["anthropic", "openai", "google"] as const) {
   for (const testCase of VALID_MESSAGE_CASES) {
     test(`complete(): ${provider} accepts a well-formed request (${testCase.name}) and actually dispatches to the driver`, async () => {
       const driver = fakeDriver(provider, { complete: async (request) => fixtureResponse(provider, request.model) });

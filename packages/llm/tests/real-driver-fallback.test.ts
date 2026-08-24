@@ -53,23 +53,23 @@ const BASE_REQUEST: LlmRequest = {
   maxTokens: 128,
   metadata: { callerApp: "test-suite", purpose: "unit-test" },
   timeoutMs: 5000,
-  fallback: [{ provider: "gemini", model: "gemini-fallback" }],
+  fallback: [{ provider: "google", model: "gemini-fallback" }],
 };
 
-const CREDENTIALS = { openai: { apiKey: "openai-fixture-key" }, gemini: { apiKey: "gemini-fixture-key" } };
+const CREDENTIALS = { openai: { apiKey: "openai-fixture-key" }, google: { apiKey: "gemini-fixture-key" } };
 
 /** Distinguishes which provider a given fetch call was aimed at, purely
  * from the request URL -- lets one fake transport serve two real SDKs
  * (each of which uses the global fetch directly, no bundled/shadowed
  * binding -- verified by reading both SDKs' source, same as the per-driver
  * test files' own fetch-patching idiom). */
-function providerForUrl(input: RequestInfo | URL): "openai" | "gemini" | "unknown" {
+function providerForUrl(input: RequestInfo | URL): "openai" | "google" | "unknown" {
   const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
   if (url.includes("openai.com")) {
     return "openai";
   }
   if (url.includes("generativelanguage.googleapis.com")) {
-    return "gemini";
+    return "google";
   }
   return "unknown";
 }
@@ -90,7 +90,7 @@ test("complete(): with DEFAULT_DRIVERS (no explicit `drivers` override), a real 
       openaiCalls += 1;
       return openaiErrorResponse(500, "internal error fixture");
     }
-    if (provider === "gemini") {
+    if (provider === "google") {
       geminiCalls += 1;
       return jsonResponse(fixtureGeminiGenerateContentResponse());
     }
@@ -109,7 +109,7 @@ test("complete(): with DEFAULT_DRIVERS (no explicit `drivers` override), a real 
   assert.ok(settled, "did not settle within the fake-timer budget");
   assert.equal(settled?.ok, true, `expected success, got ${String((settled as { error?: unknown })?.error)}`);
   const response = (settled as { value: { provider: string; model: string; text: string | null } }).value;
-  assert.equal(response.provider, "gemini", "the response must name the provider that actually answered");
+  assert.equal(response.provider, "google", "the response must name the provider that actually answered");
   assert.equal(response.model, "gemini-fixture-resolved");
   assert.equal(response.text, "from gemini");
   assert.equal(openaiCalls, MAX_RETRIES + 1, "the primary (openai) must exhaust its own retry budget before failing over");
