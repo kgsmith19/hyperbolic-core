@@ -28,21 +28,19 @@
 #     name is informational detail, same as which model each company's
 #     harness happens to run -- never the enum value itself.
 #   - review.provider names the raw model API family the structured-output
-#     review call targets: anthropic | openai | gemini. `AI Review` is one
+#     review call targets: anthropic | openai | google. `AI Review` is one
 #     sandboxed LLM call via packages/llm (see packages/review/src/config.ts)
-#     -- it never runs an agent harness, so "gemini" here is the real
-#     Gemini API, the same one services/brain and services/llm-handler call
-#     for product features. It is a distinct execution surface from
-#     Antigravity but belongs to the same provider company for separation.
+#     -- it never runs an agent harness, so "google" here is the Gemini API,
+#     the same one services/brain and services/llm-handler call for product
+#     features. It is a distinct execution surface from Antigravity but
+#     belongs to the same provider company for separation.
 # The raw spaces remain distinct, but separation compares canonical company
-# families: anthropic -> anthropic, openai -> openai, google -> google, and
-# gemini -> google. Thus dev google plus review gemini is a forbidden
-# same-company pairing even though the raw identifiers differ.
+# families: anthropic -> anthropic, openai -> openai, and google -> google.
 
 dev:
   provider: anthropic # anthropic | openai | google
   model: claude-opus-5 # exact model id the dev dispatcher requests
 
 review:
-  provider: openai # anthropic | openai | gemini
+  provider: openai # anthropic | openai | google
   model: gpt-5-mini

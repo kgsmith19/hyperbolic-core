@@ -167,19 +167,17 @@ runs:
         # comments. dev names the coding-agent TOOL's COMPANY (Claude Code =
         # anthropic, Codex = openai, Antigravity = google); review names the
         # raw model API family the structured-output review call targets (AI
-        # Review never runs an agent harness, so "gemini" there is the real
-        # Gemini API). The raw values stay role-specific, but google (dev) and
-        # gemini (review) both resolve to the Google company family before the
-        # separation comparison.
+        # Review never runs an agent harness, so "google" here is the Gemini API).
+        # The raw values stay role-specific but both resolve to the same company
+        # family, which is validated to differ from the dev family.
         VALID_PROVIDERS_BY_ROLE = {
             "dev": {"anthropic", "openai", "google"},
-            "review": {"anthropic", "openai", "gemini"},
+            "review": {"anthropic", "openai", "google"},
         }
         PROVIDER_FAMILIES = {
             "anthropic": "anthropic",
             "openai": "openai",
             "google": "google",
-            "gemini": "google",
         }
 
         try:

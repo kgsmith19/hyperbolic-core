@@ -28,7 +28,7 @@ import type { Credentials, CredentialsByProvider, LlmDelta, LlmRequest, LlmRespo
 // lets a caller (or a test) substitute a different registry entirely.
 const DEFAULT_DRIVERS: Partial<Record<Provider, LlmDriver>> = {
   anthropic: anthropicDriver,
-  gemini: geminiDriver,
+  google: geminiDriver,
   openai: openaiDriver,
 };
 

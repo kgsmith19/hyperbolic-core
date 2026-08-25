@@ -12,7 +12,7 @@ import type { Provider } from "@hyperbolic/llm";
 import type { BuilderProvider, ReviewConfig } from "./types.ts";
 
 /** The review API provider identifiers `@hyperbolic/llm` can dispatch to. */
-export const VALID_PROVIDERS: readonly Provider[] = ["anthropic", "openai", "gemini"];
+export const VALID_PROVIDERS: readonly Provider[] = ["anthropic", "openai", "google"];
 
 /** The coding-agent harness companies accepted for the builder role. */
 const VALID_BUILDER_PROVIDERS: readonly BuilderProvider[] = ["anthropic", "openai", "google"];
@@ -55,7 +55,7 @@ function isBuilderProvider(value: string): value is BuilderProvider {
 type ProviderFamily = "anthropic" | "openai" | "google";
 
 function providerFamily(provider: Provider | BuilderProvider): ProviderFamily {
-  return provider === "gemini" ? "google" : provider;
+  return provider as ProviderFamily;
 }
 
 /**

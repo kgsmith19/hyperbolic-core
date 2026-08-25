@@ -16,7 +16,7 @@
  * or has a place to persist one.
  */
 
-export type Provider = "anthropic" | "openai" | "gemini";
+export type Provider = "anthropic" | "openai" | "google";
 
 // ---------------------------------------------------------------------------
 // Messages
