@@ -9,7 +9,7 @@ import { fakeDriver, fixtureResponse } from "./driver-harness.ts";
  * guard, run before any driver is ever dispatched, that rejects a message
  * whose parts don't belong to its role -- e.g. a ToolResultPart on a
  * UserMessage/AssistantMessage, which the three drivers used to handle
- * divergently and silently (openai.ts filtered it out, gemini.ts blanked
+ * divergently and silently (openai.ts filtered it out, gemini driver blanked
  * the whole turn to `{text: ""}`, anthropic.ts routed it through
  * unconditionally). Same fakeDriver idiom as fallback.test.ts: no real
  * network call happens in this file, and `driver.calls` proves whether
@@ -25,7 +25,7 @@ const BASE_REQUEST: LlmRequest = {
   timeoutMs: 5000,
 };
 
-const CREDENTIALS = { anthropic: { apiKey: "key" }, openai: { apiKey: "key" }, gemini: { apiKey: "key" } };
+const CREDENTIALS = { anthropic: { apiKey: "key" }, openai: { apiKey: "key" }, google: { apiKey: "key" } };
 
 /** Builds a deliberately malformed Message -- the exact kind of
  * untyped/JSON-built payload that can bypass types.ts's UserContentPart /

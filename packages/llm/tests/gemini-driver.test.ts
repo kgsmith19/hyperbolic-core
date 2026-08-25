@@ -278,7 +278,7 @@ test("complete(): malformed tool_result content is rejected centrally before the
       fetchCalls += 1;
       throw new Error("must not be called: construction must fail before any network attempt");
     },
-    () => complete(malformedRequest, { gemini: { apiKey: "fixture-key" } }, { drivers: { gemini: countingGeminiDriver } }),
+    () => complete(malformedRequest, { google: { apiKey: "fixture-key" } }, { drivers: { google: countingGeminiDriver } }),
   );
   await assert.rejects(promise, (error: unknown) => {
     assert.ok(isLlmError(error));

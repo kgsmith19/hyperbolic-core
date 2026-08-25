@@ -151,7 +151,7 @@ test("complete(): fallback+tools is rejected as invalid_request before any netwo
     },
     async () => {
       await assert.rejects(
-        () => complete(request, CREDENTIALS, { drivers: { anthropic: anthropicDriver, openai: openaiDriver, gemini: geminiDriver } }),
+        () => complete(request, CREDENTIALS, { drivers: { anthropic: anthropicDriver, openai: openaiDriver, google: geminiDriver } }),
         (error: { class: string }) => error.class === "invalid_request",
       );
     },
