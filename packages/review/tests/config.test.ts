@@ -97,18 +97,18 @@ test("resolveConfig: reviewer and builder from the same family is rejected", () 
   }
 });
 
-// Cross-enum negative control. Dev calls Google's harness provider `google`,
-// while review calls the raw model API `gemini`; comparing the raw strings
-// would incorrectly treat one company as two independent families.
-test("resolveConfig: google builder and gemini reviewer are the same company family", () => {
+// Behavior protected: same-company families are rejected. Both dev (harness)
+// and review (API) now use the canonicalized "google" identifier, so a google
+// builder and google reviewer from the same company must still be rejected.
+test("resolveConfig: google builder and google reviewer are the same company family", () => {
   assert.throws(
     () =>
       resolveConfig({
         REVIEW_PROVIDER: "google",
         REVIEW_MODEL: "gemini-2.5-pro",
-        REVIEW_BUILDER_PROVIDER: "anthropic",
+        REVIEW_BUILDER_PROVIDER: "google",
       }),
-    /same provider family.*anthropic/i
+    /same provider family.*google/i
   );
 });
 

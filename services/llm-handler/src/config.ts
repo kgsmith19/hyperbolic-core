@@ -16,7 +16,7 @@ function required(name: string): string {
 }
 
 // 08 section 5's configuration skeleton lists LLM_KEYS_ANTHROPIC,
-// LLM_KEYS_OPENAI, LLM_KEYS_GEMINI, each independently optional here: a
+// LLM_KEYS_OPENAI, LLM_KEYS_GOOGLE, each independently optional here: a
 // deploy that has not yet provisioned every provider still starts, and a
 // request naming an unconfigured provider fails per-request at
 // packages/llm's own getCredentials() ("no credentials supplied for
@@ -24,7 +24,7 @@ function required(name: string): string {
 const LLM_KEY_ENV_VARS: Record<Provider, string> = {
   anthropic: "LLM_KEYS_ANTHROPIC",
   openai: "LLM_KEYS_OPENAI",
-  gemini: "LLM_KEYS_GEMINI",
+  google: "LLM_KEYS_GOOGLE",
 };
 
 function loadLlmCredentials(env: NodeJS.ProcessEnv): CredentialsByProvider {

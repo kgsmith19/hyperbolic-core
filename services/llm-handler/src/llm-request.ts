@@ -11,7 +11,7 @@
 
 import type { FallbackTarget, LlmRequest, LlmRequestMetadata, Message, Provider, ToolDef } from "@hyperbolic/llm";
 
-const PROVIDERS: ReadonlySet<Provider> = new Set(["anthropic", "openai", "gemini"]);
+const PROVIDERS: ReadonlySet<Provider> = new Set(["anthropic", "openai", "google"]);
 
 export type ParsedLlmRequest = { ok: true; request: LlmRequest } | { ok: false; error: string };
 

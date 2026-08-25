@@ -41,7 +41,7 @@ export function brokerCredentials(config: BrokerDriverConfig): Credentials {
 }
 
 /** An OrchestrationOptions.drivers value with ONLY `anthropic` replaced by
- * the broker-routed driver -- openai/gemini are left absent so a caller
+ * the broker-routed driver -- openai/google are left absent so a caller
  * merges this with its own full registry (or complete()'s own defaults)
  * rather than this module silently deciding those providers' routing too. */
 export function brokerRoutedDrivers(): Partial<Record<Provider, LlmDriver>> {
