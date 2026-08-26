@@ -2587,3 +2587,120 @@ test("llm-review-dialogue.yml posts suggestions as comment content only: content
   assert.match(script, /pulls\.createReviewComment/, "the suggestion path must use the pulls review-comment API");
   assert.doesNotMatch(script, /createOrUpdateFileContents|deleteFile|createCommit|createOrUpdateRef|updateRef|git\.createRef|repos\.merge/);
 });
+
+// ---------------------------------------------------------------------------
+// Resolution-by-citation (Issue #325) -- every deliberation turn takes an
+// explicit position on the other side's latest evidence, grounded in the
+// finding's own citation. The reviewer's half lives in packages/review
+// (prompt/schema/validate, tested there); these cover the dev agent's half of
+// the structural requirement and the dialogue render surfacing the fields.
+// ---------------------------------------------------------------------------
+
+// STRUCTURAL, same evidence class as the footer test above: this proves the
+// instruction is PRESENT in the prompt handed to the dispatched agent, not
+// that the agent complies. Behavior protected: the dev side of Issue #325's
+// two-directional requirement -- every reply opens with an explicit position
+// (Agree / Disagree / Other) on the reviewer's most recent citation-grounded
+// reasoning, an alternate fix is argued FOR against the cited requirement
+// rather than against the reviewer's suggestion, and a repeated position
+// with no new citation-grounded reasoning is named as not a real turn.
+test("dev-agent-dispatch.yml's prompt instructs the agent to open every reply with an explicit position and argue alternates against the citation", () => {
+  const promptStart = dispatchYaml.indexOf("prompt: |");
+  assert.ok(promptStart >= 0, "no prompt: | block found");
+  const prompt = dispatchYaml.slice(promptStart);
+  assert.match(prompt, /\*\*Agree\*\*,\s*\n?\s*\*\*Disagree\*\*, or \*\*Other\*\*/);
+  assert.match(prompt, /why it satisfies the cited requirement, not\s*\n?\s*why the reviewer's suggestion is wrong/);
+  assert.match(prompt, /repeats a\s*\n?\s*prior position without new citation-grounded reasoning does not\s*\n?\s*count as a real turn/);
+});
+
+// Behavior protected: a later-round blocking finding's `deliberation` -- the
+// reviewer's explicit position on the dev's latest evidence, the field that
+// justifies its continued block -- is rendered in the managed comment, so
+// the dev agent and a human can see WHAT was engaged rather than only that
+// the block persists. Defect caught: a render that silently drops the field,
+// which would make the reviewer's engagement invisible and the dialogue
+// look like the bare re-assertion Issue #325 exists to eliminate.
+test("dialogue: a blocking finding's deliberation renders as an explicit position on the dev's latest evidence", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const verdict = {
+    verdict: "block",
+    findings: [
+      {
+        severity: "blocking",
+        category: "test",
+        claim: "c",
+        evidence: "e",
+        requestedChange: "r",
+        citation: "AGENTS.md > x",
+        deliberation: { position: "disagree", engagesLatestEvidence: "the alternate still lacks invalidation, which the cited criterion requires" },
+      },
+    ],
+    discarded: [],
+    summary: "s",
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": verdict,
+    },
+  }, { pr: BASE_PR });
+
+  const body = calls.createComment[0].body;
+  assert.match(body, /\*\*Position on the dev's latest evidence\.\*\* `disagree`/);
+  assert.match(body, /the alternate still lacks invalidation/);
+});
+
+// Behavior protected: a finding validate.ts resolved by default (demoted to
+// advisory with resolvedByDefault: true because a later-round continued
+// block carried no deliberation) renders with an explicit explanation of WHY
+// it no longer blocks -- never silently reshuffled into the advisory list as
+// if the reviewer had downgraded it itself. Defect caught: dropping the
+// marker, which would make the gate's own intervention indistinguishable
+// from reviewer judgment.
+test("dialogue: a resolvedByDefault finding renders its resolved-by-default explanation, and the verdict passes", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const verdict = {
+    verdict: "pass",
+    findings: [
+      {
+        severity: "advisory",
+        category: "test",
+        claim: "re-asserted without engagement",
+        evidence: "e",
+        requestedChange: "r",
+        citation: "AGENTS.md > x",
+        resolvedByDefault: true,
+      },
+    ],
+    discarded: [],
+    summary: "1 blocking finding(s) were resolved by default.",
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "success", verdictPresent: true },
+      "review-verdict.json": verdict,
+    },
+  }, { pr: BASE_PR });
+
+  const body = calls.createComment[0].body;
+  assert.match(body, /\*\*Verdict: `pass`\*\*/);
+  assert.match(body, /\*\*Resolved by default\.\*\*/);
+  assert.match(body, /Issue #​?325/);
+  assert.doesNotMatch(body, /### Blocking findings/);
+});

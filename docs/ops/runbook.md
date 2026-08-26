@@ -2,7 +2,7 @@
 title: Platform Operations Runbook
 status: active
 owner: Kyle
-updated: 2026-08-15
+updated: 2026-08-26
 ---
 
 # Platform Operations Runbook
@@ -13,60 +13,84 @@ secret paths and operational procedures.
 
 ## VPS bootstrap (from nothing)
 
-Every section below assumes a `deploy@$DEPLOY_HOST` that already exists, is
-joined to the tailnet, and already trusts all three deploy keys (Shell,
-Handler A, Brain). This section is that starting point, run once per VPS
+Every section below assumes a `deploy@$DEPLOY_HOST` that already exists and
+is joined to the tailnet with Tailscale SSH enabled. This section is that
+starting point, run once per VPS
 (see `docs/planning/issues/m1-13-chore-platform-production-bootstrap.md`).
 
-**One script**, run once as root on the fresh VPS, does steps 2-4 below --
-creating the `deploy` user, generating and installing all three deploy
-keypairs, and creating every directory `deploy.yml` expects to own:
+**No deploy SSH keys exist anywhere (ADR 008, issue #191).** Every deploy
+pipeline in this repository -- `deploy.yml`'s four units, `lifeos-deploy.yml`,
+`ops-serve-apply.yml`, `ops-edge.yml`, `platform-smoke.yml`'s broker probe --
+authenticates the same way: the CI runner joins the tailnet as an ephemeral
+`tag:ci` node and the tailnet ACL grants `tag:ci` SSH to `deploy@<vps>`.
+Nothing to generate, install, rotate, or store in Infisical.
+
+**One script**, run once as root on the fresh VPS, does steps 2-3 below --
+creating the `deploy` user and creating every directory the deploy
+workflows expect to own:
 
 ```bash
 # Preview every command it would run -- no mutation.
 docs/ops/bootstrap-vps.sh --dry-run
 
-# Also joins the tailnet first if you pass a reusable auth key
-# (Settings -> Keys in the Tailscale admin console; omit to join yourself
-# with `tailscale up` before running this).
+# Also joins the tailnet first (with Tailscale SSH enabled) if you pass a
+# reusable auth key (Settings -> Keys in the Tailscale admin console; omit
+# to join yourself with `tailscale up --ssh` before running this).
 sudo docs/ops/bootstrap-vps.sh --apply --tailnet-authkey=<tskey-...>
 ```
 
-It prints the three PRIVATE key halves once at the end -- paste each
-immediately into its Infisical path (see "Infisical and GitHub
-configuration" below) and do not save them anywhere else; the script shreds
-its own key files from disk before exiting. Rerunning is safe: it rotates
-each key by name (replaces the matching `authorized_keys` entry) rather than
-accumulating dead ones, so it also doubles as the key-rotation procedure.
-
-Spelled out, what it does and why -- and the two steps it deliberately
+Spelled out, what it does and why -- and the three steps it deliberately
 leaves to you:
 
-1. Provision one VPS and join it to the tailnet as an approved device
-   (`tailscale up` -- the script's own `--tailnet-authkey` flag does this if
-   given a reusable key; approve in the admin console if the ACL requires
-   manual approval for non-`tag:ci` devices). **Not scriptable from inside
-   the box**: the admin-console approval step, when the ACL requires it.
+1. Provision one VPS and join it to the tailnet as an approved device with
+   Tailscale SSH enabled (`tailscale up --ssh` -- the script's own
+   `--tailnet-authkey` flag does this if given a reusable key; a box that
+   joined without `--ssh` needs `tailscale set --ssh` once). Approve in the
+   admin console if the ACL requires manual approval for non-`tag:ci`
+   devices. **Not scriptable from inside the box**: the admin-console
+   approval step, when the ACL requires it.
 2. Create the `deploy` OS user: `useradd -m -s /bin/bash deploy` (skipped if
    it already exists).
-3. Generate three deploy key pairs, one per pipeline (ADR-05's
-   one-identity-per-pipeline rule extends to keys, not just Infisical
-   identities): `ssh-keygen -t ed25519 -C <name>@hyperbolic-core -f <key>`,
-   no passphrase (must be usable non-interactively from CI). Install each
-   **public** half into `~deploy/.ssh/authorized_keys` (mode 600, directory
-   mode 700, owned by `deploy`). The **private** halves are printed once,
-   for you to paste into Infisical at `/platform/shell-deploy/SHELL_DEPLOY_SSH_KEY`,
-   `/platform/llm-handler/LLM_HANDLER_SSH_KEY`, and `/brain/BRAIN_DEPLOY_SSH_KEY`
-   -- never in this repository, never on a workstation disk longer than the
-   copy takes.
-4. Create the directories `deploy.yml` expects to own: `mkdir -p ~deploy/{shell,lifeos-ui,llm-handler,brain}`.
+3. Create the directories the deploy workflows expect to own:
+   `mkdir -p ~deploy/{shell,lifeos-ui,llm-handler,brain,broker}`.
+4. Confirm the tailnet ACL grants `tag:ci` SSH access to `deploy@<vps>`
+   (tailnet admin console -- ACL configuration is external to this
+   repository and cannot be verified from it). Empirically confirmed live
+   on 2026-08-26 by `ops-serve-apply` run 33019617168 and
+   `platform-smoke.yml`'s broker probes, each SSHing as `deploy@` from a
+   `tag:ci` runner with no key material loaded.
 5. Confirm `ssh -o BatchMode=yes deploy@<tailnet-name> true` succeeds from a
-   tailnet client before the first real CI dispatch; `deploy.yml`'s own
-   `ssh_options` use `BatchMode=yes`, so a passphrase-protected or
-   not-yet-trusted key fails the job immediately rather than hanging. **Not
-   scriptable from inside the box being bootstrapped**: this has to run from
-   a separate tailnet client, after step 1's admin-console approval (if any)
-   has actually landed.
+   tailnet client before the first real CI dispatch; the deploy workflows'
+   own `ssh_options` use `BatchMode=yes`, so a missing Tailscale SSH grant
+   fails the job immediately rather than hanging. **Not scriptable from
+   inside the box being bootstrapped**: this has to run from a separate
+   tailnet client, after step 1's admin-console approval (if any) has
+   actually landed.
+
+### Break-glass access (if Tailscale SSH is ever unavailable)
+
+Every SSH path to the box rides the tailnet -- there is no key-based SSH
+fallback anymore, by design. If Tailscale SSH itself is down (tailscaled
+crashed, an ACL edit locked `tag:ci` out, the box lost tailnet
+connectivity), use the **Hetzner Cloud web console** (Hetzner Cloud console
+-> the server -> "Console" -- a VNC-style out-of-band terminal that does not
+traverse the network stack at all, see
+[`docs/ops/vendors.md`](vendors.md#hetzner)): log in as root (set/reset the
+root password via Hetzner's "Rescue" -> "Reset root password" if none is
+known), then diagnose from inside:
+
+```bash
+systemctl status tailscaled     # is the daemon even running?
+systemctl restart tailscaled
+tailscale status                # is the box on the tailnet?
+tailscale up --ssh              # rejoin / re-enable Tailscale SSH
+```
+
+If the ACL is the problem (Tailscale SSH works but `tag:ci` or your own
+device is refused), fix the grant in the tailnet admin console -- that is a
+Tailscale-side change, no box access needed. The Hetzner console is the
+break-glass of last resort: it depends only on Hetzner's own control plane,
+never on the tailnet.
 
 ## Infisical and GitHub configuration
 
@@ -192,9 +216,9 @@ signup, same as any other SaaS org. Everything after that is scriptable.
 
    | Path | Keys |
    | --- | --- |
-   | `/platform/shell-deploy/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `SHELL_DEPLOY_SSH_KEY` (from the VPS script's output) |
-   | `/platform/llm-handler/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `LLM_HANDLER_SSH_KEY` (from the VPS script's output), `TOOLBELT_GITHUB_INTAKE_PAT`, `SUPABASE_SERVICE_ROLE_KEY`, and optionally `LLM_KEYS_ANTHROPIC` / `LLM_KEYS_OPENAI` / `LLM_KEYS_GEMINI` (provider keys for the service's LLM routes; omitted from the rendered `.env` when absent) |
-   | `/brain/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `BRAIN_DEPLOY_SSH_KEY` (from the VPS script's output), `BRAIN_ANTHROPIC_API_KEY` |
+   | `/platform/shell-deploy/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` |
+   | `/platform/llm-handler/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `TOOLBELT_GITHUB_INTAKE_PAT`, `SUPABASE_SERVICE_ROLE_KEY`, and optionally `LLM_KEYS_ANTHROPIC` / `LLM_KEYS_OPENAI` / `LLM_KEYS_GEMINI` (provider keys for the service's LLM routes; omitted from the rendered `.env` when absent) |
+   | `/brain/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `BRAIN_ANTHROPIC_API_KEY` |
    | `/platform/` | `SUPABASE_DB_URL` (table-owner Postgres connection string -- read by `platform-migrations.yml`, which sets `secret-path: "/platform/"`) |
    | `/toolbelt/` | `SUPABASE_DB_URL` (same connection string, a second copy -- read by `platform-backup.yml`, which sets `secret-path: "/toolbelt/"`; the two pipelines deliberately read different paths so their identities' grants stay disjoint) |
    | `/review/` | Exactly one of `REVIEW_ANTHROPIC_API_KEY` / `REVIEW_OPENAI_API_KEY` / `REVIEW_GEMINI_API_KEY` -- the reviewer credential for the LLM Review gate (#128). Only the key matching `vars.REVIEW_PROVIDER` is read; the others need not exist. Before this path is read, `verify-llm-review` resolves the builder from default-branch `agent-roles.yaml` and reuses `packages/review/src/config.ts` to reject same-company pairs, including dev `google` plus review `gemini`. The legacy `vars.REVIEW_BUILDER_PROVIDER` is only an optional mirror and a mismatch fails closed. Kept off `/platform/llm-handler/` deliberately: that path's `LLM_KEYS_*` are the *product's* provider keys, and the gate that judges a change must not share a grant with the service under change. Also: `REVIEW_GITHUB_APP_ID` / `REVIEW_GITHUB_APP_PRIVATE_KEY` -- the reviewer's own GitHub App identity (Issue #272), minted via `actions/create-github-app-token` by `llm-review-dialogue.yml` so the managed review comment posts as that App rather than `github-actions[bot]`. |
@@ -362,7 +386,7 @@ Configure these repository variables before enabling deployment:
 
 `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_ACC_API`, and `VITE_LIFEOS_API` are optional public overrides; the Shell has documented production defaults.
 
-The `shell-deploy` OIDC identity's `/platform/shell-deploy/` secret path must contain three values: `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_SECRET` (the tailnet join, shared shape with every other CI-joining workflow) and `SHELL_DEPLOY_SSH_KEY` (the deploy user's private key, PEM/OpenSSH text; `deploy.yml` writes it to the runner's default SSH identity path before the first `ssh`/`scp` call -- see "VPS bootstrap" above for how the matching public half gets installed).
+The `shell-deploy` OIDC identity's `/platform/shell-deploy/` secret path must contain two values: `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_SECRET` (the tailnet join, shared shape with every other CI-joining workflow). SSH to the box is keyless Tailscale SSH (ADR 008, issue #191) -- the runner joins as `tag:ci` and the tailnet ACL grants `tag:ci` SSH to `deploy@`; no key material exists in this pipeline (see "VPS bootstrap" above).
 
 The deploy job uploads into a run-specific staging directory, atomically switches `shell/current`, and verifies both `/healthz` and the built JavaScript asset through the real tailnet origin. A failed activation or health proof restores the previous symlink automatically. Only after health succeeds does `prune-dist-dirs.sh` retain the newest three releases.
 
@@ -387,13 +411,13 @@ Configure these repository variables in addition to Shell's own (`DEPLOY_ENABLED
 | --- | --- |
 | `INFISICAL_LLM_HANDLER_DEPLOY_IDENTITY_ID` | Dedicated OIDC identity for this pipeline (ADR-05: never `shell-deploy`'s identity, even though both ultimately reach the same `deploy` OS user). |
 
-The `llm-handler-deploy` identity's `/platform/llm-handler/` secret path must contain five values: `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` (tailnet join, shared shape with every other CI-joining workflow), `LLM_HANDLER_SSH_KEY` (a distinct deploy key from Shell's own -- generate its own pair in the "VPS bootstrap" steps below, do not reuse `SHELL_DEPLOY_SSH_KEY`), `TOOLBELT_GITHUB_INTAKE_PAT` (05-h-idea-intake.md section 6.3 -- a fine-grained GitHub PAT scoped to `Issues: Read and write` on the explicitly selected target repos, nothing else), and `SUPABASE_SERVICE_ROLE_KEY`. Optionally it also carries `LLM_KEYS_ANTHROPIC` / `LLM_KEYS_OPENAI` / `LLM_KEYS_GEMINI` -- the provider keys behind the service's `/api/v1/*` LLM routes (`services/llm-handler/src/config.ts` treats each as optional; the deploy omits an absent key from `.env` rather than failing, so the routes for an unprovisioned provider simply stay credential-less).
+The `llm-handler-deploy` identity's `/platform/llm-handler/` secret path must contain four values: `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` (tailnet join, shared shape with every other CI-joining workflow; SSH itself is keyless Tailscale SSH, ADR 008), `TOOLBELT_GITHUB_INTAKE_PAT` (05-h-idea-intake.md section 6.3 -- a fine-grained GitHub PAT scoped to `Issues: Read and write` on the explicitly selected target repos, nothing else), and `SUPABASE_SERVICE_ROLE_KEY`. Optionally it also carries `LLM_KEYS_ANTHROPIC` / `LLM_KEYS_OPENAI` / `LLM_KEYS_GEMINI` -- the provider keys behind the service's `/api/v1/*` LLM routes (`services/llm-handler/src/config.ts` treats each as optional; the deploy omits an absent key from `.env` rather than failing, so the routes for an unprovisioned provider simply stay credential-less).
 
 `SUPABASE_SERVICE_ROLE_KEY` deserves the same care as platform-migrations' `SUPABASE_DB_URL`: it bypasses RLS entirely. Handler A holds it for exactly one purpose -- calling `intake.mark_submitted_to_github()`, the narrow SECURITY DEFINER RPC that is the only legal way to complete a submit (`20260814040000_intake_mark_submitted_to_github_rpc.sql`; a plain PostgREST PATCH is blocked at the grant level by design, closing a P1 finding from the PR #8 security review). The service never uses this key for anything else and never derives it from an incoming request; every other database read/write in `services/llm-handler` rides the caller's own session JWT through PostgREST, scoped by the same `owner_rw` RLS the browser would get directly. Deliberately kept in its own path, not co-located with `/platform/`'s `SUPABASE_DB_URL` (platform-migrations' own credential) -- two different powerful secrets serving two unrelated pipelines should never share one Infisical grant.
 
 `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are not secrets: the deploy job reads them from the same public repository variables Shell's build already uses (`vars.VITE_SUPABASE_URL`, `vars.VITE_SUPABASE_PUBLISHABLE_KEY`).
 
-Extend the "VPS bootstrap" steps above with Handler A's own key pair: generate a second `ssh-keygen -t ed25519` pair, install its public half into the SAME `~deploy/.ssh/authorized_keys` (one OS user, multiple trusted keys is normal), store the private half at `/platform/llm-handler/LLM_HANDLER_SSH_KEY`, and `mkdir -p ~deploy/llm-handler`.
+Handler A needs no deploy key of its own (keyless Tailscale SSH, ADR 008); the "VPS bootstrap" script above already creates `~deploy/llm-handler`.
 
 Manual rollback mirrors LifeOS's own container rollback: repoint the image tag and restart.
 
@@ -414,11 +438,11 @@ Configure these repository variables in addition to Shell's own (`DEPLOY_ENABLED
 | --- | --- |
 | `INFISICAL_BRAIN_DEPLOY_IDENTITY_ID` | Dedicated OIDC identity for this pipeline (ADR-05: never `shell-deploy`'s or `llm-handler-deploy`'s identity, even though all three ultimately reach the same `deploy` OS user). |
 
-The `brain-deploy` identity's `/brain/` secret path (ADR-05's own path convention -- never `/platform/brain-deploy/` or any path under `/platform/`, since the Brain's own key is isolated from every other unit's secrets by construction, not just by naming) must contain: `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` (tailnet join, shared shape with every other CI-joining workflow), `BRAIN_DEPLOY_SSH_KEY` (a distinct deploy key from Shell's and Handler A's own -- generate its own pair in the "VPS bootstrap" steps below), and `BRAIN_ANTHROPIC_API_KEY` (the Brain's own metered Anthropic API key -- 07-brain-architecture.md's own gate question 1: harness dispatch on the VPS authenticates with this key, not the operator's subscription session). Optionally also `SUPABASE_SERVICE_ROLE_KEY` (m4-17's core-mirror write-back; the daemon runs and passes its health check without it, just skips mirroring cost/telemetry rows) and, once a task class is wired to use it (m4-20's stubbed `LifeOsSurface` client), `BRAIN_AGENT_TOKEN_PUBLIC_KEY` / `BRAIN_AGENT_TOKEN_ISSUER` / `BRAIN_AGENT_TOKEN_AUDIENCE` (verifies LifeOS-minted agent tokens calling into the Brain's own `/api/brain/*` surface) and `BRAIN_LIFEOS_API_URL` / `BRAIN_LIFEOS_AGENT_TOKEN` (the Brain calling out to LifeOS). All of these are optional at the daemon's own boot (`config.ts` has no required field); the deploy job passes through whatever Infisical provides and omits the rest from the rendered `.env` rather than failing.
+The `brain-deploy` identity's `/brain/` secret path (ADR-05's own path convention -- never `/platform/brain-deploy/` or any path under `/platform/`, since the Brain's own key is isolated from every other unit's secrets by construction, not just by naming) must contain: `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` (tailnet join, shared shape with every other CI-joining workflow; SSH itself is keyless Tailscale SSH, ADR 008) and `BRAIN_ANTHROPIC_API_KEY` (the Brain's own metered Anthropic API key -- 07-brain-architecture.md's own gate question 1: harness dispatch on the VPS authenticates with this key, not the operator's subscription session). Optionally also `SUPABASE_SERVICE_ROLE_KEY` (m4-17's core-mirror write-back; the daemon runs and passes its health check without it, just skips mirroring cost/telemetry rows) and, once a task class is wired to use it (m4-20's stubbed `LifeOsSurface` client), `BRAIN_AGENT_TOKEN_PUBLIC_KEY` / `BRAIN_AGENT_TOKEN_ISSUER` / `BRAIN_AGENT_TOKEN_AUDIENCE` (verifies LifeOS-minted agent tokens calling into the Brain's own `/api/brain/*` surface) and `BRAIN_LIFEOS_API_URL` / `BRAIN_LIFEOS_AGENT_TOKEN` (the Brain calling out to LifeOS). All of these are optional at the daemon's own boot (`config.ts` has no required field); the deploy job passes through whatever Infisical provides and omits the rest from the rendered `.env` rather than failing.
 
 `BRAIN_ANTHROPIC_API_KEY` is the one value the deploy job hard-requires (`test -n`) before rendering anything: `services/brain/compose.yaml`'s own `secrets:` block references a file that must exist for `docker compose up` to succeed at all, regardless of whether any task has exercised it yet. It is rendered to its own file (`brain/anthropic-api-key`, mode 600) and mounted into the container at `/run/secrets/anthropic-api-key` (Docker Compose's own secrets convention) -- the rendered `.env` sets `BRAIN_SECRET_FILE=/run/secrets/anthropic-api-key` to match, ADR-05's key-isolation mechanism (`isolation-check.mjs`'s own header comment: "the standard Docker/Compose secrets-mount convention"). `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are not secrets: the deploy job reads them from the same public repository variables Shell's and Handler A's builds already use (`vars.VITE_SUPABASE_URL`, `vars.VITE_SUPABASE_PUBLISHABLE_KEY`).
 
-Extend the "VPS bootstrap" steps above with the Brain's own key pair: generate a third `ssh-keygen -t ed25519` pair, install its public half into the SAME `~deploy/.ssh/authorized_keys`, store the private half at `/brain/BRAIN_DEPLOY_SSH_KEY`, and `mkdir -p ~deploy/brain`.
+The Brain needs no deploy key of its own (keyless Tailscale SSH, ADR 008); the "VPS bootstrap" script above already creates `~deploy/brain`.
 
 Manual rollback mirrors Handler A's own container rollback: repoint the image tag and restart.
 
@@ -433,7 +457,7 @@ Brain state (SQLite WAL, run journal) lives entirely in the `brain-state` compos
 
 ### Operator evidence still required (ADR-05 identity isolation)
 
-This repository proves, in `docs/ops/deploy-workflow.test.mjs`, that `deploy-brain` and `deploy-llm-handler` are structurally disjoint: distinct Infisical secret paths (`/brain/` vs `/platform/llm-handler/`), distinct SSH key variables, distinct compose project directories, and distinct `concurrency` groups. It cannot prove the live Infisical project itself actually scopes the `brain-deploy` machine identity's ACL to read only `/brain/` (and `llm-handler-deploy`'s to read only `/platform/llm-handler/`) -- that is Infisical-side configuration, external to this repository, the same category of gap the tailscale-serve section above already names. When provisioning each identity, confirm in the Infisical console that its ACL grants read access to exactly its own path and no other, and record that confirmation here. `brain-ci.yml`'s own "ADR-05 isolation check" PR-gate step proves the narrower, code-side half of this guarantee on every PR: the Brain's secret file is unreadable from an ordinary (non-Brain-container) process, by construction.
+This repository proves, in `docs/ops/deploy-workflow.test.mjs`, that `deploy-brain` and `deploy-llm-handler` are structurally disjoint: distinct Infisical secret paths (`/brain/` vs `/platform/llm-handler/`), distinct OIDC identities, distinct compose project directories, and distinct `concurrency` groups. It cannot prove the live Infisical project itself actually scopes the `brain-deploy` machine identity's ACL to read only `/brain/` (and `llm-handler-deploy`'s to read only `/platform/llm-handler/`) -- that is Infisical-side configuration, external to this repository, the same category of gap the tailscale-serve section above already names. When provisioning each identity, confirm in the Infisical console that its ACL grants read access to exactly its own path and no other, and record that confirmation here. `brain-ci.yml`'s own "ADR-05 isolation check" PR-gate step proves the narrower, code-side half of this guarantee on every PR: the Brain's secret file is unreadable from an ordinary (non-Brain-container) process, by construction.
 
 ### Brain external reachability: `/api/brain/` mount
 
@@ -456,9 +480,9 @@ Configure these repository variables in addition to Shell's own (`DEPLOY_ENABLED
 | `INFISICAL_BROKER_DEPLOY_IDENTITY_ID` | Dedicated OIDC identity for this pipeline (ADR-05: never another unit's identity). |
 | `BROKER_DEPLOY_ENABLED` | Set to `true` once the broker has actually been deployed and its healthz is confirmed reachable. Gates `platform-smoke.yml`'s broker probe -- **leave unset until then**: the broker is brand new (unlike Shell/Handler A/Brain, which have been continuously live since earlier milestones), and an ungated probe would fail the smoke verdict, and so withhold the release tag, for every OTHER unit's deploy too. |
 
-The `broker-deploy` identity's `/platform/broker/` secret path must contain: `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` (tailnet join) and `BROKER_DEPLOY_SSH_KEY` (a distinct deploy key from every other unit's own -- `docs/ops/bootstrap-vps.sh` generates and installs it automatically, alongside the other three, as of this Issue). For the Issue #187 Phase 0 cutover it additionally needs `LLM_KEYS_ANTHROPIC` (a copy of the same provider key llm-handler holds -- the broker injects it server-side for llm-handler's proxied complete calls; llm-handler keeps its own copy for the streaming path) and `BROKER_CALLER_TOKEN_LLM_HANDLER` (llm-handler's caller-auth token). The **same token value** must also be provisioned at `/platform/llm-handler/` as `BROKER_CALLER_TOKEN` -- the two-path, two-name pairing described in the credential-injection paragraph above (ADR-05: no shared secret path between the two identities). None of this activates anything until slice B renders `BROKER_URL`/`BROKER_CALLER_TOKEN` into llm-handler's deployed `.env`.
+The `broker-deploy` identity's `/platform/broker/` secret path must contain: `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` (tailnet join). SSH itself is keyless Tailscale SSH (ADR 008, issue #191); the broker needs no deploy key. For the Issue #187 Phase 0 cutover it additionally needs `LLM_KEYS_ANTHROPIC` (a copy of the same provider key llm-handler holds -- the broker injects it server-side for llm-handler's proxied complete calls; llm-handler keeps its own copy for the streaming path) and `BROKER_CALLER_TOKEN_LLM_HANDLER` (llm-handler's caller-auth token). The **same token value** must also be provisioned at `/platform/llm-handler/` as `BROKER_CALLER_TOKEN` -- the two-path, two-name pairing described in the credential-injection paragraph above (ADR-05: no shared secret path between the two identities). None of this activates anything until slice B renders `BROKER_URL`/`BROKER_CALLER_TOKEN` into llm-handler's deployed `.env`.
 
-Unlike LifeOS's cutover (`LIFEOS_DEPLOY_ENABLED`), `deploy-broker` has no separate var gate of its own -- it deploys whenever `DEPLOY_ENABLED` is on and `services/broker/**`/`packages/**` change, matching Handler A's and the Brain's own convention (dark via the SSH-key-load step's own hard `exit 1` when `/platform/broker/` isn't provisioned yet, not a second on/off switch). Provision the identity and its secret path **before** the first push that touches those paths lands on `main`, or `deploy-broker` fails loudly on that push (by design -- see "dark until provisioned" above); it does not block `smoke`/`tag-release` for the other units either way, since `tag-release` only reads `smoke`'s own result.
+Unlike LifeOS's cutover (`LIFEOS_DEPLOY_ENABLED`), `deploy-broker` has no separate var gate of its own -- it deploys whenever `DEPLOY_ENABLED` is on and `services/broker/**`/`packages/**` change, matching Handler A's and the Brain's own convention (dark via the Infisical OIDC pull and the tailnet join failing loudly when `/platform/broker/` and its identity aren't provisioned yet -- the join's OAuth client comes from that path -- not a second on/off switch). Provision the identity and its secret path **before** the first push that touches those paths lands on `main`, or `deploy-broker` fails loudly on that push (by design -- see "dark until provisioned" above); it does not block `smoke`/`tag-release` for the other units either way, since `tag-release` only reads `smoke`'s own result.
 
 `services/broker/tool.json`'s own `permissions.networkEgress` is intentionally empty: the field describes a fixed list of hosts a unit contacts, and the broker's actual proxied targets are dynamic per-request (whatever `targetHost` a caller supplies, validated but not host-allowlisted until #187's enforcement flip) -- there is no fixed set to declare yet.
 

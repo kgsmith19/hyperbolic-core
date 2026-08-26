@@ -474,6 +474,17 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   produce, the same drift PR #270 hit. Once a reply supplies any substantive, on-topic response to a
   finding's original ask, the reviewer now defaults to resolving it rather than holding out for a
   fuller or more polished version of that same response.
+- **Resolution-by-citation (Issue #325).** The bar for resolving an already-blocking finding is its
+  own `citation`, never the reviewer's originally-suggested implementation, and every deliberation
+  turn in either direction records an explicit position — agree, disagree, or other — on the other
+  side's most recent evidence with citation-grounded rationale: `dev-agent-dispatch.yml` instructs
+  the dev agent's replies into that shape, and on a re-review round every finding the reviewer
+  keeps blocking must carry a `deliberation` engaging the dev's latest evidence with new
+  citation-grounded reasoning. `packages/review`'s validator enforces the reviewer's half
+  mechanically, in the fail-open direction only: a re-review-round blocking finding without one is
+  demoted to advisory and marked `resolvedByDefault` — re-asserting the original preferred fix
+  cannot keep a pull request blocked — extending Issue #281's default-to-resolve posture. Round-one
+  behavior and Issue #273's scope-lock are untouched.
 - **Fail-closed vs. fail-open:** infrastructure failure (missing credential, unset
   `REVIEW_MODEL`, invalid provider configuration, API error, timeout) fails the gate; a weak or
   malformed model answer does not.

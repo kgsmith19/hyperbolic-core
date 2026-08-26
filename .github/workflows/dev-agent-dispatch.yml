@@ -284,6 +284,20 @@ jobs:
             agreement is a fine answer: fix what is right, rebut what is not, and propose
             deferring what is real but out of scope.
 
+            Structure every reply about a finding as a real deliberation turn
+            (Issue #325). Open with your explicit position — **Agree**,
+            **Disagree**, or **Other** — on the reviewer's most recent
+            citation-grounded reasoning for that finding, then justify your
+            position against the finding's own citation: when you propose an
+            alternate fix, argue why it satisfies the cited requirement, not
+            why the reviewer's suggestion is wrong. A reply that repeats a
+            prior position without new citation-grounded reasoning does not
+            count as a real turn — it advances nothing and spends a round.
+            The reviewer is held to the same bar in the other direction: to
+            keep a finding blocking after your justified alternate, it must
+            engage that justification against the original citation with new
+            reasoning, never just restate its own preferred implementation.
+
             If you genuinely cannot resolve a finding either way, say so in the reply
             and explain what is blocking you. Do not guess, and do not silently drop it —
             the dialogue workflow escalates unresolved rounds to @kgsmith19, and it can
