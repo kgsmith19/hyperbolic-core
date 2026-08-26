@@ -62,14 +62,23 @@ export function createHandler(daemon: BrainDaemon, config: BrainConfig) {
     const route = (req.url ?? "/").split("?")[0]!;
     const method = req.method ?? "GET";
 
-    // /healthz + /api/healthz: bare for the loopback Docker healthcheck,
-    // prefixed for tailscale-serve path-mounting (llm-handler/src/
-    // server.ts's own dual-registration precedent, same reasoning).
+    // Three spellings of the same unauthenticated health route:
+    // /healthz for the loopback Docker healthcheck; /health because
+    // tailscale serve STRIPS the mount prefix before proxying
+    // (ipn/ipnlocal/serve.go wraps every proxy handler in
+    // http.StripPrefix(mountPoint, ...) -- tailscale/tailscale#6571), so
+    // an origin request for /api/brain/health arrives here as /health --
+    // this is the route platform-smoke.yml's Brain probe actually
+    // exercises; /api/brain/health kept as the previously-documented
+    // alias, harmless under either proxy semantic. (The earlier comment
+    // here claimed tailscale forwards the full path; Issue #332 disproved
+    // that live -- every other unit's routed probe just happens to strip
+    // to a bare /healthz its backend already registers.)
     // Deliberately unauthenticated, like every other unit's health route
     // in this monorepo -- an infra liveness probe, not an operator
     // surface, and m4-14's own 401-latency acceptance criterion is
     // scoped to "any /api/brain/* route", which this is not.
-    if ((route === "/healthz" || route === "/api/brain/health") && method === "GET") {
+    if ((route === "/healthz" || route === "/health" || route === "/api/brain/health") && method === "GET") {
       daemon
         .health()
         .then((health) => send(res, health.status === "ok" ? 200 : 503, health))
