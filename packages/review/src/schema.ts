@@ -64,6 +64,28 @@ const findingSchema = {
       description:
         "True only when the pull request's own dialogue thread shows the dev agent proposing this exact finding belongs in a separate, non-blocking Issue instead of blocking this pull request, and you agree. Never true on a first-round review -- there is nothing yet to have agreed to. Does not change `severity`; it only excludes an otherwise-blocking finding from the block decision, and the finding still gets reported.",
     },
+    proposedBlockingIssue: {
+      type: "object",
+      additionalProperties: false,
+      description:
+        "The inverse of outOfScope: propose that this finding, real but not something you are raising as blocking in THIS round, become its own tracked Issue that blocks the pull request once the dev side agrees. Only ever attach this to an advisory finding you believe deserves that visibility -- never to a finding you are already reporting as blocking. Set `confirmed: true` only when a later round's dialogue thread shows the dev agent or a human explicitly affirming this exact proposal; never on the same round you first raised it.",
+      properties: {
+        title: {
+          type: "string",
+          description: "Short, GitHub-Issue-appropriate title for the proposed blocking Issue.",
+        },
+        body: {
+          type: "string",
+          description: "What is wrong, why it deserves its own tracked Issue, and what would resolve it.",
+        },
+        confirmed: {
+          type: "boolean",
+          description:
+            "True only when the pull request's dialogue thread shows the dev agent or a human explicitly affirming THIS exact proposal since you last raised it. Absent or false otherwise.",
+        },
+      },
+      required: ["title", "body"],
+    },
   },
   required: ["severity", "category", "claim", "evidence", "requestedChange", "citation"],
 } as const;
