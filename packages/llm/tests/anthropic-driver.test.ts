@@ -138,6 +138,60 @@ test("anthropicDriver.complete: maps system/user/assistant/tool messages, tools,
   assert.deepEqual(capturedBody?.tool_choice, { type: "tool", name: "get_weather" });
 });
 
+test("anthropicDriver.complete: forwards an explicit temperature for a non-locked model", async () => {
+  let capturedBody: Record<string, unknown> | undefined;
+
+  await withPatchedFetch(
+    async (_input, init) => {
+      capturedBody = JSON.parse(String(init?.body));
+      return jsonResponse(fixtureMessage());
+    },
+    () => anthropicDriver.complete({ ...BASE_REQUEST, model: "claude-opus-4-6", temperature: 0 }, { apiKey: "fixture-key" }),
+  );
+
+  assert.equal(capturedBody?.temperature, 0);
+});
+
+// claude-sonnet-5 rejected this live: "`temperature` is deprecated for this
+// model." -- models released after Claude Opus 4.6 only accept the API's
+// own default, so the driver must omit the field rather than send a value
+// the API will 400 on. See platform.claude.com/docs/en/api/messages.
+test("anthropicDriver.complete: omits temperature for models released after Claude Opus 4.6", async () => {
+  for (const model of ["claude-sonnet-5", "claude-opus-5", "claude-fable-5", "claude-mythos-5", "claude-mythos-preview", "claude-opus-4-7", "claude-opus-4-8"]) {
+    let capturedBody: Record<string, unknown> | undefined;
+
+    await withPatchedFetch(
+      async (_input, init) => {
+        capturedBody = JSON.parse(String(init?.body));
+        return jsonResponse(fixtureMessage());
+      },
+      () => anthropicDriver.complete({ ...BASE_REQUEST, model, temperature: 0 }, { apiKey: "fixture-key" }),
+    );
+
+    assert.ok(capturedBody);
+    assert.equal("temperature" in (capturedBody as object), false, `expected no temperature field for model "${model}"`);
+  }
+});
+
+// Same over-matching hazard openai.ts's own isReasoningModel test guards
+// against: startsWith() alone would also match a hypothetical newer model
+// that merely shares a prefix (e.g. "claude-sonnet-50" or "claude-opus-5-mini").
+test("anthropicDriver.complete: prefix matching does not over-match a same-prefix different-generation model id", async () => {
+  for (const model of ["claude-sonnet-50", "claude-opus-50", "claude-fable-50"]) {
+    let capturedBody: Record<string, unknown> | undefined;
+
+    await withPatchedFetch(
+      async (_input, init) => {
+        capturedBody = JSON.parse(String(init?.body));
+        return jsonResponse(fixtureMessage());
+      },
+      () => anthropicDriver.complete({ ...BASE_REQUEST, model, temperature: 0 }, { apiKey: "fixture-key" }),
+    );
+
+    assert.equal(capturedBody?.temperature, 0, `expected temperature to still be forwarded for unrelated model id "${model}"`);
+  }
+});
+
 test("anthropicDriver.complete: parses tool_use content blocks into toolCalls and reports stopReason tool_use", async () => {
   const response = await withPatchedFetch(
     async () =>

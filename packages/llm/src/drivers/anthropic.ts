@@ -114,6 +114,39 @@ interface AnthropicBaseParams {
   temperature?: number;
 }
 
+// Models released after Claude Opus 4.6 reject any `temperature` other than
+// the API's own default (1) with a 400 -- a real, documented Messages API
+// constraint (platform.claude.com/docs/en/api/messages: "Deprecated. Models
+// released after Claude Opus 4.6 do not support setting temperature."), not
+// something this driver can negotiate around. No alternative sampling
+// parameter is offered; Anthropic's own guidance is to omit the field and
+// rely on prompting instead. Observed via a live 400 from claude-sonnet-5
+// ("`temperature` is deprecated for this model."). Detection is by id
+// prefix, same shape as openai.ts's own TEMPERATURE_LOCKED_MODEL_PREFIXES --
+// extend this list as new locked-model generations ship.
+const TEMPERATURE_LOCKED_MODEL_PREFIXES = [
+  "claude-sonnet-5",
+  "claude-opus-5",
+  "claude-fable-5",
+  "claude-mythos-5",
+  "claude-mythos-preview",
+  "claude-opus-4-7",
+  "claude-opus-4-8",
+];
+
+// A bare startsWith() would also match a same-prefix different-generation id
+// it was never meant to (e.g. a hypothetical "claude-opus-5-mini" starts
+// with "claude-opus-5"), so the prefix must be the whole id or be followed
+// by a "-" (a real next model id extends with a separator, not more of the
+// same token).
+function isTemperatureLocked(model: string): boolean {
+  return TEMPERATURE_LOCKED_MODEL_PREFIXES.some((prefix) => {
+    if (!model.startsWith(prefix)) return false;
+    const next = model[prefix.length];
+    return next === undefined || next === "-";
+  });
+}
+
 // Exported (issue #186): anthropic-via-broker.ts reuses this exact wire-
 // format mapping rather than re-deriving it -- the Anthropic Messages API
 // request shape belongs in exactly one place, whether the request is sent
@@ -127,7 +160,7 @@ export function buildParams(request: LlmRequest): AnthropicBaseParams {
     system: toAnthropicSystem(request.messages),
     tools: request.tools?.map(toAnthropicTool),
     tool_choice: request.toolChoice ? toAnthropicToolChoice(request.toolChoice) : undefined,
-    temperature: request.temperature,
+    temperature: isTemperatureLocked(request.model) ? undefined : request.temperature,
   };
 }
 
