@@ -89,6 +89,13 @@ runs:
     # was empty nor the fact that a GitHub variable, not anything in
     # Infisical, is what's absent (issue #212). Reports set/unset only,
     # never values, so it is safe on a public repository.
+    #
+    # Owner directive (2026-08-26): every provider value this action uses
+    # comes from repository variables, never parsed out of agent-roles.yaml
+    # -- an earlier revision of this step read agent-roles.yaml directly via
+    # the API, which the owner overruled as premature for this repo's
+    # current early stage. vars.DEV_PROVIDER remains the single source for
+    # the builder identity in the collision check below.
     - name: Preflight · Verify the reviewer is configured
       if: inputs.pr_number != ''
       shell: bash
