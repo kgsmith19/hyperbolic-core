@@ -63,6 +63,21 @@ export interface Finding {
    * behavior.
    */
   outOfScope?: boolean;
+  /**
+   * The inverse of `outOfScope`: the reviewer proposes that this finding,
+   * real but not raised as `blocking` this round, become its own tracked
+   * Issue that blocks the pull request -- but only once the dev side agrees.
+   * `confirmed` is reachable only through the same dialogue deliberation
+   * `outOfScope` requires, just for the opposite direction: never true on the
+   * round the proposal was first raised. This field alone never blocks or
+   * files anything -- it is additive data for the caller (the dialogue
+   * workflow) to act on once `confirmed` is true.
+   */
+  proposedBlockingIssue?: {
+    title: string;
+    body: string;
+    confirmed?: boolean;
+  };
 }
 
 /**

@@ -187,6 +187,121 @@ test("validateVerdict: outOfScope is omitted, not defaulted to false, on an ordi
   assert.equal("outOfScope" in (result.findings[0] ?? {}), false);
 });
 
+// Behavior protected: proposedBlockingIssue is additive data only -- it must
+// never change the block/pass verdict by itself, since only the dialogue
+// workflow (not this package) may act on `confirmed` by actually filing an
+// Issue. Defect caught: a validator that treats a confirmed proposal as
+// equivalent to a blocking finding, which would let this field silently
+// start failing pull requests the schema's own description says it cannot.
+test("validateVerdict: proposedBlockingIssue never affects the verdict by itself, confirmed or not", () => {
+  for (const confirmed of [undefined, false, true]) {
+    const result = validateVerdict({
+      verdict: "pass",
+      summary: "Advisory finding with a proposed blocking Issue.",
+      findings: [
+        wellFormedFinding({
+          severity: "advisory",
+          proposedBlockingIssue: { title: "Track the broader refactor", body: "Too large for this PR.", confirmed },
+        }),
+      ],
+    });
+    assert.equal(result.verdict, "pass");
+  }
+});
+
+// Behavior protected: a well-formed proposal survives with its title, body,
+// and confirmed flag intact -- the dialogue workflow needs all three to
+// decide whether to file the Issue and what to file.
+// Defect caught: dropping the field entirely, or losing `confirmed` (which
+// would make a real dev-side affirmation invisible to the caller).
+test("validateVerdict: a well-formed proposedBlockingIssue is kept intact, including confirmed", () => {
+  const result = validateVerdict({
+    verdict: "pass",
+    summary: "One proposal, confirmed on this round.",
+    findings: [
+      wellFormedFinding({
+        severity: "advisory",
+        proposedBlockingIssue: { title: "Track it", body: "Real, but not this PR.", confirmed: true },
+      }),
+    ],
+  });
+
+  assert.deepEqual(result.findings[0]?.proposedBlockingIssue, {
+    title: "Track it",
+    body: "Real, but not this PR.",
+    confirmed: true,
+  });
+});
+
+// Behavior protected: an unconfirmed proposal is kept without a `confirmed`
+// key at all -- absence and explicit-false must read the same way `outOfScope`
+// already does, so a later "was this explicitly considered?" distinction stays
+// possible without a breaking change.
+test("validateVerdict: proposedBlockingIssue.confirmed is omitted, not defaulted to false", () => {
+  const result = validateVerdict({
+    verdict: "pass",
+    summary: "One proposal, not yet confirmed.",
+    findings: [
+      wellFormedFinding({
+        severity: "advisory",
+        proposedBlockingIssue: { title: "Track it", body: "Real, but not this PR." },
+      }),
+    ],
+  });
+
+  assert.equal(result.findings[0]?.proposedBlockingIssue?.title, "Track it");
+  assert.equal("confirmed" in (result.findings[0]?.proposedBlockingIssue ?? {}), false);
+});
+
+// NEGATIVE CONTROL: a malformed proposal (missing title/body, or not an
+// object at all) must be dropped silently, exactly like a malformed
+// outOfScope value -- never promoted into something the dialogue workflow
+// would act on, and never a reason to discard the whole finding.
+test("validateVerdict: a malformed proposedBlockingIssue is dropped, and the finding is still kept", () => {
+  for (const malformed of [
+    { title: "", body: "Real, but not this PR." },
+    { title: "Track it", body: "" },
+    { title: "Track it" },
+    "not an object",
+    42,
+    null,
+  ]) {
+    const result = validateVerdict({
+      verdict: "pass",
+      summary: "Malformed proposal must not survive.",
+      findings: [wellFormedFinding({ severity: "advisory", proposedBlockingIssue: malformed })],
+    });
+    assert.equal(result.findings.length, 1, `finding itself must survive a malformed proposal: ${JSON.stringify(malformed)}`);
+    assert.equal(
+      "proposedBlockingIssue" in (result.findings[0] ?? {}),
+      false,
+      `malformed proposal must not survive: ${JSON.stringify(malformed)}`
+    );
+  }
+});
+
+// NEGATIVE CONTROL for confirmed's trust posture, mirroring outOfScope's own:
+// only a literal boolean `true` counts.
+test("validateVerdict: proposedBlockingIssue.confirmed is only honored as a literal boolean true", () => {
+  for (const value of ["true", 1, 0, null]) {
+    const result = validateVerdict({
+      verdict: "pass",
+      summary: "Non-boolean confirmed must not carry through.",
+      findings: [
+        wellFormedFinding({
+          severity: "advisory",
+          proposedBlockingIssue: { title: "Track it", body: "Real, but not this PR.", confirmed: value },
+        }),
+      ],
+    });
+    assert.equal(
+      "confirmed" in (result.findings[0]?.proposedBlockingIssue ?? {}),
+      false,
+      `confirmed: ${JSON.stringify(value)} must not carry through`
+    );
+  }
+});
+
 // Behavior protected: unparseable model output never throws and never blocks.
 // Defect caught: letting a JSON/shape error escape, which would be caught by
 // the CLI's infrastructure handler and reported as exit 2 -- turning "the model

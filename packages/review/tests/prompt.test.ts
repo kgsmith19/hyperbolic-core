@@ -75,6 +75,18 @@ test("buildSystemPrompt: restricts outOfScope to an explicit prior proposal, nev
   assert.match(prompt, /in response to an explicit proposal/);
 });
 
+// Behavior protected: proposedBlockingIssue (the inverse of outOfScope) is
+// restricted the same way -- confirmed only on a later round, only in
+// response to explicit dev/human affirmation, never invented. Defect caught:
+// prompt text loose enough that the model marks a proposal confirmed on the
+// same round it raised it, or without the dialogue thread actually agreeing.
+test("buildSystemPrompt: restricts proposedBlockingIssue.confirmed to a later round's explicit affirmation", () => {
+  const prompt = buildSystemPrompt();
+  assert.match(prompt, /proposedBlockingIssue/);
+  assert.match(prompt, /never on the same round you first raised it/);
+  assert.match(prompt, /do not invent agreement that was not given/);
+});
+
 // Behavior protected: after round one, the model may not introduce a
 // blocking finding absent from the prior conversation, and must judge a
 // finding's resolution against its ORIGINAL wording, not a stricter one

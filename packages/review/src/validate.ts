@@ -87,6 +87,25 @@ function toFinding(raw: unknown): { finding: Finding; valid: boolean } | null {
   if (raw.outOfScope === true) {
     finding.outOfScope = true;
   }
+  // Same fail-safe posture as outOfScope: a malformed or absent proposal
+  // (not a record, or missing a non-empty title/body) is simply dropped --
+  // it never promotes a finding into something the dialogue workflow would
+  // act on. `confirmed` only carries through as `true` when literally `true`,
+  // for the same reason severityOf() and the outOfScope check above only
+  // ever honor an exact match: a field this consequential (it can eventually
+  // cause a real GitHub Issue to be filed) must never be promoted by a typo
+  // or an unexpected type.
+  if (isRecord(raw.proposedBlockingIssue)) {
+    const title = nonEmptyString(raw.proposedBlockingIssue.title);
+    const body = nonEmptyString(raw.proposedBlockingIssue.body);
+    if (title !== null && body !== null) {
+      finding.proposedBlockingIssue = {
+        title,
+        body,
+        ...(raw.proposedBlockingIssue.confirmed === true ? { confirmed: true } : {}),
+      };
+    }
+  }
 
   const valid = claim !== null && evidence !== null && citation !== null && requestedChange !== null;
   return { finding, valid };
