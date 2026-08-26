@@ -17,15 +17,22 @@ function required(name: string): string {
 }
 
 // 08 section 5's configuration skeleton lists LLM_KEYS_ANTHROPIC,
-// LLM_KEYS_OPENAI, LLM_KEYS_GOOGLE, each independently optional here: a
+// LLM_KEYS_OPENAI, LLM_KEYS_GEMINI, each independently optional here: a
 // deploy that has not yet provisioned every provider still starts, and a
 // request naming an unconfigured provider fails per-request at
 // packages/llm's own getCredentials() ("no credentials supplied for
 // provider ...", invalid_request) rather than crashing the whole process.
+//
+// Provider `google` deliberately reads LLM_KEYS_GEMINI, not
+// LLM_KEYS_GOOGLE: the #307/#308 provider-enum standardization renamed
+// the enum value only, while deploy.yml's deploy-llm-handler job renders
+// LLM_KEYS_GEMINI (the name Infisical /platform/llm-handler/ stores) into
+// the unit's .env. Reading any other name here strands the credential in
+// production (issue #337); tests/config.test.ts pins this agreement.
 const LLM_KEY_ENV_VARS: Record<Provider, string> = {
   anthropic: "LLM_KEYS_ANTHROPIC",
   openai: "LLM_KEYS_OPENAI",
-  google: "LLM_KEYS_GOOGLE",
+  google: "LLM_KEYS_GEMINI",
 };
 
 function loadLlmCredentials(env: NodeJS.ProcessEnv): CredentialsByProvider {
