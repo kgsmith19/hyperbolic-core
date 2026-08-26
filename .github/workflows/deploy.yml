@@ -1,5 +1,14 @@
 name: Platform Deploy
 
+# NO SSH KEYS, deliberately (ADR 008, issue #191): every deploy job below
+# authenticates the same way lifeos-deploy.yml and ops-serve-apply.yml
+# already do -- the CI runner joins the tailnet as an ephemeral tag:ci node
+# (tailscale/github-action, OAuth client from each job's own Infisical path)
+# and the tailnet ACL grants tag:ci SSH to deploy@$DEPLOY_HOST. No SSH key
+# material exists anywhere in this pipeline (pinned by
+# docs/ops/deploy-workflow.test.mjs, the same contract
+# lifeos-deploy-workflow.test.mjs already pins for LifeOS).
+
 on:
   push:
     branches: [main]
@@ -210,27 +219,6 @@ jobs:
           env-slug: prod
           secret-path: "/platform/shell-deploy/"
           domain: https://app.infisical.com
-      - name: Load the deploy SSH key
-        # Infisical/secrets-action only ever exports secrets as plain
-        # environment variables (GITHUB_ENV) or a .env file -- it has no
-        # SSH-key-file or ssh-agent feature of its own [confirmed against
-        # the action's own README]. Every ssh/scp call below authenticates
-        # as deploy@$DEPLOY_HOST with no -i flag, relying on OpenSSH's
-        # default identity-file lookup, so the private key injected from
-        # Infisical's /platform/shell-deploy/ path (variable name
-        # SHELL_DEPLOY_SSH_KEY, this job's own convention) must be
-        # materialized at that default path before the first ssh call.
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${SHELL_DEPLOY_SSH_KEY:-}" ]; then
-            echo "::error::SHELL_DEPLOY_SSH_KEY was not injected from Infisical (/platform/shell-deploy/) -- cannot authenticate to the deploy host." >&2
-            exit 1
-          fi
-          umask 077
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$SHELL_DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
-          chmod 600 "$HOME/.ssh/id_ed25519"
       - name: Join tailnet
         uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
         with:
@@ -401,24 +389,6 @@ jobs:
           env-slug: prod
           secret-path: "/platform/llm-handler/"
           domain: https://app.infisical.com
-      - name: Load the deploy SSH key
-        # Same gap and same fix as deploy-shell's own "Load the deploy SSH
-        # key" step (this file, above): Infisical/secrets-action never
-        # writes an SSH key file itself. A distinct key from Shell's
-        # (ADR-05: one identity's leaked secret must not grant another
-        # identity's access), materialized at the same default path since
-        # each job runs on its own fresh, single-use runner.
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${LLM_HANDLER_SSH_KEY:-}" ]; then
-            echo "::error::LLM_HANDLER_SSH_KEY was not injected from Infisical (/platform/llm-handler/) -- cannot authenticate to the deploy host." >&2
-            exit 1
-          fi
-          umask 077
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$LLM_HANDLER_SSH_KEY" > "$HOME/.ssh/id_ed25519"
-          chmod 600 "$HOME/.ssh/id_ed25519"
       - name: Join tailnet
         uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
         with:
@@ -592,24 +562,6 @@ jobs:
           env-slug: prod
           secret-path: "/brain/"
           domain: https://app.infisical.com
-      - name: Load the deploy SSH key
-        # Same gap and same fix as deploy-shell's/deploy-llm-handler's own
-        # "Load the deploy SSH key" step: Infisical/secrets-action never
-        # writes an SSH key file itself. A distinct key from either of
-        # theirs (ADR-05: one identity's leaked secret must not grant
-        # another identity's access), materialized at the same default
-        # path since each job runs on its own fresh, single-use runner.
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${BRAIN_DEPLOY_SSH_KEY:-}" ]; then
-            echo "::error::BRAIN_DEPLOY_SSH_KEY was not injected from Infisical (/brain/) -- cannot authenticate to the deploy host." >&2
-            exit 1
-          fi
-          umask 077
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$BRAIN_DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
-          chmod 600 "$HOME/.ssh/id_ed25519"
       - name: Join tailnet
         uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
         with:
@@ -803,24 +755,6 @@ jobs:
           env-slug: prod
           secret-path: "/platform/broker/"
           domain: https://app.infisical.com
-      - name: Load the deploy SSH key
-        # Same gap and same fix as every sibling deploy job's own "Load the
-        # deploy SSH key" step: Infisical/secrets-action never writes an SSH
-        # key file itself. A distinct key from every other identity's
-        # (ADR-05: one identity's leaked secret must not grant another
-        # identity's access), materialized at the same default path since
-        # each job runs on its own fresh, single-use runner.
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${BROKER_DEPLOY_SSH_KEY:-}" ]; then
-            echo "::error::BROKER_DEPLOY_SSH_KEY was not injected from Infisical (/platform/broker/) -- cannot authenticate to the deploy host." >&2
-            exit 1
-          fi
-          umask 077
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$BROKER_DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
-          chmod 600 "$HOME/.ssh/id_ed25519"
       - name: Join tailnet
         uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
         with:
