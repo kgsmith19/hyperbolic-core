@@ -410,7 +410,7 @@ jobs:
             }
 
             function renderFinding(finding, index) {
-              return [
+              const parts = [
                 `#### ${index}. \`${neutralize(finding.category || "unspecified", 60)}\`${locate(finding)}`,
                 "",
                 `**Claim.** ${neutralize(finding.claim)}`,
@@ -421,7 +421,30 @@ jobs:
                 `**Requested change.** ${neutralize(finding.requestedChange)}`,
                 "",
                 `**Cites.** ${neutralize(finding.citation, 300)}`,
-              ].join("\n");
+              ];
+              // Issue #326: a suggestion that made it into a real line-anchored
+              // review comment is only referenced here; one that could not be
+              // anchored is shown in full, so it is never silently lost. The
+              // Map is populated by the suggestion loop below, which runs
+              // before this function is ever called at comment-build time.
+              const suggestionResult = suggestionOutcome.get(finding);
+              if (suggestionResult === "posted") {
+                parts.push(
+                  "",
+                  "**Suggested fix.** Posted as a line-anchored review comment with a GitHub-native suggestion block — apply or dismiss it there."
+                );
+              } else if (suggestionResult === "fallback") {
+                parts.push(
+                  "",
+                  `**Suggested fix** — could not be line-anchored, shown here instead. In \`${neutralize(finding.suggestedFix.file, 200)}\`, replace:`,
+                  codeBlock(finding.suggestedFix.originalLines),
+                  "with:",
+                  finding.suggestedFix.replacement.trim() === ""
+                    ? "_(nothing — the fix deletes those lines)_"
+                    : codeBlock(finding.suggestedFix.replacement)
+                );
+              }
+              return parts.join("\n");
             }
 
             // ---------------------------------------------------------------
@@ -460,6 +483,7 @@ jobs:
               identityEscalated: false,
               deferredIssues: {},
               confirmedIssues: {},
+              suggestionComments: {},
             };
 
             // ---------------------------------------------------------------
@@ -755,6 +779,117 @@ jobs:
               }
             }
 
+            // ---------------------------------------------------------------
+            // Post GitHub-native suggested fixes (Issue #326). A finding may
+            // carry suggestedFix: { file, originalLines, replacement }
+            // (packages/review/src/types.ts) -- a replacement the reviewer's
+            // own prompt restricts to small, unambiguous, mechanical fixes.
+            // It is rendered as a suggestion block in a REAL line-anchored
+            // review comment via the pulls review-comment API, so the author
+            // can accept it through GitHub's own "Apply suggestion" UI --
+            // which is also the permission boundary: this workflow only ever
+            // writes comment content, and only a human with write access can
+            // turn a suggestion into a commit. The reviewer App's permissions
+            // are unchanged (Contents: Read-only); applying is GitHub's job,
+            // never this workflow's.
+            //
+            // Degrade, never fail: a finding without a usable line, an
+            // oversized suggestion, or an anchor the API rejects (a line
+            // outside the diff is a 422) falls back to a fenced block inside
+            // the managed comment below -- display-only, but never lost and
+            // never a failed delivery. Deduplicated through the managed
+            // comment's own state, same as the two Issue-filing loops above,
+            // so a same-head re-run does not spray duplicate review comments.
+            // ---------------------------------------------------------------
+            const SUGGESTION_CAP = 3000;
+
+            function isRenderableSuggestion(finding) {
+              const suggestion = finding.suggestedFix;
+              return (
+                suggestion !== null &&
+                typeof suggestion === "object" &&
+                typeof suggestion.file === "string" &&
+                suggestion.file.trim() !== "" &&
+                typeof suggestion.originalLines === "string" &&
+                suggestion.originalLines.trim() !== "" &&
+                typeof suggestion.replacement === "string"
+              );
+            }
+
+            // The replacement is applyable code, so unlike every other model-
+            // authored string it is NOT run through neutralize(): a zero-width
+            // space injected there would be committed into the repository by
+            // GitHub's own "Apply suggestion". Inside a fenced code block a
+            // mention cannot ping and an issue reference does not cross-link,
+            // and the fence is sized past the longest backtick run so the
+            // content cannot break out -- same technique as codeBlock(). An
+            // empty replacement emits a fence with ZERO content lines: that is
+            // GitHub's deletion form, distinct from a fence containing one
+            // empty line (which would mean "replace with a blank line").
+            function suggestionFence(replacement) {
+              const text = String(replacement).replace(/\r/g, "");
+              const longest = (text.match(/`+/g) || []).reduce((n, run) => Math.max(n, run.length), 0);
+              const fence = "`".repeat(Math.max(3, longest + 1));
+              return text === "" ? `${fence}suggestion\n${fence}` : `${fence}suggestion\n${text}\n${fence}`;
+            }
+
+            const suggestionComments = { ...(prior.suggestionComments || {}) };
+            const suggestionOutcome = new Map();
+
+            for (const finding of findings.filter(isRenderableSuggestion)) {
+              const suggestion = finding.suggestedFix;
+              // Keyed on the head too, unlike the Issue fingerprints above: a
+              // review comment anchors to THIS head's line numbers, so a new
+              // head legitimately earns a fresh comment while a same-head
+              // re-run must reuse the record.
+              const fingerprint = require("node:crypto")
+                .createHash("sha256")
+                .update(`${headSha}|${suggestion.file}|${finding.line ?? ""}|${suggestion.replacement}`)
+                .digest("hex")
+                .slice(0, 16);
+              if (suggestionComments[fingerprint]) {
+                suggestionOutcome.set(finding, "posted");
+                continue;
+              }
+              const anchorLine = Number.isInteger(finding.line) && finding.line > 0 ? finding.line : null;
+              if (
+                anchorLine === null ||
+                suggestion.replacement.length > SUGGESTION_CAP ||
+                suggestion.originalLines.length > SUGGESTION_CAP
+              ) {
+                suggestionOutcome.set(finding, "fallback");
+                continue;
+              }
+              const lineCount = suggestion.originalLines.replace(/\n$/, "").split("\n").length;
+              try {
+                const created = await github.rest.pulls.createReviewComment({
+                  owner,
+                  repo,
+                  pull_number: meta.prNumber,
+                  commit_id: headSha,
+                  path: suggestion.file,
+                  side: "RIGHT",
+                  line: anchorLine + lineCount - 1,
+                  ...(lineCount > 1 ? { start_line: anchorLine, start_side: "RIGHT" } : {}),
+                  body: [
+                    "**Suggested fix from AI Review** — apply it only if you agree. The reviewer can only propose; accepting a suggestion is your call, through GitHub's own UI.",
+                    "",
+                    suggestionFence(suggestion.replacement),
+                    "",
+                    reviewFooter,
+                  ].join("\n"),
+                });
+                suggestionComments[fingerprint] = created.data.id;
+                suggestionOutcome.set(finding, "posted");
+                core.info(`Posted a line-anchored suggestion for PR #${meta.prNumber} at ${suggestion.file}:${anchorLine} (fingerprint ${fingerprint}).`);
+              } catch (error) {
+                suggestionOutcome.set(finding, "fallback");
+                core.warning(
+                  `Could not post a line-anchored suggestion for ${suggestion.file}:${anchorLine}: ${error.message}. Rendering it inside the managed comment instead.`
+                );
+              }
+            }
+
             const state = {
               round,
               headSha,
@@ -764,6 +899,7 @@ jobs:
               verdict: verdict.verdict,
               deferredIssues,
               confirmedIssues,
+              suggestionComments,
             };
 
             // ---------------------------------------------------------------

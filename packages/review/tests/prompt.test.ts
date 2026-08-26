@@ -337,3 +337,19 @@ test("each run gets a distinct, non-trivial fence id", () => {
   assert.notEqual(a, b);
   assert.ok(a.length >= 12, `fence id too short to be unguessable: ${a}`);
 });
+
+// Behavior protected (Issue #326): suggestedFix is restricted to small,
+// unambiguous, mechanical fixes -- never judgment calls -- matching the
+// small-vs-large-ask distinction AGENTS.md draws for review asks. Defect
+// caught: prompt text loose enough that the model attaches applyable
+// replacement code to design decisions or multi-implementation changes,
+// where "apply with one click" is exactly the wrong affordance.
+test("buildSystemPrompt: restricts suggestedFix to small, unambiguous, mechanical fixes, never judgment calls", () => {
+  const prompt = buildSystemPrompt();
+  assert.match(prompt, /SUGGESTED FIXES/);
+  assert.match(prompt, /suggestedFix/);
+  assert.match(prompt, /small,\s+unambiguous, and mechanical/);
+  assert.match(prompt, /Never\s+attach one for a judgment call/);
+  assert.match(prompt, /quote the exact current lines being replaced, verbatim/);
+  assert.match(prompt, /you never apply it yourself/);
+});

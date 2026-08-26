@@ -573,6 +573,10 @@ function makeGithub({
   dispatchThrows = false,
   searchResults = [],
   createIssueThrows = false,
+  // Issue #326: simulates the pulls review-comment API rejecting a suggestion
+  // anchor (e.g. a 422 for a line outside the diff), which must degrade to
+  // the managed comment, never fail delivery.
+  reviewCommentThrows = false,
   // Fixture for the default-branch agent-roles.yaml the dialogue script now
   // reads to decide whether the assigned dev provider is the one this
   // repository's dispatcher actually implements (anthropic, today).
@@ -585,11 +589,21 @@ function makeGithub({
   reviewProvider = "openai",
   reviewModel = "y",
 }) {
-  const calls = { updateComment: [], createComment: [], createDispatchEvent: [], createIssue: [], search: [] };
+  const calls = { updateComment: [], createComment: [], createDispatchEvent: [], createIssue: [], search: [], createReviewComment: [] };
   let nextIssueNumber = 300;
+  let nextReviewCommentId = 900;
   const api = {
     rest: {
-      pulls: { get: async () => ({ data: pr }) },
+      pulls: {
+        get: async () => ({ data: pr }),
+        createReviewComment: async (args) => {
+          calls.createReviewComment.push(args);
+          if (reviewCommentThrows) throw new Error("simulated line-anchor failure");
+          const id = nextReviewCommentId;
+          nextReviewCommentId += 1;
+          return { data: { id } };
+        },
+      },
       issues: {
         listComments: async () => (existingComment ? [existingComment] : []),
         createComment: async (args) => {
@@ -650,12 +664,12 @@ async function runDialogue(
   os,
   path_,
   env,
-  { pr, existingComment, dispatchThrows, searchResults, createIssueThrows, devProvider, reviewProvider, reviewModel } = {}
+  { pr, existingComment, dispatchThrows, searchResults, createIssueThrows, reviewCommentThrows, devProvider, reviewProvider, reviewModel } = {}
 ) {
   const dir = fs.mkdtempSync(path_.join(os.tmpdir(), "llm-review-dialogue-test-"));
   makeArtifact(fs, path_, dir, env.__files);
   delete env.__files;
-  const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows, searchResults, createIssueThrows, devProvider, reviewProvider, reviewModel });
+  const { api, calls } = makeGithub({ pr, existingComment, dispatchThrows, searchResults, createIssueThrows, reviewCommentThrows, devProvider, reviewProvider, reviewModel });
   const core = makeCore();
   // Most dialogue tests exercise behavior after successful provisioning, so
   // App presence defaults true. A test for incomplete identity provisioning
@@ -2345,4 +2359,231 @@ test("dialogue: a deferred finding and a confirmed proposal both render and file
   const body = calls.createComment[0].body;
   assert.match(body, /### Deferred findings \(1\) — agreed out of scope, does not block/);
   assert.match(body, /### Proposed blocking Issues \(1\) — confirmed, filed to track/);
+});
+
+// ---------------------------------------------------------------------------
+// Behavioral: GitHub-native suggested fixes (packages/review/src/types.ts's
+// suggestedFix field, Issue #326). A finding may carry a small, mechanical
+// replacement; the dialogue renders it as a real, line-anchored PR review
+// comment containing a GitHub suggestion block -- the pulls review-comment
+// API, never the managed summary comment, which cannot carry line-anchored
+// suggestions. When anchoring is impossible (no usable line, or the API
+// rejects the anchor) it degrades to a fenced block inside the managed
+// comment; delivery never fails over a suggestion. The reviewer only ever
+// writes comment content -- applying a suggestion is GitHub's own
+// write-gated UI action, so no new permission is involved.
+// ---------------------------------------------------------------------------
+
+const SUGGESTED_FIX_FINDING = {
+  severity: "advisory",
+  category: "test-quality",
+  file: "src/pricing.ts",
+  line: 42,
+  claim: "The discount comparison uses the wrong operator.",
+  evidence: "if (discount > 100) {",
+  requestedChange: "Use >= so a 100% discount is clamped too.",
+  citation: "AGENTS.md > Test quality",
+  suggestedFix: {
+    file: "src/pricing.ts",
+    originalLines: "if (discount > 100) {",
+    replacement: "if (discount >= 100) {",
+  },
+};
+
+function suggestedFixFingerprint(finding = SUGGESTED_FIX_FINDING, headSha = HEAD) {
+  return require("node:crypto")
+    .createHash("sha256")
+    .update(`${headSha}|${finding.suggestedFix.file}|${finding.line ?? ""}|${finding.suggestedFix.replacement}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+function suggestedFixEnv(findings, overrides = {}) {
+  return {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "success", verdictPresent: true },
+      "review-verdict.json": { verdict: "pass", findings, discarded: [], summary: "suggested-fix run" },
+    },
+    ...overrides,
+  };
+}
+
+// Behavior protected: the suggestion lands as a REAL line-anchored review
+// comment -- pulls.createReviewComment with the head commit, the suggestion's
+// own path, the finding's line, side RIGHT, and a GitHub suggestion fence --
+// and the managed comment references it rather than inlining a fallback.
+// Defect caught: rendering the suggestion only into the managed comment
+// (which cannot carry line-anchored suggestions), anchoring to the wrong
+// commit or path, or dropping the suggestion fence GitHub's "Apply
+// suggestion" UI keys on.
+test("dialogue: a suggestedFix with a line posts one line-anchored review comment carrying a GitHub suggestion block", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, suggestedFixEnv([SUGGESTED_FIX_FINDING]), { pr: BASE_PR });
+
+  assert.equal(calls.createReviewComment.length, 1, "exactly one review comment must be posted");
+  const reviewComment = calls.createReviewComment[0];
+  assert.equal(reviewComment.pull_number, 230);
+  assert.equal(reviewComment.commit_id, HEAD);
+  assert.equal(reviewComment.path, "src/pricing.ts");
+  assert.equal(reviewComment.line, 42);
+  assert.equal(reviewComment.side, "RIGHT");
+  assert.equal("start_line" in reviewComment, false, "a single-line suggestion must not send start_line");
+  assert.match(reviewComment.body, /```suggestion\n/);
+  assert.match(reviewComment.body, /if \(discount >= 100\) \{/);
+  assert.match(reviewComment.body, /apply it only if you agree/);
+
+  const body = calls.createComment[0].body;
+  assert.match(body, /\*\*Suggested fix\.\*\* Posted as a line-anchored review comment/);
+  assert.doesNotMatch(body, /could not be line-anchored/);
+  assert.match(body, new RegExp(`"suggestionComments":\\{"${suggestedFixFingerprint()}":900\\}`), "the posted comment id must be recorded in state");
+});
+
+// Behavior protected: a multi-line originalLines anchors as a range --
+// start_line at the finding's line, line at its last replaced line -- which
+// is what GitHub requires for a multi-line suggestion to be applyable.
+test("dialogue: a multi-line suggestedFix anchors as a start_line..line range", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const finding = {
+    ...SUGGESTED_FIX_FINDING,
+    suggestedFix: { ...SUGGESTED_FIX_FINDING.suggestedFix, originalLines: "if (discount > 100) {\n  discount = 100;", replacement: "if (discount >= 100) {\n  discount = 99;" },
+  };
+  const { calls } = await runDialogue(fs, os, path_, suggestedFixEnv([finding]), { pr: BASE_PR });
+
+  const reviewComment = calls.createReviewComment[0];
+  assert.equal(reviewComment.start_line, 42);
+  assert.equal(reviewComment.start_side, "RIGHT");
+  assert.equal(reviewComment.line, 43);
+});
+
+// Behavior protected: an empty replacement is a deletion -- the suggestion
+// fence must contain zero content lines, because a fence containing one empty
+// line means "replace with a blank line", a different (and wrong) change.
+test("dialogue: an empty-replacement suggestedFix posts a deletion suggestion block with zero content lines", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const finding = {
+    ...SUGGESTED_FIX_FINDING,
+    suggestedFix: { ...SUGGESTED_FIX_FINDING.suggestedFix, replacement: "" },
+  };
+  const { calls } = await runDialogue(fs, os, path_, suggestedFixEnv([finding]), { pr: BASE_PR });
+
+  assert.match(calls.createReviewComment[0].body, /```suggestion\n```/);
+});
+
+// GRACEFUL DEGRADATION, half one. Behavior protected: a suggestion whose
+// finding has no usable line renders as a fenced block inside the managed
+// comment instead -- never a review comment (there is nothing to anchor to),
+// and never a failure.
+test("dialogue: a suggestedFix without a line degrades to a fenced block in the managed comment", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { line, ...findingWithoutLine } = SUGGESTED_FIX_FINDING;
+  const { calls } = await runDialogue(fs, os, path_, suggestedFixEnv([findingWithoutLine]), { pr: BASE_PR });
+
+  assert.equal(calls.createReviewComment.length, 0, "nothing to anchor to, so no review-comment attempt");
+  assert.equal(calls.createComment.length, 1, "delivery must still happen");
+  const body = calls.createComment[0].body;
+  assert.match(body, /could not be line-anchored/);
+  assert.match(body, /if \(discount >= 100\) \{/);
+});
+
+// GRACEFUL DEGRADATION, half two. Behavior protected: the review-comment API
+// rejecting the anchor (a line outside the diff is a 422) must not fail
+// delivery -- the suggestion falls back into the managed comment and the
+// failure is a visible warning, not a crash.
+test("dialogue: a rejected line anchor degrades to the managed comment and still delivers", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls, core } = await runDialogue(fs, os, path_, suggestedFixEnv([SUGGESTED_FIX_FINDING]), {
+    pr: BASE_PR,
+    reviewCommentThrows: true,
+  });
+
+  assert.equal(calls.createReviewComment.length, 1, "the anchor must at least be attempted");
+  assert.equal(calls.createComment.length, 1, "delivery must survive the rejection");
+  const body = calls.createComment[0].body;
+  assert.match(body, /could not be line-anchored/);
+  assert.match(body, /if \(discount >= 100\) \{/);
+  assert.ok(
+    core.warnings.some((w) => w.includes("Could not post a line-anchored suggestion")),
+    "the degradation must be visible in the run log, not silent"
+  );
+});
+
+// NEGATIVE CONTROL / idempotency. Behavior protected: a same-head re-run
+// whose fingerprint is already recorded in the managed comment's state does
+// not post a duplicate review comment -- same discipline as the two
+// Issue-filing loops.
+test("dialogue: a same-head re-run does not repost an already-recorded suggestion", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const fingerprint = suggestedFixFingerprint();
+  const priorState = { round: 0, headSha: HEAD, escalated: false, suggestionComments: { [fingerprint]: 901 } };
+  const existingComment = {
+    id: 1,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\n\nprior body`,
+  };
+  const { calls } = await runDialogue(fs, os, path_, suggestedFixEnv([SUGGESTED_FIX_FINDING]), { pr: BASE_PR, existingComment });
+
+  assert.equal(calls.createReviewComment.length, 0, "an already-recorded suggestion must not be re-posted");
+  assert.match(calls.updateComment[0].body, /\*\*Suggested fix\.\*\* Posted as a line-anchored review comment/);
+});
+
+// NEGATIVE CONTROL. Behavior protected: a malformed or missing suggestedFix
+// never posts a review comment and never throws -- the same fail-safe
+// posture as proposedBlockingIssue, since this path holds a write token.
+test("dialogue: a malformed or missing suggestedFix never posts a review comment and never throws", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+
+  const malformedFindings = [
+    { ...SUGGESTED_FIX_FINDING, suggestedFix: undefined },
+    { ...SUGGESTED_FIX_FINDING, suggestedFix: null },
+    { ...SUGGESTED_FIX_FINDING, suggestedFix: "use >= instead" },
+    { ...SUGGESTED_FIX_FINDING, suggestedFix: { originalLines: "x", replacement: "y" } }, // no file
+    { ...SUGGESTED_FIX_FINDING, suggestedFix: { file: "a.ts", originalLines: "   ", replacement: "y" } }, // blank anchor
+    { ...SUGGESTED_FIX_FINDING, suggestedFix: { file: "a.ts", originalLines: "x" } }, // replacement missing
+    { ...SUGGESTED_FIX_FINDING, suggestedFix: { file: "a.ts", originalLines: "x", replacement: 42 } }, // wrong type
+  ];
+
+  for (const finding of malformedFindings) {
+    let result;
+    await assert.doesNotReject(async () => {
+      result = await runDialogue(fs, os, path_, suggestedFixEnv([finding]), { pr: BASE_PR });
+    }, `must not throw for suggestedFix=${JSON.stringify(finding.suggestedFix)}`);
+    assert.equal(result.calls.createReviewComment.length, 0, `must not post for suggestedFix=${JSON.stringify(finding.suggestedFix)}`);
+    assert.doesNotMatch(result.calls.createComment[0].body, /Suggested fix/);
+  }
+});
+
+// STRUCTURAL (Issue #326's permission invariant). Behavior protected: a
+// suggestion is comment content, never a commit -- the workflow's own token
+// permissions stay contents: read, and the posting script's suggestion path
+// goes through the pulls review-comment API with no git-write pathway
+// (contents API, commit/ref mutation, merges) anywhere in it. GitHub itself
+// enforces that only someone with write access can APPLY a suggestion, so
+// keeping this job commit-incapable is what keeps "the reviewer can suggest
+// but cannot make the change" true from the repo side.
+test("llm-review-dialogue.yml posts suggestions as comment content only: contents stays read-only and no git-write API appears in the script", () => {
+  for (const block of permissionsBlocks(dialogueYaml)) {
+    assert.doesNotMatch(block, /contents:\s*write/, "no permissions block may grant contents: write");
+  }
+  const script = extractScript(dialogueYaml, dialogueYaml.indexOf("Dialogue · Post findings"));
+  assert.match(script, /pulls\.createReviewComment/, "the suggestion path must use the pulls review-comment API");
+  assert.doesNotMatch(script, /createOrUpdateFileContents|deleteFile|createCommit|createOrUpdateRef|updateRef|git\.createRef|repos\.merge/);
 });

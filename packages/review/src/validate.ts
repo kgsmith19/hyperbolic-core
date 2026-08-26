@@ -107,6 +107,22 @@ function toFinding(raw: unknown): { finding: Finding; valid: boolean } | null {
     }
   }
 
+  // Same fail-safe posture again for suggestedFix (Issue #326): a malformed
+  // suggestion (not a record, a missing/empty `file` or `originalLines`, or a
+  // non-string `replacement`) is dropped rather than repaired -- the dialogue
+  // workflow renders whatever arrives here into a real, line-anchored GitHub
+  // suggestion a human can apply with one click, so a field this consequential
+  // must never be promoted by a typo or an unexpected type. `replacement`
+  // alone may be the empty string: an empty replacement proposes deleting the
+  // quoted lines, which GitHub's suggestion UI supports directly.
+  if (isRecord(raw.suggestedFix)) {
+    const file = nonEmptyString(raw.suggestedFix.file);
+    const originalLines = nonEmptyString(raw.suggestedFix.originalLines);
+    if (file !== null && originalLines !== null && typeof raw.suggestedFix.replacement === "string") {
+      finding.suggestedFix = { file, originalLines, replacement: raw.suggestedFix.replacement };
+    }
+  }
+
   const valid = claim !== null && evidence !== null && citation !== null && requestedChange !== null;
   return { finding, valid };
 }

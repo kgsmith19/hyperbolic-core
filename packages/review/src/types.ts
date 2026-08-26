@@ -78,6 +78,23 @@ export interface Finding {
     body: string;
     confirmed?: boolean;
   };
+  /**
+   * An optional, concrete replacement for the exact lines this finding
+   * objects to -- additive data for the caller (the dialogue workflow) to
+   * render as a GitHub-native suggestion block in a line-anchored review
+   * comment (Issue #326). Restricted by the prompt to small, unambiguous,
+   * mechanical fixes; carrying one changes nothing about the verdict. The
+   * reviewer can only propose: applying a suggestion is GitHub's own
+   * write-gated UI action, so the reviewer never applies anything itself.
+   * `originalLines` quotes the exact current lines being replaced, verbatim,
+   * so the renderer can anchor the block; `replacement` may be the empty
+   * string, which proposes deleting those lines.
+   */
+  suggestedFix?: {
+    file: string;
+    originalLines: string;
+    replacement: string;
+  };
 }
 
 /**
