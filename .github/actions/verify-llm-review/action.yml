@@ -89,8 +89,11 @@ runs:
     # same-company collision from itself), so the canonical value is always
     # read from the DEFAULT branch's agent-roles.yaml -- never the PR's own
     # ref -- via the API, independent of whatever this composite action's
-    # own checkout has on disk. review_builder_provider (vars.DEV_PROVIDER)
-    # remains only a legacy mirror, cross-checked below.
+    # own checkout has on disk. inputs.review_builder_provider
+    # (vars.DEV_PROVIDER) is no longer read: it is a separately-maintained
+    # repository variable, not guaranteed to stay in sync with
+    # agent-roles.yaml's own dev.provider, which is the actual source of
+    # truth this action must trust.
     - name: Preflight · Resolve the builder provider from agent-roles.yaml
       id: roles
       if: inputs.pr_number != ''
@@ -133,7 +136,6 @@ runs:
         REVIEW_PROVIDER: ${{ inputs.review_provider }}
         REVIEW_MODEL: ${{ inputs.review_model }}
         REVIEW_BUILDER_PROVIDER: ${{ steps.roles.outputs.builder_provider }}
-        LEGACY_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
         DEV_MODEL: ${{ inputs.dev_model }}
       run: |
         set -euo pipefail
@@ -161,21 +163,6 @@ runs:
             echo "REVIEW_PROVIDER is read."
           } >&2
           exit 1
-        fi
-
-        # review_builder_provider (vars.DEV_PROVIDER) is only a legacy
-        # mirror of the canonical value resolved above from the default
-        # branch's own agent-roles.yaml -- if both are provisioned and they
-        # disagree, that is drift between two things that must never
-        # disagree, and it fails closed rather than silently trusting
-        # whichever one happened to be read.
-        if [ -n "$LEGACY_BUILDER_PROVIDER" ]; then
-          canonical_lower=$(printf '%s' "$REVIEW_BUILDER_PROVIDER" | tr '[:upper:]' '[:lower:]')
-          legacy_lower=$(printf '%s' "$LEGACY_BUILDER_PROVIDER" | tr '[:upper:]' '[:lower:]')
-          if [ "$canonical_lower" != "$legacy_lower" ]; then
-            echo "agent-roles.yaml's dev.provider ('$REVIEW_BUILDER_PROVIDER') does not match the legacy vars.DEV_PROVIDER ('$LEGACY_BUILDER_PROVIDER')." >&2
-            exit 1
-          fi
         fi
 
         npm ci --ignore-scripts
