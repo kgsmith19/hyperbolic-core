@@ -15,6 +15,16 @@ services:
     # compose pins `user: brain`. Stated here too so a stale image without
     # the USER directive still cannot come up as root.
     user: handler
+    # Issue #187 Phase 0 slice B: joins the shared platform-internal network
+    # ADDITIVELY. Naming networks explicitly removes Compose's implicit
+    # default-network attachment, so `default` (this project's own bridge --
+    # real egress, unchanged today) is named alongside `platform-internal`
+    # (the shared --internal network where `broker:8300` resolves). Phase 1's
+    # owner-gated enforcement flip is exactly one change here: remove
+    # `default` from this list, leaving the broker as the only path out.
+    networks:
+      - default
+      - platform-internal
     ports:
       - "127.0.0.1:8200:8200"
     healthcheck:
@@ -32,3 +42,14 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+# Compose requires `default` to be declared here once a service names it
+# explicitly (the empty value keeps Compose's own per-project bridge
+# defaults). platform-internal is created once on the host -- idempotently by
+# deploy.yml's two "Ensure the shared platform-internal network exists" steps
+# and by docs/ops/bootstrap-vps.sh -- never owned by any single project's
+# lifecycle, hence external.
+networks:
+  default:
+  platform-internal:
+    external: true

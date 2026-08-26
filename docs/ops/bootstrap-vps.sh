@@ -97,6 +97,21 @@ for dir in "${target_dirs[@]}"; do
   run mkdir -p "$deploy_home/$dir"
 done
 
+# Shared --internal Docker network (issue #187 Phase 0 slice B): the
+# llm-handler and broker compose projects both join platform-internal
+# (additively, on top of each project's own default bridge). deploy.yml's
+# deploy-llm-handler and deploy-broker jobs create it idempotently before
+# every compose up too; creating it here as well means a rebuilt VPS has it
+# before the first deploy ever runs. Guarded the same way as useradd above:
+# an existing network is left untouched, so reruns stay no-ops.
+if [[ "$mode" == "--dry-run" ]]; then
+  print_cmd docker network inspect platform-internal
+  echo "  (if that fails:)"
+  print_cmd docker network create --internal platform-internal
+elif ! docker network inspect platform-internal >/dev/null 2>&1; then
+  run docker network create --internal platform-internal
+fi
+
 if [[ "$mode" == "--dry-run" ]]; then
   print_cmd chown -R "$deploy_user:$deploy_user" "$deploy_home"
   exit 0
