@@ -260,7 +260,29 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: apps/lifeos/frontend/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            apps/lifeos/frontend/package-lock.json
+
+      # apps/lifeos/frontend is not a root npm workspace member (it predates
+      # the monorepo migration and still declares its @hyperbolic/* deps via
+      # plain `file:` references rather than the workspace protocol), so its
+      # own `npm ci` below only ever installs into its own node_modules --
+      # it never builds or installs the workspace packages those `file:`
+      # links point at. A root-level install is required first: it builds
+      # packages/ui's dist/ output (consumers resolve it via `main`/`types`,
+      # which do not exist until `npm run build --workspace=packages/ui`
+      # runs) and hoists packages/platform-client's own dependencies (e.g.
+      # @supabase/supabase-js) into a node_modules directory that Node's
+      # resolution walk reaches from platform-client's real (symlinked-to)
+      # source location. Same two-step shape deploy.yml's Shell build
+      # already uses for the same packages/ui dependency.
+      - name: Build · Build shared workspace packages LifeOS depends on
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build --workspace=packages/ui
 
       - name: Build · Build the UI with public production configuration
         shell: bash
