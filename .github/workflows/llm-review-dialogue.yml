@@ -459,6 +459,7 @@ jobs:
               identityFallbackStreak: 0,
               identityEscalated: false,
               deferredIssues: {},
+              confirmedIssues: {},
             };
 
             // ---------------------------------------------------------------
@@ -479,6 +480,28 @@ jobs:
             const blockingFindings = findings.filter((f) => f.severity === "blocking" && f.outOfScope !== true);
             const advisoryFindings = findings.filter((f) => f.severity !== "blocking" && f.outOfScope !== true);
             const deferredFindings = findings.filter((f) => f.outOfScope === true);
+            // The inverse of outOfScope (packages/review/src/types.ts's
+            // proposedBlockingIssue field): the reviewer proposed a NEW
+            // blocking Issue and a later round's dialogue judged the dev/human
+            // side as having explicitly confirmed that exact proposal. Same
+            // fail-safe posture as severityOf()/outOfScope above -- only a
+            // literal `confirmed === true`, on a proposal carrying a real
+            // title and body, is ever honored. An absent, false, or malformed
+            // proposedBlockingIssue never reaches this filter, so it can never
+            // file anything -- this is structural, not a runtime check.
+            function isConfirmedProposal(finding) {
+              const proposal = finding.proposedBlockingIssue;
+              return (
+                proposal !== null &&
+                typeof proposal === "object" &&
+                proposal.confirmed === true &&
+                typeof proposal.title === "string" &&
+                proposal.title.trim() !== "" &&
+                typeof proposal.body === "string" &&
+                proposal.body.trim() !== ""
+              );
+            }
+            const confirmedProposals = findings.filter(isConfirmedProposal);
 
             if (!ran) {
               core.info("The reviewer produced no verdict (unprovisioned or infrastructure failure); leaving the dialogue comment untouched.");
@@ -653,6 +676,85 @@ jobs:
               }
             }
 
+            // ---------------------------------------------------------------
+            // File a real, blocking-tracking Issue for each finding whose
+            // proposed blocking Issue the dev side has explicitly confirmed
+            // (packages/review/src/types.ts's proposedBlockingIssue field).
+            // Mirrors the deferredFindings filing loop above exactly --
+            // same fingerprint/state/search-fallback shape, just keyed off a
+            // sha256 of the proposal's own title instead of the finding's
+            // structural fields, since two different findings can each
+            // propose the same Issue across rounds and must file it once.
+            //
+            // This never touches `blocking`/`verdict` -- confirmedProposals is
+            // computed independently above and nothing here feeds back into
+            // the block decision. Wiring the filed Issue into PR Gate's own
+            // linked-Issue-checklist gate is deliberately out of scope for
+            // this slice (see the pull request body for the tracking Issue).
+            // ---------------------------------------------------------------
+            const CONFIRMED_ISSUE_MARKER_OPEN = "<!-- llm-review-confirmed-blocking-issue: ";
+            const CONFIRMED_ISSUE_MARKER_CLOSE = " -->";
+
+            function proposalFingerprintOf(finding) {
+              return require("node:crypto")
+                .createHash("sha256")
+                .update(finding.proposedBlockingIssue.title)
+                .digest("hex")
+                .slice(0, 16);
+            }
+
+            const confirmedIssues = { ...(prior.confirmedIssues || {}) };
+
+            for (const finding of confirmedProposals) {
+              const fingerprint = proposalFingerprintOf(finding);
+              if (confirmedIssues[fingerprint]) {
+                continue; // already filed and recorded in the managed comment's own state
+              }
+
+              // Fallback: the managed comment's state can be lost (hand-edited,
+              // or a marker parse failure) without the Issue itself vanishing.
+              // Search for it by the same fingerprint before creating a new
+              // one, so state loss degrades to "found by search" rather than
+              // "filed again" -- same discipline as the deferred-Issue loop.
+              let existingIssueNumber = null;
+              try {
+                const searchResult = await github.rest.search.issuesAndPullRequests({
+                  q: `repo:${owner}/${repo} is:issue in:body "${CONFIRMED_ISSUE_MARKER_OPEN}${fingerprint}${CONFIRMED_ISSUE_MARKER_CLOSE}"`,
+                });
+                existingIssueNumber = searchResult.data.items[0]?.number ?? null;
+              } catch (error) {
+                core.warning(`Could not search for an existing confirmed blocking Issue (fingerprint ${fingerprint}): ${error.message}`);
+              }
+
+              if (existingIssueNumber !== null) {
+                confirmedIssues[fingerprint] = existingIssueNumber;
+                continue;
+              }
+
+              try {
+                const created = await github.rest.issues.create({
+                  owner,
+                  repo,
+                  title: neutralize(finding.proposedBlockingIssue.title, 200),
+                  body: [
+                    `${CONFIRMED_ISSUE_MARKER_OPEN}${fingerprint}${CONFIRMED_ISSUE_MARKER_CLOSE}`,
+                    `Filed by AI Review's dialogue on #${meta.prNumber} — the reviewer proposed this as a blocking Issue and a later review round judged the dev/human side as having explicitly confirmed that exact proposal in that pull request's conversation.`,
+                    "",
+                    neutralize(finding.proposedBlockingIssue.body, 4000),
+                    "",
+                    reviewFooter,
+                  ]
+                    .filter((line) => line !== "")
+                    .join("\n"),
+                  labels: ["source:ai-review"],
+                });
+                confirmedIssues[fingerprint] = created.data.number;
+                core.info(`Filed confirmed blocking Issue #${created.data.number} for PR #${meta.prNumber} (fingerprint ${fingerprint}).`);
+              } catch (error) {
+                core.warning(`Could not file a confirmed blocking Issue for fingerprint ${fingerprint}: ${error.message}`);
+              }
+            }
+
             const state = {
               round,
               headSha,
@@ -661,6 +763,7 @@ jobs:
               identityEscalated,
               verdict: verdict.verdict,
               deferredIssues,
+              confirmedIssues,
             };
 
             // ---------------------------------------------------------------
@@ -706,6 +809,20 @@ jobs:
                 const issueNumber = deferredIssues[fingerprint];
                 lines.push(renderFinding(finding, i + 1));
                 lines.push(issueNumber ? `**Tracked in.** #${issueNumber}` : "_Could not file a tracking Issue for this finding; see the run log._", "");
+              });
+            }
+
+            if (confirmedProposals.length > 0) {
+              lines.push(`### Proposed blocking Issues (${confirmedProposals.length}) — confirmed, filed to track`, "");
+              confirmedProposals.forEach((finding, i) => {
+                const fingerprint = proposalFingerprintOf(finding);
+                const issueNumber = confirmedIssues[fingerprint];
+                lines.push(`#### ${i + 1}. ${neutralize(finding.proposedBlockingIssue.title, 200)}`, "");
+                lines.push(neutralize(finding.proposedBlockingIssue.body, 1200), "");
+                lines.push(
+                  issueNumber ? `**Filed as.** #${issueNumber}` : "_Could not file a tracking Issue for this proposal; see the run log._",
+                  ""
+                );
               });
             }
 
