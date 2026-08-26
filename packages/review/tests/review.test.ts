@@ -164,6 +164,29 @@ test("runReview: a malformed tool payload returns a non-blocking verdict rather 
   assert.equal(verdict.findings.length, 0);
 });
 
+// Issue #325 wiring test: the orchestrator must tell the validator whether
+// prior dialogue exists -- validate.ts's own resolution-by-citation tests
+// prove the demotion logic, but they would stay green if runReview forgot to
+// pass the flag, and this seam is exactly where that bug would live. Defect
+// caught: a runReview that always validates as if round one, which would let
+// an unengaged re-asserted block keep blocking forever despite a green
+// validate suite.
+test("runReview: with prior dialogue in the context, a blocking finding without deliberation resolves instead of blocking", async () => {
+  const withDialogue: ReviewContext = {
+    ...context,
+    conversation: "dev-agent (2026-08-26T00:00:00Z): Disagree — the alternate satisfies criterion 1; here is why.",
+  };
+  const verdict = await runReview({
+    config,
+    context: withDialogue,
+    credentials,
+    completeFn: async () => response({ toolCalls: [validBlockingCall] }),
+  });
+
+  assert.equal(verdict.verdict, "pass");
+  assert.equal(verdict.findings[0]?.resolvedByDefault, true);
+});
+
 // End-to-end positive control through the orchestrator: a real, evidenced
 // blocking finding survives the whole path and blocks. Defect caught: a
 // validate/orchestrate seam that drops findings -- which would make every test

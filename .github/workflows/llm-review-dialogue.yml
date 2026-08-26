@@ -422,6 +422,24 @@ jobs:
                 "",
                 `**Cites.** ${neutralize(finding.citation, 300)}`,
               ];
+              // Issue #325: on a re-review round a continued block carries the
+              // reviewer's own deliberation -- its explicit position on the
+              // dev side's latest evidence -- and a finding that kept blocking
+              // WITHOUT one arrives here already demoted by validate.ts,
+              // marked resolvedByDefault. Both are rendered so the gate's own
+              // intervention is visible, never mistaken for reviewer judgment.
+              if (finding.deliberation && typeof finding.deliberation === "object") {
+                parts.push(
+                  "",
+                  `**Position on the dev's latest evidence.** \`${neutralize(finding.deliberation.position, 20)}\` — ${neutralize(finding.deliberation.engagesLatestEvidence)}`
+                );
+              }
+              if (finding.resolvedByDefault === true) {
+                parts.push(
+                  "",
+                  "**Resolved by default.** The reviewer kept this finding blocking on a re-review round without a deliberation engaging the dev side's latest evidence against the finding's own citation, so the gate resolved it (`AGENTS.md` > Independent LLM Review, Issue #325). It no longer blocks."
+                );
+              }
               // Issue #326: a suggestion that made it into a real line-anchored
               // review comment is only referenced here; one that could not be
               // anchored is shown in full, so it is never silently lost. The
