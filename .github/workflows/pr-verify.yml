@@ -530,6 +530,13 @@ jobs:
               "<!-- agent-engineering-standard:work-state:v1 -->";
             const ISSUE_CLOSE_FALLBACK_MARKER =
               "<!-- agent-engineering-standard:issue-close-fallback:v1 -->";
+            // Same marker and embedded-state convention llm-review-dialogue.yml
+            // uses for its own managed comment (Issue #319, Option B, owner-
+            // confirmed) -- read here, never written: this job only consumes
+            // the confirmedIssues state that workflow already maintains.
+            const LLM_REVIEW_MARKER = "<!-- agent-engineering-standard:llm-review:v1 -->";
+            const LLM_REVIEW_STATE_OPEN = "<!-- llm-review-state: ";
+            const LLM_REVIEW_STATE_CLOSE = " -->";
             const DRAFT_LABEL = "owner:allow-draft";
             const HOLD_LABEL = "owner:hold-merge";
             const CHECKLIST_LABEL = "owner:allow-incomplete-issue";
@@ -751,6 +758,57 @@ jobs:
               return [...new Set(matches.map((entry) => Number(entry[1])))];
             }
 
+            // Issue #319 (Option B, owner-confirmed on the Issue: "Yes,
+            // option B sounds good"): a proposed blocking Issue that AI
+            // Review's dialogue filed after explicit confirmation
+            // (llm-review-dialogue.yml's confirmedIssues state, Issue
+            // #320/#321) is never written into the PR body -- Option A
+            // (mutating the body from that workflow) was rejected on
+            // measured cost: ~9 min and ~7 min CI re-trigger latency
+            // observed from two PR-body edits while landing #321. This
+            // reads that same state directly from the managed AI Review
+            // comment instead, so a confirmed blocking Issue gates merge
+            // exactly like any other linked Issue, with no PR-body
+            // mutation and no new check row. Mirrors
+            // llm-review-dialogue.yml's own parseState() exactly (same
+            // marker, same embedded-state delimiters) -- read-only here,
+            // that workflow remains the sole writer of this state.
+            //
+            // Fails OPEN on any read/parse problem (comment missing,
+            // state markers absent, malformed JSON): reported in the
+            // summary and treated as "no confirmed Issues", never as a
+            // reason to block every PR -- same orchestration-error
+            // tolerance checkLinkedIssueChecklists already applies to a
+            // single unreadable linked Issue below.
+            async function readConfirmedIssueNumbers(prNumber) {
+              let comment;
+              try {
+                comment = await findCommentByMarker(prNumber, LLM_REVIEW_MARKER);
+              } catch (error) {
+                summaryLines.push(
+                  `- Issue checklist: could not read the AI Review comment for confirmed blocking Issues: ${error.message}`
+                );
+                return [];
+              }
+              if (!comment) return [];
+              const body = comment.body || "";
+              const start = body.indexOf(LLM_REVIEW_STATE_OPEN);
+              if (start < 0) return [];
+              const end = body.indexOf(LLM_REVIEW_STATE_CLOSE, start);
+              if (end < 0) return [];
+              let state;
+              try {
+                state = JSON.parse(body.slice(start + LLM_REVIEW_STATE_OPEN.length, end));
+              } catch (error) {
+                summaryLines.push(
+                  `- Issue checklist: could not parse the AI Review comment's state; confirmed blocking Issues not counted: ${error.message}`
+                );
+                return [];
+              }
+              const confirmedIssues = (state && typeof state === "object" && state.confirmedIssues) || {};
+              return [...new Set(Object.values(confirmedIssues).map(Number).filter(Number.isInteger))];
+            }
+
             // Issue #274: block auto-merge (and fail this check row visibly,
             // not just skip arming) when a linked Issue is still open and its
             // body has at least one unchecked "- [ ]" item. Closed for ANY
@@ -758,6 +816,10 @@ jobs:
             // repo's own existing convention for superseded/no-longer-relevant
             // work; see AGENTS.md > Releases and milestones) -- exempts an
             // Issue entirely; only an OPEN Issue with unchecked items blocks.
+            // Since Issue #319, "linked" means either a body "Closes #N"
+            // reference (parseLinkedIssues above) or a confirmed-and-filed
+            // proposed blocking Issue (readConfirmedIssueNumbers above) --
+            // both feed the same loop below identically.
             //
             // Fails OPEN on a read error for one Issue (bad number, deleted,
             // a transient API problem): that Issue is reported as
@@ -768,7 +830,8 @@ jobs:
             // shut, and PR Gate re-evaluates on every subsequent event, so a
             // transient failure does not persist past the run that hit it.
             async function checkLinkedIssueChecklists(pr) {
-              const issueNumbers = parseLinkedIssues(pr.body);
+              const confirmedIssueNumbers = await readConfirmedIssueNumbers(pr.number);
+              const issueNumbers = [...new Set([...parseLinkedIssues(pr.body), ...confirmedIssueNumbers])];
               const incomplete = [];
               for (const issueNumber of issueNumbers) {
                 let issue;
