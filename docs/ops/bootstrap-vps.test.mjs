@@ -26,10 +26,10 @@ function fakeBin(userExists) {
   writeFileSync(path.join(bin, "useradd"), `#!/bin/sh\necho "useradd $*" >> "${log}"\n`);
   writeFileSync(path.join(bin, "chown"), `#!/bin/sh\necho "chown $*" >> "${log}"\n`);
   writeFileSync(path.join(bin, "tailscale"), `#!/bin/sh\necho "tailscale $*" >> "${log}"\n`);
-  // Mirrors real ssh-keygen's two observable side effects: a private key
-  // file at -f's argument and a `<file>.pub` carrying a line ending in the
-  // -C comment -- the exact shape bootstrap-vps.sh's own rotation logic
-  // (`grep -F " ${name}@hyperbolic-core"`) depends on.
+  // A fake ssh-keygen stays on PATH deliberately, even though the script
+  // must never call it anymore (issue #191): if a key-generation step ever
+  // sneaks back in, the invocation lands in the log and the keyless
+  // negative test below fails on evidence, not on a PATH lookup error.
   writeFileSync(
     path.join(bin, "ssh-keygen"),
     `#!/bin/sh
@@ -96,60 +96,35 @@ test("apply: creates the deploy user only when it does not already exist", () =>
   assert.doesNotMatch(readFileSync(existing.log, "utf8"), /useradd/);
 });
 
-test("apply: creates all five target directories and installs four authorized_keys entries", () => {
+test("apply: creates all five target directories deploy workflows expect to own", () => {
   const env = fakeBin(true);
   const result = spawnSync(script, ["--apply"], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin`, NODE_TEST_CONTEXT: "child-v8", BOOTSTRAP_VPS_TEST_ROOT: env.home, EUID: "0" } });
   assert.equal(result.status, 0, result.stderr);
   for (const dir of ["shell", "lifeos-ui", "llm-handler", "brain", "broker"]) {
     assert.ok(existsSync(path.join(env.home, dir)), `${dir} was not created`);
   }
-  const authorizedKeys = readFileSync(path.join(env.home, ".ssh", "authorized_keys"), "utf8");
-  assert.equal(authorizedKeys.trim().split("\n").length, 4);
-  assert.match(authorizedKeys, /shell-deploy@hyperbolic-core/);
-  assert.match(authorizedKeys, /llm-handler-deploy@hyperbolic-core/);
-  assert.match(authorizedKeys, /brain-deploy@hyperbolic-core/);
-  assert.match(authorizedKeys, /broker-deploy@hyperbolic-core/);
 });
 
-test("apply: prints all four private keys with their Infisical variable name and path, exactly once", () => {
-  const env = fakeBin(true);
-  const result = spawnSync(script, ["--apply"], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin`, NODE_TEST_CONTEXT: "child-v8", BOOTSTRAP_VPS_TEST_ROOT: env.home, EUID: "0" } });
-  for (const [varName, infisicalPath] of [
-    ["SHELL_DEPLOY_SSH_KEY", "/platform/shell-deploy/"],
-    ["LLM_HANDLER_SSH_KEY", "/platform/llm-handler/"],
-    ["BRAIN_DEPLOY_SSH_KEY", "/brain/"],
-    ["BROKER_DEPLOY_SSH_KEY", "/platform/broker/"],
-  ]) {
-    assert.match(result.stdout, new RegExp(`--- ${varName} \\(path ${infisicalPath.replace(/\//g, "\\/")}\\) ---`));
-  }
-});
-
-test("apply: rerunning rotates the key for each name instead of accumulating dead entries", () => {
-  const env = fakeBin(true);
-  const opts = { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin`, NODE_TEST_CONTEXT: "child-v8", BOOTSTRAP_VPS_TEST_ROOT: env.home, EUID: "0" } };
-  spawnSync(script, ["--apply"], opts);
-  const firstKeys = readFileSync(path.join(env.home, ".ssh", "authorized_keys"), "utf8");
-  spawnSync(script, ["--apply"], opts);
-  const secondKeys = readFileSync(path.join(env.home, ".ssh", "authorized_keys"), "utf8");
-  assert.equal(secondKeys.trim().split("\n").length, 4, "a second run must replace, not append, each key name's entry");
-  assert.notEqual(firstKeys, secondKeys, "the regenerated keys must actually differ (a real rerun mints fresh key material)");
-});
-
-test("apply: passing --tailnet-authkey joins the tailnet first", () => {
-  const env = fakeBin(true);
-  spawnSync(script, ["--apply", "--tailnet-authkey=tskey-test-123"], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin`, NODE_TEST_CONTEXT: "child-v8", BOOTSTRAP_VPS_TEST_ROOT: env.home, EUID: "0" } });
-  assert.match(readFileSync(env.log, "utf8"), /tailscale up --authkey=tskey-test-123 --ssh/);
-});
-
-test("apply: no private key material is left on disk once the script exits", () => {
+test("apply: provisions no SSH key material at all -- keyless Tailscale SSH is the only deploy auth (ADR 008, issue #191)", () => {
+  // Before issue #191 this script generated four deploy keypairs, installed
+  // their public halves into authorized_keys, and printed the private halves
+  // for Infisical. Deploy auth is now the tailnet ACL granting tag:ci SSH to
+  // deploy@ -- so a rerun of this script must neither invoke ssh-keygen nor
+  // create authorized_keys, and nothing resembling key material may reach
+  // stdout. This is the same "no SSH key material" contract
+  // deploy-workflow.test.mjs pins on deploy.yml itself.
   const env = fakeBin(true);
   const result = spawnSync(script, ["--apply"], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin`, NODE_TEST_CONTEXT: "child-v8", BOOTSTRAP_VPS_TEST_ROOT: env.home, EUID: "0" } });
   assert.equal(result.status, 0, result.stderr);
-  // Every ssh-keygen -f target lives under a mktemp -d directory printed in
-  // the ssh-keygen invocation log, and the script's own EXIT trap shreds it.
-  const calls = readFileSync(env.log, "utf8");
-  const keyfileDirs = [...calls.matchAll(/-f (\S+)_key/g)].map((m) => path.dirname(m[1]));
-  for (const dir of new Set(keyfileDirs)) {
-    assert.equal(existsSync(dir), false, `${dir} must not survive script exit`);
-  }
+  assert.doesNotMatch(readFileSync(env.log, "utf8"), /ssh-keygen/);
+  assert.equal(existsSync(path.join(env.home, ".ssh", "authorized_keys")), false, "no authorized_keys may be created");
+  assert.doesNotMatch(result.stdout, /COPY THESE INTO INFISICAL|PRIVATE|SSH_KEY/);
+  const scriptSource = readFileSync(script, "utf8");
+  assert.doesNotMatch(scriptSource, /ssh-keygen|authorized_keys|SSH_KEY|id_ed25519/);
+});
+
+test("apply: passing --tailnet-authkey joins the tailnet first, with Tailscale SSH enabled on the box", () => {
+  const env = fakeBin(true);
+  spawnSync(script, ["--apply", "--tailnet-authkey=tskey-test-123"], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin`, NODE_TEST_CONTEXT: "child-v8", BOOTSTRAP_VPS_TEST_ROOT: env.home, EUID: "0" } });
+  assert.match(readFileSync(env.log, "utf8"), /tailscale up --authkey=tskey-test-123 --ssh/);
 });
