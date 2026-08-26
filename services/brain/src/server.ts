@@ -165,6 +165,11 @@ export function createHandler(daemon: BrainDaemon, config: BrainConfig) {
 export function startServer(daemon: BrainDaemon, config: BrainConfig): Promise<http.Server> {
   const server = http.createServer(createHandler(daemon, config));
   return new Promise((resolve) => {
-    server.listen(config.port, "127.0.0.1", () => resolve(server));
+    // 0.0.0.0, not 127.0.0.1: see services/llm-handler/src/server.ts's
+    // identical comment (Issue #323) -- compose.yaml's host-side
+    // 127.0.0.1:PORT:PORT publish is the real loopback-only boundary;
+    // binding to the container's own loopback instead of 0.0.0.0 makes
+    // the app unreachable via that published port at all.
+    server.listen(config.port, "0.0.0.0", () => resolve(server));
   });
 }

@@ -170,6 +170,15 @@ export function createHandler(config: HandlerConfig, serviceRoleKey: string) {
 export function startServer(config: HandlerConfig, serviceRoleKey: string): Promise<http.Server> {
   const server = http.createServer(createHandler(config, serviceRoleKey));
   return new Promise((resolve) => {
-    server.listen(config.port, "127.0.0.1", () => resolve(server));
+    // 0.0.0.0, not 127.0.0.1: this binds inside the container's own
+    // network namespace. compose.yaml publishes the port as
+    // 127.0.0.1:PORT:PORT on the HOST -- that host-side binding is
+    // the actual loopback-only security boundary. Binding the app to
+    // the container's own loopback instead of 0.0.0.0 makes it
+    // unreachable via that published port at all (Docker's bridge
+    // networking forwards to the container's routable interface, never
+    // to its loopback), which is exactly what broke Handler A's deploy
+    // healthcheck (Issue #323).
+    server.listen(config.port, "0.0.0.0", () => resolve(server));
   });
 }
