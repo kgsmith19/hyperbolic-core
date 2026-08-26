@@ -2087,3 +2087,262 @@ test("dialogue: deferredIssues survives the round/escalated reset on a resolved 
   assert.match(body, /"escalated":false/);
   assert.match(body, /"deferredIssues":\{"abc123":999\}/);
 });
+
+// ---------------------------------------------------------------------------
+// Confirmed blocking-Issue proposals (packages/review/src/types.ts's
+// proposedBlockingIssue field, Issue #316) -- the inverse of outOfScope
+// above: the reviewer proposes a NEW blocking Issue, and only once a later
+// review round judges the dev/human side as having explicitly confirmed it
+// does the dialogue script file it. Never affects the block/pass verdict --
+// confirmedProposals is computed independently of blocking/blockingFindings.
+// ---------------------------------------------------------------------------
+
+const CONFIRMED_PROPOSAL_FINDING = {
+  severity: "advisory",
+  category: "security",
+  claim: "The webhook handler trusts an unauthenticated payload field.",
+  evidence: "const userId = payload.userId;",
+  requestedChange: "Verify payload.userId against the authenticated session before using it.",
+  citation: "AGENTS.md > Independent LLM Review",
+  proposedBlockingIssue: {
+    title: "Webhook handler trusts an unauthenticated payload field",
+    body: "Tracked separately per the dialogue's agreement -- see the originating pull request for full context.",
+    confirmed: true,
+  },
+};
+
+function confirmedProposalFingerprint(finding = CONFIRMED_PROPOSAL_FINDING) {
+  return require("node:crypto").createHash("sha256").update(finding.proposedBlockingIssue.title).digest("hex").slice(0, 16);
+}
+
+const CONFIRMED_PROPOSAL_VERDICT = {
+  verdict: "pass",
+  findings: [CONFIRMED_PROPOSAL_FINDING],
+  discarded: [],
+  summary: "One finding, proposed and confirmed as its own blocking Issue.",
+};
+
+function confirmedProposalEnv(overrides = {}) {
+  return {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "success", verdictPresent: true },
+      "review-verdict.json": CONFIRMED_PROPOSAL_VERDICT,
+    },
+    ...overrides,
+  };
+}
+
+// Behavior protected: a confirmed proposal not yet filed is filed exactly
+// once, with the proposal's own title/body, and rendered in a new "Proposed
+// blocking Issues" section. Defect caught: never calling issues.create for a
+// confirmed proposal, or rendering it inside the blocking/deferred sections
+// instead of its own.
+test("dialogue: a confirmed proposal not yet filed is filed once and rendered in its own section", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, confirmedProposalEnv(), { pr: BASE_PR });
+
+  assert.equal(calls.createIssue.length, 1, "exactly one Issue must be filed");
+  assert.equal(calls.createIssue[0].title, "Webhook handler trusts an unauthenticated payload field");
+  assert.deepEqual(calls.createIssue[0].labels, ["source:ai-review"]);
+  assert.match(calls.createIssue[0].body, /Tracked separately per the dialogue's agreement/);
+  assert.match(calls.createIssue[0].body, /^<!-- llm-review-confirmed-blocking-issue: [0-9a-f]{16} -->/);
+  assert.match(calls.createIssue[0].body, /the dev\/human side as having explicitly confirmed/);
+
+  const body = calls.createComment[0].body;
+  assert.match(body, /### Proposed blocking Issues \(1\) — confirmed, filed to track/);
+  assert.match(body, /\*\*Filed as\.\*\* #300/);
+  assert.doesNotMatch(body, /### Deferred findings/);
+  assert.doesNotMatch(body, /### Blocking findings/);
+});
+
+// NEGATIVE CONTROL / idempotency. Behavior protected: re-running the SAME
+// confirmed proposal (same fingerprint) against a comment that already
+// recorded it does NOT file a second Issue. Defect caught: filing a new
+// Issue on every re-run instead of reusing the recorded number -- the exact
+// double-filing this mechanism exists to prevent.
+test("dialogue: re-running the same confirmed proposal does not file a duplicate Issue", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const fingerprint = confirmedProposalFingerprint();
+  const priorState = { round: 0, headSha: HEAD, escalated: false, confirmedIssues: { [fingerprint]: 555 } };
+  const existingComment = {
+    id: 1,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\n\nprior body`,
+  };
+
+  const { calls } = await runDialogue(fs, os, path_, confirmedProposalEnv(), { pr: BASE_PR, existingComment });
+
+  assert.equal(calls.createIssue.length, 0, "no new Issue may be filed for an already-recorded fingerprint");
+  assert.equal(calls.updateComment.length, 1);
+  assert.match(calls.updateComment[0].body, /\*\*Filed as\.\*\* #555/);
+});
+
+// Behavior protected: state loss (a hand-edited or corrupted managed
+// comment) degrades to "found by search," not "filed again" -- same
+// fallback discipline as the deferred-Issue loop.
+test("dialogue: a lost comment state falls back to search and reuses the found confirmed-proposal Issue", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const fingerprint = confirmedProposalFingerprint();
+
+  const { calls } = await runDialogue(fs, os, path_, confirmedProposalEnv(), {
+    pr: BASE_PR,
+    searchResults: [{ number: 888, body: `<!-- llm-review-confirmed-blocking-issue: ${fingerprint} -->\nold issue` }],
+  });
+
+  assert.equal(calls.createIssue.length, 0, "a fingerprint found via search must not be re-filed");
+  assert.match(calls.createComment[0].body, /\*\*Filed as\.\*\* #888/);
+});
+
+// NEGATIVE CONTROL. Behavior protected: a proposal with no `confirmed: true`
+// (absent, or explicitly false -- a rebuttal, per Issue #316's own negative
+// control) must never file anything and must never render the "Proposed
+// blocking Issues" section. Defect caught: honoring `confirmed` on anything
+// other than a literal `true`, mirroring outOfScope's own fail-safe posture.
+test("dialogue: an unconfirmed proposal never files an Issue and never renders the section", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+
+  for (const proposedBlockingIssue of [
+    { title: "x", body: "y" }, // confirmed absent
+    { title: "x", body: "y", confirmed: false }, // explicit rebuttal
+    { title: "x", body: "y", confirmed: "true" }, // wrong type, must not be coerced
+  ]) {
+    const finding = { ...CONFIRMED_PROPOSAL_FINDING, proposedBlockingIssue };
+    const verdict = { verdict: "pass", findings: [finding], discarded: [], summary: "not yet confirmed" };
+    const { calls } = await runDialogue(
+      fs,
+      os,
+      path_,
+      confirmedProposalEnv({
+        __files: {
+          "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "success", verdictPresent: true },
+          "review-verdict.json": verdict,
+        },
+      }),
+      { pr: BASE_PR }
+    );
+
+    assert.equal(calls.createIssue.length, 0, `must not file for proposedBlockingIssue=${JSON.stringify(proposedBlockingIssue)}`);
+    assert.doesNotMatch(calls.createComment[0].body, /### Proposed blocking Issues/);
+  }
+});
+
+// NEGATIVE CONTROL. Behavior protected: a malformed or missing
+// proposedBlockingIssue never files anything and never throws -- the dialogue
+// script must fail closed on uncertain model output, not crash the job.
+test("dialogue: a malformed or missing proposedBlockingIssue never files and never throws", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+
+  const malformedFindings = [
+    { ...CONFIRMED_PROPOSAL_FINDING, proposedBlockingIssue: undefined },
+    { ...CONFIRMED_PROPOSAL_FINDING, proposedBlockingIssue: null },
+    { ...CONFIRMED_PROPOSAL_FINDING, proposedBlockingIssue: "confirmed" },
+    { ...CONFIRMED_PROPOSAL_FINDING, proposedBlockingIssue: { confirmed: true } }, // no title/body
+    { ...CONFIRMED_PROPOSAL_FINDING, proposedBlockingIssue: { title: "", body: "y", confirmed: true } }, // empty title
+    { ...CONFIRMED_PROPOSAL_FINDING, proposedBlockingIssue: { title: "x", body: "   ", confirmed: true } }, // blank body
+  ];
+
+  for (const finding of malformedFindings) {
+    const verdict = { verdict: "pass", findings: [finding], discarded: [], summary: "malformed proposal" };
+    await assert.doesNotReject(
+      runDialogue(
+        fs,
+        os,
+        path_,
+        confirmedProposalEnv({
+          __files: {
+            "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "success", verdictPresent: true },
+            "review-verdict.json": verdict,
+          },
+        }),
+        { pr: BASE_PR }
+      ),
+      `must not throw for proposedBlockingIssue=${JSON.stringify(finding.proposedBlockingIssue)}`
+    );
+  }
+});
+
+// Behavior protected: confirmedIssues survives the round/escalated reset on
+// a resolved verdict -- same permanence guarantee as deferredIssues, since
+// these are permanent Issue records, not per-round state.
+test("dialogue: confirmedIssues survives the round/escalated reset on a resolved verdict", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const priorState = { round: 2, headSha: "b".repeat(40), escalated: true, confirmedIssues: { def456: 111 } };
+  const existingComment = {
+    id: 1,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\n\nprior body`,
+  };
+  const { calls } = await runDialogue(
+    fs,
+    os,
+    path_,
+    {
+      RUN_ID: "1",
+      RUN_URL: "http://x",
+      RUN_HEAD_SHA: HEAD,
+      ESCALATE_AFTER: "3",
+      HAS_ANTHROPIC_OAUTH: "true",
+      HAS_ANTHROPIC_API_KEY: "true",
+      __files: {
+        "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "success", verdictPresent: true },
+        "review-verdict.json": { verdict: "pass", findings: [], discarded: [], summary: "clean" },
+      },
+    },
+    { pr: BASE_PR, existingComment }
+  );
+
+  const body = calls.updateComment[0].body;
+  assert.match(body, /"round":0/);
+  assert.match(body, /"escalated":false/);
+  assert.match(body, /"confirmedIssues":\{"def456":111\}/);
+});
+
+// Behavior protected: an outOfScope deferral and a confirmed blocking-Issue
+// proposal render in their own independent sections without clobbering each
+// other, and each files its own Issue -- proving the two mechanisms (inverse
+// of one another by design, per Issue #316) are wired independently rather
+// than sharing state that could let one suppress the other.
+test("dialogue: a deferred finding and a confirmed proposal both render and file independently in the same run", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const verdict = {
+    verdict: "pass",
+    findings: [DEFERRED_FINDING, CONFIRMED_PROPOSAL_FINDING],
+    discarded: [],
+    summary: "one deferred, one confirmed",
+  };
+  const { calls } = await runDialogue(
+    fs,
+    os,
+    path_,
+    confirmedProposalEnv({
+      __files: {
+        "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "success", verdictPresent: true },
+        "review-verdict.json": verdict,
+      },
+    }),
+    { pr: BASE_PR }
+  );
+
+  assert.equal(calls.createIssue.length, 2, "both the deferred Issue and the confirmed-proposal Issue must be filed");
+  const body = calls.createComment[0].body;
+  assert.match(body, /### Deferred findings \(1\) — agreed out of scope, does not block/);
+  assert.match(body, /### Proposed blocking Issues \(1\) — confirmed, filed to track/);
+});
