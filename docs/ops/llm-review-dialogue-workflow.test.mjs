@@ -60,26 +60,22 @@ const runbook = readFileSync(runbookPath, "utf8");
 // Issue #304: provider-company separation is a credential boundary, not only
 // a model-dispatch check. The action must execute packages/review's canonical
 // validator before Infisical imports the selected reviewer credential.
+//
+// Owner directive (2026-08-26): every provider value this action uses comes
+// from repository variables (vars.DEV_PROVIDER via inputs.review_builder_provider),
+// never parsed out of agent-roles.yaml directly -- an earlier revision added
+// a step reading agent-roles.yaml via the API, which the owner overruled as
+// premature for this repo's current early stage.
 test("AI Review validates provider-company separation before reading credentials", () => {
   const setupNode = reviewActionYaml.indexOf("- name: Setup · Install Node");
-  const resolveBuilder = reviewActionYaml.indexOf(
-    "- name: Preflight · Resolve the builder provider from agent-roles.yaml"
-  );
   const preflight = reviewActionYaml.indexOf("- name: Preflight · Verify the reviewer is configured");
   const credentials = reviewActionYaml.indexOf("- name: Setup · Pull reviewer credentials from Infisical");
 
   assert.ok(setupNode >= 0, "verify-llm-review/action.yml: Node setup step not found");
-  assert.ok(resolveBuilder >= 0, "verify-llm-review/action.yml: canonical builder-resolution step not found");
   assert.ok(preflight >= 0, "verify-llm-review/action.yml: reviewer preflight step not found");
   assert.ok(credentials >= 0, "verify-llm-review/action.yml: Infisical credential step not found");
-  assert.ok(setupNode < resolveBuilder, "Node setup must precede provider resolution");
-  assert.ok(resolveBuilder < preflight, "the canonical builder must be resolved before separation is checked");
+  assert.ok(setupNode < preflight, "Node setup must precede the reviewer preflight");
   assert.ok(preflight < credentials, "provider separation must pass before credentials are read");
-
-  const resolveBuilderEnd = reviewActionYaml.indexOf("\n    - name:", resolveBuilder + 1);
-  const resolveBuilderBlock = reviewActionYaml.slice(resolveBuilder, resolveBuilderEnd);
-  assert.match(resolveBuilderBlock, /path:\s*["']agent-roles\.yaml["']/);
-  assert.match(resolveBuilderBlock, /core\.setOutput\(["']builder_provider["']/);
 
   const preflightEnd = reviewActionYaml.indexOf("\n    - name:", preflight + 1);
   const preflightBlock = reviewActionYaml.slice(preflight, preflightEnd);
@@ -95,13 +91,13 @@ test("AI Review validates provider-company separation before reading credentials
   );
   assert.match(
     preflightBlock,
-    /REVIEW_BUILDER_PROVIDER:\s*\$\{\{ steps\.roles\.outputs\.builder_provider \}\}/,
-    "the runtime validator must receive agent-roles.yaml's dev provider"
+    /REVIEW_BUILDER_PROVIDER:\s*\$\{\{ inputs\.review_builder_provider \}\}/,
+    "the runtime validator must receive vars.DEV_PROVIDER via the input"
   );
   assert.match(
     reviewActionYaml,
-    /Review · Run the adversarial LLM reviewer[\s\S]*?REVIEW_BUILDER_PROVIDER:\s*\$\{\{ steps\.roles\.outputs\.builder_provider \}\}/,
-    "the model call must receive the same canonical builder provider"
+    /Review · Run the adversarial LLM reviewer[\s\S]*?REVIEW_BUILDER_PROVIDER:\s*\$\{\{ inputs\.review_builder_provider \}\}/,
+    "the model call must receive the same builder provider"
   );
 });
 
@@ -228,12 +224,6 @@ function loadIssueAndPrBodyScript() {
   const marker = reviewActionYaml.indexOf("Context · Write the linked Issue body and the pull request body to files");
   assert.ok(marker >= 0, "verify-llm-review/action.yml: Issue-and-PR-body step not found");
   return new AsyncFunction("require", "context", "core", "github", "process", extractScript(reviewActionYaml, marker));
-}
-
-function loadReviewBuilderResolver() {
-  const marker = reviewActionYaml.indexOf("Preflight · Resolve the builder provider from agent-roles.yaml");
-  assert.ok(marker >= 0, "verify-llm-review/action.yml: builder resolver step not found");
-  return new AsyncFunction("context", "core", "github", extractScript(reviewActionYaml, marker));
 }
 
 // ---------------------------------------------------------------------------
@@ -546,80 +536,6 @@ test("neither new workflow adds a second pull_request-triggered workflow to the 
     const onBlock = endMatch ? rest.slice(0, 3 + endMatch.index) : rest;
     assert.doesNotMatch(onBlock, /^\s{2}pull_request(_target)?:/m);
   }
-});
-
-test("AI Review resolves the raw dev provider from default-branch agent-roles.yaml", async () => {
-  const outputs = {};
-  const failures = [];
-  let request = null;
-  const github = {
-    rest: {
-      repos: {
-        getContent: async (args) => {
-          request = args;
-          return {
-            data: {
-              type: "file",
-              encoding: "base64",
-              content: Buffer.from('dev:\n  provider: "google"\n  model: gemini-2.5-pro\n', "utf8").toString(
-                "base64"
-              ),
-            },
-          };
-        },
-      },
-    },
-  };
-  const core = {
-    setOutput: (key, value) => (outputs[key] = value),
-    setFailed: (message) => failures.push(message),
-  };
-
-  await loadReviewBuilderResolver()(
-    { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } },
-    core,
-    github
-  );
-
-  assert.deepEqual(request, {
-    owner: "kgsmith19",
-    repo: "hyperbolic-core",
-    path: "agent-roles.yaml",
-  });
-  assert.deepEqual(failures, []);
-  assert.equal(outputs.builder_provider, "google");
-});
-
-test("AI Review fails closed when default-branch dev.provider is invalid", async () => {
-  const outputs = {};
-  const failures = [];
-  const github = {
-    rest: {
-      repos: {
-        getContent: async () => ({
-          data: {
-            type: "file",
-            encoding: "base64",
-            content: Buffer.from("dev:\n  provider: gemini\n  model: x\n", "utf8").toString("base64"),
-          },
-        }),
-      },
-    },
-  };
-  const core = {
-    setOutput: (key, value) => (outputs[key] = value),
-    setFailed: (message) => failures.push(message),
-  };
-
-  await loadReviewBuilderResolver()(
-    { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } },
-    core,
-    github
-  );
-
-  assert.deepEqual(outputs, {});
-  assert.equal(failures.length, 1);
-  assert.match(failures[0], /refusing to guess the builder family/);
 });
 
 test("every action reference in the new workflows is pinned to a 40-hex SHA with a version comment", () => {

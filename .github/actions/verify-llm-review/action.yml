@@ -83,50 +83,19 @@ runs:
         cache: npm
         cache-dependency-path: package-lock.json
 
-    # Issue #304: provider-company separation is a credential boundary, not
-    # only a model-dispatch check. A PR cannot be trusted to name its own
-    # builder provider (it could forge agent-roles.yaml to hide a
-    # same-company collision from itself), so the canonical value is always
-    # read from the DEFAULT branch's agent-roles.yaml -- never the PR's own
-    # ref -- via the API, independent of whatever this composite action's
-    # own checkout has on disk. inputs.review_builder_provider
-    # (vars.DEV_PROVIDER) is no longer read: it is a separately-maintained
-    # repository variable, not guaranteed to stay in sync with
-    # agent-roles.yaml's own dev.provider, which is the actual source of
-    # truth this action must trust.
-    - name: Preflight · Resolve the builder provider from agent-roles.yaml
-      id: roles
-      if: inputs.pr_number != ''
-      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
-      with:
-        github-token: ${{ inputs.github_token }}
-        script: |
-          const { owner, repo } = context.repo;
-          // No `ref`: the API resolves to the repository's default branch on
-          // its own, which is exactly the point -- a PR's own head must never
-          // be trusted to name its own builder provider.
-          const { data: file } = await github.rest.repos.getContent({ owner, repo, path: "agent-roles.yaml" });
-          const text = Buffer.from(file.content, file.encoding).toString("utf8");
-
-          const match = /^dev:\s*\n\s+provider:\s*["']?([A-Za-z0-9_-]+)["']?/m.exec(text);
-          const rawProvider = match ? match[1].trim().toLowerCase() : null;
-          const validProviders = new Set(["anthropic", "openai", "google"]);
-
-          if (!rawProvider || !validProviders.has(rawProvider)) {
-            core.setFailed(
-              `agent-roles.yaml's dev.provider is ${JSON.stringify(rawProvider)}; must be one of ${JSON.stringify([...validProviders])} -- refusing to guess the builder family for the collision check.`
-            );
-            return;
-          }
-          core.setOutput("builder_provider", rawProvider);
-
-    # Runs after the canonical builder is resolved so an unprovisioned gate
-    # says WHICH knob is missing rather than dying inside
-    # Infisical/secrets-action with "Missing identity ID for OIDC auth" -- an
-    # error that names neither the GitHub variable that was empty nor the
-    # fact that a GitHub variable, not anything in Infisical, is what's
-    # absent (issue #212). Reports set/unset only, never values, so it is
-    # safe on a public repository.
+    # Runs first so an unprovisioned gate says WHICH knob is missing rather
+    # than dying inside Infisical/secrets-action with "Missing identity ID
+    # for OIDC auth" -- an error that names neither the GitHub variable that
+    # was empty nor the fact that a GitHub variable, not anything in
+    # Infisical, is what's absent (issue #212). Reports set/unset only,
+    # never values, so it is safe on a public repository.
+    #
+    # Owner directive (2026-08-26): every provider value this action uses
+    # comes from repository variables, never parsed out of agent-roles.yaml
+    # -- an earlier revision of this step read agent-roles.yaml directly via
+    # the API, which the owner overruled as premature for this repo's
+    # current early stage. vars.DEV_PROVIDER remains the single source for
+    # the builder identity in the collision check below.
     - name: Preflight · Verify the reviewer is configured
       if: inputs.pr_number != ''
       shell: bash
@@ -135,7 +104,7 @@ runs:
         PROJECT_SLUG: ${{ inputs.infisical_project_slug }}
         REVIEW_PROVIDER: ${{ inputs.review_provider }}
         REVIEW_MODEL: ${{ inputs.review_model }}
-        REVIEW_BUILDER_PROVIDER: ${{ steps.roles.outputs.builder_provider }}
+        REVIEW_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
         DEV_MODEL: ${{ inputs.dev_model }}
       run: |
         set -euo pipefail
@@ -310,7 +279,7 @@ runs:
       env:
         REVIEW_PROVIDER: ${{ inputs.review_provider }}
         REVIEW_MODEL: ${{ inputs.review_model }}
-        REVIEW_BUILDER_PROVIDER: ${{ steps.roles.outputs.builder_provider }}
+        REVIEW_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
         BASE_SHA: ${{ inputs.base_sha }}
         HEAD_SHA: ${{ inputs.head_sha }}
       run: |
