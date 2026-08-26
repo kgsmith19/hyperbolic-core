@@ -54,6 +54,12 @@ jobs:
     name: Probe the live origin
     if: vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
+    # Matches deploy.yml's deploy-shell job: the shell-deploy Infisical
+    # identity trusts the environment-scoped OIDC subject
+    # (...:environment:shell-deploy-production), not the no-environment
+    # ref:refs/heads/main fallback this job would otherwise present
+    # (runbook.md, "Tailscale Serve" OIDC subject table).
+    environment: shell-deploy-production
     timeout-minutes: 10
     permissions:
       contents: read

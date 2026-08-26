@@ -30,6 +30,18 @@ test("smoke is callable, dispatchable, production-gated, and read-only by design
   assert.doesNotMatch(smoke, /SSH_KEY|id_ed25519/);
 });
 
+test("the smoke job declares shell-deploy-production so its OIDC subject matches the trusted shell-deploy identity", () => {
+  // deploy.yml's deploy-shell job declares this same environment, so the
+  // shell-deploy Infisical identity is trusted against the environment-
+  // scoped subject (...:environment:shell-deploy-production), not the
+  // no-environment ref:refs/heads/main fallback. Without this, the smoke
+  // job's own Infisical pull 403s with "OIDC subject not allowed" even
+  // though it authenticates as the same identity (confirmed live: run
+  // 32930336092's "Post-deploy smoke" job).
+  const smokeJob = smoke.slice(smoke.indexOf("  smoke:"), smoke.indexOf("    steps:"));
+  assert.match(smokeJob, /environment: shell-deploy-production/);
+});
+
 test("the broker probe is the ONLY ssh usage, keyless, and strictly read-only (curl, never a mutating command)", () => {
   // issue #185: the broker is deliberately loopback-only with no Serve
   // mount (its callers are other containers, not external clients), so it
