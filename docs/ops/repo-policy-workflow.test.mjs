@@ -112,15 +112,17 @@ test("agent-roles.yaml validator: dev.provider === review.provider fails closed"
   assert.match(result.stderr, /dev\.provider and review\.provider are both 'anthropic'/);
 });
 
-// Cross-enum negative control. The role-specific values intentionally name
-// different surfaces, but Google/Antigravity dev and Gemini API review still
-// belong to one company family and therefore are not independent.
-test("agent-roles.yaml validator: google dev and gemini review are one provider family", () => {
+// Cross-enum negative control. dev and review are role-specific value
+// spaces, but both now name COMPANIES identically (Issue #307/#308 dropped
+// review's separate "gemini" model-API identifier in favor of the same
+// "google" family name dev already uses), so a Google-family collision is
+// caught the same simple way as any other same-provider collision.
+test("agent-roles.yaml validator: google dev and google review are one provider family", () => {
   const result = runValidator(
     fixture({
       devProvider: "google",
       devModel: "gemini-2.5-pro",
-      reviewProvider: "gemini",
+      reviewProvider: "google",
       reviewModel: "gemini-2.5-pro",
     })
   );
@@ -205,24 +207,30 @@ test("agent-roles.yaml validator: dev.provider rejects gemini -- that identifier
   assert.match(result.stderr, /must be one of \['anthropic', 'google', 'openai'\]/);
 });
 
-// NEGATIVE CONTROL, the mirror image. Behavior protected: "google" is dev's
-// tool-company identifier, not a valid review-API name -- AI Review never
-// runs an agent harness, only a bare model call, and there is no "google"
-// model API `packages/llm` exposes (the real API there is named "gemini").
-// Defect caught: the same shared-set regression as above, from the other
-// direction.
-test("agent-roles.yaml validator: review.provider rejects google -- that identifier belongs to dev's tool space, not review's API space", () => {
+// POSITIVE CONTROL, the mirror image of dev's own "accepts google" test
+// above. Behavior protected: review.provider now names the same COMPANY
+// space dev.provider does (Issue #307/#308) -- "google" identifies the
+// Gemini API here, same value, same meaning as dev's own Antigravity entry.
+// Defect caught: a validator edit that added "google" to dev's set but
+// forgot review's, silently keeping the two enums out of sync.
+test("agent-roles.yaml validator: review.provider accepts google, the real Gemini API's company", () => {
   const result = runValidator(fixture({ reviewProvider: "google" }));
-  assert.equal(result.ok, false);
-  assert.match(result.stderr, /'review\.provider' is 'google'/);
+  assert.equal(result.ok, true, `expected pass, got failure: ${result.stderr}`);
+  assert.match(result.stdout, /dev=anthropic, review=google/);
 });
 
-// Behavior protected: review.provider keeps meaning the real Gemini API --
-// this fix must not remove a value review legitimately still supports.
-test("agent-roles.yaml validator: review.provider still accepts gemini, the real Gemini API", () => {
+// NEGATIVE CONTROL for the rename itself, review's mirror of dev's own
+// "rejects antigravity" control above. Behavior protected: "gemini" (a
+// specific model name, not a provider company) is no longer a valid
+// review.provider value now that review.provider's space names companies
+// consistently with dev.provider. Defect caught: a validator edit that
+// added "google" without actually removing the old "gemini" identifier,
+// silently leaving two ways to name the same company.
+test("agent-roles.yaml validator: review.provider rejects gemini -- superseded by the company name google", () => {
   const result = runValidator(fixture({ reviewProvider: "gemini" }));
-  assert.equal(result.ok, true, `expected pass, got failure: ${result.stderr}`);
-  assert.match(result.stdout, /dev=anthropic, review=gemini/);
+  assert.equal(result.ok, false);
+  assert.match(result.stderr, /'review\.provider' is 'gemini'/);
+  assert.match(result.stderr, /must be one of \['anthropic', 'google', 'openai'\]/);
 });
 
 // ---------------------------------------------------------------------------
