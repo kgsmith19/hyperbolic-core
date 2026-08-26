@@ -277,6 +277,92 @@ test("POST /v1/complete: a caller at its concurrency cap gets 429, no provider c
 });
 
 // ---------------------------------------------------------------------------
+// Broker-routed /v1/complete (issue #187 Phase 0)
+// ---------------------------------------------------------------------------
+
+/** CONFIG plus a broker driver config -- what loadConfig() produces when
+ * BROKER_URL/BROKER_CALLER_TOKEN are both provisioned. Deliberately a
+ * non-loopback broker host: withPatchedFetch above passes 127.0.0.1 through
+ * to the real fetch (the loopback server under test), so a loopback broker
+ * URL would escape the mock. Production's own value is a compose-network
+ * hostname anyway (http://broker:8300, Issue #187's slice B). */
+const BROKER_CONFIG: HandlerConfig = {
+  ...CONFIG,
+  broker: { brokerBaseUrl: "http://broker:8300", brokerCallerToken: "fixture-caller-token" },
+};
+
+test("POST /v1/complete with broker config present routes through the broker /proxy envelope, never api.anthropic.com directly", async () => {
+  let proxyCalls = 0;
+  let directProviderCalls = 0;
+  let envelope: Record<string, unknown> | undefined;
+  await withPatchedFetch(
+    async (input, init) => {
+      const url = String(input);
+      if (url.includes("is_platform_owner")) return jsonResponse(true);
+      if (url.includes("rpc/log_llm_call")) return jsonResponse({});
+      if (url === "http://broker:8300/proxy") {
+        proxyCalls += 1;
+        envelope = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return jsonResponse(anthropicMessageFixture());
+      }
+      if (url.includes("anthropic.com")) {
+        directProviderCalls += 1;
+        return jsonResponse(anthropicMessageFixture());
+      }
+      throw new Error(`unexpected call: ${url}`);
+    },
+    () =>
+      withServer(BROKER_CONFIG, async (baseUrl) => {
+        const res = await fetch(`${baseUrl}/api/v1/complete`, {
+          method: "POST",
+          headers: { authorization: "Bearer owner-token" },
+          body: JSON.stringify(REQUEST_BODY),
+        });
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as { text: string; provider: string };
+        assert.equal(body.text, "hello there");
+        assert.equal(body.provider, "anthropic");
+      })
+  );
+  assert.equal(proxyCalls, 1, "the anthropic call must go through the broker's /proxy exactly once");
+  assert.equal(directProviderCalls, 0, "with broker config present, /v1/complete must never call api.anthropic.com directly");
+  assert.equal(envelope?.caller, "llm-handler");
+  assert.equal(envelope?.token, "fixture-caller-token");
+  assert.equal(envelope?.targetHost, "api.anthropic.com");
+  assert.equal(envelope?.credential, "LLM_KEYS_ANTHROPIC");
+});
+
+test("POST /v1/complete without broker config keeps calling api.anthropic.com directly -- byte-identical to today's behavior", async () => {
+  // Negative control for the cutover seam itself: the same request against
+  // the same server, differing ONLY in config.broker being absent, must
+  // take the direct path (the mock throws on any /proxy call).
+  let directProviderCalls = 0;
+  await withPatchedFetch(
+    async (input) => {
+      const url = String(input);
+      if (url.includes("is_platform_owner")) return jsonResponse(true);
+      if (url.includes("rpc/log_llm_call")) return jsonResponse({});
+      if (url.includes("/proxy")) throw new Error("no broker config is present -- /proxy must never be called");
+      if (url.includes("anthropic.com")) {
+        directProviderCalls += 1;
+        return jsonResponse(anthropicMessageFixture());
+      }
+      throw new Error(`unexpected call: ${url}`);
+    },
+    () =>
+      withServer(CONFIG, async (baseUrl) => {
+        const res = await fetch(`${baseUrl}/api/v1/complete`, {
+          method: "POST",
+          headers: { authorization: "Bearer owner-token" },
+          body: JSON.stringify(REQUEST_BODY),
+        });
+        assert.equal(res.status, 200);
+      })
+  );
+  assert.equal(directProviderCalls, 1);
+});
+
+// ---------------------------------------------------------------------------
 // /v1/stream
 // ---------------------------------------------------------------------------
 
@@ -326,6 +412,67 @@ test("POST /v1/stream: happy path emits SSE text deltas and a done delta, and lo
       })
   );
   assert.equal(logCalls, 1);
+});
+
+test("POST /v1/stream stays on the direct provider path even with broker config present (issue #187 Phase 0 negative control)", async () => {
+  // The R2 sensitivity demonstration for this slice: a plausible wrong
+  // implementation routes BOTH call sites through the broker whenever
+  // config.broker is set -- which would break every /v1/stream call, since
+  // the broker buffers whole responses (no SSE pass-through) and the
+  // broker driver's stream() deliberately throws. This test fails against
+  // that implementation: the /proxy branch below would be hit (or the
+  // route would 4xx/5xx), instead of the direct SSE path succeeding.
+  const events = [
+    {
+      event: "message_start",
+      data: { type: "message_start", message: anthropicMessageFixture({ content: [] }) },
+    },
+    { event: "content_block_start", data: { type: "content_block_start", index: 0, content_block: { type: "text", text: "", citations: null } } },
+    { event: "content_block_delta", data: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } } },
+    { event: "content_block_stop", data: { type: "content_block_stop", index: 0 } },
+    {
+      event: "message_delta",
+      data: {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null, container: null, stop_details: null },
+        usage: { input_tokens: 10, output_tokens: 2, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens_details: null, server_tool_use: null },
+      },
+    },
+    { event: "message_stop", data: { type: "message_stop" } },
+  ];
+  let proxyCalls = 0;
+  let directProviderCalls = 0;
+  await withPatchedFetch(
+    async (input) => {
+      const url = String(input);
+      if (url.includes("is_platform_owner")) return jsonResponse(true);
+      if (url.includes("rpc/log_llm_call")) return jsonResponse({});
+      if (url.includes("/proxy")) {
+        proxyCalls += 1;
+        return jsonResponse(anthropicMessageFixture());
+      }
+      if (url.includes("anthropic.com")) {
+        directProviderCalls += 1;
+        return sseResponse(events);
+      }
+      throw new Error(`unexpected call: ${url}`);
+    },
+    () =>
+      withServer(BROKER_CONFIG, async (baseUrl) => {
+        const res = await fetch(`${baseUrl}/api/v1/stream`, {
+          method: "POST",
+          headers: { authorization: "Bearer owner-token" },
+          body: JSON.stringify(REQUEST_BODY),
+        });
+        assert.equal(res.status, 200);
+        assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
+        const text = await res.text();
+        assert.match(text, /"kind":"text"/);
+        assert.match(text, /"kind":"done"/);
+      })
+  );
+  assert.equal(proxyCalls, 0, "/v1/stream must never route through the broker -- it buffers whole responses");
+  assert.equal(directProviderCalls, 1, "/v1/stream must keep streaming from the provider directly");
 });
 
 // ---------------------------------------------------------------------------

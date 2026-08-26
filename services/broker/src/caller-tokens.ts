@@ -17,6 +17,14 @@ import { timingSafeEqual } from "node:crypto";
 
 export type CallerTokenMap = Record<string, string>;
 
+// Naming asymmetry, deliberate (issue #187 Phase 0): the broker reads each
+// caller's token as the SUFFIXED `BROKER_CALLER_TOKEN_<CALLER>` from its own
+// environment (Infisical `/platform/broker/`), while the caller itself reads
+// the same secret VALUE as the unsuffixed `BROKER_CALLER_TOKEN` from ITS
+// environment (e.g. `/platform/llm-handler/` -- see
+// services/llm-handler/src/broker-drivers.ts's loadBrokerDriverConfig).
+// ADR-05 gives the two identities no shared secret path, so the one value is
+// provisioned twice, once under each path, under those two names.
 function envVarNameFor(caller: string): string {
   return `BROKER_CALLER_TOKEN_${caller.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
 }

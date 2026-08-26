@@ -2,6 +2,7 @@
 // A's own /v1/* LLM route surface (08-llm-handlers.md section 4/5, m4-05).
 
 import type { CredentialsByProvider } from "@hyperbolic/llm";
+import type { BrokerDriverConfig } from "./broker-drivers.ts";
 
 export interface HandlerConfig {
   readonly port: number;
@@ -15,6 +16,11 @@ export interface HandlerConfig {
   readonly llmCredentials: CredentialsByProvider;
   /** Per-caller concurrency cap (08 section 5), default 2. */
   readonly llmMaxConcurrencyPerCaller: number;
+  /** Broker routing for /api/v1/complete's Anthropic calls (issue #187
+   * Phase 0). Optional, never required: absent BROKER_URL/
+   * BROKER_CALLER_TOKEN env leaves this undefined and every route on
+   * exactly today's direct-provider behavior. */
+  readonly broker?: BrokerDriverConfig;
 }
 
 /** 05-h section 6.4: the exact six error classes and their row-state/retry contract. */
