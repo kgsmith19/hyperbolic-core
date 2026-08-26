@@ -318,3 +318,108 @@ test("validateVerdict: malformed tool input returns a flagged, non-blocking verd
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// suggestedFix (Issue #326) -- an optional, concrete replacement the dialogue
+// workflow renders as a GitHub-native suggestion block. Additive data only,
+// mirroring proposedBlockingIssue's fail-safe posture: malformed input is
+// dropped, never repaired, and the field never touches the verdict.
+// ---------------------------------------------------------------------------
+
+// Behavior protected: a well-formed suggestion survives validation intact --
+// the dialogue workflow anchors on `originalLines` and posts `replacement`
+// verbatim, so any silent mutation here would corrupt an applyable fix.
+test("validateVerdict: a well-formed suggestedFix is kept intact on the finding", () => {
+  const result = validateVerdict({
+    verdict: "pass",
+    summary: "One mechanical fix.",
+    findings: [
+      wellFormedFinding({
+        severity: "advisory",
+        suggestedFix: {
+          file: "src/pricing.ts",
+          originalLines: "if (discount > 100) {",
+          replacement: "if (discount >= 100) {",
+        },
+      }),
+    ],
+  });
+
+  assert.equal(result.findings.length, 1);
+  assert.deepEqual(result.findings[0]?.suggestedFix, {
+    file: "src/pricing.ts",
+    originalLines: "if (discount > 100) {",
+    replacement: "if (discount >= 100) {",
+  });
+});
+
+// Behavior protected: an empty replacement is a DELETION, which GitHub's
+// suggestion UI supports directly -- it must not be dropped as malformed.
+// Defect caught: validating replacement with the same non-empty rule as
+// file/originalLines, which would silently forbid deletion suggestions.
+test("validateVerdict: a suggestedFix with an empty replacement is kept -- an empty replacement proposes a deletion", () => {
+  const result = validateVerdict({
+    verdict: "pass",
+    summary: "Delete a dead line.",
+    findings: [
+      wellFormedFinding({
+        severity: "advisory",
+        suggestedFix: { file: "src/pricing.ts", originalLines: "const unused = 1;", replacement: "" },
+      }),
+    ],
+  });
+
+  assert.equal(result.findings[0]?.suggestedFix?.replacement, "");
+});
+
+// Fail-safe posture, same as proposedBlockingIssue: a malformed suggestion is
+// dropped while the finding itself is kept. Defect caught: a validator that
+// discards the whole finding over its optional field, or one that carries a
+// malformed suggestion through to the workflow that renders it into an
+// applyable review comment.
+test("validateVerdict: a malformed suggestedFix is dropped, and the finding is still kept", () => {
+  const malformedSuggestions = [
+    "use >= instead", // not a record
+    { originalLines: "x", replacement: "y" }, // no file
+    { file: "", originalLines: "x", replacement: "y" }, // empty file
+    { file: "a.ts", originalLines: "   ", replacement: "y" }, // blank anchor
+    { file: "a.ts", originalLines: "x" }, // replacement missing entirely
+    { file: "a.ts", originalLines: "x", replacement: 42 }, // wrong type
+  ];
+
+  for (const malformed of malformedSuggestions) {
+    const result = validateVerdict({
+      verdict: "pass",
+      summary: "One finding with a broken suggestion.",
+      findings: [wellFormedFinding({ severity: "advisory", suggestedFix: malformed })],
+    });
+
+    assert.equal(result.findings.length, 1, `finding must survive suggestedFix=${JSON.stringify(malformed)}`);
+    assert.equal(
+      "suggestedFix" in (result.findings[0] ?? {}),
+      false,
+      `malformed suggestedFix must be dropped: ${JSON.stringify(malformed)}`
+    );
+  }
+});
+
+// NEGATIVE CONTROL. Behavior protected: suggestedFix is rendering data only.
+// Defect caught: any wiring that lets a suggestion's presence or absence leak
+// into the blocking decision in either direction.
+test("validateVerdict: suggestedFix never affects the verdict", () => {
+  const suggestion = { file: "a.ts", originalLines: "x", replacement: "y" };
+
+  const advisory = validateVerdict({
+    verdict: "block",
+    summary: "Advisory with a fix.",
+    findings: [wellFormedFinding({ severity: "advisory", suggestedFix: suggestion })],
+  });
+  assert.equal(advisory.verdict, "pass");
+
+  const blocking = validateVerdict({
+    verdict: "pass",
+    summary: "Blocking with a fix.",
+    findings: [wellFormedFinding({ severity: "blocking", suggestedFix: suggestion })],
+  });
+  assert.equal(blocking.verdict, "block");
+});

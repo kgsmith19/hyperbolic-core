@@ -86,6 +86,28 @@ const findingSchema = {
       },
       required: ["title", "body"],
     },
+    suggestedFix: {
+      type: "object",
+      additionalProperties: false,
+      description:
+        "Optional concrete replacement code for THIS finding, rendered as a GitHub suggestion block the author can apply with one click. Attach one ONLY for a small, unambiguous, mechanical fix -- a typo, a wrong operator or constant, an off-by-one, a missing await -- where exactly one correct replacement exists. Never for a judgment call: anything with more than one reasonable implementation, any design or naming decision, or any change larger than a few lines stays in `requestedChange` as prose. You can only suggest; GitHub's own UI is where a human applies or rejects it.",
+      properties: {
+        file: {
+          type: "string",
+          description: "Repository-relative path of the file the replacement applies to.",
+        },
+        originalLines: {
+          type: "string",
+          description:
+            "The exact current line(s) being replaced, quoted verbatim from the diff's post-change side, starting at the line `line` points at, so the renderer can anchor the suggestion.",
+        },
+        replacement: {
+          type: "string",
+          description: "The complete replacement for `originalLines`. May be empty to propose deleting those lines.",
+        },
+      },
+      required: ["file", "originalLines", "replacement"],
+    },
   },
   required: ["severity", "category", "claim", "evidence", "requestedChange", "citation"],
 } as const;

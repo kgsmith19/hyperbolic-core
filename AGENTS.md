@@ -486,7 +486,14 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   `AI Review` itself stays read-only — the artifact is the only thing that crosses the boundary,
   and the PR number it names is verified against the triggering run's own head SHA before anything
   is posted.
-- The managed comment posts under the reviewer's **own GitHub App identity** (Issue #272), minted
+- A finding may carry an optional **suggested fix** (Issue #326): `packages/review`'s schema and
+  prompt restrict it to small, unambiguous, mechanical corrections — never judgment calls — and
+  `llm-review-dialogue.yml` renders a present one as a GitHub-native suggestion block in a real,
+  line-anchored PR review comment (the pulls review-comment API), deduplicated per head via the
+  managed comment's own state. When line-anchoring is impossible (no usable line, or the API
+  rejects the anchor) it degrades to a fenced block inside the managed comment — never a failed
+  delivery. The reviewer only proposes: applying a suggestion is GitHub's own write-gated UI
+  action, and the reviewer App's permissions are unchanged (`Contents: Read-only`). minted
   from `REVIEW_GITHUB_APP_ID`/`REVIEW_GITHUB_APP_PRIVATE_KEY` in Infisical's `/review/` path —
   the same identity and secret path `verify-llm-review` already reads model provider keys from —
   via `actions/create-github-app-token`, the identical mechanism `dev-agent-dispatch.yml` uses for
