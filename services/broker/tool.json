@@ -2,8 +2,8 @@
   "id": "broker",
   "name": "Guards Broker",
   "kind": "headless",
-  "version": "0.1.0",
-  "description": "The guards broker (Epic #182, issue #185): a forward proxy on 127.0.0.1:8300 for outbound calls other services make. Log-only pass-through in this phase -- logs every proxied request (caller, target host, timestamp) and forwards it unmodified. No credential injection (#186), no egress allowlist enforcement (#187), no budget enforcement (#188) yet.",
+  "version": "0.1.1",
+  "description": "The guards broker (Epic #182): a forward proxy on 127.0.0.1:8300 for outbound calls other services make. Authenticates each caller (BROKER_CALLER_TOKEN_<CALLER>), authorizes it against its manifest's vaultKeys/allowedHosts, and injects the named credential server-side (#186) -- callers never hold provider keys for broker-routed calls. Host-allowlist checks (#187) and budget spend checks (#188/#200) are log-only today: no request is refused on either yet.",
   "ownership": {
     "owner": "kylegsmith19@gmail.com",
     "path": "services/broker"
@@ -27,6 +27,6 @@
   "lifecycle": {
     "migrate": "none",
     "health": "node --test \"tests/*.test.ts\"",
-    "register": "20260817120000_register_broker.sql"
+    "register": "20260826120100_register_broker-v0.1.1.sql"
   }
 }

@@ -9,6 +9,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { complete, isLlmError, stream, type LlmDelta, type LlmErrorClass, type LlmResponse } from "@hyperbolic/llm";
+import { brokerMergedCredentials, brokerMergedDrivers } from "./broker-drivers.ts";
 import type { ConcurrencyGate } from "./concurrency.ts";
 import { readJsonBody, send } from "./http.ts";
 import { estimateMessagesTokens } from "./count.ts";
@@ -79,7 +80,15 @@ async function handleComplete(req: IncomingMessage, res: ServerResponse, config:
 
   const startedAt = performance.now();
   try {
-    const response = await complete(request, config.llmCredentials, {});
+    // Issue #187 Phase 0: when broker config is present (BROKER_URL +
+    // BROKER_CALLER_TOKEN provisioned), anthropic calls route through
+    // services/broker's /proxy while openai/google stay on their direct
+    // drivers with their real keys (complete()'s `drivers` option REPLACES
+    // the registry, hence the merged forms). Absent broker config, this is
+    // byte-identical to the pre-cutover call.
+    const response = config.broker
+      ? await complete(request, brokerMergedCredentials(config.llmCredentials, config.broker), { drivers: brokerMergedDrivers() })
+      : await complete(request, config.llmCredentials, {});
     void logLlmCall(config.supabaseUrl, config.supabasePublishableKey, bearerTokenFrom(req), {
       callerApp,
       purpose: request.metadata.purpose,
@@ -172,6 +181,12 @@ async function handleStream(req: IncomingMessage, res: ServerResponse, config: H
 
   try {
     const requestWithSignal = { ...request, signal: abortSignalForRequest(req) };
+    // Deliberately NOT broker-routed, even when config.broker is present
+    // (issue #187 Phase 0): services/broker's forward() buffers the whole
+    // upstream response before resolving (no SSE pass-through), and the
+    // broker driver's stream() correctly throws. Streaming stays on the
+    // direct drivers with this service's own LLM_KEYS_* until the broker
+    // gains SSE pass-through.
     const iterator = stream(requestWithSignal, config.llmCredentials, {})[Symbol.asyncIterator]();
     // Defer committing to a 200/SSE response until the FIRST step succeeds:
     // a failure here (invalid_request, an immediate auth/transport failure

@@ -5,6 +5,7 @@
 // convention, docs/ops/runbook.md).
 
 import type { CredentialsByProvider, Provider } from "@hyperbolic/llm";
+import { loadBrokerDriverConfig } from "./broker-drivers.ts";
 import type { HandlerConfig } from "./types.ts";
 
 function required(name: string): string {
@@ -56,6 +57,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HandlerConfig 
     githubIntakePat: required("TOOLBELT_GITHUB_INTAKE_PAT"),
     llmCredentials: loadLlmCredentials(env),
     llmMaxConcurrencyPerCaller: maxConcurrencyPerCaller,
+    // Optional broker routing (issue #187 Phase 0): undefined unless
+    // BROKER_URL and BROKER_CALLER_TOKEN are both provisioned -- see
+    // broker-drivers.ts for the env contract and the deliberate
+    // BROKER_CALLER_TOKEN / BROKER_CALLER_TOKEN_LLM_HANDLER naming
+    // asymmetry across the two Infisical paths.
+    broker: loadBrokerDriverConfig(env),
     // SUPABASE_SERVICE_ROLE_KEY is read separately by index.ts and passed
     // through SubmitDeps.serviceRoleKey (intake-submit.ts), never folded
     // into this shared HandlerConfig -- the /v1/* LLM routes added by

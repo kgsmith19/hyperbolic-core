@@ -238,3 +238,14 @@ test("generateBrokerPolicy against the real repository: every real manifest gets
   assert.ok("llm-handler" in policy, "llm-handler's real tool.json should be discovered");
   assert.deepEqual(validatePolicyDocument(policy), { ok: true, errors: [] });
 });
+
+test('generateBrokerPolicy against the real repository: llm-handler declares vaultKeys ["LLM_KEYS_ANTHROPIC"] (issue #187 Phase 0 broker cutover)', () => {
+  // The broker's credential-injection path (#186) only ever grants a caller
+  // a credential its manifest declares. Phase 0 of issue #187 routes
+  // llm-handler's /api/v1/complete Anthropic calls through the broker, so
+  // the generated policy entry must carry exactly this one key -- no more
+  // (openai/google stay direct, keys held by llm-handler itself), no less
+  // (an empty list means the broker refuses the LLM_KEYS_ANTHROPIC grant).
+  const policy = generateBrokerPolicy(findManifestPaths());
+  assert.deepEqual(policy["llm-handler"].vaultKeys, ["LLM_KEYS_ANTHROPIC"]);
+});
