@@ -86,7 +86,24 @@ if [[ "$mode" == "--apply" ]]; then
 fi
 
 for index in "${!mounts[@]}"; do
+  # Serving a local filesystem path (as opposed to an http:// proxy target)
+  # requires actual sudo elevation, confirmed live against a real deploy:
+  # tailscale refuses a bare, non-root, non-sudo `tailscale serve` call for
+  # a path target with "must be root, or be an operator and able to run
+  # 'sudo tailscale'" -- it does not self-elevate. The three proxy targets
+  # below are unaffected (verified live before this fix existed). Skipped
+  # under TAILSCALE_SERVE_TEST_ROOT (not NODE_TEST_CONTEXT alone -- node
+  # --test sets that for the whole process tree, including the plain
+  # dry-run invocations below, same reason deploy_root's own override above
+  # requires both) so the test suite's $PATH-based fake-tailscale
+  # interception keeps working -- sudo's own secure_path would otherwise
+  # bypass a $PATH-based test double entirely.
+  sudo_prefix=()
+  if [[ -z "${TAILSCALE_SERVE_TEST_ROOT:-}" && "${targets[$index]}" != http*://* ]]; then
+    sudo_prefix=(sudo)
+  fi
   command=(
+    "${sudo_prefix[@]}"
     tailscale serve --bg --yes --https=443
     "--set-path=${mounts[$index]}"
     "${targets[$index]}"

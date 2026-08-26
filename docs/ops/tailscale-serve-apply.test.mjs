@@ -59,10 +59,10 @@ function applyFixture(lifeIndex) {
   return { calls, result };
 }
 
-test("dry run emits the exact five fixed, private-origin routes", () => {
+test("dry run emits the exact five fixed, private-origin routes, sudo-elevated for the two path targets", () => {
   assert.deepEqual(run("--dry-run").split("\n"), [
-    "tailscale serve --bg --yes --https=443 --set-path=/ /home/deploy/shell/current",
-    "tailscale serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/current",
+    "sudo tailscale serve --bg --yes --https=443 --set-path=/ /home/deploy/shell/current",
+    "sudo tailscale serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/current",
     "tailscale serve --bg --yes --https=443 --set-path=/life/api/ http://127.0.0.1:8000",
     "tailscale serve --bg --yes --https=443 --set-path=/api/ http://127.0.0.1:8200",
     "tailscale serve --bg --yes --https=443 --set-path=/api/brain/ http://127.0.0.1:8100",
