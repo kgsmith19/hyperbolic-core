@@ -313,6 +313,13 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
       // for an undefined mock method.
       issueChecklists = {},
       prBody = "closes #7",
+      // Issue #319 (Option B): seeds the managed AI Review comment
+      // (issue_number 42, same PR) with confirmedIssues state, so
+      // readConfirmedIssueNumbers has something to find. A plain object
+      // seeds a well-formed comment; llmReviewRawBody (below) overrides
+      // with a raw body for the malformed-state fail-open case.
+      llmReviewConfirmedIssues = undefined,
+      llmReviewRawBody = undefined,
       // Issue #291: agent-roles.yaml's dev.provider, as read by the Work
       // State comment's Controller/Builder lines. Defaults to "anthropic" to
       // match this repo's actual live assignment, so every pre-existing test
@@ -323,6 +330,15 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
     }) {
       const calls = [];
       const commentsByIssue = new Map();
+      if (llmReviewRawBody !== undefined) {
+        commentsByIssue.set(42, [{ id: 999, body: llmReviewRawBody }]);
+      } else if (llmReviewConfirmedIssues !== undefined) {
+        const marker = "<!-- agent-engineering-standard:llm-review:v1 -->";
+        const state = { confirmedIssues: llmReviewConfirmedIssues };
+        commentsByIssue.set(42, [
+          { id: 999, body: `${marker}\n<!-- llm-review-state: ${JSON.stringify(state)} -->\n` },
+        ]);
+      }
       const github = {
         paginate: async function (fn, args) {
           if (fn === github.rest.issues.listEventsForTimeline) return timeline;
@@ -584,6 +600,71 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
 
     m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: "no checklist here at all" } } });
     assert.ok(m.calls.includes("ARM"), "an Issue with no checklist items is not incomplete -- nothing to check");
+    assert.equal(m.failed, null);
+
+    // ---- Issue #319 (Option B): confirmed-and-filed blocking Issues -------
+    //
+    // A proposed blocking Issue that AI Review's dialogue filed after
+    // explicit confirmation (llm-review-dialogue.yml's confirmedIssues
+    // state) is never written into the PR body -- it lives only in the
+    // managed AI Review comment. These cases reference Issue #321 ONLY
+    // through that comment's state, never through "Closes #N", proving the
+    // gate reads it independently of parseLinkedIssues.
+
+    m = await run({
+      gates: GREEN,
+      prBody: "no closing keyword here at all",
+      llmReviewConfirmedIssues: { fingerprintA: 321 },
+      issueChecklists: { 321: { state: "open", body: "- [ ] one" } },
+    });
+    assert.ok(
+      !m.calls.includes("ARM"),
+      "a confirmed-and-filed blocking Issue referenced only via the AI Review comment must block, exactly like a body-linked Issue"
+    );
+    assert.notEqual(m.failed, null);
+    assert.match(m.failed || "", /#321 \(1 unchecked\)/);
+
+    // Negative control: the same confirmed Issue, but closed -- must not
+    // block, mirroring the existing closed-Issue exemption for body-linked
+    // Issues (Issue #274) exactly.
+    m = await run({
+      gates: GREEN,
+      prBody: "no closing keyword here at all",
+      llmReviewConfirmedIssues: { fingerprintA: 321 },
+      issueChecklists: { 321: { state: "closed", body: "- [ ] one" } },
+    });
+    assert.ok(m.calls.includes("ARM"), "a CLOSED confirmed blocking Issue must not block");
+    assert.equal(m.failed, null);
+
+    // A confirmed Issue that is already fully checked off must not block
+    // either -- same "nothing incomplete" rule as any other linked Issue.
+    m = await run({
+      gates: GREEN,
+      prBody: "no closing keyword here at all",
+      llmReviewConfirmedIssues: { fingerprintA: 321 },
+      issueChecklists: { 321: { state: "open", body: "- [x] done" } },
+    });
+    assert.ok(m.calls.includes("ARM"), "a confirmed Issue with nothing unchecked must not block");
+    assert.equal(m.failed, null);
+
+    // A malformed or unparsable AI Review comment state must fail OPEN --
+    // an infrastructure hiccup in a downstream comment must never wedge
+    // every PR shut, matching this job's existing tolerance for a single
+    // unreadable linked Issue.
+    m = await run({
+      gates: GREEN,
+      prBody: "no closing keyword here at all",
+      llmReviewRawBody: "<!-- agent-engineering-standard:llm-review:v1 -->\nno embedded state here",
+    });
+    assert.ok(m.calls.includes("ARM"), "a marker comment with no parseable state must fail open, not block");
+    assert.equal(m.failed, null);
+
+    m = await run({
+      gates: GREEN,
+      prBody: "no closing keyword here at all",
+      llmReviewRawBody: "<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: {not json -->\n",
+    });
+    assert.ok(m.calls.includes("ARM"), "a marker comment with malformed JSON state must fail open, not block");
     assert.equal(m.failed, null);
 
     // ---- fail CLOSED when the needs payload says nothing ------------------
