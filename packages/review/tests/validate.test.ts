@@ -302,6 +302,163 @@ test("validateVerdict: proposedBlockingIssue.confirmed is only honored as a lite
   }
 });
 
+// ---------------------------------------------------------------------------
+// deliberation / resolution-by-citation (Issue #325) -- on a re-review round
+// (priorDialogue: true), continued blocking must engage the dev side's latest
+// evidence with new citation-grounded reasoning, recorded in `deliberation`.
+// A blocking finding without one resolves by default: demoted to advisory,
+// marked `resolvedByDefault`, never dropped. Round one is untouched.
+// ---------------------------------------------------------------------------
+
+function deliberation(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    position: "disagree",
+    engagesLatestEvidence:
+      "The dev's alternate caches per request, but the cited criterion requires invalidation across requests, which the alternate still lacks.",
+    ...overrides,
+  };
+}
+
+// NEGATIVE CONTROL -- Issue #325's acceptance criterion 5. Behavior protected:
+// a reviewer that keeps a finding blocking on a re-review round WITHOUT
+// engaging the dev's latest evidence (no deliberation at all -- the exact
+// shape of re-asserting its original preferred fix unchanged) cannot keep the
+// pull request blocked. Defect caught: a blocking filter that ignores
+// priorDialogue, which would let "no, do it my way" repeat forever -- the
+// precise failure mode the owner described on #256.
+test("validateVerdict: on a re-review round, a blocking finding without deliberation resolves by default instead of blocking", () => {
+  const result = validateVerdict(
+    {
+      verdict: "block",
+      summary: "Re-asserting the original ask.",
+      findings: [wellFormedFinding({ severity: "blocking" })],
+    },
+    { priorDialogue: true }
+  );
+
+  assert.equal(result.verdict, "pass");
+  assert.equal(result.findings.length, 1, "the finding must be reported, never silently dropped");
+  assert.equal(result.findings[0]?.severity, "advisory", "resolved-by-default must demote, the same fail-open direction severityOf takes");
+  assert.equal(result.findings[0]?.resolvedByDefault, true);
+  assert.match(result.summary, /resolved by default/);
+});
+
+// POSITIVE CONTROL for the test above: a continued block that DOES engage the
+// dev's latest evidence with a position and citation-grounded reasoning still
+// blocks. Defect caught: an over-eager demotion that resolves every
+// later-round blocking finding, which would make round two an automatic pass
+// and the whole gate a one-round formality.
+test("validateVerdict: on a re-review round, a blocking finding WITH a well-formed deliberation still blocks, kept intact", () => {
+  const result = validateVerdict(
+    {
+      verdict: "pass", // deliberately contradicts the finding: the model is not trusted
+      summary: "Engaged and still standing.",
+      findings: [wellFormedFinding({ severity: "blocking", deliberation: deliberation() })],
+    },
+    { priorDialogue: true }
+  );
+
+  assert.equal(result.verdict, "block");
+  assert.equal(result.findings[0]?.severity, "blocking");
+  assert.deepEqual(result.findings[0]?.deliberation, {
+    position: "disagree",
+    engagesLatestEvidence: deliberation().engagesLatestEvidence,
+  });
+  assert.equal("resolvedByDefault" in (result.findings[0] ?? {}), false);
+});
+
+// Issue #325's acceptance criterion 4: round-one scope-lock (#273) and
+// round-one blocking behavior are UNAFFECTED. Behavior protected: without
+// prior dialogue -- options omitted entirely, or priorDialogue explicitly
+// false -- a blocking finding blocks exactly as before, deliberation or not.
+// Defect caught: the demotion leaking into first-round reviews, where there
+// is no dev evidence yet to engage and demanding a deliberation would let
+// every round-one finding be resolved by a schema technicality.
+test("validateVerdict: round-one behavior is unchanged -- a blocking finding without deliberation still blocks when there is no prior dialogue", () => {
+  for (const options of [undefined, { priorDialogue: false }, {}]) {
+    const result = validateVerdict(
+      {
+        verdict: "block",
+        summary: "First-round finding.",
+        findings: [wellFormedFinding({ severity: "blocking" })],
+      },
+      options
+    );
+    assert.equal(result.verdict, "block", `options ${JSON.stringify(options)} must not change round-one blocking`);
+    assert.equal(result.findings[0]?.severity, "blocking");
+    assert.equal("resolvedByDefault" in (result.findings[0] ?? {}), false);
+  }
+});
+
+// Fail-safe posture, same as outOfScope/proposedBlockingIssue/suggestedFix: a
+// malformed deliberation is dropped, never repaired -- and on a re-review
+// round, dropped means the finding resolves by default (the fail-open
+// direction), never that it blocks on a technicality. Defect caught: a looser
+// parse (any truthy position, an unknown token, whitespace reasoning) that
+// would let an unengaged re-assertion masquerade as deliberation.
+test("validateVerdict: a malformed deliberation is dropped, and on a re-review round the finding resolves by default", () => {
+  const malformedDeliberations = [
+    "I disagree", // not a record
+    deliberation({ position: "strongly-disagree" }), // unknown token
+    deliberation({ position: "AGREE" }), // wrong case -- only the exact contract values count
+    deliberation({ engagesLatestEvidence: "   " }), // whitespace-only reasoning
+    { position: "disagree" }, // reasoning missing entirely
+    { engagesLatestEvidence: "reasoning with no position" },
+  ];
+
+  for (const malformed of malformedDeliberations) {
+    const result = validateVerdict(
+      {
+        verdict: "block",
+        summary: "Malformed deliberation must not survive.",
+        findings: [wellFormedFinding({ severity: "blocking", deliberation: malformed })],
+      },
+      { priorDialogue: true }
+    );
+    assert.equal(result.verdict, "pass", `deliberation ${JSON.stringify(malformed)} must not sustain a block`);
+    assert.equal(result.findings.length, 1, `finding must survive deliberation ${JSON.stringify(malformed)}`);
+    assert.equal("deliberation" in (result.findings[0] ?? {}), false, `malformed deliberation must be dropped: ${JSON.stringify(malformed)}`);
+    assert.equal(result.findings[0]?.resolvedByDefault, true);
+  }
+});
+
+// NEGATIVE CONTROL for resolvedByDefault's trust posture: the field is set by
+// the validator only. A model emitting it directly is ignored by
+// construction -- toFinding builds findings from known fields -- so a model
+// cannot pre-resolve its own finding on round one, and cannot forge the
+// "the gate resolved this" explanation the dialogue workflow renders.
+test("validateVerdict: a model-emitted resolvedByDefault is ignored -- only the validator sets it", () => {
+  const result = validateVerdict({
+    verdict: "block",
+    summary: "Model tries to pre-resolve its own finding.",
+    findings: [wellFormedFinding({ severity: "blocking", resolvedByDefault: true })],
+  });
+
+  assert.equal(result.verdict, "block");
+  assert.equal("resolvedByDefault" in (result.findings[0] ?? {}), false);
+});
+
+// Behavior protected: a blocking finding already excused as outOfScope (an
+// agreed deferral) is not double-marked by the resolution-by-citation
+// default -- it keeps its severity and its deferral semantics, so the
+// dialogue workflow's deferred-Issue filing path sees exactly what it saw
+// before this field existed.
+test("validateVerdict: an outOfScope blocking finding is not demoted by the re-review deliberation rule", () => {
+  const result = validateVerdict(
+    {
+      verdict: "block",
+      summary: "Agreed deferral on a later round.",
+      findings: [wellFormedFinding({ severity: "blocking", outOfScope: true })],
+    },
+    { priorDialogue: true }
+  );
+
+  assert.equal(result.verdict, "pass");
+  assert.equal(result.findings[0]?.severity, "blocking");
+  assert.equal(result.findings[0]?.outOfScope, true);
+  assert.equal("resolvedByDefault" in (result.findings[0] ?? {}), false);
+});
+
 // Behavior protected: unparseable model output never throws and never blocks.
 // Defect caught: letting a JSON/shape error escape, which would be caught by
 // the CLI's infrastructure handler and reported as exit 2 -- turning "the model

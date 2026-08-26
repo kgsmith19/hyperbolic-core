@@ -95,6 +95,36 @@ export interface Finding {
     originalLines: string;
     replacement: string;
   };
+  /**
+   * Resolution-by-citation (Issue #325). On a re-review round -- prior
+   * dialogue exists in the PR conversation -- every finding the reviewer
+   * keeps blocking must record an explicit position (agree, disagree, or
+   * other) on the dev side's most recent evidence for that finding, plus
+   * NEW reasoning grounded in the finding's own `citation` that engages
+   * that evidence directly. The bar for resolution is the citation, never
+   * the reviewer's originally-suggested implementation. validate.ts
+   * enforces the mechanical half: with prior dialogue, a blocking finding
+   * without a well-formed deliberation is demoted to advisory and marked
+   * `resolvedByDefault` -- it resolves rather than blocks, extending Issue
+   * #281's default-to-resolve posture. Absent on first-round findings,
+   * where there is nothing yet to engage; validate.ts never requires it
+   * there.
+   */
+  deliberation?: {
+    position: "agree" | "disagree" | "other";
+    engagesLatestEvidence: string;
+  };
+  /**
+   * Set by validate.ts only, never honored from the model (toFinding builds
+   * findings from known fields, so a model-emitted copy is dropped by
+   * construction). True when a re-review round's blocking finding carried no
+   * well-formed `deliberation` and was therefore demoted to advisory --
+   * resolved by default rather than allowed to keep blocking on an
+   * unengaged, re-asserted position. Carried on the finding so the dialogue
+   * workflow can render WHY it no longer blocks, instead of the gate's
+   * intervention masquerading as the reviewer's own downgrade.
+   */
+  resolvedByDefault?: boolean;
 }
 
 /**

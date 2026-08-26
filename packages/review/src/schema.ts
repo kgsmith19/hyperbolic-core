@@ -108,6 +108,26 @@ const findingSchema = {
       },
       required: ["file", "originalLines", "replacement"],
     },
+    deliberation: {
+      type: "object",
+      additionalProperties: false,
+      description:
+        "REQUIRED on every blocking finding you carry into a re-review round (the PR CONVERSATION is non-empty); omit it on a first-round review. Your explicit position on the other side's most recent evidence for THIS finding -- a dev reply, or code pushed in response -- plus NEW reasoning grounded in this finding's own citation that engages that evidence directly. The gate excludes a re-review-round blocking finding without this from the block decision: continued blocking that cannot engage the dev's latest evidence against the citation resolves by default.",
+      properties: {
+        position: {
+          type: "string",
+          enum: ["agree", "disagree", "other"],
+          description:
+            "agree, disagree, or other -- your position on the other side's most recent evidence for this finding. Use 'other' when the dev side has not yet responded to this specific finding, and say so in engagesLatestEvidence.",
+        },
+        engagesLatestEvidence: {
+          type: "string",
+          description:
+            "New reasoning, grounded in this finding's own citation, that responds directly to the dev side's latest evidence -- never a restatement of your previously-suggested implementation, which does not meet the bar for a continued block.",
+        },
+      },
+      required: ["position", "engagesLatestEvidence"],
+    },
   },
   required: ["severity", "category", "claim", "evidence", "requestedChange", "citation"],
 } as const;

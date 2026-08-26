@@ -170,6 +170,39 @@ test("buildSystemPrompt: defaults to resolving a finding once any substantive on
   assert.match(prompt, /Do not keep a finding open by demanding a fuller, more polished, or more exhaustive version/);
 });
 
+// Behavior protected (Issue #325, owner directive on #256): the bar for
+// resolving an already-blocking finding is its own citation, never the
+// reviewer's originally-suggested implementation -- and a continued block on
+// a later round must carry `deliberation`: an explicit position on the dev
+// side's latest evidence plus NEW citation-grounded reasoning. Defect
+// caught: a prompt edit that drops the instruction, returning the reviewer
+// to the failure mode the owner described -- "a reviewer saying no you must
+// do A, B, C ... cannot continuously just say no".
+test("buildSystemPrompt: resolution-by-citation -- a continued block must engage the dev's latest evidence against the original citation", () => {
+  const prompt = buildSystemPrompt();
+  assert.match(prompt, /RESOLUTION BY CITATION/);
+  assert.match(prompt, /its own `citation`, never your\s+originally-suggested implementation/);
+  assert.match(prompt, /judge the alternate against the citation itself/);
+  assert.match(prompt, /MUST include `deliberation`/);
+  assert.match(prompt, /`agree`, `disagree`, or `other`/);
+  assert.match(prompt, /engagesLatestEvidence/);
+});
+
+// Behavior protected (Issue #325): a turn that merely repeats a prior
+// position is instructed against in so many words -- restating the
+// originally-suggested fix is NOT new reasoning and cannot sustain a block --
+// and the mechanical consequence (exclusion from the block decision) is
+// stated so the model knows the gate enforces it rather than merely wishes
+// it. Defect caught: softening the section into advice with no stated
+// consequence, which is exactly the "productive always" gap the owner named.
+test("buildSystemPrompt: repeating a prior position without new citation-grounded reasoning is named as not a real turn, with the mechanical consequence stated", () => {
+  const prompt = buildSystemPrompt();
+  assert.match(prompt, /Restating your previously-suggested fix unchanged is not new reasoning/);
+  assert.match(prompt, /repeats a prior position without new citation-grounded reasoning is not a real turn/);
+  assert.match(prompt, /blocking finding without a well-formed\s+`deliberation` is reported but excluded from the block decision/);
+  assert.match(prompt, /does not loosen or tighten SCOPE LOCK/);
+});
+
 // Behavior protected: the rule is repeated AFTER the untrusted payload, where
 // recency favours it. Defect caught: fencing the data but stating the rule only
 // once, far above it -- the arrangement injection attempts most reliably

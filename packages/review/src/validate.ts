@@ -123,6 +123,21 @@ function toFinding(raw: unknown): { finding: Finding; valid: boolean } | null {
     }
   }
 
+  // Same fail-safe posture again for deliberation (Issue #325): only an
+  // exact-match position token and non-empty reasoning carry through --
+  // anything else (an unknown or wrong-case token, whitespace reasoning, not
+  // a record) is dropped rather than repaired. Dropping fails OPEN here: on
+  // a re-review round validateVerdict treats a blocking finding without a
+  // deliberation as resolved by default, so a malformed one can never
+  // sustain a block on a technicality, and never fail one into existence.
+  if (isRecord(raw.deliberation)) {
+    const position = raw.deliberation.position;
+    const engagesLatestEvidence = nonEmptyString(raw.deliberation.engagesLatestEvidence);
+    if ((position === "agree" || position === "disagree" || position === "other") && engagesLatestEvidence !== null) {
+      finding.deliberation = { position, engagesLatestEvidence };
+    }
+  }
+
   const valid = claim !== null && evidence !== null && citation !== null && requestedChange !== null;
   return { finding, valid };
 }
@@ -141,8 +156,14 @@ function malformed(reason: string): ReviewVerdict {
  *
  * Blocking rule: the result blocks if and only if at least one VALID finding
  * has `severity === "blocking"`. Discarded findings never block.
+ *
+ * `priorDialogue` (Issue #325) says whether this run is a re-review round --
+ * the PR conversation the reviewer was shown was non-empty. The caller
+ * (review.ts) derives it from the same context the model itself saw, so the
+ * validator and the prompt's own SCOPE LOCK round test can never disagree
+ * about which round this is.
  */
-export function validateVerdict(raw: unknown): ReviewVerdict {
+export function validateVerdict(raw: unknown, options: { priorDialogue?: boolean } = {}): ReviewVerdict {
   if (!isRecord(raw)) {
     return malformed("tool input was not an object");
   }
@@ -158,6 +179,33 @@ export function validateVerdict(raw: unknown): ReviewVerdict {
       continue;
     }
     (parsed.valid ? findings : discarded).push(parsed.finding);
+  }
+
+  // Resolution-by-citation (Issue #325). On a re-review round, a continued
+  // block must engage the dev side's latest evidence with new
+  // citation-grounded reasoning -- the `deliberation` field the prompt and
+  // schema require there. A blocking finding without one resolves by
+  // default: demoted to advisory (the same fail-open direction severityOf()
+  // takes on an unknown token -- never promoted into the one value that
+  // fails a pull request) and marked `resolvedByDefault` so the dialogue
+  // workflow can say why it no longer blocks. This is the mechanical half of
+  // Issue #281's default-to-resolve posture: a reviewer re-asserting its
+  // originally-suggested fix without engaging the dev's alternate has not
+  // grounded a continued block, and a malformed answer must fail open, never
+  // stall a pull request. An outOfScope finding is skipped -- it is already
+  // excused by an agreed deferral, and demoting it would corrupt the
+  // deferred-Issue path's view of it. First-round behavior is untouched:
+  // without prior dialogue there is nothing yet to engage, and blocking
+  // findings block exactly as before.
+  let resolvedByDefaultCount = 0;
+  if (options.priorDialogue === true) {
+    for (const finding of findings) {
+      if (finding.severity === "blocking" && finding.outOfScope !== true && finding.deliberation === undefined) {
+        finding.severity = "advisory";
+        finding.resolvedByDefault = true;
+        resolvedByDefaultCount += 1;
+      }
+    }
   }
 
   // outOfScope excuses a finding from the block decision without touching its
@@ -177,6 +225,11 @@ export function validateVerdict(raw: unknown): ReviewVerdict {
   if (discarded.length > 0) {
     summaryParts.push(
       `${discarded.length} finding(s) were discarded for missing evidence, citation, claim, or requested change, and did not affect the verdict.`
+    );
+  }
+  if (resolvedByDefaultCount > 0) {
+    summaryParts.push(
+      `${resolvedByDefaultCount} blocking finding(s) were resolved by default: on a re-review round, a continued block must carry a deliberation engaging the dev side's latest evidence with new citation-grounded reasoning, and these carried none. They are reported as advisory.`
     );
   }
 

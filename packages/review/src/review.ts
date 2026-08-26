@@ -103,5 +103,10 @@ export async function runReview(options: RunReviewOptions): Promise<ReviewVerdic
     );
   }
 
-  return validateVerdict(toolCall.input);
+  // priorDialogue is derived from the exact conversation the model was shown
+  // (Issue #325): prompt.ts renders an empty conversation as the first-round
+  // placeholder, so "the payload had prior dialogue" and "the validator
+  // requires deliberation on continued blocks" are the same fact, computed
+  // from the same field, and cannot drift apart.
+  return validateVerdict(toolCall.input, { priorDialogue: context.conversation.trim() !== "" });
 }
