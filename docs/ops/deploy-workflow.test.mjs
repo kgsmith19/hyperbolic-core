@@ -44,26 +44,55 @@ test("Shell, Handler A, Brain, and the broker deploy each read only their own de
     new Set(paths),
     new Set(["/platform/shell-deploy/", "/platform/llm-handler/", "/brain/", "/platform/broker/"]),
   );
-});
-
-test("Handler A's and the Brain's deploy jobs each use their own SSH key variable, never another unit's", () => {
+  assert.match(workflow, /INFISICAL_SHELL_DEPLOY_IDENTITY_ID/);
   assert.match(workflow, /INFISICAL_LLM_HANDLER_DEPLOY_IDENTITY_ID/);
   assert.match(workflow, /INFISICAL_BRAIN_DEPLOY_IDENTITY_ID/);
-  const deployShell = workflow.slice(workflow.indexOf("  deploy-shell:"), workflow.indexOf("  build-llm-handler:"));
-  const deployLlmHandler = workflow.slice(workflow.indexOf("  deploy-llm-handler:"), workflow.indexOf("  build-brain:"));
-  const deployBrain = workflow.slice(workflow.indexOf("  deploy-brain:"), workflow.indexOf("  build-broker:"));
-  const sshKeyVars = ["SHELL_DEPLOY_SSH_KEY", "LLM_HANDLER_SSH_KEY", "BRAIN_DEPLOY_SSH_KEY"];
-  const jobs = { deployShell, deployLlmHandler, deployBrain };
-  const owners = { SHELL_DEPLOY_SSH_KEY: "deployShell", LLM_HANDLER_SSH_KEY: "deployLlmHandler", BRAIN_DEPLOY_SSH_KEY: "deployBrain" };
-  for (const [jobName, body] of Object.entries(jobs)) {
-    for (const sshKeyVar of sshKeyVars) {
-      if (owners[sshKeyVar] === jobName) {
-        assert.match(body, new RegExp(sshKeyVar), `${jobName} must reference its own ${sshKeyVar}`);
-      } else {
-        assert.doesNotMatch(body, new RegExp(sshKeyVar), `${jobName} must never reference ${sshKeyVar}`);
-      }
-    }
+  assert.match(workflow, /INFISICAL_BROKER_DEPLOY_IDENTITY_ID/);
+});
+
+test("no SSH key material anywhere: keyless Tailscale SSH only (ADR 008, issue #191)", () => {
+  // The exact same contract lifeos-deploy-workflow.test.mjs already pins for
+  // lifeos-deploy.yml, and platform-smoke-workflow.test.mjs for the broker
+  // probe: authentication is the tailnet ACL granting tag:ci SSH to deploy@,
+  // never a persisted private key. A quiet reintroduction of any key-load
+  // step (or an ssh-agent action, or a written identity file) must fail a
+  // gate, not be discovered live.
+  assert.doesNotMatch(workflow, /id_ed25519/);
+  assert.doesNotMatch(workflow, /SSH_KEY/);
+  assert.doesNotMatch(workflow, /webfactory\/ssh-agent/);
+  assert.doesNotMatch(workflow, /Load the deploy SSH key/);
+  assert.doesNotMatch(workflow, /ssh-add|ssh-agent/);
+  assert.doesNotMatch(workflow, /\.ssh\//);
+});
+
+test("all four deploy jobs join the tailnet as tag:ci (with a host ping) between the Infisical pull and the first ssh -- lifeos-deploy.yml's keyless shape", () => {
+  const jobSlices = {
+    "deploy-shell": workflow.slice(workflow.indexOf("  deploy-shell:"), workflow.indexOf("  build-llm-handler:")),
+    "deploy-llm-handler": workflow.slice(workflow.indexOf("  deploy-llm-handler:"), workflow.indexOf("  build-brain:")),
+    "deploy-brain": workflow.slice(workflow.indexOf("  deploy-brain:"), workflow.indexOf("  build-broker:")),
+    "deploy-broker": workflow.slice(workflow.indexOf("  deploy-broker:"), workflow.indexOf("  smoke:")),
+  };
+  for (const [name, body] of Object.entries(jobSlices)) {
+    const infisical = body.indexOf("Infisical/secrets-action");
+    const join = body.indexOf("tailscale/github-action");
+    const firstSsh = body.search(/\bssh /);
+    assert.ok(infisical > -1, `${name}: pulls its Infisical path (tailnet OAuth client lives there)`);
+    assert.ok(join > infisical, `${name}: tailnet join must follow the Infisical pull that supplies TS_OAUTH_*`);
+    assert.ok(firstSsh > join, `${name}: no ssh use before the tailnet join`);
+    assert.match(body, /tags: tag:ci/, `${name}: joins as tag:ci (the ACL's SSH grant subject)`);
+    assert.match(body, /ping: \$\{\{ vars\.DEPLOY_HOST \}\}/, `${name}: pings the deploy host before ssh`);
   }
+  const joins = workflow.match(/tailscale\/github-action@/g) ?? [];
+  assert.equal(joins.length, 4);
+});
+
+test("every ssh/scp call keeps the exact client options the keyless pattern uses (BatchMode, ConnectTimeout, accept-new)", () => {
+  // Identical string in lifeos-deploy.yml/ops-serve-apply.yml: BatchMode so a
+  // missing Tailscale SSH grant fails immediately instead of hanging on a
+  // prompt, accept-new because a fresh single-use runner has no known_hosts.
+  const optionSets = workflow.match(/ssh_options=\(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new\)/g) ?? [];
+  assert.ok(optionSets.length >= 10, `every remote step declares the shared ssh_options (saw ${optionSets.length})`);
+  assert.doesNotMatch(workflow, /ssh[^\n]* -i /);
 });
 
 test("release health is proven before pruning and failures have a rollback path", () => {
@@ -153,11 +182,12 @@ test("deploy-broker generates broker-policy.json fresh from every discovered man
   assert.match(brokerGitignore, /^broker-policy\.json$/m);
 });
 
-test("deploy-broker reads only its own dedicated Infisical path and SSH key, matching every sibling unit's isolation", () => {
+test("deploy-broker reads only its own dedicated Infisical path and identity, matching every sibling unit's isolation", () => {
   assert.match(workflow, /INFISICAL_BROKER_DEPLOY_IDENTITY_ID/);
   const deployBroker = workflow.slice(workflow.indexOf("  deploy-broker:"), workflow.indexOf("  smoke:"));
-  assert.match(deployBroker, /BROKER_DEPLOY_SSH_KEY/);
-  assert.doesNotMatch(deployBroker, /SHELL_DEPLOY_SSH_KEY|LLM_HANDLER_SSH_KEY|BRAIN_DEPLOY_SSH_KEY/);
+  assert.match(deployBroker, /secret-path: "\/platform\/broker\/"/);
+  assert.doesNotMatch(deployBroker, /\/platform\/shell-deploy\/|\/platform\/llm-handler\/|secret-path: "\/brain\/"/);
+  assert.doesNotMatch(deployBroker, /INFISICAL_SHELL_DEPLOY_IDENTITY_ID|INFISICAL_LLM_HANDLER_DEPLOY_IDENTITY_ID|INFISICAL_BRAIN_DEPLOY_IDENTITY_ID/);
 });
 
 test("deploy-broker ships broker-policy.json world-readable (644), never 600 like .env -- the container reads it as a different uid than deploy owns it as", () => {
