@@ -1,11 +1,10 @@
-// Tests for docs/ops/edge-origin/ (issue #165). No nginx binary is assumed
-// to exist in every environment this runs in (see the PR's Verification
-// section for where that was and wasn't true); these tests are the
-// "equivalent parse check" used when `nginx -t` is unavailable, plus the
-// isolation/sync checks between nginx's active private application routes
-// and the checked-in, deny-by-default public template.
+// Tests for docs/ops/edge-origin/ (issue #165). Structural checks run in every
+// environment; CI additionally runs the pinned nginx image's real `nginx -t`
+// with all three configuration files mounted. Local Docker absence skips only
+// that integration check, never the isolation/synchronization contracts.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
@@ -18,6 +17,13 @@ const privateSpaConf = readFileSync(path.join(edgeOriginDir, "private_spa_locati
 const publicPathsConf = readFileSync(path.join(edgeOriginDir, "public_paths.conf"), "utf8");
 const composeYml = readFileSync(path.join(edgeOriginDir, "compose.yml"), "utf8");
 
+function serviceBlock(serviceName, nextServiceName) {
+  const start = composeYml.indexOf(`\n  ${serviceName}:`);
+  assert.ok(start >= 0, `${serviceName} service not found`);
+  const end = nextServiceName ? composeYml.indexOf(`\n  ${nextServiceName}:`, start + 1) : composeYml.length;
+  return composeYml.slice(start, end < 0 ? undefined : end);
+}
+
 /**
  * The private nginx application route table. Tailscale has only one root
  * proxy now, so nginx.conf and its focused SPA include are authoritative.
@@ -28,7 +34,7 @@ function privateRouteTable() {
     ...parseLocationBodies(nginxConf),
     ...parseLocationBodies(privateSpaConf),
   ]) {
-    if (route === "/healthz") continue;
+    if (route === "/healthz" || /\breturn 308\b/.test(body)) continue;
     routes.set(route, routeTarget(body, route));
   }
   return routes;
@@ -186,6 +192,50 @@ test("compose.yml uses host networking so nginx can reach loopback backends with
   assert.doesNotMatch(composeYml, /0\.0\.0\.0/);
 });
 
+test("cloudflared pins its real host-network metrics listener to one loopback address", () => {
+  const cloudflared = serviceBlock("cloudflared");
+  assert.match(cloudflared, /^\s+command: tunnel --no-autoupdate --metrics 127\.0\.0\.1:20241 run$/m);
+  assert.doesNotMatch(cloudflared, /--metrics (?:0\.0\.0\.0|\[::\]|:)/);
+});
+
 test("compose.yml's healthcheck targets the private origin before Serve can migrate", () => {
   assert.match(composeYml, /127\.0\.0\.1:8080\/healthz/);
 });
+
+const dockerInfo = spawnSync("docker", ["info", "--format", "{{.ServerVersion}}"], {
+  encoding: "utf8",
+  timeout: 10_000,
+});
+const dockerReady = dockerInfo.status === 0;
+
+test(
+  "nginx:1.27-alpine accepts the mounted main, private SPA, and public policy configs",
+  { skip: !process.env.CI && !dockerReady },
+  () => {
+    assert.equal(
+      dockerInfo.status,
+      0,
+      `Docker is required for nginx -t in CI: ${dockerInfo.stderr || dockerInfo.error?.message || "unavailable"}`,
+    );
+    const mount = (source, target) => `${path.resolve(edgeOriginDir, source).replaceAll("\\", "/")}:${target}:ro`;
+    const result = spawnSync(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "--volume",
+        mount("nginx.conf", "/etc/nginx/nginx.conf"),
+        "--volume",
+        mount("private_spa_locations.conf", "/etc/nginx/private_spa_locations.conf"),
+        "--volume",
+        mount("public_paths.conf", "/etc/nginx/public_paths.conf"),
+        "nginx:1.27-alpine",
+        "nginx",
+        "-t",
+      ],
+      { encoding: "utf8", timeout: 120_000 },
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(`${result.stdout}\n${result.stderr}`, /test is successful/);
+  },
+);

@@ -11,7 +11,9 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const workflow = readFileSync(path.join(root, ".github/workflows/lifeos-deploy.yml"), "utf8");
+const read = (relativePath) =>
+  readFileSync(path.join(root, relativePath), "utf8").replaceAll("\r\n", "\n");
+const workflow = read(".github/workflows/lifeos-deploy.yml");
 
 const backendJob = workflow.slice(
   workflow.indexOf("  deploy-backend:"),
@@ -66,12 +68,22 @@ test("every checkout refuses to persist credentials", () => {
 
 test("backend renders the one-origin root path and applies migrations before shipping", () => {
   // LIFEOS_ROOT_PATH=/life/api is what makes the backend routable behind the
-  // full-path-forwarding /life/api/ serve mount; without it every proxied
+  // full-path-forwarding nginx /life/api/ location; without it every proxied
   // request 404s. Migrations must land before the new container expects them.
   assert.match(backendJob, /LIFEOS_ROOT_PATH=\/life\/api/);
   const migrateAt = backendJob.indexOf("supabase db push");
   const shipAt = backendJob.indexOf("docker save");
   assert.ok(migrateAt > -1 && shipAt > -1 && migrateAt < shipAt);
+});
+
+test("live UI verification is mandatory now that nginx owns /life/", () => {
+  assert.doesNotMatch(workflow, /skip_live_verify/);
+  const verifyStep = uiJob.slice(
+    uiJob.indexOf("- name: Verify · Live bundle serves the built assets"),
+    uiJob.indexOf("- name: Recover · Roll back an unhealthy release"),
+  );
+  assert.ok(verifyStep.length > 10);
+  assert.doesNotMatch(verifyStep, /^\s*if:/m);
 });
 
 test("UI is a versioned-dir release: stage, activate, verify, roll back, prune -- in that order", () => {
@@ -134,7 +146,7 @@ test("both deploy jobs validate DEPLOY_HOST before first use", () => {
 
 // --- ops-serve-apply.yml (issue #142): the serve route transport ---
 
-const serveApply = readFileSync(path.join(root, ".github/workflows/ops-serve-apply.yml"), "utf8");
+const serveApply = read(".github/workflows/ops-serve-apply.yml");
 
 test("serve-apply is dispatch-only, production-gated, and ships the checked-in script verbatim", () => {
   const onBlock = serveApply.slice(serveApply.indexOf("\non:"), serveApply.indexOf("\npermissions:"));

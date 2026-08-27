@@ -52,7 +52,7 @@ SFTP (port 23) with its own sub-account per repository (`platform`, `lifeos`). N
 (Tailscale SSH: no SSH-key secrets for the LifeOS pipeline; the platform pipeline still uses
 Infisical-stored SSH keys today, with keyless Tailscale SSH as the planned target — not yet a
 scheduled Issue), the TLS terminator (`tailscale serve --https=443`
-fronting the one-origin route table — see `runbook.md`'s "Single-origin Tailscale Serve routes"),
+fronting the one-root private nginx origin — see `runbook.md`'s "Single-origin Tailscale Serve route"),
 the authorization boundary (ACL: `tag:ci` → SSH to `tag:prod`, user `deploy`), and the CI identity
 (`tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3`, pinned, joins as an
 ephemeral `tag:ci` node per run).

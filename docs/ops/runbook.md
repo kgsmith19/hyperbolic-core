@@ -462,7 +462,7 @@ This repository proves, in `docs/ops/deploy-workflow.test.mjs`, that `deploy-bra
 
 ### Brain external reachability: `/api/brain/` mount
 
-`services/brain/src/server.ts` registers its HTTP surface under `/api/brain/*` plus a bare `/healthz` for the in-container Docker healthcheck. The serve mount is `/api/brain/` -- tailscale forwards the full incoming path unchanged (the same mechanic as `/api/` and `/life/api/`), so `https://<origin>/api/brain/<route>` reaches the container as `/api/brain/<route>`, exactly what the server handles. (The original mount was `/brain/stream`, a name that predated the server's real route shape; nothing handled that path, so it was retired when the mount was corrected -- issue #134.) The `/api/brain/` mount is more specific than `/api/`, and Tailscale Serve routes by most-specific path, so Handler A keeps everything else under `/api/`. External health probes use `/api/brain/health` (unauthenticated), never the origin's bare `/healthz`, which is the Shell's static health asset.
+`services/brain/src/server.ts` registers its HTTP surface under `/api/brain/*` plus a bare `/healthz` for the in-container Docker healthcheck. nginx owns the private `/api/brain/` location and forwards the full incoming path unchanged, so `https://<origin>/api/brain/<route>` reaches the container as `/api/brain/<route>`, exactly what the server handles. (The original path was `/brain/stream`, a name that predated the server's real route shape; nothing handled it, so it was retired in issue #134.) nginx's `/api/brain/` prefix is more specific than `/api/`, so Handler A keeps everything else under `/api/`. External health probes use `/api/brain/health` (unauthenticated), never the origin's bare `/healthz`, which is the Shell's static health asset.
 
 ## Guards broker deployment (issue #185)
 
@@ -491,7 +491,7 @@ Unlike LifeOS's cutover (`LIFEOS_DEPLOY_ENABLED`), `deploy-broker` has no separa
 
 At deploy time, `deploy-broker` regenerates `broker-policy.json` fresh from every discovered `tool.json` (`apps/toolbelt/scripts/generate-broker-policy.mjs`, issue #184) and ships it alongside `compose.yaml`/`.env`, bind-mounted read-only into the container at `/app/broker-policy.json`. It is world-readable (`chmod 644`) on the box, unlike `.env`'s `600`: the file holds no secrets (host allowlists and vault key **names**, aggregated from committed `tool.json` files), and the container reads it as the `broker` user (fixed uid `10300`), not `deploy` -- a `600` file owned by `deploy` would be unreadable to any other uid and fail `docker compose up --wait` on every deploy.
 
-The broker has no Tailscale Serve mount, deliberately: its callers are other containers on the same Docker network, not external clients, and giving it a public/tailnet-reachable mount would defeat the point of an internal-only proxy. `platform-smoke.yml`'s broker probe therefore runs over keyless Tailscale SSH (ADR 008) instead of the shared-origin `probe()` every other unit uses -- see that workflow's own header comment for the scoping discipline (exactly one `ssh` invocation, a single read-only `curl`, structurally asserted in `docs/ops/platform-smoke-workflow.test.mjs`).
+The broker has no nginx route, deliberately: its callers are other containers on the same Docker network, not external clients, and giving it a shared-origin route would defeat the point of an internal-only proxy. `platform-smoke.yml`'s broker probe therefore runs over keyless Tailscale SSH (ADR 008) instead of the shared-origin `probe()` every other unit uses -- see that workflow's own header comment for the scoping discipline (exactly one `ssh` invocation, a single read-only `curl`, structurally asserted in `docs/ops/platform-smoke-workflow.test.mjs`).
 
 ## Release tagging (issue #189)
 
@@ -574,37 +574,36 @@ used it).
 2. **Confirm quiescence.** In the standalone repo's Actions tab, confirm no
    deploy or backup run is in flight (wait for any to finish). From this
    point the box has exactly zero writers.
-3. **Arm the monorepo.** Here, set `LIFEOS_DEPLOY_ENABLED=true` and
+3. **Confirm the nginx gateway.** Complete the private-origin migration above
+   and prove `curl -fsS http://127.0.0.1:8080/healthz` on the VPS returns the
+   exact nginx health payload. nginx must already own `/life/` and
+   `/life/api/` before the monorepo deploy is armed.
+4. **Arm the monorepo.** Here, set `LIFEOS_DEPLOY_ENABLED=true` and
    `LIFEOS_BACKUP_ENABLED=true`.
-4. **Bootstrap deploy (one time).** Dispatch `lifeos-deploy.yml` with
-   `skip_live_verify` checked: the `/life/` serve route still points at the
-   standalone layout until the route table is re-applied, so the live-route
-   verify cannot pass yet. This run creates `lifeos-ui/current` and starts
-   the backend from the monorepo image.
-5. **Re-apply the serve routes** so `/life/` serves `lifeos-ui/current`:
-   dispatch the `Ops Serve Apply` workflow (route table above).
-6. **Fully verified deploy.** Dispatch `lifeos-deploy.yml` again with
-   defaults. Both units must go green, including the live `/life/` verify
+5. **Fully verified deploy.** Dispatch `lifeos-deploy.yml` with its defaults.
+   The UI activation creates `lifeos-ui/current`; live verification is never
+   skippable. Both units must go green, including the live `/life/` verify
    and the backend's `/healthz` gate. Then confirm from a tailnet device:
    `https://<host>/life/` renders and `https://<host>/life/api/healthz` is
    green.
-7. **First monorepo backup.** Dispatch `lifeos-backup.yml`; download the
+6. **First monorepo backup.** Dispatch `lifeos-backup.yml`; download the
    artifact and confirm it decrypts with the NEW LifeOS age key and lists
    (`age -d -i <key> | tar -t`).
-8. **Cron ownership.** Dispatch `lifeos-ops.yml` task
+7. **Cron ownership.** Dispatch `lifeos-ops.yml` task
    `install-scheduled-jobs` (rewrites the wrapper to the monorepo-managed
    text), then task `run-scheduled-jobs` once and confirm the trio passes.
-9. **Record the cutover** on the Epic: run links for steps 4-8 and the
+8. **Record the cutover** on the Epic: run links for steps 4-7 and the
    owner's attestation that step 1's flips are in place.
 
 **Rollback to the standalone pipeline** (if anything above fails and cannot
 be fixed forward): set this repo's two `LIFEOS_*_ENABLED` vars back to
-unset/false, re-point the `/life/` serve route at `lifeos-ui/dist`, and
-restore `DEPLOY_ENABLED`/`BACKUP_ENABLED` in `kgsmith19/lifeos`. The
-standalone pipeline's next deploy rebuilds its own layout; nothing the
-monorepo shipped blocks it. Leave the standalone repository intact as
-history in either outcome -- it is the archive of record for the pre-cutover
-era, never deleted.
+unset/false, atomically repoint `lifeos-ui/current` at the standalone
+`lifeos-ui/dist` directory nginx already owns, and restore
+`DEPLOY_ENABLED`/`BACKUP_ENABLED` in `kgsmith19/lifeos`. The standalone
+pipeline's next deploy rebuilds its own layout; nginx remains the only path
+router throughout. Leave the standalone repository intact as history in
+either outcome -- it is the archive of record for the pre-cutover era,
+never deleted.
 
 ## One-time platform migration adoption
 
@@ -830,6 +829,13 @@ endpoints. When the Cloudflare gate is true it additionally renders the token-on
 starts the `cloudflare` profile. Triggers on
 `workflow_dispatch` or a push to `main` touching `docs/ops/edge-origin/**` (or the workflow file
 itself, `.github/workflows/ops-edge.yml`).
+
+`cloudflared` runs with host networking so it can reach the 8081 loopback
+origin. Cloudflare's metrics documentation states that containerized
+instances otherwise default the Prometheus listener to `0.0.0.0` on the
+first available port from 20241 through 20245. The checked-in command pins
+that listener to `127.0.0.1:20241`; do not remove or wildcard the
+`--metrics` address. See <https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/monitor-tunnels/metrics/>.
 
 Owner setup, one time, before flipping the gate:
 

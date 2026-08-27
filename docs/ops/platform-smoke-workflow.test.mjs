@@ -21,7 +21,7 @@ test("smoke is callable, dispatchable, production-gated, and read-only by design
   assert.match(smoke, /if: vars\.DEPLOY_ENABLED == 'true'/);
   // Read-only: probes only -- no scp, no mutation of the box. ssh alone is
   // no longer forbidden outright (issue #185's broker probe uses it, since
-  // the broker has no Serve mount -- see the dedicated test below for what
+  // the broker has no nginx route -- see the dedicated test below for what
   // stays true about that one exception), but every other read-only-over-
   // HTTPS invariant is unchanged: no key material, no secrets beyond the
   // tailnet OAuth client already used to join.
@@ -68,8 +68,8 @@ test("the broker probe is the ONLY ssh usage, keyless, and strictly read-only (c
   assert.match(smoke, /probe_ssh "Broker" "http:\/\/127\.0\.0\.1:8300\/healthz"/);
 });
 
-test("the probe map covers every mounted unit through the shared origin", () => {
-  // One probe per serve mount (runbook route table). Losing one silently
+test("the probe map covers every nginx-routed unit through the shared origin", () => {
+  // One probe per nginx route family. Losing one silently
   // un-verifies that unit on every future deploy.
   for (const probePath of ["/healthz", '"/"', "/api/healthz", "/api/brain/health", "/life/", "/life/api/healthz"]) {
     assert.ok(smoke.includes(probePath), `missing probe: ${probePath}`);
@@ -88,7 +88,7 @@ test("LifeOS probes are gated on the cutover switch, not skipped forever", () =>
   assert.match(smoke, /skipped \(pre-cutover\)/);
 });
 
-test("the broker probe is gated behind BROKER_DEPLOY_ENABLED, not run unconditionally (issue #185)", () => {
+test("the unrouted broker probe is gated behind BROKER_DEPLOY_ENABLED, not run unconditionally (issue #185)", () => {
   // The broker has never been deployed until the owner provisions Infisical
   // /platform/broker/ and confirms it live -- unlike Shell/Handler A/Brain,
   // which have been continuously live since earlier milestones and are

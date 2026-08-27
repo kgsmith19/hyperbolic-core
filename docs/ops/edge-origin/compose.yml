@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
     network_mode: host
     profiles: ["cloudflare"]
-    command: tunnel --no-autoupdate run
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:20241 run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
