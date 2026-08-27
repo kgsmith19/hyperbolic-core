@@ -131,6 +131,7 @@ http {
   server {
     listen 8080;
     server_name _;
+    absolute_redirect off;
 
     location = /healthz {
       default_type text/plain;
@@ -241,6 +242,13 @@ async function assertResponse(baseUrl, requestPath, expected) {
       `${requestPath}: content type`,
     );
   }
+  if (expected.notContentType !== undefined) {
+    assert.doesNotMatch(
+      response.headers.get("content-type") ?? "",
+      expected.notContentType,
+      `${requestPath}: content type`,
+    );
+  }
   if (expected.location !== undefined) {
     const location = response.headers.get("location") ?? "";
     if (expected.location instanceof RegExp) {
@@ -286,6 +294,13 @@ test("the bare /life mount redirects permanently to the canonical LifeOS prefix"
     "location = /life {",
   );
   assert.match(body, /return 308 \/life\/;/);
+});
+
+test("the real-nginx fixture keeps every canonical redirect relative", () => {
+  assert.equal(
+    countOccurrences(privateGatewayConfig(), "absolute_redirect off;"),
+    1,
+  );
 });
 
 test("asset-like paths with trailing slashes have an explicit 404 owner", () => {
@@ -441,7 +456,7 @@ test(
 
       await assertResponse(baseUrl, "/life", {
         status: 308,
-        location: /\/life\/$/,
+        location: "/life/",
       });
       const redirectedLife = await fetch(`${baseUrl}/life`);
       assert.equal(redirectedLife.status, 200, "/life: eventual status");
@@ -507,7 +522,7 @@ test(
         await assertResponse(baseUrl, requestPath, {
           status: 418,
           body,
-          contentType: /^text\/plain\b/,
+          notContentType: /^text\/html\b/,
         });
       }
 
@@ -518,7 +533,7 @@ test(
       ]) {
         await assertResponse(baseUrl, requestPath, {
           status: 308,
-          location: new RegExp(`${canonicalPath}$`),
+          location: canonicalPath,
         });
         const redirectedApi = await fetch(`${baseUrl}${requestPath}`);
         assert.equal(
