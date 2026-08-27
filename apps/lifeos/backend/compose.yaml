@@ -1,6 +1,6 @@
 # Production runtime on the VPS (docs/runbook.md). The API listens on
-# loopback only; `tailscale serve` fronts it with HTTPS on the tailnet —
-# nothing is reachable from the public internet.
+# loopback only; nginx proxies it through the private origin, and Tailscale
+# Serve targets only nginx's root. Nothing is reachable from the public internet.
 services:
   api:
     # Every deploy records LIFEOS_IMAGE (a sha tag) in the project-directory

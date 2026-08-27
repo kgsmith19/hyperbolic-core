@@ -18,7 +18,7 @@ Project references:
 | `LIFEOS_SUPABASE_URL` | `https://<ref>.supabase.co` — issuer/JWKS derive from it. |
 | `LIFEOS_OWNER_USER_ID` | UUID of the single allowed Supabase Auth user. |
 | `LIFEOS_AUTH_AUDIENCE` | Optional, defaults to `authenticated`. |
-| `LIFEOS_ROOT_PATH` | Optional (m2-08). Set to `/life/api` when this API is reached through the one-origin `tailscale serve` mount (`docs/ops/tailscale-serve-apply.sh`'s `/life/api/` route), which forwards the full path rather than stripping it. Unset in the standalone-repo deploy shape, where the API is the origin's whole path space. See "Auth re-point to the platform IdP (m2-08)" below. |
+| `LIFEOS_ROOT_PATH` | Optional (m2-08). Set to `/life/api` when this API is reached through nginx's private `/life/api/` location (`docs/ops/edge-origin/nginx.conf`), which forwards the full path rather than stripping it. Unset in the standalone-repo deploy shape, where the API is the origin's whole path space. See "Auth re-point to the platform IdP (m2-08)" below. |
 | `LIFEOS_SUPABASE_PUBLISHABLE_KEY` | Only for `scripts/get_token.py`. |
 | `LIFEOS_ICS_URLS` | Comma-separated ICS feed URLs for the ingestion job (ADR 012). |
 | `LIFEOS_BRIEFING_TZ` | Optional IANA zone deciding the briefing's "today"; defaults to UTC. |
@@ -250,7 +250,8 @@ adduser --disabled-password --gecos "" deploy
 usermod -aG docker deploy
 mkdir -p /home/deploy/lifeos && chown deploy:deploy /home/deploy/lifeos
 tailscale up --ssh --advertise-tags=tag:prod   # approve the node in the admin console
-tailscale serve --bg --https=443 http://127.0.0.1:8000
+# After nginx is deployed, apply the one-root proxy through the root repo's
+# Ops Serve Apply workflow; do not configure application paths here.
 ufw default deny incoming && ufw default allow outgoing
 ufw allow in on tailscale0 && ufw enable
 ```
@@ -261,9 +262,11 @@ Then as `deploy`:
 # No manual .env here either: every deploy renders lifeos/.env from
 # Infisical (chmod 600) — see the Infisical section below.
 ```
-In the admin console: disable key expiry for the VPS node. The API is then
-`https://<vps-name>.<tailnet>.ts.net` on every signed-in device (that name is
-`DEPLOY_HOST`).
+In the admin console: disable key expiry for the VPS node. Tailscale Serve
+owns only the origin root after that workflow runs; nginx owns `/life/api/`
+and the other application paths. The API is then
+`https://<vps-name>.<tailnet>.ts.net/life/api/` on every signed-in device
+(that host name is `DEPLOY_HOST`).
 
 ### 4. Infisical — human required (the one protected spot, ADR 009)
 1. Sign up at https://app.infisical.com (free tier), create org + project
@@ -372,8 +375,9 @@ all, since its session was reading the OLD project's Auth):
    TCP connection — it comes from the deploy topology one layer down: the
    API container binds `127.0.0.1:8000` only (`docker-compose`, `EXPOSE
    8000` in `Dockerfile` is documentation, not a bind), and
-   `docs/ops/tailscale-serve-apply.sh`'s `/life/api/` route is the only
-   thing in front of it that can reach a non-loopback network at all. An
+   nginx's loopback-only private origin is the only component in front of it;
+   Tailscale Serve proxies only the origin root to nginx and never owns the
+   `/life/api/` path. An
    operator who sets `LIFEOS_AUTH_MODE=disabled` on a box where something
    ELSE (a stray `--host 0.0.0.0`, a compose port mapping) exposes 8000
    beyond loopback has broken the deploy topology's own invariant, which

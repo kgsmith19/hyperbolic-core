@@ -18,6 +18,21 @@ const serveWorkflow = read(".github/workflows/ops-serve-apply.yml");
 const lifeosWorkflow = read(".github/workflows/lifeos-deploy.yml");
 const smokeWorkflow = read(".github/workflows/platform-smoke.yml");
 const runbook = normalize(read("docs/ops/runbook.md"));
+const activeRouteOwners = new Map(
+  [
+    "apps/lifeos/backend/src/api/main.py",
+    "apps/lifeos/backend/tests/api/test_root_path.py",
+    "apps/lifeos/backend/docs/runbook.md",
+    "apps/lifeos/backend/compose.yaml",
+    ".github/workflows/deploy.yml",
+    "services/llm-handler/src/server.ts",
+    "services/llm-handler/tests/server.test.ts",
+    "services/llm-handler/compose.yaml",
+    "services/brain/AGENTS.md",
+    "services/brain/src/server.ts",
+    "services/brain/tests/server.test.ts",
+  ].map((relativePath) => [relativePath, normalize(read(relativePath))]),
+);
 
 function extractBlocks(text, openingPattern) {
   const lines = text.split("\n");
@@ -153,11 +168,23 @@ test("active deployment guidance assigns path ownership to nginx, never legacy S
   assert.match(activeRunbook, /nginx owns all path routing/);
 });
 
+test("active application source and nested guidance cannot reassign API paths to Tailscale Serve", () => {
+  const legacyOwnership =
+    /tailscale-serve-forwarded|tailscale serve (?:forwards|STRIPS)|(?:serve|Serve) (?:mount|route table)|Serve table mounts|tailscale-serve-apply\.sh.{0,80}\/(?:api|life\/api)\//s;
+
+  for (const [relativePath, source] of activeRouteOwners) {
+    assert.doesNotMatch(source, legacyOwnership, relativePath);
+    assert.match(source, /nginx/i, `${relativePath} must name nginx as the active path owner`);
+  }
+});
+
 test("Compose gives nginx host-loopback reachability without opening a wildcard listener", () => {
   assert.match(compose, /edge-origin:\s*[\s\S]*?network_mode: host/);
   assert.match(compose, /\.\/private_spa_locations\.conf:\/etc\/nginx\/private_spa_locations\.conf:ro/);
   assert.doesNotMatch(compose, /0\.0\.0\.0/);
   assert.doesNotMatch(compose, /^\s+ports:/m);
+  assert.doesNotMatch(compose, /never listens on anything/);
+  assert.match(compose, /metrics listener binds only 127\.0\.0\.1:20241/);
 });
 
 test("Serve preflights nginx and replaces the old table with one root proxy", () => {

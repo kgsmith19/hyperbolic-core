@@ -115,14 +115,10 @@ export function createHandler(config: HandlerConfig, serviceRoleKey: string) {
     // result is `string | undefined`, which cannot index the route table.
     const route = (req.url ?? "/").split("?")[0] ?? "/";
 
-    // /healthz: the loopback-only Docker healthcheck and
-    // tailscale-serve-apply.sh's preflight both curl 127.0.0.1:8200
-    // directly, bypassing tailscale entirely, matching every other unit's
-    // bare-/healthz convention. /api/healthz: tailscale serve forwards the
-    // FULL incoming path unchanged for a path-mounted target (does not
-    // strip the /api/ mount prefix -- confirmed against this repo's own
-    // apps/lifeos/backend/tests/api/test_root_path.py, which documents the
-    // identical mechanic for LifeOS's /life/api/ mount), so an operator
+    // /healthz: the loopback-only Docker healthcheck curls 127.0.0.1:8200
+    // directly, matching every other unit's bare-/healthz convention.
+    // /api/healthz: nginx's private /api/ location forwards the FULL incoming
+    // path unchanged because proxy_pass has no URI suffix, so an operator
     // checking health through the real public origin needs this second,
     // prefixed alias to reach the same handler.
     if ((route === "/healthz" || route === "/api/healthz") && req.method === "GET") {
@@ -137,9 +133,8 @@ export function createHandler(config: HandlerConfig, serviceRoleKey: string) {
       return;
     }
 
-    // /api/v1/*, not bare /v1/*: docs/ops/runbook.md's Tailscale Serve
-    // table mounts Handler A's whole loopback origin at /api/ with the full
-    // incoming path forwarded unchanged (same mechanic /api/healthz's own
+    // /api/v1/*, not bare /v1/*: nginx's private /api/ location forwards the
+    // full incoming path unchanged (same mechanic /api/healthz's own
     // comment above documents), and /api/intake/submit already established
     // the precedent of a single canonical /api/-prefixed path with no bare
     // alias (unlike /healthz, which genuinely needs both for the loopback

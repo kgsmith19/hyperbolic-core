@@ -139,10 +139,8 @@ class _StripRootPathMiddleware:
     docs/planning/05-a-hyperbolic-core.md section 4; 10-cicd-deployment.md
     section 4: "LifeOS API; FastAPI `root_path` handles the prefix").
 
-    `tailscale serve --set-path=/life/api/ http://127.0.0.1:8000` forwards
-    the FULL incoming path to this upstream — it does not strip the mount
-    prefix itself (that is standard `tailscale serve` behavior for an HTTP
-    backend, not something this app controls) — so a browser request for
+    nginx's private `/life/api/` location forwards the FULL incoming path
+    because its `proxy_pass` has no URI suffix — so a browser request for
     `/life/api/types` arrives here with `scope["path"] == "/life/api/types"`,
     not `/types`. FastAPI's `root_path` constructor argument alone does NOT
     make the router strip a prefix from the incoming path: Starlette only

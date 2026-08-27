@@ -30,8 +30,9 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Outbound-only tunnel to Cloudflare's edge (#169). No `ports:` -- it
-  # never listens on anything, it only dials out. Ingress is a single
+  # Outbound-only application tunnel to Cloudflare's edge (#169). No `ports:`
+  # publish an ingress socket; its metrics listener binds only 127.0.0.1:20241.
+  # Application tunnel traffic only dials out. Ingress is a single
   # blanket rule pointed at edge-origin, configured in the Cloudflare
   # dashboard when the owner creates the tunnel (a token-based,
   # remotely-managed tunnel needs no local ingress config file); all

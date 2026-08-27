@@ -55,12 +55,10 @@ in-process instead, per 08's forced decision 5).
   network round trip.
 - `/healthz`, `/health`, and `/api/brain/health` must all keep working
   and stay unauthenticated: `/healthz` is the loopback Docker
-  healthcheck; `/health` is what an origin request for
-  `/api/brain/health` actually arrives as, because tailscale serve
-  STRIPS the mount prefix (`/api/brain/`) before proxying
-  (tailscale/tailscale#6571; Issue #332 established this live);
-  `/api/brain/health` is the kept alias, harmless under either proxy
-  semantic.
+  healthcheck; nginx's private `/api/brain/` location forwards
+  `/api/brain/health` unchanged for the shared-origin smoke probe; `/health`
+  is the retained compatibility alias from the former per-path Serve
+  topology, not an actively routed path.
 - Every S1/S2 Brain failure must produce a new case in `evals/cases/`
   before its fix merges (07 section 7.11).
 
@@ -104,8 +102,8 @@ docker build -f services/brain/Dockerfile .   # context is the monorepo root
 ## 📚 Documentation
 
 `docs/ops/runbook.md`'s "Brain deployment" section covers the deploy
-pipeline, required Infisical secrets (`/brain/`), manual rollback, and a
-documented known gap in `/brain/stream` external tailscale routing.
+pipeline, required Infisical secrets (`/brain/`), manual rollback, and nginx's
+private `/api/brain/` route contract.
 
 ## ✅ Completion
 

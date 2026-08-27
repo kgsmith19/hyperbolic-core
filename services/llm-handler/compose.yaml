@@ -1,7 +1,7 @@
 # Production runtime on the VPS (docs/ops/runbook.md). Shipped by
 # deploy.yml's deploy-llm-handler job to deploy@host:llm-handler/compose.yaml
 # -- mirrors apps/lifeos/backend/compose.yaml's shape exactly (same
-# loopback-only + tailscale-serve-fronts-it posture, same image-tag-from-env
+# loopback-only + nginx-private-origin posture, same image-tag-from-env
 # convention, same healthcheck-then-log-rotation pattern).
 services:
   llm-handler:
