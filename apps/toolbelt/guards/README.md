@@ -21,10 +21,9 @@ stdin and a config file.
   every guard-config change; `guard.mjs` itself never writes its config.
 - `config.json` — the tracked base config: `enabled` and `secrets`, the
   parts that don't vary by machine.
-- `config.<profile>.json` — a tracked per-machine overlay carrying the
-  machine-varying parts (`runboxDir`, `protected`, `repos`); this repo's
-  `config.kyleg-machine.json` is the operator's own. See `config.example.json`
-  for the shape of both files without real values.
+- `config.<profile>.json` — a local, ignored per-machine overlay carrying the
+  machine-varying parts (`runboxDir`, `protected`, `repos`). Copy its shape
+  from `config.example.json`, fill in local values, and do not commit it.
 - `config-loader.mjs` — shared by `guard.mjs` and `cli.mjs`: resolves and
   shallow-merges the base + overlay pair described below.
 
@@ -37,12 +36,25 @@ Both files resolve their config the same way (`config-loader.mjs`):
    this module had a profile concept. Existing callers (tests, an embedding
    caller's subprocess calls) are unaffected by anything below.
 2. Otherwise, the tracked `config.json` colocated with the script (base) is
-   shallow-merged with a tracked per-machine overlay `config.<profile>.json`,
-   also colocated with the script, where `<profile>` is the `GUARDS_PROFILE`
-   environment variable if set, else the lowercased hostname. A missing
-   overlay merges as base-only — the secret globs (the read-blocking check)
-   still apply, but the machine-specific protected/repo rules are empty on an
-   unrecognized machine.
+   shallow-merged with a local, ignored per-machine overlay
+   `config.<profile>.json`, also colocated with the script. `<profile>` is the
+   `GUARDS_PROFILE` environment variable if set, else the lowercased hostname.
+   A missing overlay merges as base-only — the secret globs (the read-blocking
+   check) still apply, but the machine-specific protected/repo rules are empty
+   on an unrecognized machine.
+
+Create this machine's overlay once, from this directory. It writes the profile
+file the loader looks for, seeded from `config.example.json` — runbox, the
+protected path list, and per-repo cell ownership with its `alwaysAllowed`
+escape hatch — and refuses to overwrite an existing overlay:
+
+```bash
+node --input-type=module -e 'import { existsSync, readFileSync, writeFileSync } from "node:fs"; import { resolveProfile } from "./config-loader.mjs"; const f = `config.${resolveProfile()}.json`; if (existsSync(f)) throw new Error(`${f} already exists -- edit it instead`); const { _comment, ...overlay } = JSON.parse(readFileSync("config.example.json", "utf8"))["config.<profile>.json"]; writeFileSync(f, JSON.stringify(overlay, null, 2) + "\n"); console.log(`wrote ${f}`);'
+```
+
+Replace every placeholder path with a real local one. `node cli.mjs
+protected-add <path>` then edits that same overlay — it fails closed until the
+file exists — while `repos` cell ownership is edited by hand.
 
 There is no dependency on any particular directory layout beyond that — set
 `GUARDS_CONFIG` to point at a config anywhere, on any machine.
