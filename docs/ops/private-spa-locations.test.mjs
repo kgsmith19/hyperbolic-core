@@ -288,6 +288,24 @@ test("the bare /life mount redirects permanently to the canonical LifeOS prefix"
   assert.match(body, /return 308 \/life\/;/);
 });
 
+test("asset-like paths with trailing slashes have an explicit 404 owner", () => {
+  const config = readFileSync(spaInclude, "utf8");
+  const rejectingPatterns = [...config.matchAll(/location\s+~\*\s+([^\s{]+)\s*\{([^}]*)\}/g)]
+    .filter(([, , body]) => /\breturn\s+404;/.test(body))
+    .map(([, pattern]) => new RegExp(pattern, "i"));
+
+  for (const requestPath of [
+    "/missing.js/",
+    "/assets/chunks/missing.js/",
+    "/life/assets/missing.js/",
+  ]) {
+    assert.ok(
+      rejectingPatterns.some((pattern) => pattern.test(requestPath)),
+      `${requestPath} must match an explicit 404 location`,
+    );
+  }
+});
+
 test("the private gateway fixture keeps bare API mounts out of both SPA fallbacks", () => {
   const config = privateGatewayConfig();
   for (const [requestPath, canonicalPath] of [
@@ -456,16 +474,21 @@ test(
 
       for (const requestPath of [
         "/missing.js",
+        "/missing.js/",
         "/missing.css",
         "/missing.png",
         "/missing.js.map",
         "/favicon.ico",
         "/fonts/missing.woff2",
+        "/assets/chunks/missing.js/",
+        "/assets/shell.js/",
         "/life/assets/missing.js",
+        "/life/assets/missing.js/",
         "/life/assets/missing.css",
         "/life/assets/missing.png",
         "/life/assets/missing.js.map",
         "/life/favicon.ico",
+        "/life/assets/life.js/",
       ]) {
         await assertResponse(baseUrl, requestPath, { status: 404 });
       }
@@ -473,10 +496,13 @@ test(
       for (const [requestPath, body] of [
         ["/api/", "handler-api"],
         ["/api/missing.js", "handler-api"],
+        ["/api/missing.js/", "handler-api"],
         ["/api/brain/", "brain-api"],
         ["/api/brain/missing.css", "brain-api"],
+        ["/api/brain/missing.css/", "brain-api"],
         ["/life/api/", "life-api"],
         ["/life/api/missing.png", "life-api"],
+        ["/life/api/missing.png/", "life-api"],
       ]) {
         await assertResponse(baseUrl, requestPath, {
           status: 418,
