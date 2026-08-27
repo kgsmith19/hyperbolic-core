@@ -231,7 +231,11 @@ test("real assets are served as assets while missing assets remain 404", async (
   }
   for (const missing of [
     "/assets/does-not-exist.js",
+    "/assets/does-not-exist.js/",
     "/life/assets/does-not-exist.js",
+    "/life/assets/does-not-exist.js/",
+    `${shellAsset}/`,
+    `${lifeAsset}/`,
   ]) {
     const response = await request.get(missing);
     expect(response.status(), missing).toBe(404);
@@ -246,8 +250,11 @@ test("API failures never fall through to either SPA document", async ({
 }) => {
   for (const apiPath of [
     "/api/not-a-route",
+    "/api/not-a-route.js/",
     "/api/brain/not-a-route",
+    "/api/brain/not-a-route.css/",
     "/life/api/not-a-route",
+    "/life/api/not-a-route.png/",
   ]) {
     const response = await request.get(apiPath);
     await expectStubApiResponse(response, apiPath);
