@@ -15,7 +15,7 @@ name: "Verify: LLM Review"
 #
 # OWNER-PROVISIONED PREREQUISITES. This cannot run until the owner has
 # created all of the following; none of them is agent-settable:
-#   - vars.REVIEW_PROVIDER              reviewer family: anthropic|openai|gemini
+#   - vars.REVIEW_PROVIDER              reviewer family: anthropic|openai|google
 #   - vars.REVIEW_MODEL                 exact model id served by that family
 #   - vars.DEV_PROVIDER                 coding-agent harness company that
 #                                       writes code here; required, and must

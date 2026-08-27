@@ -22,6 +22,8 @@ export {
 } from "./config.ts";
 export type { ReviewEnv } from "./config.ts";
 
+export { readCredentials, REVIEW_CREDENTIAL_ENV_VARS } from "./credentials.ts";
+
 export { SUBMIT_REVIEW_TOOL_NAME, submitReviewTool, submitReviewToolChoice } from "./schema.ts";
 
 export { buildSystemPrompt, buildUserMessage, DATA_NOT_INSTRUCTIONS_RULE } from "./prompt.ts";

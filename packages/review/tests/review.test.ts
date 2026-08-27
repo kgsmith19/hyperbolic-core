@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { CredentialsByProvider, LlmRequest, LlmResponse } from "@hyperbolic/llm";
+import type { CredentialsByProvider, LlmRequest, LlmResponse, Provider } from "@hyperbolic/llm";
 import type { ReviewContext } from "../src/context.ts";
 import { buildReviewRequest, ReviewInfrastructureError, runReview } from "../src/review.ts";
 import { SUBMIT_REVIEW_TOOL_NAME } from "../src/schema.ts";
@@ -209,31 +209,6 @@ test("runReview: a valid blocking finding survives orchestration and blocks", as
   assert.equal(verdict.findings[0]?.citation, "AGENTS.md > Test quality");
 });
 
-// Issue #354 follow-up. Behavior protected: the builder identity the config
-// resolved reaches the REQUEST -- the object actually handed to the client --
-// rather than stopping at a log line and a workflow env block. Defect caught:
-// a `resolveConfig` that validates provider separation and then discards the
-// values, which leaves the gate unable to state after the fact whose work it
-// judged. The fixture's builder pair is deliberately distinct from the
-// reviewer pair on both axes, so a wiring bug that copies the reviewer's own
-// provider/model into the provenance slot cannot pass.
-//
-// It rides on `metadata`, not in the prompt, on purpose: `metadata` is
-// `@hyperbolic/llm`'s caller-side logging spine and is never transmitted, so
-// this records provenance without telling an adversarial reviewer who wrote
-// the code -- which would invite exactly the authorship-based reasoning the
-// system prompt forbids.
-test("buildReviewRequest: the request carries the builder identity as provenance", () => {
-  const request: LlmRequest = buildReviewRequest(config, context);
-
-  assert.deepEqual(request.metadata.provenance, {
-    provider: "anthropic",
-    model: "a-specific-builder-model-id",
-  });
-  assert.equal(request.provider, "openai", "the request still targets the REVIEWER");
-  assert.equal(request.model, "a-specific-model-id");
-});
-
 // The same claim asserted where it actually matters: on the request the client
 // receives. buildReviewRequest is pure and exported, so a test against it
 // alone would stay green if runReview stopped calling it or rebuilt the
@@ -251,8 +226,15 @@ test("runReview: the request handed to the client carries the builder identity",
   });
 
   assert.ok(seen !== undefined, "the client must have been called");
-  assert.deepEqual((seen as LlmRequest).metadata.provenance, {
-    provider: "anthropic",
-    model: "a-specific-builder-model-id",
-  });
+  const provenance = (seen as LlmRequest).metadata.provenance;
+  assert.ok(provenance !== undefined, "the request must carry provenance");
+  assert.deepEqual(provenance, { provider: "anthropic", model: "a-specific-builder-model-id" });
+
+  // Compile-time oracle, and the only kind available for this claim: the
+  // provenance provider must be the closed `Provider` union, not a bare
+  // string. If the field widened back to `string` this assignment would not
+  // typecheck -- an accident no runtime assertion in this file could catch,
+  // because every runtime value it could hold is a string either way.
+  const narrowed: Provider = provenance.provider;
+  assert.equal(narrowed, "anthropic");
 });

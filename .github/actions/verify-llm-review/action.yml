@@ -56,7 +56,7 @@ inputs:
     required: false
     default: ""
   review_provider:
-    description: Reviewer model family — anthropic|openai|gemini (vars.REVIEW_PROVIDER).
+    description: Reviewer model family — anthropic|openai|google (vars.REVIEW_PROVIDER).
     required: false
     default: ""
   review_model:
@@ -162,33 +162,17 @@ runs:
         npm ci --ignore-scripts
 
         # Reuse the canonical package validator before any credential is
-        # imported. The pinned workspace tsx dependency makes this explicit
-        # and reproducible on the vanilla CI runner.
-        npx --no-install tsx --eval <<'NODE'
-        import { writeFileSync } from "node:fs";
-        import { resolveConfig } from "./packages/review/src/config.ts";
-        const config = resolveConfig(process.env);
-        // Durable provenance, written by the canonical validator itself so the
-        // recorded identities are the RESOLVED ones -- canonicalized provider,
-        // byte-for-byte model -- with exactly one implementation of that
-        // resolution. The staging step copies this into the artifact the
-        // dialogue workflow reads; a job log expires, the record must not.
-        writeFileSync(
-          `${process.env.RUNNER_TEMP}/review-config.json`,
-          `${JSON.stringify(
-            {
-              reviewerProvider: config.reviewerProvider,
-              reviewerModel: config.reviewerModel,
-              builderProvider: config.builderProvider,
-              builderModel: config.builderModel,
-            },
-            null,
-            2
-          )}
-`
-        );
-        console.log(`Reviewer configuration present: provider=${config.reviewerProvider} model=${config.reviewerModel} builder=${config.builderProvider} builderModel=${config.builderModel}`);
-        NODE
+        # imported, and record what it resolved. The pinned workspace tsx
+        # dependency makes the runtime explicit and reproducible on the
+        # vanilla CI runner.
+        #
+        # A checked-in script rather than an inline heredoc, deliberately: a
+        # heredoc cannot be executed by a test, so the seam between what this
+        # step resolves and what the staged artifact carries had no oracle.
+        # docs/ops/llm-review-dialogue-workflow.test.mjs reads THIS command
+        # line out of this file and runs it for real, so deleting or renaming
+        # the producer fails a test instead of silently emptying the record.
+        npx --no-install tsx packages/review/bin/write-review-config.mjs "$RUNNER_TEMP/review-config.json"
 
     # Install dependencies after the credential-free preflight; lifecycle
     # scripts therefore never run with provider keys in the environment.
@@ -407,14 +391,31 @@ runs:
         # models a run never used is worse than one that admits it does not
         # know, and the consumer renders exactly that.
         provenance = None
+        why_absent = None
         config_path = os.path.join(os.environ["RUNNER_TEMP"], "review-config.json")
         try:
             with open(config_path) as handle:
                 provenance = json.load(handle)
         except FileNotFoundError:
-            pass
+            why_absent = "the preflight never wrote it"
         except (OSError, ValueError) as error:
-            print(f"::warning::Could not read the resolved review config: {error}", file=sys.stderr)
+            why_absent = f"it could not be read ({error})"
+        if not isinstance(provenance, dict):
+            if why_absent is None:
+                why_absent = "it is not a JSON object"
+            provenance = None
+
+        # A verdict exists but its provenance does not: the run judged something
+        # and cannot say with what. Say so out loud -- and only then, because a
+        # run that produced no verdict has nothing to be missing. Never a gate
+        # failure: the findings still have to reach the pull request, and the
+        # consumer renders `unknown` rather than a guess.
+        if os.environ["VERDICT_PRESENT"] == "true" and provenance is None:
+            print(
+                f"::warning::Staged a verdict with no resolved reviewer configuration ({why_absent}). "
+                "The pull request will report unknown identities; findings are unaffected.",
+                file=sys.stderr,
+            )
 
         json.dump(
             {

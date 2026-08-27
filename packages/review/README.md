@@ -34,9 +34,9 @@ named `AGENTS.md` section. Findings without both are discarded and cannot block.
 ```bash
 npm ci                                    # from the repo root
 
-export REVIEW_PROVIDER=gemini             # must differ from the builder family
+export REVIEW_PROVIDER=google             # must differ from the builder family
 export REVIEW_MODEL=<exact-model-id>      # required; never defaulted
-export REVIEW_GEMINI_API_KEY=<key>        # only the reviewer's key is needed
+export REVIEW_GEMINI_API_KEY=<key>        # google's key keeps its historical name
 export REVIEW_BUILDER_PROVIDER=anthropic  # required; the family that WROTE the change
 export DEV_MODEL=<exact-model-id>         # required; the exact model that wrote it
 

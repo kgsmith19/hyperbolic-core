@@ -8,13 +8,13 @@
 //     --base <sha> --head <sha> [--issue-body-file <path>] [--pr-body-file <path>] [--out <path>]
 //
 // Environment (see ../src/config.ts -- nothing here is defaulted silently):
-//   REVIEW_PROVIDER            reviewer provider family (anthropic|openai|gemini)
+//   REVIEW_PROVIDER            reviewer provider family (anthropic|openai|google)
 //   REVIEW_MODEL               exact model id served by REVIEW_PROVIDER
 //   REVIEW_BUILDER_PROVIDER    required; family that WROTE the code
 //   DEV_MODEL                  required; exact model id that WROTE the code
 //   REVIEW_ANTHROPIC_API_KEY   only the reviewer provider's key is required
 //   REVIEW_OPENAI_API_KEY
-//   REVIEW_GEMINI_API_KEY
+//   REVIEW_GEMINI_API_KEY      the google family's key keeps its historical name
 //
 // Exit codes, and why they are three and not two:
 //   0  reviewed, verdict = pass
@@ -28,7 +28,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
-import { gatherContext, resolveConfig, runReview } from "../src/index.ts";
+import { gatherContext, readCredentials, resolveConfig, runReview } from "../src/index.ts";
 
 const USAGE = `Usage: node packages/review/bin/review.mjs --base <sha> --head <sha> [--issue-body-file <path>] [--pr-body-file <path>] [--conversation-file <path>] [--out <path>]`;
 
@@ -59,24 +59,6 @@ function parseArgs(argv) {
     throw new Error(`--base and --head are both required.\n${USAGE}`);
   }
   return args;
-}
-
-// One env var per provider, read only for the provider actually being used.
-// Handing the client every key it could find would widen the blast radius of
-// this process for no benefit: the review makes exactly one call.
-function readCredentials(env, provider) {
-  const varName = {
-    anthropic: "REVIEW_ANTHROPIC_API_KEY",
-    openai: "REVIEW_OPENAI_API_KEY",
-    gemini: "REVIEW_GEMINI_API_KEY",
-  }[provider];
-  const apiKey = (env[varName] ?? "").trim();
-  if (apiKey === "") {
-    throw new Error(
-      `${varName} is unset or empty, but REVIEW_PROVIDER="${provider}" needs it. The review cannot run; failing closed.`
-    );
-  }
-  return { [provider]: { apiKey } };
 }
 
 function renderHumanSummary(verdict) {

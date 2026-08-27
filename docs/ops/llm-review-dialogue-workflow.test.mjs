@@ -79,12 +79,18 @@ test("AI Review validates provider-company separation before reading credentials
   assert.ok(setupNode < preflight, "Node setup must precede the reviewer preflight");
   assert.ok(preflight < credentials, "provider separation must pass before credentials are read");
 
-  const preflightEnd = reviewActionYaml.indexOf("\n    - name:", preflight + 1);
-  const preflightBlock = reviewActionYaml.slice(preflight, preflightEnd);
+  const preflightBlock = stepBlock(reviewActionYaml, PREFLIGHT_STEP);
+  // The preflight now calls a checked-in producer rather than an inline
+  // heredoc, so the claim is asserted where it moved to: whatever script the
+  // action names must be the one importing the canonical validator. Following
+  // the action's own reference rather than a hardcoded path is what keeps a
+  // rename in either file from quietly detaching this oracle.
+  const producerPath = producerCommandLine().match(/packages\/review\/bin\/[\w.-]+\.mjs/)?.[0];
+  assert.ok(producerPath, "the preflight must invoke a checked-in provenance producer");
   assert.match(
-    preflightBlock,
-    /import \{ resolveConfig \} from ["']\.\/packages\/review\/src\/config\.ts["']/,
-    "the preflight must reuse packages/review's company-aware validator"
+    readFileSync(path.join(root, producerPath), "utf8"),
+    /import \{ resolveConfig \} from ["']\.\.\/src\/config\.ts["']/,
+    "the preflight's producer must reuse packages/review's company-aware validator"
   );
   assert.doesNotMatch(
     preflightBlock,
@@ -108,6 +114,24 @@ test("AI Review validates provider-company separation before reading credentials
 // reviewer credential, and calls a model to review a change whose author was
 // never stated. So the step's own `run:` body is extracted and executed.
 //
+// Git Bash is not always on PATH for the process that launched node on
+// Windows, so it is discovered rather than assumed. A miss fails the test that
+// needs it, naming what was tried -- never a skip, which would silently turn
+// every shell-boundary oracle in this file into a no-op.
+let discoveredBash;
+function bash() {
+  const candidates = ["bash", "C:/Program Files/Git/bin/bash.exe", "C:/Program Files (x86)/Git/bin/bash.exe"];
+  if (discoveredBash === undefined) {
+    discoveredBash =
+      candidates.find((candidate) => {
+        const probe = spawnSync(candidate, ["-c", "exit 0"], { encoding: "utf8" });
+        return probe.error === undefined && probe.status === 0;
+      }) ?? null;
+  }
+  assert.ok(discoveredBash !== null, `no usable bash found; tried: ${candidates.join(", ")}`);
+  return discoveredBash;
+}
+
 // `npm` and `npx` are stubbed as shell FUNCTIONS sourced ahead of the script
 // rather than as PATH entries: a function shadows the real binary inside the
 // very shell that runs the step's unmodified text, and it sidesteps the MSYS
@@ -123,14 +147,14 @@ function runPreflightStep(stepEnv) {
   const npmMarker = path.join(dir, "npm-was-called");
   const npxMarker = path.join(dir, "npx-was-called");
 
-  writeFileSync(scriptPath, extractStepShell(reviewActionYaml, "Preflight · Verify the reviewer is configured"), "utf8");
+  writeFileSync(scriptPath, extractStepShell(reviewActionYaml, PREFLIGHT_STEP), "utf8");
   writeFileSync(
     wrapperPath,
     ['npm() { : > "$NPM_MARKER"; }', 'npx() { : > "$NPX_MARKER"; }', '. "$PREFLIGHT_SCRIPT"', ""].join("\n"),
     "utf8"
   );
 
-  const result = spawnSync("bash", [wrapperPath], {
+  const result = spawnSync(bash(), [wrapperPath], {
     encoding: "utf8",
     env: {
       PATH: process.env.PATH,
@@ -158,6 +182,9 @@ function runPreflightStep(stepEnv) {
 // The six repository variables the step reads, all present. Individual tests
 // blank out the ones under test.
 const PROVISIONED_PREFLIGHT_ENV = {
+  // Always set on a GitHub-hosted runner, and the producer command expands it,
+  // so `set -u` makes its absence an error rather than an empty path.
+  RUNNER_TEMP: os.tmpdir(),
   IDENTITY_ID: "an-infisical-identity",
   PROJECT_SLUG: "a-project-slug",
   REVIEW_PROVIDER: "openai",
@@ -169,9 +196,7 @@ const PROVISIONED_PREFLIGHT_ENV = {
 test("AI Review refuses a missing builder provider or model before importing any credential", () => {
   // The wiring oracle first: executing the step with an env this test invents
   // would prove nothing if the action never passed those values in.
-  const preflightStart = reviewActionYaml.indexOf("- name: Preflight · Verify the reviewer is configured");
-  const preflightEnd = reviewActionYaml.indexOf("\n    - name:", preflightStart + 1);
-  const preflightBlock = reviewActionYaml.slice(preflightStart, preflightEnd);
+  const preflightBlock = stepBlock(reviewActionYaml, PREFLIGHT_STEP);
   assert.match(
     preflightBlock,
     /DEV_MODEL:\s*\$\{\{ inputs\.dev_model \}\}/,
@@ -222,27 +247,28 @@ test("AI Review preflight proceeds past the variable check once every builder va
 //
 // The staging step is executed for real, exactly as extracted, so a test
 // cannot pass against a step that merely mentions the fields in a comment.
-function runStagingStep({ files, stepEnv }) {
-  const runnerTemp = mkdtempSync(path.join(os.tmpdir(), "issue-354-staging-"));
+function runStagingStep({ files, stepEnv, runnerTemp }) {
+  const dir = runnerTemp ?? mkdtempSync(path.join(os.tmpdir(), "issue-354-staging-"));
   for (const [name, contents] of Object.entries(files)) {
-    writeFileSync(path.join(runnerTemp, name), JSON.stringify(contents), "utf8");
+    writeFileSync(path.join(dir, name), typeof contents === "string" ? contents : JSON.stringify(contents), "utf8");
   }
 
-  const scriptPath = path.join(runnerTemp, "stage.sh");
+  const scriptPath = path.join(dir, "stage.sh");
   writeFileSync(scriptPath, extractStepShell(reviewActionYaml, "Review · Stage the verdict for the dialogue workflow"), "utf8");
 
-  const result = spawnSync("bash", [scriptPath], {
+  const result = spawnSync(bash(), [scriptPath], {
     encoding: "utf8",
-    env: { PATH: process.env.PATH, RUNNER_TEMP: runnerTemp, ...stepEnv },
+    env: { PATH: process.env.PATH, RUNNER_TEMP: dir, ...stepEnv },
   });
 
-  const metaPath = path.join(runnerTemp, "llm-review-artifact", "review-meta.json");
+  const metaPath = path.join(dir, "llm-review-artifact", "review-meta.json");
   const observed = {
     status: result.status,
+    stdout: result.stdout ?? "",
     stderr: result.error ? `${result.error.message}\n${result.stderr ?? ""}` : (result.stderr ?? ""),
     meta: existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, "utf8")) : null,
   };
-  rmSync(runnerTemp, { recursive: true, force: true });
+  if (runnerTemp === undefined) rmSync(dir, { recursive: true, force: true });
   return observed;
 }
 
@@ -254,43 +280,124 @@ const STAGING_ENV = {
 };
 
 // The resolved config's builder model is opaque provenance, so the sentinel is
-// trim-sensitive and mixed-case: a staging step that re-derives the value from
-// a shell variable, or normalizes it on the way through, cannot pass.
-const RESOLVED_CONFIG = {
-  reviewerProvider: "openai",
-  reviewerModel: "gpt-5-mini",
-  builderProvider: "anthropic",
-  builderModel: "  Claude-OPUS-5.1@2026-08\t",
+// padded and mixed-case end to end: any producer or staging step that trims,
+// lowercases, or re-derives the value from a shell variable fails here.
+const PRODUCER_ENV = {
+  REVIEW_PROVIDER: "openai",
+  REVIEW_MODEL: "gpt-5-mini",
+  REVIEW_BUILDER_PROVIDER: "ANTHROPIC",
+  DEV_MODEL: "  Claude-OPUS-5.1@2026-08\t",
 };
 
-test("the staged artifact carries the resolved reviewer and builder identities verbatim", () => {
-  const observed = runStagingStep({
-    files: { "review-verdict.json": { verdict: "pass" }, "review-config.json": RESOLVED_CONFIG },
-    stepEnv: STAGING_ENV,
-  });
+const RESOLVED_PROVENANCE_KEYS = ["builderModel", "builderProvider", "reviewerModel", "reviewerProvider"];
 
-  assert.equal(observed.status, 0, `the staging step must succeed: ${observed.stderr}`);
-  assert.equal(observed.meta?.verdictPresent, true);
-  assert.deepEqual(
-    observed.meta?.provenance,
-    RESOLVED_CONFIG,
-    "the artifact must carry what the canonical validator resolved, byte for byte"
+// The producer is located BY READING THE ACTION, not by hardcoding a path
+// here. That is the whole point: a test that names the script itself stays
+// green when the action stops calling it, and a test that stubs the runtime
+// stays green when the script is deleted. Reading the command the action
+// actually runs makes both of those a failure.
+function producerCommandLine() {
+  const line = stepBlock(reviewActionYaml, PREFLIGHT_STEP)
+    .split("\n")
+    .map((raw) => raw.replace(/\r$/, "").trim())
+    .find((raw) => !raw.startsWith("#") && raw.includes("review-config.json"));
+  assert.ok(line, "the preflight must run a command that produces review-config.json");
+  return line;
+}
+
+test("the action's provenance producer is a real script the action actually invokes", () => {
+  const command = producerCommandLine();
+  const scriptPath = command.match(/packages\/review\/bin\/[\w.-]+\.mjs/)?.[0];
+  assert.ok(
+    scriptPath,
+    `the preflight must invoke a checked-in producer script, not an inline heredoc: ${command}`
+  );
+  assert.ok(
+    existsSync(path.join(root, scriptPath)),
+    `${scriptPath} is named by verify-llm-review/action.yml but does not exist on disk`
   );
 });
 
-// Fail closed, and visibly. When the preflight never got far enough to resolve
-// a config there is nothing true to say about which models ran, and the one
-// unacceptable answer is a plausible guess: a footer that names models the run
-// never used is worse than one that admits it does not know.
-test("a run with no resolved config stages an explicitly absent provenance, never a guess", () => {
-  const observed = runStagingStep({
-    files: {},
-    stepEnv: { ...STAGING_ENV, REVIEW_OUTCOME: "failure" },
+// Runs the producer exactly as the action runs it -- same command line, same
+// runtime -- into a real RUNNER_TEMP, then runs the real staging step over that
+// same directory. Nothing is hand-seeded, so deleting or renaming the producer,
+// changing its key names, or breaking either half of the seam fails here.
+function runProducer(runnerTemp, producerEnv) {
+  return spawnSync(bash(), ["-c", producerCommandLine()], {
+    cwd: root,
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, RUNNER_TEMP: runnerTemp, ...producerEnv },
   });
+}
+
+test("producer to artifact: the resolved config reaches review-meta.json with exact keys, byte for byte", () => {
+  const runnerTemp = mkdtempSync(path.join(os.tmpdir(), "issue-354-seam-"));
+  try {
+    const produced = runProducer(runnerTemp, PRODUCER_ENV);
+    assert.equal(produced.status, 0, `the producer must succeed: ${produced.stderr}`);
+
+    const configPath = path.join(runnerTemp, "review-config.json");
+    assert.ok(existsSync(configPath), "the producer must write review-config.json where the action names it");
+
+    const staged = runStagingStep({
+      runnerTemp,
+      files: { "review-verdict.json": { verdict: "pass" } },
+      stepEnv: STAGING_ENV,
+    });
+    assert.equal(staged.status, 0, `the staging step must succeed: ${staged.stderr}`);
+
+    assert.deepEqual(
+      Object.keys(staged.meta.provenance).sort(),
+      RESOLVED_PROVENANCE_KEYS,
+      "exactly the four resolved fields, no more and no fewer"
+    );
+    assert.deepEqual(staged.meta.provenance, {
+      reviewerProvider: "openai",
+      reviewerModel: "gpt-5-mini",
+      builderProvider: "anthropic",
+      builderModel: PRODUCER_ENV.DEV_MODEL,
+    });
+  } finally {
+    rmSync(runnerTemp, { recursive: true, force: true });
+  }
+});
+
+// Fail closed, and VISIBLY. A verdict was produced but its provenance is
+// missing or unreadable: the run judged something and cannot say with what.
+// That must be said out loud, and it must not become a gate failure -- the
+// findings still have to reach the pull request.
+test("a verdict with no readable provenance stages null and warns, without failing the step", () => {
+  for (const [label, files] of [
+    ["absent", { "review-verdict.json": { verdict: "pass" } }],
+    ["malformed", { "review-verdict.json": { verdict: "pass" }, "review-config.json": "{ not json" }],
+  ]) {
+    const observed = runStagingStep({ files, stepEnv: STAGING_ENV });
+
+    assert.equal(observed.status, 0, `${label} provenance must not fail the step: ${observed.stderr}`);
+    assert.equal(observed.meta?.verdictPresent, true, `${label}: the verdict is still staged`);
+    assert.equal(observed.meta?.provenance, null, `${label} provenance must be null, never invented`);
+    assert.match(
+      `${observed.stdout}${observed.stderr}`,
+      /::warning::/,
+      `${label} provenance must be announced, not swallowed`
+    );
+  }
+});
+
+// The discriminating control for the warning above: when no verdict was
+// produced at all, absent provenance is the expected, unremarkable state --
+// the review did not run. Warning there would train readers to ignore it.
+test("a run that produced no verdict stages absent provenance without a warning", () => {
+  const observed = runStagingStep({ files: {}, stepEnv: { ...STAGING_ENV, REVIEW_OUTCOME: "failure" } });
 
   assert.equal(observed.status, 0, `staging must still run after a failed review: ${observed.stderr}`);
   assert.equal(observed.meta?.verdictPresent, false, "no verdict file means no verdict");
   assert.equal(observed.meta?.provenance, null, "absent provenance must be null, not invented");
+  assert.doesNotMatch(
+    `${observed.stdout}${observed.stderr}`,
+    /::warning::/,
+    "no verdict means absent provenance is expected, not noteworthy"
+  );
 });
 
 // The reviewer step runs packages/review's CLI, which resolves the SAME config
@@ -299,10 +406,7 @@ test("a run with no resolved config stages an explicitly absent provenance, neve
 // provider credential is already in the environment -- the preflight exists
 // precisely so that cannot happen.
 test("the model call receives the builder model, not only the builder provider", () => {
-  const reviewStep = reviewActionYaml.indexOf("- name: Review · Run the adversarial LLM reviewer");
-  assert.ok(reviewStep >= 0, "verify-llm-review/action.yml: reviewer step not found");
-  const reviewEnd = reviewActionYaml.indexOf("\n    - name:", reviewStep + 1);
-  const reviewBlock = reviewActionYaml.slice(reviewStep, reviewEnd);
+  const reviewBlock = stepBlock(reviewActionYaml, "Review · Run the adversarial LLM reviewer");
 
   assert.match(
     reviewBlock,
@@ -389,12 +493,20 @@ function extractScript(yamlText, fromIndex = 0) {
   return extractIndentedBlock(yamlText, "script: |", fromIndex);
 }
 
+// One named composite-action step, start to just before the next step.
+function stepBlock(yamlText, stepName) {
+  const start = yamlText.indexOf(`- name: ${stepName}`);
+  assert.ok(start >= 0, `verify-llm-review/action.yml: step "${stepName}" not found`);
+  const end = yamlText.indexOf("\n    - name:", start + 1);
+  return yamlText.slice(start, end < 0 ? undefined : end);
+}
+
 // The `run: |` body of a named composite-action step, ready to hand to bash.
 function extractStepShell(yamlText, stepName) {
-  const stepIndex = yamlText.indexOf(`- name: ${stepName}`);
-  assert.ok(stepIndex >= 0, `verify-llm-review/action.yml: step "${stepName}" not found`);
-  return `${extractIndentedBlock(yamlText, "run: |", stepIndex, { stripCarriageReturns: true })}\n`;
+  return `${extractIndentedBlock(stepBlock(yamlText, stepName), "run: |", 0, { stripCarriageReturns: true })}\n`;
 }
+
+const PREFLIGHT_STEP = "Preflight · Verify the reviewer is configured";
 
 // Wrapped exactly the way actions/github-script actually invokes a script:
 // as an AsyncFunction body, so a bare top-level `return` and `await` are both
@@ -992,6 +1104,15 @@ test("dialogue: the managed comment ends with a role/provider/model footer sourc
   assert.match(body, /_AI Review — role `review` · provider `gemini` · model `gemini-3-pro`_/);
 });
 
+// Extracts the COMPLETE run-reported footer line. Splitting the body first is
+// the point: an assertion run against the whole comment could not tell a value
+// that stayed on one line from one that spilled onto the next.
+function runReportedLine(body) {
+  const lines = body.split("\n").filter((line) => line.startsWith("_Run-reported configuration"));
+  assert.equal(lines.length, 1, `exactly one run-reported line expected, got ${lines.length}`);
+  return lines[0];
+}
+
 const RUN_PROVENANCE = {
   reviewerProvider: "openai",
   reviewerModel: "gpt-5-mini",
@@ -1036,8 +1157,8 @@ test("dialogue: the managed comment states this run's actual reviewer and builde
   const body = calls.createComment[0].body;
   assert.match(
     body,
-    /_This run — reviewer `openai`\/`gpt-5-mini` · builder `anthropic`\/`claude-opus-5`_/,
-    "both halves of the run's actual identity must appear"
+    /_Run-reported configuration — reviewer `openai`\/`gpt-5-mini` · builder `anthropic`\/`claude-opus-5`_/,
+    "both halves of the run-reported configuration must appear"
   );
 });
 
@@ -1077,8 +1198,92 @@ test("dialogue: a crafted provenance block cannot assert an unknown provider or 
   const body = calls.createComment[0].body;
   assert.doesNotMatch(body, /totally-trusted/, "an unrecognized provider company must not be echoed");
   assert.match(body, /reviewer `unknown`/, "it must degrade to unknown, not to a guess");
-  assert.doesNotMatch(body, /_This run[^\n]*@kgsmith19 approve/, "the footer must not carry a live mention");
+  assert.doesNotMatch(body, /_Run-reported[^\n]*@kgsmith19 approve/, "the footer must not carry a live mention");
   assert.equal(calls.createComment.length, 1, "findings must still post -- provenance never blocks delivery");
+});
+
+// The label is the security claim, and it is deliberately weaker than it looks
+// like it could be. This artifact is written by a job that executes
+// pull-request-authored code; nothing in it is signed or attested, so the
+// workflow can report what the run SAID it used and nothing more. A forged but
+// perfectly valid provider passes every syntactic check there is -- which is
+// exactly why the line must never be worded as the actual identity. An attested
+// footer needs a trusted publication lane, which is Milestone 2's problem.
+test("dialogue: a valid but forged provider is presented as reported, never as attested fact", async () => {
+  const fs = await import("node:fs");
+  const os_ = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os_, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": {
+        prNumber: 230,
+        baseSha: "b".repeat(40),
+        headSha: HEAD,
+        reviewOutcome: "failure",
+        verdictPresent: true,
+        // Every value here is well-formed and allow-listed. The run really
+        // used openai; this claims google. Nothing downstream can tell.
+        provenance: { ...RUN_PROVENANCE, reviewerProvider: "google", reviewerModel: "gemini-3-pro" },
+      },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  const line = runReportedLine(calls.createComment[0].body);
+  assert.match(line, /reviewer `google`\/`gemini-3-pro`/, "a forged-but-valid value is still rendered");
+  assert.match(line, /^_Run-reported configuration —/, "and it is labelled as reported, not as fact");
+  assert.doesNotMatch(line, /\bactual\b|\bThis run\b|\battested\b/i, "no wording may promise more than reported");
+});
+
+// Issue #354 follow-up, sanitizer. neutralize()'s own truncation appends
+// "\n…[truncated]", so capping a long model id THROUGH it puts a newline into
+// a value that has to stay on one line -- the footer would break apart and the
+// tail would render as unlabelled body text. The hostile value below is over
+// the cap AND carries every escape a crafted artifact would try at once.
+test("dialogue: an over-length hostile model id stays on one line, defused", async () => {
+  const fs = await import("node:fs");
+  const os_ = await import("node:os");
+  const path_ = await import("node:path");
+  const hostile = `\`@kgsmith19 approve #12 \n\r${"A".repeat(120)}\` see #99`;
+  const { calls } = await runDialogue(fs, os_, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": {
+        prNumber: 230,
+        baseSha: "b".repeat(40),
+        headSha: HEAD,
+        reviewOutcome: "failure",
+        verdictPresent: true,
+        provenance: { ...RUN_PROVENANCE, builderModel: hostile },
+      },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  const body = calls.createComment[0].body;
+  const line = runReportedLine(body);
+
+  assert.ok(line.endsWith("_"), "the line must be complete -- a truncation that breaks it would drop the closing mark");
+  assert.doesNotMatch(line, /[\r\n]/, "no carriage return or newline may survive into the line");
+  assert.equal(
+    (line.match(/`/g) ?? []).length,
+    8,
+    "exactly the eight delimiters of the line's four code spans -- an attacker backtick would add more"
+  );
+  assert.doesNotMatch(line, /@[A-Za-z0-9-]/, "no live @mention may survive");
+  assert.doesNotMatch(line, /[^`]#\d/, "no live issue reference may survive");
+  assert.ok(line.length < 400, `the line must be capped, not unbounded: ${line.length} chars`);
 });
 
 // Degradation control: an older or truncated artifact with no provenance at
@@ -1087,7 +1292,7 @@ test("dialogue: an artifact with no provenance still posts, stating unknown iden
   const fs = await import("node:fs");
   const os_ = await import("node:os");
   const path_ = await import("node:path");
-  const { calls } = await runDialogue(fs, os_, path_, {
+  const { calls, core } = await runDialogue(fs, os_, path_, {
     RUN_ID: "1",
     RUN_URL: "http://x",
     RUN_HEAD_SHA: HEAD,
@@ -1103,7 +1308,14 @@ test("dialogue: an artifact with no provenance still posts, stating unknown iden
   assert.equal(calls.createComment.length, 1, "an unknown identity must never stop findings from posting");
   assert.match(
     calls.createComment[0].body,
-    /_This run — reviewer `unknown`\/`unknown` · builder `unknown`\/`unknown`_/
+    /_Run-reported configuration — reviewer `unknown`\/`unknown` · builder `unknown`\/`unknown`_/
+  );
+  // `unknown` in a footer is honest but easy to skim past, so the run log says
+  // it too. The producer side warns as well; this is the consumer half, and it
+  // covers an artifact staged by an older run that never wrote provenance.
+  assert.ok(
+    core.warnings.some((warning) => /run-reported configuration/i.test(warning)),
+    `the missing configuration must be announced in the log: ${JSON.stringify(core.warnings)}`
   );
 });
 
