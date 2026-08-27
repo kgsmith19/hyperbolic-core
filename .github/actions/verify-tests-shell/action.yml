@@ -3,8 +3,10 @@ description: >-
   Shell's suite: builds packages/ui, type-checks and unit-tests apps/shell
   plus the packages/services it composes (platform-client, ui, llm, review,
   llm-handler, broker), runs the deployment-operator tooling tests and the
-  full Playwright e2e suite against a local PostgreSQL, then the production
-  build, health endpoint, and size budgets. Shared by pr-verify.yml's native
+  full Shell Playwright suite against a local PostgreSQL, then a production-
+  bundle composed-origin suite through the checked-in nginx config, followed
+  by the production build, health endpoint, and size budgets. Shared by
+  pr-verify.yml's native
   "Platform" job and shell-ci.yml's own
   merge_group/push/workflow_dispatch triggers, so the suite has exactly one
   source. Assumes the caller already checked out the repository.
@@ -121,6 +123,18 @@ runs:
       working-directory: apps/shell/frontend
       run: npx playwright test
 
+    - name: E2E · Install LifeOS production-bundle dependencies
+      shell: bash
+      working-directory: apps/lifeos/frontend
+      run: npm ci
+
+    - name: E2E · Run composed production-origin routing suite
+      # This suite builds both SPAs, starts the checked-in edge-origin nginx
+      # configuration in Docker, and drives them through one origin. Vite's
+      # dev/preview fallback is never involved.
+      shell: bash
+      run: npx playwright test --config docs/ops/composed-origin/playwright.config.ts
+
     - name: Build · Production build
       shell: bash
       run: npm run build:app --workspace=apps/shell
@@ -150,6 +164,8 @@ runs:
         path: |
           apps/shell/frontend/playwright-report/
           apps/shell/frontend/test-results/
+          docs/ops/composed-origin/playwright-report/
+          docs/ops/composed-origin/test-results/
         # `error`, not `ignore`: this step only runs on failure, and a failed
         # e2e run that produces no evidence is itself a defect worth failing
         # loudly on -- silently uploading nothing is what let #148 hide.

@@ -1,0 +1,22 @@
+services:
+  origin:
+    image: nginx:1.27-alpine
+    # Production nginx deliberately binds the container loopback. Linux host
+    # networking preserves that exact boundary; Docker port publishing would
+    # forward to the container's non-loopback address and could not reach it.
+    network_mode: host
+    volumes:
+      - ../edge-origin:/opt/hyperbolic-edge-origin:ro
+      - ../../../apps/shell/frontend/dist:/home/deploy/shell/current:ro
+      - ../../../apps/lifeos/frontend/dist:/home/deploy/lifeos-ui/current:ro
+    # Keep nginx's packaged mime.types, then overlay every checked-in .conf.
+    # Mounting the repo directory directly on /etc/nginx would hide that
+    # packaged file and make this fixture differ from the deployed image.
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        cp /opt/hyperbolic-edge-origin/*.conf /etc/nginx/
+        sed -i 's/127\.0\.0\.1:8080/127.0.0.1:18080/g' /etc/nginx/*.conf
+        sed -i 's/127\.0\.0\.1:8081/127.0.0.1:18081/g' /etc/nginx/*.conf
+        exec nginx -g 'daemon off;'

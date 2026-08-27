@@ -12,6 +12,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const smoke = readFileSync(path.join(root, ".github/workflows/platform-smoke.yml"), "utf8");
 const deploy = readFileSync(path.join(root, ".github/workflows/deploy.yml"), "utf8");
 const lifeosDeploy = readFileSync(path.join(root, ".github/workflows/lifeos-deploy.yml"), "utf8");
+const platformGate = readFileSync(path.join(root, ".github/actions/verify-tests-shell/action.yml"), "utf8");
 
 test("smoke is callable, dispatchable, production-gated, and read-only by design", () => {
   const onBlock = smoke.slice(smoke.indexOf("\non:"), smoke.indexOf("\npermissions:"));
@@ -78,6 +79,17 @@ test("the probe map covers every nginx-routed unit through the shared origin", (
   assert.match(smoke, /failures=\$\(\(failures \+ 1\)\)/);
   assert.match(smoke, /exit 1/);
   assert.match(smoke, />> "\$GITHUB_STEP_SUMMARY"/);
+});
+
+test("live smoke rejects regressions on representative browser-history routes", () => {
+  // Index routes are insufficient evidence for a browser-history SPA: a
+  // filesystem origin can serve / and /life/ while returning a server 404
+  // for every real deep link. These exact probes are the release boundary
+  // for both bundles, and each checks the bundle's generated asset marker so
+  // an unrelated proxy/error page cannot satisfy the probe.
+  assert.ok(smoke.includes(`probe "Shell login deep link" "/login" '/assets/[A-Za-z0-9_.-]+\\.js'`));
+  assert.ok(smoke.includes(`probe "Shell settings deep link" "/settings" '/assets/[A-Za-z0-9_.-]+\\.js'`));
+  assert.ok(smoke.includes(`probe "LifeOS capture deep link" "/life/capture" '/life/assets/[A-Za-z0-9_.-]+\\.js'`));
 });
 
 test("LifeOS probes are gated on the cutover switch, not skipped forever", () => {
@@ -175,4 +187,14 @@ test("both deploy workflows call smoke after their deploy jobs, red-on-red", () 
     assert.match(smokeJob, /always\(\)/);
     assert.match(smokeJob, anySuccess);
   }
+});
+
+test("the Platform gate runs the composed production-origin browser suite", () => {
+  assert.match(platformGate, /working-directory: apps\/lifeos\/frontend\s+run: npm ci/);
+  assert.match(
+    platformGate,
+    /npx playwright test --config docs\/ops\/composed-origin\/playwright\.config\.ts/,
+  );
+  assert.match(platformGate, /docs\/ops\/composed-origin\/playwright-report\//);
+  assert.match(platformGate, /docs\/ops\/composed-origin\/test-results\//);
 });

@@ -14,17 +14,20 @@ name: "Platform Smoke"
 # Tailscale owns only / and nginx owns the application paths below:
 #   /healthz            Shell static health asset ({"status":"ok"})
 #   /                   Shell index (must reference a /assets/*.js bundle)
+#   /login              Shell browser-history document route
+#   /settings           representative authenticated Shell document route
 #   /api/healthz        Handler A through nginx's /api/ route (full-path forward;
 #                       server.ts handles /api/healthz for exactly this probe)
 #   /api/brain/health   the Brain through nginx's /api/brain/ route
 #   /life/              LifeOS UI index (only once LIFEOS_DEPLOY_ENABLED --
 #                       before cutover the route serves the standalone layout,
 #                       which this repo must not assert about)
+#   /life/capture       representative LifeOS browser-history document route
 #   /life/api/healthz   LifeOS API through nginx's /life/api/ route (same gate)
 #
 # Credentials: only the tailnet OAuth client (shell-deploy Infisical path).
-# No SSH for the six probes above -- the box is probed exactly the way a
-# user's browser reaches it, over the tailnet HTTPS origin.
+# No SSH for the shared-origin probes above -- the box is probed exactly the
+# way a user's browser reaches it, over the tailnet HTTPS origin.
 #
 # The broker (issue #185) is the one exception: it is deliberately
 # loopback-only with no nginx route of its own -- its callers are
@@ -138,6 +141,8 @@ jobs:
 
           probe "Shell health" "/healthz" '\{"status":"ok"\}'
           probe "Shell index" "/" '/assets/[A-Za-z0-9_.-]+\.js'
+          probe "Shell login deep link" "/login" '/assets/[A-Za-z0-9_.-]+\.js'
+          probe "Shell settings deep link" "/settings" '/assets/[A-Za-z0-9_.-]+\.js'
           probe "Handler A" "/api/healthz" ''
           probe "Brain" "/api/brain/health" ''
 
@@ -158,6 +163,7 @@ jobs:
 
           if [[ "${LIFEOS_LIVE:-}" == "true" ]]; then
             probe "LifeOS UI" "/life/" '/life/assets/[A-Za-z0-9_.-]+\.js'
+            probe "LifeOS capture deep link" "/life/capture" '/life/assets/[A-Za-z0-9_.-]+\.js'
             probe "LifeOS API" "/life/api/healthz" ''
           else
             results+=("| LifeOS UI | \`/life/\` | ⏭️ skipped (pre-cutover) |")
