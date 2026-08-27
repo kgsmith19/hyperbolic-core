@@ -64,7 +64,7 @@ describe("classifyNavigationTarget: document boundaries come from the zone regis
     }
   });
 
-  test("uses React Router-equivalent decoding at encoded zone boundaries", () => {
+  test("uses origin-equivalent decoding at encoded zone boundaries", () => {
     const origin = "https://shell.example";
     const lifeRoutes = [{ path: "/life/*" }];
     const encodedLife = "/%6cife/capture?mode=quick#entry";
@@ -73,10 +73,16 @@ describe("classifyNavigationTarget: document boundaries come from the zone regis
     assert.ok(matchRoutes(lifeRoutes, encodedLifePath), encodedLife);
     assert.equal(classifyNavigationTarget(encodedLife), "document", encodedLife);
 
+    for (const target of ["/life%2Fcapture", "/%6cife%2Fcapture"]) {
+      const originPath = decodeURIComponent(new URL(target, origin).pathname);
+      assert.equal(originPath, "/life/capture", target);
+      assert.equal(classifyNavigationTarget(target), "document", target);
+    }
+
     for (const target of [
       "/%6cifefoo/capture",
       "/%6cifestyle",
-      "/%6cife%2Fcapture",
+      "/life%252Fcapture",
       "/%6cife/../%73ettings?tab=theme#system",
     ]) {
       const browserPath = new URL(target, origin).pathname;
