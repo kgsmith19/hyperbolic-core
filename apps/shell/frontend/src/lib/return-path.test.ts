@@ -1,8 +1,10 @@
 // sanitizeReturnPath is the one function standing between an attacker-
 // influenceable `?return=` query param and react-router's `navigate()`
 // (SH-2b's deep-link return, open-redirect guarded). Exercised adversarially
-// here, independent of any component or router.
+// here without a component; WHATWG URL and React Router matching provide
+// independent oracles for the two normalization boundaries.
 import { describe, expect, it } from "vitest";
+import { matchRoutes } from "react-router";
 import { sanitizeReturnPath } from "./return-path";
 
 const SHELL_ORIGIN = "https://shell.example";
@@ -32,6 +34,10 @@ describe("sanitizeReturnPath: falls back to / for anything falsy or absent", () 
 describe("sanitizeReturnPath: rejects targets that would leave this document/origin (open-redirect guard)", () => {
   it.each([
     ["protocol-relative", "//evil.example.com/tools"],
+    [
+      "protocol-relative sentinel collision",
+      "//shell.invalid/looks-like-the-sentinel",
+    ],
     ["absolute HTTPS", "https://evil.example.com/tools"],
     ["absolute HTTP", "http://evil.example.com/tools"],
     ["script scheme", "javascript:alert(1)"],
@@ -69,11 +75,14 @@ describe("sanitizeReturnPath: never redirects back into the login route itself",
     "/login?foo=bar#fragment",
     "/LOGIN#fragment",
     "/tools/../login?foo=bar#fragment",
+    "/%6cogin?return=%2Flife%2Fcapture",
+    "/%6Cogin#fragment",
   ])("%s -> /", (input) => {
-    const browserPath = new URL(input, SHELL_ORIGIN).pathname.toLowerCase();
-    expect(
-      browserPath === "/login" || browserPath.startsWith("/login/"),
-    ).toBe(true);
+    const browserPath = new URL(input, SHELL_ORIGIN).pathname;
+    // The actual router matcher is the independent loop oracle. In
+    // particular, it decodes percent-encoded path characters that the URL
+    // object's pathname intentionally leaves encoded.
+    expect(matchRoutes([{ path: "/login" }], browserPath)).not.toBeNull();
     expect(sanitizeReturnPath(input)).toBe("/");
   });
 

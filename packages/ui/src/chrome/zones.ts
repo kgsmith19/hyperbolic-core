@@ -66,7 +66,10 @@ export type NavigationTargetKind = "client" | "document";
  * attacker-influenced values must validate them before classification.
  */
 export function classifyNavigationTarget(target: string): NavigationTargetKind {
-  const pathname = target.split(/[?#]/, 1)[0];
+  // Use the same WHATWG normalization a browser applies when either
+  // navigator consumes the untouched target. In particular, dot segments
+  // can cross a zone boundary before the document request or pushState.
+  const pathname = new URL(target, "https://navigation.invalid").pathname;
   const isDocumentTarget = ZONE_ENTRIES.some((entry) => {
     if (!entry.hardNavigate) return false;
     const zoneRoot = entry.href.endsWith("/") ? entry.href.slice(0, -1) : entry.href;

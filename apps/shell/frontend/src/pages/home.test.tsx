@@ -1,13 +1,13 @@
 // Home page launcher-card navigation mechanism (P1 fix: the LifeOS card
 // must perform a REAL hard navigation, not a client-side router transition).
 //
-// LifeOS is not a Shell route at all -- it's a separate zone stitched in by
-// `tailscale serve`'s path-based reverse proxy (docs/ops/tailscale-serve-apply.sh),
-// entirely outside app.tsx's <Routes>. A plain react-router <Link> never
+// LifeOS is not a Shell route at all -- private-origin nginx selects its
+// separate production bundle at the `/life/` boundary, entirely outside
+// app.tsx's <Routes>. A plain react-router <Link> never
 // leaves Shell's SPA: react-router's useLinkClickHandler calls
 // event.preventDefault() and does a history.pushState() instead of letting
 // the browser's normal anchor click go through, so the click never becomes
-// an HTTP request and the reverse proxy never gets a chance to serve the
+// an HTTP request and nginx never gets a chance to serve the
 // LifeOS bundle -- Shell's own catch-all NotFoundPage renders instead.
 //
 // A test that only checks `href="/life/"` would pass on both the buggy

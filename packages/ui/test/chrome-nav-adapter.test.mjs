@@ -47,6 +47,21 @@ describe("classifyNavigationTarget: document boundaries come from the zone regis
       assert.equal(classifyNavigationTarget(target), "client", target);
     }
   });
+
+  test("uses the browser-normalized pathname for dot segments without losing suffixes", () => {
+    const origin = "https://shell.example";
+    for (const [target, expectedPath, expectedKind] of [
+      [
+        "/tools/../life/capture?mode=quick#details",
+        "/life/capture",
+        "document",
+      ],
+      ["/life/../settings?tab=theme#system", "/settings", "client"],
+    ]) {
+      assert.equal(new URL(target, origin).pathname, expectedPath, target);
+      assert.equal(classifyNavigationTarget(target), expectedKind, target);
+    }
+  });
 });
 
 describe("zones.ts: hardNavigate marks exactly the one genuinely cross-zone entry", () => {

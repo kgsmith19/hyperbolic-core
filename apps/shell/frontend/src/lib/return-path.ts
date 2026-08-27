@@ -5,12 +5,25 @@
 // The login page's own `?return=` query param is attacker-influenceable --
 // anyone can hand an operator a link to `/login?return=<anything>` -- so
 // this is the one place that value is trusted from before it is ever handed
-// to react-router's `navigate()`. Only a same-document, path-relative target
+// to a navigator. Only a same-origin, app-root-relative target
 // is ever returned; anything else (a protocol-relative URL, an absolute
 // URL, a `javascript:` scheme, a target that would just bounce back to
 // `/login` itself) falls back to "/".
 const FALLBACK_PATH = "/";
 const SHELL_ORIGIN_SENTINEL = "https://shell.invalid";
+
+function decodeRouterPathname(pathname: string): string {
+  try {
+    // React Router decodes each segment, then re-escapes decoded slashes so
+    // an encoded separator cannot change route segment boundaries.
+    return pathname
+      .split("/")
+      .map((segment) => decodeURIComponent(segment).replaceAll("/", "%2F"))
+      .join("/");
+  } catch {
+    return pathname;
+  }
+}
 
 /**
  * Validates and normalizes a `return=` query-param value into a safe
@@ -40,14 +53,18 @@ export function sanitizeReturnPath(raw: string | null | undefined): string {
   // A return target must be app-root-relative and must still resolve to the
   // sentinel origin after browser normalization. This excludes absolute,
   // protocol-relative, scheme, and merely path-relative inputs.
-  if (!raw.startsWith("/") || resolved.origin !== SHELL_ORIGIN_SENTINEL) {
+  if (
+    !raw.startsWith("/") ||
+    raw.startsWith("//") ||
+    resolved.origin !== SHELL_ORIGIN_SENTINEL
+  ) {
     return FALLBACK_PATH;
   }
 
   // Check the browser-normalized pathname, independent of query/fragment,
   // so variants such as `/login#frag` and `/tools/../login` cannot loop.
   // Shell route matching is case-insensitive by default.
-  const pathname = resolved.pathname.toLowerCase();
+  const pathname = decodeRouterPathname(resolved.pathname).toLowerCase();
   if (pathname === "/login" || pathname.startsWith("/login/")) {
     return FALLBACK_PATH;
   }
