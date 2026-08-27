@@ -143,6 +143,18 @@ export interface LlmRequestMetadata {
   callerApp: string;
   purpose: string;
   runRef?: string;
+  /**
+   * The provider and model that produced the material this request is ABOUT,
+   * when that differs from the one being called. Caller-side only: nothing in
+   * this package reads `metadata`, so it is never transmitted to a provider.
+   *
+   * `packages/review`'s gate sets it to the coding agent that wrote the diff it
+   * is asking a different provider company to judge, so the run's own durable
+   * record states whose work was reviewed (Issue #354). Kept out of the prompt
+   * on purpose: telling an adversarial reviewer who wrote the code invites
+   * authorship-based reasoning, which that gate's rubric forbids.
+   */
+  provenance?: { provider: string; model: string };
 }
 
 export interface FallbackTarget {

@@ -396,6 +396,52 @@ jobs:
               return text;
             }
 
+            // ---------------------------------------------------------------
+            // What this run ACTUALLY used, beside what agent-roles.yaml
+            // DECLARES (Issue #354).
+            // ---------------------------------------------------------------
+            // The declared footer above answers "who is assigned"; it cannot
+            // answer "who ran", and until now nothing in the pull request did.
+            // The resolved identities travel in review-meta.json, written by
+            // the action's own steps from packages/review's canonical
+            // validator -- never from review-verdict.json, which is model
+            // output shaped by pull-request content.
+            //
+            // The artifact still comes from a job that executes
+            // pull-request-authored code, so nothing here is taken on trust:
+            // a provider must be one of the three known companies or it reads
+            // `unknown`, and a model id is neutralized, stripped of backticks
+            // and newlines, and capped, so it cannot break out of its code
+            // span, ping a third party, or assert a company that does not
+            // exist. Absent or unusable provenance degrades to `unknown` and
+            // never stops findings from reaching the pull request.
+            const PROVIDER_COMPANIES = new Set(["anthropic", "openai", "google"]);
+            function knownProvider(value) {
+              return typeof value === "string" && PROVIDER_COMPANIES.has(value) ? value : "unknown";
+            }
+            function renderableModelId(value) {
+              if (typeof value !== "string") return "unknown";
+              // Split on whitespace of any kind AND backticks, then rejoin: a
+              // newline would break the footer's own line, a backtick would close
+              // its code span early. Both are one rule here rather than two
+              // sequential replaces, so neither can be dropped without the other.
+              const collapsed = value
+                .split(/[\s`]+/)
+                .filter((part) => part !== "")
+                .join(" ");
+              return collapsed === "" ? "unknown" : neutralize(collapsed, 80);
+            }
+            const provenance = meta.provenance ?? {};
+            const runFooter =
+              `_This run — reviewer \`${knownProvider(provenance.reviewerProvider)}\`/\`${renderableModelId(provenance.reviewerModel)}\`` +
+              ` · builder \`${knownProvider(provenance.builderProvider)}\`/\`${renderableModelId(provenance.builderModel)}\`_`;
+            // Rendered only in the managed comment, beside reviewFooter --
+            // deliberately NOT folded into reviewFooter itself, which is also
+            // the last line of every deferred/confirmed Issue this workflow
+            // files and of every line-anchored suggestion it posts. Those
+            // record the reviewer's assignment; the run's own identities
+            // belong on the pull request being judged.
+
             // A fence long enough that nothing inside can close it early.
             function codeBlock(value) {
               const text = neutralize(value);
@@ -1045,7 +1091,7 @@ jobs:
               );
             }
 
-            lines.push(reviewFooter, "");
+            lines.push(reviewFooter, runFooter, "");
 
             const body = lines.join("\n");
 

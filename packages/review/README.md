@@ -24,6 +24,7 @@ named `AGENTS.md` section. Findings without both are discarded and cannot block.
 | The model gets a **structured-output tool only** — no shell, file, or network access | Content under review is untrusted. Injected text can skew a verdict; it cannot execute anything or reach a credential. |
 | **Reviewer provider ≠ builder provider**, enforced in `config.ts` | A model family reviewing its own work is not independent verification. Fails closed when they match. |
 | **The builder identity is stated, never assumed** | `REVIEW_BUILDER_PROVIDER` and `DEV_MODEL` are both required. An assumed builder made separation hold by coincidence for one reviewer family and not at all for the others. |
+| **…and recorded, not just checked** | Both ride on the request's `metadata.provenance` and into the run's artifact, so the pull request itself states who reviewed whose work. `DEV_MODEL` is opaque: nonblank is required, and a nonblank value is kept byte for byte. |
 | **No model ID is ever defaulted** | `@hyperbolic/llm` never defaults a model silently, and a stale hardcoded ID is an unverified claim. `REVIEW_MODEL` is required. |
 | Credentials are an **explicit argument**, never read by the library | Inherited from `@hyperbolic/llm`'s zero-key-handling invariant. |
 | Infra failure blocks; a weak model answer does not | You cannot claim a review happened if it didn't — but a confused model must not stall real work. |

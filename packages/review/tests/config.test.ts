@@ -207,27 +207,40 @@ test("resolveConfig: unset DEV_MODEL throws an error naming DEV_MODEL", () => {
 
 // Same whitespace hazard as every other required variable, for the same
 // reason: `vars.DEV_MODEL` reaches this process through a CI expression.
-test("resolveConfig: whitespace-only DEV_MODEL is treated as unset", () => {
-  assert.throws(
-    () =>
-      resolveConfig({
-        REVIEW_PROVIDER: "openai",
-        REVIEW_MODEL: "some-model-id",
-        REVIEW_BUILDER_PROVIDER: "anthropic",
-        DEV_MODEL: "  ",
-      }),
-    /DEV_MODEL is unset or empty/
-  );
+//
+// Every blank shape is exercised, not just a run of spaces: the builder model
+// is the one required variable this package does NOT trim (see the byte-for-
+// byte test below), so "is it blank" and "what is stored" are decided by two
+// different rules. A tab- or newline-only value must still be rejected even
+// though nothing downstream will strip it.
+test("resolveConfig: a whitespace-only DEV_MODEL of any shape is treated as unset", () => {
+  for (const blank of ["  ", "\t", "\n", " \t\n "]) {
+    assert.throws(
+      () =>
+        resolveConfig({
+          REVIEW_PROVIDER: "openai",
+          REVIEW_MODEL: "some-model-id",
+          REVIEW_BUILDER_PROVIDER: "anthropic",
+          DEV_MODEL: blank,
+        }),
+      /DEV_MODEL is unset or empty/,
+      `DEV_MODEL=${JSON.stringify(blank)} must be rejected`
+    );
+  }
 });
 
-// Behavior protected: the builder model is OPAQUE provenance, carried exactly
-// as the owner wrote it. Defect caught: lowercasing it alongside the provider
-// identifiers, or validating it against some invented list of known model ids.
-// A provider name is a closed enum this package dispatches on; a model id is a
-// vendor string this package never interprets, and mangling it would falsify
-// the record of which model's work was reviewed.
-test("resolveConfig: the builder model is carried through verbatim, not normalized", () => {
-  const exactModelId = "Claude-Opus-5.1_Preview@2026-08";
+// Behavior protected: a nonblank builder model is OPAQUE provenance, recorded
+// byte for byte. Defect caught: routing it through the shared `required()`
+// helper, which TRIMS -- right for identifiers this package normalizes anyway,
+// wrong for a value whose whole job is to say exactly what the owner set --
+// or lowercasing it alongside the provider identifiers.
+//
+// The sentinel is deliberately hostile on both axes at once: surrounding
+// whitespace catches a trim, interior capitals catch a normalization, and the
+// same case asserts the provider IS still canonicalized. A single-axis
+// sentinel would let one of the two defects through.
+test("resolveConfig: a nonblank builder model is recorded byte for byte", () => {
+  const exactModelId = "  Claude-OPUS-5.1_Preview@2026-08\t";
   const config = resolveConfig({
     REVIEW_PROVIDER: "openai",
     REVIEW_MODEL: "gpt-5-mini",
@@ -236,7 +249,11 @@ test("resolveConfig: the builder model is carried through verbatim, not normaliz
   });
 
   assert.equal(config.builderProvider, "anthropic", "the provider IS normalized");
-  assert.equal(config.builderModel, exactModelId, "the model is NOT");
+  assert.equal(
+    config.builderModel,
+    exactModelId,
+    "the model is NOT -- neither trimmed nor lowercased"
+  );
 });
 
 // Positive control for the guard above: it must not reject everything. A check

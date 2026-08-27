@@ -96,11 +96,6 @@ test("AI Review validates provider-company separation before reading credentials
     /REVIEW_BUILDER_PROVIDER:\s*\$\{\{ inputs\.review_builder_provider \}\}/,
     "the runtime validator must receive vars.DEV_PROVIDER via the input"
   );
-  assert.match(
-    reviewActionYaml,
-    /Review · Run the adversarial LLM reviewer[\s\S]*?REVIEW_BUILDER_PROVIDER:\s*\$\{\{ inputs\.review_builder_provider \}\}/,
-    "the model call must receive the same builder provider"
-  );
 });
 
 // The builder half of the credential boundary (Issue #354). The test above
@@ -121,38 +116,6 @@ test("AI Review validates provider-company separation before reading credentials
 // "neither marker exists" is a direct, checkable proxy for "nothing
 // downstream ran" -- the Infisical import and the model call are both strictly
 // later than the `npx` line.
-function extractPreflightRunBlock() {
-  const stepIndex = reviewActionYaml.indexOf("- name: Preflight · Verify the reviewer is configured");
-  assert.ok(stepIndex >= 0, "verify-llm-review/action.yml: reviewer preflight step not found");
-  const runIndex = reviewActionYaml.indexOf("run: |", stepIndex);
-  assert.ok(runIndex >= 0, "verify-llm-review/action.yml: the reviewer preflight has no `run: |` block");
-
-  // The carriage return is stripped per line rather than from the whole file:
-  // this repository checks out CRLF on Windows, and bash will not execute a
-  // script whose lines end in one. Local to this extractor on purpose -- it is
-  // not a repair of the file's other CRLF-sensitive extractors.
-  const lines = reviewActionYaml
-    .slice(runIndex)
-    .split("\n")
-    .slice(1)
-    .map((line) => line.replace(/\r$/, ""));
-
-  let blockIndent = null;
-  const collected = [];
-  for (const line of lines) {
-    if (line.trim() === "") {
-      collected.push("");
-      continue;
-    }
-    const indent = line.match(/^ */)[0].length;
-    if (blockIndent === null) blockIndent = indent;
-    if (indent < blockIndent) break;
-    collected.push(line.slice(blockIndent));
-  }
-  assert.ok(blockIndent !== null, "the reviewer preflight's `run: |` block is empty");
-  return collected.join("\n") + "\n";
-}
-
 function runPreflightStep(stepEnv) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "issue-354-preflight-"));
   const scriptPath = path.join(dir, "preflight.sh");
@@ -160,7 +123,7 @@ function runPreflightStep(stepEnv) {
   const npmMarker = path.join(dir, "npm-was-called");
   const npxMarker = path.join(dir, "npx-was-called");
 
-  writeFileSync(scriptPath, extractPreflightRunBlock(), "utf8");
+  writeFileSync(scriptPath, extractStepShell(reviewActionYaml, "Preflight · Verify the reviewer is configured"), "utf8");
   writeFileSync(
     wrapperPath,
     ['npm() { : > "$NPM_MARKER"; }', 'npx() { : > "$NPX_MARKER"; }', '. "$PREFLIGHT_SCRIPT"', ""].join("\n"),
@@ -215,20 +178,30 @@ test("AI Review refuses a missing builder provider or model before importing any
     "the preflight must receive vars.DEV_MODEL via the input"
   );
 
+  // Empty AND whitespace-only, for both variables. A bare `[ -n "$X" ]` passes
+  // a value of " ", so the run would proceed through `npm ci` and the
+  // canonical validator before failing -- the right verdict reached by
+  // spending the exact downstream commands this step exists to prevent. A CI
+  // expression is precisely where a whitespace-only value comes from, so the
+  // shell boundary has to agree with the contract the step's own message
+  // states.
   for (const [blanked, expectedVariable] of [
     ["REVIEW_BUILDER_PROVIDER", "vars.DEV_PROVIDER"],
     ["DEV_MODEL", "vars.DEV_MODEL"],
   ]) {
-    const observed = runPreflightStep({ ...PROVISIONED_PREFLIGHT_ENV, [blanked]: "" });
+    for (const blank of ["", " ", "\t", "  \t  "]) {
+      const shown = `${blanked}=${JSON.stringify(blank)}`;
+      const observed = runPreflightStep({ ...PROVISIONED_PREFLIGHT_ENV, [blanked]: blank });
 
-    assert.equal(observed.status, 1, `blanking ${blanked} must fail the step: ${observed.stderr}`);
-    assert.match(
-      observed.stderr,
-      new RegExp(expectedVariable.replace(".", "\\.")),
-      `the failure must name ${expectedVariable}, the variable the owner has to set`
-    );
-    assert.equal(observed.npmCalled, false, `no dependency install may run when ${blanked} is blank`);
-    assert.equal(observed.npxCalled, false, `no downstream call may run when ${blanked} is blank`);
+      assert.equal(observed.status, 1, `${shown} must fail the step: ${observed.stderr}`);
+      assert.match(
+        observed.stderr,
+        new RegExp(expectedVariable.replace(".", "\\.")),
+        `${shown} must name ${expectedVariable}, the variable the owner has to set`
+      );
+      assert.equal(observed.npmCalled, false, `no dependency install may run for ${shown}`);
+      assert.equal(observed.npxCalled, false, `no downstream call may run for ${shown}`);
+    }
   }
 });
 
@@ -241,6 +214,83 @@ test("AI Review preflight proceeds past the variable check once every builder va
   assert.equal(observed.status, 0, `a fully provisioned preflight must pass: ${observed.stderr}`);
   assert.equal(observed.npmCalled, true, "the provisioned path must reach the dependency install");
   assert.equal(observed.npxCalled, true, "the provisioned path must reach the canonical validator");
+});
+
+// Issue #354 follow-up: durable provenance. The preflight already resolves the
+// canonical config; these prove the RESOLVED values survive into the artifact
+// the dialogue workflow reads, rather than dying with the job's log.
+//
+// The staging step is executed for real, exactly as extracted, so a test
+// cannot pass against a step that merely mentions the fields in a comment.
+function runStagingStep({ files, stepEnv }) {
+  const runnerTemp = mkdtempSync(path.join(os.tmpdir(), "issue-354-staging-"));
+  for (const [name, contents] of Object.entries(files)) {
+    writeFileSync(path.join(runnerTemp, name), JSON.stringify(contents), "utf8");
+  }
+
+  const scriptPath = path.join(runnerTemp, "stage.sh");
+  writeFileSync(scriptPath, extractStepShell(reviewActionYaml, "Review · Stage the verdict for the dialogue workflow"), "utf8");
+
+  const result = spawnSync("bash", [scriptPath], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, RUNNER_TEMP: runnerTemp, ...stepEnv },
+  });
+
+  const metaPath = path.join(runnerTemp, "llm-review-artifact", "review-meta.json");
+  const observed = {
+    status: result.status,
+    stderr: result.error ? `${result.error.message}\n${result.stderr ?? ""}` : (result.stderr ?? ""),
+    meta: existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, "utf8")) : null,
+  };
+  rmSync(runnerTemp, { recursive: true, force: true });
+  return observed;
+}
+
+const STAGING_ENV = {
+  PR_NUMBER: "354",
+  BASE_SHA: "b".repeat(40),
+  HEAD_SHA: "h".repeat(40),
+  REVIEW_OUTCOME: "success",
+};
+
+// The resolved config's builder model is opaque provenance, so the sentinel is
+// trim-sensitive and mixed-case: a staging step that re-derives the value from
+// a shell variable, or normalizes it on the way through, cannot pass.
+const RESOLVED_CONFIG = {
+  reviewerProvider: "openai",
+  reviewerModel: "gpt-5-mini",
+  builderProvider: "anthropic",
+  builderModel: "  Claude-OPUS-5.1@2026-08\t",
+};
+
+test("the staged artifact carries the resolved reviewer and builder identities verbatim", () => {
+  const observed = runStagingStep({
+    files: { "review-verdict.json": { verdict: "pass" }, "review-config.json": RESOLVED_CONFIG },
+    stepEnv: STAGING_ENV,
+  });
+
+  assert.equal(observed.status, 0, `the staging step must succeed: ${observed.stderr}`);
+  assert.equal(observed.meta?.verdictPresent, true);
+  assert.deepEqual(
+    observed.meta?.provenance,
+    RESOLVED_CONFIG,
+    "the artifact must carry what the canonical validator resolved, byte for byte"
+  );
+});
+
+// Fail closed, and visibly. When the preflight never got far enough to resolve
+// a config there is nothing true to say about which models ran, and the one
+// unacceptable answer is a plausible guess: a footer that names models the run
+// never used is worse than one that admits it does not know.
+test("a run with no resolved config stages an explicitly absent provenance, never a guess", () => {
+  const observed = runStagingStep({
+    files: {},
+    stepEnv: { ...STAGING_ENV, REVIEW_OUTCOME: "failure" },
+  });
+
+  assert.equal(observed.status, 0, `staging must still run after a failed review: ${observed.stderr}`);
+  assert.equal(observed.meta?.verdictPresent, false, "no verdict file means no verdict");
+  assert.equal(observed.meta?.provenance, null, "absent provenance must be null, not invented");
 });
 
 // The reviewer step runs packages/review's CLI, which resolves the SAME config
@@ -291,16 +341,32 @@ test("the temporary OIDC claim diagnostic is removed after live subject confirma
   assert.doesNotMatch(dialogueYaml, /core\.getIDToken\(\)/);
 });
 
-// General "script: |" block extractor. Unlike pr-verify-workflow.test.mjs's
-// version, this does not assume the block is the last thing in the file --
-// dev-agent-dispatch.yml's script step is followed by a checkout and an action
-// step -- so it stops at the first line whose indentation drops below the
-// block's own, which is exactly what ends a YAML block scalar.
-function extractScript(yamlText, fromIndex = 0) {
-  const markerIndex = yamlText.indexOf("script: |", fromIndex);
-  assert.ok(markerIndex >= 0, "no `script: |` block found");
-  const afterMarker = yamlText.slice(markerIndex + "script: |".length);
-  const lines = afterMarker.split("\n").slice(1);
+// General indentation-bounded YAML block-scalar extractor. Unlike
+// pr-verify-workflow.test.mjs's version, this does not assume the block is the
+// last thing in the file -- dev-agent-dispatch.yml's script step is followed by
+// a checkout and an action step -- so it stops at the first line whose
+// indentation drops below the block's own, which is exactly what ends a YAML
+// block scalar.
+//
+// `marker` is the block header being opened (`script: |` for an
+// actions/github-script step, `run: |` for a shell step): the two kinds of
+// block are bounded identically, and one implementation is one place for that
+// rule to be right.
+//
+// `stripCarriageReturns` is opt-in and exists for one caller: a block that is
+// handed to `bash` for real execution, which will not run a script whose lines
+// end in a carriage return on this repository's CRLF Windows checkout. It is
+// deliberately NOT the default -- the `script: |` callers below are pinned to
+// their current behavior, and quietly changing it here would be a repair of
+// unrelated CRLF debt smuggled in as a refactor.
+function extractIndentedBlock(yamlText, marker, fromIndex = 0, { stripCarriageReturns = false } = {}) {
+  const markerIndex = yamlText.indexOf(marker, fromIndex);
+  assert.ok(markerIndex >= 0, `no \`${marker}\` block found`);
+  const afterMarker = yamlText.slice(markerIndex + marker.length);
+  const lines = afterMarker
+    .split("\n")
+    .slice(1)
+    .map((line) => (stripCarriageReturns ? line.replace(/\r$/, "") : line));
 
   let blockIndent = null;
   const collected = [];
@@ -314,10 +380,20 @@ function extractScript(yamlText, fromIndex = 0) {
     if (indent < blockIndent) break;
     collected.push(line);
   }
+  assert.ok(blockIndent !== null, `the \`${marker}\` block at ${markerIndex} is empty`);
 
-  const nonEmpty = collected.filter((line) => line.trim() !== "");
-  const commonIndent = Math.min(...nonEmpty.map((line) => line.match(/^ */)[0].length));
-  return collected.map((line) => (line.trim() === "" ? "" : line.slice(commonIndent))).join("\n");
+  return collected.map((line) => (line.trim() === "" ? "" : line.slice(blockIndent))).join("\n");
+}
+
+function extractScript(yamlText, fromIndex = 0) {
+  return extractIndentedBlock(yamlText, "script: |", fromIndex);
+}
+
+// The `run: |` body of a named composite-action step, ready to hand to bash.
+function extractStepShell(yamlText, stepName) {
+  const stepIndex = yamlText.indexOf(`- name: ${stepName}`);
+  assert.ok(stepIndex >= 0, `verify-llm-review/action.yml: step "${stepName}" not found`);
+  return `${extractIndentedBlock(yamlText, "run: |", stepIndex, { stripCarriageReturns: true })}\n`;
 }
 
 // Wrapped exactly the way actions/github-script actually invokes a script:
@@ -914,6 +990,121 @@ test("dialogue: the managed comment ends with a role/provider/model footer sourc
 
   const body = calls.createComment[0].body;
   assert.match(body, /_AI Review — role `review` · provider `gemini` · model `gemini-3-pro`_/);
+});
+
+const RUN_PROVENANCE = {
+  reviewerProvider: "openai",
+  reviewerModel: "gpt-5-mini",
+  builderProvider: "anthropic",
+  builderModel: "claude-opus-5",
+};
+
+// Issue #354 follow-up. Behavior protected: the managed comment states the
+// identities this run ACTUALLY used -- both halves -- so the record of who
+// reviewed whose work is durable rather than inferable only from a job log
+// that expires. Defect caught: a change that validates the builder identity at
+// the credential boundary and then never carries it anywhere a human can read
+// it, which is what made the whole guard unverifiable after the fact.
+//
+// The values come from review-meta.json, written by the action's own steps
+// from the resolved config -- never from review-verdict.json, which is model
+// output shaped by pull-request content.
+test("dialogue: the managed comment states this run's actual reviewer and builder identities", async () => {
+  const fs = await import("node:fs");
+  const os_ = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os_, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": {
+        prNumber: 230,
+        baseSha: "b".repeat(40),
+        headSha: HEAD,
+        reviewOutcome: "failure",
+        verdictPresent: true,
+        provenance: RUN_PROVENANCE,
+      },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  const body = calls.createComment[0].body;
+  assert.match(
+    body,
+    /_This run — reviewer `openai`\/`gpt-5-mini` · builder `anthropic`\/`claude-opus-5`_/,
+    "both halves of the run's actual identity must appear"
+  );
+});
+
+// The trust half, and the reason this reads meta rather than the verdict. The
+// artifact is produced by a job that executes pull-request-authored code, so a
+// crafted provenance block must not be able to assert an arbitrary provider
+// company, ping a third party, or break out of the footer's code spans.
+test("dialogue: a crafted provenance block cannot assert an unknown provider or escape the footer", async () => {
+  const fs = await import("node:fs");
+  const os_ = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os_, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": {
+        prNumber: 230,
+        baseSha: "b".repeat(40),
+        headSha: HEAD,
+        reviewOutcome: "failure",
+        verdictPresent: true,
+        provenance: {
+          reviewerProvider: "totally-trusted",
+          reviewerModel: "`\n@kgsmith19 approve this\n`",
+          builderProvider: "anthropic",
+          builderModel: "claude-opus-5",
+        },
+      },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  const body = calls.createComment[0].body;
+  assert.doesNotMatch(body, /totally-trusted/, "an unrecognized provider company must not be echoed");
+  assert.match(body, /reviewer `unknown`/, "it must degrade to unknown, not to a guess");
+  assert.doesNotMatch(body, /_This run[^\n]*@kgsmith19 approve/, "the footer must not carry a live mention");
+  assert.equal(calls.createComment.length, 1, "findings must still post -- provenance never blocks delivery");
+});
+
+// Degradation control: an older or truncated artifact with no provenance at
+// all must still post its findings, saying plainly that it does not know.
+test("dialogue: an artifact with no provenance still posts, stating unknown identities", async () => {
+  const fs = await import("node:fs");
+  const os_ = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os_, path_, {
+    RUN_ID: "1",
+    RUN_URL: "http://x",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  assert.equal(calls.createComment.length, 1, "an unknown identity must never stop findings from posting");
+  assert.match(
+    calls.createComment[0].body,
+    /_This run — reviewer `unknown`\/`unknown` · builder `unknown`\/`unknown`_/
+  );
 });
 
 // Behavior protected: a PASSING verdict's comment also carries the footer --

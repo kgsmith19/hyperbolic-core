@@ -76,7 +76,11 @@ test("buildReviewRequest: forces submit_review at temperature 0", () => {
   assert.deepEqual(request.toolChoice, { name: SUBMIT_REVIEW_TOOL_NAME });
   assert.equal(request.tools?.length, 1);
   assert.equal(request.tools?.[0]?.name, SUBMIT_REVIEW_TOOL_NAME);
-  assert.deepEqual(request.metadata, { callerApp: "review-gate", purpose: "pr-review" });
+  assert.deepEqual(request.metadata, {
+    callerApp: "review-gate",
+    purpose: "pr-review",
+    provenance: { provider: "anthropic", model: "a-specific-builder-model-id" },
+  });
   assert.equal(request.messages[0]?.role, "system");
   assert.equal(request.messages[1]?.role, "user");
 });
@@ -203,4 +207,52 @@ test("runReview: a valid blocking finding survives orchestration and blocks", as
   assert.equal(verdict.verdict, "block");
   assert.equal(verdict.findings.length, 1);
   assert.equal(verdict.findings[0]?.citation, "AGENTS.md > Test quality");
+});
+
+// Issue #354 follow-up. Behavior protected: the builder identity the config
+// resolved reaches the REQUEST -- the object actually handed to the client --
+// rather than stopping at a log line and a workflow env block. Defect caught:
+// a `resolveConfig` that validates provider separation and then discards the
+// values, which leaves the gate unable to state after the fact whose work it
+// judged. The fixture's builder pair is deliberately distinct from the
+// reviewer pair on both axes, so a wiring bug that copies the reviewer's own
+// provider/model into the provenance slot cannot pass.
+//
+// It rides on `metadata`, not in the prompt, on purpose: `metadata` is
+// `@hyperbolic/llm`'s caller-side logging spine and is never transmitted, so
+// this records provenance without telling an adversarial reviewer who wrote
+// the code -- which would invite exactly the authorship-based reasoning the
+// system prompt forbids.
+test("buildReviewRequest: the request carries the builder identity as provenance", () => {
+  const request: LlmRequest = buildReviewRequest(config, context);
+
+  assert.deepEqual(request.metadata.provenance, {
+    provider: "anthropic",
+    model: "a-specific-builder-model-id",
+  });
+  assert.equal(request.provider, "openai", "the request still targets the REVIEWER");
+  assert.equal(request.model, "a-specific-model-id");
+});
+
+// The same claim asserted where it actually matters: on the request the client
+// receives. buildReviewRequest is pure and exported, so a test against it
+// alone would stay green if runReview stopped calling it or rebuilt the
+// request itself.
+test("runReview: the request handed to the client carries the builder identity", async () => {
+  let seen: LlmRequest | undefined;
+  await runReview({
+    config,
+    context,
+    credentials,
+    completeFn: async (request) => {
+      seen = request;
+      return response({ toolCalls: [validBlockingCall] });
+    },
+  });
+
+  assert.ok(seen !== undefined, "the client must have been called");
+  assert.deepEqual((seen as LlmRequest).metadata.provenance, {
+    provider: "anthropic",
+    model: "a-specific-builder-model-id",
+  });
 });

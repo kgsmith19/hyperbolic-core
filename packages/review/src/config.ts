@@ -41,6 +41,24 @@ function required(env: ReviewEnv, name: string, hint: string): string {
   return value;
 }
 
+/**
+ * Same nonblank requirement as `required`, but the caller's exact bytes.
+ *
+ * Deliberately a second helper rather than a flag on the first: `required` is
+ * for identifiers this package normalizes anyway, where trimming is free.
+ * Opaque provenance is the opposite case -- its whole job is to say exactly
+ * what the owner set, so trimming it would silently rewrite the record. Blank
+ * is still not a value; "blank" is decided on the trimmed form, and the
+ * untrimmed original is what gets stored.
+ */
+function requiredVerbatim(env: ReviewEnv, name: string, hint: string): string {
+  const raw = env[name];
+  if (typeof raw !== "string" || raw.trim() === "") {
+    throw new Error(`${name} is unset or empty. ${hint}`);
+  }
+  return raw;
+}
+
 function isProvider(value: string): value is Provider {
   return (VALID_PROVIDERS as readonly string[]).includes(value);
 }
@@ -122,11 +140,12 @@ export function resolveConfig(env: ReviewEnv): ReviewConfig {
   }
 
   // Opaque on purpose, and deliberately NOT normalized alongside the provider
-  // identifiers above. A provider name is a closed enum this package
-  // dispatches on; a builder model id is a vendor string it only records, and
-  // lowercasing or validating it would falsify the one durable statement the
-  // config makes about whose work was reviewed.
-  const builderModel = required(
+  // identifiers above -- not lowercased, not trimmed, not checked against a
+  // list. A provider name is a closed enum this package dispatches on; a
+  // builder model id is a vendor string it only records, and rewriting it in
+  // any way would falsify the one durable statement the config makes about
+  // whose work was reviewed.
+  const builderModel = requiredVerbatim(
     env,
     "DEV_MODEL",
     `Set it to the exact model id the builder ran (vars.DEV_MODEL). This package records it verbatim and never infers it.`
