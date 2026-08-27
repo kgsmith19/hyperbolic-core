@@ -17,9 +17,6 @@ export const VALID_PROVIDERS: readonly Provider[] = ["anthropic", "openai", "goo
 /** The coding-agent harness companies accepted for the builder role. */
 const VALID_BUILDER_PROVIDERS: readonly BuilderProvider[] = ["anthropic", "openai", "google"];
 
-/** Assumed raw builder provider when the caller does not state one. */
-export const DEFAULT_BUILDER_PROVIDER: BuilderProvider = "anthropic";
-
 /**
  * Generous enough for a long verdict on a large diff; the tool schema, not
  * this number, is what keeps the answer structured.
@@ -72,10 +69,19 @@ function normalizeProvider(value: string): string {
 /**
  * Resolve `ReviewConfig` from environment variables.
  *
- * Reads `REVIEW_PROVIDER`, `REVIEW_MODEL`, and optionally
- * `REVIEW_BUILDER_PROVIDER` (default `"anthropic"`). Provider identifiers are
- * case-insensitive at this boundary and canonicalized to lowercase; nothing
- * downstream ever sees a mixed-case provider name.
+ * Reads `REVIEW_PROVIDER`, `REVIEW_MODEL`, `REVIEW_BUILDER_PROVIDER`, and
+ * `DEV_MODEL`. All four are required and none is defaulted. Provider
+ * identifiers are case-insensitive at this boundary and canonicalized to
+ * lowercase; nothing downstream ever sees a mixed-case provider name. Model
+ * ids are not: they are opaque vendor strings this package never interprets,
+ * so they are carried exactly as the owner wrote them.
+ *
+ * The builder half used to default to `"anthropic"` when unstated. That made
+ * the gate fail closed for an anthropic reviewer purely by collision, and
+ * fail OPEN for every other reviewer family -- an unset `vars.DEV_PROVIDER`
+ * silently became a claim about who wrote the code, and the review proceeded
+ * to import a credential on the strength of it (Issue #354). There is now no
+ * value this package will invent on the caller's behalf.
  *
  * Throws -- never returns a partial or defaulted config -- when a required
  * variable is missing, when a provider name is not valid for its role, or
@@ -103,17 +109,31 @@ export function resolveConfig(env: ReviewEnv): ReviewConfig {
     `Set it to an exact model id served by REVIEW_PROVIDER="${rawProvider}". This package never defaults a model id.`
   );
 
-  const rawBuilder = (env.REVIEW_BUILDER_PROVIDER ?? "").trim();
-  const builderCandidate =
-    rawBuilder === "" ? DEFAULT_BUILDER_PROVIDER : normalizeProvider(rawBuilder);
-  if (!isBuilderProvider(builderCandidate)) {
+  const rawBuilder = required(
+    env,
+    "REVIEW_BUILDER_PROVIDER",
+    `Set it to the coding-agent harness company that WROTE this change (vars.DEV_PROVIDER), one of: ${VALID_BUILDER_PROVIDERS.join(", ")}. It must differ from REVIEW_PROVIDER, and this package never assumes one.`
+  );
+  const builderProvider = normalizeProvider(rawBuilder);
+  if (!isBuilderProvider(builderProvider)) {
     throw new Error(
       `REVIEW_BUILDER_PROVIDER="${rawBuilder}" is not a supported provider. Valid providers are: ${VALID_BUILDER_PROVIDERS.join(", ")}.`
     );
   }
 
+  // Opaque on purpose, and deliberately NOT normalized alongside the provider
+  // identifiers above. A provider name is a closed enum this package
+  // dispatches on; a builder model id is a vendor string it only records, and
+  // lowercasing or validating it would falsify the one durable statement the
+  // config makes about whose work was reviewed.
+  const builderModel = required(
+    env,
+    "DEV_MODEL",
+    `Set it to the exact model id the builder ran (vars.DEV_MODEL). This package records it verbatim and never infers it.`
+  );
+
   const reviewerFamily = providerFamily(reviewerProvider);
-  const builderFamily = providerFamily(builderCandidate);
+  const builderFamily = providerFamily(builderProvider);
   if (reviewerFamily === builderFamily) {
     throw new Error(
       `Provider separation is required: REVIEW_PROVIDER and REVIEW_BUILDER_PROVIDER resolve to the same provider family "${reviewerFamily}". ` +
@@ -126,7 +146,8 @@ export function resolveConfig(env: ReviewEnv): ReviewConfig {
   return {
     reviewerProvider,
     reviewerModel,
-    builderProvider: builderCandidate,
+    builderProvider,
+    builderModel,
     maxTokens: DEFAULT_MAX_TOKENS,
     timeoutMs: DEFAULT_TIMEOUT_MS,
   };

@@ -15,7 +15,6 @@
 export type { Finding, Provider, ReviewConfig, ReviewVerdict, Severity } from "./types.ts";
 
 export {
-  DEFAULT_BUILDER_PROVIDER,
   DEFAULT_MAX_TOKENS,
   DEFAULT_TIMEOUT_MS,
   resolveConfig,

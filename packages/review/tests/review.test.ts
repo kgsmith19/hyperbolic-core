@@ -10,6 +10,7 @@ const config: ReviewConfig = {
   reviewerProvider: "openai",
   reviewerModel: "a-specific-model-id",
   builderProvider: "anthropic",
+  builderModel: "a-specific-builder-model-id",
   maxTokens: 4096,
   timeoutMs: 60_000,
 };

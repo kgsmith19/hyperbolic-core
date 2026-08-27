@@ -34,8 +34,10 @@
 // whose `if` was quietly deleted.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -98,6 +100,169 @@ test("AI Review validates provider-company separation before reading credentials
     reviewActionYaml,
     /Review · Run the adversarial LLM reviewer[\s\S]*?REVIEW_BUILDER_PROVIDER:\s*\$\{\{ inputs\.review_builder_provider \}\}/,
     "the model call must receive the same builder provider"
+  );
+});
+
+// The builder half of the credential boundary (Issue #354). The test above
+// pins the ORDER of the steps; these pin what the first one actually refuses,
+// by running the real shell the action runs.
+//
+// A structural grep cannot tell a live `[ -n "$REVIEW_BUILDER_PROVIDER" ]`
+// guard from one whose line was deleted, and the failure it would miss is the
+// silent one: an empty builder variable that reaches Infisical, mints a
+// reviewer credential, and calls a model to review a change whose author was
+// never stated. So the step's own `run:` body is extracted and executed.
+//
+// `npm` and `npx` are stubbed as shell FUNCTIONS sourced ahead of the script
+// rather than as PATH entries: a function shadows the real binary inside the
+// very shell that runs the step's unmodified text, and it sidesteps the MSYS
+// PATH rewriting that makes a PATH-based stub unreliable on Windows. They are
+// the first two things the step does once its variable check passes, so
+// "neither marker exists" is a direct, checkable proxy for "nothing
+// downstream ran" -- the Infisical import and the model call are both strictly
+// later than the `npx` line.
+function extractPreflightRunBlock() {
+  const stepIndex = reviewActionYaml.indexOf("- name: Preflight · Verify the reviewer is configured");
+  assert.ok(stepIndex >= 0, "verify-llm-review/action.yml: reviewer preflight step not found");
+  const runIndex = reviewActionYaml.indexOf("run: |", stepIndex);
+  assert.ok(runIndex >= 0, "verify-llm-review/action.yml: the reviewer preflight has no `run: |` block");
+
+  // The carriage return is stripped per line rather than from the whole file:
+  // this repository checks out CRLF on Windows, and bash will not execute a
+  // script whose lines end in one. Local to this extractor on purpose -- it is
+  // not a repair of the file's other CRLF-sensitive extractors.
+  const lines = reviewActionYaml
+    .slice(runIndex)
+    .split("\n")
+    .slice(1)
+    .map((line) => line.replace(/\r$/, ""));
+
+  let blockIndent = null;
+  const collected = [];
+  for (const line of lines) {
+    if (line.trim() === "") {
+      collected.push("");
+      continue;
+    }
+    const indent = line.match(/^ */)[0].length;
+    if (blockIndent === null) blockIndent = indent;
+    if (indent < blockIndent) break;
+    collected.push(line.slice(blockIndent));
+  }
+  assert.ok(blockIndent !== null, "the reviewer preflight's `run: |` block is empty");
+  return collected.join("\n") + "\n";
+}
+
+function runPreflightStep(stepEnv) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "issue-354-preflight-"));
+  const scriptPath = path.join(dir, "preflight.sh");
+  const wrapperPath = path.join(dir, "wrapper.sh");
+  const npmMarker = path.join(dir, "npm-was-called");
+  const npxMarker = path.join(dir, "npx-was-called");
+
+  writeFileSync(scriptPath, extractPreflightRunBlock(), "utf8");
+  writeFileSync(
+    wrapperPath,
+    ['npm() { : > "$NPM_MARKER"; }', 'npx() { : > "$NPX_MARKER"; }', '. "$PREFLIGHT_SCRIPT"', ""].join("\n"),
+    "utf8"
+  );
+
+  const result = spawnSync("bash", [wrapperPath], {
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH,
+      NPM_MARKER: npmMarker,
+      NPX_MARKER: npxMarker,
+      PREFLIGHT_SCRIPT: scriptPath,
+      ...stepEnv,
+    },
+  });
+
+  const observed = {
+    status: result.status,
+    stdout: result.stdout ?? "",
+    // `result.error` is folded in so a shell that never started (no bash on
+    // PATH) reports THAT, rather than an assertion about an empty stderr and a
+    // null status that reads like the guard misbehaved.
+    stderr: result.error ? `${result.error.message}\n${result.stderr ?? ""}` : (result.stderr ?? ""),
+    npmCalled: existsSync(npmMarker),
+    npxCalled: existsSync(npxMarker),
+  };
+  rmSync(dir, { recursive: true, force: true });
+  return observed;
+}
+
+// The six repository variables the step reads, all present. Individual tests
+// blank out the ones under test.
+const PROVISIONED_PREFLIGHT_ENV = {
+  IDENTITY_ID: "an-infisical-identity",
+  PROJECT_SLUG: "a-project-slug",
+  REVIEW_PROVIDER: "openai",
+  REVIEW_MODEL: "gpt-5-mini",
+  REVIEW_BUILDER_PROVIDER: "anthropic",
+  DEV_MODEL: "claude-opus-5",
+};
+
+test("AI Review refuses a missing builder provider or model before importing any credential", () => {
+  // The wiring oracle first: executing the step with an env this test invents
+  // would prove nothing if the action never passed those values in.
+  const preflightStart = reviewActionYaml.indexOf("- name: Preflight · Verify the reviewer is configured");
+  const preflightEnd = reviewActionYaml.indexOf("\n    - name:", preflightStart + 1);
+  const preflightBlock = reviewActionYaml.slice(preflightStart, preflightEnd);
+  assert.match(
+    preflightBlock,
+    /DEV_MODEL:\s*\$\{\{ inputs\.dev_model \}\}/,
+    "the preflight must receive vars.DEV_MODEL via the input"
+  );
+
+  for (const [blanked, expectedVariable] of [
+    ["REVIEW_BUILDER_PROVIDER", "vars.DEV_PROVIDER"],
+    ["DEV_MODEL", "vars.DEV_MODEL"],
+  ]) {
+    const observed = runPreflightStep({ ...PROVISIONED_PREFLIGHT_ENV, [blanked]: "" });
+
+    assert.equal(observed.status, 1, `blanking ${blanked} must fail the step: ${observed.stderr}`);
+    assert.match(
+      observed.stderr,
+      new RegExp(expectedVariable.replace(".", "\\.")),
+      `the failure must name ${expectedVariable}, the variable the owner has to set`
+    );
+    assert.equal(observed.npmCalled, false, `no dependency install may run when ${blanked} is blank`);
+    assert.equal(observed.npxCalled, false, `no downstream call may run when ${blanked} is blank`);
+  }
+});
+
+// Positive control for the test above. Without it "the markers are absent"
+// could just as easily mean the stubs were never reachable at all, which would
+// make every assertion above vacuously true.
+test("AI Review preflight proceeds past the variable check once every builder variable is set", () => {
+  const observed = runPreflightStep(PROVISIONED_PREFLIGHT_ENV);
+
+  assert.equal(observed.status, 0, `a fully provisioned preflight must pass: ${observed.stderr}`);
+  assert.equal(observed.npmCalled, true, "the provisioned path must reach the dependency install");
+  assert.equal(observed.npxCalled, true, "the provisioned path must reach the canonical validator");
+});
+
+// The reviewer step runs packages/review's CLI, which resolves the SAME config
+// the preflight validated. A builder variable checked in the preflight but
+// never exported to the CLI would fail the real run at the point where a
+// provider credential is already in the environment -- the preflight exists
+// precisely so that cannot happen.
+test("the model call receives the builder model, not only the builder provider", () => {
+  const reviewStep = reviewActionYaml.indexOf("- name: Review · Run the adversarial LLM reviewer");
+  assert.ok(reviewStep >= 0, "verify-llm-review/action.yml: reviewer step not found");
+  const reviewEnd = reviewActionYaml.indexOf("\n    - name:", reviewStep + 1);
+  const reviewBlock = reviewActionYaml.slice(reviewStep, reviewEnd);
+
+  assert.match(
+    reviewBlock,
+    /REVIEW_BUILDER_PROVIDER:\s*\$\{\{ inputs\.review_builder_provider \}\}/,
+    "the model call must receive the builder provider"
+  );
+  assert.match(
+    reviewBlock,
+    /DEV_MODEL:\s*\$\{\{ inputs\.dev_model \}\}/,
+    "the model call must receive the builder model too"
   );
 });
 

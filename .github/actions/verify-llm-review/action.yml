@@ -26,7 +26,9 @@ description: >-
   packages/review/src/config.ts REFUSES to run when REVIEW_PROVIDER and
   REVIEW_BUILDER_PROVIDER resolve to the same provider company, so this gate
   cannot degrade into one model family grading its own work (AGENTS.md > Risk
-  classification, R2/R3).
+  classification, R2/R3). The builder identity is stated, never assumed: both
+  vars.DEV_PROVIDER and vars.DEV_MODEL are required, and an empty one fails
+  this action by name before any credential is imported (Issue #354).
 
 inputs:
   pr_number:
@@ -61,12 +63,18 @@ inputs:
     description: Exact model id served by that family (vars.REVIEW_MODEL).
     required: false
     default: ""
+  # Both builder inputs are mandatory in substance: the preflight below refuses
+  # an empty one by name before any credential is imported. They stay
+  # `required: false` with an empty default because the composite-action runner
+  # does not enforce `required: true` -- declaring it would state a guarantee
+  # nothing checks, and the caller would still reach the preflight with an
+  # empty string. The preflight is the enforcement; this is the documentation.
   review_builder_provider:
-    description: Coding-agent provider family from vars.DEV_PROVIDER.
+    description: Required. Coding-agent provider family from vars.DEV_PROVIDER; empty fails the gate.
     required: false
     default: ""
   dev_model:
-    description: Coding-agent model from vars.DEV_MODEL.
+    description: Required. Coding-agent model from vars.DEV_MODEL; empty fails the gate.
     required: false
     default: ""
 
@@ -113,13 +121,21 @@ runs:
         [ -n "$PROJECT_SLUG" ]   || missing+=("vars.INFISICAL_PROJECT_SLUG")
         [ -n "$REVIEW_PROVIDER" ]|| missing+=("vars.REVIEW_PROVIDER")
         [ -n "$REVIEW_MODEL" ]   || missing+=("vars.REVIEW_MODEL")
+        # The builder identity, checked here and not left to the validator
+        # below: an unset vars.DEV_PROVIDER used to resolve through an assumed
+        # default, so the gate imported a reviewer credential and reviewed a
+        # change whose author was never stated (Issue #354). Naming both halves
+        # at this point costs nothing and happens before `npm ci`, before
+        # Infisical, and before any provider request.
+        [ -n "$REVIEW_BUILDER_PROVIDER" ] || missing+=("vars.DEV_PROVIDER")
+        [ -n "$DEV_MODEL" ]      || missing+=("vars.DEV_MODEL")
 
         if [ ${#missing[@]} -gt 0 ]; then
           {
             echo "This gate is not fully provisioned. Empty repository variables:"
             printf '  - %s\n' "${missing[@]}"
             echo
-            echo "All four are read through the \`vars.\` context, so each must exist as a"
+            echo "All six are read through the \`vars.\` context, so each must exist as a"
             echo "repository VARIABLE (Settings -> Secrets and variables -> Actions -> the"
             echo "Variables tab). Two placements look correct but are invisible here:"
             echo "  * added under Secrets instead of Variables -- \`vars.\` cannot read secrets;"
@@ -142,7 +158,7 @@ runs:
         npx --no-install tsx --eval <<'NODE'
         import { resolveConfig } from "./packages/review/src/config.ts";
         const config = resolveConfig(process.env);
-        console.log(`Reviewer configuration present: provider=${config.reviewerProvider} model=${config.reviewerModel} builder=${config.builderProvider}`);
+        console.log(`Reviewer configuration present: provider=${config.reviewerProvider} model=${config.reviewerModel} builder=${config.builderProvider} builderModel=${config.builderModel}`);
         NODE
 
     # Install dependencies after the credential-free preflight; lifecycle
@@ -280,6 +296,7 @@ runs:
         REVIEW_PROVIDER: ${{ inputs.review_provider }}
         REVIEW_MODEL: ${{ inputs.review_model }}
         REVIEW_BUILDER_PROVIDER: ${{ inputs.review_builder_provider }}
+        DEV_MODEL: ${{ inputs.dev_model }}
         BASE_SHA: ${{ inputs.base_sha }}
         HEAD_SHA: ${{ inputs.head_sha }}
       run: |

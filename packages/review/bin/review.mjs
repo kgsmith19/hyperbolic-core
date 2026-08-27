@@ -10,7 +10,8 @@
 // Environment (see ../src/config.ts -- nothing here is defaulted silently):
 //   REVIEW_PROVIDER            reviewer provider family (anthropic|openai|gemini)
 //   REVIEW_MODEL               exact model id served by REVIEW_PROVIDER
-//   REVIEW_BUILDER_PROVIDER    family that WROTE the code (default: anthropic)
+//   REVIEW_BUILDER_PROVIDER    required; family that WROTE the code
+//   DEV_MODEL                  required; exact model id that WROTE the code
 //   REVIEW_ANTHROPIC_API_KEY   only the reviewer provider's key is required
 //   REVIEW_OPENAI_API_KEY
 //   REVIEW_GEMINI_API_KEY

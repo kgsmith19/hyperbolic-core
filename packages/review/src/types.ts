@@ -145,14 +145,22 @@ export interface ReviewVerdict {
 }
 
 /**
- * Resolved run configuration. `builderProvider` is not used to call anything;
- * it exists solely so config.ts can refuse a reviewer from the same provider
- * family as the code's author.
+ * Resolved run configuration.
+ *
+ * Neither builder field is used to call anything. `builderProvider` exists so
+ * config.ts can refuse a reviewer from the same provider company as the code's
+ * author; `builderModel` is the exact model id that author ran, recorded
+ * verbatim so the run states WHOSE work was reviewed rather than only which
+ * company's. Both are required and neither is ever defaulted (Issue #354) --
+ * an assumed builder is a claim the gate cannot support, made at the moment it
+ * is about to import a reviewer credential on the strength of it.
  */
 export interface ReviewConfig {
   reviewerProvider: Provider;
   reviewerModel: string;
   builderProvider: BuilderProvider;
+  /** Opaque vendor string. Never normalized, never validated against a list. */
+  builderModel: string;
   maxTokens: number;
   timeoutMs: number;
 }
