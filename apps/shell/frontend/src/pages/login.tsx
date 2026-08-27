@@ -2,26 +2,54 @@
 // "Login flow and session lifecycle: Shell ... zones never render a login
 // form"). Rendered OUTSIDE components/protected-layout.tsx's gate (see
 // app.tsx) -- it is the one route that must be reachable while signed out.
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
-import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@hyperbolic/ui";
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Input,
+  Label,
+  classifyNavigationTarget,
+} from "@hyperbolic/ui";
 import type { SessionStatus } from "../lib/session";
 import { sanitizeReturnPath } from "../lib/return-path";
 
 interface LoginPageProps {
   status: SessionStatus;
   onSignIn: (email: string, password: string) => Promise<void>;
+  replaceDocument?: (href: string) => void;
 }
 
-function LoginPage({ status, onSignIn }: LoginPageProps) {
+function replaceBrowserDocument(href: string): void {
+  window.location.replace(href);
+}
+
+function LoginPage({ status, onSignIn, replaceDocument = replaceBrowserDocument }: LoginPageProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const replacedDocumentTarget = useRef<string | null>(null);
 
   const returnTo = sanitizeReturnPath(new URLSearchParams(location.search).get("return"));
+  const returnKind = classifyNavigationTarget(returnTo);
+
+  function replaceReturnDocumentOnce(): void {
+    if (replacedDocumentTarget.current === returnTo) return;
+    replacedDocumentTarget.current = returnTo;
+    replaceDocument(returnTo);
+  }
+
+  useEffect(() => {
+    if (status === "signed-in" && returnKind === "document") {
+      replaceReturnDocumentOnce();
+    }
+  }, [replaceDocument, returnKind, returnTo, status]);
 
   if (status === "checking") {
     // Session status isn't resolved yet -- mirrors
@@ -40,7 +68,7 @@ function LoginPage({ status, onSignIn }: LoginPageProps) {
     // never show a login form to a signed-in session -- SH-2/SH-3's
     // "exactly one login surface" would be violated by a stray second
     // prompt.
-    return <Navigate to={returnTo} replace />;
+    return returnKind === "document" ? null : <Navigate to={returnTo} replace />;
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -49,7 +77,11 @@ function LoginPage({ status, onSignIn }: LoginPageProps) {
     setError(null);
     try {
       await onSignIn(email, password);
-      navigate(returnTo, { replace: true });
+      if (returnKind === "document") {
+        replaceReturnDocumentOnce();
+      } else {
+        navigate(returnTo, { replace: true });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed. Check your email and password.");
       setSubmitting(false);

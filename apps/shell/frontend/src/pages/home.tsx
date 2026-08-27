@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { Card, CardContent, CardHeader, CardTitle } from "@hyperbolic/ui";
+import { Card, CardContent, CardHeader, CardTitle, classifyNavigationTarget } from "@hyperbolic/ui";
 import { AccStatusCard } from "../components/acc-status-card";
 import { HealthSummary } from "../components/health-summary";
 
@@ -10,28 +10,25 @@ import { HealthSummary } from "../components/health-summary";
 // want a longer descriptive sentence per zone that the nav's short labels
 // don't carry. Hrefs match the 05-a section 4 route map exactly.
 //
-// `hardNavigate` marks entries that are NOT Shell routes at all: LifeOS is a
-// wholly separate zone stitched in at the infrastructure level by
-// `tailscale serve`'s path-based reverse proxy (docs/ops/tailscale-serve-apply.sh's
-// ROUTES array maps `/life/` to LifeOS's own, entirely different static
-// bundle -- Shell's `app.tsx` <Routes> has no `/life` entry and never will,
-// same for active-zone.ts's ZONE_BY_PREFIX table). A plain in-Shell <Link>
+// LifeOS is a wholly separate production bundle selected by the private-origin
+// nginx configuration at the `/life/` boundary. Shell's `app.tsx` <Routes>
+// has no `/life` entry. A plain in-Shell <Link>
 // only ever calls history.pushState -- it never issues an HTTP request --
-// so a client-side router navigation to /life/ can't reach that proxy layer
+// so a client-side router navigation to /life/ can't reach nginx
 // at all and falls straight through to Shell's own catch-all NotFoundPage
 // (app.tsx's `<Route path="*">`). `reloadDocument` (below) forces a real
-// browser navigation for exactly this one entry, which is the only way to
-// actually leave Shell's SPA and let `tailscale serve` route the request.
-// Every other card below points at a real Shell route, so it stays a normal
-// SPA `<Link>` on purpose -- flip this on ONLY for a zone that is genuinely
-// served from outside Shell's own bundle, not for internal Shell pages.
-const LAUNCHERS: { id: string; name: string; href: string; description: string; hardNavigate?: boolean }[] = [
+// browser navigation for the cross-zone entry, allowing the private origin
+// to select LifeOS's document instead of retaining Shell's document.
+// `classifyNavigationTarget` derives that boundary from packages/ui's zone
+// registry, so Home owns presentation copy only and cannot drift from the
+// nav rail, command palette, or login-return policy. Every other card below
+// points at a real Shell route and stays a normal SPA `<Link>`.
+const LAUNCHERS: { id: string; name: string; href: string; description: string }[] = [
   {
     id: "life",
     name: "LifeOS",
     href: "/life/",
     description: "Entities, intentions, and health tracking.",
-    hardNavigate: true,
   },
   { id: "acc", name: "ACC", href: "/acc", description: "Agentic Command Center status and link-out." },
   { id: "tools", name: "Tools", href: "/tools", description: "Toolbelt registry surfaces." },
@@ -55,14 +52,12 @@ function HomePage() {
             <Link
               key={launcher.id}
               to={launcher.href}
-              // See the LAUNCHERS comment above: only set true for a zone
-              // that lives outside Shell's own SPA bundle (currently just
-              // LifeOS). react-router 8.3's <Link> supports this natively --
+              // react-router 8.3's <Link> supports this natively --
               // when set it skips the SPA click handler entirely (no
               // preventDefault, no pushState) and lets the browser perform
-              // its normal anchor navigation, so path-based reverse proxies
-              // (tailscale serve) actually see the request.
-              reloadDocument={launcher.hardNavigate}
+              // its normal anchor navigation, so private-origin nginx sees
+              // the request and selects the correct production bundle.
+              reloadDocument={classifyNavigationTarget(launcher.href) === "document"}
               data-testid="launcher-card"
               data-zone={launcher.id}
               className="block rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"

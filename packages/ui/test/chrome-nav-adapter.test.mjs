@@ -20,8 +20,87 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { matchRoutes } from "react-router";
 
-const { ZONE_ENTRIES, shouldNavigateClientSide } = await import("../src/chrome/zones.ts");
+const { classifyNavigationTarget, ZONE_ENTRIES, shouldNavigateClientSide } = await import("../src/chrome/zones.ts");
+
+describe("classifyNavigationTarget: document boundaries come from the zone registry", () => {
+  test("LifeOS roots and descendants require document navigation without losing suffixes", () => {
+    for (const target of [
+      "/life",
+      "/life/",
+      "/life/today",
+      "/life/today?view=compact#entry-4",
+    ]) {
+      assert.equal(classifyNavigationTarget(target), "document", target);
+    }
+  });
+
+  test("similar prefixes and Shell routes remain client navigation", () => {
+    for (const target of [
+      "/",
+      "/settings",
+      "/tools/foo",
+      "/ideas/123?view=detail#notes",
+      "/lifefoo",
+      "/lifestyle",
+    ]) {
+      assert.equal(classifyNavigationTarget(target), "client", target);
+    }
+  });
+
+  test("uses the browser-normalized pathname for dot segments without losing suffixes", () => {
+    const origin = "https://shell.example";
+    for (const [target, expectedPath, expectedKind] of [
+      [
+        "/tools/../life/capture?mode=quick#details",
+        "/life/capture",
+        "document",
+      ],
+      ["/life/../settings?tab=theme#system", "/settings", "client"],
+    ]) {
+      assert.equal(new URL(target, origin).pathname, expectedPath, target);
+      assert.equal(classifyNavigationTarget(target), expectedKind, target);
+    }
+  });
+
+  test("uses origin-equivalent decoding at encoded zone boundaries", () => {
+    const origin = "https://shell.example";
+    const lifeRoutes = [{ path: "/life/*" }];
+    const encodedLife = "/%6cife/capture?mode=quick#entry";
+    const encodedLifePath = new URL(encodedLife, origin).pathname;
+
+    assert.ok(matchRoutes(lifeRoutes, encodedLifePath), encodedLife);
+    assert.equal(classifyNavigationTarget(encodedLife), "document", encodedLife);
+
+    for (const target of ["/life%2Fcapture", "/%6cife%2Fcapture"]) {
+      const originPath = decodeURIComponent(new URL(target, origin).pathname);
+      assert.equal(originPath, "/life/capture", target);
+      assert.equal(classifyNavigationTarget(target), "document", target);
+    }
+
+    for (const target of [
+      "/%6cifefoo/capture",
+      "/%6cifestyle",
+      "/life%252Fcapture",
+      "/%6cife/../%73ettings?tab=theme#system",
+    ]) {
+      const browserPath = new URL(target, origin).pathname;
+      assert.equal(matchRoutes(lifeRoutes, browserPath), null, target);
+      assert.equal(classifyNavigationTarget(target), "client", target);
+    }
+  });
+
+  test("malformed percent sequences classify without throwing", () => {
+    for (const [target, expected] of [
+      ["/%zzlife/capture", "client"],
+      ["/life/%zz", "document"],
+    ]) {
+      assert.doesNotThrow(() => classifyNavigationTarget(target), target);
+      assert.equal(classifyNavigationTarget(target), expected, target);
+    }
+  });
+});
 
 describe("zones.ts: hardNavigate marks exactly the one genuinely cross-zone entry", () => {
   test("life is hardNavigate:true; every other zone is falsy", () => {

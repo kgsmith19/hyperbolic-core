@@ -1,13 +1,13 @@
 // Home page launcher-card navigation mechanism (P1 fix: the LifeOS card
 // must perform a REAL hard navigation, not a client-side router transition).
 //
-// LifeOS is not a Shell route at all -- it's a separate zone stitched in by
-// `tailscale serve`'s path-based reverse proxy (docs/ops/tailscale-serve-apply.sh),
-// entirely outside app.tsx's <Routes>. A plain react-router <Link> never
+// LifeOS is not a Shell route at all -- private-origin nginx selects its
+// separate production bundle at the `/life/` boundary, entirely outside
+// app.tsx's <Routes>. A plain react-router <Link> never
 // leaves Shell's SPA: react-router's useLinkClickHandler calls
 // event.preventDefault() and does a history.pushState() instead of letting
 // the browser's normal anchor click go through, so the click never becomes
-// an HTTP request and the reverse proxy never gets a chance to serve the
+// an HTTP request and nginx never gets a chance to serve the
 // LifeOS bundle -- Shell's own catch-all NotFoundPage renders instead.
 //
 // A test that only checks `href="/life/"` would pass on both the buggy
@@ -29,6 +29,20 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import HomePage from "./home";
 
+type NavigationClassifier = (target: string) => "client" | "document";
+
+const classifier = vi.hoisted(() => ({
+  mock: vi.fn<NavigationClassifier>(),
+  real: undefined as NavigationClassifier | undefined,
+}));
+
+vi.mock("@hyperbolic/ui", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@hyperbolic/ui")>();
+  classifier.real = actual.classifyNavigationTarget;
+  classifier.mock.mockImplementation(actual.classifyNavigationTarget);
+  return { ...actual, classifyNavigationTarget: classifier.mock };
+});
+
 function renderHome() {
   return render(
     <MemoryRouter initialEntries={["/"]}>
@@ -39,6 +53,8 @@ function renderHome() {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  classifier.mock.mockReset();
+  if (classifier.real) classifier.mock.mockImplementation(classifier.real);
 });
 
 describe("HomePage launcher cards: navigation mechanism", () => {
@@ -93,5 +109,23 @@ describe("HomePage launcher cards: navigation mechanism", () => {
     const cards = screen.getAllByTestId("launcher-card");
     expect(cards).toHaveLength(6);
     expect(document.querySelector('[data-testid="launcher-card"][data-zone="life"]')).not.toBeNull();
+  });
+
+  it("takes the LifeOS reload decision only from the shared classifier", () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network unreachable")));
+    // Deliberately contradict today's real registry policy. If Home still
+    // owns a second hardNavigate flag, that stale local flag wins and this
+    // click remains native. With the classifier as the sole policy owner,
+    // the forced client result makes React Router intercept the click.
+    classifier.mock.mockReturnValue("client");
+    renderHome();
+
+    const lifeCard = screen.getAllByTestId("launcher-card").find((el) => el.dataset.zone === "life");
+    if (!lifeCard) throw new Error("no launcher-card with data-zone=life rendered");
+
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    fireEvent(lifeCard, event);
+
+    expect(event.defaultPrevented).toBe(true);
   });
 });

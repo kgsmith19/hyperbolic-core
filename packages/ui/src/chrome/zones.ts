@@ -34,11 +34,10 @@ export interface ZoneEntry {
    * Finding #70 (PR #8 security review): marks entries that are NOT part of
    * this SPA's own router at all -- currently just `life`, LifeOS being a
    * wholly separate zone stitched in at the infrastructure level (see
-   * apps/shell/frontend/src/pages/home.tsx's identically-named, identically-scoped
-   * `hardNavigate` flag on its own LAUNCHERS table, added for that same
-   * P1 fix; this mirrors it exactly rather than inventing a second
-   * mechanism). Every other zone entry is a genuine Shell route and is
-   * left `undefined` (falsy) here on purpose, so it is eligible for
+   * `classifyNavigationTarget`, which lets Shell consumers derive the same
+   * boundary from this registry instead of maintaining another flag).
+   * Every other zone entry is a genuine Shell route and is left `undefined`
+   * (falsy) here on purpose, so it is eligible for
    * client-side navigation whenever a consumer wires a `navigate` adapter
    * (nav-rail.tsx / command-palette.tsx / chrome.tsx's `ChromeProps`).
    */
@@ -53,6 +52,46 @@ export const ZONE_ENTRIES: readonly ZoneEntry[] = [
   { zone: "prompts", label: "Prompts", href: "/prompts/", icon: NotebookText },
   { zone: "ideas", label: "Ideas", href: "/ideas/", icon: Lightbulb },
 ];
+
+export type NavigationTargetKind = "client" | "document";
+
+function decodeOriginPathname(pathname: string): string {
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    // Keep malformed escapes inert so classification fails safely without
+    // inventing a different origin path.
+    return pathname;
+  }
+}
+
+/**
+ * Classifies a same-origin path for a router-owning consumer. Cross-zone
+ * roots come from ZONE_ENTRIES rather than a second list, and match only at
+ * a path-segment boundary: `/life` and `/life/...` leave the current SPA,
+ * while `/lifefoo` does not. Query and fragment suffixes do not affect the
+ * decision and remain untouched for the caller to pass to its navigator.
+ *
+ * This is navigation policy, not URL validation. Callers handling
+ * attacker-influenced values must validate them before classification.
+ */
+export function classifyNavigationTarget(target: string): NavigationTargetKind {
+  // Use the same WHATWG normalization a browser applies when either
+  // navigator consumes the untouched target. In particular, dot segments
+  // can cross a zone boundary before the document request or pushState.
+  // Decode the remaining escapes once because the origin matches locations
+  // against that decoded path, including a single-encoded path separator.
+  const pathname = decodeOriginPathname(
+    new URL(target, "https://navigation.invalid").pathname
+  );
+  const isDocumentTarget = ZONE_ENTRIES.some((entry) => {
+    if (!entry.hardNavigate) return false;
+    const zoneRoot = entry.href.endsWith("/") ? entry.href.slice(0, -1) : entry.href;
+    return pathname === zoneRoot || pathname.startsWith(`${zoneRoot}/`);
+  });
+
+  return isDocumentTarget ? "document" : "client";
+}
 
 /** A function that performs a client-side (SPA) navigation to `href`. */
 export type NavigateAdapter = (href: string) => void;

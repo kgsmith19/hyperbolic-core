@@ -1,9 +1,13 @@
 // sanitizeReturnPath is the one function standing between an attacker-
 // influenceable `?return=` query param and react-router's `navigate()`
 // (SH-2b's deep-link return, open-redirect guarded). Exercised adversarially
-// here, independent of any component or router.
+// here without a component; WHATWG URL and React Router matching provide
+// independent oracles for the two normalization boundaries.
 import { describe, expect, it } from "vitest";
+import { matchRoutes } from "react-router";
 import { sanitizeReturnPath } from "./return-path";
+
+const SHELL_ORIGIN = "https://shell.example";
 
 describe("sanitizeReturnPath: legitimate same-origin targets pass through unchanged", () => {
   it.each([
@@ -12,6 +16,10 @@ describe("sanitizeReturnPath: legitimate same-origin targets pass through unchan
     ["/prompts/", "/prompts/"],
     ["/", "/"],
     ["/settings", "/settings"],
+    [
+      "/life/capture?mode=quick#details",
+      "/life/capture?mode=quick#details",
+    ],
   ])("%s -> %s", (input, expected) => {
     expect(sanitizeReturnPath(input)).toBe(expected);
   });
@@ -25,27 +33,63 @@ describe("sanitizeReturnPath: falls back to / for anything falsy or absent", () 
 
 describe("sanitizeReturnPath: rejects targets that would leave this document/origin (open-redirect guard)", () => {
   it.each([
-    "//evil.example.com",
-    "//evil.example.com/tools",
-    "https://evil.example.com",
-    "http://evil.example.com/tools",
-    "javascript:alert(1)",
+    ["protocol-relative", "//evil.example.com/tools"],
+    [
+      "protocol-relative sentinel collision",
+      "//shell.invalid/looks-like-the-sentinel",
+    ],
+    ["absolute HTTPS", "https://evil.example.com/tools"],
+    ["absolute HTTP", "http://evil.example.com/tools"],
+    ["script scheme", "javascript:alert(1)"],
+    ["backslash-normalized authority", "/\\evil.example.com/path"],
+    ["slash-backslash-normalized authority", "/\\/evil.example.com/path"],
+    ["tab-stripped authority", "/\t/evil.example.com/path"],
+    ["carriage-return-stripped authority", "/\r/evil.example.com/path"],
+    ["newline-stripped authority", "/\n/evil.example.com/path"],
+  ])("%s resolves outside the Shell origin and falls back", (_label, input) => {
+    // WHATWG URL parsing is the independent browser oracle: these strings do
+    // not all look absolute before normalization, but they resolve off-origin.
+    expect(new URL(input, SHELL_ORIGIN).origin).not.toBe(SHELL_ORIGIN);
+    expect(sanitizeReturnPath(input)).toBe("/");
+  });
+
+  it.each([
     "tools", // no leading slash: relative to current path, not app-root-relative
     "../tools",
     " ",
-    "/\\evil.example.com", // backslash normalization trick
-    "/\\/evil.example.com",
-])("%s -> /", (input) => {
+    "/tools\u0000next",
+    "/tools\u001fnext",
+    "/tools\u007fnext",
+  ])("%s -> /", (input) => {
     expect(sanitizeReturnPath(input)).toBe("/");
   });
 });
 
 describe("sanitizeReturnPath: never redirects back into the login route itself", () => {
-  it.each(["/login", "/login/", "/login?return=%2Ftools", "/login?foo=bar"])("%s -> /", (input) => {
+  it.each([
+    "/login",
+    "/login/",
+    "/login?return=%2Ftools",
+    "/login?foo=bar",
+    "/login#fragment",
+    "/login?foo=bar#fragment",
+    "/LOGIN#fragment",
+    "/tools/../login?foo=bar#fragment",
+    "/%6cogin?return=%2Flife%2Fcapture",
+    "/%6Cogin#fragment",
+  ])("%s -> /", (input) => {
+    const browserPath = new URL(input, SHELL_ORIGIN).pathname;
+    // The actual router matcher is the independent loop oracle. In
+    // particular, it decodes percent-encoded path characters that the URL
+    // object's pathname intentionally leaves encoded.
+    expect(matchRoutes([{ path: "/login" }], browserPath)).not.toBeNull();
     expect(sanitizeReturnPath(input)).toBe("/");
   });
 
-  it("does not false-positive on an unrelated route that merely starts with the same letters", () => {
-    expect(sanitizeReturnPath("/loginhistory")).toBe("/loginhistory");
-  });
+  it.each(["/loginhistory", "/login-help", "/login-help?next=1#form"])(
+    "does not false-positive on %s",
+    (input) => {
+      expect(sanitizeReturnPath(input)).toBe(input);
+    },
+  );
 });
