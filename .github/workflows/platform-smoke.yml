@@ -140,9 +140,9 @@ jobs:
           }
 
           probe "Shell health" "/healthz" '\{"status":"ok"\}'
-          probe "Shell index" "/" '/assets/[A-Za-z0-9_.-]+\.js'
-          probe "Shell login deep link" "/login" '/assets/[A-Za-z0-9_.-]+\.js'
-          probe "Shell settings deep link" "/settings" '/assets/[A-Za-z0-9_.-]+\.js'
+          probe "Shell index" "/" 'src="/assets/[A-Za-z0-9_.-]+\.js"'
+          probe "Shell login deep link" "/login" 'src="/assets/[A-Za-z0-9_.-]+\.js"'
+          probe "Shell settings deep link" "/settings" 'src="/assets/[A-Za-z0-9_.-]+\.js"'
           probe "Handler A" "/api/healthz" ''
           probe "Brain" "/api/brain/health" ''
 
