@@ -2,7 +2,7 @@
 // "Login flow and session lifecycle: Shell ... zones never render a login
 // form"). Rendered OUTSIDE components/protected-layout.tsx's gate (see
 // app.tsx) -- it is the one route that must be reachable while signed out.
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
 import {
   Button,
@@ -34,13 +34,20 @@ function LoginPage({ status, onSignIn, replaceDocument = replaceBrowserDocument 
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const replacedDocumentTarget = useRef<string | null>(null);
 
   const returnTo = sanitizeReturnPath(new URLSearchParams(location.search).get("return"));
   const returnKind = classifyNavigationTarget(returnTo);
 
+  function replaceReturnDocumentOnce(): void {
+    if (replacedDocumentTarget.current === returnTo) return;
+    replacedDocumentTarget.current = returnTo;
+    replaceDocument(returnTo);
+  }
+
   useEffect(() => {
     if (status === "signed-in" && returnKind === "document") {
-      replaceDocument(returnTo);
+      replaceReturnDocumentOnce();
     }
   }, [replaceDocument, returnKind, returnTo, status]);
 
@@ -71,7 +78,7 @@ function LoginPage({ status, onSignIn, replaceDocument = replaceBrowserDocument 
     try {
       await onSignIn(email, password);
       if (returnKind === "document") {
-        replaceDocument(returnTo);
+        replaceReturnDocumentOnce();
       } else {
         navigate(returnTo, { replace: true });
       }

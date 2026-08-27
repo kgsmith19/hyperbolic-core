@@ -29,6 +29,20 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import HomePage from "./home";
 
+type NavigationClassifier = (target: string) => "client" | "document";
+
+const classifier = vi.hoisted(() => ({
+  mock: vi.fn<NavigationClassifier>(),
+  real: undefined as NavigationClassifier | undefined,
+}));
+
+vi.mock("@hyperbolic/ui", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@hyperbolic/ui")>();
+  classifier.real = actual.classifyNavigationTarget;
+  classifier.mock.mockImplementation(actual.classifyNavigationTarget);
+  return { ...actual, classifyNavigationTarget: classifier.mock };
+});
+
 function renderHome() {
   return render(
     <MemoryRouter initialEntries={["/"]}>
@@ -39,6 +53,8 @@ function renderHome() {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  classifier.mock.mockReset();
+  if (classifier.real) classifier.mock.mockImplementation(classifier.real);
 });
 
 describe("HomePage launcher cards: navigation mechanism", () => {
@@ -93,5 +109,23 @@ describe("HomePage launcher cards: navigation mechanism", () => {
     const cards = screen.getAllByTestId("launcher-card");
     expect(cards).toHaveLength(6);
     expect(document.querySelector('[data-testid="launcher-card"][data-zone="life"]')).not.toBeNull();
+  });
+
+  it("takes the LifeOS reload decision only from the shared classifier", () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network unreachable")));
+    // Deliberately contradict today's real registry policy. If Home still
+    // owns a second hardNavigate flag, that stale local flag wins and this
+    // click remains native. With the classifier as the sole policy owner,
+    // the forced client result makes React Router intercept the click.
+    classifier.mock.mockReturnValue("client");
+    renderHome();
+
+    const lifeCard = screen.getAllByTestId("launcher-card").find((el) => el.dataset.zone === "life");
+    if (!lifeCard) throw new Error("no launcher-card with data-zone=life rendered");
+
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    fireEvent(lifeCard, event);
+
+    expect(event.defaultPrevented).toBe(true);
   });
 });

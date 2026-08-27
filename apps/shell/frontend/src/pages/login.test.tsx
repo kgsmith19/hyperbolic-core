@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -49,6 +50,29 @@ function renderLogin(
         />
       </Routes>
     </MemoryRouter>
+  );
+}
+
+function LoginWhoseSignInUpdatesStatus({
+  onSignIn,
+  replaceDocument,
+}: {
+  onSignIn: (email: string, password: string) => void;
+  replaceDocument: (href: string) => void;
+}) {
+  const [status, setStatus] = useState<SessionStatus>("signed-out");
+
+  return (
+    <LoginPage
+      status={status}
+      onSignIn={async (email, password) => {
+        onSignIn(email, password);
+        // Mirrors useShellSession.signIn(): publish signed-in state before
+        // the promise observed by LoginPage resolves.
+        setStatus("signed-in");
+      }}
+      replaceDocument={replaceDocument}
+    />
   );
 }
 
@@ -133,6 +157,30 @@ describe("LoginPage: submitting", () => {
 
     await waitFor(() => expect(replaced).toEqual([returnTo]));
     expect(screen.queryByTestId("life-client-route")).toBeNull();
+  });
+
+  it("replaces a LifeOS document exactly once when sign-in publishes signed-in status before resolving", async () => {
+    const user = userEvent.setup();
+    const onSignIn = vi.fn();
+    const replaced: string[] = [];
+    const returnTo = "/life/today?focus=health#entry-4";
+
+    render(
+      <MemoryRouter initialEntries={[`/login?return=${encodeURIComponent(returnTo)}`]}>
+        <LoginWhoseSignInUpdatesStatus
+          onSignIn={onSignIn}
+          replaceDocument={(href) => replaced.push(href)}
+        />
+      </MemoryRouter>
+    );
+
+    await user.type(screen.getByTestId("login-email"), "operator@example.com");
+    await user.type(screen.getByTestId("login-password"), "hunter2");
+    await user.click(screen.getByTestId("login-submit"));
+
+    await waitFor(() => expect(screen.queryByTestId("login-form")).toBeNull());
+    expect(onSignIn).toHaveBeenCalledWith("operator@example.com", "hunter2");
+    expect(replaced).toEqual([returnTo]);
   });
 
   it("shows an error message and keeps the form when sign-in rejects, without navigating away", async () => {
