@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Apply the single-origin route table from docs/planning/10-cicd-deployment.md.
+# Replace the legacy five-mount table with one private nginx origin.
 set -euo pipefail
 
 usage() {
@@ -31,17 +31,15 @@ case "$mode" in
     ;;
 esac
 
-mounts=("/" "/life/" "/life/api/" "/api/" "/api/brain/")
-deploy_root="/home/deploy"
+sudo_prefix=(sudo)
 if [[ -n "${NODE_TEST_CONTEXT:-}" && -n "${TAILSCALE_SERVE_TEST_ROOT:-}" ]]; then
-  deploy_root="$TAILSCALE_SERVE_TEST_ROOT"
+  sudo_prefix=()
 fi
-targets=(
-  "${deploy_root}/shell/current"
-  "${deploy_root}/lifeos-ui/current"
-  "http://127.0.0.1:8000"
-  "http://127.0.0.1:8200"
-  "http://127.0.0.1:8100"
+reset_command=("${sudo_prefix[@]}" tailscale serve reset)
+apply_command=(
+  "${sudo_prefix[@]}"
+  tailscale serve --bg --yes --https=443 --set-path=/
+  http://127.0.0.1:8080
 )
 
 preflight() {
@@ -49,77 +47,35 @@ preflight() {
     echo "error: tailscale is not installed" >&2
     return 1
   }
-  [[ -f "${targets[0]}/healthz" && "$(<"${targets[0]}/healthz")" == '{"status":"ok"}' ]] || {
-    echo "error: Shell release or health asset is missing: ${targets[0]}" >&2
-    return 1
-  }
-  [[ -f "${targets[1]}/index.html" ]] || {
-    echo "error: LifeOS release is missing: ${targets[1]}" >&2
-    return 1
-  }
-  grep -Eq '(src|href)="/life/' "${targets[1]}/index.html" || {
-    echo "error: LifeOS was not built for the /life/ base path" >&2
-    return 1
-  }
   command -v curl >/dev/null || {
     echo "error: curl is not installed" >&2
     return 1
   }
-  curl -fsS --max-time 5 "${targets[2]}/healthz" >/dev/null || {
-    echo "error: LifeOS API health check failed: ${targets[2]}/healthz" >&2
+  local health_response
+  health_response="$(curl -fsS --max-time 5 http://127.0.0.1:8080/healthz)" || {
+    echo "error: private nginx origin health check failed: http://127.0.0.1:8080/healthz" >&2
     return 1
   }
-  curl -fsS --max-time 5 "${targets[3]}/healthz" >/dev/null || {
-    echo "error: Handler A health check failed: ${targets[3]}/healthz" >&2
-    return 1
-  }
-  curl -fsS --max-time 5 "${targets[4]}/healthz" >/dev/null || {
-    echo "error: Brain health check failed: ${targets[4]}/healthz" >&2
+  [[ "$health_response" == '{"status":"ok"}' ]] || {
+    echo "error: unexpected private nginx origin health response" >&2
     return 1
   }
   tailscale serve status >/dev/null
 }
 
-if [[ "$mode" == "--apply" ]]; then
-  preflight
-  trap 'echo "error: route application stopped early; fix the cause and rerun --apply" >&2' ERR
+if [[ "$mode" == "--dry-run" ]]; then
+  print_command "${reset_command[@]}"
+  print_command "${apply_command[@]}"
+  exit 0
 fi
 
-for index in "${!mounts[@]}"; do
-  # Every tailscale serve mutation -- path target or http:// proxy target
-  # alike -- requires actual sudo elevation, confirmed live against a real
-  # deploy: tailscale refuses a bare, non-root, non-sudo `tailscale serve`
-  # call with "must be root, or be an operator and able to run 'sudo
-  # tailscale'" regardless of target type; it does not self-elevate. (An
-  # earlier fix scoped this to path targets only, based on a stale status
-  # snapshot; a live re-verification immediately proved the proxy targets
-  # hit the identical 401 -- see Issue #330.) Skipped under
-  # TAILSCALE_SERVE_TEST_ROOT (not NODE_TEST_CONTEXT alone -- node --test
-  # sets that for the whole process tree, including the plain dry-run
-  # invocations below, same reason deploy_root's own override above
-  # requires both) so the test suite's $PATH-based fake-tailscale
-  # interception keeps working -- sudo's own secure_path would otherwise
-  # bypass a $PATH-based test double entirely.
-  sudo_prefix=()
-  if [[ -z "${TAILSCALE_SERVE_TEST_ROOT:-}" ]]; then
-    sudo_prefix=(sudo)
-  fi
-  command=(
-    "${sudo_prefix[@]}"
-    tailscale serve --bg --yes --https=443
-    "--set-path=${mounts[$index]}"
-    "${targets[$index]}"
-  )
-  if [[ "$mode" == "--dry-run" ]]; then
-    print_command "${command[@]}"
-  else
-    printf '+ '
-    print_command "${command[@]}"
-    "${command[@]}"
-  fi
-done
-
-if [[ "$mode" == "--apply" ]]; then
-  trap - ERR
-  tailscale serve status
-fi
+preflight
+trap 'echo "error: Serve migration stopped early; use the documented rollback commands in docs/ops/runbook.md before retrying" >&2' ERR
+printf '+ '
+print_command "${reset_command[@]}"
+"${reset_command[@]}"
+printf '+ '
+print_command "${apply_command[@]}"
+"${apply_command[@]}"
+trap - ERR
+tailscale serve status

@@ -1,15 +1,14 @@
 name: "Ops Serve Apply"
 
-# Applies the one-origin tailscale serve route table to the VPS by workflow
+# Applies the one-root Tailscale Serve proxy to the VPS by workflow
 # dispatch, replacing the runbook's shell-into-the-box instruction (the docs
 # themselves called for "the ops-workflow pattern, one dispatchable task").
 # The route map itself stays in docs/ops/tailscale-serve-apply.sh -- tested,
 # idempotent, preflighted -- and this workflow is only its transport: ship the
 # exact checked-in script over keyless Tailscale SSH and run it with --apply.
-# The script's own preflights (Shell health asset, LifeOS /life/ base-path
-# assertion, all three loopback healthz probes) fail the run loudly before
-# any route changes, and existing routes are only ever added to, never
-# wiped wholesale.
+# The script proves the private nginx origin on 127.0.0.1:8080 is healthy
+# before resetting the obsolete five-mount table and installing one root
+# proxy. A failed preflight performs no Serve mutation.
 #
 # Credentials: the shell-deploy Infisical identity (/platform/shell-deploy/)
 # supplies the tailnet OAuth client -- the serve table fronts the Shell
@@ -77,7 +76,7 @@ jobs:
           set -euo pipefail
           chmod 0755 tailscale-serve-apply.sh
           echo "=== serve status BEFORE ==="
-          tailscale serve status || true
+          tailscale serve status
           echo "=== apply ==="
           ./tailscale-serve-apply.sh --apply
           echo "=== serve status AFTER ==="

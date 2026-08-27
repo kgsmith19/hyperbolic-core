@@ -1,18 +1,15 @@
-# Local-only HTTP origin cloudflared (#169) points at, plus the tunnel
-# itself. Loopback-bound edge-origin, same posture as every other unit's
-# compose file on this box (services/llm-handler, services/brain,
-# apps/lifeos/backend): the only way in is a route another layer explicitly
-# opens, and here that layer is public_paths.conf, which opens nothing until
-# the owner edits it. cloudflared adds the only other way in -- an
-# outbound-only tunnel, never a listening socket of its own.
+# The shared nginx process owns private 127.0.0.1:8080 and public
+# 127.0.0.1:8081 listeners. Host networking is required so nginx can reach
+# backend services on the host loopback and cloudflared can reach 8081.
+# nginx.conf binds both listeners explicitly; there is no wildcard socket.
 services:
   edge-origin:
     image: nginx:1.27-alpine
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8081:8081"
+    network_mode: host
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./private_spa_locations.conf:/etc/nginx/private_spa_locations.conf:ro
       - ./public_paths.conf:/etc/nginx/public_paths.conf:ro
       - /home/deploy/shell:/home/deploy/shell:ro
       - /home/deploy/lifeos-ui:/home/deploy/lifeos-ui:ro
@@ -22,7 +19,7 @@ services:
         - wget
         - --spider
         - --quiet
-        - http://127.0.0.1:8081/healthz
+        - http://127.0.0.1:8080/healthz
       interval: 30s
       timeout: 5s
       retries: 3
@@ -48,9 +45,11 @@ services:
     # silently, unlike a wrong checksum would.
     image: cloudflare/cloudflared:2025.6.1
     restart: unless-stopped
+    network_mode: host
+    profiles: ["cloudflare"]
     command: tunnel --no-autoupdate run
     environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:?recorded in ./.env by every deploy (ops-edge.yml)}
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
       edge-origin:
         condition: service_healthy
