@@ -34,11 +34,10 @@ export interface ZoneEntry {
    * Finding #70 (PR #8 security review): marks entries that are NOT part of
    * this SPA's own router at all -- currently just `life`, LifeOS being a
    * wholly separate zone stitched in at the infrastructure level (see
-   * apps/shell/frontend/src/pages/home.tsx's identically-named, identically-scoped
-   * `hardNavigate` flag on its own LAUNCHERS table, added for that same
-   * P1 fix; this mirrors it exactly rather than inventing a second
-   * mechanism). Every other zone entry is a genuine Shell route and is
-   * left `undefined` (falsy) here on purpose, so it is eligible for
+   * `classifyNavigationTarget`, which lets Shell consumers derive the same
+   * boundary from this registry instead of maintaining another flag).
+   * Every other zone entry is a genuine Shell route and is left `undefined`
+   * (falsy) here on purpose, so it is eligible for
    * client-side navigation whenever a consumer wires a `navigate` adapter
    * (nav-rail.tsx / command-palette.tsx / chrome.tsx's `ChromeProps`).
    */
