@@ -118,6 +118,21 @@ describe("LoginPage: rendering by status", () => {
     expect(screen.queryByTestId("life-client-route")).toBeNull();
   });
 
+  it("preserves an encoded LifeOS return unchanged while selecting document navigation", async () => {
+    const replaced: string[] = [];
+    const returnTo = "/%6cife/capture?mode=quick#entry";
+
+    renderLogin(
+      `/login?return=${encodeURIComponent(returnTo)}`,
+      "signed-in",
+      vi.fn(),
+      (href) => replaced.push(href)
+    );
+
+    await waitFor(() => expect(replaced).toEqual([returnTo]));
+    expect(screen.queryByTestId("life-client-route")).toBeNull();
+  });
+
   it("falls back to / when already signed in with an unsafe ?return= target", () => {
     renderLogin("/login?return=" + encodeURIComponent("https://evil.example.com"), "signed-in");
     expect(screen.getByTestId("home-page")).toBeInTheDocument();

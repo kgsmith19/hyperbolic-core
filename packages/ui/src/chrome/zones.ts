@@ -55,6 +55,19 @@ export const ZONE_ENTRIES: readonly ZoneEntry[] = [
 
 export type NavigationTargetKind = "client" | "document";
 
+function decodeRouterPathname(pathname: string): string {
+  try {
+    return pathname
+      .split("/")
+      .map((segment) => decodeURIComponent(segment).replaceAll("/", "%2F"))
+      .join("/");
+  } catch {
+    // React Router preserves the original pathname when any segment has a
+    // malformed percent escape. Classification must likewise fail safely.
+    return pathname;
+  }
+}
+
 /**
  * Classifies a same-origin path for a router-owning consumer. Cross-zone
  * roots come from ZONE_ENTRIES rather than a second list, and match only at
@@ -69,7 +82,9 @@ export function classifyNavigationTarget(target: string): NavigationTargetKind {
   // Use the same WHATWG normalization a browser applies when either
   // navigator consumes the untouched target. In particular, dot segments
   // can cross a zone boundary before the document request or pushState.
-  const pathname = new URL(target, "https://navigation.invalid").pathname;
+  const pathname = decodeRouterPathname(
+    new URL(target, "https://navigation.invalid").pathname
+  );
   const isDocumentTarget = ZONE_ENTRIES.some((entry) => {
     if (!entry.hardNavigate) return false;
     const zoneRoot = entry.href.endsWith("/") ? entry.href.slice(0, -1) : entry.href;

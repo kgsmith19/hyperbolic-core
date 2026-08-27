@@ -20,6 +20,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { matchRoutes } from "react-router";
 
 const { classifyNavigationTarget, ZONE_ENTRIES, shouldNavigateClientSide } = await import("../src/chrome/zones.ts");
 
@@ -60,6 +61,37 @@ describe("classifyNavigationTarget: document boundaries come from the zone regis
     ]) {
       assert.equal(new URL(target, origin).pathname, expectedPath, target);
       assert.equal(classifyNavigationTarget(target), expectedKind, target);
+    }
+  });
+
+  test("uses React Router-equivalent decoding at encoded zone boundaries", () => {
+    const origin = "https://shell.example";
+    const lifeRoutes = [{ path: "/life/*" }];
+    const encodedLife = "/%6cife/capture?mode=quick#entry";
+    const encodedLifePath = new URL(encodedLife, origin).pathname;
+
+    assert.ok(matchRoutes(lifeRoutes, encodedLifePath), encodedLife);
+    assert.equal(classifyNavigationTarget(encodedLife), "document", encodedLife);
+
+    for (const target of [
+      "/%6cifefoo/capture",
+      "/%6cifestyle",
+      "/%6cife%2Fcapture",
+      "/%6cife/../%73ettings?tab=theme#system",
+    ]) {
+      const browserPath = new URL(target, origin).pathname;
+      assert.equal(matchRoutes(lifeRoutes, browserPath), null, target);
+      assert.equal(classifyNavigationTarget(target), "client", target);
+    }
+  });
+
+  test("malformed percent sequences classify without throwing", () => {
+    for (const [target, expected] of [
+      ["/%zzlife/capture", "client"],
+      ["/life/%zz", "document"],
+    ]) {
+      assert.doesNotThrow(() => classifyNavigationTarget(target), target);
+      assert.equal(classifyNavigationTarget(target), expected, target);
     }
   });
 });
