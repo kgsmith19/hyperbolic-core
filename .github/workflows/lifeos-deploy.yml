@@ -1,9 +1,9 @@
 name: "LifeOS Deploy"
 
-# Deploys LifeOS from THIS repository: backend container + /life/ UI, closing
-# the gap that the one-origin route table's /life/ and /life/api/ mounts had
-# no producer here (the standalone kgsmith19/lifeos repo ran the live
-# pipeline). Authored FRESH -- the inert apps/lifeos/.github/workflows/ files
+# Deploys LifeOS from THIS repository: backend container plus the /life/ UI
+# and /life/api/ service nginx routes (the standalone kgsmith19/lifeos repo
+# ran the live pipeline). Authored FRESH -- the inert
+# apps/lifeos/.github/workflows/ files
 # are reference material only and are never relocated (Workflow Safety
 # Invariant: the standalone ci.yml's build-backend job has no repository-
 # variable gate and would publish a ghcr image on every push to main).
@@ -33,13 +33,12 @@ name: "LifeOS Deploy"
 # vars.INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID, secret-path /platform/lifeos-deploy/)
 # supplies the application secrets and the tailnet OAuth client.
 #
-# One-origin shape: the backend is reached through the /life/api/ serve mount
-# (full-path forwarding), so LIFEOS_ROOT_PATH=/life/api is rendered into its
+# One-origin shape: nginx routes /life/api/ to the backend with full-path
+# forwarding, so LIFEOS_ROOT_PATH=/life/api is rendered into its
 # env; the UI is built with base /life/ and VITE_API_URL=/life/api and is
 # activated as versioned directories behind a lifeos-ui/current symlink with
 # automatic rollback -- replacing the standalone pipeline's destructive
-# rm -rf swap. The /life/ serve route must point at lifeos-ui/current (the
-# route table change lands with this workflow; re-apply routes at cutover).
+# rm -rf swap. nginx's private SPA include owns /life/ and reads that symlink.
 
 on:
   push:
@@ -59,15 +58,6 @@ on:
         description: Deploy the LifeOS UI bundle
         type: boolean
         default: true
-      skip_live_verify:
-        description: >-
-          First-cutover bootstrap only: skip the live-route UI verify (and its
-          rollback trigger) for the one deploy that must run BEFORE the /life/
-          serve route points at lifeos-ui/current. Sequence: dispatch with this
-          set, apply the serve routes, then dispatch again unset for a fully
-          verified deploy. Never needed afterwards.
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -202,8 +192,8 @@ jobs:
             printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
             printf 'LIFEOS_SUPABASE_URL=%s\n' "$LIFEOS_SUPABASE_URL"
             printf 'LIFEOS_OWNER_USER_ID=%s\n' "$LIFEOS_OWNER_USER_ID"
-            # One-origin shape: reached through the /life/api/ serve mount,
-            # which forwards the full path (docs/ops/tailscale-serve-apply.sh).
+            # One-origin shape: nginx's /life/api/ location forwards the full
+            # path to this service (docs/ops/edge-origin/nginx.conf).
             printf 'LIFEOS_ROOT_PATH=/life/api\n'
             [ -n "${ANTHROPIC_API_KEY:-}" ] && printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
             [ -n "${LIFEOS_ICS_URLS:-}" ] && printf 'LIFEOS_ICS_URLS=%s\n' "$LIFEOS_ICS_URLS"
@@ -365,7 +355,6 @@ jobs:
           "
 
       - name: Verify · Live bundle serves the built assets
-        if: inputs.skip_live_verify != true
         shell: bash
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}

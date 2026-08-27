@@ -2,10 +2,10 @@
 docs/planning/05-a-hyperbolic-core.md section 4; 10-cicd-deployment.md
 section 4's "LifeOS API; FastAPI `root_path` handles the prefix" row).
 
-`tailscale serve --set-path=/life/api/ http://127.0.0.1:8000`
-(docs/ops/tailscale-serve-apply.sh) forwards the FULL incoming path to this
-app — it does not strip `/life/api` itself — so these tests exercise the
-actual property that matters: a request arriving with that prefix intact
+nginx's private `/life/api/` location (docs/ops/edge-origin/nginx.conf)
+forwards the FULL incoming path to this app because its `proxy_pass` has no
+URI suffix — so these tests exercise the actual property that matters: a
+request arriving with that prefix intact
 still reaches the right route once `LIFEOS_ROOT_PATH` is set, and every
 existing (unprefixed) call keeps working when it is not. `auth_disabled`
 (tests/api/conftest.py) is autouse for this whole package, so these hit real
@@ -55,7 +55,7 @@ def test_prefixed_request_404s_without_root_path_configured() -> None:
 def test_prefixed_request_routes_once_root_path_is_set(root_path: str) -> None:
     """GREEN case: the exact route table entry this issue wires
     (docs/ops/runbook.md: `/life/api/*` -> `http://127.0.0.1:8000`) -- the
-    same path a real tailscale-serve-forwarded request carries reaches the
+    same path a real nginx-forwarded request carries reaches the
     same handler as the unprefixed call above."""
     response = client.get("/life/api/healthz")
     assert response.status_code == 200
@@ -76,8 +76,8 @@ def test_root_path_is_reflected_in_scope_for_url_generation(root_path: str) -> N
 
 @pytest.mark.parametrize("root_path", ["/life/api/"], indirect=True)
 def test_trailing_slash_on_the_configured_prefix_is_tolerated(root_path: str) -> None:
-    """docs/ops/runbook.md's route table writes the mount path with a
-    trailing slash (`/life/api/`); the env var should not have to be typed
+    """docs/ops/edge-origin/nginx.conf writes the location with a trailing
+    slash (`/life/api/`); the env var should not have to be typed
     without one to work."""
     response = client.get("/life/api/healthz")
     assert response.status_code == 200
@@ -103,7 +103,7 @@ def test_upload_size_cap_still_matches_the_prefixed_documents_path(root_path: st
     `_StripRootPathMiddleware` must be the outermost middleware, not merely
     documented as such. A declared Content-Length over the cap must still
     produce a 413 (not a pass-through 404/422) when the request carries the
-    full `/life/api/documents` path a real tailscale-serve-forwarded upload
+    full `/life/api/documents` path a real nginx-forwarded upload
     would use."""
     from domains.documents.capture import MAX_UPLOAD_BYTES
 

@@ -335,7 +335,7 @@ test("the production Shell build bakes a Brain API base that reaches the shared 
   // 127.0.0.1:8100 (apps/shell/frontend/src/lib/session.ts), so the deployed
   // Shell could never reach the Brain. '/' means same-origin: the client
   // strips the trailing slash and issues /api/brain/* requests, which the
-  // serve route table forwards to the daemon (issue #134).
+  // nginx's private route table forwards to the daemon (issue #134).
   const buildJob = workflow.slice(
     workflow.indexOf("  build-shell:"),
     workflow.indexOf("  deploy-shell:"),

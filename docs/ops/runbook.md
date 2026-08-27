@@ -2,7 +2,7 @@
 title: Platform Operations Runbook
 status: active
 owner: Kyle
-updated: 2026-08-26
+updated: 2026-08-27
 ---
 
 # Platform Operations Runbook
@@ -311,31 +311,27 @@ own OIDC claims or Infisical auth log rather than broadening either pattern.
 alongside its existing required deploy-identity flags -- see "Infisical and
 GitHub configuration" above for the full invocation.
 
-## Single-origin Tailscale Serve routes
+## Single-origin Tailscale Serve route
 
-The VPS exposes one tailnet-only HTTPS origin. Tailscale provides the network boundary; applications still enforce authentication and authorization.
+The VPS exposes one tailnet-only HTTPS origin. Tailscale terminates TLS and proxies the root mount to the loopback nginx private origin; nginx owns all path routing. Tailscale provides the network boundary, while applications still enforce authentication and authorization.
 
-| Path | Target | State |
+| Tailscale path | Target | State |
 | --- | --- | --- |
-| `/` | `/home/deploy/shell/current` | active static bundle |
-| `/life/` | `/home/deploy/lifeos-ui/current` | active static bundle (versioned dirs + symlink, activated by `lifeos-deploy.yml`) |
-| `/life/api/` | `http://127.0.0.1:8000` | active loopback proxy |
-| `/api/` | `http://127.0.0.1:8200` | active loopback proxy (Handler A; `/api/intake/submit` and `/api/v1/complete`\|`stream`\|`count`, m4-05) |
-| `/api/brain/` | `http://127.0.0.1:8100` | active loopback proxy (the Brain daemon; full-path forwarding matches `server.ts`'s `/api/brain/*` routes) |
+| `/` | `http://127.0.0.1:8080` | active root proxy; nginx routes Shell, LifeOS, and APIs |
 
-The command shape follows the current [Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve). Apply the routes by dispatching the **`Ops Serve Apply`** workflow (`.github/workflows/ops-serve-apply.yml`) from the Actions tab -- it ships the exact checked-in script over keyless Tailscale SSH, runs it with `--apply`, and republishes `tailscale serve status` before and after to the run summary. Gated on `DEPLOY_ENABLED`, same as every prod-touching job. The script can still be run directly on the VPS when working on the box itself:
+The command shape follows the current [Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve). Migration order is load-bearing. Leave `PRIVATE_ORIGIN_GATEWAY_ENABLED` unset while this workflow change merges, so the merge's `push` event cannot touch the VPS. After the code is on `main`, set that variable to literal `true`, dispatch **`Ops Origin`** (`.github/workflows/ops-edge.yml`), and confirm `curl -fsS http://127.0.0.1:8080/healthz` returns `{"status":"ok"}` on the VPS. Only then dispatch **`Ops Serve Apply`**. It ships the checked-in script over keyless Tailscale SSH, runs `--apply`, and republishes status before and after. Both jobs require `DEPLOY_ENABLED`; the origin job additionally requires its migration gate. `CLOUDFLARE_EDGE_ENABLED` controls only the optional tunnel, never the private nginx origin.
 
-Do not apply these routes until the LifeOS m2-08 base-path release and Handler A (`llm-handler`, see "Handler A deployment" below) are both deployed. The script proves the built LifeOS asset URLs use `/life/`, and that both the LifeOS and Handler A loopback `/healthz` endpoints respond, before it changes any route.
+The script independently repeats the nginx 8080 health check before any mutation. It then resets the legacy five-mount Serve configuration and installs exactly one root proxy, so stale more-specific paths cannot bypass nginx.
 
 ```bash
 # Inspect the exact commands. This is the default and performs no writes.
 docs/ops/tailscale-serve-apply.sh --dry-run
 
-# Apply the three active mappings after all preflights pass.
+# Replace the legacy route table after the 8080 preflight passes.
 docs/ops/tailscale-serve-apply.sh --apply
 ```
 
-Reapplying the same mappings is idempotent. The script intentionally does not call `tailscale serve reset`, because that would delete unrelated configuration without a recoverable transaction. It prints `tailscale serve status` after applying; the operator must investigate and explicitly remove any unexpected pre-existing mappings.
+Reapplying is idempotent: the script resets this node's Serve configuration and recreates the same one-root proxy. It prints final status. Do not add unrelated Serve configuration to this node; the script intentionally treats the private origin as the complete desired state.
 
 ### Verify
 
@@ -356,16 +352,21 @@ ss -tlnp
 
 The Shell is static. LifeOS and future services must listen only on loopback; investigate any application listener on a non-loopback interface.
 
-### Remove one mapping
+### Roll back to the prior five mounts
 
-Use the same protocol, port, and path flags with `off`, then inspect status:
+Rollback does not require an application deploy. From the VPS, reset the one-root configuration and restore the exact pre-migration mounts:
 
 ```bash
-tailscale serve --bg --yes --https=443 --set-path=/life/api/ off
+sudo tailscale serve reset
+sudo tailscale serve --bg --yes --https=443 --set-path=/ /home/deploy/shell/current
+sudo tailscale serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/current
+sudo tailscale serve --bg --yes --https=443 --set-path=/life/api/ http://127.0.0.1:8000
+sudo tailscale serve --bg --yes --https=443 --set-path=/api/ http://127.0.0.1:8200
+sudo tailscale serve --bg --yes --https=443 --set-path=/api/brain/ http://127.0.0.1:8100
 tailscale serve status
 ```
 
-Rerun `--apply` to restore the declared active mappings. Reserve `tailscale serve reset` for an intentional full rebuild after capturing `tailscale serve status --json` and confirming every affected route.
+After diagnosing nginx, rerun `--apply` to return to the one-root desired state.
 
 ### Operator evidence still required
 
@@ -461,7 +462,7 @@ This repository proves, in `docs/ops/deploy-workflow.test.mjs`, that `deploy-bra
 
 ### Brain external reachability: `/api/brain/` mount
 
-`services/brain/src/server.ts` registers its HTTP surface under `/api/brain/*` plus a bare `/healthz` for the in-container Docker healthcheck. The serve mount is `/api/brain/` -- tailscale forwards the full incoming path unchanged (the same mechanic as `/api/` and `/life/api/`), so `https://<origin>/api/brain/<route>` reaches the container as `/api/brain/<route>`, exactly what the server handles. (The original mount was `/brain/stream`, a name that predated the server's real route shape; nothing handled that path, so it was retired when the mount was corrected -- issue #134.) The `/api/brain/` mount is more specific than `/api/`, and Tailscale Serve routes by most-specific path, so Handler A keeps everything else under `/api/`. External health probes use `/api/brain/health` (unauthenticated), never the origin's bare `/healthz`, which is the Shell's static health asset.
+`services/brain/src/server.ts` registers its HTTP surface under `/api/brain/*` plus a bare `/healthz` for the in-container Docker healthcheck. nginx owns the private `/api/brain/` location and forwards the full incoming path unchanged, so `https://<origin>/api/brain/<route>` reaches the container as `/api/brain/<route>`, exactly what the server handles. (The original path was `/brain/stream`, a name that predated the server's real route shape; nothing handled it, so it was retired in issue #134.) nginx's `/api/brain/` prefix is more specific than `/api/`, so Handler A keeps everything else under `/api/`. External health probes use `/api/brain/health` (unauthenticated), never the origin's bare `/healthz`, which is the Shell's static health asset.
 
 ## Guards broker deployment (issue #185)
 
@@ -490,7 +491,7 @@ Unlike LifeOS's cutover (`LIFEOS_DEPLOY_ENABLED`), `deploy-broker` has no separa
 
 At deploy time, `deploy-broker` regenerates `broker-policy.json` fresh from every discovered `tool.json` (`apps/toolbelt/scripts/generate-broker-policy.mjs`, issue #184) and ships it alongside `compose.yaml`/`.env`, bind-mounted read-only into the container at `/app/broker-policy.json`. It is world-readable (`chmod 644`) on the box, unlike `.env`'s `600`: the file holds no secrets (host allowlists and vault key **names**, aggregated from committed `tool.json` files), and the container reads it as the `broker` user (fixed uid `10300`), not `deploy` -- a `600` file owned by `deploy` would be unreadable to any other uid and fail `docker compose up --wait` on every deploy.
 
-The broker has no Tailscale Serve mount, deliberately: its callers are other containers on the same Docker network, not external clients, and giving it a public/tailnet-reachable mount would defeat the point of an internal-only proxy. `platform-smoke.yml`'s broker probe therefore runs over keyless Tailscale SSH (ADR 008) instead of the shared-origin `probe()` every other unit uses -- see that workflow's own header comment for the scoping discipline (exactly one `ssh` invocation, a single read-only `curl`, structurally asserted in `docs/ops/platform-smoke-workflow.test.mjs`).
+The broker has no nginx route, deliberately: its callers are other containers on the same Docker network, not external clients, and giving it a shared-origin route would defeat the point of an internal-only proxy. `platform-smoke.yml`'s broker probe therefore runs over keyless Tailscale SSH (ADR 008) instead of the shared-origin `probe()` every other unit uses -- see that workflow's own header comment for the scoping discipline (exactly one `ssh` invocation, a single read-only `curl`, structurally asserted in `docs/ops/platform-smoke-workflow.test.mjs`).
 
 ## Release tagging (issue #189)
 
@@ -573,37 +574,36 @@ used it).
 2. **Confirm quiescence.** In the standalone repo's Actions tab, confirm no
    deploy or backup run is in flight (wait for any to finish). From this
    point the box has exactly zero writers.
-3. **Arm the monorepo.** Here, set `LIFEOS_DEPLOY_ENABLED=true` and
+3. **Confirm the nginx gateway.** Complete the private-origin migration above
+   and prove `curl -fsS http://127.0.0.1:8080/healthz` on the VPS returns the
+   exact nginx health payload. nginx must already own `/life/` and
+   `/life/api/` before the monorepo deploy is armed.
+4. **Arm the monorepo.** Here, set `LIFEOS_DEPLOY_ENABLED=true` and
    `LIFEOS_BACKUP_ENABLED=true`.
-4. **Bootstrap deploy (one time).** Dispatch `lifeos-deploy.yml` with
-   `skip_live_verify` checked: the `/life/` serve route still points at the
-   standalone layout until the route table is re-applied, so the live-route
-   verify cannot pass yet. This run creates `lifeos-ui/current` and starts
-   the backend from the monorepo image.
-5. **Re-apply the serve routes** so `/life/` serves `lifeos-ui/current`:
-   dispatch the `Ops Serve Apply` workflow (route table above).
-6. **Fully verified deploy.** Dispatch `lifeos-deploy.yml` again with
-   defaults. Both units must go green, including the live `/life/` verify
+5. **Fully verified deploy.** Dispatch `lifeos-deploy.yml` with its defaults.
+   The UI activation creates `lifeos-ui/current`; live verification is never
+   skippable. Both units must go green, including the live `/life/` verify
    and the backend's `/healthz` gate. Then confirm from a tailnet device:
    `https://<host>/life/` renders and `https://<host>/life/api/healthz` is
    green.
-7. **First monorepo backup.** Dispatch `lifeos-backup.yml`; download the
+6. **First monorepo backup.** Dispatch `lifeos-backup.yml`; download the
    artifact and confirm it decrypts with the NEW LifeOS age key and lists
    (`age -d -i <key> | tar -t`).
-8. **Cron ownership.** Dispatch `lifeos-ops.yml` task
+7. **Cron ownership.** Dispatch `lifeos-ops.yml` task
    `install-scheduled-jobs` (rewrites the wrapper to the monorepo-managed
    text), then task `run-scheduled-jobs` once and confirm the trio passes.
-9. **Record the cutover** on the Epic: run links for steps 4-8 and the
+8. **Record the cutover** on the Epic: run links for steps 4-7 and the
    owner's attestation that step 1's flips are in place.
 
 **Rollback to the standalone pipeline** (if anything above fails and cannot
 be fixed forward): set this repo's two `LIFEOS_*_ENABLED` vars back to
-unset/false, re-point the `/life/` serve route at `lifeos-ui/dist`, and
-restore `DEPLOY_ENABLED`/`BACKUP_ENABLED` in `kgsmith19/lifeos`. The
-standalone pipeline's next deploy rebuilds its own layout; nothing the
-monorepo shipped blocks it. Leave the standalone repository intact as
-history in either outcome -- it is the archive of record for the pre-cutover
-era, never deleted.
+unset/false, atomically repoint `lifeos-ui/current` at the standalone
+`lifeos-ui/dist` directory nginx already owns, and restore
+`DEPLOY_ENABLED`/`BACKUP_ENABLED` in `kgsmith19/lifeos`. The standalone
+pipeline's next deploy rebuilds its own layout; nginx remains the only path
+router throughout. Leave the standalone repository intact as history in
+either outcome -- it is the archive of record for the pre-cutover era,
+never deleted.
 
 ## One-time platform migration adoption
 
@@ -796,22 +796,21 @@ credentials exist for it to use. This is expected until the owner completes step
 
 ## Cloudflare edge origin (nginx + cloudflared)
 
-`docs/ops/edge-origin/` (issue #165) is the local HTTP origin `cloudflared` (issue #169, added to
-the same compose file) points at once the owner sets up Cloudflare Tunnel + Access. It is a second,
-deliberately narrower front door onto the same box: `tailscale-serve-apply.sh`'s private route table
-is untouched and keeps working exactly as before over the tailnet.
+`docs/ops/edge-origin/` now runs the shared loopback nginx process: its 8080 server is the private
+Tailscale origin, while `cloudflared` (when enabled) points only at the separate 8081 public server.
+The two servers have distinct includes; the public server never imports private SPA policy.
 
 **Nothing is public by default.** `docs/ops/edge-origin/public_paths.conf` is the only place a path
 can become reachable through this origin, and every line in the checked-in file is commented out --
 `docs/ops/edge-origin.test.mjs` asserts this on every commit. With the file in that state, nginx has
-no location block for any of the five private routes, so every request 404s; only `GET /healthz`
+no active application location block, so every request 404s; only `GET /healthz`
 (defined directly in `nginx.conf`, not in `public_paths.conf`) ever answers, and it exists purely so
 the container's own healthcheck has something stable to poll.
 
 To expose a path: uncomment its `location` block in `public_paths.conf` and redeploy (`ops-edge.yml`
-dispatch, or push a change under `docs/ops/edge-origin/`). Each block's target must mirror
-`tailscale-serve-apply.sh`'s mount -> target mapping exactly (`edge-origin.test.mjs`'s sync test
-fails the build if they ever drift apart), so copy the block as written rather than retyping it.
+dispatch, or push a change under `docs/ops/edge-origin/`). Each block's target must mirror the
+private nginx application's target for the same path (`edge-origin.test.mjs` fails if they drift),
+so copy the block as written rather than retyping it.
 
 `nginx.conf` sets `access_log off;` -- deliberate for now, since with nothing exposed there is
 nothing worth logging. Once a path is actually uncommented and this becomes cloudflared's real
@@ -821,16 +820,28 @@ containers), turn `access_log` back on at that point -- an explicit owner call, 
 
 ### Deploying the stack (`ops-edge.yml`, issue #169)
 
-Dark behind `CLOUDFLARE_EDGE_ENABLED` -- ships `compose.yml`/`nginx.conf`/`public_paths.conf` and a
-rendered `.env` (holding only `CLOUDFLARE_TUNNEL_TOKEN`) to the box over keyless Tailscale SSH (ADR
-008, no SSH key material), then `docker compose pull && docker compose up -d --wait`. Triggers on
+The nginx origin requires both `DEPLOY_ENABLED` and the default-dark
+`PRIVATE_ORIGIN_GATEWAY_ENABLED` migration gate, and is required even when Cloudflare is off. The
+cloudflared profile and its token remain independently dark behind `CLOUDFLARE_EDGE_ENABLED`.
+The workflow ships `compose.yml`, `nginx.conf`, `private_spa_locations.conf`, and
+`public_paths.conf` over keyless Tailscale SSH, starts nginx, and proves both loopback health
+endpoints. When the Cloudflare gate is true it additionally renders the token-only `.env` and
+starts the `cloudflare` profile. Triggers on
 `workflow_dispatch` or a push to `main` touching `docs/ops/edge-origin/**` (or the workflow file
 itself, `.github/workflows/ops-edge.yml`).
+
+`cloudflared` runs with host networking so it can reach the 8081 loopback
+origin. Cloudflare's metrics documentation states that containerized
+instances otherwise default the Prometheus listener to `0.0.0.0` on the
+first available port from 20241 through 20245. The checked-in command pins
+that listener to `127.0.0.1:20241`; do not remove or wildcard the
+`--metrics` address. See <https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/monitor-tunnels/metrics/>.
 
 Owner setup, one time, before flipping the gate:
 
 | Variable | Purpose |
 | --- | --- |
+| `PRIVATE_ORIGIN_GATEWAY_ENABLED` | Leave unset while this change merges. After it is present on `main`, set literal `true` and dispatch `Ops Origin` to perform the first controlled origin deployment. Once enabled, later matching pushes may redeploy the origin. |
 | `INFISICAL_PLATFORM_EDGE_IDENTITY_ID` | Dedicated OIDC identity reading `/platform/edge/` -- distinct from every other pipeline's identity (ADR-05); `/platform/edge/` must contain `CLOUDFLARE_TUNNEL_TOKEN` (from the Cloudflare dashboard when the tunnel is created). |
 | `CLOUDFLARE_EDGE_ENABLED` | Set to `true` once the identity/token above are provisioned and a Cloudflare Tunnel exists pointed at this box. Off by default. |
 

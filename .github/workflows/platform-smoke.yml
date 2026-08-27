@@ -10,25 +10,26 @@ name: "Platform Smoke"
 # deploy.yml and lifeos-deploy.yml (a red smoke fails the calling run), and
 # directly dispatchable for on-demand verification.
 #
-# Probe map (docs/ops/runbook.md, "Single-origin Tailscale Serve routes"):
+# Probe map (docs/ops/runbook.md, "Single-origin Tailscale Serve route");
+# Tailscale owns only / and nginx owns the application paths below:
 #   /healthz            Shell static health asset ({"status":"ok"})
 #   /                   Shell index (must reference a /assets/*.js bundle)
-#   /api/healthz        Handler A through the /api/ mount (full-path forward;
+#   /api/healthz        Handler A through nginx's /api/ route (full-path forward;
 #                       server.ts handles /api/healthz for exactly this probe)
-#   /api/brain/health   the Brain through the /api/brain/ mount
+#   /api/brain/health   the Brain through nginx's /api/brain/ route
 #   /life/              LifeOS UI index (only once LIFEOS_DEPLOY_ENABLED --
 #                       before cutover the route serves the standalone layout,
 #                       which this repo must not assert about)
-#   /life/api/healthz   LifeOS API through the /life/api/ mount (same gate)
+#   /life/api/healthz   LifeOS API through nginx's /life/api/ route (same gate)
 #
 # Credentials: only the tailnet OAuth client (shell-deploy Infisical path).
 # No SSH for the six probes above -- the box is probed exactly the way a
 # user's browser reaches it, over the tailnet HTTPS origin.
 #
 # The broker (issue #185) is the one exception: it is deliberately
-# loopback-only with no Tailscale Serve mount of its own -- its callers are
+# loopback-only with no nginx route of its own -- its callers are
 # other containers on the same Docker network, not external clients, and
-# giving it a Serve mount would make it reachable from any tailnet device,
+# giving it an nginx route would make it reachable from any tailnet device,
 # defeating the point. It is probed over Tailscale SSH instead (the same
 # transport ops-serve-apply.yml and ops-edge.yml already use for a
 # credential-free, keyless join+SSH round trip -- deploy.yml's own jobs
@@ -118,7 +119,7 @@ jobs:
             echo "ok   $label ($path)"
           }
 
-          # The broker has no Serve mount (see this file's own header
+          # The broker has no nginx route (see this file's own header
           # comment) -- reached over Tailscale SSH instead, the same
           # ssh_options shape deploy.yml's own jobs use.
           probe_ssh() {
@@ -161,7 +162,7 @@ jobs:
           else
             results+=("| LifeOS UI | \`/life/\` | ⏭️ skipped (pre-cutover) |")
             results+=("| LifeOS API | \`/life/api/healthz\` | ⏭️ skipped (pre-cutover) |")
-            echo "skip LifeOS probes: LIFEOS_DEPLOY_ENABLED != 'true' (pre-cutover; the route serves the standalone layout)"
+            echo "skip LifeOS probes: LIFEOS_DEPLOY_ENABLED != 'true' (pre-cutover)"
           fi
 
           {

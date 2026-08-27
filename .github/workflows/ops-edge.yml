@@ -1,23 +1,9 @@
-name: Ops Edge
+name: Ops Origin
 
-# Deploys the edge-origin nginx + cloudflared tunnel stack
-# (docs/ops/edge-origin/, #165/#169) to the box. Dark behind
-# CLOUDFLARE_EDGE_ENABLED until the owner has a Cloudflare account, a
-# domain, and a tunnel token -- landing this now, gated off, proves the
-# pipeline shape without touching production. Nothing this workflow ships
-# is public until the owner separately uncomments a path in
-# public_paths.conf (docs/ops/edge-origin/public_paths.conf) and configures
-# Access (#170) -- this workflow only gets the stack running, loopback- and
-# outbound-only.
-#
-# Keyless Tailscale SSH (ADR 008, same as lifeos-deploy.yml): no SSH key
-# material, no GitHub Actions secrets.
-#
-# No custom-built image: nginx and cloudflared are both pulled directly on
-# the box from their public registries by `docker compose pull`, unlike the
-# app units this repo ships via docker save|ssh|load -- neither image is
-# proprietary, so there is no registry credential to protect here.
-
+# Deploys the loopback-only nginx origin required by Tailscale Serve. The
+# Cloudflare tunnel is an optional profile and remains dark unless its
+# independent gate and credential are present. PRIVATE_ORIGIN_GATEWAY_ENABLED
+# is a migration gate: this file can merge without a push-triggered deploy.
 on:
   push:
     branches: [main]
@@ -35,8 +21,8 @@ permissions:
 
 jobs:
   deploy:
-    if: vars.CLOUDFLARE_EDGE_ENABLED == 'true'
-    name: Deploy the edge-origin + cloudflared stack
+    if: vars.DEPLOY_ENABLED == 'true' && vars.PRIVATE_ORIGIN_GATEWAY_ENABLED == 'true'
+    name: Deploy private origin and optional public tunnel
     runs-on: ubuntu-latest
     environment: ops-edge-production
     timeout-minutes: 20
@@ -48,10 +34,19 @@ jobs:
         with:
           persist-credentials: false
 
-      # A new identity/path, distinct from every other pipeline's (ADR-05):
-      # a compromised edge-deploy identity should be able to do nothing but
-      # redeploy this one loopback+outbound-only stack.
-      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+      - name: Secrets · Pull tailnet credentials
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_SHELL_DEPLOY_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/shell-deploy/"
+          domain: https://app.infisical.com
+
+      - name: Secrets · Pull optional Cloudflare tunnel token
+        if: vars.CLOUDFLARE_EDGE_ENABLED == 'true'
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_PLATFORM_EDGE_IDENTITY_ID }}
@@ -68,36 +63,51 @@ jobs:
           tags: tag:ci
           ping: ${{ vars.DEPLOY_HOST }}
 
-      - name: Deploy · Ship the compose stack and tunnel token
+      - name: Deploy · Start nginx, then optionally cloudflared
+        shell: bash
         env:
+          CLOUDFLARE_EDGE_ENABLED: ${{ vars.CLOUDFLARE_EDGE_ENABLED }}
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
         run: |
           set -euo pipefail
           ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
-          if [ -z "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
-            echo "::error::CLOUDFLARE_TUNNEL_TOKEN was not supplied by Infisical (/platform/edge/)." >&2
+          if [[ ! "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}[A-Za-z0-9]$ ]]; then
+            echo "DEPLOY_HOST must be a non-empty DNS name or IPv4 address." >&2
             exit 1
           fi
-
-          umask 077
-          printf 'CLOUDFLARE_TUNNEL_TOKEN=%s\n' "$CLOUDFLARE_TUNNEL_TOKEN" > "$RUNNER_TEMP/.env.edge"
+          cloudflare_enabled=false
+          if [[ "${CLOUDFLARE_EDGE_ENABLED:-}" == "true" ]]; then
+            cloudflare_enabled=true
+            if [[ -z "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]]; then
+              echo "::error::CLOUDFLARE_EDGE_ENABLED is true but CLOUDFLARE_TUNNEL_TOKEN was not supplied by Infisical (/platform/edge/)." >&2
+              exit 1
+            fi
+            umask 077
+            printf 'CLOUDFLARE_TUNNEL_TOKEN=%s\n' "$CLOUDFLARE_TUNNEL_TOKEN" > "$RUNNER_TEMP/.env.edge"
+          fi
 
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'mkdir -p edge-origin'
-          scp "${ssh_options[@]}" docs/ops/edge-origin/compose.yml docs/ops/edge-origin/nginx.conf docs/ops/edge-origin/public_paths.conf \
+          scp "${ssh_options[@]}" docs/ops/edge-origin/compose.yml docs/ops/edge-origin/nginx.conf \
+            docs/ops/edge-origin/private_spa_locations.conf docs/ops/edge-origin/public_paths.conf \
             "deploy@$DEPLOY_HOST:edge-origin/"
-          # chmod 600 BEFORE scp'ing content in, not after: on a box's
-          # first-ever deploy, a plain `scp` creating a brand-new .env would
-          # otherwise transiently land at whatever the deploy user's default
-          # umask produces (commonly world-readable) for the window between
-          # that scp and a later chmod. Pre-creating the file at 600 means
-          # the content-only overwrite that follows never has a
-          # wrong-permission moment to land in.
-          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
-            'touch edge-origin/.env && chmod 600 edge-origin/.env'
-          scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.edge" "deploy@$DEPLOY_HOST:edge-origin/.env"
-          # nginx.conf/public_paths.conf stay at their default, world-readable
-          # permissions: they hold no secret, and the nginx container's own
-          # worker user (not necessarily `deploy`) needs to read the
-          # bind-mounted file, which an owner-only 600 would block.
-          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
-            "cd edge-origin && chmod 600 .env && docker compose pull && docker compose up -d --wait && curl -fsS http://127.0.0.1:8081/healthz"
+          if [[ "$cloudflare_enabled" == "true" ]]; then
+            ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+              'touch edge-origin/.env && chmod 600 edge-origin/.env'
+            scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.edge" "deploy@$DEPLOY_HOST:edge-origin/.env"
+          fi
+
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "bash -s -- '$cloudflare_enabled'" <<'REMOTE'
+          set -euo pipefail
+          cd edge-origin
+          if [[ "$1" == "true" ]]; then
+            chmod 600 .env
+            docker compose --profile cloudflare pull
+            docker compose --profile cloudflare up -d --wait
+          else
+            docker compose --profile cloudflare stop cloudflared
+            docker compose pull edge-origin
+            docker compose up -d --wait edge-origin
+          fi
+          curl -fsS http://127.0.0.1:8080/healthz
+          curl -fsS http://127.0.0.1:8081/healthz
+          REMOTE

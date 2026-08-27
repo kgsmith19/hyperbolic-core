@@ -13,7 +13,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const workflow = readFileSync(path.join(root, ".github/workflows/ops-edge.yml"), "utf8");
 const compose = readFileSync(path.join(root, "docs/ops/edge-origin/compose.yml"), "utf8");
 
-test("the deploy job is gated behind CLOUDFLARE_EDGE_ENABLED", () => {
+test("the private origin deploy is production-gated while Cloudflare remains independently optional", () => {
+  assert.match(workflow, /deploy:\s*\n\s*if: vars\.DEPLOY_ENABLED == 'true' && vars\.PRIVATE_ORIGIN_GATEWAY_ENABLED == 'true'/);
   assert.match(workflow, /if: vars\.CLOUDFLARE_EDGE_ENABLED == 'true'/);
 });
 
@@ -30,7 +31,9 @@ test("no SSH key material and no GitHub Actions secrets -- keyless Tailscale SSH
   assert.match(workflow, /tailscale\/github-action@/);
 });
 
-test("the edge Infisical identity/path is distinct from every other pipeline's", () => {
+test("tailnet auth is always available and the optional edge token keeps its distinct identity/path", () => {
+  assert.match(workflow, /identity-id: \$\{\{ vars\.INFISICAL_SHELL_DEPLOY_IDENTITY_ID \}\}/);
+  assert.match(workflow, /secret-path: "\/platform\/shell-deploy\/"/);
   assert.match(workflow, /identity-id: \$\{\{ vars\.INFISICAL_PLATFORM_EDGE_IDENTITY_ID \}\}/);
   assert.match(workflow, /secret-path: "\/platform\/edge\/"/);
   assert.doesNotMatch(workflow, /INFISICAL_PLATFORM_RESTIC_IDENTITY_ID/);
@@ -92,10 +95,12 @@ test("no image is docker save|ssh|load'd -- both images are pulled directly on t
   assert.match(workflow, /docker compose pull/);
 });
 
-test("the deploy step ships exactly the three edge-origin files plus the rendered .env, then waits healthy", () => {
-  assert.match(workflow, /scp .* docs\/ops\/edge-origin\/compose\.yml docs\/ops\/edge-origin\/nginx\.conf docs\/ops\/edge-origin\/public_paths\.conf/);
-  assert.match(workflow, /docker compose up -d --wait/);
+test("the deploy step ships all four origin files, starts nginx alone first, and proves both listeners", () => {
+  assert.match(workflow, /scp [\s\S]*?compose\.yml[\s\S]*?nginx\.conf[\s\S]*?private_spa_locations\.conf[\s\S]*?public_paths\.conf/);
+  assert.match(workflow, /docker compose up -d --wait edge-origin/);
+  assert.match(workflow, /curl -fsS http:\/\/127\.0\.0\.1:8080\/healthz/);
   assert.match(workflow, /curl -fsS http:\/\/127\.0\.0\.1:8081\/healthz/);
+  assert.match(workflow, /docker compose --profile cloudflare stop cloudflared/);
 });
 
 test("the deploy step runs under strict mode", () => {
@@ -107,7 +112,7 @@ test("ops-edge.yml parses as valid bash", () => {
   assert.ok(match && match.length > 0, "could not extract any run: blocks");
   for (const block of match) {
     const script = block.replace(/^run: \|\n/, "");
-    assert.doesNotThrow(() => execFileSync("bash", ["-n"], { input: `#!/usr/bin/env bash\n${script}` }));
+    assert.doesNotThrow(() => execFileSync(process.env.BASH_PATH ?? "bash", ["-n"], { input: `#!/usr/bin/env bash\n${script}` }));
   }
 });
 
@@ -137,11 +142,9 @@ test("cloudflared waits for edge-origin to be healthy before starting", () => {
   assert.match(cloudflaredBlock, /depends_on:\s*\n\s*edge-origin:\s*\n\s*condition: service_healthy/);
 });
 
-test("the tunnel token is required, never defaulted to an empty/placeholder value", () => {
-  // Left side is TUNNEL_TOKEN -- the env var name cloudflared itself reads
-  // inside the container; the right side substitutes CLOUDFLARE_TUNNEL_TOKEN
-  // from compose's own env (the value the deploy step rendered into .env).
-  assert.match(compose, /TUNNEL_TOKEN=\$\{CLOUDFLARE_TUNNEL_TOKEN:\?/);
+test("the optional tunnel profile fails closed when enabled without a token", () => {
+  assert.match(workflow, /CLOUDFLARE_EDGE_ENABLED is true but CLOUDFLARE_TUNNEL_TOKEN was not supplied/);
+  assert.match(compose, /profiles: \["cloudflare"\]/);
 });
 
 test("compose.yml still has the expected top-level service structure with cloudflared added", () => {

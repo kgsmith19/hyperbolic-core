@@ -91,14 +91,14 @@ test("GET /healthz returns 200 {status: ok, ...} while the store is writable, no
   });
 });
 
-test("GET /health is the same route -- the path a tailscale-serve-routed /api/brain/health request actually arrives as after mount-prefix stripping (issue #332)", async () => {
+test("GET /health is the same route -- the compatibility alias from the former per-path topology", async () => {
   await withServer(async ({ baseUrl }) => {
     const res = await fetch(`${baseUrl}/health`);
     assert.equal(res.status, 200);
   });
 });
 
-test("GET /api/brain/health is the same route, prefixed (kept alias; harmless under either proxy semantic)", async () => {
+test("GET /api/brain/health is the same route nginx forwards for shared-origin health", async () => {
   await withServer(async ({ baseUrl }) => {
     const res = await fetch(`${baseUrl}/api/brain/health`);
     assert.equal(res.status, 200);

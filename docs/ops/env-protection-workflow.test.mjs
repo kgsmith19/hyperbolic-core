@@ -101,5 +101,8 @@ test("adding an environment: does not remove any existing vars.*_ENABLED gate --
   assert.match(jobBlock(platformBackup, "bundle"), /vars\.PLATFORM_BACKUP_ENABLED == 'true'/);
   assert.match(jobBlock(lifeosBackup, "bundle"), /vars\.LIFEOS_BACKUP_ENABLED == 'true'/);
   assert.match(jobBlock(opsServeApply, "apply"), /vars\.DEPLOY_ENABLED == 'true'/);
-  assert.match(jobBlock(opsEdge, "deploy"), /vars\.CLOUDFLARE_EDGE_ENABLED == 'true'/);
+  const originDeploy = jobBlock(opsEdge, "deploy");
+  assert.match(originDeploy, /vars\.DEPLOY_ENABLED == 'true'/);
+  assert.match(originDeploy, /vars\.PRIVATE_ORIGIN_GATEWAY_ENABLED == 'true'/);
+  assert.match(originDeploy, /if: vars\.CLOUDFLARE_EDGE_ENABLED == 'true'/);
 });

@@ -52,11 +52,10 @@ async function withServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
   }
 }
 
-test("GET /api/healthz (the path tailscale's /api/ mount actually forwards) also returns 200 {status: ok}", async () => {
-  // tailscale serve does not strip the /api/ mount prefix (verified against
-  // apps/lifeos/backend/tests/api/test_root_path.py's identical claim for
-  // its own /life/api/ mount) -- a public health check through the real
-  // origin hits this path, not bare /healthz.
+test("GET /api/healthz (the path nginx's /api/ location forwards) also returns 200 {status: ok}", async () => {
+  // nginx preserves the /api/ prefix because proxy_pass has no URI suffix,
+  // so a health check through the shared origin hits this path, not bare
+  // /healthz.
   await withServer(async (baseUrl) => {
     const res = await fetch(`${baseUrl}/api/healthz`);
     assert.equal(res.status, 200);
