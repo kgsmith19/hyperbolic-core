@@ -230,6 +230,84 @@ test("Handler A's rendered .env can deliver the LLM provider keys the service re
   assert.match(job, /\[ -n "\$\{LLM_KEYS_ANTHROPIC:-\}" \]/);
 });
 
+test("Phase 0 slice B (issue #187): deploy-llm-handler renders BROKER_URL + BROKER_CALLER_TOKEN into .env, optional and paired", () => {
+  // services/llm-handler only activates broker routing when BOTH vars are
+  // present (broker-drivers.ts), so the two lines render together, gated on
+  // the secret's presence -- the same optional shape as LLM_KEYS_*: an
+  // unprovisioned token omits both lines entirely (dark), never renders
+  // them empty. BROKER_URL is the shared-network service-name alias, not a
+  // secret, hence the literal value.
+  const job = workflow.slice(
+    workflow.indexOf("  deploy-llm-handler:"),
+    workflow.indexOf("  build-brain:"),
+  );
+  assert.match(
+    job,
+    /\[ -n "\$\{BROKER_CALLER_TOKEN:-\}" \] && printf 'BROKER_URL=http:\/\/broker:8300\\nBROKER_CALLER_TOKEN=%s\\n' "\$BROKER_CALLER_TOKEN"/,
+  );
+  // The existing provider keys keep their own optional shape (streaming
+  // stays direct in Phase 0, so llm-handler retains its own keys).
+  assert.match(job, /\[ -n "\$\{LLM_KEYS_ANTHROPIC:-\}" \] && printf 'LLM_KEYS_ANTHROPIC=%s\\n'/);
+});
+
+test("Phase 0 slice B (issue #187): deploy-broker renders the injection secrets optionally, BROKER_IMAGE unconditionally", () => {
+  // LLM_KEYS_ANTHROPIC (server-side injection for llm-handler's proxied
+  // complete calls) and BROKER_CALLER_TOKEN_LLM_HANDLER (llm-handler's
+  // caller-auth token) come from /platform/broker/. Both optional: absent
+  // secrets must not fail the deploy -- the broker stays dark until the
+  // owner provisions them.
+  const job = workflow.slice(workflow.indexOf("  deploy-broker:"), workflow.indexOf("  smoke:"));
+  assert.match(job, /printf 'BROKER_IMAGE=%s\\n' "\$IMAGE"/);
+  assert.match(
+    job,
+    /\[ -n "\$\{LLM_KEYS_ANTHROPIC:-\}" \] && printf 'LLM_KEYS_ANTHROPIC=%s\\n' "\$LLM_KEYS_ANTHROPIC"/,
+  );
+  assert.match(
+    job,
+    /\[ -n "\$\{BROKER_CALLER_TOKEN_LLM_HANDLER:-\}" \] && printf 'BROKER_CALLER_TOKEN_LLM_HANDLER=%s\\n' "\$BROKER_CALLER_TOKEN_LLM_HANDLER"/,
+  );
+});
+
+test("Phase 0 slice B (issue #187): both container jobs on the shared network ensure platform-internal exists, idempotently, before compose up", () => {
+  // Each job deploys independently (separate compose projects, ADR-05), so
+  // BOTH must be able to create the shared --internal network on a host
+  // that lacks it; `docker network inspect || docker network create` makes
+  // a rerun a no-op instead of an error.
+  const ensureCmd =
+    "docker network inspect platform-internal >/dev/null 2>&1 || docker network create --internal platform-internal";
+  const jobSlices = {
+    "deploy-llm-handler": workflow.slice(
+      workflow.indexOf("  deploy-llm-handler:"),
+      workflow.indexOf("  build-brain:"),
+    ),
+    "deploy-broker": workflow.slice(workflow.indexOf("  deploy-broker:"), workflow.indexOf("  smoke:")),
+  };
+  for (const [name, body] of Object.entries(jobSlices)) {
+    const ensure = body.indexOf(ensureCmd);
+    assert.ok(ensure > -1, `${name}: has the guarded network-create step`);
+    const composeUp = body.indexOf("docker compose up -d --wait");
+    assert.ok(composeUp > -1 && ensure < composeUp, `${name}: network exists before compose up`);
+  }
+});
+
+test("Phase 0 slice B (issue #187): llm-handler and broker compose files join platform-internal ADDITIVELY (default kept)", () => {
+  // Naming networks explicitly on a service removes Compose's implicit
+  // default-network attachment, so each service must name BOTH `default`
+  // (its own project bridge -- real egress preserved, nothing cut off yet)
+  // AND `platform-internal` (external, shared). Phase 1's flip later just
+  // removes `default` from llm-handler's list. `default` must also be
+  // declared at top level once a service names it explicitly.
+  for (const file of ["services/llm-handler/compose.yaml", "services/broker/compose.yaml"]) {
+    const compose = readFileSync(path.join(root, file), "utf8");
+    assert.match(compose, /    networks:\n      - default\n      - platform-internal\n/, `${file}: service dual-homed`);
+    assert.match(compose, /^networks:\n  default:\n  platform-internal:\n    external: true\n/m, `${file}: top-level declaration`);
+  }
+  // BROKER_URL=http://broker:8300 resolves via the shared network's
+  // service-name alias, so the broker's compose service must be `broker`.
+  const brokerCompose = readFileSync(path.join(root, "services/broker/compose.yaml"), "utf8");
+  assert.match(brokerCompose, /^services:\n  broker:\n/m);
+});
+
 const migrationsWorkflow = readFileSync(
   path.join(root, ".github/workflows/platform-migrations.yml"),
   "utf8",

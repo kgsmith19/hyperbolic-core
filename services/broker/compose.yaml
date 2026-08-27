@@ -15,6 +15,14 @@ services:
     # compose pins `user: handler`. Stated here too so a stale image without
     # the USER directive still cannot come up as root.
     user: broker
+    # Issue #187 Phase 0 slice B: dual-homed per the owner-approved topology.
+    # `platform-internal` (shared --internal network) is where callers reach
+    # this service as `broker:8300`; `default` (this project's own bridge) is
+    # the route with real egress to provider APIs. Naming networks explicitly
+    # removes Compose's implicit default attachment, so both are listed.
+    networks:
+      - default
+      - platform-internal
     ports:
       - "127.0.0.1:8300:8300"
     volumes:
@@ -41,3 +49,14 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+# Compose requires `default` to be declared here once a service names it
+# explicitly (the empty value keeps Compose's own per-project bridge
+# defaults). platform-internal is created once on the host -- idempotently by
+# deploy.yml's two "Ensure the shared platform-internal network exists" steps
+# and by docs/ops/bootstrap-vps.sh -- never owned by any single project's
+# lifecycle, hence external.
+networks:
+  default:
+  platform-internal:
+    external: true

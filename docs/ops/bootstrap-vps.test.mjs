@@ -44,7 +44,20 @@ echo "FAKE-PRIVATE-$comment" > "$keyfile"
 echo "ssh-ed25519 FAKEPUB-$RANDOM-$$ $comment" > "$keyfile.pub"
 `,
   );
-  for (const bin_ of ["id", "useradd", "chown", "tailscale", "ssh-keygen"]) chmodSync(path.join(bin, bin_), 0o755);
+  // Fake docker (issue #187 slice B): `network inspect platform-internal`
+  // succeeds only when the test dropped a marker file, so tests can exercise
+  // both halves of the idempotent create-if-missing guard.
+  writeFileSync(
+    path.join(bin, "docker"),
+    `#!/bin/sh
+echo "docker $*" >> "${log}"
+if [ "$1" = "network" ] && [ "$2" = "inspect" ]; then
+  [ -e "${root}/platform-internal-exists" ] && exit 0 || exit 1
+fi
+exit 0
+`,
+  );
+  for (const bin_ of ["id", "useradd", "chown", "tailscale", "ssh-keygen", "docker"]) chmodSync(path.join(bin, bin_), 0o755);
   return { root, bin, home, log };
 }
 
@@ -121,6 +134,34 @@ test("apply: provisions no SSH key material at all -- keyless Tailscale SSH is t
   assert.doesNotMatch(result.stdout, /COPY THESE INTO INFISICAL|PRIVATE|SSH_KEY/);
   const scriptSource = readFileSync(script, "utf8");
   assert.doesNotMatch(scriptSource, /ssh-keygen|authorized_keys|SSH_KEY|id_ed25519/);
+});
+
+test("apply: creates the shared platform-internal Docker network with --internal when it does not exist (issue #187 slice B)", () => {
+  const env = fakeBin(true);
+  const result = spawnSync(script, ["--apply"], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin`, NODE_TEST_CONTEXT: "child-v8", BOOTSTRAP_VPS_TEST_ROOT: env.home, EUID: "0" } });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readFileSync(env.log, "utf8");
+  assert.match(log, /docker network inspect platform-internal/);
+  assert.match(log, /docker network create --internal platform-internal/);
+});
+
+test("apply: an already-existing platform-internal network is left alone (idempotent rerun)", () => {
+  const env = fakeBin(true);
+  writeFileSync(path.join(env.root, "platform-internal-exists"), "");
+  const result = spawnSync(script, ["--apply"], { encoding: "utf8", env: { ...process.env, PATH: `${env.bin}:/usr/bin:/bin`, NODE_TEST_CONTEXT: "child-v8", BOOTSTRAP_VPS_TEST_ROOT: env.home, EUID: "0" } });
+  assert.equal(result.status, 0, result.stderr);
+  const log = readFileSync(env.log, "utf8");
+  assert.match(log, /docker network inspect platform-internal/);
+  assert.doesNotMatch(log, /docker network create/);
+});
+
+test("dry run prints the guarded platform-internal network-create plan without executing docker", () => {
+  const env = fakeBin(false);
+  const result = run(env, "--dry-run");
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /docker network inspect platform-internal/);
+  assert.match(result.stdout, /docker network create --internal platform-internal/);
+  assert.doesNotMatch(readFileSync(env.log, "utf8"), /docker/);
 });
 
 test("apply: passing --tailnet-authkey joins the tailnet first, with Tailscale SSH enabled on the box", () => {

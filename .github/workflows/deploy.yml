@@ -415,6 +415,21 @@ jobs:
           fi
           echo "image=${previous:-__none__}" >> "$GITHUB_OUTPUT"
 
+      - name: Ensure the shared platform-internal network exists
+        # Issue #187 Phase 0 slice B: llm-handler and the broker are separate
+        # compose projects that each deploy independently (ADR-05), so each
+        # job creates the shared --internal network idempotently rather than
+        # assuming a sibling deploy already did. Joining it is additive for
+        # both services today (each keeps its own default project bridge, so
+        # real egress is untouched); Phase 1's owner-gated flip later removes
+        # `default` from llm-handler's compose networks list.
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "docker network inspect platform-internal >/dev/null 2>&1 || docker network create --internal platform-internal"
       - name: Deploy Handler A
         # Mirrors apps/lifeos/.github/workflows/ci.yml's deploy-backend job
         # shape exactly (docker pull the just-pushed image back to the
@@ -444,6 +459,15 @@ jobs:
             [ -n "${LLM_KEYS_ANTHROPIC:-}" ] && printf 'LLM_KEYS_ANTHROPIC=%s\n' "$LLM_KEYS_ANTHROPIC"
             [ -n "${LLM_KEYS_OPENAI:-}" ] && printf 'LLM_KEYS_OPENAI=%s\n' "$LLM_KEYS_OPENAI"
             [ -n "${LLM_KEYS_GEMINI:-}" ] && printf 'LLM_KEYS_GEMINI=%s\n' "$LLM_KEYS_GEMINI"
+            # Broker routing for /api/v1/complete (issue #187 Phase 0 slice B):
+            # llm-handler only activates the broker path when BOTH vars are
+            # present (src/broker-drivers.ts), so the pair renders together,
+            # gated on the token from /platform/llm-handler/ -- unprovisioned
+            # means both lines are omitted and production stays dark (direct
+            # provider calls, byte-identical to before). BROKER_URL is the
+            # shared platform-internal network's service-name alias for the
+            # broker container, not a secret, hence the literal value.
+            [ -n "${BROKER_CALLER_TOKEN:-}" ] && printf 'BROKER_URL=http://broker:8300\nBROKER_CALLER_TOKEN=%s\n' "$BROKER_CALLER_TOKEN"
           } > "$RUNNER_TEMP/.env.prod"
           docker pull --quiet "$IMAGE"
           docker save "$IMAGE" | gzip | ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'gunzip | docker load'
@@ -781,6 +805,18 @@ jobs:
           fi
           echo "image=${previous:-__none__}" >> "$GITHUB_OUTPUT"
 
+      - name: Ensure the shared platform-internal network exists
+        # Issue #187 Phase 0 slice B: same idempotent host-setup step as
+        # deploy-llm-handler's, because either unit may deploy first (or
+        # alone) on a host that lacks the network -- see that job's own copy
+        # of this step for the full rationale.
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "docker network inspect platform-internal >/dev/null 2>&1 || docker network create --internal platform-internal"
       - name: Deploy the broker
         # Same shape as deploy-llm-handler; the one addition is shipping
         # broker-policy.json alongside compose.yaml and .env, bind-mounted
@@ -793,7 +829,24 @@ jobs:
           set -euo pipefail
           ssh_options=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
           umask 077
-          printf 'BROKER_IMAGE=%s\n' "$IMAGE" > "$RUNNER_TEMP/.env.prod"
+          {
+            printf 'BROKER_IMAGE=%s\n' "$IMAGE"
+            # Credential-injection secrets from /platform/broker/ (issue #187
+            # Phase 0 slice B): LLM_KEYS_ANTHROPIC is the broker's own copy of
+            # the provider key it injects server-side for llm-handler's
+            # proxied complete calls; BROKER_CALLER_TOKEN_LLM_HANDLER
+            # authenticates llm-handler as a caller (the same secret VALUE is
+            # stored under llm-handler's own Infisical path as
+            # BROKER_CALLER_TOKEN -- see runbook.md's broker section for the
+            # two-path pairing; ADR-05 gives the two identities no shared
+            # path, so one generated token is stored twice). Optional
+            # at daemon boot, so an unprovisioned secret is omitted from .env
+            # rather than rendered empty or failing the deploy -- the same
+            # dark-until-provisioned shape deploy-llm-handler uses for
+            # LLM_KEYS_*.
+            [ -n "${LLM_KEYS_ANTHROPIC:-}" ] && printf 'LLM_KEYS_ANTHROPIC=%s\n' "$LLM_KEYS_ANTHROPIC"
+            [ -n "${BROKER_CALLER_TOKEN_LLM_HANDLER:-}" ] && printf 'BROKER_CALLER_TOKEN_LLM_HANDLER=%s\n' "$BROKER_CALLER_TOKEN_LLM_HANDLER"
+          } > "$RUNNER_TEMP/.env.prod"
           docker pull --quiet "$IMAGE"
           docker save "$IMAGE" | gzip | ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'gunzip | docker load'
           ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'mkdir -p broker'
