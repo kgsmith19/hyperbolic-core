@@ -92,7 +92,7 @@ function assertIsolatedTopology(nginxText) {
   assert.deepEqual([...publicLocations.keys()], ["/healthz"], "public server locations");
   assert.deepEqual(includes(privateServer), ["/etc/nginx/private_spa_locations.conf"]);
   assert.deepEqual(includes(publicServer), ["/etc/nginx/public_paths.conf"]);
-  assert.deepEqual([...locationMap(privateSpa).keys()].sort(), ["/", "/life/"].sort());
+  assert.deepEqual([...locationMap(privateSpa).keys()].sort(), ["/", "/life", "/life/"].sort());
   return { privateLocations, privateServer, publicLocations, publicServer };
 }
 
