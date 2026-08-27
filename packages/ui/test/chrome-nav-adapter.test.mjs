@@ -21,7 +21,33 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-const { ZONE_ENTRIES, shouldNavigateClientSide } = await import("../src/chrome/zones.ts");
+const { classifyNavigationTarget, ZONE_ENTRIES, shouldNavigateClientSide } = await import("../src/chrome/zones.ts");
+
+describe("classifyNavigationTarget: document boundaries come from the zone registry", () => {
+  test("LifeOS roots and descendants require document navigation without losing suffixes", () => {
+    for (const target of [
+      "/life",
+      "/life/",
+      "/life/today",
+      "/life/today?view=compact#entry-4",
+    ]) {
+      assert.equal(classifyNavigationTarget(target), "document", target);
+    }
+  });
+
+  test("similar prefixes and Shell routes remain client navigation", () => {
+    for (const target of [
+      "/",
+      "/settings",
+      "/tools/foo",
+      "/ideas/123?view=detail#notes",
+      "/lifefoo",
+      "/lifestyle",
+    ]) {
+      assert.equal(classifyNavigationTarget(target), "client", target);
+    }
+  });
+});
 
 describe("zones.ts: hardNavigate marks exactly the one genuinely cross-zone entry", () => {
   test("life is hardNavigate:true; every other zone is falsy", () => {

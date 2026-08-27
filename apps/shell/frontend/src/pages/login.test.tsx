@@ -1,17 +1,52 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useNavigationType } from "react-router";
 import LoginPage from "./login";
 import type { SessionStatus } from "../lib/session";
 
-function renderLogin(initialPath: string, status: SessionStatus, onSignIn = vi.fn()) {
+function NavigationTypeProbe() {
+  return <div data-testid="navigation-type">{useNavigationType()}</div>;
+}
+
+function renderLogin(
+  initialPath: string,
+  status: SessionStatus,
+  onSignIn = vi.fn(),
+  replaceDocument?: (href: string) => void
+) {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
-        <Route path="/login" element={<LoginPage status={status} onSignIn={onSignIn} />} />
-        <Route path="/tools" element={<div data-testid="tools-page">tools</div>} />
-        <Route path="/" element={<div data-testid="home-page">home</div>} />
+        <Route
+          path="/login"
+          element={
+            <LoginPage
+              status={status}
+              onSignIn={onSignIn}
+              replaceDocument={replaceDocument}
+            />
+          }
+        />
+        <Route
+          path="/tools"
+          element={
+            <>
+              <div data-testid="tools-page">tools</div>
+              <NavigationTypeProbe />
+            </>
+          }
+        />
+        <Route path="/life/*" element={<div data-testid="life-client-route">life client route</div>} />
+        <Route
+          path="/"
+          element={
+            <>
+              <div data-testid="home-page">home</div>
+              <NavigationTypeProbe />
+            </>
+          }
+        />
       </Routes>
     </MemoryRouter>
   );
@@ -41,6 +76,22 @@ describe("LoginPage: rendering by status", () => {
   it("redirects to the sanitized ?return= target when already signed in", () => {
     renderLogin("/login?return=%2Ftools", "signed-in");
     expect(screen.getByTestId("tools-page")).toBeInTheDocument();
+    expect(screen.getByTestId("navigation-type")).toHaveTextContent("REPLACE");
+  });
+
+  it("replaces the document for an already-signed-in LifeOS return and preserves path, query, and fragment", async () => {
+    const replaced: string[] = [];
+    const returnTo = "/life/today?view=compact#entry-4";
+
+    renderLogin(
+      `/login?return=${encodeURIComponent(returnTo)}`,
+      "signed-in",
+      vi.fn(),
+      (href) => replaced.push(href)
+    );
+
+    await waitFor(() => expect(replaced).toEqual([returnTo]));
+    expect(screen.queryByTestId("life-client-route")).toBeNull();
   });
 
   it("falls back to / when already signed in with an unsafe ?return= target", () => {
@@ -61,6 +112,27 @@ describe("LoginPage: submitting", () => {
 
     await waitFor(() => expect(onSignIn).toHaveBeenCalledWith("operator@example.com", "hunter2"));
     await waitFor(() => expect(screen.getByTestId("tools-page")).toBeInTheDocument());
+    expect(screen.getByTestId("navigation-type")).toHaveTextContent("REPLACE");
+  });
+
+  it("replaces the document after sign-in for a LifeOS return without routing inside Shell", async () => {
+    const user = userEvent.setup();
+    const onSignIn = vi.fn().mockResolvedValue(undefined);
+    const replaced: string[] = [];
+    const returnTo = "/life/?focus=health#today";
+    renderLogin(
+      `/login?return=${encodeURIComponent(returnTo)}`,
+      "signed-out",
+      onSignIn,
+      (href) => replaced.push(href)
+    );
+
+    await user.type(screen.getByTestId("login-email"), "operator@example.com");
+    await user.type(screen.getByTestId("login-password"), "hunter2");
+    await user.click(screen.getByTestId("login-submit"));
+
+    await waitFor(() => expect(replaced).toEqual([returnTo]));
+    expect(screen.queryByTestId("life-client-route")).toBeNull();
   });
 
   it("shows an error message and keeps the form when sign-in rejects, without navigating away", async () => {

@@ -54,6 +54,29 @@ export const ZONE_ENTRIES: readonly ZoneEntry[] = [
   { zone: "ideas", label: "Ideas", href: "/ideas/", icon: Lightbulb },
 ];
 
+export type NavigationTargetKind = "client" | "document";
+
+/**
+ * Classifies a same-origin path for a router-owning consumer. Cross-zone
+ * roots come from ZONE_ENTRIES rather than a second list, and match only at
+ * a path-segment boundary: `/life` and `/life/...` leave the current SPA,
+ * while `/lifefoo` does not. Query and fragment suffixes do not affect the
+ * decision and remain untouched for the caller to pass to its navigator.
+ *
+ * This is navigation policy, not URL validation. Callers handling
+ * attacker-influenced values must validate them before classification.
+ */
+export function classifyNavigationTarget(target: string): NavigationTargetKind {
+  const pathname = target.split(/[?#]/, 1)[0];
+  const isDocumentTarget = ZONE_ENTRIES.some((entry) => {
+    if (!entry.hardNavigate) return false;
+    const zoneRoot = entry.href.endsWith("/") ? entry.href.slice(0, -1) : entry.href;
+    return pathname === zoneRoot || pathname.startsWith(`${zoneRoot}/`);
+  });
+
+  return isDocumentTarget ? "document" : "client";
+}
+
 /** A function that performs a client-side (SPA) navigation to `href`. */
 export type NavigateAdapter = (href: string) => void;
 
