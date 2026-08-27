@@ -23,6 +23,7 @@ export type {
   Message,
   MessagePart,
   Provider,
+  RequestProvenance,
   StopReason,
   SystemMessage,
   TextPart,

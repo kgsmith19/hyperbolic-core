@@ -397,12 +397,13 @@ jobs:
             }
 
             // ---------------------------------------------------------------
-            // What this run ACTUALLY used, beside what agent-roles.yaml
-            // DECLARES (Issue #354).
+            // What this run REPORTED it was configured with, beside what
+            // agent-roles.yaml DECLARES (Issue #354).
             // ---------------------------------------------------------------
             // The declared footer above answers "who is assigned"; it cannot
-            // answer "who ran", and until now nothing in the pull request did.
-            // The resolved identities travel in review-meta.json, written by
+            // answer "what did this run report", and until now nothing in the
+            // pull request did. The run-reported configuration travels in
+            // review-meta.json, written by
             // the action's own steps from packages/review's canonical
             // validator -- never from review-verdict.json, which is model
             // output shaped by pull-request content.

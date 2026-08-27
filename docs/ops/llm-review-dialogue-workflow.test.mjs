@@ -1121,16 +1121,17 @@ const RUN_PROVENANCE = {
 };
 
 // Issue #354 follow-up. Behavior protected: the managed comment states the
-// identities this run ACTUALLY used -- both halves -- so the record of who
-// reviewed whose work is durable rather than inferable only from a job log
-// that expires. Defect caught: a change that validates the builder identity at
-// the credential boundary and then never carries it anywhere a human can read
-// it, which is what made the whole guard unverifiable after the fact.
+// run-reported configuration -- both halves -- so the record of who reviewed
+// whose work is durable rather than inferable only from a job log that expires.
+// Defect caught: a change that validates the builder identity at the credential
+// boundary and then never carries it anywhere a human can read it, which is
+// what made the whole guard unverifiable after the fact.
 //
 // The values come from review-meta.json, written by the action's own steps
 // from the resolved config -- never from review-verdict.json, which is model
-// output shaped by pull-request content.
-test("dialogue: the managed comment states this run's actual reviewer and builder identities", async () => {
+// output shaped by pull-request content. Reported, not attested: see the
+// forged-provider test below for what that does and does not buy.
+test("dialogue: the managed comment states this run's reported reviewer and builder configuration", async () => {
   const fs = await import("node:fs");
   const os_ = await import("node:os");
   const path_ = await import("node:path");
