@@ -3,7 +3,7 @@
 //
 // The tracked base config.json keeps the portable fields (enabled, secrets
 // -- the parts that don't vary by machine). Machine-specific fields
-// (runboxDir, protected, repos) live in a tracked overlay file
+// (runboxDir, protected, repos) live in a local, ignored overlay file
 // config.<profile>.json colocated with it, where <profile> is GUARDS_PROFILE
 // if set, else the lowercased hostname. GUARDS_CONFIG keeps its pre-existing
 // meaning unchanged: an absolute pointer to one fully-resolved config,

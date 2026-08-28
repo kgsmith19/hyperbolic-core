@@ -1,3 +1,9 @@
 # GUARDS_LOG decision audit trail (05-g section 3c). Opt-in and per-run; if
 # an operator points GUARDS_LOG at a file colocated here, never track it.
 *.jsonl
+
+# Machine profile overlays contain operator-specific absolute paths. Keep
+# reusable examples and test fixtures tracked; keep every real profile local.
+config.*.json
+!config.example.json
+!config.fixture.json
