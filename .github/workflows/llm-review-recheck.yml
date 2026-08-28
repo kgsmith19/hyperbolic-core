@@ -24,6 +24,9 @@ name: "LLM Review Recheck"
 # (.github/actions/verify-llm-review), so review logic has one source
 # despite two trigger paths, the same discipline AGENTS.md documents for
 # pr-verify.yml's own lanes and llm-review.yml's standalone trigger.
+# Before checkout it also rejects forks and uploads the live
+# {runId, prNumber, headSha} binding consumed by llm-review-dialogue.yml;
+# verdict output created after checkout can never choose its own write target.
 #
 # Adds no pull-request check row: repository_dispatch-triggered runs never
 # do, the same as dev-agent-dispatch.yml's own runs today.
@@ -62,29 +65,70 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.client_payload.prNumber }}
           DISPATCH_HEAD_SHA: ${{ github.event.client_payload.headSha }}
+          BINDING_DIR: ${{ runner.temp }}/llm-review-recheck-binding
         with:
           script: |
+            const fs = require("node:fs");
+            const path = require("node:path");
             const { owner, repo } = context.repo;
+            core.setOutput("stale", "true");
+
+            const prNumber = Number(process.env.PR_NUMBER);
+            const dispatchedHead = process.env.DISPATCH_HEAD_SHA || "";
+            if (!Number.isInteger(prNumber) || prNumber <= 0 || !/^[0-9a-f]{40}$/i.test(dispatchedHead)) {
+              core.setFailed("Recheck dispatch must carry a positive integer prNumber and a 40-character hexadecimal headSha.");
+              return;
+            }
             const { data: pr } = await github.rest.pulls.get({
               owner,
               repo,
-              pull_number: Number(process.env.PR_NUMBER),
+              pull_number: prNumber,
             });
-            if (pr.head.sha !== process.env.DISPATCH_HEAD_SHA) {
+            if (pr.head.sha !== dispatchedHead) {
               core.info(
-                `PR #${pr.number} has moved to ${pr.head.sha}; this recheck was raised for ${process.env.DISPATCH_HEAD_SHA}. ` +
+                `PR #${pr.number} has moved to ${pr.head.sha}; this recheck was raised for ${dispatchedHead}. ` +
                   "A newer head means pr-verify.yml already re-ran AI Review on it. Standing down."
               );
-              core.setOutput("stale", "true");
               return;
             }
             if (pr.state !== "open") {
               core.info(`PR #${pr.number} is ${pr.state}; nothing to recheck.`);
-              core.setOutput("stale", "true");
               return;
             }
+
+            const expectedRepo = `${owner}/${repo}`.toLowerCase();
+            const headRepo = pr.head.repo?.full_name?.toLowerCase();
+            const baseRepo = pr.base.repo?.full_name?.toLowerCase();
+            if (pr.head.repo?.fork !== false || headRepo !== expectedRepo || baseRepo !== expectedRepo) {
+              core.info(`PR #${pr.number} is not an open same-repository pull request; refusing to create a trusted recheck binding.`);
+              return;
+            }
+
+            const runId = Number(context.runId);
+            if (!Number.isSafeInteger(runId) || runId <= 0) {
+              core.setFailed(`GitHub supplied an unusable workflow run id: ${JSON.stringify(context.runId)}`);
+              return;
+            }
+
+            fs.mkdirSync(process.env.BINDING_DIR, { recursive: true });
+            fs.writeFileSync(
+              path.join(process.env.BINDING_DIR, "recheck-binding.json"),
+              JSON.stringify({ runId, prNumber: pr.number, headSha: pr.head.sha })
+            );
             core.setOutput("stale", "false");
             core.setOutput("base_sha", pr.base.sha);
+
+      # This artifact is created from API data before checkout. upload-artifact
+      # v4 artifacts are immutable within a run, so PR-authored code cannot
+      # replace this name after checkout with a self-asserted target.
+      - name: Trust · Upload the pre-checkout recheck binding
+        if: steps.pr.outputs.stale == 'false'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: llm-review-recheck-binding
+          path: ${{ runner.temp }}/llm-review-recheck-binding/recheck-binding.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Setup · Checkout repository
         if: steps.pr.outputs.stale == 'false'
