@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { CredentialsByProvider, LlmRequest, LlmResponse } from "@hyperbolic/llm";
+import type { CredentialsByProvider, LlmRequest, LlmResponse, Provider } from "@hyperbolic/llm";
 import type { ReviewContext } from "../src/context.ts";
 import { buildReviewRequest, ReviewInfrastructureError, runReview } from "../src/review.ts";
 import { SUBMIT_REVIEW_TOOL_NAME } from "../src/schema.ts";
@@ -10,6 +10,7 @@ const config: ReviewConfig = {
   reviewerProvider: "openai",
   reviewerModel: "a-specific-model-id",
   builderProvider: "anthropic",
+  builderModel: "a-specific-builder-model-id",
   maxTokens: 4096,
   timeoutMs: 60_000,
 };
@@ -75,7 +76,11 @@ test("buildReviewRequest: forces submit_review at temperature 0", () => {
   assert.deepEqual(request.toolChoice, { name: SUBMIT_REVIEW_TOOL_NAME });
   assert.equal(request.tools?.length, 1);
   assert.equal(request.tools?.[0]?.name, SUBMIT_REVIEW_TOOL_NAME);
-  assert.deepEqual(request.metadata, { callerApp: "review-gate", purpose: "pr-review" });
+  assert.deepEqual(request.metadata, {
+    callerApp: "review-gate",
+    purpose: "pr-review",
+    provenance: { provider: "anthropic", model: "a-specific-builder-model-id" },
+  });
   assert.equal(request.messages[0]?.role, "system");
   assert.equal(request.messages[1]?.role, "user");
 });
@@ -202,4 +207,34 @@ test("runReview: a valid blocking finding survives orchestration and blocks", as
   assert.equal(verdict.verdict, "block");
   assert.equal(verdict.findings.length, 1);
   assert.equal(verdict.findings[0]?.citation, "AGENTS.md > Test quality");
+});
+
+// The same claim asserted where it actually matters: on the request the client
+// receives. buildReviewRequest is pure and exported, so a test against it
+// alone would stay green if runReview stopped calling it or rebuilt the
+// request itself.
+test("runReview: the request handed to the client carries the builder identity", async () => {
+  let seen: LlmRequest | undefined;
+  await runReview({
+    config,
+    context,
+    credentials,
+    completeFn: async (request) => {
+      seen = request;
+      return response({ toolCalls: [validBlockingCall] });
+    },
+  });
+
+  assert.ok(seen !== undefined, "the client must have been called");
+  const provenance = (seen as LlmRequest).metadata.provenance;
+  assert.ok(provenance !== undefined, "the request must carry provenance");
+  assert.deepEqual(provenance, { provider: "anthropic", model: "a-specific-builder-model-id" });
+
+  // Compile-time oracle, and the only kind available for this claim: the
+  // provenance provider must be the closed `Provider` union, not a bare
+  // string. If the field widened back to `string` this assignment would not
+  // typecheck -- an accident no runtime assertion in this file could catch,
+  // because every runtime value it could hold is a string either way.
+  const narrowed: Provider = provenance.provider;
+  assert.equal(narrowed, "anthropic");
 });

@@ -137,12 +137,38 @@ export interface ToolCallDelta {
 // Request / response
 // ---------------------------------------------------------------------------
 
-/** Logging spine (08-llm-handlers.md section 6). This package does not log;
- * it only carries the fields through so a caller-owned logger can. */
+/**
+ * The provider and model that produced the material a request is ABOUT, when
+ * that differs from the one being called.
+ *
+ * `provider` is the closed `Provider` union, not a string: this names a family
+ * this package knows how to dispatch to, and a caller that cannot say which one
+ * has nothing to record. `model` is an opaque vendor string, never interpreted.
+ */
+export interface RequestProvenance {
+  provider: Provider;
+  model: string;
+}
+
 export interface LlmRequestMetadata {
   callerApp: string;
   purpose: string;
   runRef?: string;
+  /**
+   * Optional provenance for this one request. Caller-side only: nothing in this
+   * package reads `metadata`, so it is neither transmitted to a provider nor
+   * persisted anywhere by this library -- whether it outlives the call is
+   * entirely the caller's business.
+   *
+   * `packages/review`'s gate sets it to the coding agent that wrote the diff it
+   * is asking a different provider company to judge (Issue #354). Note this is
+   * the REQUEST's two-field shape and nothing more; the durable artifact that
+   * gate stages beside its verdict is a separate, wider record owned by
+   * .github/actions/verify-llm-review, not by this type. Kept out of the prompt
+   * on purpose: telling an adversarial reviewer who wrote the code invites
+   * authorship-based reasoning, which that gate's rubric forbids.
+   */
+  provenance?: RequestProvenance;
 }
 
 export interface FallbackTarget {

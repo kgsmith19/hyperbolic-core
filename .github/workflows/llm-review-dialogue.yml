@@ -396,6 +396,80 @@ jobs:
               return text;
             }
 
+            // ---------------------------------------------------------------
+            // What this run REPORTED it was configured with, beside what
+            // agent-roles.yaml DECLARES (Issue #354).
+            // ---------------------------------------------------------------
+            // The declared footer above answers "who is assigned"; it cannot
+            // answer "what did this run report", and until now nothing in the
+            // pull request did. The run-reported configuration travels in
+            // review-meta.json, written by
+            // the action's own steps from packages/review's canonical
+            // validator -- never from review-verdict.json, which is model
+            // output shaped by pull-request content.
+            //
+            // The artifact still comes from a job that executes
+            // pull-request-authored code, so nothing here is taken on trust:
+            // a provider must be one of the three known companies or it reads
+            // `unknown`, and a model id is neutralized, stripped of backticks
+            // and newlines, and capped, so it cannot break out of its code
+            // span, ping a third party, or assert a company that does not
+            // exist. Absent or unusable provenance degrades to `unknown` and
+            // never stops findings from reaching the pull request.
+            const PROVIDER_COMPANIES = new Set(["anthropic", "openai", "google"]);
+            function knownProvider(value) {
+              return typeof value === "string" && PROVIDER_COMPANIES.has(value) ? value : "unknown";
+            }
+            const MODEL_ID_CAP = 80;
+            function renderableModelId(value) {
+              if (typeof value !== "string") return "unknown";
+              // Split on whitespace of any kind AND backticks, then rejoin: a
+              // newline would break the footer's own line, a backtick would close
+              // its code span early. Both are one rule here rather than two
+              // sequential replaces, so neither can be dropped without the other.
+              const collapsed = value
+                .split(/[\s`]+/)
+                .filter((part) => part !== "")
+                .join(" ");
+              if (collapsed === "") return "unknown";
+              // Capped HERE, on one line, and not by neutralize: neutralize's own
+              // truncation marker starts with a newline, which would put back
+              // exactly the line break the split above just removed and split
+              // this footer across two lines. neutralize is then handed a limit
+              // it cannot reach, so it only defuses mentions and issue refs.
+              const capped =
+                collapsed.length > MODEL_ID_CAP ? `${collapsed.slice(0, MODEL_ID_CAP)}…` : collapsed;
+              return neutralize(capped, capped.length);
+            }
+            const provenance = meta.provenance ?? {};
+            // A verdict exists but says nothing about what produced it. The
+            // comment will read `unknown`, which is honest but easy to skim
+            // past, so the run log says it too. Never a failure: findings
+            // reaching the pull request outranks knowing which model found them.
+            if (meta.verdictPresent === true && knownProvider(provenance.reviewerProvider) === "unknown") {
+              core.warning(
+                "The verdict artifact carries no usable run-reported configuration; the managed comment will read `unknown`."
+              );
+            }
+            // "Run-reported", not "actual", and the wording is the security
+            // claim. This artifact is written by a job that executes
+            // pull-request-authored code; nothing in it is signed or attested,
+            // so a forged value that is merely well-formed passes every check
+            // below. Allow-listing the provider and defusing the model id keeps
+            // a crafted value HARMLESS -- it cannot make it TRUE. Calling this
+            // the actual identity would promise an authentication this lane
+            // does not perform; a footer that can be trusted as fact needs a
+            // trusted publication lane, which is Milestone 2's work.
+            const runFooter =
+              `_Run-reported configuration — reviewer \`${knownProvider(provenance.reviewerProvider)}\`/\`${renderableModelId(provenance.reviewerModel)}\`` +
+              ` · builder \`${knownProvider(provenance.builderProvider)}\`/\`${renderableModelId(provenance.builderModel)}\`_`;
+            // Rendered only in the managed comment, beside reviewFooter --
+            // deliberately NOT folded into reviewFooter itself, which is also
+            // the last line of every deferred/confirmed Issue this workflow
+            // files and of every line-anchored suggestion it posts. Those
+            // record the reviewer's assignment; the run's own identities
+            // belong on the pull request being judged.
+
             // A fence long enough that nothing inside can close it early.
             function codeBlock(value) {
               const text = neutralize(value);
@@ -1045,7 +1119,7 @@ jobs:
               );
             }
 
-            lines.push(reviewFooter, "");
+            lines.push(reviewFooter, runFooter, "");
 
             const body = lines.join("\n");
 

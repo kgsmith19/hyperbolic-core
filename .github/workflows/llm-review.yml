@@ -15,10 +15,14 @@ name: "Verify: LLM Review"
 #
 # OWNER-PROVISIONED PREREQUISITES. This cannot run until the owner has
 # created all of the following; none of them is agent-settable:
-#   - vars.REVIEW_PROVIDER              reviewer family: anthropic|openai|gemini
+#   - vars.REVIEW_PROVIDER              reviewer family: anthropic|openai|google
 #   - vars.REVIEW_MODEL                 exact model id served by that family
-#   - vars.REVIEW_BUILDER_PROVIDER      legacy mirror of agent-roles.yaml's
-#                                       dev.provider (optional; mismatches fail)
+#   - vars.DEV_PROVIDER                 coding-agent harness company that
+#                                       writes code here; required, and must
+#                                       name a different company than
+#                                       vars.REVIEW_PROVIDER
+#   - vars.DEV_MODEL                    exact model id that harness runs;
+#                                       required, recorded verbatim
 #   - vars.INFISICAL_REVIEW_IDENTITY_ID Infisical machine identity for OIDC
 #   - vars.INFISICAL_PROJECT_SLUG       (already used by deploy.yml)
 #   - Infisical secrets at path /review/ (env prod), named exactly

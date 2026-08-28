@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_BUILDER_PROVIDER, resolveConfig, VALID_PROVIDERS } from "../src/config.ts";
+import { resolveConfig, VALID_PROVIDERS } from "../src/config.ts";
 
 // Behavior protected: resolveConfig fails closed on a missing model id.
 // Defect caught: a future "sensible default" for REVIEW_MODEL. A defaulted
@@ -85,6 +85,7 @@ test("resolveConfig: reviewer and builder from the same family is rejected", () 
           REVIEW_PROVIDER: provider,
           REVIEW_MODEL: "some-model-id",
           REVIEW_BUILDER_PROVIDER: provider,
+          DEV_MODEL: "claude-opus-5",
         }),
       (error: unknown) => {
         assert.ok(error instanceof Error);
@@ -107,6 +108,7 @@ test("resolveConfig: google builder and google reviewer are the same company fam
         REVIEW_PROVIDER: "google",
         REVIEW_MODEL: "gemini-2.5-pro",
         REVIEW_BUILDER_PROVIDER: "google",
+        DEV_MODEL: "claude-opus-5",
       }),
     /same provider family.*google/i
   );
@@ -119,21 +121,138 @@ test("resolveConfig: google builder is valid with a non-google reviewer", () => 
     REVIEW_PROVIDER: "openai",
     REVIEW_MODEL: "gpt-5-mini",
     REVIEW_BUILDER_PROVIDER: "google",
+    DEV_MODEL: "claude-opus-5",
   });
 
   assert.equal(config.reviewerProvider, "openai");
   assert.equal(config.builderProvider, "google");
 });
 
-// The default builder is anthropic, so an anthropic reviewer with NO explicit
-// builder must still be rejected. Defect caught: implementing the separation
-// check against the raw env var instead of the resolved value, which would let
-// the most likely real-world misconfiguration -- forgetting to set
-// REVIEW_BUILDER_PROVIDER at all -- slip straight through.
-test("resolveConfig: same-family is caught through the default builder provider too", () => {
+// Behavior protected: an absent builder provider fails closed, naming the
+// variable, rather than resolving through an assumed default (Issue #354).
+//
+// This test replaces one that asserted the OPPOSITE arrangement: that an
+// anthropic reviewer with no explicit builder was caught by the separation
+// guard, because the unset builder defaulted to anthropic. That accident of
+// agreement is exactly the hazard -- the guard only fired because the guessed
+// default happened to collide. The `doesNotMatch` is the load-bearing half:
+// it proves the refusal happens at the missing-variable boundary, not one
+// step later by coincidence, so the same absence is caught for every reviewer
+// family rather than only for anthropic.
+test("resolveConfig: an absent REVIEW_BUILDER_PROVIDER fails closed instead of defaulting", () => {
   assert.throws(
-    () => resolveConfig({ REVIEW_PROVIDER: DEFAULT_BUILDER_PROVIDER, REVIEW_MODEL: "some-model-id" }),
-    /[Pp]rovider separation is required/
+    () => resolveConfig({ REVIEW_PROVIDER: "anthropic", REVIEW_MODEL: "some-model-id" }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /REVIEW_BUILDER_PROVIDER is unset or empty/);
+      assert.doesNotMatch(
+        error.message,
+        /[Pp]rovider separation is required/,
+        "the refusal must come from the missing variable itself, not from a defaulted value that happened to collide"
+      );
+      return true;
+    }
+  );
+});
+
+// The companion control, and the one the removed test could never express: a
+// reviewer family that does NOT collide with the old anthropic default. Under
+// the default this configuration resolved successfully and reviewed a change
+// whose author was never stated, which is the silent degradation Issue #354
+// closes.
+test("resolveConfig: an absent REVIEW_BUILDER_PROVIDER fails closed even when no collision would result", () => {
+  assert.throws(
+    () => resolveConfig({ REVIEW_PROVIDER: "openai", REVIEW_MODEL: "some-model-id" }),
+    /REVIEW_BUILDER_PROVIDER is unset or empty/
+  );
+});
+
+// Behavior protected: whitespace is not a value here either. Defect caught: an
+// unset `vars.DEV_PROVIDER` expanding to "" or " " in the workflow expression
+// and sailing past a bare truthiness check into an unstated builder identity.
+test("resolveConfig: whitespace-only REVIEW_BUILDER_PROVIDER is treated as unset", () => {
+  assert.throws(
+    () =>
+      resolveConfig({
+        REVIEW_PROVIDER: "openai",
+        REVIEW_MODEL: "some-model-id",
+        REVIEW_BUILDER_PROVIDER: "   ",
+        DEV_MODEL: "claude-opus-5",
+      }),
+    /REVIEW_BUILDER_PROVIDER is unset or empty/
+  );
+});
+
+// Behavior protected: the builder MODEL is required too, not only the family.
+// Defect caught: recording provider separation while leaving the exact model
+// that wrote the code unstated -- the review's own record of what it judged
+// would then be half-anonymous, and no later reader could tell which model's
+// output the reviewer actually graded.
+test("resolveConfig: unset DEV_MODEL throws an error naming DEV_MODEL", () => {
+  assert.throws(
+    () =>
+      resolveConfig({
+        REVIEW_PROVIDER: "openai",
+        REVIEW_MODEL: "some-model-id",
+        REVIEW_BUILDER_PROVIDER: "anthropic",
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /DEV_MODEL/);
+      assert.match(error.message, /unset or empty/);
+      return true;
+    }
+  );
+});
+
+// Same whitespace hazard as every other required variable, for the same
+// reason: `vars.DEV_MODEL` reaches this process through a CI expression.
+//
+// Every blank shape is exercised, not just a run of spaces: the builder model
+// is the one required variable this package does NOT trim (see the byte-for-
+// byte test below), so "is it blank" and "what is stored" are decided by two
+// different rules. A tab- or newline-only value must still be rejected even
+// though nothing downstream will strip it.
+test("resolveConfig: a whitespace-only DEV_MODEL of any shape is treated as unset", () => {
+  for (const blank of ["  ", "\t", "\n", " \t\n "]) {
+    assert.throws(
+      () =>
+        resolveConfig({
+          REVIEW_PROVIDER: "openai",
+          REVIEW_MODEL: "some-model-id",
+          REVIEW_BUILDER_PROVIDER: "anthropic",
+          DEV_MODEL: blank,
+        }),
+      /DEV_MODEL is unset or empty/,
+      `DEV_MODEL=${JSON.stringify(blank)} must be rejected`
+    );
+  }
+});
+
+// Behavior protected: a nonblank builder model is OPAQUE provenance, recorded
+// byte for byte. Defect caught: routing it through the shared `required()`
+// helper, which TRIMS -- right for identifiers this package normalizes anyway,
+// wrong for a value whose whole job is to say exactly what the owner set --
+// or lowercasing it alongside the provider identifiers.
+//
+// The sentinel is deliberately hostile on both axes at once: surrounding
+// whitespace catches a trim, interior capitals catch a normalization, and the
+// same case asserts the provider IS still canonicalized. A single-axis
+// sentinel would let one of the two defects through.
+test("resolveConfig: a nonblank builder model is recorded byte for byte", () => {
+  const exactModelId = "  Claude-OPUS-5.1_Preview@2026-08\t";
+  const config = resolveConfig({
+    REVIEW_PROVIDER: "openai",
+    REVIEW_MODEL: "gpt-5-mini",
+    REVIEW_BUILDER_PROVIDER: "ANTHROPIC",
+    DEV_MODEL: exactModelId,
+  });
+
+  assert.equal(config.builderProvider, "anthropic", "the provider IS normalized");
+  assert.equal(
+    config.builderModel,
+    exactModelId,
+    "the model is NOT -- neither trimmed nor lowercased"
   );
 });
 
@@ -145,6 +264,7 @@ test("resolveConfig: differing reviewer and builder families resolve successfull
     REVIEW_PROVIDER: "openai",
     REVIEW_MODEL: "a-specific-model-id",
     REVIEW_BUILDER_PROVIDER: "anthropic",
+    DEV_MODEL: "claude-opus-5",
   });
 
   assert.equal(config.reviewerProvider, "openai");
@@ -168,6 +288,7 @@ test("resolveConfig: REVIEW_PROVIDER casing is normalized to the lowercase canon
       REVIEW_PROVIDER: spelling,
       REVIEW_MODEL: "a-specific-model-id",
       REVIEW_BUILDER_PROVIDER: "anthropic",
+      DEV_MODEL: "claude-opus-5",
     });
     assert.equal(
       config.reviewerProvider,
@@ -189,6 +310,7 @@ test("resolveConfig: separation guard compares normalized values, so casing cann
         REVIEW_PROVIDER: "Anthropic",
         REVIEW_MODEL: "a-specific-model-id",
         REVIEW_BUILDER_PROVIDER: "ANTHROPIC",
+        DEV_MODEL: "claude-opus-5",
       }),
     /[Pp]rovider separation is required/
   );
@@ -201,6 +323,7 @@ test("resolveConfig: REVIEW_BUILDER_PROVIDER casing is normalized too", () => {
     REVIEW_PROVIDER: "openai",
     REVIEW_MODEL: "a-specific-model-id",
     REVIEW_BUILDER_PROVIDER: "Anthropic",
+    DEV_MODEL: "claude-opus-5",
   });
   assert.equal(config.builderProvider, "anthropic");
 });
@@ -216,6 +339,7 @@ test("resolveConfig: an invalid REVIEW_BUILDER_PROVIDER is rejected, not ignored
         REVIEW_PROVIDER: "openai",
         REVIEW_MODEL: "a-specific-model-id",
         REVIEW_BUILDER_PROVIDER: "claude",
+        DEV_MODEL: "claude-opus-5",
       }),
     /REVIEW_BUILDER_PROVIDER="claude" is not a supported provider/
   );

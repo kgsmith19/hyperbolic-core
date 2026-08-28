@@ -60,7 +60,16 @@ export function buildReviewRequest(config: ReviewConfig, context: ReviewContext)
     // must be boring.
     temperature: 0,
     maxTokens: config.maxTokens,
-    metadata: { callerApp: "review-gate", purpose: "pr-review" },
+    // The builder identity travels ON the request, not in it: `metadata` is
+    // the client's caller-side logging spine and is never transmitted, so the
+    // run records whose work it judged without ever telling the reviewer who
+    // wrote the code -- which would invite exactly the authorship-based
+    // reasoning buildSystemPrompt forbids (Issue #354).
+    metadata: {
+      callerApp: "review-gate",
+      purpose: "pr-review",
+      provenance: { provider: config.builderProvider, model: config.builderModel },
+    },
     timeoutMs: config.timeoutMs,
   };
 }

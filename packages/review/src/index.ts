@@ -15,13 +15,14 @@
 export type { Finding, Provider, ReviewConfig, ReviewVerdict, Severity } from "./types.ts";
 
 export {
-  DEFAULT_BUILDER_PROVIDER,
   DEFAULT_MAX_TOKENS,
   DEFAULT_TIMEOUT_MS,
   resolveConfig,
   VALID_PROVIDERS,
 } from "./config.ts";
 export type { ReviewEnv } from "./config.ts";
+
+export { readCredentials } from "./credentials.ts";
 
 export { SUBMIT_REVIEW_TOOL_NAME, submitReviewTool, submitReviewToolChoice } from "./schema.ts";
 
