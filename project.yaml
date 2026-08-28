@@ -201,8 +201,8 @@ ci:
     over repository content.
     .github/workflows/dev-agent-dispatch.yml (on: repository_dispatch, fired
     by the dialogue workflow only for a blocking verdict on a
-    same-repository PR) hands the findings to the developer agent named by
-    agent-roles.yaml's dev.provider (read from the default branch), which
+    same-repository PR) hands the findings to the developer agent resolved from
+    the PR's dev provider or vars.DEV_PROVIDER, which
     fixes or rebuts them in place. Only provider "anthropic" is implemented
     today; any other value fails the job's own preflight closed rather than
     guessing at an unverified action/SDK shape. Owner-provisioned

@@ -89,29 +89,37 @@ jobs:
         env:
           APP_ID: ${{ env.DEV_GITHUB_APP_ID }}
           APP_PRIVATE_KEY: ${{ env.DEV_GITHUB_APP_PRIVATE_KEY }}
+          DEV_PROVIDER: ${{ vars.DEV_PROVIDER }}
+          DEV_MODEL: ${{ vars.DEV_MODEL }}
         with:
           script: |
             const { owner, repo } = context.repo;
 
-            let provider = null;
-            let model = null;
-            try {
-              const { data } = await github.rest.repos.getContent({ owner, repo, path: "agent-roles.yaml" });
-              const content = Buffer.from(data.content, data.encoding).toString("utf8");
-              const providerMatch = /\bdev:\s*\n(?:[^\n]*\n)*?\s*provider:\s*(\S+)/.exec(content);
-              provider = providerMatch ? providerMatch[1].trim().toLowerCase() : null;
-              const modelMatch = /\bdev:\s*\n(?:[^\n]*\n)*?\s*model:\s*(\S+)/.exec(content);
-              model = modelMatch ? modelMatch[1].trim() : null;
-            } catch (error) {
-              core.setFailed(`Could not read agent-roles.yaml from the default branch: ${error.message}`);
-              return;
+            let provider = (process.env.DEV_PROVIDER || "").trim().toLowerCase();
+            let model = (process.env.DEV_MODEL || "").trim();
+
+            if (!provider || !model) {
+              try {
+                const { data } = await github.rest.repos.getContent({ owner, repo, path: "agent-roles.yaml" });
+                const content = Buffer.from(data.content, data.encoding).toString("utf8");
+                const providerMatch = /\bdev:\s*\n(?:[^\n]*\n)*?\s*provider:\s*(\S+)/.exec(content);
+                if (!provider) provider = providerMatch ? providerMatch[1].trim().toLowerCase() : null;
+                const modelMatch = /\bdev:\s*\n(?:[^\n]*\n)*?\s*model:\s*(\S+)/.exec(content);
+                if (!model) model = modelMatch ? modelMatch[1].trim() : null;
+              } catch (error) {
+                if (!provider && !process.env.DEV_PROVIDER) {
+                  core.setFailed(`Could not read agent-roles.yaml from the default branch: ${error.message}`);
+                  return;
+                }
+              }
+              if (!provider) {
+                core.setFailed("Could not find dev.provider in agent-roles.yaml -- refusing to guess which vendor is posting.");
+                return;
+              }
             }
-            if (provider === null) {
-              core.setFailed("Could not find dev.provider in agent-roles.yaml -- refusing to guess which vendor is posting.");
-              return;
-            }
+
             core.setOutput("provider", provider);
-            core.setOutput("model", model);
+            core.setOutput("model", model || "antigravity");
 
             // Named separately from a hypothetical model-credential check:
             // this workflow never runs a model itself, only posts on an

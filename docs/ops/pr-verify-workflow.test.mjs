@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(root, ".github/workflows/pr-verify.yml");
-const workflow = readFileSync(workflowPath, "utf8");
+const workflow = readFileSync(workflowPath, "utf8").replace(/\r\n/g, "\n");
 
 // The worker lanes PR Gate rolls up, keyed by job id. Every id here must
 // appear in the YAML with exactly this display name, must have no needs:

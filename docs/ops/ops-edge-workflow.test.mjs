@@ -26,7 +26,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const workflow = readFileSync(path.join(root, ".github/workflows/ops-edge.yml"), "utf8");
 const compose = readFileSync(path.join(root, "docs/ops/edge-origin/compose.yml"), "utf8");
 const temporaryDirectories = [];
-const remoteMatch = workflow.match(/<<'REMOTE'\n([\s\S]*?)\n\s+REMOTE/);
+const remoteMatch = workflow.match(/<<'REMOTE'\r?\n([\s\S]*?)\r?\n\s+REMOTE/);
 assert.ok(remoteMatch, "could not extract origin activation remote script");
 const remoteScript = remoteMatch[1].replace(/^ {10}/gm, "");
 
@@ -233,7 +233,7 @@ mv() {
 docker() {
   printf '%s\\n' "$*" >> "$OPS_EDGE_DOCKER_LOG"
   if [[ "$OPS_EDGE_FAIL_AT" == "nginx" &&
-        "$*" == "compose -f .staged-123-1/compose.yml run --rm --no-deps edge-origin nginx -t" ]]; then
+        "$*" == "compose -f .staged-123-1/compose.yml run -T --rm --no-deps edge-origin nginx -t" ]]; then
     return 96
   fi
   case "$*" in
@@ -559,7 +559,7 @@ test("the deploy step ships all origin inputs, starts nginx alone first, and pro
 test("origin config is staged and nginx-tested before any active file is replaced", () => {
   assert.match(workflow, /stage_dir="\.staged-\$deployment_id"/);
   assert.match(workflow, /scp [\s\S]*?"deploy@\$DEPLOY_HOST:edge-origin\/\.staged-\$deployment_id\/"/);
-  const nginxTest = workflow.indexOf('docker compose -f "$stage_dir/compose.yml" run --rm --no-deps edge-origin nginx -t');
+  const nginxTest = workflow.indexOf('docker compose -f "$stage_dir/compose.yml" run -T --rm --no-deps edge-origin nginx -t');
   const activation = workflow.indexOf("activation_started=true");
   assert.ok(nginxTest > -1, "the staged compose/config set must pass real nginx -t");
   assert.ok(activation > nginxTest, "activation cannot begin before nginx -t succeeds");
@@ -585,7 +585,7 @@ test("activation backs up the exact prior files and restores them automatically 
 test("cleanup and rollback traps cover pull and nginx validation failures, including staged .env", () => {
   const exitTrap = workflow.indexOf("trap restore_previous EXIT");
   const pull = workflow.indexOf('docker compose pull edge-origin');
-  const nginxTest = workflow.indexOf('docker compose -f "$stage_dir/compose.yml" run --rm --no-deps edge-origin nginx -t');
+  const nginxTest = workflow.indexOf('docker compose -f "$stage_dir/compose.yml" run -T --rm --no-deps edge-origin nginx -t');
   assert.ok(exitTrap > -1 && pull > -1 && nginxTest > -1);
   assert.ok(exitTrap < pull, "EXIT cleanup must be armed before a pull can fail");
   assert.ok(exitTrap < nginxTest, "EXIT cleanup must be armed before nginx -t can fail");
@@ -1185,7 +1185,7 @@ test("a preparation failure restores mutable image references for stopped servic
   assert.deepEqual(finalStates, { edge: "stopped", cloudflared: "stopped" });
 
   const failedNginx = calls.indexOf(
-    "compose -f .staged-123-1/compose.yml run --rm --no-deps edge-origin nginx -t",
+    "compose -f .staged-123-1/compose.yml run -T --rm --no-deps edge-origin nginx -t",
   );
   const edgeRetag = calls.indexOf("image tag sha256:edge-old nginx:old");
   const cloudflaredRetag = calls.indexOf(
@@ -1492,10 +1492,10 @@ test("the deploy step runs under strict mode", () => {
 });
 
 test("ops-edge.yml parses as valid bash", () => {
-  const match = workflow.match(/run: \|\n((?:[ \t]+.*\n?)+)/g);
+  const match = workflow.match(/run: \|\r?\n((?:[ \t]+.*\r?\n?)+)/g);
   assert.ok(match && match.length > 0, "could not extract any run: blocks");
   for (const block of match) {
-    const script = block.replace(/^run: \|\n/, "");
+    const script = block.replace(/^run: \|\r?\n/, "");
     assert.doesNotThrow(() => execFileSync(process.env.BASH_PATH ?? "bash", ["-n"], { input: `#!/usr/bin/env bash\n${script}` }));
   }
 });
