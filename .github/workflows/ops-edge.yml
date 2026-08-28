@@ -652,7 +652,7 @@ jobs:
               docker compose pull edge-origin
             )
           fi
-          docker compose -f "$stage_dir/compose.yml" run -T --rm --no-deps edge-origin nginx -t
+          docker compose -f "$stage_dir/compose.yml" run -T --rm --no-deps edge-origin nginx -t < /dev/null
 
           activation_started=true
           for config_file in "${config_files[@]}"; do

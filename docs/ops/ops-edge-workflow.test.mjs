@@ -559,7 +559,7 @@ test("the deploy step ships all origin inputs, starts nginx alone first, and pro
 test("origin config is staged and nginx-tested before any active file is replaced", () => {
   assert.match(workflow, /stage_dir="\.staged-\$deployment_id"/);
   assert.match(workflow, /scp [\s\S]*?"deploy@\$DEPLOY_HOST:edge-origin\/\.staged-\$deployment_id\/"/);
-  const nginxTest = workflow.indexOf('docker compose -f "$stage_dir/compose.yml" run -T --rm --no-deps edge-origin nginx -t');
+  const nginxTest = workflow.indexOf('docker compose -f "$stage_dir/compose.yml" run -T --rm --no-deps edge-origin nginx -t < /dev/null');
   const activation = workflow.indexOf("activation_started=true");
   assert.ok(nginxTest > -1, "the staged compose/config set must pass real nginx -t");
   assert.ok(activation > nginxTest, "activation cannot begin before nginx -t succeeds");
@@ -585,7 +585,7 @@ test("activation backs up the exact prior files and restores them automatically 
 test("cleanup and rollback traps cover pull and nginx validation failures, including staged .env", () => {
   const exitTrap = workflow.indexOf("trap restore_previous EXIT");
   const pull = workflow.indexOf('docker compose pull edge-origin');
-  const nginxTest = workflow.indexOf('docker compose -f "$stage_dir/compose.yml" run -T --rm --no-deps edge-origin nginx -t');
+  const nginxTest = workflow.indexOf('docker compose -f "$stage_dir/compose.yml" run -T --rm --no-deps edge-origin nginx -t < /dev/null');
   assert.ok(exitTrap > -1 && pull > -1 && nginxTest > -1);
   assert.ok(exitTrap < pull, "EXIT cleanup must be armed before a pull can fail");
   assert.ok(exitTrap < nginxTest, "EXIT cleanup must be armed before nginx -t can fail");
