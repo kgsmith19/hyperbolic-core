@@ -102,6 +102,15 @@ jobs:
           origin="https://$DEPLOY_HOST"
           failures=0
           results=()
+          smoke_tmp="$(mktemp -d)"
+
+          cleanup_smoke_tmp() {
+            rm -rf -- "$smoke_tmp"
+          }
+          trap cleanup_smoke_tmp EXIT
+          trap 'exit 129' HUP
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
 
           probe() {
             local label="$1" path="$2" expect="$3"
@@ -115,6 +124,44 @@ jobs:
             if [[ -n "$expect" ]] && ! grep -qE "$expect" <<<"$body"; then
               results+=("| $label | \`$path\` | ❌ unexpected body |")
               echo "FAIL $label ($path): body did not match /$expect/" >&2
+              failures=$((failures + 1))
+              return 0
+            fi
+            results+=("| $label | \`$path\` | ✅ |")
+            echo "ok   $label ($path)"
+          }
+
+          is_json_health() {
+            local content_type="${1,,}"
+            [[ "$content_type" =~ ^application/json([[:space:]]*;|$) ]] || return 1
+            python3 -c 'import json, sys; payload = json.load(sys.stdin); raise SystemExit(0 if isinstance(payload, dict) and payload.get("status") == "ok" else 1)'
+          }
+
+          probe_json_health() {
+            local label="$1" path="$2"
+            local body_file error_file response_meta http_status content_type error_message
+            body_file="$smoke_tmp/json-health-body"
+            error_file="$smoke_tmp/json-health-error"
+            : >"$body_file"
+            : >"$error_file"
+            if ! response_meta="$(curl --fail --silent --show-error --max-time 15 --output "$body_file" --write-out '%{http_code} %{content_type}' "$origin$path" 2>"$error_file")"; then
+              error_message="$(<"$error_file")"
+              results+=("| $label | \`$path\` | ❌ unreachable |")
+              echo "FAIL $label ($path): $error_message" >&2
+              failures=$((failures + 1))
+              return 0
+            fi
+            http_status="${response_meta%% *}"
+            content_type="${response_meta#* }"
+            if [[ "$http_status" != "200" ]]; then
+              results+=("| $label | \`$path\` | ❌ HTTP $http_status (expected 200) |")
+              echo "FAIL $label ($path): expected HTTP 200; got $http_status" >&2
+              failures=$((failures + 1))
+              return 0
+            fi
+            if ! is_json_health "$content_type" <"$body_file" 2>/dev/null; then
+              results+=("| $label | \`$path\` | ❌ invalid JSON health response |")
+              echo "FAIL $label ($path): expected application/json with top-level status=ok; got content-type '$content_type'" >&2
               failures=$((failures + 1))
               return 0
             fi
@@ -143,8 +190,8 @@ jobs:
           probe "Shell index" "/" 'src="/assets/[A-Za-z0-9_.-]+\.js"'
           probe "Shell login deep link" "/login" 'src="/assets/[A-Za-z0-9_.-]+\.js"'
           probe "Shell settings deep link" "/settings" 'src="/assets/[A-Za-z0-9_.-]+\.js"'
-          probe "Handler A" "/api/healthz" ''
-          probe "Brain" "/api/brain/health" ''
+          probe_json_health "Handler A" "/api/healthz"
+          probe_json_health "Brain" "/api/brain/health"
 
           if [[ "${BROKER_LIVE:-}" == "true" ]]; then
             probe_ssh "Broker" "http://127.0.0.1:8300/healthz"
@@ -164,7 +211,7 @@ jobs:
           if [[ "${LIFEOS_LIVE:-}" == "true" ]]; then
             probe "LifeOS UI" "/life/" '/life/assets/[A-Za-z0-9_.-]+\.js'
             probe "LifeOS capture deep link" "/life/capture" '/life/assets/[A-Za-z0-9_.-]+\.js'
-            probe "LifeOS API" "/life/api/healthz" ''
+            probe_json_health "LifeOS API" "/life/api/healthz"
           else
             results+=("| LifeOS UI | \`/life/\` | ⏭️ skipped (pre-cutover) |")
             results+=("| LifeOS API | \`/life/api/healthz\` | ⏭️ skipped (pre-cutover) |")

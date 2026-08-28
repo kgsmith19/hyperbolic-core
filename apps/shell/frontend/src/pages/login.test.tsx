@@ -118,9 +118,41 @@ describe("LoginPage: rendering by status", () => {
     expect(screen.queryByTestId("life-client-route")).toBeNull();
   });
 
-  it("preserves an encoded LifeOS return unchanged while selecting document navigation", async () => {
+  it("rejects an encoded LifeOS root before already-authenticated navigation", () => {
     const replaced: string[] = [];
     const returnTo = "/%6cife/capture?mode=quick#entry";
+
+    renderLogin(
+      `/login?return=${encodeURIComponent(returnTo)}`,
+      "signed-in",
+      vi.fn(),
+      (href) => replaced.push(href)
+    );
+
+    expect(screen.getByTestId("home-page")).toBeInTheDocument();
+    expect(screen.getByTestId("navigation-type")).toHaveTextContent("REPLACE");
+    expect(replaced).toEqual([]);
+  });
+
+  it("rejects an encoded LifeOS separator before already-authenticated navigation", () => {
+    const replaced: string[] = [];
+    const returnTo = "/life%2Fcapture?mode=quick#entry";
+
+    renderLogin(
+      `/login?return=${encodeURIComponent(returnTo)}`,
+      "signed-in",
+      vi.fn(),
+      (href) => replaced.push(href)
+    );
+
+    expect(screen.getByTestId("home-page")).toBeInTheDocument();
+    expect(screen.getByTestId("navigation-type")).toHaveTextContent("REPLACE");
+    expect(replaced).toEqual([]);
+  });
+
+  it("preserves encoded tail data below the canonical LifeOS boundary", async () => {
+    const returnTo = "/life/%FF?mode=quick#entry";
+    const replaced: string[] = [];
 
     renderLogin(
       `/login?return=${encodeURIComponent(returnTo)}`,
@@ -133,9 +165,9 @@ describe("LoginPage: rendering by status", () => {
     expect(screen.queryByTestId("life-client-route")).toBeNull();
   });
 
-  it("preserves an encoded-separator LifeOS return while selecting document navigation", async () => {
+  it("rejects an encoded traversal into LifeOS before already-authenticated navigation", () => {
     const replaced: string[] = [];
-    const returnTo = "/life%2Fcapture?mode=quick#entry";
+    const returnTo = "/shell/%2e%2e%2Flife%2Fcapture?mode=quick#entry";
 
     renderLogin(
       `/login?return=${encodeURIComponent(returnTo)}`,
@@ -144,8 +176,27 @@ describe("LoginPage: rendering by status", () => {
       (href) => replaced.push(href)
     );
 
-    await waitFor(() => expect(replaced).toEqual([returnTo]));
-    expect(screen.queryByTestId("life-client-route")).toBeNull();
+    expect(screen.getByTestId("home-page")).toBeInTheDocument();
+    expect(screen.getByTestId("navigation-type")).toHaveTextContent("REPLACE");
+    expect(replaced).toEqual([]);
+  });
+
+  it.each([
+    ["above-root decoded traversal", "/%2e%2e%2Flife%2Fcapture"],
+    ["decoded NUL", "/life%2F%00?mode=quick#entry"],
+  ])("falls back to / before navigating a server-invalid %s", (_label, returnTo) => {
+    const replaced: string[] = [];
+
+    renderLogin(
+      `/login?return=${encodeURIComponent(returnTo)}`,
+      "signed-in",
+      vi.fn(),
+      (href) => replaced.push(href)
+    );
+
+    expect(screen.getByTestId("home-page")).toBeInTheDocument();
+    expect(screen.getByTestId("navigation-type")).toHaveTextContent("REPLACE");
+    expect(replaced).toEqual([]);
   });
 
   it("falls back to / when already signed in with an unsafe ?return= target", () => {
@@ -187,6 +238,28 @@ describe("LoginPage: submitting", () => {
 
     await waitFor(() => expect(replaced).toEqual([returnTo]));
     expect(screen.queryByTestId("life-client-route")).toBeNull();
+  });
+
+  it("rejects an unmountable encoded LifeOS return after successful sign-in", async () => {
+    const user = userEvent.setup();
+    const onSignIn = vi.fn().mockResolvedValue(undefined);
+    const replaced: string[] = [];
+    const returnTo = "/%2Flife/capture";
+    renderLogin(
+      `/login?return=${encodeURIComponent(returnTo)}`,
+      "signed-out",
+      onSignIn,
+      (href) => replaced.push(href)
+    );
+
+    await user.type(screen.getByTestId("login-email"), "operator@example.com");
+    await user.type(screen.getByTestId("login-password"), "hunter2");
+    await user.click(screen.getByTestId("login-submit"));
+
+    await waitFor(() => expect(onSignIn).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByTestId("home-page")).toBeInTheDocument());
+    expect(screen.getByTestId("navigation-type")).toHaveTextContent("REPLACE");
+    expect(replaced).toEqual([]);
   });
 
   it("replaces a LifeOS document exactly once when sign-in publishes signed-in status before resolving", async () => {

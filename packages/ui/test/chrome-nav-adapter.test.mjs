@@ -6,15 +6,12 @@
 // consumers call instead of each hand-rolling their own copy of the rule.
 //
 // This imports src/chrome/zones.ts directly (not dist/index.cjs), matching
-// test/notifications.test.mjs's established precedent: `ZONE_ENTRIES`,
-// `NavigateAdapter`, and `shouldNavigateClientSide` are plain TypeScript
-// with no JSX (Node's built-in type stripping runs the file directly, no
-// build step to go stale) and are NOT re-exported through packages/ui's
-// public entry (src/index.ts exports only the `Zone` type from this
-// module) -- testing them through dist would force them into the package's
-// public surface just to be reachable. NavRail's and CommandPalette's own
-// USE of this function (the actual onClick wiring) is JSX and therefore
-// cannot be exercised this way; that behavioral half is proven in
+// test/notifications.test.mjs's established precedent: the navigation
+// registry and its policy helpers are plain TypeScript with no JSX, so
+// Node's built-in type stripping can exercise the source without a build
+// step going stale. NavRail's and CommandPalette's own USE of this function
+// (the actual onClick wiring) is JSX and therefore cannot be exercised this
+// way; that behavioral half is proven in
 // apps/shell's jsdom-backed component tests and e2e/chrome.spec.ts's real
 // browser proof instead -- see this issue's report for why.
 
@@ -22,7 +19,61 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { matchRoutes } from "react-router";
 
-const { classifyNavigationTarget, ZONE_ENTRIES, shouldNavigateClientSide } = await import("../src/chrome/zones.ts");
+const {
+  classifyNavigationTarget,
+  isNavigationTargetMountable,
+  normalizeOriginPathname,
+  ZONE_ENTRIES,
+  shouldNavigateClientSide,
+} = await import("../src/chrome/zones.ts");
+
+describe("isNavigationTargetMountable: document owners can mount the browser pathname", () => {
+  const lifeRoutes = [{ path: "/*" }];
+  const origin = "https://shell.example";
+
+  test("accepts canonical LifeOS boundaries and preserves encoded tail data", () => {
+    for (const target of [
+      "/life",
+      "/life/",
+      "/life/capture?mode=quick#entry",
+      "/life/entities/id%2Fwith%2Fslashes",
+    ]) {
+      const browserPathname = new URL(target, origin).pathname;
+      assert.ok(matchRoutes(lifeRoutes, browserPathname, "/life"), target);
+      assert.equal(isNavigationTargetMountable?.(target), true, target);
+    }
+
+    assert.equal(
+      isNavigationTargetMountable?.("/life/%FF?mode=quick#entry"),
+      true,
+      "a non-UTF byte below the literal boundary remains navigation data",
+    );
+  });
+
+  test("rejects encoded boundaries that nginx assigns to LifeOS but its basename cannot mount", () => {
+    for (const target of [
+      "/%6cife/capture",
+      "/%6cife",
+      "/life%2Fcapture",
+      "/life%2F",
+      "/%6cife%2Fcapture",
+      "/%2Flife/capture",
+      "/shell/%2e%2e%2Flife%2Fcapture",
+    ]) {
+      const browserPathname = new URL(target, origin).pathname;
+      assert.equal(classifyNavigationTarget(target), "document", target);
+      assert.equal(matchRoutes(lifeRoutes, browserPathname, "/life"), null, target);
+      assert.equal(isNavigationTargetMountable?.(target), false, target);
+    }
+  });
+
+  test("does not impose the LifeOS basename on Shell-owned targets", () => {
+    for (const target of ["/", "/settings", "/lifefoo", "/life%252Fcapture"]) {
+      assert.equal(classifyNavigationTarget(target), "client", target);
+      assert.equal(isNavigationTargetMountable?.(target), true, target);
+    }
+  });
+});
 
 describe("classifyNavigationTarget: document boundaries come from the zone registry", () => {
   test("LifeOS roots and descendants require document navigation without losing suffixes", () => {
@@ -66,11 +117,15 @@ describe("classifyNavigationTarget: document boundaries come from the zone regis
 
   test("uses origin-equivalent decoding at encoded zone boundaries", () => {
     const origin = "https://shell.example";
-    const lifeRoutes = [{ path: "/life/*" }];
+    const lifeRoutes = [{ path: "/*" }];
     const encodedLife = "/%6cife/capture?mode=quick#entry";
     const encodedLifePath = new URL(encodedLife, origin).pathname;
 
-    assert.ok(matchRoutes(lifeRoutes, encodedLifePath), encodedLife);
+    assert.equal(
+      matchRoutes(lifeRoutes, encodedLifePath, "/life"),
+      null,
+      encodedLife,
+    );
     assert.equal(classifyNavigationTarget(encodedLife), "document", encodedLife);
 
     for (const target of ["/life%2Fcapture", "/%6cife%2Fcapture"]) {
@@ -86,19 +141,82 @@ describe("classifyNavigationTarget: document boundaries come from the zone regis
       "/%6cife/../%73ettings?tab=theme#system",
     ]) {
       const browserPath = new URL(target, origin).pathname;
-      assert.equal(matchRoutes(lifeRoutes, browserPath), null, target);
+      assert.equal(matchRoutes(lifeRoutes, browserPath, "/life"), null, target);
       assert.equal(classifyNavigationTarget(target), "client", target);
     }
   });
 
-  test("malformed percent sequences classify without throwing", () => {
-    for (const [target, expected] of [
-      ["/%zzlife/capture", "client"],
-      ["/life/%zz", "document"],
+  test("decodes valid boundary bytes even when another escaped byte is invalid UTF-8", () => {
+    for (const [target, expectedKind] of [
+      ["/life%2F%FF?mode=quick#entry", "document"],
+      ["/lifefoo%2F%FF", "client"],
+    ]) {
+      assert.equal(classifyNavigationTarget(target), expectedKind, target);
+    }
+  });
+
+  test("normalizes decoded separators and dot segments before choosing the nginx-owned zone", () => {
+    for (const [target, expectedKind] of [
+      ["/%2Flife/capture", "document"],
+      ["/%2Flife/capture?mode=quick#entry", "document"],
+      ["/shell/%2e%2e%2Flife%2Fcapture", "document"],
+      ["/shell/%2e%2e%2Flife%2Fcapture?mode=quick#entry", "document"],
+      ["/life%2F..%2Fsettings", "client"],
+      ["/life%2F..%2Fsettings?tab=theme#system", "client"],
+    ]) {
+      assert.equal(classifyNavigationTarget(target), expectedKind, target);
+    }
+  });
+
+  test("rejects origin-invalid decoded pathnames and classifies them fail-closed", () => {
+    const origin = "https://shell.example";
+
+    assert.equal(
+      normalizeOriginPathname?.(
+        new URL("/shell/%2e%2e%2Flife%2Fcapture", origin).pathname
+      ),
+      "/life/capture",
+      "an in-root decoded traversal remains valid"
+    );
+
+    for (const target of [
+      "/%2e%2e%2Flife%2Fcapture",
+      "/life%2F%00?mode=quick#entry",
+    ]) {
+      assert.equal(
+        normalizeOriginPathname?.(new URL(target, origin).pathname),
+        null,
+        target
+      );
+      assert.equal(classifyNavigationTarget(target), "document", target);
+    }
+  });
+
+  test("rejects malformed original percent sequences and classifies them fail-closed", () => {
+    const origin = "https://shell.example";
+
+    for (const target of [
+      "/%zzlife/capture",
+      "/life/%zz",
+      "/life/%2",
+      "/life/%",
     ]) {
       assert.doesNotThrow(() => classifyNavigationTarget(target), target);
-      assert.equal(classifyNavigationTarget(target), expected, target);
+      assert.equal(
+        normalizeOriginPathname(new URL(target, origin).pathname),
+        null,
+        target
+      );
+      assert.equal(classifyNavigationTarget(target), "document", target);
     }
+  });
+
+  test("keeps an escape exposed by one-pass percent decoding inert", () => {
+    const target = "/life%252Fcapture";
+    const browserPath = new URL(target, "https://shell.example").pathname;
+
+    assert.equal(normalizeOriginPathname(browserPath), "/life%2Fcapture");
+    assert.equal(classifyNavigationTarget(target), "client");
   });
 });
 

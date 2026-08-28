@@ -8,7 +8,12 @@
 // to a navigator. Only a same-origin, app-root-relative target
 // is ever returned; anything else (a protocol-relative URL, an absolute
 // URL, a `javascript:` scheme, a target that would just bounce back to
-// `/login` itself) falls back to "/".
+// `/login` itself, or a server-invalid encoded pathname) falls back to "/".
+import {
+  isNavigationTargetMountable,
+  normalizeOriginPathname,
+} from "@hyperbolic/ui";
+
 const FALLBACK_PATH = "/";
 const SHELL_ORIGIN_SENTINEL = "https://shell.invalid";
 
@@ -26,9 +31,10 @@ function decodeRouterPathname(pathname: string): string {
 }
 
 /**
- * Validates and normalizes a `return=` query-param value into a safe
- * same-origin path to hand to `navigate()`. Never throws; always resolves to
- * a usable in-app path (falling back to "/" for anything it cannot trust).
+ * Validates a `return=` query-param value into a safe same-origin path to hand
+ * to a navigator. Accepted values are returned unchanged. Never throws;
+ * always resolves to a usable path (falling back to "/" for anything it
+ * cannot trust).
  */
 export function sanitizeReturnPath(raw: string | null | undefined): string {
   if (!raw) {
@@ -58,6 +64,20 @@ export function sanitizeReturnPath(raw: string | null | undefined): string {
     raw.startsWith("//") ||
     resolved.origin !== SHELL_ORIGIN_SENTINEL
   ) {
+    return FALLBACK_PATH;
+  }
+
+  // Reject origin-invalid forms before either the client or document
+  // navigator can see them. Keep the normalized value validation-only: a
+  // valid target is still returned byte-for-byte as the caller supplied it.
+  if (normalizeOriginPathname(resolved.pathname) === null) {
+    return FALLBACK_PATH;
+  }
+
+  // nginx owns cross-zone documents after decoding and path normalization,
+  // while each destination router strips its basename from the browser's
+  // still-encoded pathname. Reject targets where those two views disagree.
+  if (!isNavigationTargetMountable(raw)) {
     return FALLBACK_PATH;
   }
 

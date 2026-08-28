@@ -56,13 +56,60 @@ export const ZONE_ENTRIES: readonly ZoneEntry[] = [
 export type NavigationTargetKind = "client" | "document";
 
 function decodeOriginPathname(pathname: string): string {
-  try {
-    return decodeURIComponent(pathname);
-  } catch {
-    // Keep malformed escapes inert so classification fails safely without
-    // inventing a different origin path.
-    return pathname;
+  // The origin unescapes bytes before location matching without requiring
+  // the whole URI to be valid UTF-8. One replacement pass decodes every
+  // valid byte independently while leaving newly exposed escapes inert;
+  // normalizeOriginPathname rejects malformed original escapes first.
+  return pathname.replace(/%([0-9a-f]{2})/giu, (_escape, hex: string) =>
+    String.fromCharCode(Number.parseInt(hex, 16))
+  );
+}
+
+/**
+ * Mirrors the origin's post-browser pathname normalization for ownership
+ * checks. Returns `null` when decoding exposes a path the origin rejects:
+ * a NUL byte or a `..` segment that would escape above the URI root.
+ *
+ * The input is a browser-parsed pathname, not a complete navigation target.
+ * Valid `%XX` bytes are decoded once; malformed original escapes are rejected,
+ * while newly exposed escapes remain inert. The normalized value is
+ * classification/validation data only and must not replace the caller's
+ * original navigation target.
+ */
+export function normalizeOriginPathname(pathname: string): string | null {
+  // nginx rejects a request URI when any percent token in the original
+  // pathname is incomplete or contains a non-hex byte. Validate before the
+  // one-pass decode so an escape exposed by `%25` remains inert.
+  if (/%(?![0-9a-f]{2})/iu.test(pathname)) return null;
+
+  const decodedPathname = decodeOriginPathname(pathname);
+  if (decodedPathname.includes("\0")) return null;
+
+  const segments: string[] = [];
+
+  for (const segment of decodedPathname.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (segments.length === 0) return null;
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
   }
+
+  return `/${segments.join("/")}`;
+}
+
+function zoneRoot(entry: Pick<ZoneEntry, "href">): string {
+  return entry.href.endsWith("/") ? entry.href.slice(0, -1) : entry.href;
+}
+
+function findDocumentOwner(pathname: string): ZoneEntry | undefined {
+  return ZONE_ENTRIES.find((entry) => {
+    if (!entry.hardNavigate) return false;
+    const root = zoneRoot(entry);
+    return pathname === root || pathname.startsWith(`${root}/`);
+  });
 }
 
 /**
@@ -76,21 +123,49 @@ function decodeOriginPathname(pathname: string): string {
  * attacker-influenced values must validate them before classification.
  */
 export function classifyNavigationTarget(target: string): NavigationTargetKind {
-  // Use the same WHATWG normalization a browser applies when either
-  // navigator consumes the untouched target. In particular, dot segments
-  // can cross a zone boundary before the document request or pushState.
-  // Decode the remaining escapes once because the origin matches locations
-  // against that decoded path, including a single-encoded path separator.
-  const pathname = decodeOriginPathname(
-    new URL(target, "https://navigation.invalid").pathname
-  );
-  const isDocumentTarget = ZONE_ENTRIES.some((entry) => {
-    if (!entry.hardNavigate) return false;
-    const zoneRoot = entry.href.endsWith("/") ? entry.href.slice(0, -1) : entry.href;
-    return pathname === zoneRoot || pathname.startsWith(`${zoneRoot}/`);
-  });
+  // Start with the browser-normalized pathname, then mirror the origin's
+  // remaining normalization: decode once, merge adjacent slashes, and
+  // resolve any dot segments exposed by that decode. This pathname is used
+  // only for ownership classification; callers still navigate to `target`
+  // unchanged, preserving its query, fragment, and original encoding.
+  const browserPathname = new URL(target, "https://navigation.invalid").pathname;
+  const pathname = normalizeOriginPathname(browserPathname);
+
+  // A server-invalid target has no route owner. Document navigation is the
+  // fail-closed classifier fallback: the origin can reject it instead of an
+  // SPA interpreting it. Security-sensitive callers must validate first.
+  if (pathname === null) return "document";
+
+  const isDocumentTarget = findDocumentOwner(pathname) !== undefined;
 
   return isDocumentTarget ? "document" : "client";
+}
+
+/**
+ * Reports whether the bundle selected by origin-normalized ownership can
+ * mount the browser's still-encoded pathname. Document-zone basenames come
+ * from the same hard-navigation registry rows as ownership; encoded bytes
+ * below a literal basename boundary remain untouched and mountable.
+ *
+ * This is navigation policy, not URL validation. Attacker-influenced values
+ * must still pass their caller's same-origin and malformed-path checks.
+ */
+export function isNavigationTargetMountable(target: string): boolean {
+  const browserPathname = new URL(target, "https://navigation.invalid").pathname;
+  const originPathname = normalizeOriginPathname(browserPathname);
+  if (originPathname === null) return false;
+
+  const documentOwner = findDocumentOwner(originPathname);
+  if (!documentOwner) return true;
+
+  // Match React Router's basename stripping boundary: the comparison is
+  // case-insensitive, but the browser pathname is not percent-decoded first.
+  const basename = zoneRoot(documentOwner);
+  if (!browserPathname.toLowerCase().startsWith(basename.toLowerCase())) {
+    return false;
+  }
+  const nextCharacter = browserPathname.charAt(basename.length);
+  return nextCharacter === "" || nextCharacter === "/";
 }
 
 /** A function that performs a client-side (SPA) navigation to `href`. */
