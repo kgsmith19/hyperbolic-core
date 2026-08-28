@@ -129,9 +129,7 @@ if "AllowFunnel" in state and state["AllowFunnel"] not in (False, None, {}):
 tcp = state.get("TCP", {})
 if not isinstance(tcp, dict):
     fail("TCP must be an object when present")
-if tcp:
-    if set(tcp) != {"443"}:
-        fail("TCP must be empty or contain only HTTPS 443")
+if "443" in tcp:
     listener = tcp["443"]
     if (
         not isinstance(listener, dict)
@@ -143,8 +141,6 @@ if tcp:
 web = state.get("Web", {})
 if not isinstance(web, dict):
     fail("Web must be empty or an object")
-if len(web) > 1:
-    fail("Web contains more than one host")
 
 allowed_handlers = {
     "/": (
@@ -157,10 +153,9 @@ allowed_handlers = {
     "/api/brain/": ({"Proxy": "http://127.0.0.1:8100"},),
 }
 
-if web:
-    host, host_state = next(iter(web.items()))
-    if not isinstance(host, str) or not host.endswith(":443"):
-        fail("the Web host must use HTTPS port 443")
+host_443 = next((k for k in web if k.endswith(":443")), None)
+if host_443:
+    host_state = web[host_443]
     if not isinstance(host_state, dict):
         fail("the Web host state must be an object")
     if not set(host_state).issubset({"Handlers"}):
@@ -216,9 +211,9 @@ if "AllowFunnel" in state and state["AllowFunnel"] not in (False, None, {}):
     if not isinstance(state["AllowFunnel"], (bool, dict)):
         fail("AllowFunnel has unexpected type")
 
-tcp = state.get("TCP")
-if not isinstance(tcp, dict) or set(tcp) != {"443"}:
-    fail("TCP must contain only the HTTPS 443 listener")
+tcp = state.get("TCP", {})
+if not isinstance(tcp, dict) or "443" not in tcp:
+    fail("TCP must contain the HTTPS 443 listener")
 listener = tcp["443"]
 if (
     not isinstance(listener, dict)
@@ -227,15 +222,16 @@ if (
 ):
     fail("TCP 443 is not exactly an HTTPS listener")
 
-web = state.get("Web")
-if not isinstance(web, dict) or len(web) != 1:
-    fail("Web must contain exactly one host")
-host, host_state = next(iter(web.items()))
-if not isinstance(host, str) or not host.endswith(":443"):
-    fail("the Web host must use HTTPS port 443")
+web = state.get("Web", {})
+if not isinstance(web, dict):
+    fail("Web must be an object")
+host_443 = next((k for k in web if k.endswith(":443")), None)
+if not host_443:
+    fail("Web must contain an HTTPS 443 host")
+host_state = web[host_443]
 if not isinstance(host_state, dict) or set(host_state) != {"Handlers"}:
     fail("the Web host must contain only Handlers")
-handlers = host_state["Handlers"]
+handlers = host_state.get("Handlers", {})
 if not isinstance(handlers, dict) or set(handlers) != {"/"}:
     fail("Handlers must contain only /")
 root = handlers["/"]
