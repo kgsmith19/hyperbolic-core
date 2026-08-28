@@ -111,3 +111,50 @@ jobs:
           curl -fsS http://127.0.0.1:8080/healthz
           curl -fsS http://127.0.0.1:8081/healthz
           REMOTE
+
+          # Health alone cannot prove browser-history routing. Probe through
+          # the same tailnet HTTPS boundary a browser uses, and keep asset/API
+          # negative controls honest so an over-broad SPA fallback cannot pass.
+          origin="https://$DEPLOY_HOST"
+          probe_document() {
+            local label="$1" path="$2" expect="$3"
+            local body="$RUNNER_TEMP/ops-origin-document.html"
+            if ! curl --fail --silent --show-error --max-time 15 \
+              "$origin$path" > "$body"; then
+              echo "::error::$label ($path) did not return a successful document." >&2
+              return 1
+            fi
+            if ! grep -qE "$expect" "$body"; then
+              echo "::error::$label ($path) did not contain its expected production bundle marker." >&2
+              return 1
+            fi
+            echo "ok   $label ($path)"
+          }
+          probe_404() {
+            local label="$1" path="$2" require_non_html="$3"
+            local body="$RUNNER_TEMP/ops-origin-negative-body"
+            local headers="$RUNNER_TEMP/ops-origin-negative-headers"
+            local status
+            status="$(curl --silent --show-error --max-time 15 \
+              --output "$body" --dump-header "$headers" \
+              --write-out '%{http_code}' "$origin$path")"
+            if [[ "$status" != "404" ]]; then
+              echo "::error::$label ($path) returned HTTP $status instead of an honest 404." >&2
+              return 1
+            fi
+            if [[ "$require_non_html" == "true" ]] && \
+              grep -qiE '^content-type:[[:space:]]*text/html' "$headers"; then
+              echo "::error::$label ($path) returned an SPA HTML document from an API prefix." >&2
+              return 1
+            fi
+            echo "ok   $label ($path: 404)"
+          }
+
+          probe_document "Shell login" "/login" 'src="/assets/[A-Za-z0-9_.-]+\.js"'
+          probe_document "Shell settings" "/settings" 'src="/assets/[A-Za-z0-9_.-]+\.js"'
+          probe_document "LifeOS capture" "/life/capture" 'src="/life/assets/[A-Za-z0-9_.-]+\.js"'
+          probe_404 "Missing Shell asset" "/assets/__ops_origin_missing__.js" "false"
+          probe_404 "Missing LifeOS asset" "/life/assets/__ops_origin_missing__.js" "false"
+          probe_404 "Handler API boundary" "/api/__ops_origin_boundary__.js" "true"
+          probe_404 "Brain API boundary" "/api/brain/__ops_origin_boundary__.js" "true"
+          probe_404 "LifeOS API boundary" "/life/api/__ops_origin_boundary__.js" "true"

@@ -1,0 +1,536 @@
+name: "Auto-Merge Deploy Reconcile"
+
+# Native auto-merge is armed by PR Gate with the repository GITHUB_TOKEN.
+# GitHub suppresses the resulting push-triggered workflows, so a separately
+# trusted default-branch workflow reconciles the completed merge through the
+# existing workflow_dispatch entrypoints. This workflow never checks out or
+# executes pull-request content. Every trust decision is made against live
+# GitHub API state before the token's actions:write permission is used.
+
+on:
+  workflow_run:
+    workflows: ["PR Verification"]
+    types: [completed]
+
+run-name: Reconcile deployment for ${{ github.event.workflow_run.head_sha }}
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+concurrency:
+  group: auto-merge-deploy-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile auto-merged deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Reconcile · Validate the exact merge and dispatch affected workflows
+        id: reconcile
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const EXPECTED_WORKFLOW_ID = 335930003;
+            const EXPECTED_WORKFLOW_NAME = "PR Verification";
+            const EXPECTED_WORKFLOW_PATH = ".github/workflows/pr-verify.yml";
+            const AUTOMATION_MERGER = "github-actions[bot]";
+            const POLL_INTERVAL_MS = 5000;
+            const STATE_SETTLE_ATTEMPTS = 3;
+            const MERGE_POLL_MAX_ATTEMPTS = 60;
+
+            const { owner, repo } = context.repo;
+            const repositoryFullName = `${owner}/${repo}`;
+            const payloadRepository = context.payload.repository;
+            const run = context.payload.workflow_run;
+
+            function fail(message) {
+              throw new Error(`Auto-merge deploy reconciliation refused: ${message}`);
+            }
+
+            function isSha(value) {
+              return typeof value === "string" && /^[0-9a-f]{40}$/i.test(value);
+            }
+
+            function sameRepositoryPr(pr, label) {
+              const headRepo = pr?.head?.repo;
+              const baseRepo = pr?.base?.repo;
+              if (
+                !headRepo ||
+                !baseRepo ||
+                headRepo.fork === true ||
+                headRepo.full_name !== repositoryFullName ||
+                baseRepo.full_name !== repositoryFullName
+              ) {
+                fail(`${label} is not a same-repository pull request.`);
+              }
+              if (pr.head.sha !== run.head_sha) {
+                fail(
+                  `${label} head mismatch: workflow reviewed ${run.head_sha}, live association reports ${pr.head.sha}.`,
+                );
+              }
+            }
+
+            function startsWith(filename, prefix) {
+              return filename.startsWith(prefix);
+            }
+
+            function isProductionScoped(filename) {
+              return (
+                startsWith(filename, "apps/shell/") ||
+                startsWith(filename, "services/llm-handler/") ||
+                startsWith(filename, "services/brain/") ||
+                startsWith(filename, "services/broker/") ||
+                startsWith(filename, "apps/lifeos/backend/") ||
+                startsWith(filename, "apps/lifeos/frontend/") ||
+                startsWith(filename, "apps/agentic-command-center/backend/kernel/") ||
+                startsWith(filename, "apps/agentic-command-center/backend/hooks/") ||
+                startsWith(filename, "apps/agentic-command-center/backend/runner/") ||
+                filename === "apps/agentic-command-center/backend/policy.json" ||
+                startsWith(filename, "apps/toolbelt/guards/") ||
+                /^apps\/toolbelt\/(?:.*\/)?supabase\/migrations\//.test(filename) ||
+                startsWith(filename, "packages/") ||
+                startsWith(filename, "docs/ops/edge-origin/") ||
+                filename === "docs/ops/tailscale-serve-apply.sh" ||
+                filename === "docs/ops/prune-dist-dirs.sh" ||
+                filename === "docs/ops/prune-docker-images.sh" ||
+                filename === ".github/workflows/deploy.yml" ||
+                filename === ".github/workflows/lifeos-deploy.yml" ||
+                filename === ".github/workflows/ops-edge.yml" ||
+                filename === ".github/workflows/ops-serve-apply.yml" ||
+                filename === ".github/workflows/platform-migrations.yml"
+              );
+            }
+
+            function classifyDeployments(filenames) {
+              const platform = {
+                shell: false,
+                llmHandler: false,
+                brain: false,
+                broker: false,
+                migrations: false,
+              };
+              const lifeos = { backend: false, ui: false };
+              let edge = false;
+              let serve = false;
+              const mappedFiles = new Set();
+
+              for (const filename of filenames) {
+                let mapped = false;
+
+                // Mirror deploy.yml's current Classify deployable changes
+                // expressions exactly. The explicit inputs below preserve the
+                // same per-unit granularity that a normal push would have used.
+                if (
+                  startsWith(filename, "apps/shell/") ||
+                  startsWith(filename, "packages/") ||
+                  filename === "docs/ops/prune-dist-dirs.sh" ||
+                  filename === ".github/workflows/deploy.yml"
+                ) {
+                  platform.shell = true;
+                  mapped = true;
+                }
+                if (
+                  startsWith(filename, "services/llm-handler/") ||
+                  startsWith(filename, "packages/") ||
+                  filename === "docs/ops/prune-docker-images.sh" ||
+                  filename === ".github/workflows/deploy.yml"
+                ) {
+                  platform.llmHandler = true;
+                  mapped = true;
+                }
+                if (
+                  startsWith(filename, "services/brain/") ||
+                  startsWith(
+                    filename,
+                    "apps/agentic-command-center/backend/kernel/",
+                  ) ||
+                  startsWith(
+                    filename,
+                    "apps/agentic-command-center/backend/hooks/",
+                  ) ||
+                  startsWith(
+                    filename,
+                    "apps/agentic-command-center/backend/runner/",
+                  ) ||
+                  filename === "apps/agentic-command-center/backend/policy.json" ||
+                  startsWith(filename, "apps/toolbelt/guards/") ||
+                  startsWith(filename, "packages/") ||
+                  filename === "docs/ops/prune-docker-images.sh" ||
+                  filename === ".github/workflows/deploy.yml"
+                ) {
+                  platform.brain = true;
+                  mapped = true;
+                }
+                if (
+                  startsWith(filename, "services/broker/") ||
+                  startsWith(filename, "packages/") ||
+                  filename === "docs/ops/prune-docker-images.sh" ||
+                  filename === ".github/workflows/deploy.yml"
+                ) {
+                  platform.broker = true;
+                  mapped = true;
+                }
+                if (
+                  /^apps\/toolbelt\/(?:.*\/)?supabase\/migrations\//.test(
+                    filename,
+                  )
+                ) {
+                  platform.migrations = true;
+                  mapped = true;
+                }
+
+                // Mirror lifeos-deploy.yml's backend/UI classifier exactly.
+                if (
+                  startsWith(filename, "apps/lifeos/backend/") ||
+                  filename === "docs/ops/prune-docker-images.sh" ||
+                  filename === ".github/workflows/lifeos-deploy.yml"
+                ) {
+                  lifeos.backend = true;
+                  mapped = true;
+                }
+                if (
+                  startsWith(filename, "apps/lifeos/frontend/") ||
+                  filename === "docs/ops/prune-dist-dirs.sh" ||
+                  filename === ".github/workflows/lifeos-deploy.yml"
+                ) {
+                  lifeos.ui = true;
+                  mapped = true;
+                }
+
+                if (
+                  startsWith(filename, "docs/ops/edge-origin/") ||
+                  filename === ".github/workflows/ops-edge.yml"
+                ) {
+                  edge = true;
+                  mapped = true;
+                }
+                if (
+                  filename === "docs/ops/tailscale-serve-apply.sh" ||
+                  filename === ".github/workflows/ops-serve-apply.yml"
+                ) {
+                  serve = true;
+                  mapped = true;
+                }
+
+                if (mapped) mappedFiles.add(filename);
+              }
+
+              const unmappedProduction = filenames.filter(
+                (filename) =>
+                  isProductionScoped(filename) && !mappedFiles.has(filename),
+              );
+              if (unmappedProduction.length > 0) {
+                fail(
+                  `unmapped production path(s): ${unmappedProduction.join(", ")}. Add an explicit deployment owner before merging.`,
+                );
+              }
+
+              const targets = [];
+              if (
+                platform.shell ||
+                platform.llmHandler ||
+                platform.brain ||
+                platform.broker ||
+                platform.migrations
+              ) {
+                targets.push({
+                  workflow_id: "deploy.yml",
+                  inputs: {
+                    deploy_shell: String(platform.shell),
+                    deploy_llm_handler: String(platform.llmHandler),
+                    deploy_brain: String(platform.brain),
+                    deploy_broker: String(platform.broker),
+                    apply_migrations: String(platform.migrations),
+                  },
+                });
+              }
+              if (lifeos.backend || lifeos.ui) {
+                targets.push({
+                  workflow_id: "lifeos-deploy.yml",
+                  inputs: {
+                    deploy_backend: String(lifeos.backend),
+                    deploy_ui: String(lifeos.ui),
+                  },
+                });
+              }
+              if (edge) {
+                targets.push({ workflow_id: "ops-edge.yml", inputs: {} });
+              }
+              if (serve) {
+                targets.push({
+                  workflow_id: "ops-serve-apply.yml",
+                  inputs: {},
+                });
+              }
+              return targets;
+            }
+
+            if (!payloadRepository || payloadRepository.full_name !== repositoryFullName) {
+              fail("event repository does not match the executing repository.");
+            }
+            if (!run || !Number.isSafeInteger(run.id) || run.id <= 0) {
+              fail("workflow_run.id is missing or malformed.");
+            }
+            if (
+              run.workflow_id !== EXPECTED_WORKFLOW_ID ||
+              run.name !== EXPECTED_WORKFLOW_NAME ||
+              run.path !== EXPECTED_WORKFLOW_PATH
+            ) {
+              fail(
+                `source workflow must be ID ${EXPECTED_WORKFLOW_ID}, ${EXPECTED_WORKFLOW_NAME} at ${EXPECTED_WORKFLOW_PATH}; received ID ${run.workflow_id}, ${run.name} at ${run.path}.`,
+              );
+            }
+            if (run.event !== "pull_request") {
+              fail(`source workflow event must be pull_request, received ${run.event}.`);
+            }
+            if (run.conclusion !== "success") {
+              core.info(
+                `PR Verification concluded ${run.conclusion}; no successful merge can be reconciled.`,
+              );
+              core.setOutput("record_receipt", "false");
+              return;
+            }
+            if (!isSha(run.head_sha)) {
+              fail("workflow_run.head_sha is not an exact 40-character commit SHA.");
+            }
+            if (
+              !run.head_repository ||
+              run.head_repository.fork === true ||
+              run.head_repository.full_name !== repositoryFullName
+            ) {
+              fail("workflow run did not originate from this same repository.");
+            }
+
+            const defaultBranch = payloadRepository.default_branch;
+            if (typeof defaultBranch !== "string" || defaultBranch.length === 0) {
+              fail("repository default branch is missing.");
+            }
+
+            // Real PR Verification workflow_run payloads in this repository
+            // have an empty pull_requests array, and GitHub exposes no
+            // workflow-run-to-PR list endpoint. Bind through the reviewed
+            // commit instead; commit association remains available after
+            // native auto-merge deletes the source branch.
+            const associated = await github.paginate(
+              github.rest.repos.listPullRequestsAssociatedWithCommit,
+              { owner, repo, commit_sha: run.head_sha, per_page: 100 },
+            );
+            const candidates = associated.filter(
+              (pr) =>
+                pr?.head?.sha === run.head_sha &&
+                pr?.head?.repo?.fork !== true &&
+                pr?.head?.repo?.full_name === repositoryFullName &&
+                pr?.base?.repo?.full_name === repositoryFullName &&
+                pr?.base?.ref === defaultBranch,
+            );
+            if (candidates.length !== 1) {
+              fail(
+                `expected exactly one same-repository default-branch pull request associated with commit ${run.head_sha} at the exact reviewed head; found ${candidates.length}.`,
+              );
+            }
+            sameRepositoryPr(candidates[0], "commit-associated pull request");
+            const prNumber = candidates[0].number;
+            if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
+              fail("commit-associated pull request number is malformed.");
+            }
+
+            async function readLivePr() {
+              const { data } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: prNumber,
+              });
+              sameRepositoryPr(data, `live pull request #${prNumber}`);
+              if (data.base.ref !== defaultBranch) {
+                fail(
+                  `pull request #${prNumber} targets ${data.base.ref}, not default branch ${defaultBranch}.`,
+                );
+              }
+              return data;
+            }
+
+            let live = await readLivePr();
+            if (!live.merged) {
+              if (live.state === "closed") {
+                fail(`pull request #${prNumber} is closed but unmerged.`);
+              }
+
+              // The PR Gate check can transition to completed a scheduler tick
+              // before the pull request API exposes the auto_merge field or the
+              // resulting merge. Give that trusted state a short stabilization
+              // window; an intentional draft/hold still exits as a clean no-op.
+              for (
+                let attempt = 1;
+                attempt <= STATE_SETTLE_ATTEMPTS &&
+                !live.merged &&
+                !live.auto_merge;
+                attempt += 1
+              ) {
+                await new Promise((resolve) =>
+                  setTimeout(resolve, POLL_INTERVAL_MS),
+                );
+                live = await readLivePr();
+                if (!live.merged && live.state === "closed") {
+                  fail(`pull request #${prNumber} is closed but unmerged.`);
+                }
+              }
+              if (!live.merged && !live.auto_merge) {
+                core.info(
+                  `Pull request #${prNumber} remained open without native auto-merge armed after ${STATE_SETTLE_ATTEMPTS} stabilization checks; this successful verification run owns no deployment reconciliation.`,
+                );
+                core.setOutput("record_receipt", "false");
+                return;
+              }
+
+              for (
+                let attempt = 1;
+                attempt <= MERGE_POLL_MAX_ATTEMPTS && !live.merged;
+                attempt += 1
+              ) {
+                await new Promise((resolve) =>
+                  setTimeout(resolve, POLL_INTERVAL_MS),
+                );
+                live = await readLivePr();
+                if (!live.merged && live.state === "closed") {
+                  fail(`pull request #${prNumber} is closed but unmerged.`);
+                }
+              }
+              if (!live.merged) {
+                if (!live.auto_merge) {
+                  core.info(
+                    `Native auto-merge for pull request #${prNumber} was no longer armed; no deployment was dispatched.`,
+                  );
+                  core.setOutput("record_receipt", "false");
+                  return;
+                }
+                fail(
+                  `pull request #${prNumber} still had native auto-merge armed but was not merged after ${MERGE_POLL_MAX_ATTEMPTS} checks.`,
+                );
+              }
+            }
+
+            const merger = live.merged_by?.login ?? "";
+            if (merger !== AUTOMATION_MERGER) {
+              core.info(
+                `Pull request #${prNumber} was merged by ${merger || "an unknown actor"}; existing push triggers own that deployment path.`,
+              );
+              core.setOutput("record_receipt", "false");
+              return;
+            }
+
+            const mergeSha = live.merge_commit_sha;
+            if (!isSha(mergeSha)) {
+              fail(`pull request #${prNumber} has no valid merge commit SHA.`);
+            }
+            const { data: comparison } =
+              await github.rest.repos.compareCommitsWithBasehead({
+                owner,
+                repo,
+                basehead: `${mergeSha}...${defaultBranch}`,
+              });
+            if (
+              !["ahead", "identical"].includes(comparison.status) ||
+              comparison.merge_base_commit?.sha !== mergeSha
+            ) {
+              fail(
+                `merge ${mergeSha} is not an ancestor of live default branch ${defaultBranch}.`,
+              );
+            }
+
+            const receiptName = `auto-merge-deploy-${mergeSha}`;
+            const { data: artifactPage } =
+              await github.rest.actions.listArtifactsForRepo({
+                owner,
+                repo,
+                name: receiptName,
+                per_page: 100,
+              });
+            const existingReceipt = (artifactPage.artifacts ?? []).some(
+              (artifact) =>
+                artifact.name === receiptName && artifact.expired !== true,
+            );
+            core.setOutput("receipt_name", receiptName);
+            if (existingReceipt) {
+              core.info(
+                `Deployment reconciliation receipt ${receiptName} already exists; suppressing duplicate dispatch.`,
+              );
+              core.setOutput("record_receipt", "false");
+              return;
+            }
+
+            const fileRows = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+            if (
+              Number.isSafeInteger(live.changed_files) &&
+              fileRows.length !== live.changed_files
+            ) {
+              fail(
+                `changed-file retrieval was incomplete for PR #${prNumber}: API returned ${fileRows.length} of ${live.changed_files}.`,
+              );
+            }
+            const filenames = fileRows.map((file) => file.filename);
+            const targets = classifyDeployments(filenames);
+
+            for (const target of targets) {
+              try {
+                await github.rest.actions.createWorkflowDispatch({
+                  owner,
+                  repo,
+                  workflow_id: target.workflow_id,
+                  ref: defaultBranch,
+                  inputs: target.inputs,
+                });
+              } catch (error) {
+                fail(
+                  `dispatch of ${target.workflow_id} failed for merge ${mergeSha}: ${error.message}`,
+                );
+              }
+            }
+
+            const receipt = {
+              schemaVersion: 1,
+              sourceRunId: run.id,
+              pullRequest: prNumber,
+              reviewedHead: run.head_sha,
+              mergeCommit: mergeSha,
+              defaultBranch,
+              changedFiles: filenames,
+              dispatched: targets.map((target) => ({
+                workflow: target.workflow_id,
+                inputs: target.inputs,
+              })),
+            };
+            core.setOutput("receipt", JSON.stringify(receipt));
+            core.setOutput("record_receipt", "true");
+            core.info(
+              targets.length > 0
+                ? `Dispatched ${targets.map((target) => target.workflow_id).join(", ")} for auto-merged PR #${prNumber}.`
+                : `Auto-merged PR #${prNumber} changed no mapped production path; recording a no-op receipt.`,
+            );
+
+      - name: Evidence · Write the per-merge reconciliation receipt
+        if: steps.reconcile.outputs.record_receipt == 'true'
+        shell: bash
+        env:
+          RECEIPT: ${{ steps.reconcile.outputs.receipt }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/auto-merge-deploy-reconcile"
+          printf '%s\n' "$RECEIPT" > "$RUNNER_TEMP/auto-merge-deploy-reconcile/receipt.json"
+
+      - name: Evidence · Publish the per-merge reconciliation receipt
+        if: steps.reconcile.outputs.record_receipt == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.reconcile.outputs.receipt_name }}
+          path: ${{ runner.temp }}/auto-merge-deploy-reconcile/receipt.json
+          if-no-files-found: error
+          retention-days: 90
