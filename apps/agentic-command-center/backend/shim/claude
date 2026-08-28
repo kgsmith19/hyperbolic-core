@@ -1,5 +1,5 @@
 #!/bin/sh
 DIR="$(cd "$(dirname "$0")" && pwd)"
 node "$DIR/../hooks/lane.mjs" gate -- "$@" || { [ $? -eq 42 ] && exit 42; }
-REAL="${ACC_REAL_CLAUDE_EXE:-C:/Users/kyleg/.local/bin/claude.exe}"
+REAL="${ACC_REAL_CLAUDE_EXE:-$HOME/.local/bin/claude.exe}"
 exec "$REAL" "$@"

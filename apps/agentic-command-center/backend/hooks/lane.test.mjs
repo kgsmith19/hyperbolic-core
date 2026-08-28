@@ -740,9 +740,110 @@ test("formatHolders renders pid/label/startedAt, and falls back to 'unknown' whe
   );
 });
 
-test("shim/claude.cmd's baked-in real exe path matches policy.json's lane.total.exe[0]", () => {
-  const policy = JSON.parse(fs.readFileSync(path.join(HERE_DIR, "..", "policy.json"), "utf8").replace(/^\uFEFF/, ""));
-  const configuredExe = policy.lane.total.exe[0];
+// The shims are the only production code that decides WHICH executable a
+// `claude` invocation actually starts, so their default has to be pinned by
+// running them, not by reading them. Each case below builds a throwaway
+// profile under BASE, drops a stand-in at the path the shim is supposed to
+// derive from it, and reads that stand-in's own distinctive exit code back
+// out of the shim. Nothing here can reach a real claude.exe: HOME never
+// points at a real profile and the stand-in is a two-line shell script.
+//
+// `sh` is why these live in this file rather than the Windows suite:
+// package.json's test:windows deliberately excludes lane.test.mjs, so they
+// only ever run where a POSIX shell exists. POSIX separators below are
+// deliberate too -- on Windows `sh` is MSYS, and `dirname` on a backslash
+// path returns ".", which would make the shim resolve hooks/lane.mjs
+// relative to the caller's cwd instead of its own directory.
+const SHIM_SH = path.join(HERE_DIR, "..", "shim", "claude").split(path.sep).join("/");
+const STAND_IN_MARKER = "ACC-SHIM-STAND-IN";
+
+function writeStandIn(file, exitCode) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `#!/bin/sh\necho ${STAND_IN_MARKER}\nexit ${exitCode}\n`);
+  fs.chmodSync(file, 0o755);
+}
+
+// cap 3 with the empty process fixture allows, cap 0 refuses. The exe list is
+// a path that exists nowhere, so neither outcome depends on what is really
+// running on the host.
+function shimSandbox(cap = 3) {
+  const dir = fs.mkdtempSync(path.join(BASE, "shim-"));
+  const home = path.join(dir, "home");
+  const policy = path.join(dir, "policy.json");
+  fs.writeFileSync(policy, JSON.stringify({ lane: { total: { cap, exe: ["C:\\definitely-not-a-real-path\\claude.exe"] } } }));
+  writeStandIn(path.join(home, ".local", "bin", "claude.exe"), 23);
+  return { dir, home, policy };
+}
+
+// Always the same session arguments, so the only thing that differs between
+// the allow, refuse and override cases is the one input each is about. An
+// ambient ACC_REAL_CLAUDE_EXE on the developer's own machine must never be
+// what decides them, so it is dropped unless a case supplies one.
+function runPosixShim(sb, realExe) {
+  const env = {
+    ...process.env,
+    HOME: sb.home,
+    ACC_POLICY: sb.policy,
+    ACC_LANE_DIR: path.join(sb.dir, "lane"),
+    ACC_LANE_PROCESS_FIXTURE: "[]",
+  };
+  if (realExe) env.ACC_REAL_CLAUDE_EXE = realExe;
+  else delete env.ACC_REAL_CLAUDE_EXE;
+  return spawnSync("sh", [SHIM_SH, "-p", "hi"], { encoding: "utf8", env });
+}
+
+test("shim/claude launches $HOME/.local/bin/claude.exe by default", () => {
+  const r = runPosixShim(shimSandbox());
+  assert.equal(
+    r.status,
+    23,
+    `a baked-in absolute profile path is #352 exactly: it launches nothing on any other machine (stderr: ${r.stderr})`
+  );
+  assert.ok(r.stdout.includes(STAND_IN_MARKER), "the stand-in under the synthetic HOME must be the process that ran");
+});
+
+test("shim/claude still prefers an explicit ACC_REAL_CLAUDE_EXE over the profile default", () => {
+  const sb = shimSandbox();
+  const override = path.join(sb.dir, "override-claude");
+  writeStandIn(override, 31);
+  const r = runPosixShim(sb, override);
+  assert.equal(r.status, 31, `the explicit override, not the profile default, must win (stderr: ${r.stderr})`);
+});
+
+test("shim/claude exits 42 without launching anything when the lane gate refuses", () => {
+  const r = runPosixShim(shimSandbox(0));
+  assert.equal(r.status, 42, "a refusal must reach the caller as 42, not as the child's status");
+  assert.ok(!r.stdout.includes(STAND_IN_MARKER), "a refused launch must never start the executable");
+});
+
+// shim/claude.cmd's own control-flow test is PowerShell and only ever runs on
+// windows-latest, so nothing in this suite can execute it -- the same
+// constraint, and the same remedy, as the ACC_LANE_PROCESS_FIXTURE assertion
+// above. Pin the one line that makes it portable at all.
+test("shim/claude.cmd derives its default executable from the running user's profile", () => {
   const shimCmd = fs.readFileSync(path.join(HERE_DIR, "..", "shim", "claude.cmd"), "utf8");
-  assert.ok(shimCmd.includes(configuredExe), `shim/claude.cmd must contain the exact path ${configuredExe}`);
+  assert.match(
+    shimCmd,
+    /%USERPROFILE%\\\.local\\bin\\claude\.exe/,
+    "claude.cmd must derive its default executable from %USERPROFILE%"
+  );
+  assert.doesNotMatch(
+    shimCmd,
+    /[A-Za-z]:\\Users\\/,
+    "a literal profile path is what #352 removed: it resolves on one developer's machine and nowhere else"
+  );
+});
+
+// What the deleted "shim contains policy.json's exe path" assertion also
+// quietly covered, kept: the launcher default is portable now, but the
+// process MATCHER is still deliberately an exact absolute path, and gate()
+// fails OPEN on an empty list -- so dropping the key disables the
+// machine-wide cap without failing anything else.
+test("policy.json still configures absolute lane.total.exe paths for the cap to count", () => {
+  const policy = JSON.parse(fs.readFileSync(path.join(HERE_DIR, "..", "policy.json"), "utf8").replace(/^\uFEFF/, ""));
+  const exe = policy.lane.total.exe;
+  assert.ok(Array.isArray(exe) && exe.length > 0, "an empty lane.total.exe makes gate() fail open -- the cap stops applying");
+  for (const p of exe) {
+    assert.match(p, /^[A-Za-z]:\\/, `lane.total.exe is matched against Win32_Process ExecutablePath, so it must be absolute: ${p}`);
+  }
 });

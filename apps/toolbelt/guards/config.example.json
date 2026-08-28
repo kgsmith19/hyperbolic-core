@@ -5,7 +5,7 @@
     "secrets": [".env", ".env.*", "*.pem", "*.key", "id_rsa*", "vault.json"]
   },
   "config.<profile>.json": {
-    "_comment": "tracked per-machine overlay, colocated with guard.mjs -- <profile> is GUARDS_PROFILE if set, else the lowercased hostname. Shallow-merged over config.json at read time; GUARDS_CONFIG bypasses this whole file pair and points at one fully-resolved config instead.",
+    "_comment": "local ignored per-machine overlay, colocated with guard.mjs -- <profile> is GUARDS_PROFILE if set, else the lowercased hostname. Shallow-merged over config.json at read time; GUARDS_CONFIG bypasses this whole file pair and points at one fully-resolved config instead.",
     "runboxDir": "/absolute/path/to/your/runbox",
     "protected": ["/absolute/path/to/your/claude/settings.json"],
     "repos": {
