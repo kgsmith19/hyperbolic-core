@@ -449,7 +449,12 @@ CODEOWNERS review gating. GitHub runs the job and reports a status check — exa
   case-insensitive and canonicalized to lowercase at one boundary (`packages/review/src/config.ts`),
   for comparison against canonical families. A repository variable like `REVIEW_PROVIDER=OPENAI`
   cannot slip past validation on casing alone, and the separation guard prevents both roles from
-  resolving to the same provider company.
+  resolving to the same provider company. **The builder identity is stated, never assumed** (Issue
+  #354): `vars.DEV_PROVIDER` and `vars.DEV_MODEL` are both required, and `verify-llm-review` names
+  an empty one and fails before Infisical is reached or any provider is called. An assumed builder
+  made separation hold by coincidence — the guessed default collided only with an `anthropic`
+  reviewer, so for every other reviewer family an unset `vars.DEV_PROVIDER` imported a credential
+  and reviewed a change whose author was never stated.
 - **The model receives a structured-output tool and nothing else** — no shell, filesystem-write,
   or network access. Repository content under review is data, never instructions. Injected text
   can at worst skew a verdict; it cannot execute anything or reach a credential.
