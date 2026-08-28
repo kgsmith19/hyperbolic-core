@@ -572,7 +572,18 @@ function loadRecheckFireScript() {
 function loadRecheckContextScript() {
   const marker = recheckYaml.indexOf("Context · Resolve the pull request, and stop if it moved on");
   assert.ok(marker >= 0, "llm-review-recheck.yml: context step not found");
-  return new AsyncFunction("context", "core", "github", "process", extractScript(recheckYaml, marker));
+  return new AsyncFunction("require", "context", "core", "github", "process", extractScript(recheckYaml, marker));
+}
+
+// Issue #356: the write-capable dialogue job must derive its target from a
+// trusted pre-checkout binding before it imports an App credential or mutates
+// anything. This script handles both workflow_run shapes: direct PR reviews
+// bind to GitHub's run metadata, while repository-dispatch rechecks bind to
+// the immutable artifact the recheck uploaded before checkout.
+function loadDialogueBindingScript() {
+  const marker = dialogueYaml.indexOf("Dialogue · Validate trusted run binding");
+  assert.ok(marker >= 0, "llm-review-dialogue.yml: trusted-binding step not found");
+  return new AsyncFunction("require", "context", "core", "github", "process", extractScript(dialogueYaml, marker));
 }
 
 // The conversation step is the SECOND script: | block in this file (after
@@ -864,6 +875,51 @@ test("llm-review-recheck.yml checks out only the exact dispatched head, and reus
   assert.match(recheckYaml, /uses: \.\/\.github\/actions\/verify-llm-review/);
 });
 
+test("issue #356: recheck uploads an immutable trusted binding before checkout", () => {
+  const contextStep = recheckYaml.indexOf("Context · Resolve the pull request, and stop if it moved on");
+  const uploadStep = recheckYaml.indexOf("Trust · Upload the pre-checkout recheck binding");
+  const checkoutStep = recheckYaml.indexOf("Setup · Checkout repository");
+
+  assert.ok(contextStep >= 0, "recheck context step missing");
+  assert.ok(uploadStep > contextStep, "trusted binding must be produced only after live PR validation");
+  assert.ok(checkoutStep > uploadStep, "trusted binding must be uploaded before PR-authored code is checked out");
+
+  const uploadBlock = recheckYaml.slice(uploadStep, checkoutStep);
+  assert.match(uploadBlock, /uses: actions\/upload-artifact/);
+  assert.match(uploadBlock, /name:\s*llm-review-recheck-binding/);
+  assert.match(uploadBlock, /recheck-binding\.json/);
+  assert.doesNotMatch(uploadBlock, /continue-on-error:\s*true/, "a missing trusted binding must fail visibly");
+});
+
+test("issue #356: dialogue validates the run binding before credentials and every authored mutation", () => {
+  const verdictFetch = dialogueYaml.indexOf("Dialogue · Fetch the reviewer's verdict");
+  const bindingFetch = dialogueYaml.indexOf("Dialogue · Fetch the trusted recheck binding");
+  const validate = dialogueYaml.indexOf("Dialogue · Validate trusted run binding");
+  const reviewerSecrets = dialogueYaml.indexOf("Dialogue · Pull the reviewer App's credentials from Infisical");
+  const posting = dialogueYaml.indexOf("Dialogue · Post findings, count the round, escalate if unresolved");
+
+  assert.ok(verdictFetch >= 0 && bindingFetch > verdictFetch, "the recheck binding must be fetched from the triggering run");
+  assert.ok(validate > bindingFetch, "the downloaded binding must be validated before use");
+  assert.ok(reviewerSecrets > validate, "no App credential may be imported before binding validation");
+  assert.ok(posting > reviewerSecrets, "the mutation step must remain after credential setup");
+
+  for (const stepName of [
+    "Dialogue · Pull the reviewer App's credentials from Infisical",
+    "Dialogue · Mint the reviewer App's installation token",
+    "Dialogue · Check whether the dev agent's Anthropic credential is provisioned in Infisical",
+    "Dialogue · Post findings, count the round, escalate if unresolved",
+  ]) {
+    const start = dialogueYaml.indexOf(`- name: ${stepName}`);
+    const end = dialogueYaml.indexOf("\n      - name:", start + 1);
+    assert.ok(start >= 0, `${stepName}: step missing`);
+    assert.match(
+      dialogueYaml.slice(start, end < 0 ? undefined : end),
+      /steps\.binding\.outputs\.eligible\s*==\s*'true'/,
+      `${stepName}: must be unreachable until the trusted binding is eligible`
+    );
+  }
+});
+
 // Extracts the `with:` block immediately following a verify-llm-review
 // `uses:` line into a plain key -> raw-expression-text map, using the same
 // indentation-bounded scan every other block extractor in this file uses.
@@ -931,7 +987,10 @@ test("neither new workflow adds a second pull_request-triggered workflow to the 
 });
 
 test("every action reference in the new workflows is pinned to a 40-hex SHA with a version comment", () => {
-  const pattern = /^\s*uses:\s*(\S+)/gm;
+  // Horizontal whitespace only. `\s*` can consume the preceding newline on
+  // a CRLF checkout, making match.index point at that newline and the sliced
+  // "line" empty even though the version comment is present.
+  const pattern = /^[ \t]*uses:[ \t]*(\S+)/gm;
   for (const [name, text] of [
     ["llm-review-dialogue.yml", dialogueYaml],
     ["dev-agent-dispatch.yml", dispatchYaml],
@@ -1080,14 +1139,153 @@ async function runDialogue(
   return { calls, core };
 }
 
+async function runDialogueBinding({ event, runId = 77, runHeadSha = HEAD, runPrNumber = 230, files = {}, pr = BASE_PR }) {
+  const fs = require("node:fs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "llm-review-binding-test-"));
+  const artifactDir = path.join(dir, "review");
+  const bindingDir = path.join(dir, "binding");
+  fs.mkdirSync(artifactDir, { recursive: true });
+  fs.mkdirSync(bindingDir, { recursive: true });
+  for (const [name, value] of Object.entries(files)) {
+    const targetDir = name === "recheck-binding.json" ? bindingDir : artifactDir;
+    fs.writeFileSync(path.join(targetDir, name), JSON.stringify(value));
+  }
+
+  const outputs = {};
+  const failures = [];
+  const pullCalls = [];
+  const core = {
+    setOutput: (key, value) => (outputs[key] = value),
+    setFailed: (message) => failures.push(message),
+    warning: () => {},
+    info: () => {},
+  };
+  const github = {
+    rest: {
+      pulls: {
+        get: async (args) => {
+          pullCalls.push(args);
+          return { data: pr };
+        },
+      },
+    },
+  };
+  const proc = {
+    env: {
+      ARTIFACT_DIR: artifactDir,
+      BINDING_DIR: bindingDir,
+      RUN_EVENT: event,
+      RUN_ID: String(runId),
+      RUN_HEAD_SHA: runHeadSha,
+      RUN_PR_NUMBER: String(runPrNumber),
+    },
+  };
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+
+  await loadDialogueBindingScript()(require, context, core, github, proc);
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { outputs, failures, pullCalls };
+}
+
 const HEAD = "a".repeat(40);
-const BASE_PR = { number: 230, head: { sha: HEAD }, state: "open" };
+const SAME_REPO = { full_name: "kgsmith19/hyperbolic-core", fork: false };
+const BASE_PR = {
+  number: 230,
+  head: { sha: HEAD, repo: SAME_REPO },
+  base: { sha: "b".repeat(40), repo: SAME_REPO },
+  state: "open",
+};
 const BLOCKING_VERDICT = {
   verdict: "block",
   findings: [{ severity: "blocking", category: "test", claim: "c", evidence: "e", requestedChange: "r", citation: "AGENTS.md > x" }],
   discarded: [],
   summary: "s",
 };
+
+test("issue #356 binding: a valid recheck binds run, PR, artifact head, and live head", async () => {
+  const { outputs, failures, pullCalls } = await runDialogueBinding({
+    event: "repository_dispatch",
+    files: {
+      "recheck-binding.json": { runId: 77, prNumber: 230, headSha: HEAD },
+      "review-meta.json": { prNumber: 230, headSha: HEAD },
+    },
+  });
+
+  assert.deepEqual(failures, []);
+  assert.equal(outputs.eligible, "true");
+  assert.equal(outputs.pr_number, "230");
+  assert.equal(outputs.head_sha, HEAD);
+  assert.equal(pullCalls.length, 1);
+});
+
+test("issue #356 binding: a direct PR review binds to workflow-run metadata without a recheck artifact", async () => {
+  const { outputs, failures } = await runDialogueBinding({
+    event: "pull_request",
+    files: { "review-meta.json": { prNumber: 230, headSha: HEAD } },
+  });
+
+  assert.deepEqual(failures, []);
+  assert.equal(outputs.eligible, "true");
+  assert.equal(outputs.pr_number, "230");
+  assert.equal(outputs.head_sha, HEAD);
+});
+
+for (const [name, binding] of [
+  ["missing", null],
+  ["malformed run id", { runId: "77", prNumber: 230, headSha: HEAD }],
+  ["wrong triggering run", { runId: 78, prNumber: 230, headSha: HEAD }],
+  ["malformed PR number", { runId: 77, prNumber: "230", headSha: HEAD }],
+  ["malformed head", { runId: 77, prNumber: 230, headSha: "short" }],
+]) {
+  test(`issue #356 binding: ${name} recheck binding fails before a live PR lookup`, async () => {
+    const files = { "review-meta.json": { prNumber: 230, headSha: HEAD } };
+    if (binding !== null) files["recheck-binding.json"] = binding;
+    const { outputs, failures, pullCalls } = await runDialogueBinding({ event: "repository_dispatch", files });
+
+    assert.equal(outputs.eligible, "false");
+    assert.equal(failures.length, 1);
+    assert.equal(pullCalls.length, 0);
+  });
+}
+
+test("issue #356 binding: verdict metadata cannot redirect the trusted PR or head", async () => {
+  for (const meta of [
+    { prNumber: 231, headSha: HEAD },
+    { prNumber: 230, headSha: "c".repeat(40) },
+  ]) {
+    const { outputs, failures, pullCalls } = await runDialogueBinding({
+      event: "repository_dispatch",
+      files: {
+        "recheck-binding.json": { runId: 77, prNumber: 230, headSha: HEAD },
+        "review-meta.json": meta,
+      },
+    });
+
+    assert.equal(outputs.eligible, "false");
+    assert.equal(failures.length, 1);
+    assert.equal(pullCalls.length, 0);
+  }
+});
+
+test("issue #356 binding: a stale or cross-repository live PR fails closed", async () => {
+  for (const pr of [
+    { ...BASE_PR, head: { ...BASE_PR.head, sha: "d".repeat(40) } },
+    { ...BASE_PR, state: "closed" },
+    { ...BASE_PR, head: { ...BASE_PR.head, repo: { full_name: "attacker/fork", fork: true } } },
+  ]) {
+    const { outputs, failures } = await runDialogueBinding({
+      event: "repository_dispatch",
+      pr,
+      files: {
+        "recheck-binding.json": { runId: 77, prNumber: 230, headSha: HEAD },
+        "review-meta.json": { prNumber: 230, headSha: HEAD },
+      },
+    });
+
+    assert.equal(outputs.eligible, "false");
+    assert.equal(failures.length, 1);
+  }
+});
 
 test("dialogue: a fresh blocking verdict opens round 1, posts one new comment, and wakes the agent", async () => {
   const fs = await import("node:fs");
@@ -2696,7 +2894,7 @@ test("recheck-fire: a dispatch failure warns instead of throwing", async () => {
 // ---------------------------------------------------------------------------
 
 test("recheck context: a PR that moved past the dispatched head stands down", async () => {
-  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" }, runId: 77 };
   const outputs = {};
   const core = { setOutput: (key, value) => (outputs[key] = value), info: () => {} };
   const github = {
@@ -2708,14 +2906,14 @@ test("recheck context: a PR that moved past the dispatched head stands down", as
   };
   const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
 
-  await loadRecheckContextScript()(context, core, github, proc);
+  await loadRecheckContextScript()(require, context, core, github, proc);
 
   assert.equal(outputs.stale, "true");
   assert.equal(outputs.base_sha, undefined);
 });
 
 test("recheck context: a closed PR at the right head still stands down -- there is nothing left to recheck", async () => {
-  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" }, runId: 77 };
   const outputs = {};
   const core = { setOutput: (key, value) => (outputs[key] = value), info: () => {} };
   const github = {
@@ -2725,27 +2923,59 @@ test("recheck context: a closed PR at the right head still stands down -- there 
   };
   const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
 
-  await loadRecheckContextScript()(context, core, github, proc);
+  await loadRecheckContextScript()(require, context, core, github, proc);
 
   assert.equal(outputs.stale, "true");
 });
 
 test("recheck context: a still-current, still-open PR proceeds and exposes the base sha for verify-llm-review", async () => {
-  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" }, runId: 77 };
   const outputs = {};
   const core = { setOutput: (key, value) => (outputs[key] = value), info: () => {} };
   const baseSha = "b".repeat(40);
+  const bindingDir = mkdtempSync(path.join(os.tmpdir(), "llm-review-recheck-binding-test-"));
   const github = {
     rest: {
-      pulls: { get: async () => ({ data: { number: 230, head: { sha: HEAD }, state: "open", base: { sha: baseSha } } }) },
+      pulls: { get: async () => ({ data: { ...BASE_PR, base: { sha: baseSha, repo: SAME_REPO } } }) },
     },
   };
-  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
+  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD, BINDING_DIR: bindingDir } };
 
-  await loadRecheckContextScript()(context, core, github, proc);
+  await loadRecheckContextScript()(require, context, core, github, proc);
 
   assert.equal(outputs.stale, "false");
   assert.equal(outputs.base_sha, baseSha);
+  assert.deepEqual(
+    JSON.parse(readFileSync(path.join(bindingDir, "recheck-binding.json"), "utf8")),
+    { runId: 77, prNumber: 230, headSha: HEAD }
+  );
+  rmSync(bindingDir, { recursive: true, force: true });
+});
+
+test("recheck context: a fork at the dispatched head stands down before writing a binding", async () => {
+  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" }, runId: 77 };
+  const outputs = {};
+  const core = { setOutput: (key, value) => (outputs[key] = value), info: () => {} };
+  const bindingDir = mkdtempSync(path.join(os.tmpdir(), "llm-review-recheck-fork-test-"));
+  const github = {
+    rest: {
+      pulls: {
+        get: async () => ({
+          data: {
+            ...BASE_PR,
+            head: { sha: HEAD, repo: { full_name: "attacker/hyperbolic-core", fork: true } },
+          },
+        }),
+      },
+    },
+  };
+  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD, BINDING_DIR: bindingDir } };
+
+  await loadRecheckContextScript()(require, context, core, github, proc);
+
+  assert.equal(outputs.stale, "true");
+  assert.equal(existsSync(path.join(bindingDir, "recheck-binding.json")), false);
+  rmSync(bindingDir, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------

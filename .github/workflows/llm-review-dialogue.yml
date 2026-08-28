@@ -95,12 +95,11 @@ jobs:
     # check (docs: "Events that trigger workflows"), not a same-repo
     # full_name comparison reimplementing the same fact less directly.
     #
-    # A recheck run (event == 'repository_dispatch') has no PR head/base
-    # repo shape to check the same way -- but it needs none: it exists only
-    # because dev-agent-dispatch.yml fired it, which itself only ever runs
-    # for a dispatch this same fork check already passed once, upstream, the
-    # first time the PR was woken. There is no path to a repository_dispatch
-    # run here that did not already clear this exact check.
+    # A recheck run (event == 'repository_dispatch') has no PR head/base repo
+    # shape in workflow_run metadata, so the job may start but cannot reach a
+    # credential or mutation from this condition alone. The trusted-binding
+    # step below requires the recheck's immutable pre-checkout artifact and
+    # independently re-proves the current live same-repository PR and head.
     if: >-
       (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_repository.fork == false) ||
       github.event.workflow_run.event == 'repository_dispatch'
@@ -134,6 +133,122 @@ jobs:
         if: steps.fetch.outcome != 'success'
         run: 'echo "AI Review produced no verdict artifact for this run; nothing to post."'
 
+      # repository_dispatch runs do not carry a trustworthy PR number or PR
+      # head in workflow_run metadata. The recheck therefore uploads this
+      # immutable artifact before checkout, from live API data. A missing
+      # binding is a hard, visible failure: no credential or mutation step is
+      # allowed to guess a target from the verdict artifact instead.
+      - name: Dialogue · Fetch the trusted recheck binding
+        id: binding-fetch
+        if: steps.fetch.outcome == 'success' && github.event.workflow_run.event == 'repository_dispatch'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: llm-review-recheck-binding
+          path: ${{ runner.temp }}/llm-review-recheck-binding
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      # This is the only target-selection boundary for the write-capable job.
+      # Direct pull_request reviews bind to GitHub's workflow_run metadata;
+      # repository_dispatch rechecks bind to the pre-checkout artifact above.
+      # Both paths then prove the verdict metadata and current live PR still
+      # match before Infisical, App-token minting, comments, dispatches, or
+      # Issue mutations become reachable.
+      - name: Dialogue · Validate trusted run binding
+        id: binding
+        if: steps.fetch.outcome == 'success'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/llm-review
+          BINDING_DIR: ${{ runner.temp }}/llm-review-recheck-binding
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        with:
+          script: |
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const { owner, repo } = context.repo;
+            core.setOutput("eligible", "false");
+
+            function readJson(dir, name) {
+              const file = path.join(dir, name);
+              if (!fs.existsSync(file)) {
+                core.setFailed(`Required trust artifact is missing: ${name}`);
+                return null;
+              }
+              try {
+                const value = JSON.parse(fs.readFileSync(file, "utf8"));
+                if (!value || typeof value !== "object" || Array.isArray(value)) {
+                  core.setFailed(`${name} must contain a JSON object.`);
+                  return null;
+                }
+                return value;
+              } catch (error) {
+                core.setFailed(`Could not parse ${name}: ${error.message}`);
+                return null;
+              }
+            }
+
+            const runId = Number(process.env.RUN_ID);
+            if (!Number.isSafeInteger(runId) || runId <= 0) {
+              core.setFailed(`Workflow run id is unusable: ${JSON.stringify(process.env.RUN_ID)}`);
+              return;
+            }
+
+            let trusted;
+            if (process.env.RUN_EVENT === "repository_dispatch") {
+              trusted = readJson(process.env.BINDING_DIR, "recheck-binding.json");
+              if (!trusted) return;
+              if (
+                !Number.isSafeInteger(trusted.runId) || trusted.runId !== runId ||
+                !Number.isInteger(trusted.prNumber) || trusted.prNumber <= 0 ||
+                typeof trusted.headSha !== "string" || !/^[0-9a-f]{40}$/i.test(trusted.headSha)
+              ) {
+                core.setFailed("Recheck binding does not match this run or has malformed PR/head fields.");
+                return;
+              }
+            } else if (process.env.RUN_EVENT === "pull_request") {
+              const prNumber = Number(process.env.RUN_PR_NUMBER);
+              const headSha = process.env.RUN_HEAD_SHA || "";
+              if (!Number.isInteger(prNumber) || prNumber <= 0 || !/^[0-9a-f]{40}$/i.test(headSha)) {
+                core.setFailed("Pull-request workflow metadata has no usable PR number or head SHA.");
+                return;
+              }
+              trusted = { runId, prNumber, headSha };
+            } else {
+              core.setFailed(`Unsupported triggering event: ${JSON.stringify(process.env.RUN_EVENT)}`);
+              return;
+            }
+
+            const meta = readJson(process.env.ARTIFACT_DIR, "review-meta.json");
+            if (!meta) return;
+            if (meta.prNumber !== trusted.prNumber || meta.headSha !== trusted.headSha) {
+              core.setFailed(
+                `Verdict metadata (${meta.prNumber}@${meta.headSha}) does not match the trusted run binding ` +
+                  `(${trusted.prNumber}@${trusted.headSha}).`
+              );
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: trusted.prNumber });
+            const expectedRepo = `${owner}/${repo}`.toLowerCase();
+            const sameRepository =
+              pr.head.repo?.fork === false &&
+              pr.head.repo?.full_name?.toLowerCase() === expectedRepo &&
+              pr.base.repo?.full_name?.toLowerCase() === expectedRepo;
+            if (pr.number !== trusted.prNumber || pr.state !== "open" || !sameRepository || pr.head.sha !== trusted.headSha) {
+              core.setFailed(
+                `Live PR #${trusted.prNumber} is closed, cross-repository, or no longer at trusted head ${trusted.headSha}.`
+              );
+              return;
+            }
+
+            core.setOutput("pr_number", String(trusted.prNumber));
+            core.setOutput("head_sha", trusted.headSha);
+            core.setOutput("eligible", "true");
+
       # The reviewer's own posting identity (Issue #272). Reuses the same
       # Infisical identity and /review/ secret path verify-llm-review already
       # pulls REVIEW_GITHUB_APP_ID/REVIEW_GITHUB_APP_PRIVATE_KEY from -- that
@@ -150,7 +265,7 @@ jobs:
       # REVIEW_APP_TOKEN_MINTED below for how the fallback is made visible
       # rather than silent.
       - name: Dialogue · Pull the reviewer App's credentials from Infisical
-        if: steps.fetch.outcome == 'success'
+        if: steps.fetch.outcome == 'success' && steps.binding.outputs.eligible == 'true'
         id: review-app-secrets
         continue-on-error: true
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
@@ -163,7 +278,7 @@ jobs:
           domain: https://app.infisical.com
 
       - name: Dialogue · Mint the reviewer App's installation token
-        if: steps.fetch.outcome == 'success' && steps.review-app-secrets.outcome == 'success'
+        if: steps.fetch.outcome == 'success' && steps.binding.outputs.eligible == 'true' && steps.review-app-secrets.outcome == 'success'
         id: review-app-token
         continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -182,7 +297,7 @@ jobs:
       # workflow only decides whether to dispatch a fixer, it must never fail
       # the whole posting job over that decision.
       - name: Dialogue · Check whether the dev agent's Anthropic credential is provisioned in Infisical
-        if: steps.fetch.outcome == 'success'
+        if: steps.fetch.outcome == 'success' && steps.binding.outputs.eligible == 'true'
         id: dev-agent-secrets
         continue-on-error: true
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
@@ -195,7 +310,7 @@ jobs:
           domain: https://app.infisical.com
 
       - name: Dialogue · Post findings, count the round, escalate if unresolved
-        if: steps.fetch.outcome == 'success'
+        if: steps.fetch.outcome == 'success' && steps.binding.outputs.eligible == 'true'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           # Everything the script reads arrives through env, never through
@@ -205,7 +320,7 @@ jobs:
           ARTIFACT_DIR: ${{ runner.temp }}/llm-review
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
-          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_HEAD_SHA: ${{ steps.binding.outputs.head_sha }}
           ESCALATE_AFTER: ${{ vars.LLM_REVIEW_ESCALATE_AFTER }}
           # Independent of ESCALATE_AFTER above: this counts consecutive
           # posting-identity fallbacks (App credential failed to mint), not
