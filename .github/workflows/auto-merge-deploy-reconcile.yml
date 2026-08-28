@@ -94,6 +94,7 @@ jobs:
                 /^apps\/toolbelt\/(?:.*\/)?supabase\/migrations\//.test(filename) ||
                 startsWith(filename, "packages/") ||
                 startsWith(filename, "docs/ops/edge-origin/") ||
+                filename === "docs/ops/verify-private-origin.sh" ||
                 filename === "docs/ops/tailscale-serve-apply.sh" ||
                 filename === "docs/ops/prune-dist-dirs.sh" ||
                 filename === "docs/ops/prune-docker-images.sh" ||
@@ -203,12 +204,15 @@ jobs:
 
                 if (
                   startsWith(filename, "docs/ops/edge-origin/") ||
+                  filename === "docs/ops/verify-private-origin.sh" ||
+                  filename === "docs/ops/tailscale-serve-apply.sh" ||
                   filename === ".github/workflows/ops-edge.yml"
                 ) {
                   edge = true;
                   mapped = true;
                 }
                 if (
+                  filename === "docs/ops/verify-private-origin.sh" ||
                   filename === "docs/ops/tailscale-serve-apply.sh" ||
                   filename === ".github/workflows/ops-serve-apply.yml"
                 ) {
@@ -258,9 +262,12 @@ jobs:
                 });
               }
               if (edge) {
-                targets.push({ workflow_id: "ops-edge.yml", inputs: {} });
+                targets.push({
+                  workflow_id: "ops-edge.yml",
+                  inputs: serve ? { apply_serve_after_origin: true } : {},
+                });
               }
-              if (serve) {
+              if (serve && !edge) {
                 targets.push({
                   workflow_id: "ops-serve-apply.yml",
                   inputs: {},

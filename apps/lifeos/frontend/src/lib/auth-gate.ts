@@ -45,10 +45,10 @@ export function computeGateDecision(status: SessionStatus, pathname: string, sea
       // this app renders under, and a `return=` value missing that prefix
       // would send a completed Shell login back to a path that does not
       // exist inside the Shell's own route table. Carried through so a
-      // signed-in return trip can eventually land back on it -- see
-      // App.tsx's own comment on why the Shell's `?return=` handling does
-      // not (yet) complete that round trip for a cross-zone target
-      // automatically.
+      // signed-in return trip can land back on it. The Shell validates the
+      // attacker-controlled value with `sanitizeReturnPath`, then uses the
+      // shared zone policy and `window.location.replace` to load the LifeOS
+      // document while preserving replace-history semantics.
       const returnTo = `${pathname}${search}`;
       return {
         kind: "redirect-to-shell-login",

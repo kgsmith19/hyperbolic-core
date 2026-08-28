@@ -2,7 +2,7 @@
 title: Platform Operations Runbook
 status: active
 owner: Kyle
-updated: 2026-08-27
+updated: 2026-08-28
 ---
 
 # Platform Operations Runbook
@@ -319,19 +319,226 @@ The VPS exposes one tailnet-only HTTPS origin. Tailscale terminates TLS and prox
 | --- | --- | --- |
 | `/` | `http://127.0.0.1:8080` | active root proxy; nginx routes Shell, LifeOS, and APIs |
 
-The command shape follows the current [Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve). Migration order is load-bearing. Leave `PRIVATE_ORIGIN_GATEWAY_ENABLED` unset while this workflow change merges, so the merge's `push` event cannot touch the VPS. After the code is on `main`, set that variable to literal `true`, dispatch **`Ops Origin`** (`.github/workflows/ops-edge.yml`), and confirm `curl -fsS http://127.0.0.1:8080/healthz` returns `{"status":"ok"}` on the VPS. Only then dispatch **`Ops Serve Apply`**. It ships the checked-in script over keyless Tailscale SSH, runs `--apply`, and republishes status before and after. Both jobs require `DEPLOY_ENABLED`; the origin job additionally requires its migration gate. `CLOUDFLARE_EDGE_ENABLED` controls only the optional tunnel, never the private nginx origin.
+The command shape follows the current [Tailscale Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve). Migration order is load-bearing. Leave `PRIVATE_ORIGIN_GATEWAY_ENABLED` unset while this workflow change merges, so the merge's `push` event cannot touch the VPS. After the code is on `main`, set that variable to literal `true` and dispatch **`Ops Origin`** (`.github/workflows/ops-edge.yml`) with `apply_serve_after_origin` enabled for the controlled first migration. That workflow uploads into a per-run staging directory, refuses stale rollback-promotion recovery paths, copies the active files into a new rollback snapshot, records every existing service container's immutable image ID, configured image reference, and exact `running` or `stopped` state (or records `absent`), validates and retains those old images locally, and promotes the complete snapshot before any Docker pull. It then pulls the candidate, runs real `nginx -t` against the staged files, force-recreates nginx so its bind mounts resolve the newly selected files, and probes private Shell, Life, and API routes plus the public listener's expected 404. It reads and validates the node's Serve JSON without mutating it. Automatic origin rollback covers failures through the local loopback and private/public route probes and this read-only Serve classification. It restores the prior files, prior image references, and exact per-service runtime state. A successful `legacy` classification then calls **`Ops Serve Apply`** as an ordered reusable child; an existing `gateway` skips the reapply and follows the normal Origin smoke path. Manual and push-triggered Origin runs leave `apply_serve_after_origin` false by default. Direct Origin and Serve runs share the non-cancelling, full-queue `ops-origin-serve-production` concurrency group; the ordered child receives only its parent's run ID through `workflow_call` and uses a unique child group so the parent can keep holding the global lock through Serve convergence and smoke. Both mutation jobs require `DEPLOY_ENABLED`; the origin job additionally requires its migration gate. `CLOUDFLARE_EDGE_ENABLED` controls only the optional tunnel, never the private nginx origin.
 
-The script independently repeats the nginx 8080 health check before any mutation. It then resets the legacy five-mount Serve configuration and installs exactly one root proxy, so stale more-specific paths cannot bypass nginx.
+The Serve script independently repeats the exact nginx health check, then runs the same content-aware loopback verifier as Ops Origin before any Serve status read or mutation. `/login` and `/settings` must be Shell bundle documents, `/life/capture` must be a LifeOS bundle document, and `/api/healthz`, `/api/brain/health`, and `/life/api/healthz` must each return HTTP 200 with an `application/json` object whose top-level `status` is `ok`. It captures and validates `tailscale serve status --json`, then installs (or reconfirms) the nginx `/` proxy **before** removing only the known legacy handlers present in that captured JSON. It never runs `tailscale serve reset`, so a root-install failure leaves all legacy mounts untouched and a later removal failure leaves the working nginx root plus every not-yet-removed legacy mount reachable. It prints the before/after JSON as operator evidence and fails closed unless the complete node state is one HTTPS 443 listener and one Web handler at `/` whose only field is `Proxy: http://127.0.0.1:8080`, with no other handlers, Services, Funnel grants, or foreground sessions.
 
 ```bash
 # Inspect the exact commands. This is the default and performs no writes.
 docs/ops/tailscale-serve-apply.sh --dry-run
 
-# Replace the legacy route table after the 8080 preflight passes.
+# Read and validate current Serve JSON without running origin probes or writes.
+# Prints exactly `legacy` or `gateway` on success.
+docs/ops/tailscale-serve-apply.sh --classify-status
+
+# Converge the legacy route table after all private route preflights pass.
 docs/ops/tailscale-serve-apply.sh --apply
 ```
 
-Reapplying is idempotent: the script resets this node's Serve configuration and recreates the same one-root proxy. It prints final status. Do not add unrelated Serve configuration to this node; the script intentionally treats the private origin as the complete desired state.
+The current Tailscale [`get-config`/`set-config` interface](https://tailscale.com/docs/reference/tailscale-cli/serve#get-service-configuration) is scoped to **Services** configuration; the pinned [v1.102.3 client implementation](https://github.com/tailscale/tailscale/blob/v1.102.3/cmd/tailscale/cli/serve_v2.go) treats `set-config` as services-only and cannot restore legacy node-level `TCP`/`Web` fields. The same official CLI reference warns that human `status` and `status --json` have different representations, so automation uses only JSON. Therefore the legacy five-mount node configuration cannot be promised an exact automatic round trip with those commands. The **first migration** is instead ordered for continuous reachability: add the root, then remove known overrides. If it stops partway, inspect the printed JSON and rerun after fixing the reported error; do not remove the root. A **steady-state reapply** reconfirms the same root and skips already-absent legacy mounts based on the initial JSON, without matching localized CLI errors. The dry run remains deterministic, and the desired result remains one root proxy. Do not add unrelated Serve configuration to this node; the script intentionally treats the private origin as the complete desired state.
+
+The first-migration release order is **Ops Origin local loopback proof → Ops Serve Apply convergence → Platform Smoke through the tailnet**. After its content-aware local probes and public 404 check, `Ops Origin` runs `--classify-status` while rollback is still armed. A known `legacy` state (including null, empty, full legacy, or a valid partial migration) completes the origin deployment but skips the Origin smoke job: before the first cutover, the tailnet still traverses legacy Serve handlers, where browser-history Shell routes such as `/login` and `/settings` return 404 and cannot prove the nginx candidate. When `apply_serve_after_origin` is true, that successful legacy result invokes the reusable Serve workflow next, and its own Platform Smoke runs only after the final one-root state is verified. An unknown, malformed, or unreadable Serve state fails classification and automatically rolls the origin back. `Ops Serve Apply` remains the authoritative first-cutover step whether invoked by that composition or dispatched directly.
+
+On later origin pushes, an exact `gateway` classification means the one-root cutover already exists, so `Ops Origin` schedules the same reusable Platform Smoke after the local transaction commits. This preserves full tailnet verification for steady-state origin changes without a permanent repository marker. Platform Smoke is release-blocking but runs after the SSH rollback transaction has committed; it also covers unrelated tailnet, application, and optional broker dependencies. It therefore cannot safely trigger a cross-job origin rollback. A smoke failure requires diagnosis and operator-directed rollback using the immediately preceding `.rollback` evidence below.
+
+### Recover an interrupted rollback-snapshot promotion
+
+Before reading Docker state or pulling an image, `Ops Origin` scans for every
+`.rollback.staged-*` and `.rollback.previous-*` entry, including files,
+directories, and broken symlinks. If any exists, stop, inspect, and recover the
+interrupted promotion before rerunning `Ops Origin`. The workflow never
+automatically deletes ambiguous rollback evidence from another invocation.
+It also removes a same-ID staging directory on failure only when that directory
+was created by the current invocation.
+
+Use these read-only commands first; do not use a wildcard delete:
+
+```bash
+ssh deploy@<host>
+cd ~/edge-origin
+find . -maxdepth 1 \( -name '.rollback.staged-*' -o -name '.rollback.previous-*' \) -print | LC_ALL=C sort
+find . -maxdepth 2 \( -path './.rollback/runtime-state' -o -path './.rollback.staged-*/runtime-state' -o -path './.rollback.previous-*/runtime-state' \) -type f -exec sh -c 'printf -- "--- %s\n" "$1"; sed -n "/^deployment_id=/p" "$1"' _ {} \;
+```
+
+The suffix on `.rollback.staged-<deployment-id>` or
+`.rollback.previous-<deployment-id>` identifies the interrupted workflow run.
+A complete staged snapshot's `runtime-state` must contain the same
+`deployment_id`; `.rollback/runtime-state` and a previous snapshot's
+`runtime-state` identify the deployments whose committed evidence they hold.
+Inspect those IDs plus every file marker before moving anything. During normal
+promotion, the old `.rollback` is first renamed to
+`.rollback.previous-<deployment-id>`, and only then is the complete
+`.rollback.staged-<deployment-id>` renamed to `.rollback`. Recovery reverses
+those two renames so a validated prior snapshot is again at `.rollback`, while
+preserving the complete new snapshot separately. If the paths do not map
+unambiguously to that state machine, leave every byte in place and escalate;
+do not rerun the workflow. A rollback artifact can contain the live secret-bearing
+`.env`; do not use a default-readable tar archive or copy. After a verified manual
+recovery, archive one inspected staged/previous path at a time outside
+`~/edge-origin` rather than deleting it. Use its exact path from the read-only
+`find` output above—never a wildcard, and never automatic state selection:
+
+```bash
+set -euo pipefail
+cd /home/deploy/edge-origin
+umask 077
+archive_dir='/home/deploy/edge-origin-rollback-archive'
+artifact='.rollback.staged-123456789-1' # Replace with one exact inspected path.
+[[ "$artifact" =~ ^\.rollback\.(staged|previous)-[0-9]+-[0-9]+$ ]]
+destination="$archive_dir/$artifact"
+
+if [[ -L "$archive_dir" || ( -e "$archive_dir" && ! -d "$archive_dir" ) ]]; then
+  echo "archive path is not a real directory: $archive_dir" >&2
+  exit 1
+fi
+install -d -m 0700 -- "$archive_dir"
+[[ -d "$archive_dir" && ! -L "$archive_dir" ]]
+if [[ "$(stat -c '%a' -- "$archive_dir")" != 700 ]]; then
+  chmod 0700 -- "$archive_dir"
+fi
+test "$(stat -c '%a' -- "$archive_dir")" = 700
+[[ -e "$artifact" || -L "$artifact" ]]
+[[ ! -e "$destination" && ! -L "$destination" ]]
+mv -T -- "$artifact" "$destination"
+
+if [[ -d "$destination" && ! -L "$destination" ]]; then
+  if [[ -e "$destination/.env" || -L "$destination/.env" ]]; then
+    [[ -f "$destination/.env" && ! -L "$destination/.env" ]] || {
+      echo "archived .env is not a regular file: $destination/.env" >&2
+      exit 1
+    }
+    if [[ "$(stat -c '%a' -- "$destination/.env")" != 600 ]]; then
+      chmod 0600 -- "$destination/.env"
+    fi
+    test "$(stat -c '%a' -- "$destination/.env")" = 600
+  fi
+fi
+[[ -f .rollback/runtime-state && ! -L .rollback/runtime-state && -r .rollback/runtime-state && -s .rollback/runtime-state ]]
+```
+
+The exact `mv -T --` keeps the operation bounded to the inspected artifact.
+The mode-0700 archive directory is verified before `mv`, so the moved artifact
+is not traversable by other users. The explicit post-move checks enforce the
+required archive and `.env` modes. Before `mv`, a failure leaves the source untouched.
+After `mv`, a validation or permission failure leaves the artifact at the
+destination; do not move it again—stop and escalate. The final check requires a
+regular, non-symlink, readable, non-empty `.rollback/runtime-state` before a
+rerun.
+
+### Roll back the origin after a post-commit smoke failure
+
+The origin transaction disarms its automatic rollback only after nginx starts and all bounded local probes pass. If the subsequent reusable smoke job fails, do not assume nginx caused it: inspect the failed probe first. If the candidate origin is responsible, use the prior files and exact image metadata preserved in `~/edge-origin/.rollback`. The evidence set is `.rollback/runtime-state`, `.rollback/edge-origin.image-id`, `.rollback/edge-origin.image-ref`, `.rollback/cloudflared.image-id`, and `.rollback/cloudflared.image-ref` (a service's image files exist when its prior state was `running` or `stopped`, and are absent when the service was absent). Run this before another `Ops Origin` dispatch overwrites the evidence:
+
+```bash
+ssh deploy@<host>
+set -euo pipefail
+cd ~/edge-origin
+rollback=.rollback
+test -s "$rollback/runtime-state"
+
+state() { sed -n "s/^$1=//p" "$rollback/runtime-state"; }
+compose_was_present="$(state compose_was_present)"
+edge_previous_state="$(state edge_previous_state)"
+cloudflared_previous_state="$(state cloudflared_previous_state)"
+case "$compose_was_present" in
+  true|false) ;;
+  *) echo "invalid compose_was_present rollback state" >&2; exit 1 ;;
+esac
+case "$edge_previous_state" in
+  running|stopped|absent) ;;
+  *) echo "invalid edge-origin rollback state" >&2; exit 1 ;;
+esac
+case "$cloudflared_previous_state" in
+  running|stopped|absent) ;;
+  *) echo "invalid cloudflared rollback state" >&2; exit 1 ;;
+esac
+if [[ "$compose_was_present" == "false" &&
+      ( "$edge_previous_state" != "absent" || "$cloudflared_previous_state" != "absent" ) ]]; then
+  echo "invalid rollback state: containers cannot predate an absent compose file" >&2
+  exit 1
+fi
+
+restore_file() {
+  local file="$1"
+  if [[ -e "$rollback/$file" ]]; then
+    cp -a "$rollback/$file" "$file"
+  elif [[ -e "$rollback/$file.absent" ]]; then
+    rm -f "$file"
+  else
+    echo "missing rollback metadata for $file" >&2
+    return 1
+  fi
+}
+restore_image() {
+  local service="$1" image_id image_ref resolved_id
+  IFS= read -r image_id < "$rollback/$service.image-id"
+  IFS= read -r image_ref < "$rollback/$service.image-ref"
+  docker image inspect "$image_id" >/dev/null
+  case "$image_ref" in
+    *@sha256:*|sha256:*)
+      resolved_id="$(docker image inspect --format '{{.Id}}' "$image_ref")"
+      test "$resolved_id" = "$image_id"
+      ;;
+    *) docker image tag "$image_id" "$image_ref" ;;
+  esac
+}
+
+if [[ "$compose_was_present" == "true" ]]; then
+  # Remove candidate-only containers while the candidate compose file is active.
+  if [[ "$edge_previous_state" == "absent" ]]; then
+    docker compose rm --stop --force edge-origin
+  fi
+  if [[ "$cloudflared_previous_state" == "absent" ]]; then
+    docker compose --profile cloudflare rm --stop --force cloudflared
+  fi
+else
+  docker compose --profile cloudflare down
+fi
+for file in compose.yml nginx.conf private_spa_locations.conf public_paths.conf .env; do
+  restore_file "$file"
+done
+if [[ "$compose_was_present" == "true" ]]; then
+  if [[ "$edge_previous_state" != "absent" ]]; then
+    restore_image edge-origin
+  fi
+  if [[ "$cloudflared_previous_state" != "absent" ]]; then
+    restore_image cloudflared
+  fi
+  case "$edge_previous_state" in
+    running) docker compose up -d --wait edge-origin --force-recreate --pull never ;;
+    stopped) docker compose up --no-start --no-deps --force-recreate --pull never edge-origin ;;
+    absent) : ;;
+  esac
+  case "$cloudflared_previous_state" in
+    running) docker compose --profile cloudflare up -d --wait --no-deps --force-recreate --pull never cloudflared ;;
+    stopped) docker compose --profile cloudflare up --no-start --no-deps --force-recreate --pull never cloudflared ;;
+    absent) : ;;
+  esac
+fi
+# Verify the restored edge-origin runtime matches its recorded state.
+case "$edge_previous_state" in
+  running)
+    curl -fsS --max-time 10 http://127.0.0.1:8080/healthz
+    ;;
+  stopped|absent)
+    running_edge_ids="$(
+      docker ps \
+        --filter label=com.docker.compose.project=edge-origin \
+        --filter label=com.docker.compose.service=edge-origin \
+        --format '{{.ID}}'
+    )" || {
+      echo "error: could not verify restored edge-origin runtime state" >&2
+      exit 1
+    }
+    if [[ -n "$running_edge_ids" ]]; then
+      echo "error: edge-origin is running after restoring prior state $edge_previous_state" >&2
+      exit 1
+    fi
+    ;;
+esac
+```
+
+Re-run Platform Smoke after the manual restoration. A Serve-cutover smoke failure has a different rollback boundary: use the first-migration handler restoration below if the one-root state itself must be reverted.
 
 ### Verify
 
@@ -346,7 +553,7 @@ curl -fsS -o /dev/null https://<origin>/life/api/healthz
 On the VPS:
 
 ```bash
-tailscale serve status
+tailscale serve status --json
 ss -tlnp
 ```
 
@@ -354,16 +561,15 @@ The Shell is static. LifeOS and future services must listen only on loopback; in
 
 ### Roll back to the prior five mounts
 
-Rollback does not require an application deploy. From the VPS, reset the one-root configuration and restore the exact pre-migration mounts:
+This is an intentional operator rollback **after a successful first migration**, not the response to a partial apply: a partial apply retains a working nginx root and should normally be fixed and rerun. Rolling a successful migration back does not require an application deploy. From the VPS, restore the four more-specific mounts first, then replace the root last; this recreates the known pre-migration five-mount table without a zero-route reset window:
 
 ```bash
-sudo tailscale serve reset
-sudo tailscale serve --bg --yes --https=443 --set-path=/ /home/deploy/shell/current
 sudo tailscale serve --bg --yes --https=443 --set-path=/life/ /home/deploy/lifeos-ui/current
 sudo tailscale serve --bg --yes --https=443 --set-path=/life/api/ http://127.0.0.1:8000
 sudo tailscale serve --bg --yes --https=443 --set-path=/api/ http://127.0.0.1:8200
 sudo tailscale serve --bg --yes --https=443 --set-path=/api/brain/ http://127.0.0.1:8100
-tailscale serve status
+sudo tailscale serve --bg --yes --https=443 --set-path=/ /home/deploy/shell/current
+tailscale serve status --json
 ```
 
 After diagnosing nginx, rerun `--apply` to return to the one-root desired state.
@@ -823,12 +1029,21 @@ containers), turn `access_log` back on at that point -- an explicit owner call, 
 The nginx origin requires both `DEPLOY_ENABLED` and the default-dark
 `PRIVATE_ORIGIN_GATEWAY_ENABLED` migration gate, and is required even when Cloudflare is off. The
 cloudflared profile and its token remain independently dark behind `CLOUDFLARE_EDGE_ENABLED`.
-The workflow ships `compose.yml`, `nginx.conf`, `private_spa_locations.conf`, and
-`public_paths.conf` over keyless Tailscale SSH, starts nginx, and proves both loopback health
-endpoints. When the Cloudflare gate is true it additionally renders the token-only `.env` and
+The workflow ships `compose.yml`, `nginx.conf`, `private_spa_locations.conf`, `public_paths.conf`,
+the content verifier, and the read-only Serve classifier over keyless Tailscale SSH into a per-run staging directory. It pulls the
+candidate image and runs `nginx -t` against those staged files before backing up or replacing an
+active file. Activation uses `--force-recreate` (an ordinary `compose up` can leave an unchanged
+container bound to the prior config inode), then proves private Shell, Life, and API routes, both
+loopback health endpoints, and a 404 from the public root. It then classifies the validated Serve JSON while rollback remains armed. Any activation, verification, or classification failure
+restores the prior files, image references, and exact service runtime states. A successful activation with an
+exact `gateway` state calls the existing reusable `platform-smoke.yml` rather than duplicating its
+tailnet probe table; a known `legacy` first-migration state succeeds without that pre-cutover smoke. When
+the Cloudflare gate is true the workflow additionally stages the token-only `.env` at mode 600 and
 starts the `cloudflare` profile. Triggers on
-`workflow_dispatch` or a push to `main` touching `docs/ops/edge-origin/**` (or the workflow file
-itself, `.github/workflows/ops-edge.yml`).
+`workflow_dispatch` or a push to `main` touching `docs/ops/edge-origin/**`, either shared verifier
+script, or the workflow file itself (`.github/workflows/ops-edge.yml`). The manual
+`apply_serve_after_origin` input defaults to false; the trusted auto-merge reconciler sets it only
+when one merged change selects both Origin and Serve deployment ownership.
 
 `cloudflared` runs with host networking so it can reach the 8081 loopback
 origin. Cloudflare's metrics documentation states that containerized

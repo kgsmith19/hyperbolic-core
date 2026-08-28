@@ -6,9 +6,11 @@ name: "Ops Serve Apply"
 # The route map itself stays in docs/ops/tailscale-serve-apply.sh -- tested,
 # idempotent, preflighted -- and this workflow is only its transport: ship the
 # exact checked-in script over keyless Tailscale SSH and run it with --apply.
-# The script proves the private nginx origin on 127.0.0.1:8080 is healthy
-# before resetting the obsolete five-mount table and installing one root
-# proxy. A failed preflight performs no Serve mutation.
+# The script proves representative Shell, Life, and API routes through the
+# private nginx origin, installs the nginx root proxy first, and only then
+# removes the four known legacy mounts individually. A failed preflight makes
+# no Serve change; a later failure leaves the root proxy and any not-yet-
+# removed legacy mounts reachable for a safe retry.
 #
 # Credentials: the shell-deploy Infisical identity (/platform/shell-deploy/)
 # supplies the tailnet OAuth client -- the serve table fronts the Shell
@@ -16,14 +18,21 @@ name: "Ops Serve Apply"
 # No new identity, no GitHub secrets, no SSH key material.
 
 on:
+  workflow_call:
+    inputs:
+      origin_parent_run_id:
+        description: Ops Origin run ID used to isolate the nested child from the parent lock
+        required: true
+        type: string
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ops-serve-apply-production
+  group: ${{ inputs.origin_parent_run_id != '' && format('ops-origin-serve-child-{0}', inputs.origin_parent_run_id) || 'ops-origin-serve-production' }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   apply:
@@ -71,18 +80,24 @@ jobs:
             exit 1
           fi
           status=0
-          scp "${ssh_options[@]}" docs/ops/tailscale-serve-apply.sh "deploy@$DEPLOY_HOST:tailscale-serve-apply.sh"
+          scp "${ssh_options[@]}" docs/ops/tailscale-serve-apply.sh docs/ops/verify-private-origin.sh "deploy@$DEPLOY_HOST:"
           out=$(ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
-          chmod 0755 tailscale-serve-apply.sh
-          echo "=== serve status BEFORE ==="
-          tailscale serve status
-          echo "=== apply ==="
+          chmod 0755 tailscale-serve-apply.sh verify-private-origin.sh
+          echo "=== apply (script emits serve status BEFORE only after loopback verification) ==="
           ./tailscale-serve-apply.sh --apply
-          echo "=== serve status AFTER ==="
-          tailscale serve status
+          echo "=== apply complete (script emitted serve status AFTER) ==="
           REMOTE
           ) || status=$?
           printf '%s\n' "$out"
           { echo '### ops-serve-apply'; echo '```'; printf '%s\n' "$out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
+
+  smoke:
+    name: Verify one-root cutover through the tailnet
+    needs: apply
+    if: needs.apply.result == 'success'
+    uses: ./.github/workflows/platform-smoke.yml
+    permissions:
+      contents: read
+      id-token: write

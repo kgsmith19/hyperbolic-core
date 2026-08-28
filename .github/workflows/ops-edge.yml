@@ -9,12 +9,21 @@ on:
     branches: [main]
     paths:
       - "docs/ops/edge-origin/**"
+      - "docs/ops/verify-private-origin.sh"
+      - "docs/ops/tailscale-serve-apply.sh"
       - ".github/workflows/ops-edge.yml"
   workflow_dispatch:
+    inputs:
+      apply_serve_after_origin:
+        description: Apply the one-root Serve route after a successful legacy origin activation
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
-  group: deploy-edge-production
+  group: ops-origin-serve-production
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
@@ -29,6 +38,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      serve_state: ${{ steps.activate.outputs.serve_state }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,6 +75,7 @@ jobs:
           ping: ${{ vars.DEPLOY_HOST }}
 
       - name: Deploy · Start nginx, then optionally cloudflared
+        id: activate
         shell: bash
         env:
           CLOUDFLARE_EDGE_ENABLED: ${{ vars.CLOUDFLARE_EDGE_ENABLED }}
@@ -75,6 +87,12 @@ jobs:
             echo "DEPLOY_HOST must be a non-empty DNS name or IPv4 address." >&2
             exit 1
           fi
+          deployment_id="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if [[ ! "$deployment_id" =~ ^[0-9]+-[0-9]+$ ]]; then
+            echo "deployment id must contain only the numeric run id and attempt." >&2
+            exit 1
+          fi
+          local_secret_file="$RUNNER_TEMP/.env.edge"
           cloudflare_enabled=false
           if [[ "${CLOUDFLARE_EDGE_ENABLED:-}" == "true" ]]; then
             cloudflare_enabled=true
@@ -82,79 +100,639 @@ jobs:
               echo "::error::CLOUDFLARE_EDGE_ENABLED is true but CLOUDFLARE_TUNNEL_TOKEN was not supplied by Infisical (/platform/edge/)." >&2
               exit 1
             fi
-            umask 077
-            printf 'CLOUDFLARE_TUNNEL_TOKEN=%s\n' "$CLOUDFLARE_TUNNEL_TOKEN" > "$RUNNER_TEMP/.env.edge"
           fi
 
-          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" 'mkdir -p edge-origin'
-          scp "${ssh_options[@]}" docs/ops/edge-origin/compose.yml docs/ops/edge-origin/nginx.conf \
-            docs/ops/edge-origin/private_spa_locations.conf docs/ops/edge-origin/public_paths.conf \
-            "deploy@$DEPLOY_HOST:edge-origin/"
+          remote_stage_created=false
+          cleanup_remote_stage() {
+            local original_status="$?"
+            trap - EXIT INT TERM HUP
+            set +e
+            rm -f -- "$local_secret_file"
+            if [[ "$remote_stage_created" == "true" ]]; then
+              if ! ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
+                "find 'edge-origin/.staged-$deployment_id' -mindepth 1 -maxdepth 1 -type f -delete && rmdir 'edge-origin/.staged-$deployment_id'"; then
+                echo "::warning::failed to remove remote stage edge-origin/.staged-$deployment_id" >&2
+              fi
+            fi
+            exit "$original_status"
+          }
+          trap cleanup_remote_stage EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          trap 'exit 129' HUP
+
           if [[ "$cloudflare_enabled" == "true" ]]; then
-            ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
-              'touch edge-origin/.env && chmod 600 edge-origin/.env'
-            scp "${ssh_options[@]}" "$RUNNER_TEMP/.env.edge" "deploy@$DEPLOY_HOST:edge-origin/.env"
+            umask 077
+            printf 'CLOUDFLARE_TUNNEL_TOKEN=%s\n' "$CLOUDFLARE_TUNNEL_TOKEN" > "$local_secret_file"
           fi
 
-          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "bash -s -- '$cloudflare_enabled'" <<'REMOTE'
+          ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "mkdir -p 'edge-origin/.staged-$deployment_id'"
+          remote_stage_created=true
+          scp "${ssh_options[@]}" docs/ops/edge-origin/compose.yml docs/ops/edge-origin/nginx.conf docs/ops/edge-origin/private_spa_locations.conf docs/ops/edge-origin/public_paths.conf docs/ops/verify-private-origin.sh docs/ops/tailscale-serve-apply.sh "deploy@$DEPLOY_HOST:edge-origin/.staged-$deployment_id/"
+          if [[ "$cloudflare_enabled" == "true" ]]; then
+            ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "install -m 600 /dev/null edge-origin/.staged-$deployment_id/.env"
+            scp "${ssh_options[@]}" "$local_secret_file" "deploy@$DEPLOY_HOST:edge-origin/.staged-$deployment_id/.env"
+            rm -f -- "$local_secret_file"
+          fi
+
+          if ! remote_output="$(ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "bash -s -- '$cloudflare_enabled' '$deployment_id'" <<'REMOTE'
           set -euo pipefail
+          cloudflare_enabled="$1"
+          deployment_id="$2"
+          if [[ ! "$deployment_id" =~ ^[0-9]+-[0-9]+$ ]]; then
+            echo "error: invalid deployment id" >&2
+            exit 1
+          fi
           cd edge-origin
-          if [[ "$1" == "true" ]]; then
+          stage_dir=".staged-$deployment_id"
+          backup_dir=".rollback"
+          snapshot_stage_dir=".rollback.staged-$deployment_id"
+          snapshot_previous_dir=".rollback.previous-$deployment_id"
+          config_files=(compose.yml nginx.conf private_spa_locations.conf public_paths.conf)
+
+          compose_was_present=false
+          edge_previous_state=absent
+          cloudflared_previous_state=absent
+          edge_previous_container=""
+          cloudflared_previous_container=""
+          activation_started=false
+          pull_started=false
+          snapshot_promotion_started=false
+          snapshot_promoted=false
+          snapshot_stage_created_by_this_run=false
+
+          cleanup_stage() {
+            if [[ -d "$stage_dir" ]]; then
+              find "$stage_dir" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir "$stage_dir"
+            fi
+          }
+
+          cleanup_snapshot_directory() {
+            local directory="$1"
+            if [[ -d "$directory" ]]; then
+              find "$directory" -mindepth 1 -maxdepth 1 ! -type d -delete
+              rmdir "$directory"
+            elif [[ -e "$directory" ]]; then
+              echo "error: rollback snapshot path is not a directory: $directory" >&2
+              return 1
+            fi
+          }
+
+          record_existing_image() {
+            local service="$1"
+            local container_id="$2"
+            local image_id image_ref retained_ref retained_tag
+            if ! docker inspect --format '{{.Image}}' "$container_id" > "$snapshot_stage_dir/$service.image-id"; then
+              echo "error: could not inspect Docker image metadata for $service container $container_id" >&2
+              return 1
+            fi
+            if ! docker inspect --format '{{.Config.Image}}' "$container_id" > "$snapshot_stage_dir/$service.image-ref"; then
+              echo "error: could not inspect Docker image reference for $service container $container_id" >&2
+              return 1
+            fi
+            printf '%s\n' "$container_id" > "$snapshot_stage_dir/$service.container-id"
+            IFS= read -r image_id < "$snapshot_stage_dir/$service.image-id" || true
+            IFS= read -r image_ref < "$snapshot_stage_dir/$service.image-ref" || true
+            if [[ -z "$image_id" || -z "$image_ref" ]]; then
+              echo "error: Docker returned incomplete image metadata for $service" >&2
+              return 1
+            fi
+            if ! docker image inspect "$image_id" >/dev/null; then
+              echo "error: Docker image for $service is not locally available: $image_id" >&2
+              return 1
+            fi
+            case "$image_id" in
+              sha256:*) retained_tag="${image_id#sha256:}" ;;
+              *)
+                echo "error: Docker returned an unsupported image ID for $service: $image_id" >&2
+                return 1
+                ;;
+            esac
+            if [[ ! "$retained_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              echo "error: Docker returned an invalid image ID for $service: $image_id" >&2
+              return 1
+            fi
+            retained_ref="hyperbolic-rollback/$service:$retained_tag"
+            printf '%s\n' "$retained_ref" > "$snapshot_stage_dir/$service.retained-ref"
+          }
+
+          capture_service_state() {
+            local service="$1"
+            local state_variable="$2"
+            local container_variable="$3"
+            local container_output container_id docker_status previous_state
+            local -a container_ids=()
+            if ! container_output="$(docker ps --all --quiet \
+              --filter "label=com.docker.compose.project=edge-origin" \
+              --filter "label=com.docker.compose.service=$service")"; then
+              echo "error: could not discover existing $service containers" >&2
+              return 1
+            fi
+            while IFS= read -r container_id; do
+              if [[ -n "$container_id" ]]; then
+                container_ids+=("$container_id")
+              fi
+            done <<< "$container_output"
+            case "${#container_ids[@]}" in
+              0)
+                printf -v "$state_variable" '%s' absent
+                printf -v "$container_variable" '%s' ""
+                return 0
+                ;;
+              1) container_id="${container_ids[0]}" ;;
+              *)
+                echo "error: expected exactly one existing $service container; found ${#container_ids[@]}" >&2
+                return 1
+                ;;
+            esac
+            if ! docker_status="$(docker inspect --format '{{.State.Status}}' "$container_id")"; then
+              echo "error: could not inspect Docker state for $service container $container_id" >&2
+              return 1
+            fi
+            case "$docker_status" in
+              running) previous_state=running ;;
+              created|exited) previous_state=stopped ;;
+              *)
+                echo "error: unsupported Docker state for $service: $docker_status" >&2
+                return 1
+                ;;
+            esac
+            printf -v "$state_variable" '%s' "$previous_state"
+            printf -v "$container_variable" '%s' "$container_id"
+          }
+
+          validate_snapshot_marker() {
+            local relative_path="$1"
+            local present="$snapshot_stage_dir/$relative_path"
+            local absent="$snapshot_stage_dir/$relative_path.absent"
+            if [[ -e "$present" && ! -e "$absent" ]]; then
+              return 0
+            fi
+            if [[ ! -e "$present" && -f "$absent" ]]; then
+              return 0
+            fi
+            echo "error: rollback snapshot must contain exactly one marker for $relative_path" >&2
+            return 1
+          }
+
+          validate_service_snapshot() {
+            local service="$1"
+            local previous_state="$2"
+            local expected_container="$3"
+            local container_id image_id image_ref retained_ref suffix
+            case "$previous_state" in
+              absent)
+                for suffix in container-id image-id image-ref retained-ref; do
+                  if [[ -e "$snapshot_stage_dir/$service.$suffix" ]]; then
+                    echo "error: absent $service has rollback image metadata" >&2
+                    return 1
+                  fi
+                done
+                return 0
+                ;;
+              running|stopped) ;;
+              *)
+                echo "error: invalid rollback snapshot state for $service: $previous_state" >&2
+                return 1
+                ;;
+            esac
+            for suffix in container-id image-id image-ref retained-ref; do
+              if [[ ! -s "$snapshot_stage_dir/$service.$suffix" ]]; then
+                echo "error: rollback snapshot is missing $service.$suffix" >&2
+                return 1
+              fi
+            done
+            IFS= read -r container_id < "$snapshot_stage_dir/$service.container-id"
+            IFS= read -r image_id < "$snapshot_stage_dir/$service.image-id"
+            IFS= read -r image_ref < "$snapshot_stage_dir/$service.image-ref"
+            IFS= read -r retained_ref < "$snapshot_stage_dir/$service.retained-ref"
+            if [[ "$container_id" != "$expected_container" || -z "$image_id" || -z "$image_ref" ]]; then
+              echo "error: rollback snapshot has inconsistent image metadata for $service" >&2
+              return 1
+            fi
+            if [[ "$retained_ref" != "hyperbolic-rollback/$service:${image_id#sha256:}" ]]; then
+              echo "error: rollback snapshot has an inconsistent retained image reference for $service" >&2
+              return 1
+            fi
+          }
+
+          validate_snapshot() {
+            local actual_runtime_state expected_runtime_state config_file
+            for config_file in "${config_files[@]}"; do
+              validate_snapshot_marker "$config_file"
+            done
+            validate_snapshot_marker .env
+            expected_runtime_state="$(printf 'deployment_id=%s\ncompose_was_present=%s\nedge_previous_state=%s\ncloudflared_previous_state=%s' \
+              "$deployment_id" "$compose_was_present" "$edge_previous_state" "$cloudflared_previous_state")"
+            if [[ ! -f "$snapshot_stage_dir/runtime-state" ]]; then
+              echo "error: rollback snapshot is missing runtime-state" >&2
+              return 1
+            fi
+            actual_runtime_state="$(<"$snapshot_stage_dir/runtime-state")"
+            if [[ "$actual_runtime_state" != "$expected_runtime_state" ]]; then
+              echo "error: rollback snapshot runtime-state is incomplete" >&2
+              return 1
+            fi
+            validate_service_snapshot edge-origin "$edge_previous_state" "$edge_previous_container"
+            validate_service_snapshot cloudflared "$cloudflared_previous_state" "$cloudflared_previous_container"
+          }
+
+          retain_existing_image() {
+            local service="$1"
+            local image_id retained_ref resolved_id
+            IFS= read -r image_id < "$snapshot_stage_dir/$service.image-id"
+            IFS= read -r retained_ref < "$snapshot_stage_dir/$service.retained-ref"
+            docker image tag "$image_id" "$retained_ref"
+            if ! resolved_id="$(docker image inspect --format '{{.Id}}' "$retained_ref")"; then
+              echo "error: could not validate retained image reference for $service" >&2
+              return 1
+            fi
+            if [[ "$resolved_id" != "$image_id" ]]; then
+              echo "error: retained image reference for $service does not resolve to $image_id" >&2
+              return 1
+            fi
+          }
+
+          promote_snapshot() {
+            if [[ ! -d "$snapshot_stage_dir" ]]; then
+              echo "error: completed rollback snapshot is unavailable for promotion" >&2
+              return 1
+            fi
+            if [[ -e "$snapshot_previous_dir" ]]; then
+              echo "error: rollback snapshot recovery path already exists: $snapshot_previous_dir" >&2
+              return 1
+            fi
+            if [[ -e "$backup_dir" && ( ! -d "$backup_dir" || -L "$backup_dir" ) ]]; then
+              echo "error: committed rollback snapshot is not a directory: $backup_dir" >&2
+              return 1
+            fi
+            snapshot_promotion_started=true
+            if [[ -d "$backup_dir" ]]; then
+              mv -T -- "$backup_dir" "$snapshot_previous_dir"
+            fi
+            if ! mv -T -- "$snapshot_stage_dir" "$backup_dir"; then
+              echo "error: could not promote the completed rollback snapshot" >&2
+              return 1
+            fi
+            snapshot_promoted=true
+          }
+
+          recover_snapshot_promotion() {
+            if [[ -e "$snapshot_previous_dir" ]]; then
+              if [[ -e "$backup_dir" && ! -e "$snapshot_stage_dir" ]]; then
+                if ! mv -T -- "$backup_dir" "$snapshot_stage_dir"; then
+                  echo "error: could not preserve the newly promoted rollback snapshot during recovery" >&2
+                  return 1
+                fi
+              fi
+              if [[ ! -e "$backup_dir" ]]; then
+                if ! mv -T -- "$snapshot_previous_dir" "$backup_dir"; then
+                  echo "error: prior rollback evidence remains recoverable at $snapshot_previous_dir" >&2
+                  return 1
+                fi
+              fi
+            fi
+            if [[ -e "$snapshot_previous_dir" ]]; then
+              echo "error: rollback promotion recovery is incomplete at $snapshot_previous_dir" >&2
+              return 1
+            fi
+            if [[ ! -e "$backup_dir" ]]; then
+              echo "error: completed rollback evidence remains recoverable at $snapshot_stage_dir" >&2
+              return 1
+            fi
+            cleanup_snapshot_directory "$snapshot_stage_dir"
+          }
+
+          remove_absent_candidate() {
+            local service="$1"
+            (
+              cd "$stage_dir"
+              if [[ "$service" == "cloudflared" ]]; then
+                COMPOSE_PROJECT_NAME=edge-origin docker compose --profile cloudflare rm --stop --force cloudflared
+              else
+                COMPOSE_PROJECT_NAME=edge-origin docker compose rm --stop --force edge-origin
+              fi
+            )
+          }
+
+          restore_service_runtime() {
+            local service="$1"
+            local previous_state="$2"
+            local image_ready="$3"
+            case "$previous_state" in
+              running)
+                if [[ "$image_ready" != "true" ]]; then
+                  return 1
+                fi
+                if [[ "$service" == "cloudflared" ]]; then
+                  docker compose --profile cloudflare up -d --wait --no-deps --force-recreate --pull never cloudflared
+                else
+                  docker compose up -d --wait edge-origin --force-recreate --pull never
+                fi
+                ;;
+              stopped)
+                if [[ "$image_ready" != "true" ]]; then
+                  return 1
+                fi
+                if [[ "$service" == "cloudflared" ]]; then
+                  docker compose --profile cloudflare up --no-start --no-deps --force-recreate --pull never cloudflared
+                else
+                  docker compose up --no-start --no-deps --force-recreate --pull never edge-origin
+                fi
+                ;;
+              absent)
+                return 0
+                ;;
+              *)
+                echo "error: invalid rollback runtime state for $service: $previous_state" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          restore_image_reference() {
+            local service="$1"
+            local image_id image_ref resolved_id
+            if [[ ! -s "$backup_dir/$service.image-id" || ! -s "$backup_dir/$service.image-ref" ]]; then
+              echo "error: missing rollback image metadata for $service" >&2
+              return 1
+            fi
+            IFS= read -r image_id < "$backup_dir/$service.image-id"
+            IFS= read -r image_ref < "$backup_dir/$service.image-ref"
+            docker image inspect "$image_id" >/dev/null || {
+              echo "error: prior $service image is no longer present: $image_id" >&2
+              return 1
+            }
+            case "$image_ref" in
+              *@sha256:* | sha256:*)
+                resolved_id="$(docker image inspect --format '{{.Id}}' "$image_ref")" || return 1
+                if [[ "$resolved_id" != "$image_id" ]]; then
+                  echo "error: digest reference for $service no longer resolves to $image_id" >&2
+                  return 1
+                fi
+                ;;
+              *)
+                docker image tag "$image_id" "$image_ref"
+                ;;
+            esac
+            printf 'rollback image restored: service=%s image_id=%s image_ref=%s\n' \
+              "$service" "$image_id" "$image_ref" >&2
+          }
+
+          restore_previous() {
+            local original_status="$?"
+            local restore_failed=false
+            local snapshot_recovery_failed=false
+            local edge_image_ready=true
+            local cloudflared_image_ready=true
+            trap - EXIT INT TERM HUP
+            set +e
+            if [[ "$snapshot_promotion_started" == "true" && "$snapshot_promoted" != "true" ]]; then
+              recover_snapshot_promotion || {
+                snapshot_recovery_failed=true
+                restore_failed=true
+              }
+            fi
+            if [[ ( "$pull_started" == "true" || "$activation_started" == "true" ) && "$snapshot_promoted" != "true" ]]; then
+              echo "error: runtime mutation began without a promoted rollback snapshot" >&2
+              restore_failed=true
+            fi
+            if [[ "$activation_started" == "true" ]]; then
+              echo "error: origin activation failed; restoring the previous files, images, and runtime state" >&2
+            elif [[ "$pull_started" == "true" ]]; then
+              echo "error: origin preparation failed; restoring prior image references" >&2
+            fi
+
+            if [[ "$pull_started" == "true" && "$edge_previous_state" != "absent" ]]; then
+              restore_image_reference edge-origin || {
+                edge_image_ready=false
+                restore_failed=true
+              }
+            fi
+            if [[ "$pull_started" == "true" && "$cloudflared_previous_state" != "absent" ]]; then
+              restore_image_reference cloudflared || {
+                cloudflared_image_ready=false
+                restore_failed=true
+              }
+            fi
+
+            if [[ "$activation_started" != "true" ]]; then
+              cleanup_stage || restore_failed=true
+              if [[ "$snapshot_stage_created_by_this_run" == "true" && "$snapshot_promotion_started" != "true" ]]; then
+                cleanup_snapshot_directory "$snapshot_stage_dir" || restore_failed=true
+              elif [[ "$snapshot_promoted" == "true" ]]; then
+                cleanup_snapshot_directory "$snapshot_previous_dir" || restore_failed=true
+              elif [[ "$snapshot_recovery_failed" == "true" ]]; then
+                echo "error: rollback evidence remains at $backup_dir, $snapshot_stage_dir, or $snapshot_previous_dir" >&2
+              fi
+              if [[ "$restore_failed" == "true" ]]; then
+                echo "error: automatic origin preparation cleanup failed; inspect edge-origin rollback snapshot paths immediately" >&2
+                exit 1
+              fi
+              exit "$original_status"
+            fi
+
+            if [[ "$compose_was_present" == "true" ]]; then
+              if [[ "$edge_previous_state" == "absent" ]]; then
+                remove_absent_candidate edge-origin || restore_failed=true
+              fi
+              if [[ "$cloudflared_previous_state" == "absent" ]]; then
+                remove_absent_candidate cloudflared || restore_failed=true
+              fi
+            fi
+
+            for config_file in "${config_files[@]}"; do
+              if [[ -e "$backup_dir/$config_file" ]]; then
+                cp -a "$backup_dir/$config_file" "$config_file" || restore_failed=true
+              elif [[ -e "$backup_dir/$config_file.absent" ]]; then
+                rm -f "$config_file" || restore_failed=true
+              else
+                restore_failed=true
+              fi
+            done
+            if [[ -e "$backup_dir/.env" ]]; then
+              cp -a "$backup_dir/.env" .env || restore_failed=true
+            elif [[ -e "$backup_dir/.env.absent" ]]; then
+              rm -f .env || restore_failed=true
+            else
+              restore_failed=true
+            fi
+
+            if [[ "$compose_was_present" == "true" ]]; then
+              restore_service_runtime edge-origin "$edge_previous_state" "$edge_image_ready" || restore_failed=true
+              restore_service_runtime cloudflared "$cloudflared_previous_state" "$cloudflared_image_ready" || restore_failed=true
+            else
+              docker compose -p edge-origin -f "$stage_dir/compose.yml" --profile cloudflare down || restore_failed=true
+            fi
+            cleanup_stage || restore_failed=true
+            cleanup_snapshot_directory "$snapshot_previous_dir" || restore_failed=true
+            if [[ "$restore_failed" == "true" ]]; then
+              echo "error: automatic origin restoration failed; inspect edge-origin/.rollback immediately" >&2
+              exit 1
+            fi
+            echo "previous origin configuration restored" >&2
+            exit "$original_status"
+          }
+          trap restore_previous EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          trap 'exit 129' HUP
+
+          shopt -s nullglob
+          recovery_artifacts=(.rollback.staged-* .rollback.previous-*)
+          shopt -u nullglob
+          if (( ${#recovery_artifacts[@]} > 0 )); then
+            echo "error: stale rollback promotion recovery artifacts exist; stop and inspect/recover them before rerunning Ops Origin" >&2
+            printf 'error: recovery artifact: %q\n' "${recovery_artifacts[@]}" >&2
+            false
+          fi
+          mkdir "$snapshot_stage_dir"
+          snapshot_stage_created_by_this_run=true
+          if [[ -f compose.yml ]]; then
+            compose_was_present=true
+          fi
+          for config_file in "${config_files[@]}"; do
+            if [[ -e "$config_file" ]]; then
+              cp -a "$config_file" "$snapshot_stage_dir/$config_file"
+            else
+              : > "$snapshot_stage_dir/$config_file.absent"
+            fi
+          done
+          if [[ -e .env ]]; then
+            cp -a .env "$snapshot_stage_dir/.env"
+          else
+            : > "$snapshot_stage_dir/.env.absent"
+          fi
+          if ! project_container_output="$(docker ps --all --quiet \
+            --filter "label=com.docker.compose.project=edge-origin")"; then
+            echo "error: could not discover existing edge-origin project containers" >&2
+            false
+          fi
+          if [[ "$compose_was_present" != "true" && -n "$project_container_output" ]]; then
+            echo "error: compose.yml is absent while an edge-origin project container exists" >&2
+            false
+          fi
+          if [[ "$compose_was_present" == "true" ]]; then
+            capture_service_state edge-origin edge_previous_state edge_previous_container
+            capture_service_state cloudflared cloudflared_previous_state cloudflared_previous_container
+            if [[ "$edge_previous_state" != "absent" ]]; then
+              record_existing_image edge-origin "$edge_previous_container"
+            fi
+            if [[ "$cloudflared_previous_state" != "absent" ]]; then
+              record_existing_image cloudflared "$cloudflared_previous_container"
+            fi
+          fi
+          {
+            printf 'deployment_id=%s\n' "$deployment_id"
+            printf 'compose_was_present=%s\n' "$compose_was_present"
+            printf 'edge_previous_state=%s\n' "$edge_previous_state"
+            printf 'cloudflared_previous_state=%s\n' "$cloudflared_previous_state"
+          } > "$snapshot_stage_dir/runtime-state"
+
+          validate_snapshot
+          if [[ "$edge_previous_state" != "absent" ]]; then
+            retain_existing_image edge-origin
+          fi
+          if [[ "$cloudflared_previous_state" != "absent" ]]; then
+            retain_existing_image cloudflared
+          fi
+          promote_snapshot
+
+          pull_started=true
+          if [[ "$cloudflare_enabled" == "true" ]]; then
+            chmod 600 "$stage_dir/.env"
+            (
+              cd "$stage_dir"
+              docker compose --profile cloudflare pull
+            )
+          else
+            (
+              cd "$stage_dir"
+              docker compose pull edge-origin
+            )
+          fi
+          docker compose -f "$stage_dir/compose.yml" run --rm --no-deps edge-origin nginx -t
+
+          activation_started=true
+          for config_file in "${config_files[@]}"; do
+            cp -a "$stage_dir/$config_file" "$config_file.next"
+            mv -f "$config_file.next" "$config_file"
+          done
+          if [[ "$cloudflare_enabled" == "true" ]]; then
+            cp -a "$stage_dir/.env" .env.next
+            chmod 600 .env.next
+            mv -f .env.next .env
+          fi
+
+          if [[ "$cloudflare_enabled" == "true" ]]; then
             chmod 600 .env
-            docker compose --profile cloudflare pull
-            docker compose --profile cloudflare up -d --wait
+            docker compose --profile cloudflare up -d --wait --force-recreate
           else
             docker compose --profile cloudflare stop cloudflared
-            docker compose pull edge-origin
-            docker compose up -d --wait edge-origin
+            docker compose up -d --wait edge-origin --force-recreate
           fi
-          curl -fsS http://127.0.0.1:8080/healthz
-          curl -fsS http://127.0.0.1:8081/healthz
+          curl -fsS --max-time 10 http://127.0.0.1:8080/healthz
+          curl -fsS --max-time 10 http://127.0.0.1:8081/healthz
+          chmod 0755 "$stage_dir/verify-private-origin.sh" "$stage_dir/tailscale-serve-apply.sh"
+          "$stage_dir/verify-private-origin.sh" http://127.0.0.1:8080
+          public_status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/)"
+          if [[ "$public_status" != "404" ]]; then
+            echo "error: public origin root must remain deny-by-default (expected 404, got $public_status)" >&2
+            false
+          fi
+          serve_state="$("$stage_dir/tailscale-serve-apply.sh" --classify-status)"
+          case "$serve_state" in
+            gateway|legacy) ;;
+            *)
+              echo "error: Serve classifier returned an invalid label" >&2
+              false
+              ;;
+          esac
+
+          trap - EXIT INT TERM HUP
+          activation_started=false
+          if ! cleanup_snapshot_directory "$snapshot_previous_dir"; then
+            echo "warning: verified origin activation remains committed, but prior rollback snapshot cleanup failed" >&2
+          fi
+          if ! cleanup_stage; then
+            echo "warning: verified origin activation remains committed, but staged-file cleanup failed" >&2
+          fi
+          printf '__OPS_ORIGIN_SERVE_STATE__=%s\n' "$serve_state"
           REMOTE
+          )"; then
+            printf '%s\n' "$remote_output"
+            exit 1
+          fi
+          printf '%s\n' "$remote_output"
+          serve_state="$(printf '%s\n' "$remote_output" | sed -n 's/^__OPS_ORIGIN_SERVE_STATE__=//p')"
+          case "$serve_state" in
+            gateway|legacy) ;;
+            *)
+              echo "::error::remote origin activation returned no valid Serve classification" >&2
+              exit 1
+              ;;
+          esac
+          remote_stage_created=false
+          trap - EXIT INT TERM HUP
+          printf 'serve_state=%s\n' "$serve_state" >> "$GITHUB_OUTPUT"
 
-          # Health alone cannot prove browser-history routing. Probe through
-          # the same tailnet HTTPS boundary a browser uses, and keep asset/API
-          # negative controls honest so an over-broad SPA fallback cannot pass.
-          origin="https://$DEPLOY_HOST"
-          probe_document() {
-            local label="$1" path="$2" expect="$3"
-            local body="$RUNNER_TEMP/ops-origin-document.html"
-            if ! curl --fail --silent --show-error --max-time 15 \
-              "$origin$path" > "$body"; then
-              echo "::error::$label ($path) did not return a successful document." >&2
-              return 1
-            fi
-            if ! grep -qE "$expect" "$body"; then
-              echo "::error::$label ($path) did not contain its expected production bundle marker." >&2
-              return 1
-            fi
-            echo "ok   $label ($path)"
-          }
-          probe_404() {
-            local label="$1" path="$2" require_non_html="$3"
-            local body="$RUNNER_TEMP/ops-origin-negative-body"
-            local headers="$RUNNER_TEMP/ops-origin-negative-headers"
-            local status
-            status="$(curl --silent --show-error --max-time 15 \
-              --output "$body" --dump-header "$headers" \
-              --write-out '%{http_code}' "$origin$path")"
-            if [[ "$status" != "404" ]]; then
-              echo "::error::$label ($path) returned HTTP $status instead of an honest 404." >&2
-              return 1
-            fi
-            if [[ "$require_non_html" == "true" ]] && \
-              grep -qiE '^content-type:[[:space:]]*text/html' "$headers"; then
-              echo "::error::$label ($path) returned an SPA HTML document from an API prefix." >&2
-              return 1
-            fi
-            echo "ok   $label ($path: 404)"
-          }
+  apply-serve:
+    name: Converge legacy Serve routes after origin activation
+    needs: deploy
+    if: inputs.apply_serve_after_origin == true && needs.deploy.result == 'success' && needs.deploy.outputs.serve_state == 'legacy'
+    uses: ./.github/workflows/ops-serve-apply.yml
+    with:
+      origin_parent_run_id: ${{ github.run_id }}
+    permissions:
+      contents: read
+      id-token: write
 
-          probe_document "Shell login" "/login" 'src="/assets/[A-Za-z0-9_.-]+\.js"'
-          probe_document "Shell settings" "/settings" 'src="/assets/[A-Za-z0-9_.-]+\.js"'
-          probe_document "LifeOS capture" "/life/capture" 'src="/life/assets/[A-Za-z0-9_.-]+\.js"'
-          probe_404 "Missing Shell asset" "/assets/__ops_origin_missing__.js" "false"
-          probe_404 "Missing LifeOS asset" "/life/assets/__ops_origin_missing__.js" "false"
-          probe_404 "Handler API boundary" "/api/__ops_origin_boundary__.js" "true"
-          probe_404 "Brain API boundary" "/api/brain/__ops_origin_boundary__.js" "true"
-          probe_404 "LifeOS API boundary" "/life/api/__ops_origin_boundary__.js" "true"
+  smoke:
+    name: Verify private origin through tailnet
+    needs: deploy
+    if: needs.deploy.result == 'success' && needs.deploy.outputs.serve_state == 'gateway'
+    uses: ./.github/workflows/platform-smoke.yml
+    permissions:
+      contents: read
+      id-token: write
