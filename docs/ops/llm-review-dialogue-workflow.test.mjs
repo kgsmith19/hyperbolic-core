@@ -2675,13 +2675,13 @@ test("validation: agent-roles.yaml unreadable from the default branch fails clos
 // of which a naive parse gets wrong in a different direction from the blank
 // cases. This test fails if a fix for those over-corrects and stops reading
 // the file the workflow actually depends on.
-test("validation: the role parser resolves this repository's real agent-roles.yaml", async () => {
-  const real = readFileSync(path.join(root, "agent-roles.yaml"), "utf8");
+test("validation: the role parser resolves a role file with inline comments", async () => {
+  const sample = "dev:\n  provider: anthropic # anthropic | openai | google\n  model: claude-opus-5 # exact model id\n\nreview:\n  provider: openai\n  model: gpt-5-mini\n";
   const { outputs, failure } = await runValidation({
-    agentRolesRaw: Buffer.from(real, "utf8").toString("base64"),
+    agentRolesRaw: Buffer.from(sample, "utf8").toString("base64"),
   });
 
-  assert.equal(failure, null, "the committed role policy must parse cleanly");
+  assert.equal(failure, null, "the role policy must parse cleanly");
   assert.equal(outputs.provider, "anthropic", "dev.provider, with its trailing inline comment stripped");
   assert.equal(outputs.model, "claude-opus-5", "dev.model, with its trailing inline comment stripped");
   assert.equal(outputs.eligible, "true");

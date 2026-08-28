@@ -50,11 +50,13 @@ function extractValidatorScript() {
   return lines.map((line) => line.slice(commonIndent)).join("\n");
 }
 
-function runValidator(agentRolesYaml, env = {}) {
+function runValidator(agentRolesYaml = null, env = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "repo-policy-validate-"));
   const scriptFile = path.join(dir, "validate.py");
   writeFileSync(scriptFile, extractValidatorScript());
-  writeFileSync(path.join(dir, "agent-roles.yaml"), agentRolesYaml);
+  if (agentRolesYaml !== null) {
+    writeFileSync(path.join(dir, "agent-roles.yaml"), agentRolesYaml);
+  }
   try {
     const stdout = execFileSync("python3", [scriptFile], { cwd: dir, encoding: "utf8", env: { ...process.env, ...env } });
     return { ok: true, stdout };

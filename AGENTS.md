@@ -118,41 +118,25 @@ Local plans, briefs, and ledgers live only in gitignored workspaces (`.superpowe
 
 ## Active agent roles
 
-This repo has exactly two automation roles, **dev** and **review**, each bound to one model
-vendor at a time by `agent-roles.yaml` at the repo root. Read that file now, before doing
-anything else in this session.
+This repo supports dynamic per-PR agent role attribution across three model vendors:
+`anthropic` (Claude Code), `openai` (Codex), and `google` (Antigravity).
 
-- **About to write code, push a commit, or open/update a pull request?** You must be the vendor
-  named under `dev`. If you are not, stop and say so plainly to whoever is directing you, naming
-  the vendor that *is* currently assigned, before writing anything. Proceed only on their explicit
-  instruction to override — that is the owner's call to make, not yours.
-- **About to post a review verdict, or claim to speak as "the" reviewer, on a PR in this repo?**
-  Same rule, against `review`.
-- This is an instruction, not a technical lock — nothing stops a determined session from ignoring
-  it. It exists because every agent capable of working in this repo is built to honor `AGENTS.md`,
-  and honoring it here is exactly as mandatory as honoring any other rule in this file.
+- **Dev Role Attribution:** A PR declares its coding-agent vendor dynamically via:
+  1. PR label (e.g. `dev:google`, `dev:anthropic`, `dev:openai`), OR
+  2. PR body metadata (e.g. `<!-- dev-agent: provider=google model=antigravity -->`), OR
+  3. The repository variable fallback (`vars.DEV_PROVIDER` and `vars.DEV_MODEL`).
+- **Review Role Assignment:** `AI Review` operates via `vars.REVIEW_PROVIDER` and `vars.REVIEW_MODEL`.
+- **Provider Separation Guard:** The active dev provider family and review provider family must
+  resolve to different provider companies: `anthropic → anthropic`, `openai → openai`, and
+  `google → google`. Therefore dev and review cannot both be assigned `google` on the same PR.
+  `repository-standards` (`.github/actions/verify-repo-policy`) and `ai-review`
+  (`.github/actions/verify-llm-review`) mechanically enforce this separation on every PR.
 - `dev.provider` and `review.provider` are different value spaces, not one enum reused twice.
-  `dev.provider` names the coding-agent **tool/harness's company**, consistently with every value
-  in both enums — `anthropic | openai | google` (Claude Code, Codex, or Antigravity — Google's
-  agentic CLI and the deprecated Gemini CLI's successor; the CLI name is informational detail,
-  never the enum value). `review.provider` names the raw model **API family** the
-  structured-output review call targets — `anthropic | openai | google`. `AI Review` is one
-  sandboxed LLM call via `packages/llm` (see `packages/review/src/config.ts`); it never runs an
-  agent harness, so `google` there is the Gemini API — the same one `services/brain` and
-  `services/llm-handler` call for product features. Both dev and review use `google` to identify
-  the same provider company; dev names the harness vendor, review names the model API. They are
-  different execution surfaces but the same provider company for separation.
-- The active roles must resolve to different provider companies. Validation preserves the
-  role-specific raw identifiers but compares canonical families: `anthropic → anthropic`,
-  `openai → openai`, and `google → google`. Therefore dev and review cannot both be assigned `google`
-  — different provider companies are required. `repository-standards` enforces this mechanically:
-  `.github/actions/verify-repo-policy`
-  validates the file on every PR — it must parse, `dev.provider` and `review.provider` must each
-  be valid for their own value space above, both must name a non-empty `model`, and the resolved
-  companies must differ. Any violation fails the whole `PR Gate` closed — a role collision
-  or a malformed file blocks every PR, not just one that touches this file. This is the first of
-  three independent checks of the same constraint; the dev dispatcher and the reviewer gate each
-  re-verify it too, once those slices land.
+  `dev.provider` names the coding-agent **tool/harness's company** (`anthropic | openai | google`).
+  `review.provider` names the raw model **API family** the structured-output review call targets
+  (`anthropic | openai | google`). `AI Review` is one sandboxed LLM call via `packages/llm`
+  (see `packages/review/src/config.ts`); it never runs an agent harness, so `google` there is the
+  Gemini API — the same one `services/brain` and `services/llm-handler` call for product features.
 - **An interactive session driving the `dev` role in this repo posts PR/Issue comments via
   `.github/workflows/dev-agent-post.yml` (`workflow_dispatch`), not directly through its own
   ambient GitHub credential.** That credential resolves to whichever account is connected to the
@@ -638,7 +622,7 @@ in the job summary as unverifiable, matching this job's existing tolerance for o
 errors elsewhere, rather than wedging every PR shut on a typo or a momentary API blip.
 
 `.github/CODEOWNERS` requires `@kgsmith19` review for this repo's control-plane paths
-(`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`, `agent-roles.yaml`). `main` protection: pull request
+(`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`). `main` protection: pull request
 required, squash only, linear history, no force push, no deletion, code-owner approval required
 for those paths, owner bypass.
 

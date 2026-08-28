@@ -90,6 +90,8 @@ jobs:
           DISPATCH_HEAD_SHA: ${{ github.event.client_payload.headSha }}
           ROUND: ${{ github.event.client_payload.round }}
           RUN_URL: ${{ github.event.client_payload.runUrl }}
+          DEV_PROVIDER: ${{ vars.DEV_PROVIDER }}
+          DEV_MODEL: ${{ vars.DEV_MODEL }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -119,35 +121,37 @@ jobs:
               return;
             }
 
-            let provider = null;
-            let model = null;
-            try {
-              const { data } = await github.rest.repos.getContent({ owner, repo, path: "agent-roles.yaml" });
-              const content = Buffer.from(data.content, data.encoding).toString("utf8").replace(/\r\n/g, "\n");
-              const devBlockMatch = /^dev:[ \t]*(?:#[^\n]*)?\n((?:[ \t]+[^\n]*(?:\n|$))*)/m.exec(content);
-              const devBlock = devBlockMatch ? devBlockMatch[1] : "";
-              const providerMatch = /^[ \t]+provider:[ \t]*(\S+)/m.exec(devBlock);
-              const modelMatch = /^[ \t]+model:[ \t]*(\S+)/m.exec(devBlock);
-              provider = providerMatch ? providerMatch[1].trim().toLowerCase() : null;
-              model = modelMatch ? modelMatch[1].trim() : null;
-            } catch (error) {
-              core.setFailed(`Could not read agent-roles.yaml from the default branch: ${error.message}`);
-              return;
+            let provider = (process.env.DEV_PROVIDER || "").trim().toLowerCase();
+            let model = (process.env.DEV_MODEL || "").trim();
+
+            if (!provider || !model) {
+              try {
+                const { data } = await github.rest.repos.getContent({ owner, repo, path: "agent-roles.yaml" });
+                const content = Buffer.from(data.content, data.encoding).toString("utf8").replace(/\r\n/g, "\n");
+                const devBlockMatch = /^dev:[ \t]*(?:#[^\n]*)?\n((?:[ \t]+[^\n]*(?:\n|$))*)/m.exec(content);
+                const devBlock = devBlockMatch ? devBlockMatch[1] : "";
+                const providerMatch = /^[ \t]+provider:[ \t]*(\S+)/m.exec(devBlock);
+                const modelMatch = /^[ \t]+model:[ \t]*(\S+)/m.exec(devBlock);
+                if (!provider) provider = providerMatch ? providerMatch[1].trim().toLowerCase() : null;
+                if (!model) model = modelMatch ? modelMatch[1].trim() : null;
+              } catch (_) {
+                // agent-roles.yaml is optional
+              }
             }
 
             if (!provider || provider === '""' || provider === "''") {
-              core.setFailed("Could not find a nonblank dev.provider in agent-roles.yaml -- refusing to guess which vendor to wake.");
+              core.setFailed("Could not resolve dev.provider from vars.DEV_PROVIDER or agent-roles.yaml -- refusing to guess which vendor to wake.");
               return;
             }
             core.setOutput("provider", provider);
             if (!model || model === '""' || model === "''") {
-              core.setFailed("Could not find a nonblank dev.model in agent-roles.yaml -- refusing to use an adapter default.");
+              core.setFailed("Could not resolve dev.model from vars.DEV_MODEL or agent-roles.yaml -- refusing to use an adapter default.");
               return;
             }
             core.setOutput("model", model);
             if (provider !== "anthropic") {
               core.setFailed(
-                `agent-roles.yaml names dev.provider="${provider}", but this dispatcher only implements "anthropic" today. ` +
+                `Configured dev.provider="${provider}", but this dispatcher only implements "anthropic" today. ` +
                   "Nothing will reach a pull request or credential until that provider's real adapter is implemented."
               );
               return;
