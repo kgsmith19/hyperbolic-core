@@ -243,7 +243,7 @@ if [[ "$mode" == "--classify-status" ]]; then
     echo "error: python3 is not installed" >&2
     exit 1
   }
-  if ! classifier_status="$(tailscale serve status --json)"; then
+  if ! classifier_status="$("${sudo_prefix[@]}" tailscale serve status --json)"; then
     echo "error: Serve status check failed; no Serve mutation was attempted" >&2
     exit 1
   fi
@@ -267,7 +267,7 @@ fi
 
 preflight
 
-if ! initial_status="$(tailscale serve status --json)"; then
+if ! initial_status="$("${sudo_prefix[@]}" tailscale serve status --json)"; then
   echo "error: initial Serve status check failed; no Serve mutation was attempted" >&2
   exit 1
 fi
@@ -305,14 +305,14 @@ for mount in "${legacy_mounts[@]}"; do
   fi
   if ! remove_legacy_mount "$mount"; then
     echo "error: failed to remove legacy mount $mount; the nginx root proxy remains active and later legacy routes were not changed" >&2
-    if diagnostic_status="$(tailscale serve status --json)"; then
+    if diagnostic_status="$("${sudo_prefix[@]}" tailscale serve status --json)"; then
       printf 'Serve status JSON after removal failure:\n%s\n' "$diagnostic_status" >&2
     fi
     exit 1
   fi
 done
 
-if ! final_status="$(tailscale serve status --json)"; then
+if ! final_status="$("${sudo_prefix[@]}" tailscale serve status --json)"; then
   echo "error: final Serve status check failed; the nginx root proxy remains configured" >&2
   exit 1
 fi
