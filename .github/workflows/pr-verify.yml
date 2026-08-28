@@ -166,51 +166,12 @@ jobs:
           base_sha: ${{ github.event.pull_request.base.sha }}
           head_sha: ${{ github.event.pull_request.head.sha }}
 
-      - name: Standards · Resolve dev role attribution
-        id: resolve-dev
-        shell: bash
-        env:
-          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          DEFAULT_DEV_PROVIDER: ${{ vars.DEV_PROVIDER }}
-          DEFAULT_DEV_MODEL: ${{ vars.DEV_MODEL }}
-        run: |
-          python3 <<'PYEOF'
-          import json, os, re
-
-          labels = json.loads(os.environ.get("PR_LABELS") or "[]")
-          body = os.environ.get("PR_BODY") or ""
-          provider = ""
-          model = ""
-
-          for label in labels:
-              if isinstance(label, str) and label.startswith("dev:"):
-                  provider = label.split(":", 1)[1].strip().lower()
-                  break
-
-          if not provider:
-              m = re.search(r"<!--\s*dev-agent:\s*provider=(\w+)(?:\s+model=([^\s>]+))?\s*-->", body, re.IGNORECASE)
-              if m:
-                  provider = m.group(1).strip().lower()
-                  if m.group(2):
-                      model = m.group(2).strip()
-
-          if not provider:
-              provider = (os.environ.get("DEFAULT_DEV_PROVIDER") or "").strip().lower()
-          if not model:
-              model = (os.environ.get("DEFAULT_DEV_MODEL") or "").strip()
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"dev_provider={provider}\n")
-              f.write(f"dev_model={model}\n")
-          PYEOF
-
       - name: Standards · Repo policy
         uses: ./.github/actions/verify-repo-policy
         with:
           base_sha: ${{ github.event.pull_request.base.sha }}
-          dev_provider: ${{ steps.resolve-dev.outputs.dev_provider || vars.DEV_PROVIDER }}
-          dev_model: ${{ steps.resolve-dev.outputs.dev_model || vars.DEV_MODEL }}
+          dev_provider: ${{ vars.DEV_PROVIDER }}
+          dev_model: ${{ vars.DEV_MODEL }}
           review_provider: ${{ vars.REVIEW_PROVIDER }}
           review_model: ${{ vars.REVIEW_MODEL }}
 
@@ -483,46 +444,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Review · Resolve dev role attribution
-        id: resolve-dev
-        shell: bash
-        env:
-          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          DEFAULT_DEV_PROVIDER: ${{ vars.DEV_PROVIDER }}
-          DEFAULT_DEV_MODEL: ${{ vars.DEV_MODEL }}
-        run: |
-          python3 <<'PYEOF'
-          import json, os, re
-
-          labels = json.loads(os.environ.get("PR_LABELS") or "[]")
-          body = os.environ.get("PR_BODY") or ""
-          provider = ""
-          model = ""
-
-          for label in labels:
-              if isinstance(label, str) and label.startswith("dev:"):
-                  provider = label.split(":", 1)[1].strip().lower()
-                  break
-
-          if not provider:
-              m = re.search(r"<!--\s*dev-agent:\s*provider=(\w+)(?:\s+model=([^\s>]+))?\s*-->", body, re.IGNORECASE)
-              if m:
-                  provider = m.group(1).strip().lower()
-                  if m.group(2):
-                      model = m.group(2).strip()
-
-          if not provider:
-              provider = (os.environ.get("DEFAULT_DEV_PROVIDER") or "").strip().lower()
-          if not model:
-              model = (os.environ.get("DEFAULT_DEV_MODEL") or "").strip()
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"dev_provider={provider}\n")
-              f.write(f"dev_model={model}\n")
-          PYEOF
-
       - uses: ./.github/actions/verify-llm-review
         with:
           pr_number: ${{ github.event.pull_request.number }}
@@ -533,8 +454,8 @@ jobs:
           infisical_project_slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           review_provider: ${{ vars.REVIEW_PROVIDER }}
           review_model: ${{ vars.REVIEW_MODEL }}
-          review_builder_provider: ${{ steps.resolve-dev.outputs.dev_provider || vars.DEV_PROVIDER }}
-          dev_model: ${{ steps.resolve-dev.outputs.dev_model || vars.DEV_MODEL }}
+          review_builder_provider: ${{ vars.DEV_PROVIDER }}
+          dev_model: ${{ vars.DEV_MODEL }}
 
   # =====================================================================
   # PR Gate -- the sole required check AND the sole merge authority

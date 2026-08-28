@@ -1185,7 +1185,7 @@ test("a preparation failure restores mutable image references for stopped servic
   assert.deepEqual(finalStates, { edge: "stopped", cloudflared: "stopped" });
 
   const failedNginx = calls.indexOf(
-    "compose -f .staged-123-1/compose.yml run --rm --no-deps edge-origin nginx -t",
+    "compose -f .staged-123-1/compose.yml run -T --rm --no-deps edge-origin nginx -t",
   );
   const edgeRetag = calls.indexOf("image tag sha256:edge-old nginx:old");
   const cloudflaredRetag = calls.indexOf(

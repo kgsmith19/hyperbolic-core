@@ -134,8 +134,9 @@ jobs:
                 const modelMatch = /^[ \t]+model:[ \t]*(\S+)/m.exec(devBlock);
                 if (!provider) provider = providerMatch ? providerMatch[1].trim().toLowerCase() : null;
                 if (!model) model = modelMatch ? modelMatch[1].trim() : null;
-              } catch (_) {
-                // agent-roles.yaml is optional
+              } catch (error) {
+                core.setFailed(`Could not read agent-roles.yaml from the default branch: ${error.message}`);
+                return;
               }
             }
 
@@ -151,7 +152,7 @@ jobs:
             core.setOutput("model", model);
             if (provider !== "anthropic") {
               core.setFailed(
-                `Configured dev.provider="${provider}", but this dispatcher only implements "anthropic" today. ` +
+                `dev.provider="${provider}", but this dispatcher only implements "anthropic" today. ` +
                   "Nothing will reach a pull request or credential until that provider's real adapter is implemented."
               );
               return;
