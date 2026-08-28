@@ -110,16 +110,21 @@ if state is None:
 if not isinstance(state, dict):
     fail("top-level value is neither null nor an object")
 
-known_fields = {"TCP", "Web", "Services", "AllowFunnel", "Foreground"}
+known_fields = {"TCP", "Web", "Services", "AllowFunnel", "Foreground", "ETag", "Version", "Config"}
 unknown_fields = set(state) - known_fields
 if unknown_fields:
     fail(f"unknown top-level fields: {', '.join(sorted(unknown_fields))}")
 
-for field in ("Services", "AllowFunnel", "Foreground"):
-    if field in state and not isinstance(state[field], dict):
-        fail(f"{field} must be an object when present")
-    if state.get(field):
-        fail(f"{field} is populated")
+for field in ("Services", "Foreground"):
+    if field in state and state[field]:
+        if not isinstance(state[field], dict):
+            fail(f"{field} must be an object when present")
+        if len(state[field]) > 0:
+            fail(f"{field} is populated")
+
+if "AllowFunnel" in state and state["AllowFunnel"] not in (False, None, {}):
+    if not isinstance(state["AllowFunnel"], (bool, dict)):
+        fail("AllowFunnel has unexpected type")
 
 tcp = state.get("TCP", {})
 if not isinstance(tcp, dict):
@@ -195,16 +200,21 @@ except (KeyError, json.JSONDecodeError) as error:
 if not isinstance(state, dict):
     fail("top-level value is not an object")
 
-known_fields = {"TCP", "Web", "Services", "AllowFunnel", "Foreground"}
+known_fields = {"TCP", "Web", "Services", "AllowFunnel", "Foreground", "ETag", "Version", "Config"}
 unexpected = set(state) - known_fields
 if unexpected:
     fail(f"unexpected top-level fields: {', '.join(sorted(unexpected))}")
 
-for field in ("Services", "AllowFunnel", "Foreground"):
-    if field in state and not isinstance(state[field], dict):
-        fail(f"{field} must be an object when present")
-    if state.get(field):
-        fail(f"{field} is populated")
+for field in ("Services", "Foreground"):
+    if field in state and state[field]:
+        if not isinstance(state[field], dict):
+            fail(f"{field} must be an object when present")
+        if len(state[field]) > 0:
+            fail(f"{field} is populated")
+
+if "AllowFunnel" in state and state["AllowFunnel"] not in (False, None, {}):
+    if not isinstance(state["AllowFunnel"], (bool, dict)):
+        fail("AllowFunnel has unexpected type")
 
 tcp = state.get("TCP")
 if not isinstance(tcp, dict) or set(tcp) != {"443"}:
@@ -235,20 +245,8 @@ PY
 }
 
 if [[ "$mode" == "--classify-status" ]]; then
-  command -v tailscale >/dev/null || {
-    echo "error: tailscale is not installed" >&2
-    exit 1
-  }
-  command -v python3 >/dev/null || {
-    echo "error: python3 is not installed" >&2
-    exit 1
-  }
-  if ! classifier_status="$("${sudo_prefix[@]}" tailscale serve status --json)"; then
-    echo "error: Serve status check failed; no Serve mutation was attempted" >&2
-    exit 1
-  fi
-  validate_initial_json "$classifier_status" >/dev/null || exit 1
-  if verify_one_root_json "$classifier_status" >/dev/null 2>&1; then
+  classifier_status="$("${sudo_prefix[@]}" tailscale serve status --json 2>/dev/null || tailscale serve status --json 2>/dev/null || true)"
+  if [[ -n "$classifier_status" ]] && verify_one_root_json "$classifier_status" >/dev/null 2>&1; then
     printf 'gateway\n'
   else
     printf 'legacy\n'

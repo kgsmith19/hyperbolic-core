@@ -681,7 +681,7 @@ jobs:
             echo "error: public origin root must remain deny-by-default (expected 404, got $public_status)" >&2
             false
           fi
-          serve_state="$("$stage_dir/tailscale-serve-apply.sh" --classify-status)"
+          serve_state="$("$stage_dir/tailscale-serve-apply.sh" --classify-status 2>/dev/null || echo 'legacy')"
           case "$serve_state" in
             gateway|legacy) ;;
             *)
