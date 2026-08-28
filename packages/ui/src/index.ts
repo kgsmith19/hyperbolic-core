@@ -30,7 +30,11 @@ export { Tabs, TabsList, TabsTab, TabsIndicator, TabsPanel } from "./primitives/
 
 export { Chrome } from "./chrome/chrome";
 export type { ChromeProps } from "./chrome/chrome";
-export { classifyNavigationTarget } from "./chrome/zones";
+export {
+  classifyNavigationTarget,
+  isNavigationTargetMountable,
+  normalizeOriginPathname,
+} from "./chrome/zones";
 export type { NavigationTargetKind, Zone } from "./chrome/zones";
 export type { PlatformSession, ToolPaletteEntry } from "./chrome/types";
 export { ThemeSwitch } from "./chrome/theme-switch";

@@ -3,7 +3,8 @@
 // the failure it catches.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -24,6 +25,129 @@ function probeExpectation(label, requestPath) {
   assert.ok(line.endsWith("'"), `${label} probe marker must be single-quoted`);
   const marker = line.slice(prefix.length, -1);
   return new RegExp(marker);
+}
+
+function smokeBashFunction(name) {
+  const opening = `          ${name}() {`;
+  const start = smoke.indexOf(opening);
+  assert.notEqual(start, -1, `missing ${name}() in the private smoke step`);
+  const closing = "\n          }";
+  const end = smoke.indexOf(closing, start);
+  assert.notEqual(end, -1, `missing closing brace for ${name}()`);
+  return smoke
+    .slice(start, end + closing.length)
+    .split("\n")
+    .map((line) => line.slice(10))
+    .join("\n");
+}
+
+function smokeFailureGate() {
+  const opening = '          if [[ "$failures" -gt 0 ]]; then';
+  const closing = '          echo "All probes green."';
+  const start = smoke.indexOf(opening);
+  assert.notEqual(start, -1, "missing the private smoke failure gate");
+  const end = smoke.indexOf(closing, start);
+  assert.notEqual(end, -1, "missing the private smoke success verdict");
+  return smoke
+    .slice(start, end + closing.length)
+    .split("\n")
+    .map((line) => line.slice(10))
+    .join("\n");
+}
+
+function smokeTempLifecycle() {
+  const opening = '          smoke_tmp="$(mktemp -d)"';
+  const closing = "          trap 'exit 143' TERM";
+  const start = smoke.indexOf(opening);
+  assert.notEqual(start, -1, "missing the private smoke temp directory");
+  const end = smoke.indexOf(closing, start);
+  assert.notEqual(end, -1, "missing the private smoke signal traps");
+  return smoke
+    .slice(start, end + closing.length)
+    .split("\n")
+    .map((line) => line.slice(10))
+    .join("\n");
+}
+
+function runSmokeTempLifecycle(exitStatement) {
+  const lifecycle = smokeTempLifecycle();
+  const result = spawnSync(
+    "bash",
+    [
+      "-c",
+      `set -euo pipefail
+${lifecycle}
+printf 'temp_dir=%s\n' "$smoke_tmp"
+${exitStatement}`,
+    ],
+    { encoding: "utf8" },
+  );
+  const match = /^temp_dir=(.+)$/m.exec(result.stdout);
+  assert.ok(match, `smoke lifecycle did not expose its temp directory: ${result.stderr}`);
+  const survived = existsSync(match[1]);
+  rmSync(match[1], { force: true, recursive: true });
+  return { result, survived };
+}
+
+function runJsonHealthProbe(contentType, body, httpStatus = "200") {
+  const tempLifecycle = smokeTempLifecycle();
+  const validator = smokeBashFunction("is_json_health");
+  const probe = smokeBashFunction("probe_json_health");
+  const failureGate = smokeFailureGate();
+  return spawnSync(
+    "bash",
+    [
+      "-c",
+      `set -euo pipefail
+curl() {
+  local output_file="" write_out=""
+  while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == "--output" ]]; then
+      output_file="$2"
+      shift 2
+    elif [[ "$1" == "--write-out" ]]; then
+      write_out="$2"
+      shift 2
+    else
+      shift
+    fi
+  done
+  [[ -n "$output_file" ]]
+  printf '%s' "$FAKE_BODY" >"$output_file"
+  case "$write_out" in
+    '%{content_type}')
+      printf '%s' "$FAKE_CONTENT_TYPE"
+      ;;
+    '%{http_code} %{content_type}')
+      printf '%s %s' "$FAKE_HTTP_STATUS" "$FAKE_CONTENT_TYPE"
+      ;;
+    *)
+      printf 'unsupported curl write-out format: %s\n' "$write_out" >&2
+      return 64
+      ;;
+  esac
+}
+${tempLifecycle}
+${validator}
+${probe}
+origin="https://fixture.invalid"
+failures=0
+results=()
+probe_json_health "fixture API" "/api/healthz"
+printf 'failures=%s\n' "$failures"
+printf 'result=%s\n' "\${results[*]}"
+${failureGate}`,
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FAKE_BODY: body,
+        FAKE_CONTENT_TYPE: contentType,
+        FAKE_HTTP_STATUS: httpStatus,
+      },
+    },
+  );
 }
 
 test("smoke is callable, dispatchable, production-gated, and read-only by design", () => {
@@ -136,6 +260,110 @@ test("Shell document markers reject a LifeOS bundle document", () => {
   assert.doesNotMatch(representativeShellHtml, lifeMarker);
 });
 
+test("API health probes use the JSON-health contract instead of an empty generic matcher", () => {
+  for (const [label, requestPath] of [
+    ["Handler A", "/api/healthz"],
+    ["Brain", "/api/brain/health"],
+    ["LifeOS API", "/life/api/healthz"],
+  ]) {
+    assert.ok(
+      smoke.includes(`probe_json_health "${label}" "${requestPath}"`),
+      `${label} must require a JSON health response`,
+    );
+    assert.ok(
+      !smoke.includes(`probe "${label}" "${requestPath}" ''`),
+      `${label} must not use the empty matcher that accepts any 2xx body`,
+    );
+  }
+});
+
+test("JSON health response files are owned by the trapped smoke temp directory", () => {
+  const probe = smokeBashFunction("probe_json_health");
+  assert.match(probe, /body_file="\$smoke_tmp\/[^"]+"/);
+  assert.match(probe, /error_file="\$smoke_tmp\/[^"]+"/);
+  assert.doesNotMatch(
+    probe,
+    /\bmktemp\b/,
+    "probe-local temp files can escape cleanup if the function is interrupted",
+  );
+});
+
+test("the smoke temp directory is removed after an ordinary successful exit", () => {
+  const { result, survived } = runSmokeTempLifecycle("true");
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(survived, false);
+});
+
+test("the smoke temp directory is removed after a set -e early failure", () => {
+  const { result, survived } = runSmokeTempLifecycle("false");
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(survived, false);
+});
+
+for (const [signal, expectedStatus] of [
+  ["HUP", 129],
+  ["INT", 130],
+  ["TERM", 143],
+]) {
+  test(`the smoke temp directory is removed after ${signal}`, () => {
+    const { result, survived } = runSmokeTempLifecycle(`kill -${signal} $$`);
+    assert.equal(result.status, expectedStatus, result.stderr);
+    assert.equal(survived, false);
+  });
+}
+
+test("the API health validator accepts a JSON object carrying the known ok status", () => {
+  const result = runJsonHealthProbe(
+    "application/json; charset=utf-8",
+    '{"status":"ok","stateStoreWritable":true}',
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /failures=0/);
+  assert.match(result.stdout, /result=.*✅/);
+  assert.match(result.stdout, /All probes green\./);
+});
+
+test("the API health validator rejects a JSON response whose health status is not ok", () => {
+  const result = runJsonHealthProbe(
+    "application/json",
+    '{"status":"degraded"}',
+  );
+  assert.equal(result.status, 1, "the workflow's final failure gate must exit red");
+  assert.match(result.stdout, /failures=1/);
+  assert.match(result.stdout, /invalid JSON health response/);
+  assert.match(result.stderr, /Platform smoke failed: 1 probe\(s\) red/);
+});
+
+test("API health NEGATIVE CONTROL: valid ok JSON with text/html fails the workflow", () => {
+  const result = runJsonHealthProbe("text/html; charset=utf-8", '{"status":"ok"}');
+  assert.equal(result.status, 1, "a non-JSON media type must reach the red exit gate");
+  assert.match(result.stdout, /failures=1/);
+  assert.match(result.stdout, /invalid JSON health response/);
+  assert.match(result.stderr, /Platform smoke failed: 1 probe\(s\) red/);
+});
+
+test("API health NEGATIVE CONTROL: SPA HTML mislabeled as JSON fails the workflow", () => {
+  const html =
+    '<!doctype html><title>hyperbolic-core</title><script>window.fixture={"status":"ok"}</script>';
+  const result = runJsonHealthProbe("application/json", html);
+  assert.equal(result.status, 1, "an invalid JSON body must reach the red exit gate");
+  assert.match(result.stdout, /failures=1/);
+  assert.match(result.stdout, /invalid JSON health response/);
+  assert.match(result.stderr, /Platform smoke failed: 1 probe\(s\) red/);
+});
+
+test("API health NEGATIVE CONTROL: a 302 carrying valid ok JSON fails the workflow", () => {
+  const result = runJsonHealthProbe(
+    "application/json",
+    '{"status":"ok"}',
+    "302",
+  );
+  assert.equal(result.status, 1, "health endpoints must return exact HTTP 200");
+  assert.match(result.stdout, /failures=1/);
+  assert.match(result.stderr, /expected HTTP 200; got 302/);
+  assert.match(result.stderr, /Platform smoke failed: 1 probe\(s\) red/);
+});
+
 test("LifeOS probes are gated on the cutover switch, not skipped forever", () => {
   // Pre-cutover the /life/ routes serve the standalone layout this repo
   // must not assert about; post-cutover the probes MUST run. The gate is
@@ -235,9 +463,18 @@ test("both deploy workflows call smoke after their deploy jobs, red-on-red", () 
 
 test("the Platform gate runs the composed production-origin browser suite", () => {
   assert.match(platformGate, /working-directory: apps\/lifeos\/frontend\s+run: npm ci/);
+  const composedStep = platformGate.slice(
+    platformGate.indexOf("- name: E2E · Run composed production-origin routing suite"),
+    platformGate.indexOf("- name: Build · Production build"),
+  );
   assert.match(
-    platformGate,
+    composedStep,
     /npx playwright test --config docs\/ops\/composed-origin\/playwright\.config\.ts/,
+  );
+  assert.doesNotMatch(
+    composedStep,
+    /continue-on-error|\|\| true/,
+    "the composed routing suite must fail the Platform lane when an assertion is red",
   );
   assert.match(platformGate, /docs\/ops\/composed-origin\/playwright-report\//);
   assert.match(platformGate, /docs\/ops\/composed-origin\/test-results\//);

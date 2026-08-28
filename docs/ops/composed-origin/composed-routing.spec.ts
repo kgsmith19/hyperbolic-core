@@ -1,6 +1,7 @@
 import { expect, test, type APIResponse, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { rawHttpRequest } from "../test-support/raw-http-request.mjs";
 
 const ORIGIN = "http://127.0.0.1:18080";
 const SUPABASE_ORIGIN = "https://test.supabase.co";
@@ -230,8 +231,13 @@ test("real assets are served as assets while missing assets remain 404", async (
     expect(await response.text()).not.toContain("<title>");
   }
   for (const missing of [
+    "/.env",
+    "/.env/",
+    "/.git/config",
+    "/assets/does-not-exist",
     "/assets/does-not-exist.js",
     "/assets/does-not-exist.js/",
+    "/life/assets/does-not-exist",
     "/life/assets/does-not-exist.js",
     "/life/assets/does-not-exist.js/",
     `${shellAsset}/`,
@@ -242,6 +248,163 @@ test("real assets are served as assets while missing assets remain 404", async (
     const body = await response.text();
     expect(body).not.toContain("<title>hyperbolic-core</title>");
     expect(body).not.toContain("<title>lifeos</title>");
+  }
+});
+
+test("literal LifeOS boundaries mount the app while encoded boundaries fail closed", async ({
+  page,
+  request,
+}) => {
+  await installPlatformStubs(page);
+  await seedSession(page);
+  const canonical = await page.goto("/life/capture");
+  expect(canonical?.status()).toBe(200);
+  await expect(page).toHaveTitle("lifeos");
+  await expect(page.locator('[data-app-data="lifeos-zone"]')).toBeVisible();
+
+  for (const encodedPath of [
+    "/%6cife/capture",
+    "/%6cife",
+    "/life%2Fcapture",
+    "/life%2F",
+    "/%6cife%2Fcapture",
+    "/%2Flife/capture",
+    "/shell/%2e%2e%2Flife%2Fcapture",
+  ]) {
+    const response = await request.get(encodedPath, { maxRedirects: 0 });
+    expect(new URL(response.url()).pathname, encodedPath).toBe(encodedPath);
+    expect(response.status(), encodedPath).toBe(404);
+    const body = await response.text();
+    expect(body, encodedPath).not.toContain("<title>hyperbolic-core</title>");
+    expect(body, encodedPath).not.toContain("<title>lifeos</title>");
+  }
+});
+
+test("reserved API and asset namespaces cannot traverse into either SPA fallback", async () => {
+  for (const encodedPath of [
+    "/%2Fapi/%2e%2e/settings",
+    "//api/../settings",
+    "/./assets/../settings",
+    "/%2Flife/api/%2e%2e/capture",
+    "//life/api/../capture",
+    "/./life/assets/../capture",
+    "/%2F%61pi/%2e%2e/settings",
+    "//assets/../settings",
+    "/./%2E/%61ssets/%2e%2E/settings",
+    "/%2Flife/%61pi/%2e%2e/capture",
+    "//%6Cife/assets/../capture",
+    "/./life/%2E/%61pi/%2e%2e/capture",
+    "/%2E/%6cife/%2F%61ssets/%2e%2E/capture",
+    "/foo/../api/../settings",
+    "/%66oo/%2e%2e/%61pi/%2e%2e/settings",
+    "//foo/../api/../settings",
+    "/%2Ffoo/%2e%2e/api/%2e%2e/settings",
+    "/life/foo/../assets/../capture",
+    "/life/%66oo/%2e%2e/%61ssets/%2e%2e/capture",
+    "/alpha/beta/../../api/v1/../../settings",
+    "/life/one/two/../../assets/v1/../../capture",
+    "/%41pi/%2e%2e/settings",
+    "/%41%50%49/%2e%2e/settings",
+    "/%61%50i/%2e%2e/settings",
+    "/%41ssets/../settings",
+    "/%41%53%53%45%54%53/%2e%2e/settings",
+    "/%61%53s%65%54%73/%2e%2e/settings",
+    "/life/%41ssets/../capture",
+    "/life/%41%73%53e%54%73/%2e%2e/capture",
+    "/api/%2e%2e%2Fsettings",
+    "/api//../settings",
+    "/api/%2F%2e%2e%2Fsettings",
+    "/%61pi//%2e%2e/settings",
+    "/api/%2f/%2E.%2Fsettings",
+    "/%61pi/%2e%2e%2Fsettings",
+    "/api%2F%2e%2e%2Fsettings",
+    "/assets/%2e%2e%2Fsettings",
+    "/assets///../settings",
+    "/%61ssets/%2F/%2e%2E/settings",
+    "/%61ssets/%2e%2e%2Fsettings",
+    "/assets%2F%2e%2e%2Fsettings",
+    "/life/api/%2e%2e%2Fcapture",
+    "/life/api//%2e%2e/capture",
+    "/%6Cife/%61pi/%2f/%2E.%2Fcapture",
+    "/life/%61pi/%2e%2e%2Fcapture",
+    "/life/api%2F%2e%2e%2Fcapture",
+    "/life/assets/%2e%2e%2Fcapture",
+    "/life/assets/%2F%2e%2E%2fcapture",
+    "/%6cife/%61ssets///../capture",
+    "/life/%61ssets/%2e%2e%2Fcapture",
+    "/life/assets%2F%2e%2e%2Fcapture",
+  ]) {
+    const response = await rawHttpRequest(ORIGIN, encodedPath);
+    expect(response.rawRequestTarget, encodedPath).toBe(encodedPath);
+    expect([400, 404], encodedPath).toContain(response.status);
+    expect(response.headers["content-type"] ?? "", encodedPath).not.toMatch(
+      /^text\/html\b/,
+    );
+    const body = response.body;
+    expect(body, encodedPath).not.toContain("<title>hyperbolic-core</title>");
+    expect(body, encodedPath).not.toContain("<title>lifeos</title>");
+  }
+});
+
+test("reserved-component traversal policy ignores lookalikes, queries, and canonical traffic", async ({
+  request,
+}) => {
+  for (const shellPath of [
+    "/lifefoo",
+    "/docs/api/reference",
+    "/settings?return=/api/../x",
+    "/settings?return=/%41pi/../x",
+  ]) {
+    const response = await request.get(shellPath);
+    expect(response.status(), shellPath).toBe(200);
+    expect(await response.text(), shellPath).toContain(
+      "<title>hyperbolic-core</title>",
+    );
+  }
+
+  const encodedEntity = await request.get(
+    "/life/entities/id%2Fwith%2Fslashes",
+  );
+  expect(encodedEntity.status()).toBe(200);
+  expect(await encodedEntity.text()).toContain("<title>lifeos</title>");
+
+  for (const apiPath of ["/api/healthz", "/api/brain/health", "/life/api/healthz"]) {
+    await expectStubApiResponse(await request.get(apiPath), apiPath);
+  }
+});
+
+test("an encoded traversal out of LifeOS remains Shell-owned", async ({ request }) => {
+  const encodedPath = "/life%2F..%2Fsettings";
+  const response = await request.get(encodedPath, { maxRedirects: 0 });
+  expect(new URL(response.url()).pathname).toBe(encodedPath);
+  expect(response.status()).toBe(200);
+  const body = await response.text();
+  expect(body).toContain("<title>hyperbolic-core</title>");
+  expect(body).not.toContain("<title>lifeos</title>");
+});
+
+test("an encoded dot traversal above the origin root is rejected before SPA fallback", async ({
+  request,
+}) => {
+  const encodedPath = "/%2e%2e%2Flife%2Fcapture";
+  const response = await request.get(encodedPath, { maxRedirects: 0 });
+  expect(new URL(response.url()).pathname).toBe(encodedPath);
+  expect(response.status()).toBe(400);
+  const body = await response.text();
+  expect(body).not.toContain("<title>hyperbolic-core</title>");
+  expect(body).not.toContain("<title>lifeos</title>");
+});
+
+test("malformed percent request targets are rejected before either SPA fallback", async ({
+  request,
+}) => {
+  for (const malformedPath of ["/%zzlife/capture", "/life/%2", "/life/%"]) {
+    const response = await request.get(malformedPath, { maxRedirects: 0 });
+    expect(new URL(response.url()).pathname, malformedPath).toBe(malformedPath);
+    expect(response.status(), malformedPath).toBe(400);
+    const body = await response.text();
+    expect(body, malformedPath).not.toContain("<title>hyperbolic-core</title>");
+    expect(body, malformedPath).not.toContain("<title>lifeos</title>");
   }
 });
 

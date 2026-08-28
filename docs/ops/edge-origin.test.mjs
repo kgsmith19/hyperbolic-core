@@ -30,12 +30,12 @@ function serviceBlock(serviceName, nextServiceName) {
  */
 function privateRouteTable() {
   const routes = new Map();
-  for (const [route, body] of [
+  for (const [route, location] of [
     ...parseLocationBodies(nginxConf),
     ...parseLocationBodies(privateSpaConf),
   ]) {
-    if (route === "/healthz" || /\breturn 308\b/.test(body)) continue;
-    routes.set(route, routeTarget(body, route));
+    if (route === "/healthz" || /\breturn 308\b/.test(location.body)) continue;
+    routes.set(route, routeMapping(location.body, route));
   }
   return routes;
 }
@@ -50,7 +50,7 @@ function uncomment(text) {
 
 /**
  * Line-based parser for `location [=] <path> { ... }` blocks, each on its
- * own line with the closing `}` on its own line (this repo's nginx files
+ * own line with braces balanced inside the block (this repo's nginx files
  * are hand-formatted that way). Deliberately line-aware rather than a
  * multiline regex over the whole file: a regex search for the substring
  * "location ... { ... }" would just as happily match inside a `# location
@@ -65,28 +65,37 @@ function parseLocationBodies(confText) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (line === "" || line.startsWith("#")) continue;
-    const opening = line.match(/^location\s+(?:(?:=|\^~)\s*)?(\S+)\s*\{$/);
+    const opening = line.match(/^location\s+(?:(=|\^~)\s*)?(\S+)\s*\{$/);
     if (!opening) continue;
-    const locationPath = opening[1];
+    const locationPath = opening[2];
     const bodyLines = [];
+    let depth = 1;
     i += 1;
-    while (i < lines.length && lines[i].trim() !== "}") {
+    while (i < lines.length) {
+      const directive = lines[i].replace(/#.*/, "");
+      depth += (directive.match(/\{/g) ?? []).length;
+      depth -= (directive.match(/\}/g) ?? []).length;
+      if (depth === 0) break;
       bodyLines.push(lines[i]);
       i += 1;
     }
-    locations.set(locationPath, bodyLines.join("\n"));
+    assert.equal(depth, 0, `unterminated location ${locationPath}`);
+    locations.set(locationPath, {
+      modifier: opening[1] ?? "",
+      body: bodyLines.join("\n"),
+    });
   }
   return locations;
 }
 
-/** Extracts the root/alias/proxy_pass value from a location block's body. */
-function routeTarget(body, locationPath) {
-  const targetMatch = body.match(/\b(?:root|alias|proxy_pass)\s+(\S+?);/);
+/** Extracts the root/alias/proxy_pass directive and value from a location. */
+function routeMapping(body, locationPath) {
+  const targetMatch = body.match(/\b(root|alias|proxy_pass)\s+(\S+?);/);
   assert.ok(targetMatch, `location ${locationPath} has no root/alias/proxy_pass`);
-  return targetMatch[1];
+  return { directive: targetMatch[1], target: targetMatch[2] };
 }
 
-/** Strips exactly one trailing slash, for comparing alias vs. root targets. */
+/** Strips exactly one trailing slash when comparing root targets. */
 function withoutTrailingSlash(value) {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
@@ -115,23 +124,77 @@ test("the commented-out public template covers every private application route, 
   assert.deepEqual([...templateLocations.keys()].sort(), [...privateRoutes.keys()].sort());
 });
 
-test("every public_paths.conf target matches its private nginx target", () => {
+function assertPublicTargetsMatch(publicConfig) {
   const privateRoutes = privateRouteTable();
-  const templateLocations = parseLocationBodies(uncomment(publicPathsConf));
-  for (const [locationPath, body] of templateLocations) {
-    const nginxTarget = routeTarget(body, locationPath);
+  const templateLocations = parseLocationBodies(uncomment(publicConfig));
+  for (const [locationPath, location] of templateLocations) {
+    const actual = routeMapping(location.body, locationPath);
     const expected = privateRoutes.get(locationPath);
     assert.ok(expected, `public_paths.conf has a route tailscale-serve-apply.sh does not: ${locationPath}`);
-    if (expected.startsWith("http://")) {
-      // Reverse-proxy targets carry the loopback port -- compare byte for byte.
-      assert.equal(nginxTarget, expected, `${locationPath}: proxy target must match exactly, including the port`);
-    } else {
+    assert.equal(actual.directive, expected.directive, `${locationPath}: target directive must match`);
+    if (expected.directive === "root") {
       assert.equal(
-        withoutTrailingSlash(nginxTarget),
-        withoutTrailingSlash(expected),
-        `${locationPath}: static target must match`,
+        withoutTrailingSlash(actual.target),
+        withoutTrailingSlash(expected.target),
+        `${locationPath}: root target must match`,
+      );
+    } else if (expected.directive === "alias") {
+      assert.equal(
+        actual.target,
+        expected.target,
+        `${locationPath}: alias target must match byte-for-byte`,
+      );
+    } else {
+      // Reverse-proxy targets carry the loopback port -- compare byte for byte.
+      assert.equal(
+        actual.target,
+        expected.target,
+        `${locationPath}: proxy target must match exactly, including the port`,
       );
     }
+  }
+}
+
+test("every public_paths.conf target matches its private nginx target", () => {
+  assertPublicTargetsMatch(publicPathsConf);
+});
+
+test("public alias targets retain their nginx-significant trailing slashes", () => {
+  for (const [withSlash, withoutSlash] of [
+    [
+      "#     alias /home/deploy/lifeos-ui/current/;",
+      "#     alias /home/deploy/lifeos-ui/current;",
+    ],
+    [
+      "#     alias /home/deploy/lifeos-ui/current/assets/;",
+      "#     alias /home/deploy/lifeos-ui/current/assets;",
+    ],
+  ]) {
+    const mutated = publicPathsConf.replace(withSlash, withoutSlash);
+    assert.notEqual(mutated, publicPathsConf, `mutation fixture is absent: ${withSlash}`);
+    assert.throws(
+      () => assertPublicTargetsMatch(mutated),
+      /alias target must match byte-for-byte/,
+    );
+  }
+});
+
+test("the public template preserves the private static namespace policy", () => {
+  const privateLocations = parseLocationBodies(privateSpaConf);
+  const templateLocations = parseLocationBodies(uncomment(publicPathsConf));
+
+  for (const locationPath of ["/assets/", "/life/assets/"]) {
+    const privateLocation = privateLocations.get(locationPath);
+    const templateLocation = templateLocations.get(locationPath);
+    assert.ok(privateLocation, `private route is missing ${locationPath}`);
+    assert.ok(templateLocation, `public template is missing ${locationPath}`);
+    assert.equal(privateLocation.modifier, "^~", `${locationPath}: private modifier`);
+    assert.equal(templateLocation.modifier, "^~", `${locationPath}: public modifier`);
+  }
+
+  for (const locations of [privateLocations, templateLocations]) {
+    assert.match(locations.get("/assets/").body, /\btry_files \$uri =404;/);
+    assert.doesNotMatch(locations.get("/life/assets/").body, /\bindex\.html\b/);
   }
 });
 
@@ -181,8 +244,11 @@ test("public_paths.conf, with every path uncommented, is structurally well-forme
   // fake, semicolon-less "directives" and fail this check for the wrong
   // reason.
   const templateLocations = parseLocationBodies(uncomment(publicPathsConf));
-  for (const [locationPath, body] of templateLocations) {
-    assertStructurallyValid(`location ${locationPath} {\n${body}\n}`, `public_paths.conf: location ${locationPath}`);
+  for (const [locationPath, location] of templateLocations) {
+    assertStructurallyValid(
+      `location ${locationPath} {\n${location.body}\n}`,
+      `public_paths.conf: location ${locationPath}`,
+    );
   }
 });
 

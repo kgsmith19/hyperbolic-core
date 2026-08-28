@@ -20,6 +20,15 @@ describe("sanitizeReturnPath: legitimate same-origin targets pass through unchan
       "/life/capture?mode=quick#details",
       "/life/capture?mode=quick#details",
     ],
+    [
+      "/life/%FF?mode=quick#entry",
+      "/life/%FF?mode=quick#entry",
+    ],
+    [
+      "/life/entities/id%2Fwith%2Fslashes",
+      "/life/entities/id%2Fwith%2Fslashes",
+    ],
+    ["/life%252Fcapture", "/life%252Fcapture"],
   ])("%s -> %s", (input, expected) => {
     expect(sanitizeReturnPath(input)).toBe(expected);
   });
@@ -61,6 +70,35 @@ describe("sanitizeReturnPath: rejects targets that would leave this document/ori
     "/tools\u001fnext",
     "/tools\u007fnext",
   ])("%s -> /", (input) => {
+    expect(sanitizeReturnPath(input)).toBe("/");
+  });
+});
+
+describe("sanitizeReturnPath: rejects server-invalid normalized paths", () => {
+  it.each([
+    ["above-root decoded traversal", "/%2e%2e%2Flife%2Fcapture"],
+    ["decoded NUL", "/life%2F%00?mode=quick#entry"],
+    ["non-hex percent escape", "/life/%zz?mode=quick#entry"],
+    ["short percent escape", "/life/%2"],
+    ["terminal percent", "/life/%"],
+  ])("%s falls back to /", (_label, input) => {
+    expect(sanitizeReturnPath(input)).toBe("/");
+  });
+});
+
+describe("sanitizeReturnPath: rejects document targets the destination bundle cannot mount", () => {
+  it.each([
+    ["encoded zone root", "/%6cife/capture"],
+    ["encoded bare zone root", "/%6cife"],
+    ["encoded separator", "/life%2Fcapture"],
+    ["encoded trailing separator", "/life%2F"],
+    ["encoded root and separator", "/%6cife%2Fcapture"],
+    ["encoded leading separator", "/%2Flife/capture"],
+    [
+      "encoded traversal into the zone",
+      "/shell/%2e%2e%2Flife%2Fcapture?mode=quick#entry",
+    ],
+  ])("%s falls back to /", (_label, input) => {
     expect(sanitizeReturnPath(input)).toBe("/");
   });
 });
