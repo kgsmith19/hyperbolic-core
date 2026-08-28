@@ -59,6 +59,16 @@ const recheckYaml = readFileSync(recheckPath, "utf8");
 const reviewActionYaml = readFileSync(reviewActionPath, "utf8");
 const runbook = readFileSync(runbookPath, "utf8");
 
+// Issue #355's own oracles read dev-agent-dispatch.yml through a
+// line-ending-normalized copy. `core.autocrlf=true` is the default on
+// Windows, so the same committed LF file is CRLF in a Windows working tree,
+// and a locator like `indexOf("id: pr\n")` then finds nothing -- which is
+// indistinguishable from the step having been deleted. That is a silently
+// passing security oracle on one platform and a failing one on the other, so
+// the containment assertions below normalize rather than skip. Line endings
+// are not part of any claim any of them makes.
+const dispatchYamlLf = dispatchYaml.replace(/\r\n/g, "\n");
+
 // Issue #304: provider-company separation is a credential boundary, not only
 // a model-dispatch check. The action must execute packages/review's canonical
 // validator before Infisical imports the selected reviewer credential.
@@ -525,22 +535,25 @@ function loadDialogueScript() {
   return new AsyncFunction("require", "context", "core", "github", "process", extractScript(dialogueYaml, marker));
 }
 
-// The preflight step is the FIRST script: | block in dev-agent-dispatch.yml,
-// so extractScript's default fromIndex finds it directly.
-function loadPreflightScript() {
-  const marker = dispatchYaml.indexOf("Preflight · Resolve the dev provider");
-  assert.ok(marker >= 0, "dev-agent-dispatch.yml: preflight step not found");
-  return new AsyncFunction("require", "context", "core", "github", "process", extractScript(dispatchYaml, marker));
+const VALIDATION_STEP = "Preflight · Validate dispatch, dev role, and exact PR head";
+const CREDENTIAL_STEP = "Preflight · Confirm the dev agent's credentials are provisioned";
+
+// Issue #355 splits what used to be one "resolve the provider and check its
+// credential" preflight into two steps either side of the Infisical pull:
+// this one runs FIRST, with no secret in scope at all, and decides whether
+// the dispatch is eligible to reach a credential in the first place.
+function loadValidationScript() {
+  const marker = dispatchYamlLf.indexOf(VALIDATION_STEP);
+  assert.ok(marker >= 0, `dev-agent-dispatch.yml: step "${VALIDATION_STEP}" not found`);
+  return new AsyncFunction("require", "context", "core", "github", "process", extractScript(dispatchYamlLf, marker));
 }
 
-function loadDispatchPrCheckScript() {
-  // Newline-terminated: "id: pr" is also a PREFIX of the earlier preflight
-  // step's own "id: preflight", so a bare substring search would now match
-  // that step instead (Issue #252's follow-on slice 7 added it ahead of this
-  // one) and hand back the wrong script entirely.
-  const marker = dispatchYaml.indexOf("id: pr\n");
-  assert.ok(marker >= 0, "dev-agent-dispatch.yml: no `id: pr` step found");
-  return new AsyncFunction("context", "core", "github", "process", extractScript(dispatchYaml, marker));
+// The credential half of the split above -- runs only after eligibility, and
+// only after the Infisical pull has put the secrets in scope.
+function loadCredentialPreflightScript() {
+  const marker = dispatchYamlLf.indexOf(CREDENTIAL_STEP);
+  assert.ok(marker >= 0, `dev-agent-dispatch.yml: step "${CREDENTIAL_STEP}" not found`);
+  return new AsyncFunction("require", "context", "core", "github", "process", extractScript(dispatchYamlLf, marker));
 }
 
 // dev-agent-dispatch.yml's LAST script: | block (Issue #262's follow-on
@@ -548,9 +561,9 @@ function loadDispatchPrCheckScript() {
 // without pushing. Located by its own step name, same as every other
 // multi-block extractor in this file.
 function loadRecheckFireScript() {
-  const marker = dispatchYaml.indexOf("Recheck · Fire a recheck if the agent replied without pushing a commit");
+  const marker = dispatchYamlLf.indexOf("Recheck · Fire a recheck if the agent replied without pushing a commit");
   assert.ok(marker >= 0, "dev-agent-dispatch.yml: recheck-fire step not found");
-  return new AsyncFunction("context", "core", "github", "process", extractScript(dispatchYaml, marker));
+  return new AsyncFunction("context", "core", "github", "process", extractScript(dispatchYamlLf, marker));
 }
 
 // llm-review-recheck.yml's own staleness guard -- the FIRST (and only)
@@ -730,31 +743,45 @@ test("llm-review-dialogue.yml sources the dev agent's Anthropic credential from 
 // Mirrors the test above, for dev-agent-dispatch.yml's own consumption of the
 // same Infisical-sourced credential (both the preflight presence-check and
 // the actual claude-code-action invocation).
-test("dev-agent-dispatch.yml pulls its own Anthropic credential from Infisical's /dev/ path, before preflight runs", () => {
-  const pullStart = dispatchYaml.indexOf("Setup · Pull the dev App's credentials from Infisical");
+//
+// ORACLE CHANGE (Issue #355): this test previously required the Infisical
+// pull to run BEFORE the preflight. #355 inverts that deliberately -- the
+// dispatch is now validated before any secret is pulled at all -- so the
+// ordering claim moved to the containment section below, which asserts the
+// new order positively. What survives here unchanged is the claim this test
+// was actually written for: WHERE the credential comes from (Infisical's
+// /dev/ path, never a raw GitHub secret). The credential-presence env block
+// moved with the check itself, to the credential-only preflight step.
+test("dev-agent-dispatch.yml pulls its own Anthropic credential from Infisical's /dev/ path, never a GitHub secret", () => {
+  const pullStart = dispatchYamlLf.indexOf("Setup · Pull the dev App's credentials from Infisical");
   assert.ok(pullStart >= 0, "no dev App Infisical pull step found");
-  const preflightStart = dispatchYaml.indexOf("Preflight · Resolve the dev provider");
-  assert.ok(pullStart < preflightStart, "the Infisical pull must run BEFORE preflight, so preflight can see its env vars");
 
-  const pullStepStart = dispatchYaml.lastIndexOf("- name:", pullStart);
-  const pullBlock = dispatchYaml.slice(pullStepStart, dispatchYaml.indexOf("- name:", pullStart));
+  const pullStepStart = dispatchYamlLf.lastIndexOf("- name:", pullStart);
+  const pullBlock = dispatchYamlLf.slice(pullStepStart, dispatchYamlLf.indexOf("- name:", pullStart));
   assert.match(pullBlock, /secret-path:\s*"\/dev\/"/);
   assert.match(pullBlock, /identity-id:\s*\$\{\{\s*vars\.INFISICAL_DEV_IDENTITY_ID\s*\}\}/);
 
-  const preflightBlock = dispatchYaml.slice(preflightStart, dispatchYaml.indexOf("with:", preflightStart));
-  assert.match(preflightBlock, /OAUTH:\s*\$\{\{\s*env\.DEV_CLAUDE_CODE_OAUTH_TOKEN\s*\}\}/);
-  assert.match(preflightBlock, /API_KEY:\s*\$\{\{\s*env\.DEV_ANTHROPIC_API_KEY\s*\}\}/);
-  assert.doesNotMatch(preflightBlock, /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, "must not fall back to a raw GitHub secret");
-  assert.doesNotMatch(preflightBlock, /secrets\.ANTHROPIC_API_KEY/, "must not fall back to a raw GitHub secret");
+  const credentialStart = dispatchYamlLf.indexOf(CREDENTIAL_STEP);
+  assert.ok(credentialStart >= 0, `no "${CREDENTIAL_STEP}" step found`);
+  const credentialBlock = dispatchYamlLf.slice(credentialStart, dispatchYamlLf.indexOf("with:", credentialStart));
+  assert.match(credentialBlock, /OAUTH:\s*\$\{\{\s*env\.DEV_CLAUDE_CODE_OAUTH_TOKEN\s*\}\}/);
+  assert.match(credentialBlock, /API_KEY:\s*\$\{\{\s*env\.DEV_ANTHROPIC_API_KEY\s*\}\}/);
+  assert.doesNotMatch(credentialBlock, /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, "must not fall back to a raw GitHub secret");
+  assert.doesNotMatch(credentialBlock, /secrets\.ANTHROPIC_API_KEY/, "must not fall back to a raw GitHub secret");
 
-  const resolveStart = dispatchYaml.indexOf("Resolve · Hand the findings to the developer agent");
-  const resolveBlock = dispatchYaml.slice(resolveStart, dispatchYaml.indexOf("prompt:", resolveStart));
+  const resolveStart = dispatchYamlLf.indexOf("Resolve · Hand the findings to the developer agent");
+  const resolveBlock = dispatchYamlLf.slice(resolveStart, dispatchYamlLf.indexOf("prompt:", resolveStart));
   assert.match(resolveBlock, /claude_code_oauth_token:\s*\$\{\{\s*env\.DEV_CLAUDE_CODE_OAUTH_TOKEN\s*\}\}/);
   assert.match(resolveBlock, /anthropic_api_key:\s*\$\{\{\s*env\.DEV_ANTHROPIC_API_KEY\s*\}\}/);
   assert.match(
     resolveBlock,
     /claude_args:\s*\|[\s\S]*--model\s+\$\{\{\s*steps\.preflight\.outputs\.model\s*\}\}/,
     "the declared dev.model must be passed to Claude Code, not merely printed in a footer"
+  );
+  assert.doesNotMatch(
+    resolveBlock,
+    /DEV_GITHUB_APP_PRIVATE_KEY/,
+    "Issue #355: the agent step runs pull-request-authored code and must never see the App private key"
   );
 
   // Whole-file, not just the sliced blocks above -- see the sibling test's
@@ -771,12 +798,24 @@ test("llm-review-dialogue.yml refuses fork pull requests before doing anything",
   assert.match(ifLine, /head_repository\.fork == false/);
 });
 
-test("dev-agent-dispatch.yml triggers on repository_dispatch only, and is the one workflow allowed to check out and write at once", () => {
-  const onBlock = dispatchYaml.slice(dispatchYaml.indexOf("\non:"), dispatchYaml.indexOf("\npermissions:"));
+// ORACLE CHANGE (Issue #355): the final assertion here used to be
+// `contents: write` -- this was the one workflow that checked out
+// pull-request-authored code while holding an ambient write token. #355
+// removes that grant: the workflow still checks out and still writes, but
+// the write capability now arrives ONLY as the short-lived dev App
+// installation token, minted after validation. The replacement assertion is
+// therefore the inverse, and the positive half of the claim (that a real
+// write path still exists) is asserted in the containment section below
+// against the App token specifically.
+test("dev-agent-dispatch.yml triggers on repository_dispatch only, and checks out without any ambient write grant", () => {
+  const onBlock = dispatchYamlLf.slice(dispatchYamlLf.indexOf("\non:"), dispatchYamlLf.indexOf("\npermissions:"));
   assert.match(onBlock, /repository_dispatch:/);
   assert.doesNotMatch(onBlock, /pull_request(_target)?:/);
-  assert.match(dispatchYaml, /uses: actions\/checkout/);
-  assert.match(dispatchYaml, /contents:\s*write/);
+  assert.match(dispatchYamlLf, /uses: actions\/checkout/);
+  for (const block of permissionsBlocks(dispatchYamlLf)) {
+    assert.doesNotMatch(block, /contents:\s*write/, "Issue #355: no ambient contents: write");
+    assert.doesNotMatch(block, /pull-requests:\s*write/, "Issue #355: no ambient pull-requests: write");
+  }
 });
 
 // Issue #290. Structural, not behavioral -- this proves the instruction is
@@ -1999,187 +2038,576 @@ test("dialogue: an entry in verdict.discarded never counts toward blocking, even
 });
 
 // ---------------------------------------------------------------------------
-// Behavioral: dev-agent-dispatch.yml's preflight -- resolves dev.provider
-// from the DEFAULT branch's agent-roles.yaml and confirms that provider's
-// credential is provisioned, before ever checking out a pull request.
+// Structural: Issue #355 -- dispatch credential containment.
+//
+// This workflow is the single place in the repository where three things
+// meet: pull-request-authored code is checked out and EXECUTED, a model
+// credential is in scope, and something able to write to the repository is
+// in scope. Before #355 the containment for that was entirely upstream --
+// llm-review-dialogue.yml only dispatches for same-repository pull requests
+// -- and upstream-only containment fails the moment anything else learns to
+// fire an `llm-review-finding` repository_dispatch. `repository_dispatch`
+// carries an attacker-shaped `client_payload` by construction: it is a plain
+// JSON body posted to an API, not a GitHub-populated event context.
+//
+// So the invariant these tests pin is ordering, not merely presence: the
+// dispatch is proved to name an open, same-repository, non-fork pull request
+// at the exact head it claims BEFORE any secret exists in the job at all,
+// and the App private key is destroyed BEFORE the checkout that brings
+// pull-request-authored content onto the runner.
 // ---------------------------------------------------------------------------
 
-function agentRolesFixture(devProvider) {
-  return Buffer.from(`dev:\n  provider: ${devProvider}\n  model: x\n\nreview:\n  provider: openai\n  model: y\n`, "utf8").toString("base64");
+// Every `- name:` step in the job, in file order, with its own block text.
+function dispatchSteps() {
+  const stepsStart = dispatchYamlLf.indexOf("\n    steps:\n");
+  assert.ok(stepsStart >= 0, "dev-agent-dispatch.yml: no steps: block found");
+  const body = dispatchYamlLf.slice(stepsStart);
+  const steps = [];
+  const pattern = /\n {6}- name: (.+)/g;
+  for (const match of body.matchAll(pattern)) {
+    steps.push({ name: match[1].trim(), index: match.index });
+  }
+  assert.ok(steps.length > 0, "dev-agent-dispatch.yml: no named steps found");
+  return steps.map((step, i) => ({
+    ...step,
+    block: body.slice(step.index, i + 1 < steps.length ? steps[i + 1].index : undefined),
+  }));
 }
 
-async function runPreflightScript({
+function dispatchStep(name) {
+  const step = dispatchSteps().find((candidate) => candidate.name.includes(name));
+  assert.ok(step, `dev-agent-dispatch.yml: step matching "${name}" not found`);
+  return step;
+}
+
+// A `permissions:` block parsed into its actual scope/level pairs, so the
+// assertion can be an exact set rather than a grep for the two levels
+// someone happened to think of.
+function parsePermissions(block) {
+  const parsed = {};
+  for (const line of block.split("\n")) {
+    const match = /^\s*([a-z-]+):\s*(\S+)\s*$/.exec(line);
+    if (match) parsed[match[1]] = match[2];
+  }
+  return parsed;
+}
+
+// THE CORE ORDERING INVARIANT. Behavior protected: nothing that pulls,
+// mints, or exposes a credential -- and nothing that brings pull-request
+// content onto the runner -- can run before the dispatch has been validated.
+// Defect caught: the pre-#355 shape exactly, where the Infisical pull was
+// the FIRST step in the job and therefore ran for a malformed, forked, or
+// closed-PR dispatch just as readily as a real one.
+test("dispatch containment: validation runs first, then credentials, mint, clear, checkout, agent -- in that order", () => {
+  const names = dispatchSteps().map((step) => step.name);
+  const at = (needle) => {
+    const index = names.findIndex((name) => name.includes(needle));
+    assert.ok(index >= 0, `dev-agent-dispatch.yml: no step matching "${needle}"`);
+    return index;
+  };
+
+  assert.equal(names[0], VALIDATION_STEP, "the validation step must be the FIRST executable step in the job");
+
+  const validate = at(VALIDATION_STEP);
+  const infisical = at("Pull the dev App's credentials from Infisical");
+  const credentials = at(CREDENTIAL_STEP);
+  const mint = at("Mint the dev App's installation token");
+  const clear = at("Clear the dev App's private key");
+  const checkout = at("Checkout the validated pull request head");
+  const agent = at("Hand the findings to the developer agent");
+
+  assert.ok(validate < infisical, "no secret may be pulled before the dispatch is validated");
+  assert.ok(infisical < credentials, "the credential check needs the pulled secrets in scope");
+  assert.ok(credentials < mint, "mint only after the App credential is confirmed present");
+  assert.ok(mint < clear, "the private key can only be cleared once it has been exchanged for a token");
+  assert.ok(clear < checkout, "the private key must be gone BEFORE pull-request content reaches the runner");
+  assert.ok(checkout < agent, "the agent runs against the checked-out validated head");
+});
+
+// Behavior protected: the ambient GITHUB_TOKEN this job holds while running
+// pull-request-authored code cannot write anything. Asserted as an exact set
+// rather than a pair of doesNotMatch greps, so a newly-added `issues: write`
+// -- a level neither this test nor its author thought of -- fails too.
+test("dispatch containment: ambient job permissions are exactly contents/pull-requests read plus OIDC", () => {
+  const blocks = permissionsBlocks(dispatchYamlLf);
+  assert.equal(blocks.length, 2, "expected exactly a workflow-level and a job-level permissions block");
+
+  assert.deepEqual(parsePermissions(blocks[0]), { contents: "read" }, "workflow-level default stays read-only");
+  assert.deepEqual(
+    parsePermissions(blocks[1]),
+    { contents: "read", "pull-requests": "read", "id-token": "write" },
+    "the job's ambient token must be read-only; id-token: write is the OIDC exchange, not repository write"
+  );
+});
+
+// Behavior protected: the validation step decides eligibility with NO secret
+// in scope. Defect caught: reintroducing the credential-presence env block
+// into the first step, which would put the App private key into the
+// environment of the one step whose whole job is to run before secrets exist.
+test("dispatch containment: the validation step is reached with no secret-valued env", () => {
+  const validation = dispatchStep(VALIDATION_STEP);
+  const envBlock = validation.block.slice(0, validation.block.indexOf("with:"));
+  assert.doesNotMatch(envBlock, /DEV_GITHUB_APP_PRIVATE_KEY/);
+  assert.doesNotMatch(envBlock, /DEV_GITHUB_APP_ID/);
+  assert.doesNotMatch(envBlock, /DEV_ANTHROPIC_API_KEY/);
+  assert.doesNotMatch(envBlock, /DEV_CLAUDE_CODE_OAUTH_TOKEN/);
+  assert.match(envBlock, /PR_NUMBER:\s*\$\{\{\s*github\.event\.client_payload\.prNumber\s*\}\}/);
+  assert.match(envBlock, /DISPATCH_HEAD_SHA:\s*\$\{\{\s*github\.event\.client_payload\.headSha\s*\}\}/);
+});
+
+// Behavior protected: EVERY step after validation is gated on the validation
+// verdict, with the exact same expression. Defect caught: a step added later
+// without a guard, or with a subtly weaker one (`!= 'false'`, `!cancelled()`)
+// that lets an ineligible dispatch through the one door nobody re-checked.
+test("dispatch containment: every step after validation is guarded on eligible == 'true'", () => {
+  const [first, ...rest] = dispatchSteps();
+  assert.equal(first.name, VALIDATION_STEP);
+  assert.ok(rest.length >= 6, "expected the credential, mint, clear, checkout, agent and recheck steps");
+
+  for (const step of rest) {
+    const guard = /\n {8}if: steps\.preflight\.outputs\.eligible == 'true'\n/;
+    assert.match(step.block, guard, `step "${step.name}" is not guarded on the validation verdict`);
+  }
+});
+
+// Behavior protected: the App private key is removed from the job
+// environment, via GITHUB_ENV so the removal outlives the step, before any
+// pull-request-authored content is on the runner -- and is never referenced
+// again afterwards. Defect caught: a later step re-reading
+// env.DEV_GITHUB_APP_PRIVATE_KEY (for a second mint, say), which would mean
+// the key was still live while the agent executed PR code all along.
+test("dispatch containment: the App private key is cleared through GITHUB_ENV before checkout, and never referenced after", () => {
+  const clear = dispatchStep("Clear the dev App's private key");
+  assert.match(clear.block, /GITHUB_ENV/, "the clear must persist past this step, which means writing GITHUB_ENV");
+  assert.match(clear.block, /DEV_GITHUB_APP_ID=/, "must clear the App ID");
+  assert.match(clear.block, /DEV_GITHUB_APP_PRIVATE_KEY=/, "must clear the App private key");
+
+  const after = dispatchYamlLf.slice(dispatchYamlLf.indexOf(clear.block) + clear.block.length);
+  assert.doesNotMatch(after, /DEV_GITHUB_APP_PRIVATE_KEY/, "no reference to the private key after it is cleared");
+  assert.doesNotMatch(after, /DEV_GITHUB_APP_ID/, "no reference to the App ID after it is cleared");
+});
+
+// Behavior protected: the checkout takes the exact SHA the validation step
+// verified, not a branch name that can be force-pushed between validation
+// and checkout; brings no credential with it that survives into the working
+// tree; and authenticates with the short-lived App token rather than the
+// ambient one. Defect caught: `ref:` reverting to the branch ref, which
+// reopens a real TOCTOU window -- validation proves head X is safe, then
+// checkout fetches whatever the branch points at now.
+test("dispatch containment: checkout takes the validated SHA, with no persisted credential", () => {
+  const checkout = dispatchStep("Checkout the validated pull request head");
+  assert.match(checkout.block, /uses: actions\/checkout/);
+  assert.match(
+    checkout.block,
+    /ref:\s*\$\{\{\s*steps\.preflight\.outputs\.head_sha\s*\}\}/,
+    "must check out the validated SHA, never a mutable branch ref"
+  );
+  assert.match(checkout.block, /fetch-depth:\s*0/);
+  assert.match(checkout.block, /persist-credentials:\s*false/);
+  assert.match(checkout.block, /token:\s*\$\{\{\s*steps\.dev-app-token\.outputs\.token\s*\}\}/);
+});
+
+// Behavior protected: the agent's only GitHub capability is the short-lived
+// App installation token, and it will act on events from exactly one trusted
+// bot -- the reviewer App that raises the findings. Defect caught: a
+// wildcard or a `github-actions` entry, either of which would accept any
+// workflow-authored event in the repository as a legitimate initiator.
+//
+// The Controller App assertion is a DOCUMENTATION oracle, and weaker than
+// the rest of this test by design: it proves the deferral is recorded, not
+// that the login is right. `hyperbolic-core-controller[bot]` does not
+// resolve against the users API today, so allowlisting it now would be
+// squatting on a name nobody has provisioned -- exactly the way a future
+// unrelated App could inherit trust it was never granted.
+test("dispatch containment: the agent gets the App token only, and trusts only the provisioned reviewer bot", () => {
+  const agent = dispatchStep("Hand the findings to the developer agent");
+  const inputs = agent.block.slice(0, agent.block.indexOf("prompt:"));
+
+  assert.match(inputs, /github_token:\s*\$\{\{\s*steps\.dev-app-token\.outputs\.token\s*\}\}/);
+  assert.doesNotMatch(inputs, /github\.token/, "no ambient-token fallback for the agent's GitHub operations");
+  assert.match(inputs, /allowed_bots:\s*hyperbolic-core-reviewer\[bot\]\s*$/m, "exactly the reviewer App, nothing else");
+  assert.doesNotMatch(inputs, /allowed_bots:.*\*/, "never a wildcard initiator allowlist");
+  assert.doesNotMatch(inputs, /allowed_bots:.*github-actions/, "github-actions[bot] is every workflow in the repo, not an identity");
+
+  assert.match(
+    dispatchYamlLf,
+    /Milestone 2[\s\S]{0,400}?[Cc]ontroller App/,
+    "the deferred Controller App entry must stay recorded until the login is provisioned and verified"
+  );
+});
+
+// Behavior protected: the recheck dispatch -- the one repository mutation
+// this job performs directly, rather than through the agent -- is issued
+// with the App token, not the ambient read-only one. Defect caught: dropping
+// the github-token input, which makes the step silently fall back to the
+// ambient token; post-#355 that token can no longer create a dispatch event,
+// so the review loop would stall on every comment-only reply.
+test("dispatch containment: the recheck dispatch is issued with the dev App token", () => {
+  const recheck = dispatchStep("Fire a recheck if the agent replied without pushing a commit");
+  const inputs = recheck.block.slice(0, recheck.block.indexOf("script: |"));
+  assert.match(inputs, /github-token:\s*\$\{\{\s*steps\.dev-app-token\.outputs\.token\s*\}\}/);
+  assert.doesNotMatch(inputs, /github\.token/, "no ambient-token fallback for a repository mutation");
+});
+
+// ---------------------------------------------------------------------------
+// Behavioral: dev-agent-dispatch.yml's validation step (Issue #355) --
+// schema, dev role from the DEFAULT branch, and the live pull request, in
+// that order, with the cheapest checks first so a malformed payload never
+// costs an API call.
+// ---------------------------------------------------------------------------
+
+const THIS_REPO = { owner: "kgsmith19", repo: "hyperbolic-core" };
+const THIS_REPO_FULL_NAME = "kgsmith19/hyperbolic-core";
+const VALID_RUN_URL = `https://github.com/${THIS_REPO_FULL_NAME}/actions/runs/17284419901`;
+
+function agentRolesFixture(devProvider, devModel = "x") {
+  return Buffer.from(
+    `dev:\n  provider: ${devProvider}\n  model: ${devModel}\n\nreview:\n  provider: openai\n  model: y\n`,
+    "utf8"
+  ).toString("base64");
+}
+
+function livePr(overrides = {}) {
+  return {
+    number: 230,
+    state: "open",
+    head: { sha: HEAD, ref: "issue/355-x", repo: { fork: false, full_name: THIS_REPO_FULL_NAME } },
+    base: { repo: { full_name: THIS_REPO_FULL_NAME } },
+    ...overrides,
+  };
+}
+
+function validationSource() {
+  const marker = dispatchYamlLf.indexOf(VALIDATION_STEP);
+  assert.ok(marker >= 0, `dev-agent-dispatch.yml: step "${VALIDATION_STEP}" not found`);
+  return extractScript(dispatchYamlLf, marker);
+}
+
+async function runValidation({
+  prNumber = "230",
+  headSha = HEAD,
+  round = "1",
+  runUrl = VALID_RUN_URL,
   devProvider = "anthropic",
-  oauth = "",
-  apiKey = "",
-  // Default to present: the App-credential check is independent of, and
-  // runs before, the model-credential check exercised by most of these
-  // tests -- defaulting them truthy keeps every pre-existing test exercising
-  // only the model-credential path unaffected by that addition.
-  appId = "app-id-value",
-  appPrivateKey = "app-private-key-value",
-  getContentThrows = false,
+  devModel = "x",
   agentRolesRaw = null,
+  getContentThrows = false,
+  pr = livePr(),
+  pullsGetThrows = false,
+  source = null,
+  // Caller-supplied so the recorded outputs survive a script that throws --
+  // the fail-closed test below needs to see what was written BEFORE the throw.
+  outputs = {},
 } = {}) {
-  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
-  const outputs = {};
+  const calls = { getContent: 0, pullsGet: 0 };
   let failure = null;
   const core = {
-    setOutput: (k, v) => (outputs[k] = v),
+    setOutput: (key, value) => (outputs[key] = value),
     setFailed: (message) => (failure = message),
     info: () => {},
+    warning: () => {},
   };
   const github = {
     rest: {
       repos: {
         getContent: async () => {
+          calls.getContent += 1;
           if (getContentThrows) throw new Error("simulated getContent failure");
-          return { data: { encoding: "base64", content: agentRolesRaw !== null ? agentRolesRaw : agentRolesFixture(devProvider) } };
+          return {
+            data: {
+              encoding: "base64",
+              content: agentRolesRaw !== null ? agentRolesRaw : agentRolesFixture(devProvider, devModel),
+            },
+          };
+        },
+      },
+      pulls: {
+        get: async () => {
+          calls.pullsGet += 1;
+          if (pullsGetThrows) throw new Error("simulated pulls.get failure");
+          return { data: pr };
         },
       },
     },
   };
-  const proc = { env: { OAUTH: oauth, API_KEY: apiKey, APP_ID: appId, APP_PRIVATE_KEY: appPrivateKey } };
-  await loadPreflightScript()(require, context, core, github, proc);
-  return { outputs, failure };
+  const proc = {
+    env: { PR_NUMBER: prNumber, DISPATCH_HEAD_SHA: headSha, ROUND: round, RUN_URL: runUrl },
+  };
+  const script = new AsyncFunction("require", "context", "core", "github", "process", source ?? validationSource());
+  await script(require, { repo: THIS_REPO }, core, github, proc);
+  return { outputs, failure, calls };
 }
 
-// POSITIVE CONTROL. Behavior protected: the common, currently-live case --
-// dev.provider is anthropic and a credential exists -- resolves cleanly.
-test("preflight: dev.provider=anthropic with a credential present resolves without failing", async () => {
-  const { outputs, failure } = await runPreflightScript({ devProvider: "anthropic", oauth: "token-value" });
+// POSITIVE CONTROL. Behavior protected: the real, everyday case -- an open,
+// same-repository pull request at exactly the dispatched head, with a
+// supported dev role -- is eligible, and every value the rest of the job
+// consumes comes out of THIS step rather than being re-read from the
+// attacker-shaped client_payload downstream.
+test("validation: an open same-repository PR at the exact dispatched head is eligible, and republishes every input", async () => {
+  const { outputs, failure } = await runValidation();
+
   assert.equal(failure, null);
+  assert.equal(outputs.eligible, "true");
+  assert.equal(outputs.pr_number, "230");
+  assert.equal(outputs.head_sha, HEAD);
+  assert.equal(outputs.branch, "issue/355-x");
   assert.equal(outputs.provider, "anthropic");
+  assert.equal(outputs.model, "x");
+  assert.equal(outputs.round, "1");
+  assert.equal(outputs.run_url, VALID_RUN_URL);
 });
 
-// Behavior protected: dev.provider=anthropic but NEITHER credential secret
-// is set fails closed, naming exactly which two secrets would satisfy it --
-// the same fail-loud contract the pre-generalization preflight had.
-test("preflight: dev.provider=anthropic with no credential fails closed and names both accepted secrets", async () => {
-  const { outputs, failure } = await runPreflightScript({ devProvider: "anthropic", oauth: "", apiKey: "" });
-  assert.equal(outputs.provider, "anthropic");
+// Behavior protected: eligibility is DENIED BY DEFAULT -- written false
+// before any check runs, so an unexpected failure mid-validation leaves an
+// explicit false behind rather than an unset output that every downstream
+// `if:` would then compare against an empty string. Defect caught: moving
+// the initial setOutput below the checks.
+//
+// The API failure itself must still propagate: a swallowed pulls.get error
+// would turn "GitHub was briefly unreachable" into a silent stand-down that
+// looks exactly like "this dispatch was stale", which AGENTS.md's own
+// no-silent-failure rule forbids. So both halves are asserted -- it throws,
+// AND it left false behind on the way out.
+test("validation: eligibility is written false before any check, so a mid-validation failure still fails closed", async () => {
+  const outputs = {};
+  await assert.rejects(
+    () => runValidation({ pullsGetThrows: true, outputs }),
+    /simulated pulls\.get failure/,
+    "an API failure during validation must surface, never be swallowed into a quiet stand-down"
+  );
+  assert.equal(outputs.eligible, "false", "eligibility must already be explicitly false when the failure hits");
+});
+
+// Behavior protected: the schema checks are genuinely FIRST -- a malformed
+// payload costs zero API calls. This is not only efficiency: the role lookup
+// and the PR lookup are the two places this job touches the network on
+// behalf of an unvalidated caller.
+for (const [label, payload] of [
+  ["a non-numeric PR number", { prNumber: "not-a-number" }],
+  ["a zero PR number", { prNumber: "0" }],
+  ["a negative PR number", { prNumber: "-3" }],
+  ["a fractional PR number", { prNumber: "2.5" }],
+  ["an empty PR number", { prNumber: "" }],
+  ["a short head SHA", { headSha: "abc1234" }],
+  ["an over-long head SHA", { headSha: "a".repeat(41) }],
+  ["a non-hex head SHA", { headSha: "z".repeat(40) }],
+  ["an empty head SHA", { headSha: "" }],
+  ["a zero round", { round: "0" }],
+  ["a non-numeric round", { round: "one" }],
+  ["an empty round", { round: "" }],
+  ["a run URL on another host", { runUrl: "https://evil.example.com/kgsmith19/hyperbolic-core/actions/runs/1" }],
+  ["a run URL for another repository", { runUrl: "https://github.com/someone/else/actions/runs/1" }],
+  ["a run URL that is not an Actions run", { runUrl: "https://github.com/kgsmith19/hyperbolic-core/issues/355" }],
+  ["a non-URL run reference", { runUrl: "javascript:alert(1)" }],
+]) {
+  test(`validation: ${label} is rejected before any role or pull-request lookup`, async () => {
+    const { outputs, failure, calls } = await runValidation(payload);
+
+    assert.notEqual(outputs.eligible, "true");
+    assert.ok(failure, "a malformed dispatch must fail loudly, not stand down quietly");
+    assert.equal(calls.getContent, 0, "no role lookup for a malformed payload");
+    assert.equal(calls.pullsGet, 0, "no pull-request lookup for a malformed payload");
+  });
+}
+
+// Behavior protected: an unsupported dev provider stops before the pull
+// request is even looked up. Defect caught: reordering the PR lookup ahead
+// of the role check, which would spend an API call on behalf of a dispatch
+// this job has already decided it cannot serve.
+for (const provider of ["openai", "google"]) {
+  test(`validation: dev.provider=${provider} fails closed without a pull-request lookup`, async () => {
+    const { outputs, failure, calls } = await runValidation({ devProvider: provider });
+
+    assert.notEqual(outputs.eligible, "true");
+    assert.equal(outputs.provider, provider, "the resolved provider is still reported, so the failure names it");
+    assert.match(failure, new RegExp(`dev\\.provider="${provider}"`));
+    assert.match(failure, /only implements "anthropic"/);
+    assert.equal(calls.getContent, 1);
+    assert.equal(calls.pullsGet, 0, "an unsupported provider must not reach the PR lookup");
+  });
+}
+
+// Behavior protected: the role policy must be READABLE and COMPLETE before
+// it is trusted. A blank provider or a blank model is not "close enough" --
+// the model id is interpolated into the agent's own command line, and an
+// empty one would silently run whatever the action defaults to.
+//
+// Every fixture below carries a `review:` block, because agent-roles.yaml
+// always does and the difference is not cosmetic: a parser that walks the
+// file rather than the `dev:` mapping reads the REVIEWER's values when the
+// dev block's own are missing. An isolated `dev:`-only fixture returns null
+// and makes that parser look fail-closed when it is not.
+for (const [label, fixture] of [
+  ["no recognizable dev block", "not: a\nrecognizable: shape\n"],
+  ["a blank dev.provider", 'dev:\n  provider: ""\n  model: x\n\nreview:\n  provider: openai\n  model: y\n'],
+  ["a blank dev.model", "dev:\n  provider: anthropic\n  model:\n\nreview:\n  provider: openai\n  model: gpt-5-mini\n"],
+  // The two that a file-wide parse gets actively WRONG rather than merely
+  // empty. Without dev.provider the reviewer's provider is read as the dev
+  // one -- and when the reviewer is the anthropic role, that resolves to the
+  // one supported adapter and runs, on a role policy that never named a dev
+  // provider at all. Without dev.model the model regex skips past the blank
+  // line and returns the literal "review:" as the model id, which is
+  // non-empty, passes a blank check, and reaches Claude Code's --model flag.
+  ["no dev.provider at all, above an anthropic review block", "dev:\n  model: claude-opus-5\n\nreview:\n  provider: anthropic\n  model: z\n"],
+  ["no dev.model at all, above a populated review block", "dev:\n  provider: anthropic\n\nreview:\n  provider: openai\n  model: gpt-5-mini\n"],
+]) {
+  test(`validation: agent-roles.yaml with ${label} fails closed without a pull-request lookup`, async () => {
+    const { outputs, failure, calls } = await runValidation({
+      agentRolesRaw: Buffer.from(fixture, "utf8").toString("base64"),
+    });
+
+    assert.notEqual(outputs.eligible, "true");
+    assert.ok(failure, "an unusable role policy must fail closed");
+    assert.equal(calls.pullsGet, 0);
+  });
+}
+
+test("validation: agent-roles.yaml unreadable from the default branch fails closed with the real error", async () => {
+  const { outputs, failure, calls } = await runValidation({ getContentThrows: true });
+  assert.notEqual(outputs.eligible, "true");
+  assert.match(failure, /simulated getContent failure/);
+  assert.equal(calls.pullsGet, 0);
+});
+
+// THE INDEPENDENT ORACLE for the role parser: the repository's own
+// committed agent-roles.yaml, not a fixture written to match the regex.
+// Every fixture above is a simplification, and a simplification is exactly
+// where a parser bug hides -- the real file carries a trailing `# ...`
+// comment on every value and a long comment header above the mappings, both
+// of which a naive parse gets wrong in a different direction from the blank
+// cases. This test fails if a fix for those over-corrects and stops reading
+// the file the workflow actually depends on.
+test("validation: the role parser resolves this repository's real agent-roles.yaml", async () => {
+  const real = readFileSync(path.join(root, "agent-roles.yaml"), "utf8");
+  const { outputs, failure } = await runValidation({
+    agentRolesRaw: Buffer.from(real, "utf8").toString("base64"),
+  });
+
+  assert.equal(failure, null, "the committed role policy must parse cleanly");
+  assert.equal(outputs.provider, "anthropic", "dev.provider, with its trailing inline comment stripped");
+  assert.equal(outputs.model, "claude-opus-5", "dev.model, with its trailing inline comment stripped");
+  assert.equal(outputs.eligible, "true");
+});
+
+// Behavior protected: the role policy is read from the DEFAULT branch, never
+// the dispatched pull request's own branch. Defect caught: adding a `ref:`
+// that points at the PR head, which would let a pull request grant itself a
+// different dev identity by editing its own agent-roles.yaml.
+test("validation: the role policy is read without a ref, which is the default branch", () => {
+  const source = validationSource();
+  const call = /getContent\(\{([^}]*)\}\)/.exec(source);
+  assert.ok(call, "the validation step must read agent-roles.yaml through the Contents API");
+  assert.doesNotMatch(call[1], /\bref\b/, "reading a ref would let the PR branch supply its own role policy");
+});
+
+// Behavior protected: the ways a pull request can be the wrong pull request.
+// The fork and cross-repository cases are the security ones -- this job
+// executes what it checks out, so a head outside this repository is
+// arbitrary third-party code running alongside a minted App token in the
+// job. The stale and closed cases preserve the pre-#355 stand-down behavior.
+for (const [label, override] of [
+  [
+    "a head that has moved on",
+    { head: { sha: "b".repeat(40), ref: "issue/355-x", repo: { fork: false, full_name: THIS_REPO_FULL_NAME } } },
+  ],
+  ["a closed pull request", { state: "closed" }],
+  ["a merged, now-closed pull request", { state: "closed", merged: true }],
+  ["a fork head", { head: { sha: HEAD, ref: "issue/355-x", repo: { fork: true, full_name: "attacker/hyperbolic-core" } } }],
+  [
+    "a same-name fork claiming not to be one",
+    { head: { sha: HEAD, ref: "issue/355-x", repo: { fork: false, full_name: "attacker/hyperbolic-core" } } },
+  ],
+  ["a deleted head repository", { head: { sha: HEAD, ref: "issue/355-x", repo: null } }],
+  ["a cross-repository base", { base: { repo: { full_name: "kgsmith19/somewhere-else" } } }],
+]) {
+  test(`validation: ${label} is not eligible`, async () => {
+    const { outputs } = await runValidation({ pr: livePr(override) });
+    assert.notEqual(outputs.eligible, "true", `${label} must never reach a credential`);
+  });
+}
+
+// MUTATION SENSITIVITY DEMONSTRATION (AGENTS.md > Intent and behavioral
+// claims: R2/R3 work touching a gate needs a demonstrated negative control).
+//
+// The fork/cross-repository tests above assert that a hostile head is
+// rejected -- but a test asserting "not eligible" passes just as happily
+// against a validation step that rejects EVERYTHING, or one that never sets
+// the output at all. So this applies a plausible targeted mutation to the
+// real extracted script -- collapsing the provenance guard's condition to
+// `false`, exactly what "simplifying a redundant check" would produce -- and
+// proves the suite's verdict flips. If this test ever fails, the fork tests
+// above have stopped being able to reject anything.
+test("validation NEGATIVE CONTROL: collapsing the provenance guard makes a fork dispatch eligible", async () => {
+  const source = validationSource();
+  const guard = /if \(([^\n]*headRepo[^\n]*)\) \{/.exec(source);
+  assert.ok(guard, "the validation step must guard on the head repository's provenance");
+
+  const mutated = source.replace(guard[1], "false");
+  assert.notEqual(mutated, source, "the mutation must actually change the script");
+
+  const fork = livePr({
+    head: { sha: HEAD, ref: "issue/355-x", repo: { fork: true, full_name: "attacker/hyperbolic-core" } },
+  });
+
+  const real = await runValidation({ pr: fork });
+  assert.notEqual(real.outputs.eligible, "true", "the real guard rejects the fork");
+
+  const mutant = await runValidation({ pr: fork, source: mutated });
+  assert.equal(
+    mutant.outputs.eligible,
+    "true",
+    "with the guard collapsed the fork becomes eligible -- which is what proves the guard, not the fixture, is doing the rejecting"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Behavioral: dev-agent-dispatch.yml's credential preflight (Issue #355) --
+// the second half of the split preflight. Runs only for an already-eligible
+// dispatch, after Infisical has put the secrets in scope, and checks only
+// that they are present. These claims are unchanged from the pre-#355
+// preflight; only the step they live in moved.
+// ---------------------------------------------------------------------------
+
+async function runCredentialPreflight({
+  oauth = "",
+  apiKey = "",
+  appId = "app-id-value",
+  appPrivateKey = "app-private-key-value",
+} = {}) {
+  let failure = null;
+  const core = { setFailed: (message) => (failure = message), info: () => {}, setOutput: () => {} };
+  const proc = { env: { OAUTH: oauth, API_KEY: apiKey, APP_ID: appId, APP_PRIVATE_KEY: appPrivateKey } };
+  await loadCredentialPreflightScript()(require, { repo: THIS_REPO }, core, {}, proc);
+  return { failure };
+}
+
+// POSITIVE CONTROL.
+test("credential preflight: both App secrets and a model credential present resolves without failing", async () => {
+  const { failure } = await runCredentialPreflight({ oauth: "token-value" });
+  assert.equal(failure, null);
+});
+
+test("credential preflight: no model credential fails closed and names both accepted secrets", async () => {
+  const { failure } = await runCredentialPreflight({ oauth: "", apiKey: "" });
   assert.match(failure, /CLAUDE_CODE_OAUTH_TOKEN/);
   assert.match(failure, /ANTHROPIC_API_KEY/);
 });
 
-// Issue #290. Behavior protected: a missing dev App credential (the
-// posting/push identity, distinct from the model credential above) used to
-// fail opaquely inside the vendored actions/create-github-app-token step
-// instead of naming the exact secret to provision -- fails closed here with
-// a named message instead, before that step ever runs. Regression-sensitive:
-// mutating the new `if (!process.env.APP_ID || !process.env.APP_PRIVATE_KEY)`
-// check away restores the old opaque-failure behavior and this test catches it.
-test("preflight: dev.provider=anthropic with a model credential but no dev App credential fails closed and names both App secrets", async () => {
-  const { outputs, failure } = await runPreflightScript({
-    devProvider: "anthropic",
-    oauth: "token-value",
-    appId: "",
-    appPrivateKey: "",
-  });
-  assert.equal(outputs.provider, "anthropic");
+test("credential preflight: a model credential but no dev App credential fails closed and names both App secrets", async () => {
+  const { failure } = await runCredentialPreflight({ oauth: "token-value", appId: "", appPrivateKey: "" });
   assert.match(failure, /DEV_GITHUB_APP_ID/);
   assert.match(failure, /DEV_GITHUB_APP_PRIVATE_KEY/);
 });
 
-test("preflight: one dev App secret present but not the other still fails closed", async () => {
+test("credential preflight: one dev App secret present but not the other still fails closed", async () => {
   for (const credentials of [
     { appId: "app-id-value", appPrivateKey: "" },
     { appId: "", appPrivateKey: "app-private-key-value" },
   ]) {
-    const { failure } = await runPreflightScript({
-      devProvider: "anthropic",
-      oauth: "token-value",
-      ...credentials,
-    });
+    const { failure } = await runCredentialPreflight({ oauth: "token-value", ...credentials });
     assert.match(failure, /DEV_GITHUB_APP_ID/);
     assert.match(failure, /DEV_GITHUB_APP_PRIVATE_KEY/);
   }
-});
-
-// Issue #290. Behavior protected: preflight's `model` output resolves from
-// agent-roles.yaml's dev.model, the same source and the same way `provider`
-// already does -- the footer instruction in the prompt below depends on it.
-test("preflight: dev.provider=anthropic resolves a sibling model output from agent-roles.yaml", async () => {
-  const { outputs, failure } = await runPreflightScript({ devProvider: "anthropic", oauth: "token-value" });
-  assert.equal(failure, null);
-  assert.equal(outputs.provider, "anthropic");
-  assert.equal(outputs.model, "x", "agentRolesFixture() sets dev.model: x");
-});
-
-// THE CORE NEW BEHAVIOR (Issue #252's slice 7). Behavior protected: an
-// unimplemented provider fails closed with a reason naming the provider,
-// rather than either guessing at an unverified action/SDK shape or silently
-// falling back to anthropic. Defect caught: a generalization that only LOOKS
-// provider-aware but still runs the anthropic branch regardless of what
-// agent-roles.yaml actually says.
-test("preflight: dev.provider=openai fails closed without ever checking a credential", async () => {
-  const { outputs, failure } = await runPreflightScript({ devProvider: "openai", oauth: "token-value", apiKey: "key-value" });
-  assert.equal(outputs.provider, "openai");
-  assert.match(failure, /dev\.provider="openai"/);
-  assert.match(failure, /only implements "anthropic"/);
-});
-
-test("preflight: dev.provider=antigravity fails closed the same way as openai", async () => {
-  const { failure } = await runPreflightScript({ devProvider: "antigravity" });
-  assert.match(failure, /dev\.provider="antigravity"/);
-});
-
-// Behavior protected: a agent-roles.yaml this script cannot find a
-// dev.provider line in fails closed rather than defaulting to anthropic --
-// defaulting would silently run the wrong (or right, by luck) branch instead
-// of surfacing that the file's shape changed underneath this parser.
-test("preflight: agent-roles.yaml with no parseable dev.provider fails closed rather than guessing", async () => {
-  const { failure } = await runPreflightScript({ agentRolesRaw: Buffer.from("not: a\nrecognizable: shape\n", "utf8").toString("base64") });
-  assert.match(failure, /Could not find dev\.provider/);
-});
-
-// Behavior protected: the default branch being unreadable (API error, rare
-// but real) fails closed with the actual error, not a silent fallback.
-test("preflight: agent-roles.yaml unreadable from the default branch fails closed with the real error", async () => {
-  const { failure } = await runPreflightScript({ getContentThrows: true });
-  assert.match(failure, /simulated getContent failure/);
-});
-
-// ---------------------------------------------------------------------------
-// Behavioral: dev-agent-dispatch.yml's staleness guard.
-// ---------------------------------------------------------------------------
-
-test("dispatch: a PR that has moved past the dispatched head stands down instead of acting on stale findings", async () => {
-  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
-  const outputs = {};
-  const core = { setOutput: (k, v) => (outputs[k] = v), info: () => {} };
-  const github = { rest: { pulls: { get: async () => ({ data: { number: 230, head: { sha: "moved".padEnd(40, "0") }, state: "open" } }) } } };
-  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
-
-  await loadDispatchPrCheckScript()(context, core, github, proc);
-
-  assert.equal(outputs.stale, "true");
-  assert.equal(outputs.branch, undefined);
-});
-
-test("dispatch: a still-current, still-open PR proceeds and exposes its branch", async () => {
-  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
-  const outputs = {};
-  const core = { setOutput: (k, v) => (outputs[k] = v), info: () => {} };
-  const github = { rest: { pulls: { get: async () => ({ data: { number: 230, head: { sha: HEAD, ref: "issue/229-x" }, state: "open" } }) } } };
-  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
-
-  await loadDispatchPrCheckScript()(context, core, github, proc);
-
-  assert.equal(outputs.stale, "false");
-  assert.equal(outputs.branch, "issue/229-x");
-});
-
-test("dispatch: a closed PR at the right head still stands down -- there is nothing left to resolve", async () => {
-  const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
-  const outputs = {};
-  const core = { setOutput: (k, v) => (outputs[k] = v), info: () => {} };
-  const github = { rest: { pulls: { get: async () => ({ data: { number: 230, head: { sha: HEAD }, state: "closed" } }) } } };
-  const proc = { env: { PR_NUMBER: "230", DISPATCH_HEAD_SHA: HEAD } };
-
-  await loadDispatchPrCheckScript()(context, core, github, proc);
-
-  assert.equal(outputs.stale, "true");
 });
 
 // ---------------------------------------------------------------------------
