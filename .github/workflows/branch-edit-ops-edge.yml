@@ -15,14 +15,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: true
+          persist-credentials: false
 
-      - name: Apply exact one-line workflow fix
+      - name: Stage exact one-line workflow blob
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python - <<'PY'
+          import base64
+          import json
+          import os
           from pathlib import Path
+          from urllib.request import Request, urlopen
 
           path = Path('.github/workflows/ops-edge.yml')
           text = path.read_text()
@@ -31,11 +37,23 @@ jobs:
           count = text.count(old)
           if count != 1:
               raise SystemExit(f'expected exactly one old apply-serve condition, found {count}')
-          path.write_text(text.replace(old, new, 1))
+          modified = text.replace(old, new, 1).encode()
+          payload = json.dumps({
+              'content': base64.b64encode(modified).decode(),
+              'encoding': 'base64',
+          }).encode()
+          request = Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/git/blobs",
+              data=payload,
+              method='POST',
+              headers={
+                  'Accept': 'application/vnd.github+json',
+                  'Authorization': f"Bearer {os.environ['GITHUB_TOKEN']}",
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'Content-Type': 'application/json',
+              },
+          )
+          with urlopen(request) as response:
+              result = json.load(response)
+          print(f"__TARGET_BLOB_SHA__={result['sha']}")
           PY
-          git rm .github/workflows/branch-edit-ops-edge.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/ops-edge.yml
-          git commit -m "fix(ops): converge legacy Serve after push (#378)"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
