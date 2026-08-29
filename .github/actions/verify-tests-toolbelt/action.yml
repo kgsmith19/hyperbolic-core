@@ -7,15 +7,6 @@ description: >-
   merge_group/push/workflow_dispatch triggers, so the suite has exactly one
   source. Assumes the caller already checked out the repository.
 
-inputs:
-  owner_refresh_token:
-    description: >-
-      Long-lived Supabase refresh token for the owner session the Prompt
-      Organizer browser journey needs. Passed in rather than read from
-      secrets. directly, since a composite action has no secrets context.
-    required: false
-    default: ""
-
 runs:
   using: composite
   steps:
@@ -81,15 +72,9 @@ runs:
       working-directory: apps/toolbelt/guards
       run: node --test *.test.mjs
 
-    # Enumerated, not globbed, and the distinction is load-bearing: this
-    # step runs the unit and real-local-Postgres suites, which need no
-    # credential and write nothing outside their own disposable database.
-    # tests/ also holds eight live-Supabase suites (archive, configuration,
-    # render-endpoint, restore, skeleton, tags, usage, versions) that
-    # authenticate via helpers.mjs's primaryToken() and write to the real
-    # hosted project. Since m1-08 pinned prompt.* RLS to the owner UUID they
-    # cannot pass on a fixture identity at all, so they are owner-only
-    # manual proofs -- a glob here would fail the gate outright.
+    # Enumerated, not globbed: these are unit + disposable-Postgres suites.
+    # The live-Supabase suites in this directory remain separate deployment
+    # contract proofs because they authenticate to and mutate hosted state.
     - name: Test · Run Prompt Organizer tests
       shell: bash
       working-directory: apps/toolbelt/apps/prompt-organizer
@@ -101,7 +86,6 @@ runs:
           backend/tests/get-prompt.test.mjs \
           backend/tests/helpers.unit.test.mjs \
           backend/tests/migration-contract.test.mjs \
-          backend/tests/owner-session.test.mjs \
           frontend/tests/panel.test.mjs \
           backend/tests/performance.test.mjs \
           backend/tests/prompt-usage-retention-atomic.test.mjs \
@@ -147,43 +131,16 @@ runs:
         echo "Prompt Organizer did not become ready." >&2
         exit 1
 
-    # Mints the owner session AT JOB START rather than reading a
-    # hand-pasted access token straight out of the secret. Supabase access
-    # tokens expire in about an hour, so the previous wiring here (the raw
-    # secret threaded directly into the journey below) went red again within
-    # the hour of every manual re-mint, and its failure was indistinguishable
-    # from the token never having been set at all. The refresh token is
-    # long-lived, and export-owner-session.mjs exchanges it for a fresh
-    # access token, exporting that through $GITHUB_ENV.
-    #
-    # It also calls verifyOwnerAccessToken(), which fails this step outright
-    # when the resolved session is not platform.owner(). That matters: a
-    # wrong or expired credential otherwise surfaces only as an
-    # unrelated-looking "element(s) not found" in the journey below, because
-    # the test silently falls back to an RLS-powerless fixture login.
-    #
-    # REFRESH TOKEN ONLY. TOOLBELT_OWNER_TOKEN is deliberately not passed:
-    # a stored access token is a snapshot that expires in about an hour, and
-    # every failure it causes looks exactly like the credential was never
-    # configured at all. If no refresh token is configured the step fails
-    # closed with "TOOLBELT_OWNER_REFRESH_TOKEN is required", which is the
-    # honest outcome.
-    - name: E2E · Exchange and verify the owner session
-      shell: bash
-      working-directory: apps/toolbelt/apps/prompt-organizer
-      env:
-        TOOLBELT_OWNER_REFRESH_TOKEN: ${{ inputs.owner_refresh_token }}
-      run: node backend/tests/export-owner-session.mjs
-
+    # The browser journey is deliberately hermetic. It drives the real UI and
+    # verifies its bearer/session threading, REST request shapes, persistence
+    # lifecycle, render/copy behavior, usage event, and log_run side effect via
+    # a deterministic page.route fixture. The real authorization oracle stays
+    # in contract.test.mjs, which applies the committed migrations to disposable
+    # PostgreSQL and proves owner-vs-stranger RLS/grants without hosted secrets.
     - name: E2E · Run Prompt Organizer critical browser journey
       shell: bash
       env:
         PLAYWRIGHT_BASE_URL: http://localhost:8812
-        # TOOLBELT_OWNER_TOKEN is deliberately NOT set here. The exchange
-        # step above already exported a freshly minted one through
-        # $GITHUB_ENV, and a step-level env entry takes precedence over that
-        # -- re-pinning this step to the possibly-stale secret value and
-        # reintroducing the very expiry problem the exchange step removes.
       run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/prompt-organizer/frontend/playwright.config.mjs
 
     - name: Evidence · Upload Prompt Organizer browser evidence
