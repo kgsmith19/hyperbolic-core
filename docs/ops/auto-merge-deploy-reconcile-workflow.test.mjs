@@ -40,9 +40,9 @@ const privateOriginVerifierPath = path.join(
 const privateOriginVerifier = readFileSync(privateOriginVerifierPath, "utf8");
 
 function yamlBlock(source, key, indent) {
-  const lines = source.split("\n");
+  const lines = source.split(/\r?\n/);
   const prefix = `${" ".repeat(indent)}${key}:`;
-  const start = lines.findIndex((line) => line === prefix);
+  const start = lines.findIndex((line) => line.trimEnd() === prefix);
   assert.ok(start >= 0, `${prefix.trim()} block not found`);
   let end = start + 1;
   for (; end < lines.length; end += 1) {
@@ -393,7 +393,7 @@ test("Ops Origin orders legacy Serve convergence after deploy while gateway stat
   assert.match(applyServe, /needs: deploy/);
   assert.match(
     applyServe,
-    /if: inputs\.apply_serve_after_origin == true && needs\.deploy\.result == 'success' && needs\.deploy\.outputs\.serve_state == 'legacy'/,
+    /if:\s*needs\.deploy\.result == 'success' && needs\.deploy\.outputs\.serve_state == 'legacy' && \(github\.event_name == 'push' \|\| inputs\.apply_serve_after_origin == true\)/,
   );
   assert.match(
     applyServe,
@@ -749,12 +749,12 @@ printf '%s' "$body" > "$out"
 printf '%s\n%s' "$status" "$content_type"
 `,
   );
-  return spawnSync("bash", [privateOriginVerifierPath], {
+  return spawnSync(process.env.BASH_PATH ?? "bash", [privateOriginVerifierPath], {
     encoding: "utf8",
     cwd: root,
     env: {
       ...process.env,
-      PATH: `${bin}:${process.env.PATH}`,
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
       TMPDIR: verifierTemp,
       LOGIN_STATUS: loginStatus,
       SHELL_DOCUMENT: shellDocument,

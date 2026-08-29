@@ -9,7 +9,10 @@ const workflow = readFileSync(path.join(root, ".github/workflows/platform-smoke.
 
 test("post-deploy smoke treats any responding legacy LifeOS 8443 HTTPS listener as a failure", () => {
   assert.match(workflow, /probe_closed_https_listener\(\)/);
-  assert.match(workflow, /--insecure[\s\S]*https:\/\/\$DEPLOY_HOST:\$port/);
+  assert.match(
+    workflow,
+    /local legacy_origin="https:\/\/\$DEPLOY_HOST:\$port"[\s\S]*curl --insecure[\s\S]*"\$legacy_origin\/"/,
+  );
   assert.match(workflow, /retired HTTPS listener still accepted a request/);
   assert.match(
     workflow,

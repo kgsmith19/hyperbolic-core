@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const actionPath = path.join(root, ".github/actions/verify-tests-acc-windows/action.yml");
-const action = readFileSync(actionPath, "utf8");
+const action = readFileSync(actionPath, "utf8").replaceAll("\r\n", "\n");
 
 const tmpDirs = [];
 after(() => {

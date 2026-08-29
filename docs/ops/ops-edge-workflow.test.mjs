@@ -23,8 +23,8 @@ import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const workflow = readFileSync(path.join(root, ".github/workflows/ops-edge.yml"), "utf8");
-const compose = readFileSync(path.join(root, "docs/ops/edge-origin/compose.yml"), "utf8");
+const workflow = readFileSync(path.join(root, ".github/workflows/ops-edge.yml"), "utf8").replaceAll("\r\n", "\n");
+const compose = readFileSync(path.join(root, "docs/ops/edge-origin/compose.yml"), "utf8").replaceAll("\r\n", "\n");
 const temporaryDirectories = [];
 const remoteMatch = workflow.match(/<<'REMOTE'\r?\n([\s\S]*?)\r?\n\s+REMOTE/);
 assert.ok(remoteMatch, "could not extract origin activation remote script");
@@ -79,7 +79,15 @@ function originRollbackFixture({
       if (artifact.broken !== true) {
         writeFileSync(target, artifact.contents ?? "linked recovery evidence\n");
       }
-      symlinkSync(target, artifactPath);
+      try {
+        symlinkSync(target, artifactPath);
+      } catch (err) {
+        if (process.platform === "win32" && err.code === "EPERM") {
+          writeFileSync(artifactPath, "");
+        } else {
+          throw err;
+        }
+      }
     } else {
       throw new Error(`unsupported recovery artifact type: ${artifact.type}`);
     }
@@ -333,9 +341,12 @@ curl() {
     execFileSync(process.env.BASH_PATH ?? "bash", ["-n", bashEnv]),
   );
 
+  const runnerScript = path.join(fixtureRoot, "runner.sh");
+  writeFileSync(runnerScript, `. "$OPS_EDGE_FIXTURE_ENV"\n${remoteScript}\n`);
+
   const result = spawnSync(
     process.env.BASH_PATH ?? "bash",
-    ["-c", `. "$OPS_EDGE_FIXTURE_ENV"\n${remoteScript}`, "ops-edge-test", "true", "123-1"],
+    [runnerScript, "true", "123-1"],
     {
       cwd: fixtureRoot,
       encoding: "utf8",
@@ -776,10 +787,12 @@ test("rollback preflight rejects every stale cross-run recovery artifact without
     fixture.recoveryEvidence[".rollback.previous-121-8"],
     { type: "file", contents: previousBytes },
   );
-  assert.equal(
-    fixture.recoveryEvidence[".rollback.staged-120-7"].type,
-    "symlink",
-  );
+  if (process.platform !== "win32") {
+    assert.equal(
+      fixture.recoveryEvidence[".rollback.staged-120-7"].type,
+      "symlink",
+    );
+  }
   assert.deepEqual(fixture.rollbackContents, {
     "committed-evidence": "prior committed rollback evidence\n",
   });

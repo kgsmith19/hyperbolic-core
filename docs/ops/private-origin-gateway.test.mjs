@@ -9,15 +9,15 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const read = (relativePath) => readFileSync(path.join(root, relativePath), "utf8");
 const normalize = (text) => text.replaceAll("\r\n", "\n");
 const nginx = normalize(read("docs/ops/edge-origin/nginx.conf"));
-const compose = read("docs/ops/edge-origin/compose.yml");
+const compose = normalize(read("docs/ops/edge-origin/compose.yml"));
 const privateSpaPath = path.join(root, "docs/ops/edge-origin/private_spa_locations.conf");
 const privateSpa = existsSync(privateSpaPath) ? normalize(readFileSync(privateSpaPath, "utf8")) : "";
 const publicPaths = normalize(read("docs/ops/edge-origin/public_paths.conf"));
-const serveApply = read("docs/ops/tailscale-serve-apply.sh");
-const edgeWorkflow = read(".github/workflows/ops-edge.yml");
-const serveWorkflow = read(".github/workflows/ops-serve-apply.yml");
-const lifeosWorkflow = read(".github/workflows/lifeos-deploy.yml");
-const smokeWorkflow = read(".github/workflows/platform-smoke.yml");
+const serveApply = normalize(read("docs/ops/tailscale-serve-apply.sh"));
+const edgeWorkflow = normalize(read(".github/workflows/ops-edge.yml"));
+const serveWorkflow = normalize(read(".github/workflows/ops-serve-apply.yml"));
+const lifeosWorkflow = normalize(read(".github/workflows/lifeos-deploy.yml"));
+const smokeWorkflow = normalize(read(".github/workflows/platform-smoke.yml"));
 const runbook = normalize(read("docs/ops/runbook.md"));
 const activeRouteOwners = new Map(
   [
@@ -231,12 +231,12 @@ test("Serve preflights nginx and converges to one root without a zero-route rese
   const targetedRemovals = serveApply.indexOf('for mount in "${legacy_mounts[@]}"; do', rootInstall);
   assert.ok(rootInstall > -1 && targetedRemovals > rootInstall, "the nginx root must exist before any legacy mount is removed");
 
-  assert.match(serveApply, /initial_status="\$\(tailscale serve status --json\)"/);
+  assert.match(serveApply, /initial_status="\$\(("\$\{sudo_prefix\[@\]\}" )?tailscale serve status --json\)"/);
   assert.match(serveApply, /present_mounts="\$\(validate_initial_json "\$initial_status"\)"/);
-  assert.match(serveApply, /final_status="\$\(tailscale serve status --json\)"/);
-  assert.match(serveApply, /set\(tcp\) != \{"443"\}/);
-  assert.match(serveApply, /listener != \{"HTTPS": True\}/);
-  assert.match(serveApply, /len\(web\) != 1/);
+  assert.match(serveApply, /final_status="\$\(("\$\{sudo_prefix\[@\]\}" )?tailscale serve status --json\)"/);
+  assert.match(serveApply, /set\(tcp\) != expected_ports/);
+  assert.match(serveApply, /listener\.get\("HTTPS"\) is not True/);
+  assert.match(serveApply, /len\(web\) != expected_web_count/);
   assert.match(serveApply, /set\(handlers\) != \{"\/"\}/);
   assert.match(serveApply, /root != \{"Proxy": "http:\/\/127\.0\.0\.1:8080"\}/);
   for (const sibling of ["Services", "AllowFunnel", "Foreground"]) {
@@ -268,7 +268,7 @@ test("Serve transport still ships the checked-in script and cannot mutate before
   assert.doesNotMatch(serveWorkflow, /tailscale serve reset/);
   assert.doesNotMatch(serveWorkflow, /tailscale serve status(?! --json)/);
   const contentPreflight = serveApply.indexOf('"$private_origin_verifier" http://127.0.0.1:8080');
-  const initialStatus = serveApply.indexOf('initial_status="$(tailscale serve status --json)"');
+  const initialStatus = serveApply.indexOf('initial_status="$("${sudo_prefix[@]}" tailscale serve status --json)"');
   assert.ok(contentPreflight > -1 && initialStatus > contentPreflight);
 });
 

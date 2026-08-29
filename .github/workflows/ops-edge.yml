@@ -681,7 +681,7 @@ jobs:
             echo "error: public origin root must remain deny-by-default (expected 404, got $public_status)" >&2
             false
           fi
-          serve_state="$("$stage_dir/tailscale-serve-apply.sh" --classify-status 2>/dev/null || echo 'legacy')"
+          serve_state="$("$stage_dir/tailscale-serve-apply.sh" --classify-status)"
           case "$serve_state" in
             gateway|legacy) ;;
             *)
@@ -720,7 +720,7 @@ jobs:
   apply-serve:
     name: Converge legacy Serve routes after origin activation
     needs: deploy
-    if: inputs.apply_serve_after_origin == true && needs.deploy.result == 'success' && needs.deploy.outputs.serve_state == 'legacy'
+    if: needs.deploy.result == 'success' && needs.deploy.outputs.serve_state == 'legacy' && (github.event_name == 'push' || inputs.apply_serve_after_origin == true)
     uses: ./.github/workflows/ops-serve-apply.yml
     with:
       origin_parent_run_id: ${{ github.run_id }}

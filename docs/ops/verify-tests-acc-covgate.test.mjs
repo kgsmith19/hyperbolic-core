@@ -109,7 +109,7 @@ function buildDriftedScenario({ shallow = false, baseBranch = "main" } = {}) {
 function runCovgate(checkoutDir, baseSha, baseRef = "main") {
   const scriptFile = path.join(checkoutDir, "covgate-step.sh");
   writeFileSync(scriptFile, extractCovgateScript());
-  return execFileSync("bash", [scriptFile], {
+  return execFileSync(process.env.BASH_PATH ?? "bash", [scriptFile], {
     cwd: checkoutDir,
     encoding: "utf8",
     env: { ...process.env, BASE_SHA: baseSha, BASE_REF: baseRef },
