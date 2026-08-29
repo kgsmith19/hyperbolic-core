@@ -1,252 +1,233 @@
 /**
- * T-E-001 — Browser acceptance proof for the highest-value Prompt Organizer
- * user flow: unlock with a token → save prompt with variable → open render
- * panel → fill variable → copy rendered text → verify clipboard → cleanup.
+ * T-E-001 — Hermetic browser acceptance proof for Prompt Organizer's
+ * highest-value user flow: restore an already-issued session -> save prompt
+ * -> independently read it back -> render/copy -> record usage/log_run ->
+ * archive it.
  *
- * Traces to: AC-001 (FR-001 save), AC-001 (FR-007 render/copy), AC-001
- * (FR-010 variable fill) → Issue #18.
+ * Authentication/authorization is deliberately split by oracle:
+ * - this browser spec proves the real UI threads its stored bearer credential
+ *   through every REST request and handles the critical browser lifecycle;
+ * - backend/tests/contract.test.mjs proves the committed prompt.* grants/RLS
+ *   with owner and stranger subjects against disposable PostgreSQL.
  *
- * Run:
- *   npx playwright test tests/e2e/critical-flow.test.mjs \
- *     --config playwright.config.mjs
- *
- * Env vars (optional locally; defaults match the shared fixture accounts used
- * by the integration suite):
- *   PLAYWRIGHT_BASE_URL   — URL of the running app   (default: http://localhost:8812)
- *   USER_A_EMAIL          — fallback token source     (default: fixture user A)
- *   USER_A_PASSWORD       — fallback token source     (default: fixture user A)
- *   TOOLBELT_OWNER_TOKEN  — real owner session, see "Owner-credential
- *                           threading" below (default: unset)
- *
- * CI PRECONDITION: TOOLBELT_OWNER_TOKEN is REQUIRED when CI is set, and this
- * spec fails immediately without it rather than falling back. The Toolbelt
- * lane always exports it from its "E2E · Exchange and verify the owner
- * session" step, so an unset value there means that step silently degraded.
- * The fallback is not an equivalent substitute: prompt.* RLS is pinned to the
- * real owner, so a fixture-A session is RLS-powerless and every write this
- * journey depends on is denied -- the run would report an opaque failure while
- * appearing to exercise the happy path (issue #249). Locally the fallback
- * stays, and a local run without an owner token still cannot save.
- *
- * Owner-credential threading (toolbelt-ci.yml P1 finding): once prompt.* RLS
- * is pinned to the real owner (20260812180000_prompt_owner_pin.sql), a
- * fixture-A session gets a real Supabase access token but every subsequent
- * write this flow depends on (save, tag, usage-on-copy) is RLS-denied, so
- * the "happy path" this test exists to prove would silently stop proving it.
- * TOOLBELT_OWNER_TOKEN (a real owner access token, never a password --
- * docs/notes/2026-08-12-platform-idp-owner-setup.md step 3) takes priority
- * when set; a fixture-A password login (real Supabase Auth grant, but
- * RLS-powerless against live owner data) is the same known-limited fallback
- * this file already had before m5-01.
- *
- * m5-01 (docs/planning/05-d-prompt-organizer.md section 2): web/index.html's
- * password-grant sign-in form is gone -- the page now boots by reading an
- * already-issued access token from sessionStorage (its own manual-check
- * convenience, never the Shell's real session). This test seeds that same
- * sessionStorage key via page.addInitScript BEFORE navigating, so by the
- * time index.html's module script runs, it finds a token already in place
- * and unlocks automatically -- no form-filling step needed at all now.
- *
- * Evidence written by Playwright:
- *   playwright-report/   — HTML report
- *   test-results/        — per-test screenshots and traces
+ * No hosted Supabase credential or shared hosted state participates in this
+ * required PR check. Live hosted-Supabase suites remain separate deployment
+ * contract proofs.
  */
-
 import { test, expect } from "@playwright/test";
-// helpers.mjs lives at tests/helpers.mjs; from tests/e2e/ the relative path
-// is one level up. It exports login, rest, USER_A (and USER_B), all of which
-// are used by every integration test in tests/*.test.mjs.
 import { randomUUID } from "node:crypto";
-import { login, rest, USER_A } from "../../backend/tests/helpers.mjs";
 
-// Must match web/index.html's own TOKEN_STORAGE_KEY constant exactly --
-// that file has no bundler/export surface to import this from, so both
-// sides carry the literal in a comment pointing at the other.
 const TOKEN_STORAGE_KEY = "prompt-organizer-manual-check-token";
-
-// ---------------------------------------------------------------------------
-// Fixture data — unique per run so concurrent CI runs don't collide.
-// ---------------------------------------------------------------------------
-// Date.now() alone is not run-unique: concurrent CI runs share ONE owner
-// account and prompt.prompt carries a unique index on (user_id, lower(title)),
-// so two runners entering this millisecond collide -- one save 409s and fails
-// as an opaque "element(s) not found". A random suffix makes the title
-// genuinely per-run, which is what isolates concurrent runs from each other on
-// the write path and keeps each run's teardown scoped to its own row.
+const REST_ROOT = "https://woltgcggxaehtuypkxqk.supabase.co/rest/v1";
+const OWNER_SESSION = "hermetic-owner-session";
 const RUN_ID = `${Date.now()}-${randomUUID().slice(0, 8)}`;
 const PROMPT_TITLE = `e2e-critical-flow-${RUN_ID}`;
 const PROMPT_BODY = "Deploy {{REPO}} to production.";
 const VARIABLE_VALUE = "toolbelt";
 const EXPECTED_RENDERED = "Deploy toolbelt to production.";
 
-// Captured as soon as the run has a token so the afterEach below can archive
-// this run's row even when the journey dies before reaching its own teardown.
-let cleanupToken = null;
+function json(route, status, body) {
+  return route.fulfill({
+    status,
+    contentType: "application/json",
+    body: JSON.stringify(body),
+  });
+}
 
-// ---------------------------------------------------------------------------
-// T-E-001 — Critical prompt flow acceptance proof
-// ---------------------------------------------------------------------------
-test("critical_prompt_flow__unlock_save_render_copy__T_E_001", async ({
-  page,
-  context,
-}) => {
-  const user = {
-    email: process.env.USER_A_EMAIL ?? USER_A.email,
-    password: process.env.USER_A_PASSWORD ?? USER_A.password,
+function parseBody(request) {
+  const raw = request.postData();
+  return raw ? JSON.parse(raw) : undefined;
+}
+
+async function installHermeticPromptApi(page, expectedToken = OWNER_SESSION) {
+  const state = {
+    prompts: new Map(),
+    usage: [],
+    logRuns: [],
+    requests: [],
+    unauthorized: 0,
+    unexpected: [],
   };
+
+  await page.route("**/rest/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const resource = url.pathname.split("/rest/v1/")[1] ?? "";
+    const headers = request.headers();
+    const authorization = headers.authorization ?? "";
+    const record = {
+      method: request.method(),
+      resource,
+      authorization,
+      acceptProfile: headers["accept-profile"] ?? "",
+      contentProfile: headers["content-profile"] ?? "",
+    };
+    state.requests.push(record);
+
+    if (authorization !== `Bearer ${expectedToken}`) {
+      state.unauthorized += 1;
+      return json(route, 401, { message: "invalid hermetic session" });
+    }
+
+    if (request.method() === "GET" && resource === "prompt") {
+      const titleFilter = url.searchParams.get("title");
+      if (titleFilter?.startsWith("eq.")) {
+        const title = titleFilter.slice(3);
+        const rows = [...state.prompts.values()]
+          .filter((prompt) => prompt.title === title)
+          .map(({ title: savedTitle, body }) => ({ title: savedTitle, body }));
+        return json(route, 200, rows);
+      }
+
+      const activeFilter = url.searchParams.get("is_active");
+      const rows = [...state.prompts.values()]
+        .filter((prompt) => {
+          if (activeFilter === "eq.true") return prompt.is_active;
+          if (activeFilter === "eq.false") return !prompt.is_active;
+          return true;
+        })
+        .map((prompt) => ({
+          id: prompt.id,
+          title: prompt.title,
+          body: prompt.body,
+          is_active: prompt.is_active,
+          tag: [],
+          prompt_version: [{ version_no: prompt.version_no }],
+          configuration: [],
+        }));
+      return json(route, 200, rows);
+    }
+
+    if (request.method() === "POST" && resource === "prompt") {
+      const body = parseBody(request);
+      const prompt = {
+        id: `prompt-${state.prompts.size + 1}`,
+        title: body.title,
+        body: body.body,
+        is_active: true,
+        version_no: 1,
+      };
+      state.prompts.set(prompt.id, prompt);
+      return json(route, 201, [prompt]);
+    }
+
+    if (request.method() === "PATCH" && resource === "prompt") {
+      const idFilter = url.searchParams.get("id") ?? "";
+      const id = idFilter.startsWith("eq.") ? idFilter.slice(3) : idFilter;
+      const prompt = state.prompts.get(id);
+      if (!prompt) return json(route, 404, { message: "fixture prompt not found" });
+      Object.assign(prompt, parseBody(request));
+      return json(route, 200, [prompt]);
+    }
+
+    if (request.method() === "POST" && resource === "usage") {
+      const body = parseBody(request);
+      state.usage.push(body);
+      return json(route, 201, [body]);
+    }
+
+    if (request.method() === "POST" && resource === "rpc/log_run") {
+      const body = parseBody(request);
+      state.logRuns.push({
+        ...body,
+        acceptProfile: record.acceptProfile,
+        contentProfile: record.contentProfile,
+      });
+      return json(route, 200, null);
+    }
+
+    state.unexpected.push(`${request.method()} ${resource}`);
+    return json(route, 500, { message: `unexpected hermetic API request: ${request.method()} ${resource}` });
+  });
+
+  return state;
+}
+
+test("critical_prompt_flow__unlock_save_read_render_copy_archive__T_E_001", async ({ page, context }) => {
+  const state = await installHermeticPromptApi(page);
   const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:8812";
-  const ownerToken = process.env.TOOLBELT_OWNER_TOKEN || undefined;
 
-  // Grant clipboard permissions so navigator.clipboard.writeText works in the
-  // headless Chromium context without user-gesture blocking.
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-
-  // Owner-credential threading (see header comment): resolve the real token
-  // ONCE, before navigating, then seed it into sessionStorage so
-  // index.html's own boot check finds it already there.
-  // In CI the owner session is always exported by the lane's "Exchange and
-  // verify the owner session" step, so an unset token there means that step
-  // silently degraded -- and the fallback below is not equivalent. prompt.* RLS
-  // is pinned to the real owner (20260812180000_prompt_owner_pin.sql), so a
-  // fixture-A login yields a valid Supabase session whose every write is
-  // RLS-denied: the save fails, no row is added, and the journey reports the
-  // same opaque "element(s) not found" this Issue is about. Fail loudly rather
-  // than quietly proving nothing with a powerless identity. Locally the
-  // fallback stays, for the same reasons it always existed.
-  if (!ownerToken && process.env.CI) {
-    throw new Error(
-      "TOOLBELT_OWNER_TOKEN is unset in CI. prompt.* RLS is pinned to the real owner, so the " +
-        "fixture-A fallback cannot write and this journey would fail at the save without ever " +
-        "exercising the behaviour it exists to prove."
-    );
-  }
-  const token = ownerToken || (await login(user));
-  cleanupToken = token;
   await page.addInitScript(
-    ([storageKey, value]) => {
-      sessionStorage.setItem(storageKey, value);
-    },
-    [TOKEN_STORAGE_KEY, token]
+    ([storageKey, token]) => sessionStorage.setItem(storageKey, token),
+    [TOKEN_STORAGE_KEY, OWNER_SESSION],
   );
 
-  // ---- Step 1: Navigate -- the page unlocks itself from the seeded token --
   await page.goto(baseUrl);
   await expect(page.locator("h1")).toContainText("Prompt Organizer");
   await expect(page.locator("#token-form")).toBeHidden({ timeout: 15_000 });
   await expect(page.locator("#app")).toBeVisible({ timeout: 15_000 });
 
-  // ---- Step 2: Save a new prompt that contains a {{REPO}} variable ---------
   await page.fill("#title", PROMPT_TITLE);
   await page.fill("#body", PROMPT_BODY);
   await page.click('#save-form button[type="submit"]');
 
   const saveError = page.locator("#save-error");
-  const promptSummary = page.locator("#prompt-list summary", {
-    hasText: PROMPT_TITLE,
-  });
-
-  // Wait on the save actually SETTLING rather than on a fixed slice of time.
-  // When the POST is rejected -- an expired owner token, a 429 from a
-  // concurrent run, a unique-title conflict -- the client puts the real
-  // reason in #save-error and never adds a row, so waiting only on the
-  // summary reported a bare "element(s) not found" and threw the actual
-  // cause away (issue #249). Poll for either outcome, then assert which one
-  // it was, so a rejected save fails naming its own reason.
-  await expect
-    .poll(
-      async () => {
-        if ((await saveError.innerText()).trim() !== "") return "rejected";
-        return (await promptSummary.count()) > 0 ? "rendered" : "pending";
-      },
-      {
-        timeout: 15_000,
-        message: "the save neither rendered a row nor reported an error",
-      }
-    )
-    .not.toBe("pending");
-
-  await expect(saveError, "the save POST must not have been rejected").toHaveText("");
-  // Not redundant with the poll above, which only counts nodes: this is the
-  // one that asserts the row is actually VISIBLE, and it is what names the
-  // locator in the failure message when it is not.
+  const promptSummary = page.locator("#prompt-list summary", { hasText: PROMPT_TITLE });
   await expect(promptSummary).toBeVisible({ timeout: 10_000 });
+  await expect(saveError, "the save POST must not have been rejected").toHaveText("");
 
-  // ...and it must be in the database, not only in the client's optimistic
-  // in-memory copy: the save handler renders the new row without re-reading
-  // it back, so the DOM alone cannot distinguish "persisted" from "rendered
-  // from what we just posted". Read it back over REST -- a different
-  // transport than the one under test -- for an independent oracle.
-  const persisted = await rest(
-    `prompt?title=eq.${encodeURIComponent(PROMPT_TITLE)}&select=title,body`,
-    { token }
+  // Independent readback through browser fetch: this does not trust the DOM's
+  // optimistic copy. It exercises a second request against fixture persistence
+  // and proves the same bearer credential is required at that boundary.
+  const persisted = await page.evaluate(
+    async ({ restRoot, token, title }) => {
+      const response = await fetch(
+        `${restRoot}/prompt?title=eq.${encodeURIComponent(title)}&select=title,body`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      return { status: response.status, json: await response.json() };
+    },
+    { restRoot: REST_ROOT, token: OWNER_SESSION, title: PROMPT_TITLE },
   );
-  expect(persisted.status, "the saved prompt must be readable back over REST").toBeLessThan(400);
-  expect(persisted.json, "exactly one persisted row must carry this run's title and body").toEqual([
-    { title: PROMPT_TITLE, body: PROMPT_BODY },
-  ]);
+  expect(persisted.status).toBe(200);
+  expect(persisted.json).toEqual([{ title: PROMPT_TITLE, body: PROMPT_BODY }]);
 
-  // ---- Step 3: Open the render panel ---------------------------------------
-  // Clicking the <summary> expands the <details> which contains the panel.
-  // No settle sleep: Playwright waits for actionability on its own, and the
-  // list no longer re-renders underneath this click now that a superseded
-  // fetch cannot replace it (issue #249).
   await promptSummary.click();
-
-  // Scope every render-panel interaction to the prompt created by this run.
-  // The shared fixture account intentionally contains many other prompts.
   const promptDetails = page.locator("#prompt-list details", {
     has: page.locator("summary", { hasText: PROMPT_TITLE }),
   });
-  const repoInput = promptDetails.getByRole("textbox", {
-    name: "REPO",
-    exact: true,
-  });
+  const repoInput = promptDetails.getByRole("textbox", { name: "REPO", exact: true });
   await expect(repoInput).toBeVisible({ timeout: 5_000 });
-
-  // ---- Step 4: Fill the variable and copy the rendered text ----------------
   await repoInput.fill(VARIABLE_VALUE);
+  await promptDetails.getByRole("button", { name: "Copy rendered text" }).click();
+  await expect(promptDetails.locator("p", { hasText: "Copied!" })).toBeVisible({ timeout: 8_000 });
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(EXPECTED_RENDERED);
 
-  await promptDetails.locator('button:has-text("Copy rendered text")').click();
+  await expect.poll(() => state.usage.length, { timeout: 5_000 }).toBe(1);
+  await expect.poll(() => state.logRuns.length, { timeout: 5_000 }).toBe(1);
+  expect(state.usage[0]).toEqual({ prompt_id: "prompt-1", version_no: 1 });
+  expect(state.logRuns[0].p_app_id).toBe("prompt-organizer");
+  expect(state.logRuns[0].p_kind).toBe("render");
+  expect(state.logRuns[0].p_wall_clock_ms).toEqual(expect.any(Number));
+  expect(state.logRuns[0].acceptProfile).toBe("core");
+  expect(state.logRuns[0].contentProfile).toBe("core");
 
-  // The panel shows "Copied!" after a successful navigator.clipboard.writeText.
-  // Increased timeout to account for clipboard operations and usage logging.
-  await expect(
-    promptDetails.locator("p", { hasText: "Copied!" })
-  ).toBeVisible({ timeout: 8_000 });
-
-  // ---- Step 5: Verify the clipboard holds the correctly rendered text ------
-  const clipboardText = await page.evaluate(() =>
-    navigator.clipboard.readText()
-  );
-  expect(clipboardText).toBe(EXPECTED_RENDERED);
-
-  // ---- Step 6: Capture screenshot evidence ---------------------------------
   await page.screenshot({
     path: `test-results/critical-flow-${RUN_ID}.png`,
     fullPage: false,
   });
+
+  await promptDetails.getByRole("button", { name: "Archive", exact: true }).click();
+  await expect.poll(() => state.prompts.get("prompt-1")?.is_active).toBe(false);
+  await expect(page.locator("#prompt-list summary", { hasText: PROMPT_TITLE })).toHaveCount(0);
+
+  expect(state.unexpected).toEqual([]);
+  expect(state.unauthorized).toBe(0);
+  expect(state.requests.length).toBeGreaterThanOrEqual(6);
+  expect(state.requests.every((request) => request.authorization === `Bearer ${OWNER_SESSION}`)).toBe(true);
 });
 
-// ---- Teardown: archive the test prompt via the REST API --------------------
-// Archiving (not hard-deleting) aligns with ADR-0002 soft-delete policy. No
-// DELETE grant exists on prompt.prompt (AGENTS.md invariant). Reuse the exact
-// same token this run unlocked with.
-//
-// An afterEach, not the last statement of the test: as the final line it was
-// skipped by every failing run, so each flake left a permanently is_active row
-// on the shared owner account forever. Nothing prunes prompt.prompt and the
-// list query is unfiltered and unbounded, so those rows are re-downloaded on
-// every page load thereafter -- a failing run made the next run slower, and a
-// silent PATCH failure did the same (issue #249). Assert the status so it
-// cannot fail quietly again.
-test.afterEach(async () => {
-  if (!cleanupToken) return;
-  const archived = await rest(
-    `prompt?title=eq.${encodeURIComponent(PROMPT_TITLE)}`,
-    { token: cleanupToken, method: "PATCH", body: { is_active: false } }
+test("stored_wrong_session_fails_closed_before_the_app_unlocks__T_E_002", async ({ page }) => {
+  const state = await installHermeticPromptApi(page);
+  await page.addInitScript(
+    ([storageKey, token]) => sessionStorage.setItem(storageKey, token),
+    [TOKEN_STORAGE_KEY, "wrong-session"],
   );
-  expect(
-    archived.status,
-    `this run's prompt must be archived, or it accumulates on the shared owner account forever (got ${archived.status})`
-  ).toBeLessThan(400);
+
+  await page.goto(process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:8812");
+  await expect(page.locator("#token-form")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#app")).toBeHidden();
+  expect(state.unauthorized).toBe(1);
+  expect(state.prompts.size).toBe(0);
 });

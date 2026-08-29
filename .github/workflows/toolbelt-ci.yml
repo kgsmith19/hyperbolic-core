@@ -31,5 +31,3 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/verify-tests-toolbelt
-        with:
-          owner_refresh_token: ${{ secrets.TOOLBELT_OWNER_REFRESH_TOKEN }}
