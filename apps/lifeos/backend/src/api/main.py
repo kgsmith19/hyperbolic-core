@@ -123,9 +123,11 @@ async def cap_upload_size(
     return await call_next(request)
 
 
-# Browser clients (the lifeos-ui SPA). Bearer tokens, no cookies, tailnet-only
-# exposure — so a static allowlist is enough; LIFEOS_CORS_ORIGINS overrides.
-_UI_ORIGINS = "http://localhost:5173,https://lifeos-prod.taile48c9b.ts.net:8443"
+# Browser clients in development can use the Vite origin below. Production
+# LifeOS is same-origin with Shell under /life/, so it needs no cross-origin
+# production allowlist at all. LIFEOS_CORS_ORIGINS remains the explicit escape
+# hatch for a deliberately different development/test origin.
+_UI_ORIGINS = "http://localhost:5173"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=(read_env("LIFEOS_CORS_ORIGINS") or _UI_ORIGINS).split(","),
