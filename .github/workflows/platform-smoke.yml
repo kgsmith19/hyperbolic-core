@@ -24,6 +24,9 @@ name: "Platform Smoke"
 #                       which this repo must not assert about)
 #   /life/capture       representative LifeOS browser-history document route
 #   /life/api/healthz   LifeOS API through nginx's /life/api/ route (same gate)
+#   :8443               must refuse/close once LifeOS is live; that listener was
+#                       the standalone LifeOS origin and creates a second browser
+#                       origin that cannot share Shell's localStorage session
 #
 # Credentials: only the tailnet OAuth client (shell-deploy Infisical path).
 # No SSH for the shared-origin probes above -- the box is probed exactly the
@@ -169,6 +172,25 @@ jobs:
             echo "ok   $label ($path)"
           }
 
+          probe_closed_https_listener() {
+            local label="$1" port="$2"
+            local legacy_origin="https://$DEPLOY_HOST:$port"
+            local error_file="$smoke_tmp/closed-listener-$port-error"
+            : >"$error_file"
+            # --insecure is deliberate here: this is a negative listener
+            # existence probe, not a certificate assertion. Any HTTPS response
+            # on the retired port is a failure even if its certificate is stale
+            # or mismatched; a refused/closed listener is the desired result.
+            if curl --insecure --silent --show-error --connect-timeout 5 --max-time 8 --output /dev/null "$legacy_origin/" 2>"$error_file"; then
+              results+=("| $label | \`:$port\` | ❌ legacy listener still answers |")
+              echo "FAIL $label ($legacy_origin/): retired HTTPS listener still accepted a request" >&2
+              failures=$((failures + 1))
+              return 0
+            fi
+            results+=("| $label | \`:$port\` | ✅ closed/refused |")
+            echo "ok   $label (:$port closed/refused)"
+          }
+
           # The broker has no nginx route (see this file's own header
           # comment) -- reached over Tailscale SSH instead, the same
           # ssh_options shape deploy.yml's own jobs use.
@@ -212,9 +234,11 @@ jobs:
             probe "LifeOS UI" "/life/" '/life/assets/[A-Za-z0-9_.-]+\.js'
             probe "LifeOS capture deep link" "/life/capture" '/life/assets/[A-Za-z0-9_.-]+\.js'
             probe_json_health "LifeOS API" "/life/api/healthz"
+            probe_closed_https_listener "Legacy LifeOS HTTPS listener" "8443"
           else
             results+=("| LifeOS UI | \`/life/\` | ⏭️ skipped (pre-cutover) |")
             results+=("| LifeOS API | \`/life/api/healthz\` | ⏭️ skipped (pre-cutover) |")
+            results+=("| Legacy LifeOS HTTPS listener | \`:8443\` | ⏭️ skipped (pre-cutover) |")
             echo "skip LifeOS probes: LIFEOS_DEPLOY_ENABLED != 'true' (pre-cutover)"
           fi
 
