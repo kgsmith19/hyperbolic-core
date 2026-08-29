@@ -74,3 +74,5 @@ and engineering rules; [`project.yaml`](./project.yaml) for exact repository fac
 ## 📄 License
 
 [MIT](./LICENSE)
+
+<!-- test-pr-merge-verification: trivial doc-only change verifying the PR Gate -> auto-merge pipeline end-to-end. -->
