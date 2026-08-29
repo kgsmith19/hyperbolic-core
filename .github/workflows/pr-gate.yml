@@ -12,15 +12,15 @@ jobs:
       issues: read
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@b4ffbf834c0dab7f23efa3441f2deba1c5fc0021 # v4.1.1
       - name: Generate GitHub App Token for Dev Bot
         id: generate_token
-        uses: tibdex/github-app-token@v2
+        uses: tibdex/github-app-token@32691ba7c6e36257e19e7688c838f00fe7988d4c # v2.1.0
         with:
           app_id: ${{ secrets.DEV_APP_ID }}
           private_key: ${{ secrets.DEV_PRIVATE_KEY_B64 }}
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
         with:
           python-version: '3.11'
           cache: 'pip'
