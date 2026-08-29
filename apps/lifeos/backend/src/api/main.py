@@ -233,7 +233,7 @@ def schema_validation_error(request: Request, exc: jsonschema.ValidationError) -
 
 @app.exception_handler(jsonschema.SchemaError)
 def schema_error(request: Request, exc: jsonschema.SchemaError) -> JSONResponse:
-    return JSONResponse(status_code=422, content={"detail": str(exc)})
+    return JSONResponse(status_code=422, content={"detail": exc.message})
 
 
 # CONTRACT: ValueError is client input the kernel refused (bad x-flags,
