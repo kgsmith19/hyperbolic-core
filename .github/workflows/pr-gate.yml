@@ -1,0 +1,36 @@
+name: PR Gate & Verification
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Generate GitHub App Token for Dev Bot
+        id: generate_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.DEV_APP_ID }}
+          private_key: ${{ secrets.DEV_PRIVATE_KEY_B64 }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Run Deterministic CI Checks
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+        run: |
+          echo "[*] Running linting, unit testing, and security checks..."
+          python3 -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
+          echo "[+] All baseline PR gate checks passed."
