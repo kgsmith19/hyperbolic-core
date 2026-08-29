@@ -21,7 +21,7 @@
 // pointed at the SAME Supabase project reads that same stored session.
 // That is what makes this a real re-read of the Shell's session rather than
 // a parallel login system with a similar-looking API.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createPlatformClient,
   type PlatformClient,
@@ -74,14 +74,15 @@ export interface LifeOsSession {
 
 /**
  * Reads the platform session for the lifetime of this document. Exactly one
- * `getSession()` call, same shape as `useShellSession` minus `signIn` --
- * see this module's own top comment for why a second, independent
+ * `getSession()` call, same ordering-safe shape as `useShellSession` minus
+ * `signIn` -- see this module's own top comment for why a second, independent
  * `createPlatformClient()` instance here is still "the same session" and
  * not a parallel one.
  */
 export function useLifeOsSession(): LifeOsSession {
   const [status, setStatus] = useState<SessionStatus>("checking");
   const [session, setSession] = useState<PlatformSession | null>(null);
+  const revision = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,16 +97,35 @@ export function useLifeOsSession(): LifeOsSession {
       setStatus(next ? "signed-in" : "signed-out");
     }
 
-    platformClient.auth.getSession().then(apply);
-    const unsubscribe = platformClient.auth.onAuthStateChange(apply);
+    // Subscribe before restoring. platform-client performs owner verification
+    // asynchronously for both paths, so whichever auth result is newest owns
+    // the state; a slower initial getSession() must never overwrite it.
+    const unsubscribe = platformClient.auth.onAuthStateChange((next) => {
+      revision.current += 1;
+      apply(next);
+    });
+
+    const restoreRevision = revision.current;
+    platformClient.auth
+      .getSession()
+      .then((next) => {
+        if (revision.current === restoreRevision) apply(next);
+      })
+      .catch(() => {
+        if (revision.current === restoreRevision) apply(null);
+      });
 
     return () => {
       cancelled = true;
+      revision.current += 1;
       unsubscribe();
     };
   }, []);
 
   const signOut = useCallback(() => {
+    // Invalidate any in-flight initial restore before locally demoting the
+    // session, matching Shell's ordering rule for an explicit sign-out.
+    revision.current += 1;
     setSession(null);
     setStatus("signed-out");
     platformClient.auth.signOut().catch(() => {});
