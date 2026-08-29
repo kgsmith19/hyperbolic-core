@@ -720,7 +720,7 @@ jobs:
   apply-serve:
     name: Converge legacy Serve routes after origin activation
     needs: deploy
-    if: inputs.apply_serve_after_origin == true && needs.deploy.result == 'success' && needs.deploy.outputs.serve_state == 'legacy'
+    if: needs.deploy.result == 'success' && needs.deploy.outputs.serve_state == 'legacy' && (github.event_name == 'push' || inputs.apply_serve_after_origin == true)
     uses: ./.github/workflows/ops-serve-apply.yml
     with:
       origin_parent_run_id: ${{ github.run_id }}
