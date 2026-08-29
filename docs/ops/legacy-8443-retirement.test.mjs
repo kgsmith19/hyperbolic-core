@@ -41,7 +41,7 @@ function classifier(status) {
       bashEnv,
       `tailscale() {\n  if [[ "$*" == "serve status --json" ]]; then\n    printf '%s' "$SERVE_STATUS"\n    return 0\n  fi\n  return 91\n}\n`,
     );
-    return execFileSync("bash", [sourceScript, "--classify-status"], {
+    return execFileSync(process.env.BASH_PATH ?? "bash", [sourceScript, "--classify-status"], {
       encoding: "utf8",
       env: {
         ...process.env,
@@ -94,7 +94,7 @@ function applyFixture(initialState, { verifierFailsOnHttps = false } = {}) {
   esac
 }
 curl() {
-  local url="${!#}"
+  local url="\${!#}"
   if [[ "$url" == "http://127.0.0.1:8080/healthz" ]]; then
     printf '{"status":"ok"}'
     return 0
@@ -104,7 +104,7 @@ curl() {
 `,
   );
 
-  const result = spawnSync("bash", [script, "--apply"], {
+  const result = spawnSync(process.env.BASH_PATH ?? "bash", [script, "--apply"], {
     encoding: "utf8",
     env: {
       ...process.env,

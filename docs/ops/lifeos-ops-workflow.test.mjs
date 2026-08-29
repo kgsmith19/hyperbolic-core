@@ -76,7 +76,7 @@ test("the cron wrapper preserves the standalone semantics verbatim where they ma
 });
 
 test("both remote scripts run under strict mode and republish output to the step summary", () => {
-  const heredocs = workflow.match(/<<'REMOTE'\n\s+set -euo pipefail/g) ?? [];
+  const heredocs = workflow.match(/<<'REMOTE'\r?\n\s+set -euo pipefail/g) ?? [];
   assert.equal(heredocs.length, 2);
   const summaries = workflow.match(/>> "\$GITHUB_STEP_SUMMARY"/g) ?? [];
   assert.ok(summaries.length >= 3); // dry-run plan + both SSH tasks

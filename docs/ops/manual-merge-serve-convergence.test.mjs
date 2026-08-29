@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const workflow = readFileSync(".github/workflows/ops-edge.yml", "utf8");
+const workflow = readFileSync(".github/workflows/ops-edge.yml", "utf8").replaceAll("\r\n", "\n");
 
 function jobBlock(name, nextName) {
   const start = workflow.indexOf(`  ${name}:\n`);

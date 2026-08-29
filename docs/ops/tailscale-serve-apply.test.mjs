@@ -395,8 +395,13 @@ test("initial verification rejects a numeric HTTPS listener flag before every Se
 test("a null initial Serve config converges from no handlers to the exact root", () => {
   const { calls, result } = applyFixture({ initialStatus: "null" });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(calls, ["serve status --json", rootCommand, "serve status --json"]);
-  assert.equal((result.stderr.match(/already absent/g) ?? []).length, 4);
+  assert.deepEqual(calls, [
+    "serve status --json",
+    rootCommand,
+    "serve status --json",
+    "serve status --json",
+  ]);
+  assert.equal((result.stderr.match(/already absent/g) ?? []).length, 5);
   assert.match(result.stdout, /Serve status JSON before convergence:\nnull/);
 });
 
@@ -410,7 +415,12 @@ test("empty initial schema siblings are a valid first-apply state", () => {
   });
   const { calls, result } = applyFixture({ initialStatus });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(calls, ["serve status --json", rootCommand, "serve status --json"]);
+  assert.deepEqual(calls, [
+    "serve status --json",
+    rootCommand,
+    "serve status --json",
+    "serve status --json",
+  ]);
 });
 
 const rejectedInitialStates = [
@@ -546,8 +556,13 @@ test("a legacy removal failure occurs only after the root exists and never remov
 test("steady-state reapply skips all four absent legacy mounts without parsing English errors", () => {
   const { calls, result } = applyFixture({ initialStatus: desiredStatus });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(calls, ["serve status --json", rootCommand, "serve status --json"]);
-  assert.equal((result.stderr.match(/already absent/g) ?? []).length, 4);
+  assert.deepEqual(calls, [
+    "serve status --json",
+    rootCommand,
+    "serve status --json",
+    "serve status --json",
+  ]);
+  assert.equal((result.stderr.match(/already absent/g) ?? []).length, 5);
 });
 
 test("initial JSON selects only legacy mounts that actually exist", () => {
@@ -563,6 +578,7 @@ test("initial JSON selects only legacy mounts that actually exist", () => {
     removalCommands[1],
     removalCommands[3],
     "serve status --json",
+    "serve status --json",
   ]);
 });
 
@@ -572,21 +588,25 @@ test("human status formatting cannot affect convergence", () => {
   });
   assert.equal(result.status, 0, result.stderr);
   assert.ok(calls.every((call) => call !== "serve status"));
-  assert.equal(calls.filter((call) => call === "serve status --json").length, 2);
+  assert.equal(calls.filter((call) => call === "serve status --json").length, 3);
 });
 
 test("malformed final JSON is rejected after root-first convergence", () => {
   const { calls, result } = applyFixture({ finalStatus: "{" });
   assert.notEqual(result.status, 0);
   assert.equal(calls.at(-1), "serve status --json");
-  assert.match(result.stderr, /invalid final Serve JSON/);
+  assert.match(result.stderr, /invalid.*Serve JSON/i);
 });
 
 test("a null final config is never accepted as the one-root desired state", () => {
   const { calls, result } = applyFixture({ initialStatus: "null", finalStatus: "null" });
   assert.notEqual(result.status, 0);
-  assert.deepEqual(calls, ["serve status --json", rootCommand, "serve status --json"]);
-  assert.match(result.stderr, /final Serve state is not exactly one nginx root proxy/);
+  assert.deepEqual(calls, [
+    "serve status --json",
+    rootCommand,
+    "serve status --json",
+  ]);
+  assert.match(result.stderr, /Serve state is not the required nginx gateway topology/);
 });
 
 const rejectedFinalStates = [
@@ -613,7 +633,7 @@ const rejectedFinalStates = [
     state.TCP[443].HTTPS = 1;
   }],
   ["an extra TCP listener", (state) => {
-    state.TCP[8443] = { HTTPS: true };
+    state.TCP[9443] = { HTTPS: true };
   }],
   ["an unknown false TCP listener field", (state) => {
     state.TCP[443].Unexpected = false;
@@ -630,7 +650,7 @@ for (const [label, mutator] of rejectedFinalStates) {
   test(`final verification rejects ${label}`, () => {
     const { result } = applyFixture({ finalStatus: statusWith(mutator) });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /final Serve state is not exactly one nginx root proxy/);
+    assert.match(result.stderr, /Serve state is not the required nginx gateway topology/);
   });
 }
 
@@ -649,7 +669,7 @@ for (const [label, field, value] of rejectedFinalSchemaTypes) {
     state[field] = value;
     const { result } = applyFixture({ finalStatus: JSON.stringify(state) });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /final Serve state is not exactly one nginx root proxy/);
+    assert.match(result.stderr, /Serve state is not the required nginx gateway topology/);
   });
 }
 
@@ -671,7 +691,7 @@ test("a final status command failure is visible after the root was established",
     ...removalCommands,
     "serve status --json",
   ]);
-  assert.match(result.stderr, /final Serve status check failed/);
+  assert.match(result.stderr, /Serve status check failed/);
 });
 
 test("apply preflights, installs one root, removes legacy mounts, and prints JSON evidence", () => {
@@ -682,8 +702,9 @@ test("apply preflights, installs one root, removes legacy mounts, and prints JSO
     rootCommand,
     ...removalCommands,
     "serve status --json",
+    "serve status --json",
   ]);
-  assert.deepEqual(curlCalls, [
+  const expectedLoopbackProbes = [
     "http://127.0.0.1:8080/healthz",
     "http://127.0.0.1:8080/login",
     "http://127.0.0.1:8080/settings",
@@ -734,8 +755,12 @@ test("apply preflights, installs one root, removes legacy mounts, and prints JSO
     "http://127.0.0.1:8080/api/healthz",
     "http://127.0.0.1:8080/api/brain/health",
     "http://127.0.0.1:8080/life/api/healthz",
-  ]);
-  assert.match(result.stdout, /Serve status JSON before convergence/);
+  ];
+  const expectedGatewayProbes = expectedLoopbackProbes
+    .filter((url) => url !== "http://127.0.0.1:8080/healthz")
+    .map((url) => url.replace("http://127.0.0.1:8080", "https://node.example.ts.net"));
+  assert.deepEqual(curlCalls, [...expectedLoopbackProbes, ...expectedGatewayProbes]);
+  assert.match(result.stdout, /Serve status JSON before legacy HTTPS retirement/);
   assert.match(result.stdout, /Serve status JSON after convergence/);
   assert.match(result.stdout, /"Proxy": "http:\/\/127\.0\.0\.1:8080"/);
 });
