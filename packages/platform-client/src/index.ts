@@ -228,7 +228,10 @@ export function createPlatformClient(config: PlatformClientConfig): PlatformClie
     onAuthStateChange(handler) {
       const {
         data: { subscription },
-      } = supabase.auth.onAuthStateChange((_event, session) => {
+      } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === "INITIAL_SESSION" && !session) {
+          return;
+        }
         const platformSession = toPlatformSession(session);
         if (!platformSession) {
           handler(null);

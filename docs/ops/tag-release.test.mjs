@@ -59,10 +59,10 @@ function fakeEnv({ tagExists = false, createFails = false } = {}) {
 
 function run(args, { tagExists = false, createFails = false, env = {} } = {}) {
   const { bin, log } = fakeEnv({ tagExists, createFails });
-  const result = spawnSync(script, args, {
+  const result = spawnSync(process.env.BASH_PATH ?? "bash", [script, ...args], {
     encoding: "utf8",
     env: {
-      PATH: `${bin}:${process.env.PATH}`,
+      PATH: [bin, process.env.PATH].filter(Boolean).join(path.delimiter),
       GH_TOKEN: "fake-token",
       REPO: "kgsmith19/hyperbolic-core",
       TAG_RELEASE_DATE: "20260817",
@@ -73,7 +73,7 @@ function run(args, { tagExists = false, createFails = false, env = {} } = {}) {
 }
 
 test("a real bash -n parse of the script is syntactically clean", () => {
-  const result = spawnSync("bash", ["-n", script], { encoding: "utf8" });
+  const result = spawnSync(process.env.BASH_PATH ?? "bash", ["-n", script], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
 });
 
