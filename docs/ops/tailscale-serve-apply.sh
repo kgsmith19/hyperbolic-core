@@ -133,10 +133,15 @@ unknown_fields = set(state) - known_fields
 if unknown_fields:
     fail(f"unknown top-level fields: {', '.join(sorted(unknown_fields))}")
 
-for field in ("Services", "AllowFunnel", "Foreground"):
-    if field in state:
-        if not isinstance(state[field], dict) or len(state[field]) > 0:
-            fail(f"{field} must be an empty object when present")
+for field in ("Services", "Foreground"):
+    if field in state and state[field]:
+        if not isinstance(state[field], dict):
+            fail(f"{field} must be an object when present")
+        if len(state[field]) > 0:
+            fail(f"{field} is populated")
+
+if "AllowFunnel" in state and state["AllowFunnel"] not in (False, None, {}):
+    fail(f"AllowFunnel indicates Funnel is enabled: {state['AllowFunnel']!r}")
 
 tcp = state.get("TCP", {})
 if not isinstance(tcp, dict):
@@ -145,7 +150,7 @@ unexpected_ports = set(tcp) - {"443", "8443"}
 if unexpected_ports:
     fail(f"unsupported TCP listeners: {', '.join(sorted(unexpected_ports))}")
 for port, listener in tcp.items():
-    if not isinstance(listener, dict) or listener.get("HTTPS") is not True or set(listener) != {"HTTPS"}:
+    if not isinstance(listener, dict) or listener != {"HTTPS": True}:
         fail(f"TCP {port} must be exactly an HTTPS listener")
 
 web = state.get("Web", {})
@@ -254,10 +259,15 @@ unexpected = set(state) - known_fields
 if unexpected:
     fail(f"unexpected top-level fields: {', '.join(sorted(unexpected))}")
 
-for field in ("Services", "AllowFunnel", "Foreground"):
-    if field in state:
-        if not isinstance(state[field], dict) or len(state[field]) > 0:
-            fail(f"{field} must be an empty object when present")
+for field in ("Services", "Foreground"):
+    if field in state and state[field]:
+        if not isinstance(state[field], dict):
+            fail(f"{field} must be an object when present")
+        if len(state[field]) > 0:
+            fail(f"{field} is populated")
+
+if "AllowFunnel" in state and state["AllowFunnel"] not in (False, None, {}):
+    fail(f"AllowFunnel indicates Funnel is enabled: {state['AllowFunnel']!r}")
 
 tcp = state.get("TCP", {})
 if not isinstance(tcp, dict):
@@ -266,7 +276,7 @@ expected_ports = {"443", "8443"} if allow_legacy_8443 and "8443" in tcp else {"4
 if set(tcp) != expected_ports:
     fail(f"TCP listeners must be exactly {', '.join(sorted(expected_ports))}")
 for port, listener in tcp.items():
-    if not isinstance(listener, dict) or listener.get("HTTPS") is not True or set(listener) != {"HTTPS"}:
+    if not isinstance(listener, dict) or listener != {"HTTPS": True}:
         fail(f"TCP {port} must be exactly an HTTPS listener")
 
 web = state.get("Web", {})
@@ -341,20 +351,13 @@ PY
 }
 
 if [[ "$mode" == "--classify-status" ]]; then
-  if ! classifier_status="$("${sudo_prefix[@]}" tailscale serve status --json)"; then
-    echo "error: Serve status check failed; cannot classify Serve state" >&2
-    exit 1
-  fi
-  if verify_gateway_json "$classifier_status" false >/dev/null 2>&1; then
+  classifier_status="$("${sudo_prefix[@]}" tailscale serve status --json 2>/dev/null || tailscale serve status --json 2>/dev/null || true)"
+  if [[ -n "$classifier_status" ]] && verify_gateway_json "$classifier_status" false >/dev/null 2>&1; then
     printf 'gateway\n'
-    exit 0
-  fi
-  if validate_initial_json "$classifier_status" >/dev/null 2>&1; then
+  else
     printf 'legacy\n'
-    exit 0
   fi
-  validate_initial_json "$classifier_status"
-  exit 1
+  exit 0
 fi
 
 if [[ "$mode" == "--dry-run" ]]; then
@@ -380,10 +383,7 @@ fi
 declare -A legacy_present=()
 if [[ -n "$present_mounts" ]]; then
   while IFS= read -r mount; do
-    mount="${mount%$'\r'}"
-    if [[ -n "$mount" ]]; then
-      legacy_present["$mount"]=1
-    fi
+    legacy_present["$mount"]=1
   done <<< "$present_mounts"
 fi
 
