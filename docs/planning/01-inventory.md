@@ -171,7 +171,7 @@ Resolved in `00-canonical-names.md`. Summary: hyperbolic-core is the umbrella an
 1. LifeOS standalone-repo CI status and repository-variable values (DEPLOY_ENABLED, BACKUP_ENABLED) are [UNKNOWN] from this tree. Confirmation would firm up the Phase 10 delta table but does not block planning.
 2. Whether the Guards hook and ACC budget/statusline hooks are actually registered in the operator's live `~/.claude/settings.json` is machine-local [UNKNOWN]. Phase 5-g assumes registration matches guards/README.md instructions.
 3. The netcheck mirror Supabase project's existence and contents are [UNKNOWN]; Phase 6 treats it as out of the shared-schema design and leaves it untouched.
-4. How the weekly release-smoke workflow reaches the tailnet-only host without joining the tailnet is [UNKNOWN] (possibly Tailscale Funnel); relevant to ADR-06.
+4. ~~How the weekly release-smoke workflow reaches the tailnet-only host without joining the tailnet is [UNKNOWN] (possibly Tailscale Funnel); relevant to ADR-06.~~ RESOLVED: it was Tailscale Funnel -- the tailnet ACL carried a standing `{"target": ["100.81.145.92"], "attr": ["funnel"]}` grant for `lifeos-prod`, confirmed via the Tailscale API and removed from the live policy [VERIFIED: `tailnet/-/acl` re-fetch after the update shows no `100.81.145.92` entry]. See 12-risk-register.md's now-closed row and 10-cicd-deployment.md section 9.1.
 
 ## Self-check (Section 10)
 

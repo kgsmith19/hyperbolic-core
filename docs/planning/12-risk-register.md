@@ -67,7 +67,7 @@ Reading: V1 is a net-additive foundation dominated by one component (the Brain p
 | Item | Where | Cost | Justification |
 | --- | --- | --- | --- |
 | D-13: gate `build-backend` on a repository variable | standalone kgsmith19/lifeos ci.yml | one `if:` line | ungated image publish on every main push is the exact hazard root AGENTS.md documents |
-| release-smoke tailnet conversion (drop Funnel exposure if present) | standalone lifeos | ~6 workflow lines | closes ADR-06's [UNKNOWN] public-exposure question |
+| ~~release-smoke tailnet conversion (drop Funnel exposure if present)~~ RESOLVED at the infra layer: the standing Funnel grant on `lifeos-prod` (100.81.145.92) was removed from the live tailnet ACL directly, closing the public-exposure question without needing the release-smoke.yml conversion this row originally called for | standalone lifeos | ~~~6 workflow lines~~ 0 (fixed via Tailscale ACL, not a workflow change) | closes ADR-06's [UNKNOWN] public-exposure question -- RESOLVED; see 01-inventory.md gate question 4 and 10-cicd-deployment.md section 9.1 |
 | lifeos image retention + explicit rollback runbook rows | standalone lifeos | docs + retention flag | 10 section 8.1 assumes it |
 | `/life/*` base-path configuration (Vite base, router basename, FastAPI root_path) + smoke URL updates | standalone lifeos | ~20 lines config | required by ADR-02 one-origin routing (OD-03 confirms direction first) |
 | Auth re-point deploy train execution (Infisical values + one redeploy) | standalone lifeos pipeline + Infisical | config only | LO-2; must run as one train (R-04) |
