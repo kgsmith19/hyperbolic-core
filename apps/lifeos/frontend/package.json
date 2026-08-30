@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "e2e": "playwright test",
-    "gen:api": "openapi-typescript https://lifeos-prod.taile48c9b.ts.net/openapi.json -o src/api/types.gen.ts && prettier --write src/api/types.gen.ts",
+    "gen:api": "openapi-typescript https://lifeos-prod.taile48c9b.ts.net/life/api/openapi.json -o src/api/types.gen.ts && prettier --write src/api/types.gen.ts",
     "format": "prettier --write ."
   },
   "dependencies": {
