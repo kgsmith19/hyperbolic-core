@@ -1,0 +1,3 @@
+[submodule ".kilo/vendor/agent-extensions"]
+	path = .kilo/vendor/agent-extensions
+	url = https://github.com/kgsmith19/agent-extensions.git
