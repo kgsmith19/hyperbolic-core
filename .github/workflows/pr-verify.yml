@@ -159,21 +159,21 @@ jobs:
           persist-credentials: false
 
       # Cheapest-to-most-expensive, fail-fast: nothing runs after a leaked
-      # secret is found.
-      - name: Standards · Secrets
-        uses: ./.github/actions/verify-secrets
-        with:
-          base_sha: ${{ github.event.pull_request.base.sha }}
-          head_sha: ${{ github.event.pull_request.head.sha }}
+       # secret is found.
+       - name: Standards · Secrets
+         uses: ./.github/actions/verify-secrets
+         with:
+           base_sha: ${{ github.event.pull_request.base.sha }}
+           head_sha: ${{ github.event.pull_request.head.sha }}
 
-      - name: Standards · Repo policy
-        uses: ./.github/actions/verify-repo-policy
-        with:
-          base_sha: ${{ github.event.pull_request.base.sha }}
-          dev_provider: ${{ vars.DEV_PROVIDER }}
-          dev_model: ${{ vars.DEV_MODEL }}
-          review_provider: ${{ vars.REVIEW_PROVIDER }}
-          review_model: ${{ vars.REVIEW_MODEL }}
+       - name: Standards · Repo policy
+         uses: ./.github/actions/verify-repo-policy
+         with:
+           base_sha: ${{ github.event.pull_request.base.sha }}
+           dev_provider: ${{ vars.DEV_PROVIDER }}
+           dev_model: ${{ vars.DEV_MODEL }}
+           review_provider: ${{ vars.REVIEW_PROVIDER }}
+           review_model: ${{ vars.REVIEW_MODEL }}
 
       - name: Standards · PR description
         uses: ./.github/actions/verify-pr-description

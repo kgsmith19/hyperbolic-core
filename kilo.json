@@ -1,0 +1,28 @@
+{
+  "model": "anthropic/claude-haiku-4-5",
+  "small_model": "anthropic/claude-haiku-4-5",
+  "default_agent": "dev",
+  "permission": {
+    "bash": "allow",
+    "edit": [
+      "apps/**/*",
+      "packages/**/*",
+      "services/**/*",
+      ".github/**/*",
+      "kilo.json",
+      ".kilo/**/*"
+    ],
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "task": "allow",
+    "webfetch": "allow"
+  },
+  "skills": {
+    "paths": [
+      ".kilo/vendor/agent-extensions/plugins/anthropic-product-skills",
+      ".kilo/vendor/agent-extensions/plugins/general-skills"
+    ]
+  },
+  "mcp": {}
+}
