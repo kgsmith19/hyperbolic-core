@@ -82,16 +82,14 @@ jobs:
       # client_payload is caller-supplied data. Validate its schema, the
       # CODEOWNERS-protected default-branch role policy, and the live PR before
       # OIDC, Infisical, token minting, checkout, or model execution.
-      - name: Preflight · Validate dispatch, dev role, and exact PR head
-        id: preflight
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
-        env:
-          PR_NUMBER: ${{ github.event.client_payload.prNumber }}
-          DISPATCH_HEAD_SHA: ${{ github.event.client_payload.headSha }}
-          ROUND: ${{ github.event.client_payload.round }}
-          RUN_URL: ${{ github.event.client_payload.runUrl }}
-          DEV_PROVIDER: ${{ vars.DEV_PROVIDER }}
-          DEV_MODEL: ${{ vars.DEV_MODEL }}
+       - name: Preflight · Validate dispatch, dev role, and exact PR head
+         id: preflight
+         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+         env:
+           PR_NUMBER: ${{ github.event.client_payload.prNumber }}
+           DISPATCH_HEAD_SHA: ${{ github.event.client_payload.headSha }}
+           ROUND: ${{ github.event.client_payload.round }}
+           RUN_URL: ${{ github.event.client_payload.runUrl }}
         with:
           script: |
             const { owner, repo } = context.repo;

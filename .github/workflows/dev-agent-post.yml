@@ -83,14 +83,12 @@ jobs:
       # branch to prefer over it anyway, but the principle is the same one
       # dev-agent-dispatch.yml's own preflight states: role assignment is
       # an owner decision, read from the CODEOWNERS-gated copy only.
-      - name: Preflight · Resolve the dev provider/model and confirm the App identity is provisioned
-        id: preflight
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
-        env:
-          APP_ID: ${{ env.DEV_GITHUB_APP_ID }}
-          APP_PRIVATE_KEY: ${{ env.DEV_GITHUB_APP_PRIVATE_KEY }}
-          DEV_PROVIDER: ${{ vars.DEV_PROVIDER }}
-          DEV_MODEL: ${{ vars.DEV_MODEL }}
+       - name: Preflight · Resolve the dev provider/model and confirm the App identity is provisioned
+         id: preflight
+         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+         env:
+           APP_ID: ${{ env.DEV_GITHUB_APP_ID }}
+           APP_PRIVATE_KEY: ${{ env.DEV_GITHUB_APP_PRIVATE_KEY }}
         with:
           script: |
             const { owner, repo } = context.repo;

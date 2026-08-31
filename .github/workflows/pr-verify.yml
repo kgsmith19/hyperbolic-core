@@ -159,21 +159,38 @@ jobs:
           persist-credentials: false
 
       # Cheapest-to-most-expensive, fail-fast: nothing runs after a leaked
-      # secret is found.
-      - name: Standards · Secrets
-        uses: ./.github/actions/verify-secrets
-        with:
-          base_sha: ${{ github.event.pull_request.base.sha }}
-          head_sha: ${{ github.event.pull_request.head.sha }}
+       # secret is found.
+       - name: Standards · Secrets
+         uses: ./.github/actions/verify-secrets
+         with:
+           base_sha: ${{ github.event.pull_request.base.sha }}
+           head_sha: ${{ github.event.pull_request.head.sha }}
 
-      - name: Standards · Repo policy
-        uses: ./.github/actions/verify-repo-policy
-        with:
-          base_sha: ${{ github.event.pull_request.base.sha }}
-          dev_provider: ${{ vars.DEV_PROVIDER }}
-          dev_model: ${{ vars.DEV_MODEL }}
-          review_provider: ${{ vars.REVIEW_PROVIDER }}
-          review_model: ${{ vars.REVIEW_MODEL }}
+       - name: Load agent roles
+         id: roles
+         run: |
+           # Read agent-roles.yaml and export as env vars for downstream jobs
+           DEV_PROVIDER=$(grep -A2 '^dev:' agent-roles.yaml | grep 'provider:' | awk '{print $2}')
+           DEV_MODEL=$(grep -A2 '^dev:' agent-roles.yaml | grep 'model:' | awk '{print $2}')
+           REVIEW_PROVIDER=$(grep -A2 '^review:' agent-roles.yaml | grep 'provider:' | awk '{print $2}')
+           REVIEW_MODEL=$(grep -A2 '^review:' agent-roles.yaml | grep 'model:' | awk '{print $2}')
+           
+           echo "DEV_PROVIDER=$DEV_PROVIDER" >> $GITHUB_ENV
+           echo "DEV_MODEL=$DEV_MODEL" >> $GITHUB_ENV
+           echo "REVIEW_PROVIDER=$REVIEW_PROVIDER" >> $GITHUB_ENV
+           echo "REVIEW_MODEL=$REVIEW_MODEL" >> $GITHUB_ENV
+           
+           echo "dev_provider=$DEV_PROVIDER" >> $GITHUB_OUTPUT
+           echo "dev_model=$DEV_MODEL" >> $GITHUB_OUTPUT
+
+       - name: Standards · Repo policy
+         uses: ./.github/actions/verify-repo-policy
+         with:
+           base_sha: ${{ github.event.pull_request.base.sha }}
+           dev_provider: ${{ env.DEV_PROVIDER }}
+           dev_model: ${{ env.DEV_MODEL }}
+           review_provider: ${{ env.REVIEW_PROVIDER }}
+           review_model: ${{ env.REVIEW_MODEL }}
 
       - name: Standards · PR description
         uses: ./.github/actions/verify-pr-description
