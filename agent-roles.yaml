@@ -1,9 +1,0 @@
-dev:
-  provider: anthropic
-  model: claude-sonnet-4-20250514
-  github_app: hyperbolic-core-dev
-
-review:
-  provider: anthropic
-  model: claude-opus-4-20250514
-  github_app: hyperbolic-core-reviewer

@@ -89,6 +89,8 @@ jobs:
          env:
            APP_ID: ${{ env.DEV_GITHUB_APP_ID }}
            APP_PRIVATE_KEY: ${{ env.DEV_GITHUB_APP_PRIVATE_KEY }}
+           DEV_PROVIDER: ${{ vars.DEV_PROVIDER }}
+           DEV_MODEL: ${{ vars.DEV_MODEL }}
         with:
           script: |
             const { owner, repo } = context.repo;

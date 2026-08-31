@@ -90,6 +90,8 @@ jobs:
            DISPATCH_HEAD_SHA: ${{ github.event.client_payload.headSha }}
            ROUND: ${{ github.event.client_payload.round }}
            RUN_URL: ${{ github.event.client_payload.runUrl }}
+           DEV_PROVIDER: ${{ vars.DEV_PROVIDER }}
+           DEV_MODEL: ${{ vars.DEV_MODEL }}
         with:
           script: |
             const { owner, repo } = context.repo;

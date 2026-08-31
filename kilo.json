@@ -1,5 +1,5 @@
 {
-  "model": "anthropic/claude-sonnet-4-20250514",
+  "model": "anthropic/claude-haiku-4-5",
   "small_model": "anthropic/claude-haiku-4-5",
   "default_agent": "dev",
   "permission": {
@@ -9,7 +9,6 @@
       "packages/**/*",
       "services/**/*",
       ".github/**/*",
-      "agent-roles.yaml",
       "kilo.json",
       ".kilo/**/*"
     ],
