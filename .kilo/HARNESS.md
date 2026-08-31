@@ -22,7 +22,7 @@
 
 3. **Check current model and provider:**
    ```bash
-   /roles               # Displays dev and review model config from agent-roles.yaml
+   /status              # Displays current agent and model config
    ```
 
 4. **Begin work per AES:**
@@ -36,28 +36,27 @@
 
 ## Architecture
 
-### Three Core Components
+### Core Components
 
-**1. `/agent-roles.yaml` — Single Source of Truth**
+**1. `/kilo.json` — Kilo Runtime Config**
 
-- Declares `dev.provider`, `dev.model`, `review.provider`, `review.model`
-- Human-readable YAML (no templating, no secrets)
-- Committed to git
-- Read by Kilo at initialization and by GitHub Actions workflows
-- Change it once, all consumers (Kilo, Actions, reviewers) pick it up
-
-**2. `/kilo.json` — Kilo Runtime Config**
-
-- Model defaults (mapped from `agent-roles.yaml`)
+- Model and provider selection for dev and reviewer agents
 - Permission rules for dev/reviewer agents
 - Skill paths (agent-extensions plugins)
 - MCP definitions (disabled by default, enable on demand)
+- **External:** Store in local `.env` or Kilo config (`~/.config/kilo/`); never commit to repo
 
-**3. `.kilo/agent/` and `.kilo/command/` — Agent & Command Definitions**
+**2. `.kilo/agent/` and `.kilo/command/` — Agent & Command Definitions**
 
 - `dev.md`: Implementation agent system prompt + frontmatter
 - `reviewer.md`: Independent reviewer system prompt + frontmatter
 - `command/role-set.md`, `command/roles-show.md`, `command/roles-sync.md`: Role management CLI commands
+
+**3. `.kilo/vendor/agent-extensions/` — Skills & MCPs**
+
+- Skills from agent-extensions (anthropic-product-skills, general-skills)
+- MCPs from external marketplaces
+- Lazy-loaded when referenced
 
 ---
 
@@ -68,7 +67,7 @@
 | Property | Value |
 |----------|-------|
 | Mode | `primary` |
-| Model | From `agent-roles.yaml` → `dev.model` |
+| Model | `anthropic/claude-haiku-4-5` (configurable in `kilo.json`) |
 | GitHub App | `hyperbolic-core-dev` |
 | Responsibilities | Write code, create PRs, respond to reviews, merge when ready |
 | Permissions | Broad: bash, edit (apps/packages/services/.github/config), read, glob, grep, task |
@@ -80,7 +79,7 @@
 | Property | Value |
 |----------|-------|
 | Mode | `subagent` |
-| Model | From `agent-roles.yaml` → `review.model` |
+| Model | `openai/gpt-4o` (configurable in `kilo.json`) |
 | GitHub App | `hyperbolic-core-reviewer` |
 | Responsibilities | Evaluate PRs, report findings, block/allow merge |
 | Permissions | Read-only + task (no direct edits, only comments/findings) |
@@ -92,60 +91,50 @@
 
 ## Changing Models
 
-### Method 1: Direct YAML Edit
+Provider and model selection is **external to the repository** for low friction and easy changes. Configure in local Kilo config or environment variables.
 
-Edit `/agent-roles.yaml`:
-```yaml
-dev:
-  provider: openai                  # Change provider
-  model: gpt-4o                     # Change model
-  github_app: hyperbolic-core-dev
+### Option 1: Edit Local Kilo Config
 
-review:
-  provider: anthropic               # Keep reviewer independent
-  model: claude-opus-4-20250514
-  github_app: hyperbolic-core-reviewer
+Edit `~/.config/kilo/kilo.json` (your global Kilo config):
+```jsonc
+{
+  "model": "anthropic/claude-haiku-4-5",           // Dev agent model
+  // ... other config
+}
 ```
 
-Commit and push. Next Kilo session and next PR workflow automatically use the new config.
-
-### Method 2: Kilo CLI Command
-
+Or create a project-local override in `hyperbolic-core/.env.kilo`:
 ```bash
-/role set dev openai gpt-4o
+KILO_MODEL=anthropic/claude-opus-4-20250514
+KILO_SMALL_MODEL=anthropic/claude-haiku-4-5
 ```
 
-This command:
-- Reads the current `agent-roles.yaml`
-- Validates the provider (anthropic | openai | gemini)
-- Edits the file in-place
-- Validates provider separation (review ≠ dev family)
-- Reloads Kilo agents
-
-### Method 3: Kilo `/models` Command
+### Option 2: Use Kilo `/models` Command
 
 ```bash
 /models                 # Interactive model picker for current agent
 ```
 
-(Standard Kilo command; persists to `kilo.json` for this session only, not persisted to `agent-roles.yaml`)
+This changes the model for the current session only.
 
-### Verifying Changes
+### Option 3: Environment Variable
 
 ```bash
-/roles                  # Display current agent-roles.yaml
+export KILO_MODEL=anthropic/claude-opus-4-20250514
+kilo
 ```
 
-Expected output:
-```
-dev:
-  provider: openai
-  model: gpt-4o
+### Verifying Current Config
 
-review:
-  provider: anthropic
-  model: claude-opus-4-20250514
+```bash
+/status                 # Shows current model and agent config
 ```
+
+**Why external:** Provider/model selection is a developer preference, not a repository concern. Keeping it outside the repo means:
+- Easy to change at any time without commits
+- No merge conflicts from model changes
+- Low friction for experiments
+- Clean git history (no churn from provider changes)
 
 ---
 
@@ -153,7 +142,7 @@ review:
 
 ### Storage
 
-GitHub App credentials are stored in **Infisical** (the project's secret manager), never in git:
+GitHub App credentials are stored in **Infisical** (the project's secret manager), **never in git or in local Kilo config**:
 
 ```
 /dev/
@@ -183,6 +172,7 @@ GitHub App credentials are stored in **Infisical** (the project's secret manager
 - Short-lived tokens are used instead of static keys when possible
 - Each App identity (dev/reviewer) is separate and independently revocable
 - Code review on all commits catches accidental credential leaks
+- Kilo config files (local or global) never contain credentials
 
 ---
 
@@ -232,21 +222,9 @@ This symlinks all external plugins and MCPs locally (optional; not required for 
 
 ## Validation
 
-To non-destructively verify the harness is configured correctly, run these 7 checks:
+To non-destructively verify the harness is configured correctly, run these checks:
 
-### 1. GitHub Apps Authenticate as Distinct Identities
-
-```bash
-# In a Kilo session as 'dev' agent:
-gh api user --jq .login             # Shows dev app account name
-
-# Switch to 'reviewer' context (or use a different GH_TOKEN):
-GH_TOKEN=$REVIEW_TOKEN gh api user --jq .login   # Shows reviewer app account name
-```
-
-**Expected:** Two different GitHub App usernames.
-
-### 2. AES is Discovered
+### 1. AES is Discovered
 
 ```bash
 cat AGENTS.md | head -20
@@ -256,48 +234,26 @@ python tools/standardctl.py verify --select policy
 
 **Expected:** AGENTS.md present, standard.lock pinned to AES commit, policy check passes.
 
-### 3. dev/reviewer Roles Use Correct Apps
+### 2. Kilo Agents Load
 
 ```bash
-cat .kilo/agent/dev.md | grep github_app
-cat .kilo/agent/reviewer.md | grep github_app
 /agents                             # Lists both 'dev' and 'reviewer'
+kilo --agent dev                    # Switch to dev agent
+kilo --agent reviewer               # Switch to reviewer agent
 ```
 
-**Expected:** Both agents reference their respective GitHub Apps.
+**Expected:** Both agents are discoverable and switchable.
 
-### 4. Changing Model is Simple
+### 3. Kilo Models are Configurable
 
 ```bash
-/roles
-/role set dev anthropic claude-opus-4-20250514
-cat agent-roles.yaml | grep -A 2 "^dev:"
-/role set dev anthropic claude-sonnet-4-20250514   # Revert
+/status                             # Shows current model config
+/models                             # Interactive model picker
 ```
 
-**Expected:** File edited, change visible immediately, one command sufficient.
+**Expected:** Current model displayed; can change interactively.
 
-### 5. GitHub Evidence Reports Exact Provider/Model
-
-```bash
-# Create a test PR (with [WIP] prefix so it doesn't merge):
-git checkout -b test/kilo-validation
-echo "test" > test.txt
-git add test.txt
-git commit -m "test: validation check"
-git push -u origin test/kilo-validation
-# Create PR via GitHub UI
-```
-
-Check PR's GitHub Actions logs → PR Verification job → Work State comment:
-```
-dev: anthropic/claude-sonnet-4-20250514
-review: anthropic/claude-opus-4-20250514
-```
-
-**Expected:** Provider/model pair recorded in automated evidence.
-
-### 6. agent-extensions Capabilities Discoverable
+### 4. agent-extensions Capabilities Discoverable
 
 ```bash
 /skills                             # Lists skills from agent-extensions
@@ -307,16 +263,16 @@ review: anthropic/claude-opus-4-20250514
 
 **Expected:** Skills are listed and loadable; MCPs are discoverable.
 
-### 7. No Credential Stored Insecurely
+### 5. No Credentials in Repository
 
 ```bash
 git status | grep -i secret
 git log --all --grep="PRIVATE_KEY|API_KEY|TOKEN" --oneline
-grep -r "PRIVATE_KEY|api_key|secret" .kilo/ --include="*.md" --include="*.json" --include="*.yaml"
-echo $DEV_GITHUB_APP_PRIVATE_KEY | head -c 20   # Should be empty
+grep -r "PRIVATE_KEY|api_key|secret" .kilo/ --include="*.md" --include="*.json"
+grep -r "provider\|model" . --include="*.yml" --include="*.yaml"  # Should only find AES/project.yaml, not agent config
 ```
 
-**Expected:** No plaintext secrets in repo, config, or logs.
+**Expected:** No plaintext secrets in repo; no provider/model config in YAML workflows.
 
 ---
 
@@ -381,20 +337,19 @@ gh api user --jq .login
 
 ## Files Reference
 
-| File | Purpose | Created | Modified |
-|------|---------|---------|----------|
-| `/agent-roles.yaml` | Role config (dev/review model, provider, app names) | ✓ | ✓ |
-| `/kilo.json` | Kilo runtime config (model, permissions, skills, MCPs) | ✓ | — |
-| `.kilo/agent/dev.md` | Dev agent definition + system prompt | ✓ | — |
-| `.kilo/agent/reviewer.md` | Reviewer agent definition + system prompt | ✓ | — |
-| `.kilo/command/role-set.md` | `/role set` command documentation | ✓ | — |
-| `.kilo/command/roles-show.md` | `/roles` command documentation | ✓ | — |
-| `.kilo/command/roles-sync.md` | `/roles sync` command documentation | ✓ | — |
-| `.kilo/vendor/agent-extensions/` | Agent-extensions submodule (skills, MCPs, plugins) | ✓ | — |
+| File | Purpose | In Repo | Notes |
+|------|---------|---------|-------|
+| `/kilo.json` | Kilo runtime config (model, permissions, skills, MCPs) | ✓ | Can be overridden locally; default has haiku-4-5 (dev), gpt-4o (review) |
+| `.kilo/agent/dev.md` | Dev agent definition + system prompt | ✓ | References model from kilo.json or local config |
+| `.kilo/agent/reviewer.md` | Reviewer agent definition + system prompt | ✓ | References model from kilo.json or local config |
+| `.kilo/command/role-set.md` | `/role set` command documentation | ✓ | Documents how to change models externally |
+| `.kilo/command/roles-show.md` | `/roles` command documentation | ✓ | Shows current agent config |
+| `.kilo/command/roles-sync.md` | `/roles sync` command documentation | ✓ | Optional; for manual GitHub Actions bridging |
+| `.kilo/vendor/agent-extensions/` | Agent-extensions submodule (skills, MCPs, plugins) | ✓ | Lazy-loaded; no eager context bloat |
 | `.kilo/HARNESS.md` | This file (integration guide) | ✓ | — |
-| `.github/workflows/pr-verify.yml` | PR verification workflow | — | ✓ |
-| `.github/workflows/dev-agent-dispatch.yml` | Dev agent dispatch | — | ✓ |
-| `.github/workflows/dev-agent-post.yml` | Dev agent post-review | — | ✓ |
+| `.github/workflows/*.yml` | GitHub Actions workflows | ✓ | No provider/model config; reads from repo vars only (legacy compat) |
+| Local Kilo config | Provider/model selection | ✗ | `~/.config/kilo/kilo.json` or local `.env.kilo` |
+| Infisical `/dev/`, `/review/` | GitHub App credentials | ✗ | Injected at workflow runtime; never in repo |
 
 ---
 
