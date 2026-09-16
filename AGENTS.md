@@ -100,11 +100,17 @@ are unaffected by this rule.
 At the start of every new, resumed, or post-compaction controller session:
 
 1. Read this `AGENTS.md`, then `project.yaml`.
-2. Identify the active GitHub Issue, branch, PR, and exact head.
-3. Detect whether the environment is already isolated (worktree, container).
-4. Run the affected PR Gate's local-equivalent commands (see `project.yaml`) before modifying
+2. Read your harness's project-level config if present (e.g. `CLAUDE.md`, `GEMINI.md`,
+   `.kilo/HARNESS.md`). All agent-authored PR/Issue interactions (comments, review
+   replies, PR operations) go through the dev-agent GitHub App identity via
+   `dev-agent-post.yml` / `dev-agent-dispatch.yml`, never the ambient credential —
+   git transport and read-only `gh` queries excepted. Deviating requires an explicit
+   owner exception.
+3. Identify the active GitHub Issue, branch, PR, and exact head.
+4. Detect whether the environment is already isolated (worktree, container).
+5. Run the affected PR Gate's local-equivalent commands (see `project.yaml`) before modifying
    code, to establish a clean baseline.
-5. Resume the first incomplete task rather than repeating completed work.
+6. Resume the first incomplete task rather than repeating completed work.
 
 Superpowers lifecycle skills (worktrees, writing plans, subagent-driven development,
 test-driven development, systematic debugging, code review, verification before completion,

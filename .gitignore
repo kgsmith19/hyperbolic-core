@@ -4,3 +4,11 @@
 .agent-runtime/
 .evidence/
 node_modules/
+
+# Harness-specific runtime config is intentionally NOT part of this repo —
+# AGENTS.md is the harness-neutral source of truth; per-harness personas,
+# settings, and local state live globally, not here. Safety-net only.
+.kilo/
+.claude/settings.local.json
+.codex/*.local.*
+.gemini/*.local.*
