@@ -10,7 +10,6 @@ from backend.ranking.bm25_scorer import (
 )
 from backend.ranking.dense_embedder import (
     compute_dense_scores,
-    _compute_subword_fallback_scores,
 )
 from backend.ranking.reciprocal_rank_fusion import (
     reciprocal_rank_fusion,
@@ -23,7 +22,6 @@ __all__ = [
     "tokenize",
     "compute_bm25_scores",
     "compute_dense_scores",
-    "_compute_subword_fallback_scores",
     "reciprocal_rank_fusion",
     "rank_items",
 ]

@@ -24,9 +24,6 @@ from backend.retrieval.collector_client import (
     CollectorClient,
     get_collector,
     reset_collector,
-    search_brave,
-    fetch_html_text,
-    build_sanitized_evidence,
 )
 from backend.retrieval.collector_worker import (
     run_ipc_loop,
@@ -42,8 +39,5 @@ __all__ = [
     "CollectorClient",
     "get_collector",
     "reset_collector",
-    "search_brave",
-    "fetch_html_text",
-    "build_sanitized_evidence",
     "run_ipc_loop",
 ]

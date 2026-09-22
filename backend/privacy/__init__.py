@@ -11,7 +11,6 @@ from backend.privacy.socket_airgap import (
 from backend.privacy.watchlist_redactor import (
     SafetyError,
     normalize_for_match,
-    _build_term_pattern,
     redact,
     assert_safe_to_send,
 )
@@ -42,7 +41,6 @@ __all__ = [
     "enforce_secret_core_socket_block",
     "SafetyError",
     "normalize_for_match",
-    "_build_term_pattern",
     "redact",
     "assert_safe_to_send",
     "create_blinder",

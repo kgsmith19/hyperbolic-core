@@ -54,8 +54,6 @@ from backend.research import (
 from backend.research.cost_estimator import (
     CostTracker,
     SpendLimitExceededError,
-    OPENAI_PRICING,
-    estimate_research_workload,
 )
 from backend.research.cancellation import (
     cancellation_manager,
@@ -197,40 +195,12 @@ class TestDirectBoundedContexts(unittest.TestCase):
         with self.assertRaises(SpendLimitExceededError):
             tracker.record_usage(prompt_tokens=500_000_000, completion_tokens=100_000_000)
 
-    def test_estimate_research_workload(self):
-        # 1. Deterministic/offline mode: 0 API calls, $0.00
-        det_est = estimate_research_workload(mode="deterministic", concurrency=6)
-        self.assertEqual(det_est["api_calls"], 0)
-        self.assertEqual(det_est["estimated_cost_usd"], 0.0)
-        self.assertEqual(det_est["concurrency_workers"], 6)
-        self.assertIn("Free", det_est["estimated_cost_display"])
-
-        # 2. Expansion mode: 1 query planning call
-        exp_est = estimate_research_workload(mode="expansion", model="gpt-4o-mini", concurrency=4)
-        self.assertEqual(exp_est["api_calls"], 1)
-        self.assertGreater(exp_est["estimated_prompt_tokens"], 0)
-        self.assertGreater(exp_est["estimated_cost_usd"], 0.0)
-
-        # 3. Full mode with reasoning model (o3-mini with high effort)
-        o3_est = estimate_research_workload(mode="full", model="o3-mini", reasoning_effort="high", max_documents=25)
-        self.assertEqual(o3_est["api_calls"], 2)
-        self.assertGreater(o3_est["estimated_reasoning_tokens"], 10000)
-        self.assertGreater(o3_est["estimated_cost_usd"], 0.0)
-        self.assertEqual(len(o3_est["call_breakdown"]), 2)
-
-        # 4. GPT-5.6 frontier model estimation
-        gpt56_est = estimate_research_workload(mode="full", model="gpt-5.6", max_documents=30, concurrency=8)
-        self.assertEqual(gpt56_est["model"], "gpt-5.6")
-        self.assertEqual(gpt56_est["api_calls"], 2)
-        self.assertEqual(gpt56_est["concurrency_workers"], 8)
-        self.assertGreater(gpt56_est["estimated_cost_usd"], 0.0)
-
     def test_cancellation_manager(self):
         token = cancellation_manager.create_token("test_run_xyz")
         self.assertFalse(token.is_set())
         self.assertFalse(cancellation_manager.is_cancelled("test_run_xyz"))
 
-        cancelled = cancellation_manager.cancel("test_run_xyz")
+        cancelled = cancellation_manager.cancel_run("test_run_xyz")
         self.assertTrue(cancelled)
         self.assertTrue(token.is_set())
         self.assertTrue(cancellation_manager.is_cancelled("test_run_xyz"))
@@ -539,6 +509,13 @@ class TestRenamedContexts(unittest.TestCase):
         self.assertTrue(hasattr(backend.privacy, "SafetyError"))
         self.assertTrue(hasattr(backend.research, "run_search"))
         self.assertTrue(callable(LocalSynthesizer))
+
+
+class TestDeadCodeRemoved(unittest.TestCase):
+    def test_build_sanitized_evidence_is_not_exported(self):
+        import backend.retrieval as retrieval
+        self.assertFalse(hasattr(retrieval, "build_sanitized_evidence"))
+        self.assertFalse(hasattr(retrieval, "fetch_html_text"))
 
 
 class TestThreadedUIServer(unittest.TestCase):

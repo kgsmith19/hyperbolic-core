@@ -35,8 +35,6 @@ class CancellationManager:
                 return True
             return False
 
-    cancel = cancel_run
-
     def cancel_all(self) -> None:
         """Signal cancellation for all active runs."""
         with self._lock:

@@ -141,17 +141,10 @@ class ResearchFrontier:
 
             return batch
 
-    def complete_candidate(self, url: str) -> None:
-        """Mark in-flight candidate as completed."""
-        with self._lock:
-            self.in_flight_urls.discard(url)
-
     def release_candidate(self, url: str) -> None:
         """Release candidate reservation if fetch failed without consuming budget."""
         with self._lock:
             self.in_flight_urls.discard(url)
-
-    release_in_flight = release_candidate
 
     def record_document(self, url: str, content_bytes: int, text: str, doi: str = "") -> bool:
         """Record a successfully retrieved document; returns False if duplicate content."""

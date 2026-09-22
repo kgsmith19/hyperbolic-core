@@ -8,11 +8,9 @@ import json
 import os
 import subprocess
 import sys
-from backend.privacy.watchlist_redactor import redact, assert_safe_to_send, SafetyError
+from backend.privacy.watchlist_redactor import redact, assert_safe_to_send
 from backend.privacy.encrypted_scratchpad import SecureZeroBuffer
 from backend.privacy.quarantine_zone import SanitizedQuarantine
-from backend.frontier.url_canonicalizer import canonicalize_url
-from backend.retrieval.bot_barrier_detector import is_bot_or_js_barrier
 
 
 class CollectorClient:
@@ -79,22 +77,33 @@ class CollectorClient:
             except Exception:
                 return {"status": "error", "error": "Failed to decode response from collector."}
 
-        # INBOUND QUARANTINE: Sanitize and redact every string before releasing into application state
-        sanitized_payload = self._sanitize_quarantined_payload(quarantined_payload, watchlist)
+        # INBOUND QUARANTINE: one path through SanitizedQuarantine.process_payload
+        with SanitizedQuarantine() as quarantine:
+            sanitized_payload = self._sanitize_quarantined_payload(
+                quarantined_payload, watchlist, quarantine
+            )
         assert_safe_to_send(sanitized_payload, watchlist)
         return sanitized_payload
 
-    def _sanitize_quarantined_payload(self, obj, watchlist: list[str]):
-        """Recursively redact all text within quarantined collector payload and defang injections."""
+    def _sanitize_quarantined_payload(self, obj, watchlist: list[str], quarantine: SanitizedQuarantine, doc_id: str = "ipc"):
+        """Recursively quarantine strings, then redact watchlist matches."""
         if isinstance(obj, str):
-            cleaned = obj
-            for pat in SanitizedQuarantine.INJECTION_PATTERNS:
-                cleaned = pat.sub("[REDACTED:prompt-injection-attempt]", cleaned)
-            return redact(cleaned, watchlist)
-        elif isinstance(obj, list):
-            return [self._sanitize_quarantined_payload(item, watchlist) for item in obj]
-        elif isinstance(obj, dict):
-            return {k: self._sanitize_quarantined_payload(v, watchlist) for k, v in obj.items()}
+            return quarantine.process_payload(
+                raw_payload=obj,
+                doc_id=doc_id,
+                redact_func=redact,
+                watchlist=watchlist,
+            )
+        if isinstance(obj, list):
+            return [
+                self._sanitize_quarantined_payload(item, watchlist, quarantine, f"{doc_id}.{idx}")
+                for idx, item in enumerate(obj)
+            ]
+        if isinstance(obj, dict):
+            return {
+                k: self._sanitize_quarantined_payload(v, watchlist, quarantine, f"{doc_id}.{k}")
+                for k, v in obj.items()
+            }
         return obj
 
 
@@ -119,70 +128,3 @@ def reset_collector() -> None:
         except Exception:
             pass
         _COLLECTOR = None
-
-
-def search_brave(topic: str, watchlist: list[str]) -> list[dict]:
-    """Search Brave API (via collector router) for public results."""
-    assert_safe_to_send(topic, watchlist)
-    collector = get_collector()
-    task = {"task_id": "search-brave", "action": "search", "connector": "brave", "query": topic}
-    resp = collector.send_task(task, watchlist)
-    if resp.get("status") == "ok":
-        return resp.get("results", [])
-    return []
-
-
-def fetch_html_text(url: str, watchlist: list[str]) -> str:
-    """Fetch a webpage (via collector router) and extract clean plain text."""
-    assert_safe_to_send(url, watchlist)
-    collector = get_collector()
-    task = {"task_id": "fetch-url", "action": "fetch", "url": url}
-    resp = collector.send_task(task, watchlist)
-    if resp.get("status") == "ok":
-        return resp.get("content", "")
-    return ""
-
-
-def build_sanitized_evidence(results: list[dict], watchlist: list[str]) -> list[dict]:
-    """Process search results, canonicalize URLs, fetch excerpts, and redact watchlist matches."""
-    collector = get_collector()
-    evidence_list = []
-    seen_urls = set()
-
-    for item in results:
-        raw_url = item.get("url", "")
-        canonical_url = canonicalize_url(raw_url)
-        if not canonical_url or canonical_url in seen_urls:
-            continue
-        seen_urls.add(canonical_url)
-
-        clean_url = redact(canonical_url, watchlist)
-        clean_title = redact(item.get("title", ""), watchlist)
-        clean_snippet = redact(item.get("snippet", ""), watchlist)
-
-        excerpt = ""
-        if len(evidence_list) < 5 and clean_url.startswith(("http://", "https://")):
-            task = {"task_id": f"fetch-{len(evidence_list)}", "action": "fetch", "url": clean_url}
-            fetch_res = collector.send_task(task, watchlist)
-            if fetch_res.get("status") == "ok":
-                raw_c = fetch_res.get("content", "")
-                if not is_bot_or_js_barrier(raw_c):
-                    excerpt = raw_c
-
-        entry = {
-            "title": clean_title,
-            "url": clean_url,
-            "snippet": clean_snippet,
-            "excerpt": excerpt,
-        }
-
-        try:
-            assert_safe_to_send(entry["title"], watchlist)
-            assert_safe_to_send(entry["url"], watchlist)
-            assert_safe_to_send(entry["snippet"], watchlist)
-            assert_safe_to_send(entry["excerpt"], watchlist)
-            evidence_list.append(entry)
-        except SafetyError:
-            continue
-
-    return evidence_list
