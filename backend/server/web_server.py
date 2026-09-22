@@ -252,54 +252,76 @@ class SafeResearchRequestHandler(http.server.BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length).decode("utf-8")
             try:
-                data = json.loads(body)
-                topic = data.get("topic", "").strip()
-                watchlist_raw = data.get("watchlist", "")
-                if "mode" in data:
-                    err_bytes = json.dumps({"error": "mode is not supported; send SearchOptions fields"}).encode("utf-8")
-                    self.send_response(400)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(err_bytes)
-                    return
-
-                watchlist = [line.strip() for line in watchlist_raw.splitlines() if line.strip()]
-
-                if data.get("openai_key") and not str(data["openai_key"]).startswith("***"):
-                    key_val = str(data["openai_key"]).strip()
-                    if key_val:
-                        os.environ["OPENAI_API_KEY"] = key_val
-                        save_env_file({"OPENAI_API_KEY": key_val})
-                if data.get("brave_key") and not str(data["brave_key"]).startswith("***"):
-                    b_val = str(data["brave_key"]).strip()
-                    if b_val:
-                        os.environ["BRAVE_SEARCH_API_KEY"] = b_val
-                        save_env_file({"BRAVE_SEARCH_API_KEY": b_val})
-
-                options = _options_from_payload(data)
-                result = run_to_dict(run_search(
-                    topic=topic,
-                    watchlist=watchlist,
-                    options=options,
-                    run_id="default",
-                ))
-                response_bytes = json.dumps(result).encode("utf-8")
-                self.send_response(200)
+                data = json.loads(body) if body else {}
+            except Exception:
+                self.send_response(400)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(response_bytes)
-            except SafetyError:
-                err_bytes = json.dumps({"error": "Blocked by local safety guard"}).encode("utf-8")
+                self.wfile.write(json.dumps({"error": "Invalid JSON body"}).encode("utf-8"))
+                return
+
+            if "mode" in data:
+                err_bytes = json.dumps({"error": "mode is not supported; send SearchOptions fields"}).encode("utf-8")
                 self.send_response(400)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(err_bytes)
+                return
+
+            topic = data.get("topic", "").strip()
+            watchlist_raw = data.get("watchlist", "")
+            watchlist = [line.strip() for line in watchlist_raw.splitlines() if line.strip()]
+
+            if data.get("openai_key") and not str(data["openai_key"]).startswith("***"):
+                key_val = str(data["openai_key"]).strip()
+                if key_val:
+                    os.environ["OPENAI_API_KEY"] = key_val
+                    save_env_file({"OPENAI_API_KEY": key_val})
+            if data.get("brave_key") and not str(data["brave_key"]).startswith("***"):
+                b_val = str(data["brave_key"]).strip()
+                if b_val:
+                    os.environ["BRAVE_SEARCH_API_KEY"] = b_val
+                    save_env_file({"BRAVE_SEARCH_API_KEY": b_val})
+
+            options = _options_from_payload(data)
+
+            # Live progress: stream each stage as an SSE event so the UI can
+            # show what is happening while the search runs.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+
+            def _emit(payload: dict) -> None:
+                self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+
+            def progress(message: str) -> None:
+                try:
+                    _emit({"type": "progress", "message": message})
+                except Exception:
+                    pass
+
+            try:
+                run = run_search(
+                    topic=topic,
+                    watchlist=watchlist,
+                    options=options,
+                    run_id="default",
+                    progress_callback=progress,
+                )
+                _emit({"type": "result", **run_to_dict(run)})
+            except SafetyError:
+                try:
+                    _emit({"type": "error", "error": "Blocked by local safety guard"})
+                except Exception:
+                    pass
             except Exception as e:
-                err_bytes = json.dumps({"error": f"An error occurred during research: {str(e)}"}).encode("utf-8")
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(err_bytes)
+                try:
+                    _emit({"type": "error", "error": f"An error occurred during research: {str(e)}"})
+                except Exception:
+                    pass
         else:
             self.send_response(404)
             self.end_headers()

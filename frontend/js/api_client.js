@@ -92,17 +92,69 @@ const ApiClient = {
 
     /**
      * Submit research request with deep exploration and spend parameters.
+     * Streams server-sent progress events and invokes onProgress(message)
+     * live while the search runs; resolves with the final result payload.
      */
-    async executeResearch(params) {
+    async executeResearch(params, onProgress) {
         const response = await fetch('/api/research', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
         });
-        const data = await response.json();
-        if (!response.ok || data.error) {
-            throw new Error(data.error || `HTTP ${response.status}`);
+
+        if (!response.ok) {
+            let message = `HTTP ${response.status}`;
+            try {
+                const err = await response.json();
+                if (err && err.error) message = err.error;
+            } catch (err) { /* non-JSON error body */ }
+            throw new Error(message);
         }
+
+        if (!response.body || !window.ReadableStream) {
+            // Older browsers: no streaming. Wait for the full payload.
+            const data = await response.json();
+            if (data.error) throw new Error(data.error);
+            return data;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let result = null;
+
+        const handleEvent = (raw) => {
+            const line = raw.split('\n').find(l => l.startsWith('data:'));
+            if (!line) return;
+            let event;
+            try {
+                event = JSON.parse(line.slice(5).trim());
+            } catch (err) {
+                return; // ignore malformed partial
+            }
+            if (event.type === 'progress' && typeof onProgress === 'function') {
+                onProgress(event.message);
+            } else if (event.type === 'result') {
+                result = event;
+            } else if (event.type === 'error') {
+                throw new Error(event.error || 'Research failed');
+            }
+        };
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let boundary;
+            while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+                const rawEvent = buffer.slice(0, boundary);
+                buffer = buffer.slice(boundary + 2);
+                handleEvent(rawEvent);
+            }
+        }
+
+        if (!result) throw new Error('Research ended without a result.');
+        const { type, ...data } = result;
         return data;
     }
 };

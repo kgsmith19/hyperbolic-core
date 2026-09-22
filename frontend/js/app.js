@@ -238,7 +238,10 @@ async function executeResearch() {
     window.UiRenderer.renderStatus('running', 'Initializing Secret Core and launching concurrent workers...');
 
     try {
-        const data = await window.ApiClient.executeResearch(payload);
+        const data = await window.ApiClient.executeResearch(payload, (message) => {
+            // Live progress: repaint the status box as each stage streams in.
+            window.UiRenderer.renderStatus('running', message);
+        });
         window.UiRenderer.renderStatus('', '');
         window.appState.setResult(data);
         window.UiRenderer.renderResults(data);
