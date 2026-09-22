@@ -4,6 +4,7 @@ Dispatches search and fetch tasks across academic registries, SEC EDGAR,
 SearXNG, Brave Search, curl_cffi TLS impersonation, and Playwright stealth.
 """
 
+import concurrent.futures
 import os
 import httpx
 from backend.retrieval_engine.ssrf_validator import is_safe_url
@@ -80,24 +81,23 @@ class RetrievalRouter:
         elif connector == "brave":
             return self.search_brave(query)
 
-        # Multi-connector search: Query all domains simultaneously
+        # Multi-connector search: query all domains concurrently
+        workers = [
+            self.search_openalex,
+            self.search_arxiv,
+            self.search_crossref,
+            self.search_sec_edgar,
+            self.search_searxng,
+            self.search_brave,
+        ]
         aggregated = []
-        # 1. Primary academic & scientific repositories
-        aggregated.extend(self.search_openalex(query))
-        aggregated.extend(self.search_arxiv(query))
-        aggregated.extend(self.search_crossref(query))
-
-        # 2. Corporate disclosures & SEC EDGAR filings
-        aggregated.extend(self.search_sec_edgar(query))
-
-        # 3. Commercial & open web via SearXNG (DuckDuckGo + Bing)
-        aggregated.extend(self.search_searxng(query))
-
-        # 4. Brave Search API (if key is configured)
-        brave_res = self.search_brave(query)
-        if brave_res:
-            aggregated.extend(brave_res)
-
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(workers)) as executor:
+            futures = [executor.submit(fn, query) for fn in workers]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    aggregated.extend(future.result() or [])
+                except Exception:
+                    continue
         return aggregated
 
     def fetch_with_browser(self, url: str) -> dict:

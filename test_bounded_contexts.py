@@ -397,5 +397,71 @@ class TestPlanner(unittest.TestCase):
         self.assertEqual([q.text for q in qs if not q.is_decoy], ["topic"])
 
 
+class TestGuard(unittest.TestCase):
+    """Guard asserts or blinds the topic before any network work."""
+
+    def test_assert_blocks_watchlist(self):
+        from backend.research_orchestrator.guard import prepare_topic
+        from backend.research_orchestrator.types import SearchOptions
+        from backend.security_guard import SafetyError
+
+        with self.assertRaises(SafetyError):
+            prepare_topic("leak SECRET", ["SECRET"], SearchOptions())
+
+    def test_blind_replaces_watchlist(self):
+        from backend.research_orchestrator.guard import prepare_topic
+        from backend.research_orchestrator.types import SearchOptions
+
+        out = prepare_topic("leak SECRET", ["SECRET"], SearchOptions(blind_watchlist=True))
+        self.assertNotIn("SECRET", out)
+        self.assertIn("TARGET_ENTITY", out)
+
+
+class TestExplorer(unittest.TestCase):
+    """Explorer discards decoy hits and returns Evidence."""
+
+    def test_decoy_hits_never_become_evidence(self):
+        from backend.research_orchestrator.explorer import explore
+        from backend.research_orchestrator.types import Evidence, Query, SearchOptions
+
+        collector = MagicMock()
+
+        def send(task, watchlist):
+            if task.get("action") == "search":
+                q = task["query"]
+                slug = q.replace(" ", "-")
+                return {
+                    "status": "ok",
+                    "results": [{
+                        "title": q,
+                        "url": f"https://example.org/{slug}",
+                        "doi": "",
+                    }],
+                }
+            return {
+                "status": "ok",
+                "content": "Real scientific abstract about electrolytes. " * 20,
+                "links": [],
+                "bytes": 400,
+            }
+
+        collector.send_task.side_effect = send
+        qs = [
+            Query(text="solid electrolytes", is_decoy=False),
+            Query(text="ocean vents", is_decoy=True),
+        ]
+        ev = explore(
+            qs,
+            [],
+            SearchOptions(max_documents=5, max_depth=0, max_duration_sec=30),
+            cancel_token=None,
+            collector=collector,
+        )
+        urls = [e.url for e in ev]
+        self.assertTrue(all(isinstance(e, Evidence) for e in ev))
+        self.assertFalse(any("ocean" in u for u in urls))
+        self.assertTrue(any("solid" in u or "electrolytes" in u for u in urls))
+
+
 if __name__ == "__main__":
     unittest.main()
