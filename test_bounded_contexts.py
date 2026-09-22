@@ -391,6 +391,59 @@ class TestPlanner(unittest.TestCase):
         qs = plan_queries("topic", [], SearchOptions(ai_planning=True))
         self.assertEqual([q.text for q in qs if not q.is_decoy], ["topic"])
 
+    def test_planning_api_failure_warns_and_keeps_topic(self):
+        from backend.research.cloud_errors import CloudCallError
+        from backend.research.planner import plan_queries
+        from backend.research.types import SearchOptions
+
+        notes = []
+        with patch(
+            "backend.research.planner.expand_topic_queries",
+            side_effect=CloudCallError("planning", RuntimeError("boom")),
+        ):
+            qs = plan_queries(
+                "solid electrolytes",
+                [],
+                SearchOptions(ai_planning=True),
+                progress_callback=notes.append,
+            )
+        self.assertEqual([q.text for q in qs if not q.is_decoy], ["solid electrolytes"])
+        self.assertTrue(any("planning failed" in n.lower() for n in notes))
+
+
+class TestCloudFallback(unittest.TestCase):
+    """OpenAI failures must be visible, then fall back locally."""
+
+    def test_summary_api_failure_warns_and_uses_local(self):
+        from backend.research.cloud_errors import CloudCallError
+        from backend.research.research_pipeline import _synthesize
+        from backend.research.types import SearchOptions
+
+        notes = []
+        options = SearchOptions(ai_summary=True)
+        evidence = [{
+            "title": "Paper",
+            "url": "https://example.org/p",
+            "excerpt": "Sulfide electrolytes reach 12 mS/cm at room temperature. " * 4,
+        }]
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False):
+            with patch(
+                "backend.research.research_pipeline.summarize_with_openai",
+                side_effect=CloudCallError("summary", RuntimeError("timeout")),
+            ):
+                summary = _synthesize(
+                    "solid electrolytes",
+                    evidence,
+                    [],
+                    options,
+                    cost_tracker=None,
+                    cancel_token=None,
+                    progress_callback=notes.append,
+                )
+        self.assertIn("Key Research Findings", summary)
+        self.assertTrue(any("summary failed" in n.lower() for n in notes))
+        self.assertTrue(any("local summary" in n.lower() for n in notes))
+
 
 class TestGuard(unittest.TestCase):
     """Guard asserts or blinds the topic before any network work."""

@@ -76,3 +76,4 @@ class ResearchRun:
     archive_path: str
     status: str
     report_markdown: str = ""
+    warnings: list[str] = field(default_factory=list)

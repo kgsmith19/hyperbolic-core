@@ -65,5 +65,6 @@ def expand_topic_queries(
             except SafetyError:
                 continue
         return queries[:4]
-    except Exception:
-        return [topic]
+    except Exception as err:
+        from backend.research.cloud_errors import CloudCallError
+        raise CloudCallError("planning", err) from err

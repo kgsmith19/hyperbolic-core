@@ -12,6 +12,7 @@ from backend.synthesis.local_synthesizer import LocalSynthesizer
 from backend.synthesis.openai_synthesizer import summarize_with_openai
 from backend.synthesis.report_generator import write_report
 from backend.research.cost_estimator import CostTracker, SpendLimitExceededError, SpendReport
+from backend.research.cloud_errors import CloudCallError
 from backend.research.cancellation import cancellation_manager
 from backend.research.types import Evidence, Query, ResearchRun, SearchOptions
 from backend.research.guard import prepare_topic
@@ -39,12 +40,25 @@ def run_search(
     if cancel_token.is_set():
         return _empty_run("cancelled", topic, options, cost_tracker, time.time() - start_time)
 
+    warnings: list[str] = []
+
+    def note(message: str) -> None:
+        warnings.append(message)
+        if progress_callback:
+            progress_callback(message)
+
     if progress_callback:
         if options.ai_planning:
             progress_callback("Asking the model for extra search angles...")
         else:
             progress_callback("Preparing search queries...")
-    queries = plan_queries(effective_topic, watchlist, options, cost_tracker=cost_tracker)
+    queries = plan_queries(
+        effective_topic,
+        watchlist,
+        options,
+        cost_tracker=cost_tracker,
+        progress_callback=note,
+    )
 
     evidence = explore(
         queries,
@@ -67,7 +81,7 @@ def run_search(
         options,
         cost_tracker,
         cancel_token,
-        progress_callback,
+        note,
     )
 
     duration = time.time() - start_time
@@ -120,6 +134,7 @@ def run_search(
         archive_path=archive_path,
         status=status,
         report_markdown=report_md,
+        warnings=warnings,
     )
 
 
@@ -145,6 +160,7 @@ def run_to_dict(run: ResearchRun) -> dict:
         },
         "duration_seconds": run.duration_sec,
         "requires_confirm": bool(run.options.blind_watchlist or run.options.decoy_queries > 0),
+        "warnings": list(run.warnings),
     }
 
 
@@ -164,8 +180,19 @@ def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token,
                 reasoning_effort=options.reasoning_effort,
                 cost_tracker=cost_tracker,
             )
+        except CloudCallError as err:
+            if progress_callback:
+                if err.cause_type == "SpendLimitExceededError":
+                    progress_callback("Spend cap reached. Writing a local summary instead.")
+                else:
+                    progress_callback(
+                        f"AI summary failed ({err.cause_type}). Writing a local summary instead."
+                    )
         except SpendLimitExceededError:
-            pass
+            if progress_callback:
+                progress_callback("Spend cap reached. Writing a local summary instead.")
+    elif options.ai_summary and not has_openai and progress_callback:
+        progress_callback("No OpenAI key. Writing a local summary instead.")
     if progress_callback:
         progress_callback("Writing a local summary from the sources...")
     local_slm = LocalSynthesizer()

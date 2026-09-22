@@ -81,10 +81,6 @@ def summarize_with_openai(
         clean_summary = redact(output_text, watchlist)
         assert_safe_to_send(clean_summary, watchlist)
         return clean_summary
-    except Exception:
-        # Graceful fallback to local air-gapped SLM synthesis if OpenAI call fails or spend cap hit
-        local_slm = LocalSynthesizer()
-        summary = local_slm.synthesize(topic, evidence)
-        clean_summary = redact(summary, watchlist)
-        assert_safe_to_send(clean_summary, watchlist)
-        return clean_summary
+    except Exception as err:
+        from backend.research.cloud_errors import CloudCallError
+        raise CloudCallError("summary", err) from err

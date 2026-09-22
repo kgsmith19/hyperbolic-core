@@ -167,6 +167,15 @@ const UiRenderer = {
         // Render metrics bar
         this.renderMetricsBar(data);
 
+        if (data.warnings && data.warnings.length) {
+            const warnBox = document.createElement('div');
+            warnBox.className = 'run-warnings';
+            warnBox.innerHTML = data.warnings.map(w =>
+                `<div class="run-warning">${this.escapeHtml(w)}</div>`
+            ).join('');
+            queriesContainer.appendChild(warnBox);
+        }
+
         // Render multi-angle query tags
         if (data.queries && data.queries.length > 1) {
             const tagBox = document.createElement('div');

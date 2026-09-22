@@ -10,11 +10,17 @@ def plan_queries(
     watchlist: list[str],
     options: SearchOptions,
     cost_tracker=None,
+    progress_callback=None,
 ) -> list[Query]:
     """Return the topic as the first real query, optional AI angles, then decoys."""
+    from backend.research.cloud_errors import CloudCallError
+
     real: list[Query] = [Query(text=topic, is_decoy=False)]
 
     if options.ai_planning:
+        import os
+        if not os.environ.get("OPENAI_API_KEY", "").strip() and progress_callback:
+            progress_callback("No OpenAI key. Searching the topic as written.")
         try:
             expanded = expand_topic_queries(
                 topic,
@@ -23,7 +29,11 @@ def plan_queries(
                 reasoning_effort=options.reasoning_effort,
                 cost_tracker=cost_tracker,
             )
-        except Exception:
+        except CloudCallError as err:
+            if progress_callback:
+                progress_callback(
+                    f"AI planning failed ({err.cause_type}). Searching the topic as written."
+                )
             expanded = [topic]
         for line in expanded:
             clean = (line or "").strip()

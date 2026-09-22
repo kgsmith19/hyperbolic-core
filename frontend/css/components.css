@@ -140,6 +140,22 @@ label {
     display: none;
 }
 
+.run-warnings {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--warning);
+    background: rgba(245, 158, 11, 0.08);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.run-warning {
+    font-size: 13px;
+    color: var(--warning);
+}
+
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
