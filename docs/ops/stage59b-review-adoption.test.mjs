@@ -1,10 +1,9 @@
 // node --test docs/ops/stage59b-review-adoption.test.mjs (run from the repo root)
 //
 // Runtime basis: the .ts imports below run natively under Node's
-// type-stripping (Node >= 22.18; CI pins node-version "22" with the
-// floor documented at the pin in .github/actions/verify-tests-shell,
-// and the Platform lane executes exactly this file via
-// `node --test docs/ops/*.test.mjs`). No loader,
+// type-stripping (Node >= 22.18; CI pins node-version "22.19.0" in
+// .github/actions/verify-tests-shell, and the Platform lane executes
+// exactly this file via `node --test docs/ops/*.test.mjs`). No loader,
 // transpiler, or dist build is involved — proven by the green Platform
 // run on the PR, not by assertion.
 //
