@@ -1,0 +1,35 @@
+"""Research Orchestrator Bounded Context.
+
+Coordinates multi-hop exploration, concurrent territory partitioning,
+query planning, spending limits, cancellation tokens, and report generation.
+"""
+
+from backend.research_orchestrator.query_planner import (
+    expand_topic_queries,
+    expand_topic_queries_chaffed,
+)
+from backend.research_orchestrator.research_pipeline import (
+    run_research,
+)
+from backend.research_orchestrator.cost_estimator import (
+    CostTracker,
+    SpendLimitExceededError,
+    SpendReport,
+    MODEL_PRICING,
+)
+from backend.research_orchestrator.cancellation import (
+    cancellation_manager,
+    CancellationManager,
+)
+
+__all__ = [
+    "expand_topic_queries",
+    "expand_topic_queries_chaffed",
+    "run_research",
+    "CostTracker",
+    "SpendLimitExceededError",
+    "SpendReport",
+    "MODEL_PRICING",
+    "cancellation_manager",
+    "CancellationManager",
+]

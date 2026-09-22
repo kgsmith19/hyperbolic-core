@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  secret_core:
+    build:
+      context: .
+      dockerfile: Dockerfile.core
+    network_mode: "none"
+    volumes:
+      - .:/workspace:rw
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.collector
+    environment:
+      - SEARXNG_URL=${SEARXNG_URL:-http://host.docker.internal:8080}
+      - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
+    stdin_open: true
+    tty: true

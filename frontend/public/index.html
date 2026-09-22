@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep Search | Guarded Deep-Web Engine</title>
+    <link rel="stylesheet" href="/css/theme.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🛡️ Deep Search | Guarded Deep-Web Engine</h1>
+            <p>Air-gapped Secret Core, multi-hop priority frontier, deep web connectors, and BM25 + ONNX FastEmbed RRF ranking.</p>
+        </header>
+
+        <!-- Provider Settings Drawer -->
+        <div class="card" id="settings-card" style="margin-bottom:0;">
+            <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleSettings()">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:16px;">⚙️</span>
+                    <strong style="font-size:14px;">Provider & API Settings</strong>
+                    <span class="badge-safe" id="settings-badge">Free / Offline Ready</span>
+                </div>
+                <span id="settings-toggle-btn" style="font-size:12px; color:var(--text-muted);">▼ Configure Keys</span>
+            </div>
+            <div id="settings-body" style="display:none; margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px; line-height:1.5;">
+                    Deep Search runs <strong>100% free and offline</strong> by default (local FastEmbed, local SLM, arXiv, OpenAlex, Crossref, SEC EDGAR).
+                    You can optionally configure API keys below to expand retrieval to the commercial web or external LLMs.
+                </p>
+                <div class="settings-grid">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="brave-key">Brave Search API Key <span class="label-desc">(Web Search)</span></label>
+                        <input type="password" id="brave-key" placeholder="BSA..." autocomplete="off">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="openai-key">OpenAI API Key <span class="label-desc">(Cloud LLM)</span></label>
+                        <input type="password" id="openai-key" placeholder="sk-..." autocomplete="off">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="searxng-url">SearXNG Endpoint URL <span class="label-desc">(DuckDuckGo + Bing)</span></label>
+                        <input type="text" id="searxng-url" placeholder="http://127.0.0.1:8080">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="local-llm-url">Local SLM / Ollama URL</label>
+                        <input type="text" id="local-llm-url" placeholder="http://127.0.0.1:11434/v1">
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:flex-end; align-items:center; gap:10px;">
+                    <span id="settings-status-msg" style="font-size:12px; color:var(--success); display:none;">Saved!</span>
+                    <button class="btn-secondary" onclick="saveSettings()">Save to .env & Apply</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Research Setup Card -->
+        <div class="card">
+            <div class="form-group">
+                <label for="topic">1. Research Topic</label>
+                <div class="label-desc">Public or pseudonymized research brief. Evaluated strictly within the air-gapped Secret Core.</div>
+                <textarea id="topic" rows="2" placeholder="e.g. Recent breakthroughs in solid-state battery electrolytes"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="watchlist">2. Local Sensitive Watchlist <span class="badge-safe">🔒 Local Only</span></label>
+                <div class="label-desc">Values never leave the Secret Core. Collector process has zero access to this file. (One per line)</div>
+                <textarea id="watchlist" rows="2" placeholder="DEMO-TOKEN-93417&#10;CONFIDENTIAL-PROJECT-ORION"></textarea>
+            </div>
+
+            <div class="form-group">
+                <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                    <label>3. Select Research Plan & Stealth Tier</label>
+                    <span style="font-size:12px; color:var(--text-muted);">Depth, sources, and zero-secret-egress protection</span>
+                </div>
+                <div class="modes-grid" style="margin-top: 14px;">
+                    <!-- Tier 1: Standard Local -->
+                    <div class="mode-option" onclick="selectMode('deterministic')">
+                        <input type="radio" name="mode" value="deterministic">
+                        <div>
+                            <div class="tier-header">
+                                <span class="tier-name">⚡ Tier 1: Standard Local</span>
+                            </div>
+                            <div class="tier-cost">$0.00 <span class="tier-cost-sub">/ run</span></div>
+                            <div class="tier-pill tier-pill-safe">🔒 100% Offline • 0 Bytes to AI</div>
+                            <div class="tier-desc">Deterministic deep retrieval across academic registries, SEC EDGAR & SearXNG. Built via CPU extractive synthesis.</div>
+                        </div>
+                        <ul class="tier-features">
+                            <li><span class="feature-check">✓</span> <span><strong>Dual Discovery</strong>: Academic + SearXNG</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>Local Embeddings</strong>: Okapi BM25 + ONNX</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>Zero AI Exposure</strong>: Air-gapped socket</span></li>
+                            <li><span class="feature-cross">✗</span> <span>Token blinding & decoy chaffing</span></li>
+                            <li><span class="feature-cross">✗</span> <span>AI query angle expansion</span></li>
+                        </ul>
+                    </div>
+
+                    <!-- Tier 2: Cloaked Stealth (Recommended for Deep Private Search) -->
+                    <div class="mode-option active" onclick="selectMode('extreme')">
+                        <div class="tier-ribbon">⭐ Recommended for Private Deep Search</div>
+                        <input type="radio" name="mode" value="extreme" checked>
+                        <div>
+                            <div class="tier-header">
+                                <span class="tier-name">🛡️ Tier 2: Cloaked Stealth</span>
+                            </div>
+                            <div class="tier-cost">$0.00 <span class="tier-cost-sub">/ run</span></div>
+                            <div class="tier-pill tier-pill-cloaked">🥷 Max Depth • Total Zero-Egress</div>
+                            <div class="tier-desc">Deepest multi-hop exploration. Token blinding conceals watchlist terms, while decoy chaff masks true research intent from network sniffers.</div>
+                        </div>
+                        <ul class="tier-features">
+                            <li><span class="feature-check">✓</span> <span><strong>Max Multi-Hop Crawl</strong>: Citation & web graph</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>Token Blinding</strong>: Secret Core pseudonymization</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>Decoy Chaffing</strong>: K-anonymity traffic mask</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>Zero AI Exposure</strong>: 100% air-gapped CPU</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>Memory Zeroization</strong>: <code>ctypes.memset</code></span></li>
+                        </ul>
+                    </div>
+
+                    <!-- Tier 3: Smart Discovery -->
+                    <div class="mode-option" onclick="selectMode('expansion')">
+                        <input type="radio" name="mode" value="expansion">
+                        <div>
+                            <div class="tier-header">
+                                <span class="tier-name">🔍 Tier 3: Smart Discovery</span>
+                            </div>
+                            <div class="tier-cost">&lt; $0.001 <span class="tier-cost-sub">/ run</span></div>
+                            <div class="tier-pill tier-pill-hybrid">🤖 Hybrid • 1 AI Planning Call</div>
+                            <div class="tier-desc">AI plans 4 orthogonal query angles using only your public topic. Crawling, scraped documents, and ranking remain 100% local.</div>
+                        </div>
+                        <ul class="tier-features">
+                            <li><span class="feature-check">✓</span> <span><strong>Multi-Angle Planning</strong>: 4 diverse AI queries</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>Wide Frontier</strong>: High source variety</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>0 Scraped Docs to AI</strong>: Content kept local</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>Controlled Spend</strong>: Exactly 1 LLM call</span></li>
+                            <li><span class="feature-cross">✗</span> <span>Cloud executive summary</span></li>
+                        </ul>
+                    </div>
+
+                    <!-- Tier 4: Full AI Brief -->
+                    <div class="mode-option" onclick="selectMode('full')">
+                        <input type="radio" name="mode" value="full">
+                        <div>
+                            <div class="tier-header">
+                                <span class="tier-name">📝 Tier 4: Full AI Brief</span>
+                            </div>
+                            <div class="tier-cost">~$0.003+ <span class="tier-cost-sub">/ run</span></div>
+                            <div class="tier-pill tier-pill-cloud">🧠 Cloud AI • Full Synthesis</div>
+                            <div class="tier-desc">Multi-hop deep retrieval with local redaction + an executive summary generated by cloud LLMs (GPT-4o through GPT-5.6 / o1).</div>
+                        </div>
+                        <ul class="tier-features">
+                            <li><span class="feature-check">✓</span> <span><strong>AI Query Planning</strong> + Executive report</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>Local Redaction</strong> before LLM egress</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>Inline Citations</strong> tied to evidence corpus</span></li>
+                            <li><span class="feature-check">✓</span> <span><strong>Reasoning Effort</strong>: Low, Medium, High</span></li>
+                            <li><span class="feature-check" style="color:var(--warning);">⚠</span> <span>Redacted evidence sent to OpenAI</span></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Deep Research Exploration & Spend Controls -->
+            <div class="form-group" style="margin-top: 16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleParams()">
+                    <label style="cursor:pointer;">4. Deep Exploration & Spend Controls</label>
+                    <span id="params-toggle-btn" style="font-size:12px; color:var(--text-muted);">▼ Adjust Limits & Model</span>
+                </div>
+                <div class="label-desc">Configure multi-hop crawl depth, document limits, worker concurrency, and spending caps.</div>
+
+                <div id="params-body" class="params-grid" style="display:none; margin-top:12px;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="max-depth">Max Depth <span class="label-desc">(Crawl Hops)</span></label>
+                        <input type="number" id="max-depth" value="3" min="1" max="10">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="max-docs">Target Documents <span class="label-desc">(Corpus Size)</span></label>
+                        <input type="number" id="max-docs" value="25" min="5" max="100">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="max-duration">Time Budget <span class="label-desc">(Seconds)</span></label>
+                        <input type="number" id="max-duration" value="180" min="30" max="1800">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="concurrency">Concurrency <span class="label-desc">(Parallel Workers)</span></label>
+                        <div class="concurrency-row">
+                            <input type="range" id="concurrency-range" min="1" max="10" value="4" oninput="syncConcurrency(this.value)">
+                            <input type="number" id="concurrency" value="4" min="1" max="10" oninput="syncConcurrency(this.value)">
+                        </div>
+                        <div class="preset-group">
+                            <button type="button" class="preset-btn" onclick="setConcurrencyPreset(2)">2 (Gentle)</button>
+                            <button type="button" class="preset-btn active" id="preset-4" onclick="setConcurrencyPreset(4)">4 (Standard)</button>
+                            <button type="button" class="preset-btn" onclick="setConcurrencyPreset(8)">8 (Fast)</button>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="openai-model">OpenAI Model <span class="label-desc">(When Active)</span></label>
+                        <select id="openai-model">
+                            <option value="gpt-4o-mini" selected>gpt-4o-mini (Fast & Economical - $0.15/$0.60)</option>
+                            <option value="gpt-4o">gpt-4o (High Intelligence - $2.50/$10.00)</option>
+                            <option value="gpt-4.5">gpt-4.5 (Frontier Knowledge - $75.00/$150.00)</option>
+                            <option value="gpt-5-mini">gpt-5-mini (Next-Gen Compact - $0.25/$1.00)</option>
+                            <option value="gpt-5">gpt-5 (Next-Gen Foundation - $3.00/$12.00)</option>
+                            <option value="gpt-5.1">gpt-5.1 (Advanced Adaptive - $4.00/$16.00)</option>
+                            <option value="gpt-5.2">gpt-5.2 (High Precision - $5.00/$20.00)</option>
+                            <option value="gpt-5.4">gpt-5.4 (Ultra Synthesis - $7.50/$30.00)</option>
+                            <option value="gpt-5.6">gpt-5.6 (State-of-the-Art Frontier - $10.00/$40.00)</option>
+                            <option value="o3-mini">o3-mini (Deep Reasoning - $1.10/$4.40)</option>
+                            <option value="o1">o1 (Full Reasoning - $15.00/$60.00)</option>
+                            <option value="o1-pro">o1-pro (Deepest Reasoning - $150.00/$600.00)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="reasoning-effort">Reasoning Effort <span class="label-desc">(o1/o3-mini)</span></label>
+                        <select id="reasoning-effort">
+                            <option value="medium" selected>medium (Balanced)</option>
+                            <option value="low">low (Fast)</option>
+                            <option value="high">high (Exhaustive)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="max-spend">Spending Cap <span class="label-desc">($ USD Max Limit)</span></label>
+                        <input type="number" id="max-spend" value="2.00" min="0.10" max="50.00" step="0.10">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Pre-Run Cost & Workload Estimator -->
+            <div class="estimate-card" id="pre-run-estimate-card">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:15px;">📊</span>
+                        <strong style="font-size:13px;">Pre-Run Cost & Workload Estimate</strong>
+                        <span id="estimate-mode-badge" class="badge-safe">100% Free / Offline</span>
+                    </div>
+                    <span id="estimate-spend-highlight" style="font-size:15px; font-weight:700; color:var(--primary);">$0.00</span>
+                </div>
+                <div class="estimate-stats-grid">
+                    <div class="estimate-stat-box">
+                        <div class="estimate-stat-title">OpenAI API Calls</div>
+                        <div class="estimate-stat-val" id="est-api-calls">0 calls</div>
+                        <div class="estimate-stat-sub" id="est-api-calls-sub">Offline extractive CPU</div>
+                    </div>
+                    <div class="estimate-stat-box">
+                        <div class="estimate-stat-title">Active Model & Effort</div>
+                        <div class="estimate-stat-val" id="est-model-val">Offline CPU</div>
+                        <div class="estimate-stat-sub" id="est-effort-sub">0 reasoning tokens</div>
+                    </div>
+                    <div class="estimate-stat-box">
+                        <div class="estimate-stat-title">Parallel Workers</div>
+                        <div class="estimate-stat-val" id="est-concurrency-val">4 workers</div>
+                        <div class="estimate-stat-sub" id="est-concurrency-sub">Territory partitioned</div>
+                    </div>
+                    <div class="estimate-stat-box">
+                        <div class="estimate-stat-title">Estimated Tokens</div>
+                        <div class="estimate-stat-val" id="est-tokens-val">0 tokens</div>
+                        <div class="estimate-stat-sub" id="est-tokens-sub">Prompt: 0 | Comp: 0</div>
+                    </div>
+                </div>
+                <div class="estimate-steps-breakdown" id="estimate-steps-breakdown">
+                    <!-- Dynamic breakdown rows -->
+                </div>
+            </div>
+
+            <!-- Action Buttons: Run & Cancel -->
+            <div class="actions-row" style="margin-top: 16px;">
+                <button id="run-btn" class="btn-run" onclick="executeResearch()">🚀 Launch Deep Research</button>
+                <button id="cancel-btn" class="btn-cancel" onclick="cancelResearch()">🛑 Cancel / Stop Run</button>
+            </div>
+            <div id="status-box"></div>
+        </div>
+
+        <!-- Research Results & Ranked Sources -->
+        <div id="results-section" class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h2>Research Results & Ranked Sources</h2>
+                <span id="result-status-badge" class="badge-safe">Complete</span>
+            </div>
+
+            <!-- Execution Metrics Banner -->
+            <div id="metrics-bar" class="metrics-bar"></div>
+
+            <div id="queries-container"></div>
+            <div id="summary-container"></div>
+            <div id="evidence-container"></div>
+
+            <div id="report-link-container"></div>
+        </div>
+
+        <!-- Past Reports Archive Drawer -->
+        <div class="card" id="reports-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleReportsArchive()">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:16px;">📚</span>
+                    <strong style="font-size:14px;">Archived Research Reports</strong>
+                    <span class="badge-metric" id="reports-count-badge">0 reports</span>
+                </div>
+                <span id="reports-toggle-btn" style="font-size:12px; color:var(--text-muted);">▼ View Archive</span>
+            </div>
+            <div id="reports-body" style="display:none; margin-top:14px;">
+                <div id="reports-list" class="reports-list">
+                    <p style="color:var(--text-muted); font-size:13px;">No archived reports found yet.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modular Frontend Application Scripts -->
+    <script src="/js/api_client.js"></script>
+    <script src="/js/state_manager.js"></script>
+    <script src="/js/ui_renderer.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>
