@@ -195,6 +195,17 @@ test("the review lane stays one input to the single PR Gate", () => {
 
 // --- Half 3: conflicting native review authority is removed ---
 
+// Auditable live re-read artifact for the "recorded live ruleset adopts zero
+// native gating" test below: captured 2026-09-22T19:00Z by running
+// `node docs/ops/stage3c-settings-readback-live.mjs` (read-only GET of
+// ruleset 20904976) at branch head 51d2e56. Output: "Read-back clean:
+// zero drift" with snapshot {"mergeMethods":["squash"],"contexts":
+// ["PR Gate"],"strict":true,"approvals":0,"allowForce":false,
+// "allowDelete":false,"bypass":[64936641],"gateName":"PR Gate"}.
+// The committed fixture stage3c-live-ruleset-20904976.json is the INPUT to
+// the mapping under test (not the proof it passed); the proof is this
+// test executing in CI — see the PR body for the Platform run link.
+// Re-run the script any time to confirm the recording is current.
 function liveAdoptionInput() {
   const ruleset = JSON.parse(
     readFileSync(new URL("./stage3c-live-ruleset-20904976.json", import.meta.url), "utf8"),
