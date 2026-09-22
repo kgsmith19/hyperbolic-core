@@ -58,26 +58,31 @@ test("gate rename fires", () => {
 
 // --- Adapter proof: the recorded live API response is machine-verifiable ---
 
-test("recorded live ruleset 20904976 maps to a clean, drift-free snapshot", () => {
+// Independent oracle: the exact snapshot the recorded response must produce.
+const LITERAL_APPROVED_SNAPSHOT = {
+  mergeMethods: ["squash"], contexts: ["PR Gate"], strict: true,
+  approvals: 0, allowForce: false, allowDelete: false,
+  bypass: [64936641], gateName: "PR Gate",
+};
+
+test("recorded live ruleset 20904976 maps to the literal approved snapshot", () => {
   const snapshot = snapshotFromRuleset(liveRuleset());
-  assert.deepEqual(snapshot, clean());
+  assert.deepEqual(snapshot, LITERAL_APPROVED_SNAPSHOT);
   assert.deepEqual(drift(snapshot), []);
 });
 
-test("adapter fails closed when the non_fast_forward rule is absent", () => {
-  const ruleset = liveRuleset();
-  const mutated = { ...ruleset, rules: ruleset.rules.filter((r) => r.type !== "non_fast_forward") };
-  assert.ok(drift(snapshotFromRuleset(mutated)).includes("force-delete-exposure"));
-});
-
-test("adapter fails closed when the deletion rule is absent", () => {
-  const ruleset = liveRuleset();
-  const mutated = { ...ruleset, rules: ruleset.rules.filter((r) => r.type !== "deletion") };
-  assert.ok(drift(snapshotFromRuleset(mutated)).includes("force-delete-exposure"));
-});
-
-test("adapter fails closed when the required-status rule is absent", () => {
-  const ruleset = liveRuleset();
-  const mutated = { ...ruleset, rules: ruleset.rules.filter((r) => r.type !== "required_status_checks") };
-  assert.ok(drift(snapshotFromRuleset(mutated)).includes("stale-required-context"));
+test("adapter fails closed when a protective rule is absent", () => {
+  const cases = [
+    ["non_fast_forward", "force-delete-exposure"],
+    ["deletion", "force-delete-exposure"],
+    ["required_status_checks", "stale-required-context"],
+  ];
+  for (const [rule, expected] of cases) {
+    const ruleset = liveRuleset();
+    const mutated = { ...ruleset, rules: ruleset.rules.filter((r) => r.type !== rule) };
+    assert.ok(
+      drift(snapshotFromRuleset(mutated)).includes(expected),
+      `missing ${rule} should fire ${expected}`,
+    );
+  }
 });
