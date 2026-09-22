@@ -11,6 +11,7 @@ from backend.server.configuration import (
 )
 from backend.server.web_server import (
     SafeResearchRequestHandler,
+    ThreadedUIServer,
     start_ui_server,
 )
 
@@ -19,5 +20,6 @@ __all__ = [
     "save_env_file",
     "load_lines",
     "SafeResearchRequestHandler",
+    "ThreadedUIServer",
     "start_ui_server",
 ]

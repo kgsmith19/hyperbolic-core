@@ -17,9 +17,11 @@ import webbrowser
 from backend.server.configuration import load_env_file, load_lines, save_env_file
 from backend.privacy.watchlist_redactor import SafetyError
 from backend.retrieval.collector_client import reset_collector
+from dataclasses import asdict
 from backend.research.research_pipeline import run_search, run_to_dict
 from backend.research.types import SearchOptions
-from backend.research.cost_estimator import MODEL_PRICING, estimate_research_workload
+from backend.research.preview import preview
+from backend.research.cost_estimator import MODEL_PRICING
 from backend.research.cancellation import cancellation_manager
 from backend.retrieval.meta.searxng_server import is_port_in_use, start_searxng_service
 
@@ -31,6 +33,28 @@ _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ROOT_DIR = os.path.dirname(_BACKEND_DIR)
 _FRONTEND_DIR = os.path.join(_ROOT_DIR, "frontend")
 _REPORTS_DIR = os.path.join(_ROOT_DIR, "reports")
+
+
+class ThreadedUIServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def _options_from_payload(data: dict) -> SearchOptions:
+    return SearchOptions(
+        max_depth=int(data.get("max_depth", 2)),
+        max_documents=int(data.get("max_documents", data.get("max_docs", 15))),
+        max_duration_sec=float(data.get("max_duration_sec", 180.0)),
+        concurrency=int(data.get("concurrency", 4)),
+        max_per_domain=int(data.get("max_per_domain", 4)),
+        blind_watchlist=bool(data.get("blind_watchlist", False)),
+        decoy_queries=int(data.get("decoy_queries", 0)),
+        ai_planning=bool(data.get("ai_planning", False)),
+        ai_summary=bool(data.get("ai_summary", False)),
+        model=str(data.get("openai_model", data.get("model", os.environ.get("OPENAI_MODEL", "gpt-4o-mini")))),
+        reasoning_effort=data.get("reasoning_effort"),
+        max_spend_usd=float(data.get("max_spend_usd", 2.00)),
+    )
 
 
 class SafeResearchRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -168,21 +192,15 @@ class SafeResearchRequestHandler(http.server.BaseHTTPRequestHandler):
             body = self.rfile.read(content_length).decode("utf-8") if content_length > 0 else "{}"
             try:
                 data = json.loads(body) if body else {}
-                mode = data.get("mode", "deterministic")
-                model = data.get("model", "gpt-4o-mini")
-                reasoning_effort = data.get("reasoning_effort", "medium")
-                max_docs = int(data.get("max_documents", 25))
-                concurrency = int(data.get("concurrency", 4))
+                if "mode" in data:
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": "mode is not supported; send SearchOptions fields"}).encode("utf-8"))
+                    return
                 topic = data.get("topic", "")
-
-                estimate = estimate_research_workload(
-                    mode=mode,
-                    model=model,
-                    reasoning_effort=reasoning_effort,
-                    max_documents=max_docs,
-                    concurrency=concurrency,
-                    topic_length_chars=len(topic)
-                )
+                options = _options_from_payload(data)
+                estimate = asdict(preview(topic, options))
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -258,20 +276,7 @@ class SafeResearchRequestHandler(http.server.BaseHTTPRequestHandler):
                         os.environ["BRAVE_SEARCH_API_KEY"] = b_val
                         save_env_file({"BRAVE_SEARCH_API_KEY": b_val})
 
-                options = SearchOptions(
-                    max_depth=int(data.get("max_depth", 2)),
-                    max_documents=int(data.get("max_documents", 15)),
-                    max_duration_sec=float(data.get("max_duration_sec", 180.0)),
-                    concurrency=int(data.get("concurrency", 4)),
-                    max_per_domain=int(data.get("max_per_domain", 4)),
-                    blind_watchlist=bool(data.get("blind_watchlist", False)),
-                    decoy_queries=int(data.get("decoy_queries", 0)),
-                    ai_planning=bool(data.get("ai_planning", False)),
-                    ai_summary=bool(data.get("ai_summary", False)),
-                    model=str(data.get("openai_model", os.environ.get("OPENAI_MODEL", "gpt-4o-mini"))),
-                    reasoning_effort=data.get("reasoning_effort"),
-                    max_spend_usd=float(data.get("max_spend_usd", 2.00)),
-                )
+                options = _options_from_payload(data)
                 result = run_to_dict(run_search(
                     topic=topic,
                     watchlist=watchlist,
@@ -307,7 +312,7 @@ def start_ui_server(port: int = 8765) -> None:
     except Exception:
         pass
 
-    with socketserver.TCPServer(("127.0.0.1", port), SafeResearchRequestHandler) as httpd:
+    with ThreadedUIServer(("127.0.0.1", port), SafeResearchRequestHandler) as httpd:
         url = f"http://127.0.0.1:{port}"
         print(f"Deep Search UI active at: {url}")
         webbrowser.open(url)

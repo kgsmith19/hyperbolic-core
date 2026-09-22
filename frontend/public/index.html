@@ -71,93 +71,43 @@
 
             <div class="form-group">
                 <div style="display:flex; justify-content:space-between; align-items:baseline;">
-                    <label>3. Select Research Plan & Stealth Tier</label>
-                    <span style="font-size:12px; color:var(--text-muted);">Depth, sources, and zero-secret-egress protection</span>
+                    <label>3. Search Options</label>
+                    <span style="font-size:12px; color:var(--text-muted);">One search. Each toggle states its tradeoff.</span>
                 </div>
-                <div class="modes-grid" style="margin-top: 14px;">
-                    <!-- Tier 1: Standard Local -->
-                    <div class="mode-option" onclick="selectMode('deterministic')">
-                        <input type="radio" name="mode" value="deterministic">
-                        <div>
-                            <div class="tier-header">
-                                <span class="tier-name">⚡ Tier 1: Standard Local</span>
-                            </div>
-                            <div class="tier-cost">$0.00 <span class="tier-cost-sub">/ run</span></div>
-                            <div class="tier-pill tier-pill-safe">🔒 100% Offline • 0 Bytes to AI</div>
-                            <div class="tier-desc">Deterministic deep retrieval across academic registries, SEC EDGAR & SearXNG. Built via CPU extractive synthesis.</div>
-                        </div>
-                        <ul class="tier-features">
-                            <li><span class="feature-check">✓</span> <span><strong>Dual Discovery</strong>: Academic + SearXNG</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>Local Embeddings</strong>: Okapi BM25 + ONNX</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>Zero AI Exposure</strong>: Air-gapped socket</span></li>
-                            <li><span class="feature-cross">✗</span> <span>Token blinding & decoy chaffing</span></li>
-                            <li><span class="feature-cross">✗</span> <span>AI query angle expansion</span></li>
-                        </ul>
+                <div class="preset-group" style="margin-top:10px;">
+                    <button type="button" class="preset-btn" onclick="applyMacro('local')">Local</button>
+                    <button type="button" class="preset-btn" onclick="applyMacro('private')">Private &amp; Local (weaker recall)</button>
+                    <button type="button" class="preset-btn" onclick="applyMacro('plan')">Plan angles</button>
+                    <button type="button" class="preset-btn" onclick="applyMacro('brief')">Sourced brief</button>
+                </div>
+                <div class="params-grid" style="margin-top:12px;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="blind-watchlist">Blind watchlist</label>
+                        <div class="label-desc">Watchlist terms never leave the machine. Engines see placeholders — weaker recall.</div>
+                        <input type="checkbox" id="blind-watchlist" onchange="updatePreRunEstimate()">
                     </div>
-
-                    <!-- Tier 2: Cloaked Stealth (Recommended for Deep Private Search) -->
-                    <div class="mode-option active" onclick="selectMode('extreme')">
-                        <div class="tier-ribbon">⭐ Recommended for Private Deep Search</div>
-                        <input type="radio" name="mode" value="extreme" checked>
-                        <div>
-                            <div class="tier-header">
-                                <span class="tier-name">🛡️ Tier 2: Cloaked Stealth</span>
-                            </div>
-                            <div class="tier-cost">$0.00 <span class="tier-cost-sub">/ run</span></div>
-                            <div class="tier-pill tier-pill-cloaked">🥷 Max Depth • Total Zero-Egress</div>
-                            <div class="tier-desc">Deepest multi-hop exploration. Token blinding conceals watchlist terms, while decoy chaff masks true research intent from network sniffers.</div>
-                        </div>
-                        <ul class="tier-features">
-                            <li><span class="feature-check">✓</span> <span><strong>Max Multi-Hop Crawl</strong>: Citation & web graph</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>Token Blinding</strong>: Secret Core pseudonymization</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>Decoy Chaffing</strong>: K-anonymity traffic mask</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>Zero AI Exposure</strong>: 100% air-gapped CPU</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>Memory Zeroization</strong>: <code>ctypes.memset</code></span></li>
-                        </ul>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="decoy-queries">Decoy queries</label>
+                        <div class="label-desc">k-anonymity chaff. Decoy searches run for real and yield no evidence.</div>
+                        <input type="number" id="decoy-queries" value="0" min="0" max="8" onchange="updatePreRunEstimate()">
                     </div>
-
-                    <!-- Tier 3: Smart Discovery -->
-                    <div class="mode-option" onclick="selectMode('expansion')">
-                        <input type="radio" name="mode" value="expansion">
-                        <div>
-                            <div class="tier-header">
-                                <span class="tier-name">🔍 Tier 3: Smart Discovery</span>
-                            </div>
-                            <div class="tier-cost">&lt; $0.001 <span class="tier-cost-sub">/ run</span></div>
-                            <div class="tier-pill tier-pill-hybrid">🤖 Hybrid • 1 AI Planning Call</div>
-                            <div class="tier-desc">AI plans 4 orthogonal query angles using only your public topic. Crawling, scraped documents, and ranking remain 100% local.</div>
-                        </div>
-                        <ul class="tier-features">
-                            <li><span class="feature-check">✓</span> <span><strong>Multi-Angle Planning</strong>: 4 diverse AI queries</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>Wide Frontier</strong>: High source variety</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>0 Scraped Docs to AI</strong>: Content kept local</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>Controlled Spend</strong>: Exactly 1 LLM call</span></li>
-                            <li><span class="feature-cross">✗</span> <span>Cloud executive summary</span></li>
-                        </ul>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="ai-planning">AI query planning</label>
+                        <div class="label-desc">Topic leaves the machine to expand search angles. Small spend.</div>
+                        <input type="checkbox" id="ai-planning" onchange="updatePreRunEstimate()">
                     </div>
-
-                    <!-- Tier 4: Full AI Brief -->
-                    <div class="mode-option" onclick="selectMode('full')">
-                        <input type="radio" name="mode" value="full">
-                        <div>
-                            <div class="tier-header">
-                                <span class="tier-name">📝 Tier 4: Full AI Brief</span>
-                            </div>
-                            <div class="tier-cost">~$0.003+ <span class="tier-cost-sub">/ run</span></div>
-                            <div class="tier-pill tier-pill-cloud">🧠 Cloud AI • Full Synthesis</div>
-                            <div class="tier-desc">Multi-hop deep retrieval with local redaction + an executive summary generated by cloud LLMs (GPT-4o through GPT-5.6 / o1).</div>
-                        </div>
-                        <ul class="tier-features">
-                            <li><span class="feature-check">✓</span> <span><strong>AI Query Planning</strong> + Executive report</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>Local Redaction</strong> before LLM egress</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>Inline Citations</strong> tied to evidence corpus</span></li>
-                            <li><span class="feature-check">✓</span> <span><strong>Reasoning Effort</strong>: Low, Medium, High</span></li>
-                            <li><span class="feature-check" style="color:var(--warning);">⚠</span> <span>Redacted evidence sent to OpenAI</span></li>
-                        </ul>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="ai-summary">AI sourced brief</label>
+                        <div class="label-desc">Redacted excerpts leave the machine. Spend scales with corpus.</div>
+                        <input type="checkbox" id="ai-summary" onchange="updatePreRunEstimate()">
                     </div>
                 </div>
-            </div>
-
+                <div id="confirm-weaker-wrap" style="display:none; margin-top:12px;">
+                    <label for="confirm-weaker-recall" style="display:flex; gap:8px; align-items:center;">
+                        <input type="checkbox" id="confirm-weaker-recall" onchange="syncLaunchEnabled()">
+                        <span>I accept weaker recall</span>
+                    </label>
+                </div>
             <!-- Deep Research Exploration & Spend Controls -->
             <div class="form-group" style="margin-top: 16px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleParams()">
@@ -228,31 +178,31 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span style="font-size:15px;">📊</span>
-                        <strong style="font-size:13px;">Pre-Run Cost & Workload Estimate</strong>
-                        <span id="estimate-mode-badge" class="badge-safe">100% Free / Offline</span>
+                        <strong style="font-size:13px;">Search Preview</strong>
+                        <span id="estimate-mode-badge" class="badge-safe">Local</span>
                     </div>
                     <span id="estimate-spend-highlight" style="font-size:15px; font-weight:700; color:var(--primary);">$0.00</span>
                 </div>
                 <div class="estimate-stats-grid">
                     <div class="estimate-stat-box">
-                        <div class="estimate-stat-title">OpenAI API Calls</div>
-                        <div class="estimate-stat-val" id="est-api-calls">0 calls</div>
-                        <div class="estimate-stat-sub" id="est-api-calls-sub">Offline extractive CPU</div>
+                        <div class="estimate-stat-title">Hops</div>
+                        <div class="estimate-stat-val" id="est-hops">2</div>
+                        <div class="estimate-stat-sub" id="est-hops-sub">stops at hop 2</div>
                     </div>
                     <div class="estimate-stat-box">
-                        <div class="estimate-stat-title">Active Model & Effort</div>
-                        <div class="estimate-stat-val" id="est-model-val">Offline CPU</div>
-                        <div class="estimate-stat-sub" id="est-effort-sub">0 reasoning tokens</div>
+                        <div class="estimate-stat-title">Sources</div>
+                        <div class="estimate-stat-val" id="est-sources">15</div>
+                        <div class="estimate-stat-sub" id="est-sources-sub">corpus cap</div>
                     </div>
                     <div class="estimate-stat-box">
-                        <div class="estimate-stat-title">Parallel Workers</div>
-                        <div class="estimate-stat-val" id="est-concurrency-val">4 workers</div>
-                        <div class="estimate-stat-sub" id="est-concurrency-sub">Territory partitioned</div>
+                        <div class="estimate-stat-title">Time budget</div>
+                        <div class="estimate-stat-val" id="est-duration">180s</div>
+                        <div class="estimate-stat-sub" id="est-duration-sub">unfinished hops drop</div>
                     </div>
                     <div class="estimate-stat-box">
-                        <div class="estimate-stat-title">Estimated Tokens</div>
-                        <div class="estimate-stat-val" id="est-tokens-val">0 tokens</div>
-                        <div class="estimate-stat-sub" id="est-tokens-sub">Prompt: 0 | Comp: 0</div>
+                        <div class="estimate-stat-title">Spend</div>
+                        <div class="estimate-stat-val" id="est-spend">$0.00</div>
+                        <div class="estimate-stat-sub" id="est-spend-sub">offline unless AI is on</div>
                     </div>
                 </div>
                 <div class="estimate-steps-breakdown" id="estimate-steps-breakdown">

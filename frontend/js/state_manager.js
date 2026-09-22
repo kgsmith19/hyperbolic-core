@@ -1,16 +1,22 @@
 /**
  * Deep Search UI State Manager
- * Tracks execution status, selected mode, settings, deep search parameters, and reports.
+ * Tracks execution status, options, settings, and reports.
  */
 
 class StateManager {
     constructor() {
-        this.selectedMode = 'extreme';
+        this.options = {
+            blindWatchlist: false,
+            decoyQueries: 0,
+            aiPlanning: false,
+            aiSummary: false
+        };
         this.isRunning = false;
         this.isSettingsOpen = false;
         this.isParamsOpen = false;
         this.isReportsOpen = false;
         this.lastResult = null;
+        this.lastPreview = null;
         this.reports = [];
         this.settings = {
             hasBrave: false,
@@ -25,9 +31,9 @@ class StateManager {
         this.listeners = [];
     }
 
-    setMode(mode) {
-        this.selectedMode = mode;
-        this.notify('mode', mode);
+    setOptions(partial) {
+        this.options = { ...this.options, ...partial };
+        this.notify('options', this.options);
     }
 
     setRunning(running) {
@@ -72,6 +78,11 @@ class StateManager {
     setResult(result) {
         this.lastResult = result;
         this.notify('result', result);
+    }
+
+    setPreview(preview) {
+        this.lastPreview = preview;
+        this.notify('preview', preview);
     }
 
     subscribe(callback) {

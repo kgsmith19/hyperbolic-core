@@ -53,75 +53,39 @@ const UiRenderer = {
     renderPreRunEstimate(data) {
         const badge = document.getElementById('estimate-mode-badge');
         const highlight = document.getElementById('estimate-spend-highlight');
-        const apiCalls = document.getElementById('est-api-calls');
-        const apiCallsSub = document.getElementById('est-api-calls-sub');
-        const modelVal = document.getElementById('est-model-val');
-        const effortSub = document.getElementById('est-effort-sub');
-        const concurrencyVal = document.getElementById('est-concurrency-val');
-        const concurrencySub = document.getElementById('est-concurrency-sub');
-        const tokensVal = document.getElementById('est-tokens-val');
-        const tokensSub = document.getElementById('est-tokens-sub');
+        const hops = document.getElementById('est-hops');
+        const hopsSub = document.getElementById('est-hops-sub');
+        const sources = document.getElementById('est-sources');
+        const sourcesSub = document.getElementById('est-sources-sub');
+        const duration = document.getElementById('est-duration');
+        const durationSub = document.getElementById('est-duration-sub');
+        const spend = document.getElementById('est-spend');
+        const spendSub = document.getElementById('est-spend-sub');
         const breakdown = document.getElementById('estimate-steps-breakdown');
 
         if (!highlight) return;
 
-        if (data.mode === 'deterministic' || data.mode === 'extreme') {
-            if (badge) {
-                badge.className = 'badge-safe';
-                badge.innerText = data.mode === 'extreme'
-                    ? '🛡️ Tier 2: Cloaked Stealth (0 Bytes to AI)'
-                    : '⚡ Tier 1: Standard Local (0 Bytes to AI)';
-            }
-            highlight.innerText = '$0.00';
-            highlight.style.color = 'var(--success)';
-            if (apiCalls) apiCalls.innerText = '0 calls';
-            if (apiCallsSub) apiCallsSub.innerText = data.mode === 'extreme' ? 'Max depth + chaffing (Local CPU)' : 'Offline extractive CPU';
-            if (modelVal) modelVal.innerText = 'Local CPU';
-            if (effortSub) effortSub.innerText = '0 reasoning tokens';
-        } else {
-            if (badge) {
-                badge.className = data.mode === 'expansion' ? 'badge-metric' : 'badge-cost';
-                badge.innerText = data.mode === 'expansion'
-                    ? '🔍 Tier 3: Smart Discovery (1 AI Call)'
-                    : `📝 Tier 4: Full AI Brief (${data.model})`;
-            }
-            highlight.innerText = data.estimated_cost_display || `$${data.estimated_cost_usd?.toFixed(4) || '0.00'}`;
-            highlight.style.color = '#38bdf8';
-            if (apiCalls) apiCalls.innerText = `${data.api_calls} call${data.api_calls === 1 ? '' : 's'}`;
-            if (apiCallsSub) {
-                apiCallsSub.innerText = data.mode === 'expansion' ? '1 Query Expansion' : '1 Expansion + 1 Synthesis';
-            }
-            if (modelVal) modelVal.innerText = data.model || 'gpt-4o-mini';
-            if (effortSub) {
-                effortSub.innerText = data.reasoning_effort && data.reasoning_effort !== 'n/a'
-                    ? `Reasoning: ${data.reasoning_effort} (~${(data.estimated_reasoning_tokens || 0).toLocaleString()} tokens)`
-                    : 'Standard reasoning';
-            }
+        const costDisplay = data.expected_cost_display || '$0.00';
+        highlight.innerText = costDisplay;
+        highlight.style.color = data.requires_confirm ? 'var(--warning)' : 'var(--success)';
+        if (badge) {
+            badge.className = data.requires_confirm ? 'badge-cost' : 'badge-safe';
+            badge.innerText = data.requires_confirm ? 'Confirm weaker recall' : 'Ready';
         }
+        if (hops) hops.innerText = String(data.expected_hops ?? 2);
+        if (hopsSub) hopsSub.innerText = `stops at hop ${data.expected_hops ?? 2}`;
+        if (sources) sources.innerText = String(data.expected_sources ?? 15);
+        if (sourcesSub) sourcesSub.innerText = 'corpus cap';
+        if (duration) duration.innerText = `${Math.round(data.expected_duration_sec ?? 180)}s`;
+        if (durationSub) durationSub.innerText = 'unfinished hops drop';
+        if (spend) spend.innerText = costDisplay;
+        if (spendSub) spendSub.innerText = data.requires_confirm ? 'privacy tradeoff on' : 'declared spend';
 
-        if (concurrencyVal) {
-            concurrencyVal.innerText = `${data.concurrency_workers || 4} workers`;
-        }
-        if (concurrencySub) {
-            concurrencySub.innerText = 'Territory partitioned';
-        }
-
-        if (tokensVal) {
-            tokensVal.innerText = `~${(data.estimated_total_tokens || 0).toLocaleString()} tokens`;
-        }
-        if (tokensSub) {
-            tokensSub.innerText = `Prompt: ${(data.estimated_prompt_tokens || 0).toLocaleString()} | Output: ${(data.estimated_completion_tokens || 0).toLocaleString()}`;
-        }
-
-        if (breakdown && data.call_breakdown) {
-            breakdown.innerHTML = data.call_breakdown.map(item => `
+        if (breakdown) {
+            const warnings = data.warnings || [];
+            breakdown.innerHTML = warnings.map(w => `
                 <div class="breakdown-row">
-                    <span class="breakdown-title">
-                        <span>${item.calls > 0 ? '🤖' : '⚡'}</span>
-                        <strong>${this.escapeHtml(item.step)}</strong>
-                        <span class="badge-safe" style="font-size:10px; padding:1px 4px;">${item.calls} API call${item.calls === 1 ? '' : 's'}</span>
-                    </span>
-                    <span class="breakdown-desc">${this.escapeHtml(item.desc)}</span>
+                    <span class="breakdown-desc">${this.escapeHtml(w)}</span>
                 </div>
             `).join('');
         }

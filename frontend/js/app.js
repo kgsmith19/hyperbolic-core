@@ -1,14 +1,7 @@
 /**
  * Deep Search Frontend Application Orchestrator
- * Coordinates events, mode selection, settings drawer, deep parameters,
- * concurrency controls, pre-run workload estimation, cancellation kill-switch,
- * reports archive, and execution pipeline.
+ * Coordinates options, settings, preview, confirm, cancel, and launch.
  */
-
-function selectMode(mode) {
-    window.appState.setMode(mode);
-    updatePreRunEstimate();
-}
 
 function toggleSettings() {
     window.appState.toggleSettings();
@@ -22,6 +15,56 @@ function toggleReportsArchive() {
     window.appState.toggleReports();
 }
 
+function collectOptionsFromForm() {
+    return {
+        blind_watchlist: Boolean(document.getElementById('blind-watchlist')?.checked),
+        decoy_queries: parseInt(document.getElementById('decoy-queries')?.value || '0', 10),
+        ai_planning: Boolean(document.getElementById('ai-planning')?.checked),
+        ai_summary: Boolean(document.getElementById('ai-summary')?.checked),
+        max_depth: parseInt(document.getElementById('max-depth')?.value || '2', 10),
+        max_documents: parseInt(document.getElementById('max-docs')?.value || '15', 10),
+        max_duration_sec: parseFloat(document.getElementById('max-duration')?.value || '180'),
+        concurrency: parseInt(document.getElementById('concurrency')?.value || '4', 10),
+        openai_model: document.getElementById('openai-model')?.value || 'gpt-4o-mini',
+        reasoning_effort: document.getElementById('reasoning-effort')?.value || 'medium',
+        max_spend_usd: parseFloat(document.getElementById('max-spend')?.value || '2.00'),
+        topic: document.getElementById('topic')?.value || ''
+    };
+}
+
+function applyMacro(name) {
+    const blind = document.getElementById('blind-watchlist');
+    const decoys = document.getElementById('decoy-queries');
+    const plan = document.getElementById('ai-planning');
+    const summary = document.getElementById('ai-summary');
+    if (!blind || !decoys || !plan || !summary) return;
+
+    if (name === 'local') {
+        blind.checked = false;
+        decoys.value = 0;
+        plan.checked = false;
+        summary.checked = false;
+    } else if (name === 'private') {
+        blind.checked = true;
+        decoys.value = 3;
+        plan.checked = false;
+        summary.checked = false;
+    } else if (name === 'plan') {
+        blind.checked = false;
+        decoys.value = 0;
+        plan.checked = true;
+        summary.checked = false;
+    } else if (name === 'brief') {
+        blind.checked = false;
+        decoys.value = 0;
+        plan.checked = true;
+        summary.checked = true;
+    }
+    const confirm = document.getElementById('confirm-weaker-recall');
+    if (confirm) confirm.checked = false;
+    updatePreRunEstimate();
+}
+
 function syncConcurrency(val) {
     const num = Math.max(1, Math.min(10, parseInt(val, 10) || 4));
     const range = document.getElementById('concurrency-range');
@@ -29,9 +72,8 @@ function syncConcurrency(val) {
     if (range) range.value = num;
     if (input) input.value = num;
 
-    // Update active preset button style
     document.querySelectorAll('.preset-btn').forEach(btn => {
-        btn.classList.remove('active');
+        if (btn.id && btn.id.startsWith('preset-')) btn.classList.remove('active');
     });
     const matchBtn = document.getElementById(`preset-${num}`);
     if (matchBtn) matchBtn.classList.add('active');
@@ -43,51 +85,42 @@ function setConcurrencyPreset(val) {
     syncConcurrency(val);
 }
 
+function syncLaunchEnabled() {
+    const runBtn = document.getElementById('run-btn');
+    const wrap = document.getElementById('confirm-weaker-wrap');
+    const confirm = document.getElementById('confirm-weaker-recall');
+    const preview = window.appState.lastPreview;
+    const needsConfirm = Boolean(preview && preview.requires_confirm);
+    if (wrap) wrap.style.display = needsConfirm ? 'block' : 'none';
+    if (runBtn) {
+        runBtn.disabled = Boolean(window.appState.isRunning || (needsConfirm && !confirm?.checked));
+    }
+}
+
 let estimateDebounceTimer = null;
 
 async function updatePreRunEstimate() {
     clearTimeout(estimateDebounceTimer);
     estimateDebounceTimer = setTimeout(async () => {
-        const mode = window.appState.selectedMode || 'extreme';
-        const model = document.getElementById('openai-model')?.value || 'gpt-4o-mini';
-        const reasoningEffort = document.getElementById('reasoning-effort')?.value || 'medium';
-        const maxDocs = parseInt(document.getElementById('max-docs')?.value || '25', 10);
-        const concurrency = parseInt(document.getElementById('concurrency')?.value || '4', 10);
-        const topic = document.getElementById('topic')?.value || '';
-
-        const params = {
-            mode,
-            model,
-            reasoning_effort: reasoningEffort,
-            max_documents: maxDocs,
-            concurrency,
-            topic
-        };
-
+        const params = collectOptionsFromForm();
         try {
             const estimate = await window.ApiClient.fetchEstimate(params);
+            window.appState.setPreview(estimate);
             window.UiRenderer.renderPreRunEstimate(estimate);
         } catch (err) {
-            // Local fallback calculation if offline or server is starting
-            const isOffline = mode === 'deterministic' || mode === 'extreme';
-            window.UiRenderer.renderPreRunEstimate({
-                mode,
-                model: isOffline ? 'offline-cpu' : model,
-                reasoning_effort: isOffline ? 'n/a' : reasoningEffort,
-                api_calls: isOffline ? 0 : (mode === 'expansion' ? 1 : 2),
-                concurrency_workers: concurrency,
-                estimated_prompt_tokens: isOffline ? 0 : 5000,
-                estimated_completion_tokens: isOffline ? 0 : 1000,
-                estimated_total_tokens: isOffline ? 0 : 6000,
-                estimated_cost_display: isOffline ? '$0.00 (100% Free / Offline)' : '~$0.003 USD',
-                call_breakdown: isOffline ? [
-                    { step: 'Local Air-Gapped Discovery', calls: 0, desc: `${concurrency} parallel workers with territory reservation` }
-                ] : [
-                    { step: 'Query Planning', calls: 1, desc: `Angle expansion via ${model}` },
-                    { step: 'Sourced Synthesis', calls: mode === 'full' ? 1 : 0, desc: `Executive summary via ${model}` }
-                ]
-            });
+            const fallback = {
+                expected_hops: params.max_depth,
+                expected_sources: params.max_documents,
+                expected_duration_sec: params.max_duration_sec,
+                expected_spend_usd: 0,
+                expected_cost_display: (params.ai_planning || params.ai_summary) ? '~$0.003 USD' : '$0.00 (100% Free / Offline)',
+                warnings: [],
+                requires_confirm: Boolean(params.blind_watchlist || params.decoy_queries > 0)
+            };
+            window.appState.setPreview(fallback);
+            window.UiRenderer.renderPreRunEstimate(fallback);
         }
+        syncLaunchEnabled();
     }, 60);
 }
 
@@ -162,7 +195,7 @@ async function saveSettings() {
 
 async function cancelResearch() {
     try {
-        window.UiRenderer.renderStatus('running', '🛑 Cancellation requested. Terminating workers and compiling partial results...');
+        window.UiRenderer.renderStatus('running', 'Cancellation requested. Terminating workers and compiling partial results...');
         const res = await window.ApiClient.cancelResearch();
         console.log('Cancellation dispatched:', res);
     } catch (err) {
@@ -181,68 +214,45 @@ async function executeResearch() {
         return;
     }
 
-    const maxDepth = parseInt(document.getElementById('max-depth')?.value || '3', 10);
-    const maxDocs = parseInt(document.getElementById('max-docs')?.value || '25', 10);
-    const maxDuration = parseFloat(document.getElementById('max-duration')?.value || '180');
-    const concurrency = parseInt(document.getElementById('concurrency')?.value || '4', 10);
-    const openaiModel = document.getElementById('openai-model')?.value || 'gpt-4o-mini';
-    const reasoningEffort = document.getElementById('reasoning-effort')?.value || 'medium';
-    const maxSpend = parseFloat(document.getElementById('max-spend')?.value || '2.00');
+    const options = collectOptionsFromForm();
+    const preview = window.appState.lastPreview;
+    const confirm = document.getElementById('confirm-weaker-recall');
+    if (preview && preview.requires_confirm && !confirm?.checked) {
+        alert('This combination reduces recall. Check "I accept weaker recall" to launch.');
+        return;
+    }
+
     const openaiKey = document.getElementById('openai-key')?.value?.trim();
     const braveKey = document.getElementById('brave-key')?.value?.trim();
-
     const payload = {
         topic,
         watchlist,
-        mode: window.appState.selectedMode,
-        max_depth: maxDepth,
-        max_documents: maxDocs,
-        max_duration_sec: maxDuration,
-        concurrency,
-        openai_model: openaiModel,
-        reasoning_effort: reasoningEffort,
-        max_spend_usd: maxSpend
+        ...options
     };
-
-    if (openaiKey && !openaiKey.startsWith('***')) {
-        payload.openai_key = openaiKey;
-    }
-    if (braveKey && !braveKey.startsWith('***')) {
-        payload.brave_key = braveKey;
-    }
+    if (openaiKey && !openaiKey.startsWith('***')) payload.openai_key = openaiKey;
+    if (braveKey && !braveKey.startsWith('***')) payload.brave_key = braveKey;
 
     window.appState.setRunning(true);
     if (runBtn) runBtn.disabled = true;
     if (resultsSection) resultsSection.style.display = 'none';
-
-    window.UiRenderer.renderStatus('running', 'Initializing Secret Core, partitioning crawl territory, and launching concurrent workers...');
+    window.UiRenderer.renderStatus('running', 'Initializing Secret Core and launching concurrent workers...');
 
     try {
         const data = await window.ApiClient.executeResearch(payload);
         window.UiRenderer.renderStatus('', '');
         window.appState.setResult(data);
         window.UiRenderer.renderResults(data);
-        // Refresh archive list after report is written
         await loadReports();
     } catch (err) {
         window.UiRenderer.renderStatus('error', '⚠️ ' + err.message);
     } finally {
         window.appState.setRunning(false);
-        if (runBtn) runBtn.disabled = false;
+        syncLaunchEnabled();
     }
 }
 
-// State change subscriptions
 window.appState.subscribe((event, value) => {
-    if (event === 'mode') {
-        document.querySelectorAll('.mode-option').forEach(el => {
-            const input = el.querySelector('input');
-            const isMatch = input && input.value === value;
-            el.classList.toggle('active', isMatch);
-            if (input) input.checked = isMatch;
-        });
-        updatePreRunEstimate();
-    } else if (event === 'settingsOpen') {
+    if (event === 'settingsOpen') {
         const body = document.getElementById('settings-body');
         const btn = document.getElementById('settings-toggle-btn');
         if (body) body.style.display = value ? 'block' : 'none';
@@ -282,10 +292,11 @@ window.appState.subscribe((event, value) => {
         }
 
         window.UiRenderer.renderSettingsBadge(value);
+    } else if (event === 'preview') {
+        syncLaunchEnabled();
     }
 });
 
-// Bootstrap on DOM load
 window.addEventListener('DOMContentLoaded', async () => {
     await loadSettings();
     await loadModels();
@@ -301,8 +312,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         // Defaults are optional
     }
 
-    // Attach listeners for dynamic pre-run cost & workload estimation
-    const inputsToWatch = ['openai-model', 'reasoning-effort', 'max-docs', 'max-depth', 'topic'];
+    const inputsToWatch = ['openai-model', 'reasoning-effort', 'max-docs', 'max-depth', 'max-duration', 'topic', 'blind-watchlist', 'decoy-queries', 'ai-planning', 'ai-summary'];
     inputsToWatch.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
@@ -311,6 +321,5 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Initial pre-run estimate calculation
     updatePreRunEstimate();
 });

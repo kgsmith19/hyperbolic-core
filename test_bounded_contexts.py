@@ -309,6 +309,13 @@ class TestDirectBoundedContexts(unittest.TestCase):
             html_content = f.read()
         self.assertIn("/css/theme.css", html_content)
         self.assertIn("/js/app.js", html_content)
+        self.assertIn('id="blind-watchlist"', html_content)
+        self.assertIn('id="decoy-queries"', html_content)
+        self.assertIn('id="ai-planning"', html_content)
+        self.assertIn('id="ai-summary"', html_content)
+        self.assertIn('id="confirm-weaker-recall"', html_content)
+        self.assertNotIn("selectMode('extreme')", html_content)
+        self.assertNotIn("selectMode('deterministic')", html_content)
 
 
 class TestSearchPreview(unittest.TestCase):
@@ -532,6 +539,16 @@ class TestRenamedContexts(unittest.TestCase):
         self.assertTrue(hasattr(backend.privacy, "SafetyError"))
         self.assertTrue(hasattr(backend.research, "run_search"))
         self.assertTrue(callable(LocalSynthesizer))
+
+
+class TestThreadedUIServer(unittest.TestCase):
+    """Cancel must be able to run while a search is in flight."""
+
+    def test_ui_server_is_threaded(self):
+        import socketserver
+        from backend.server.web_server import ThreadedUIServer
+
+        self.assertTrue(issubclass(ThreadedUIServer, socketserver.ThreadingMixIn))
 
 
 class TestDeepSearchCLI(unittest.TestCase):
