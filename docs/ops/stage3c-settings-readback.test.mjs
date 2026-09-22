@@ -3,44 +3,24 @@
 // Stage 3c (#387): live GitHub settings/rulesets match the owner-approved
 // squash-only, exact-head, one-Gate policy — proven by read-back.
 //
-// Characterization fixtures: each drift mode below reproduces as a pure
-// predicate over a settings snapshot (no network), so CI proves the check
-// fires without mutating live state. The live read-back log (recorded
-// separately on the issue, values read via gh api, never trusted from a
-// write response) is the second half of the proof.
+// Two halves in one CI-provable file:
+//   1. Characterization fixtures: each drift mode reproduces as a pure
+//      predicate over a settings snapshot (no network).
+//   2. Adapter proof: the recorded live ruleset response
+//      (stage3c-live-ruleset-20904976.json, captured via `gh api`, never a
+//      write response) maps through snapshotFromRuleset() to a clean
+//      snapshot, and the adapter fails closed when a protective rule is
+//      absent. The same adapter is what the live re-read script uses:
+//      node docs/ops/stage3c-settings-readback-live.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { APPROVED, clean, drift, snapshotFromRuleset } from "./stage3c-settings-readback-lib.mjs";
 
-const APPROVED = {
-  mergeMethods: ["squash"],
-  requiredContext: "PR Gate",
-  requiredApprovals: 0,
-  ownerBypassId: 64936641,
-  gateName: "PR Gate",
-};
-
-function drift(snapshot) {
-  const findings = [];
-  if (JSON.stringify([...snapshot.mergeMethods].sort()) !== JSON.stringify(APPROVED.mergeMethods))
-    findings.push("wrong-merge-mode");
-  if (!snapshot.contexts.includes(APPROVED.requiredContext))
-    findings.push("stale-required-context");
-  if (snapshot.contexts.some((c) => c !== APPROVED.requiredContext && !c.startsWith("PR Gate")))
-    findings.push("wrong-required-context");
-  if (!snapshot.strict) findings.push("non-strict-protection");
-  if (snapshot.approvals !== APPROVED.requiredApprovals) findings.push("native-approval-drift");
-  if (snapshot.allowForce || snapshot.allowDelete) findings.push("force-delete-exposure");
-  if (!snapshot.bypass.includes(APPROVED.ownerBypassId)) findings.push("missing-owner-bypass");
-  if (snapshot.gateName !== APPROVED.gateName) findings.push("gate-renamed");
-  return findings;
-}
-
-function clean() {
-  return {
-    mergeMethods: ["squash"], contexts: ["PR Gate"], strict: true,
-    approvals: 0, allowForce: false, allowDelete: false,
-    bypass: [64936641], gateName: "PR Gate",
-  };
+function liveRuleset() {
+  return JSON.parse(
+    readFileSync(new URL("./stage3c-live-ruleset-20904976.json", import.meta.url), "utf8"),
+  );
 }
 
 test("clean snapshot: no drift", () => {
@@ -74,4 +54,30 @@ test("missing owner bypass fires", () => {
 
 test("gate rename fires", () => {
   assert.ok(drift({ ...clean(), gateName: "CI" }).includes("gate-renamed"));
+});
+
+// --- Adapter proof: the recorded live API response is machine-verifiable ---
+
+test("recorded live ruleset 20904976 maps to a clean, drift-free snapshot", () => {
+  const snapshot = snapshotFromRuleset(liveRuleset());
+  assert.deepEqual(snapshot, clean());
+  assert.deepEqual(drift(snapshot), []);
+});
+
+test("adapter fails closed when the non_fast_forward rule is absent", () => {
+  const ruleset = liveRuleset();
+  const mutated = { ...ruleset, rules: ruleset.rules.filter((r) => r.type !== "non_fast_forward") };
+  assert.ok(drift(snapshotFromRuleset(mutated)).includes("force-delete-exposure"));
+});
+
+test("adapter fails closed when the deletion rule is absent", () => {
+  const ruleset = liveRuleset();
+  const mutated = { ...ruleset, rules: ruleset.rules.filter((r) => r.type !== "deletion") };
+  assert.ok(drift(snapshotFromRuleset(mutated)).includes("force-delete-exposure"));
+});
+
+test("adapter fails closed when the required-status rule is absent", () => {
+  const ruleset = liveRuleset();
+  const mutated = { ...ruleset, rules: ruleset.rules.filter((r) => r.type !== "required_status_checks") };
+  assert.ok(drift(snapshotFromRuleset(mutated)).includes("stale-required-context"));
 });
