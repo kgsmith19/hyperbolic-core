@@ -7,11 +7,11 @@ Isolated network-capable worker:
 - Retrieves from SearXNG, OpenAlex, Crossref, arXiv, SEC EDGAR, and Brave Search.
 - Extracts clean text and candidate links using trafilatura with fallbacks.
 
-Delegates implementation to `backend.retrieval_engine`.
+Delegates implementation to `backend.retrieval`.
 """
 
 import argparse
-from backend.retrieval_engine import (
+from backend.retrieval import (
     is_safe_url,
     is_bot_or_js_barrier,
     extract_clean_content,

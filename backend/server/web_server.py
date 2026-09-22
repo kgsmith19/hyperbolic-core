@@ -15,12 +15,12 @@ import urllib.parse
 import webbrowser
 
 from backend.server.configuration import load_env_file, load_lines, save_env_file
-from backend.security_guard.watchlist_redactor import SafetyError
-from backend.retrieval_engine.collector_client import reset_collector
-from backend.research_orchestrator.research_pipeline import run_research
-from backend.research_orchestrator.cost_estimator import MODEL_PRICING, estimate_research_workload
-from backend.research_orchestrator.cancellation import cancellation_manager
-from backend.meta_search.searxng_server import is_port_in_use, start_searxng_service
+from backend.privacy.watchlist_redactor import SafetyError
+from backend.retrieval.collector_client import reset_collector
+from backend.research.research_pipeline import run_research
+from backend.research.cost_estimator import MODEL_PRICING, estimate_research_workload
+from backend.research.cancellation import cancellation_manager
+from backend.retrieval.meta.searxng_server import is_port_in_use, start_searxng_service
 
 # Initialize environment from .env file
 load_env_file()

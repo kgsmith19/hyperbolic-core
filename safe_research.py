@@ -2,12 +2,12 @@
 
 Top-level entrypoint and backwards-compatible facade for the Deep Search Engine.
 Delegates to modular domain bounded contexts in `backend/`:
-- backend.security_guard: Air-gap socket protection, token blinder, statistical chaffing
-- backend.retrieval_engine: Multi-connector retrieval worker and IPC client
-- backend.discovery_frontier: Priority exploration graph and cycle deduplication
-- backend.relevance_ranking: BM25 + ONNX FastEmbed RRF re-ranking
-- backend.synthesis_intelligence: Offline extractive synthesis and Markdown report writer
-- backend.research_orchestrator: Research pipeline execution and query expansion
+- backend.privacy: Air-gap socket protection, token blinder, statistical chaffing
+- backend.retrieval: Multi-connector retrieval worker and IPC client
+- backend.frontier: Priority exploration graph and cycle deduplication
+- backend.ranking: BM25 + ONNX FastEmbed RRF re-ranking
+- backend.synthesis: Offline extractive synthesis and Markdown report writer
+- backend.research: Research pipeline execution and query expansion
 - backend.server: Browser Web UI and REST API server
 """
 
@@ -16,7 +16,7 @@ import os
 import sys
 
 # Backend Bounded Context Imports
-from backend.security_guard import (
+from backend.privacy import (
     enforce_secret_core_socket_block,
     SafetyError,
     normalize_for_match,
@@ -34,24 +34,24 @@ from backend.security_guard import (
     EphemeralEncryptedScratch,
     SanitizedQuarantine,
 )
-from backend.discovery_frontier import (
+from backend.frontier import (
     FrontierItem,
     ResearchFrontier,
     canonicalize_url,
 )
-from backend.relevance_ranking import (
+from backend.ranking import (
     tokenize,
     compute_bm25_scores,
     compute_dense_scores,
     reciprocal_rank_fusion,
     rank_items,
 )
-from backend.synthesis_intelligence import (
-    LocalSLMEngine,
+from backend.synthesis import (
+    LocalSynthesizer,
     summarize_with_openai,
     write_report,
 )
-from backend.retrieval_engine import (
+from backend.retrieval import (
     is_safe_url,
     is_bot_or_js_barrier,
     extract_clean_content,
@@ -64,7 +64,7 @@ from backend.retrieval_engine import (
     fetch_html_text,
     build_sanitized_evidence,
 )
-from backend.research_orchestrator import (
+from backend.research import (
     expand_topic_queries,
     expand_topic_queries_chaffed,
     run_research,
@@ -76,7 +76,7 @@ from backend.server import (
     SafeResearchRequestHandler,
     start_ui_server,
 )
-from backend.meta_search import (
+from backend.retrieval.meta import (
     start_searxng_service,
     is_port_in_use,
 )

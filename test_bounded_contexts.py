@@ -8,7 +8,7 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
-from backend.security_guard import (
+from backend.privacy import (
     enforce_secret_core_socket_block,
     SafetyError,
     redact,
@@ -22,41 +22,41 @@ from backend.security_guard import (
     EphemeralEncryptedScratch,
     SanitizedQuarantine,
 )
-from backend.discovery_frontier import (
+from backend.frontier import (
     FrontierItem,
     ResearchFrontier,
     canonicalize_url,
 )
-from backend.relevance_ranking import (
+from backend.ranking import (
     compute_bm25_scores,
     compute_dense_scores,
     reciprocal_rank_fusion,
     rank_items,
 )
-from backend.meta_search import (
+from backend.retrieval.meta import (
     decode_bing_url,
     is_port_in_use,
 )
-from backend.retrieval_engine import (
+from backend.retrieval import (
     is_safe_url,
     is_bot_or_js_barrier,
     extract_clean_content,
     validate_task_schema,
 )
-from backend.synthesis_intelligence import (
-    LocalSLMEngine,
+from backend.synthesis import (
+    LocalSynthesizer,
     write_report,
 )
-from backend.research_orchestrator import (
+from backend.research import (
     expand_topic_queries,
 )
-from backend.research_orchestrator.cost_estimator import (
+from backend.research.cost_estimator import (
     CostTracker,
     SpendLimitExceededError,
     OPENAI_PRICING,
     estimate_research_workload,
 )
-from backend.research_orchestrator.cancellation import (
+from backend.research.cancellation import (
     cancellation_manager,
     CancellationToken,
 )
@@ -166,7 +166,7 @@ class TestDirectBoundedContexts(unittest.TestCase):
         self.assertFalse(validate_task_schema({"task_id": "2", "action": "hack", "query": "battery"})[0])
 
     def test_synthesis_intelligence_context(self):
-        engine = LocalSLMEngine()
+        engine = LocalSynthesizer()
         evidence = [
             {
                 "title": "Solid Electrolytes Review",
@@ -314,8 +314,8 @@ class TestSearchPreview(unittest.TestCase):
     """Tradeoff preview for one search with explicit options."""
 
     def test_defaults_do_not_require_confirm(self):
-        from backend.research_orchestrator.types import SearchOptions
-        from backend.research_orchestrator.preview import preview
+        from backend.research.types import SearchOptions
+        from backend.research.preview import preview
 
         p = preview("solid-state batteries", SearchOptions())
         self.assertFalse(p.requires_confirm)
@@ -326,24 +326,24 @@ class TestSearchPreview(unittest.TestCase):
         self.assertIn("Free", p.expected_cost_display)
 
     def test_blind_requires_confirm_and_warns_weaker_recall(self):
-        from backend.research_orchestrator.types import SearchOptions
-        from backend.research_orchestrator.preview import preview
+        from backend.research.types import SearchOptions
+        from backend.research.preview import preview
 
         p = preview("topic", SearchOptions(blind_watchlist=True))
         self.assertTrue(p.requires_confirm)
         self.assertTrue(any("weaker recall" in w.lower() for w in p.warnings))
 
     def test_decoys_require_confirm_and_warn_wasted_query_time(self):
-        from backend.research_orchestrator.types import SearchOptions
-        from backend.research_orchestrator.preview import preview
+        from backend.research.types import SearchOptions
+        from backend.research.preview import preview
 
         p = preview("topic", SearchOptions(decoy_queries=3))
         self.assertTrue(p.requires_confirm)
         self.assertTrue(any("decoy" in w.lower() for w in p.warnings))
 
     def test_planning_and_summary_do_not_require_confirm(self):
-        from backend.research_orchestrator.types import SearchOptions
-        from backend.research_orchestrator.preview import preview
+        from backend.research.types import SearchOptions
+        from backend.research.preview import preview
 
         p = preview("topic", SearchOptions(ai_planning=True, ai_summary=True))
         self.assertFalse(p.requires_confirm)
@@ -353,8 +353,8 @@ class TestSearchPreview(unittest.TestCase):
         )
 
     def test_requires_confirm_iff_blind_or_decoys(self):
-        from backend.research_orchestrator.types import SearchOptions
-        from backend.research_orchestrator.preview import preview
+        from backend.research.types import SearchOptions
+        from backend.research.preview import preview
 
         self.assertFalse(preview("t", SearchOptions()).requires_confirm)
         self.assertTrue(preview("t", SearchOptions(blind_watchlist=True)).requires_confirm)
@@ -368,8 +368,8 @@ class TestPlanner(unittest.TestCase):
     """Planner emits tagged real and decoy Query objects."""
 
     def test_defaults_return_single_real_query(self):
-        from backend.research_orchestrator.planner import plan_queries
-        from backend.research_orchestrator.types import SearchOptions
+        from backend.research.planner import plan_queries
+        from backend.research.types import SearchOptions
 
         qs = plan_queries("solid-state batteries", [], SearchOptions())
         self.assertEqual(len(qs), 1)
@@ -377,8 +377,8 @@ class TestPlanner(unittest.TestCase):
         self.assertFalse(qs[0].is_decoy)
 
     def test_decoys_are_tagged_and_do_not_replace_real(self):
-        from backend.research_orchestrator.planner import plan_queries
-        from backend.research_orchestrator.types import SearchOptions
+        from backend.research.planner import plan_queries
+        from backend.research.types import SearchOptions
 
         qs = plan_queries("solid-state batteries", [], SearchOptions(decoy_queries=3))
         real = [q for q in qs if not q.is_decoy]
@@ -390,8 +390,8 @@ class TestPlanner(unittest.TestCase):
 
     @patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False)
     def test_ai_planning_without_key_falls_back_to_topic(self):
-        from backend.research_orchestrator.planner import plan_queries
-        from backend.research_orchestrator.types import SearchOptions
+        from backend.research.planner import plan_queries
+        from backend.research.types import SearchOptions
 
         qs = plan_queries("topic", [], SearchOptions(ai_planning=True))
         self.assertEqual([q.text for q in qs if not q.is_decoy], ["topic"])
@@ -401,16 +401,16 @@ class TestGuard(unittest.TestCase):
     """Guard asserts or blinds the topic before any network work."""
 
     def test_assert_blocks_watchlist(self):
-        from backend.research_orchestrator.guard import prepare_topic
-        from backend.research_orchestrator.types import SearchOptions
-        from backend.security_guard import SafetyError
+        from backend.research.guard import prepare_topic
+        from backend.research.types import SearchOptions
+        from backend.privacy import SafetyError
 
         with self.assertRaises(SafetyError):
             prepare_topic("leak SECRET", ["SECRET"], SearchOptions())
 
     def test_blind_replaces_watchlist(self):
-        from backend.research_orchestrator.guard import prepare_topic
-        from backend.research_orchestrator.types import SearchOptions
+        from backend.research.guard import prepare_topic
+        from backend.research.types import SearchOptions
 
         out = prepare_topic("leak SECRET", ["SECRET"], SearchOptions(blind_watchlist=True))
         self.assertNotIn("SECRET", out)
@@ -421,8 +421,8 @@ class TestExplorer(unittest.TestCase):
     """Explorer discards decoy hits and returns Evidence."""
 
     def test_decoy_hits_never_become_evidence(self):
-        from backend.research_orchestrator.explorer import explore
-        from backend.research_orchestrator.types import Evidence, Query, SearchOptions
+        from backend.research.explorer import explore
+        from backend.research.types import Evidence, Query, SearchOptions
 
         collector = MagicMock()
 
@@ -467,8 +467,8 @@ class TestRunSearch(unittest.TestCase):
     """run_search composes agents and never ranks decoy hits."""
 
     def test_run_search_defaults_and_decoy_exclusion(self):
-        from backend.research_orchestrator.research_pipeline import run_search
-        from backend.research_orchestrator.types import ResearchRun, SearchOptions
+        from backend.research.research_pipeline import run_search
+        from backend.research.types import ResearchRun, SearchOptions
 
         collector = MagicMock()
 
@@ -514,6 +514,23 @@ class TestRunSearch(unittest.TestCase):
         for decoy in decoy_texts:
             slug = decoy.replace(" ", "-")
             self.assertFalse(any(slug in u for u in urls))
+
+
+class TestRenamedContexts(unittest.TestCase):
+    """Hard-cut package names match the lean map."""
+
+    def test_new_context_packages_import(self):
+        import backend.privacy
+        import backend.research
+        import backend.retrieval
+        import backend.frontier
+        import backend.ranking
+        import backend.synthesis
+        from backend.synthesis import LocalSynthesizer
+
+        self.assertTrue(hasattr(backend.privacy, "SafetyError"))
+        self.assertTrue(hasattr(backend.research, "run_search"))
+        self.assertTrue(callable(LocalSynthesizer))
 
 
 if __name__ == "__main__":
