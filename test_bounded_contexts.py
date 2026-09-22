@@ -463,5 +463,58 @@ class TestExplorer(unittest.TestCase):
         self.assertTrue(any("solid" in u or "electrolytes" in u for u in urls))
 
 
+class TestRunSearch(unittest.TestCase):
+    """run_search composes agents and never ranks decoy hits."""
+
+    def test_run_search_defaults_and_decoy_exclusion(self):
+        from backend.research_orchestrator.research_pipeline import run_search
+        from backend.research_orchestrator.types import ResearchRun, SearchOptions
+
+        collector = MagicMock()
+
+        def send(task, watchlist):
+            if task.get("action") == "search":
+                q = task["query"]
+                slug = q.replace(" ", "-")
+                return {
+                    "status": "ok",
+                    "results": [{
+                        "title": q,
+                        "url": f"https://example.org/{slug}",
+                        "doi": "",
+                    }],
+                }
+            return {
+                "status": "ok",
+                "content": "Sulfide solid electrolytes show high ionic conductivity at room temperature. " * 8,
+                "links": [],
+                "bytes": 400,
+            }
+
+        collector.send_task.side_effect = send
+        options = SearchOptions(
+            max_depth=0,
+            max_documents=5,
+            max_duration_sec=30,
+            decoy_queries=2,
+        )
+        run = run_search(
+            "solid electrolytes",
+            [],
+            options,
+            collector=collector,
+        )
+        self.assertIsInstance(run, ResearchRun)
+        self.assertEqual(run.status, "success")
+        urls = [e.url for e in run.evidence]
+        self.assertTrue(urls)
+        self.assertFalse(any("ocean" in u for u in urls))
+        self.assertTrue(all(not q.is_decoy for q in run.queries) or any(not q.is_decoy for q in run.queries))
+        decoy_texts = [q.text for q in run.queries if q.is_decoy]
+        for decoy in decoy_texts:
+            slug = decoy.replace(" ", "-")
+            self.assertFalse(any(slug in u for u in urls))
+
+
 if __name__ == "__main__":
     unittest.main()

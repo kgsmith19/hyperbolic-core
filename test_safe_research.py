@@ -384,10 +384,8 @@ Topic 3:
         self.assertNotIn(FAKE_SECRET, content)
         self.assertNotIn(normalize_for_match(FAKE_SECRET), normalize_for_match(content))
 
-    @patch("safe_research.get_collector")
-    def test_run_research_multi_hop_bounded(self, mock_get_collector):
+    def test_run_research_multi_hop_bounded(self):
         mock_collector = MagicMock()
-        mock_get_collector.return_value = mock_collector
 
         # Mock search and fetch responses
         mock_collector.send_task.side_effect = [
@@ -419,7 +417,8 @@ Topic 3:
             watchlist=WATCHLIST,
             mode="deterministic",
             max_depth=1,
-            max_documents=2
+            max_documents=2,
+            collector=mock_collector,
         )
 
         self.assertEqual(result["status"], "success")

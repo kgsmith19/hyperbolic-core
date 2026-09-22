@@ -10,6 +10,7 @@ from backend.research_orchestrator.query_planner import (
 )
 from backend.research_orchestrator.research_pipeline import (
     run_research,
+    run_search,
 )
 from backend.research_orchestrator.cost_estimator import (
     CostTracker,
@@ -37,6 +38,7 @@ __all__ = [
     "expand_topic_queries",
     "expand_topic_queries_chaffed",
     "run_research",
+    "run_search",
     "CostTracker",
     "SpendLimitExceededError",
     "SpendReport",
