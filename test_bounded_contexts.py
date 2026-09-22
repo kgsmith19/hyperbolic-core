@@ -242,6 +242,21 @@ class TestDirectBoundedContexts(unittest.TestCase):
         frontier.release_candidate("https://example.org/concurrent_worker_2")
         self.assertNotIn("https://example.org/concurrent_worker_2", frontier.in_flight_urls)
 
+    def test_failed_fetch_refunds_domain_budget(self):
+        frontier = ResearchFrontier(max_depth=1, max_documents=10, max_per_domain=1)
+        frontier.add_candidate("https://example.org/a", priority=90.0)
+        frontier.add_candidate("https://example.org/b", priority=80.0)
+        batch = frontier.pop_next_batch(batch_size=1)
+        self.assertEqual(batch[0].url, "https://example.org/a")
+        # Domain budget is full, but sibling URL must stay queued.
+        empty = frontier.pop_next_batch(batch_size=1)
+        self.assertEqual(empty, [])
+        self.assertTrue(any(item.url == "https://example.org/b" for item in frontier.queue))
+        frontier.release_candidate(batch[0].url)
+        batch2 = frontier.pop_next_batch(batch_size=1)
+        self.assertEqual(len(batch2), 1)
+        self.assertEqual(batch2[0].url, "https://example.org/b")
+
     def test_report_archive_and_backward_compatibility(self):
         archive_path = write_report(
             topic="High Entropy Perovskite Oxides",
@@ -279,6 +294,8 @@ class TestDirectBoundedContexts(unittest.TestCase):
             html_content = f.read()
         self.assertIn("/css/theme.css", html_content)
         self.assertIn("/js/app.js", html_content)
+        self.assertIn("What are you researching", html_content)
+        self.assertIn("Start search", html_content)
         self.assertIn('id="blind-watchlist"', html_content)
         self.assertIn('id="decoy-queries"', html_content)
         self.assertIn('id="ai-planning"', html_content)

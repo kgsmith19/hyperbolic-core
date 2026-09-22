@@ -7,7 +7,6 @@ import re
 import time
 
 from backend.privacy.watchlist_redactor import redact
-from backend.retrieval.collector_client import get_collector
 from backend.ranking.hybrid_ranker import rank_items
 from backend.synthesis.local_synthesizer import LocalSynthesizer
 from backend.synthesis.openai_synthesizer import summarize_with_openai
@@ -30,17 +29,21 @@ def run_search(
 ) -> ResearchRun:
     """Execute one progressive-depth search and return a ResearchRun."""
     start_time = time.time()
-    collector = collector or get_collector()
     cost_tracker = CostTracker(model=options.model, max_spend_usd=options.max_spend_usd)
     cancel_token = cancellation_manager.create_token(run_id)
 
+    if progress_callback:
+        progress_callback("Checking the topic against your private list...")
     effective_topic = prepare_topic(topic, watchlist, options)
 
     if cancel_token.is_set():
         return _empty_run("cancelled", topic, options, cost_tracker, time.time() - start_time)
 
     if progress_callback:
-        progress_callback("Planning search queries...")
+        if options.ai_planning:
+            progress_callback("Asking the model for extra search angles...")
+        else:
+            progress_callback("Preparing search queries...")
     queries = plan_queries(effective_topic, watchlist, options, cost_tracker=cost_tracker)
 
     evidence = explore(
@@ -53,7 +56,7 @@ def run_search(
     )
 
     if progress_callback:
-        progress_callback("Ranking corpus locally with BM25 + FastEmbed (bge-small-en-v1.5) + RRF...")
+        progress_callback("Ranking sources by relevance...")
     ranked = rank_items(topic, evidence)
 
     clean_eval_topic = re.sub(r"\[TARGET_ENTITY_\d+\]", "target component", effective_topic)
@@ -70,7 +73,7 @@ def run_search(
     duration = time.time() - start_time
     spend_report = cost_tracker.get_report()
     if progress_callback:
-        progress_callback("Writing report and archiving findings...")
+        progress_callback("Writing the report...")
 
     if options.blind_watchlist:
         clean_report_topic = re.sub(r"\[TARGET_ENTITY_\d+\]", "[PROTECTED-TARGET]", effective_topic)
@@ -104,7 +107,7 @@ def run_search(
     status = "cancelled" if cancel_token.is_set() else "success"
     cancellation_manager.clear_token(run_id)
     if progress_callback:
-        progress_callback("Research process complete.")
+        progress_callback("Done.")
 
     return ResearchRun(
         topic=topic,
@@ -151,7 +154,7 @@ def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token,
     cancelled = bool(cancel_token is not None and cancel_token.is_set())
     if options.ai_summary and has_openai and not cancelled:
         if progress_callback:
-            progress_callback(f"Generating sourced summary with OpenAI ({options.model})...")
+            progress_callback(f"Writing a sourced brief with {options.model}...")
         try:
             return summarize_with_openai(
                 topic,
@@ -164,7 +167,7 @@ def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token,
         except SpendLimitExceededError:
             pass
     if progress_callback:
-        progress_callback("Synthesizing offline sourced summary with Local SLM...")
+        progress_callback("Writing a local summary from the sources...")
     local_slm = LocalSynthesizer()
     summary = local_slm.synthesize(topic, evidence_dicts)
     return redact(summary, watchlist)

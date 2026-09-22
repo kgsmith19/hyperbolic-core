@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deep Search | Guarded Deep-Web Engine</title>
+    <title>Deep Search</title>
     <link rel="stylesheet" href="/css/theme.css">
     <link rel="stylesheet" href="/css/layout.css">
     <link rel="stylesheet" href="/css/components.css">
@@ -11,249 +11,232 @@
 <body>
     <div class="container">
         <header>
-            <h1>🛡️ Deep Search | Guarded Deep-Web Engine</h1>
-            <p>Air-gapped Secret Core, multi-hop priority frontier, deep web connectors, and BM25 + ONNX FastEmbed RRF ranking.</p>
+            <h1>Deep Search</h1>
+            <p>Research a public topic. Private words stay on this machine.</p>
         </header>
 
-        <!-- Provider Settings Drawer -->
-        <div class="card" id="settings-card" style="margin-bottom:0;">
-            <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleSettings()">
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <span style="font-size:16px;">⚙️</span>
-                    <strong style="font-size:14px;">Provider & API Settings</strong>
-                    <span class="badge-safe" id="settings-badge">Free / Offline Ready</span>
-                </div>
-                <span id="settings-toggle-btn" style="font-size:12px; color:var(--text-muted);">▼ Configure Keys</span>
-            </div>
-            <div id="settings-body" style="display:none; margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
-                <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px; line-height:1.5;">
-                    Deep Search runs <strong>100% free and offline</strong> by default (local FastEmbed, local SLM, arXiv, OpenAlex, Crossref, SEC EDGAR).
-                    You can optionally configure API keys below to expand retrieval to the commercial web or external LLMs.
-                </p>
-                <div class="settings-grid">
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="brave-key">Brave Search API Key <span class="label-desc">(Web Search)</span></label>
-                        <input type="password" id="brave-key" placeholder="BSA..." autocomplete="off">
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="openai-key">OpenAI API Key <span class="label-desc">(Cloud LLM)</span></label>
-                        <input type="password" id="openai-key" placeholder="sk-..." autocomplete="off">
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="searxng-url">SearXNG Endpoint URL <span class="label-desc">(DuckDuckGo + Bing)</span></label>
-                        <input type="text" id="searxng-url" placeholder="http://127.0.0.1:8080">
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="local-llm-url">Local SLM / Ollama URL</label>
-                        <input type="text" id="local-llm-url" placeholder="http://127.0.0.1:11434/v1">
-                    </div>
-                </div>
-                <div style="display:flex; justify-content:flex-end; align-items:center; gap:10px;">
-                    <span id="settings-status-msg" style="font-size:12px; color:var(--success); display:none;">Saved!</span>
-                    <button class="btn-secondary" onclick="saveSettings()">Save to .env & Apply</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Main Research Setup Card -->
-        <div class="card">
+        <div class="card" id="search-card">
             <div class="form-group">
-                <label for="topic">1. Research Topic</label>
-                <div class="label-desc">Public or pseudonymized research brief. Evaluated strictly within the air-gapped Secret Core.</div>
-                <textarea id="topic" rows="2" placeholder="e.g. Recent breakthroughs in solid-state battery electrolytes"></textarea>
+                <label for="topic">What are you researching?</label>
+                <div class="label-desc">A public question or brief. This is what the search engines will see unless you hide private words below.</div>
+                <textarea id="topic" rows="3" placeholder="e.g. Recent breakthroughs in solid-state battery electrolytes"></textarea>
             </div>
 
             <div class="form-group">
-                <label for="watchlist">2. Local Sensitive Watchlist <span class="badge-safe">🔒 Local Only</span></label>
-                <div class="label-desc">Values never leave the Secret Core. Collector process has zero access to this file. (One per line)</div>
-                <textarea id="watchlist" rows="2" placeholder="DEMO-TOKEN-93417&#10;CONFIDENTIAL-PROJECT-ORION"></textarea>
+                <label for="watchlist">Private words <span class="badge-safe">Stay on this PC</span></label>
+                <div class="label-desc">Optional. One per line. These never go to search engines or AI. Leave blank if you have nothing to hide.</div>
+                <textarea id="watchlist" rows="2" placeholder="Project names, tokens, or other words to keep off the network"></textarea>
             </div>
 
             <div class="form-group">
-                <div style="display:flex; justify-content:space-between; align-items:baseline;">
-                    <label>3. Search Options</label>
-                    <span style="font-size:12px; color:var(--text-muted);">One search. Each toggle states its tradeoff.</span>
+                <label>How should this search run?</label>
+                <div class="label-desc">Pick a starting point, then change any row. Each choice says what you gain and what you give up.</div>
+                <div class="starting-points" role="group" aria-label="Starting points">
+                    <button type="button" class="preset-btn" id="macro-local" onclick="applyMacro('local')">Stay local</button>
+                    <button type="button" class="preset-btn" id="macro-private" onclick="applyMacro('private')">Stay private</button>
+                    <button type="button" class="preset-btn" id="macro-plan" onclick="applyMacro('plan')">Find more angles</button>
+                    <button type="button" class="preset-btn" id="macro-brief" onclick="applyMacro('brief')">Write a brief</button>
                 </div>
-                <div class="preset-group" style="margin-top:10px;">
-                    <button type="button" class="preset-btn" onclick="applyMacro('local')">Local</button>
-                    <button type="button" class="preset-btn" onclick="applyMacro('private')">Private &amp; Local (weaker recall)</button>
-                    <button type="button" class="preset-btn" onclick="applyMacro('plan')">Plan angles</button>
-                    <button type="button" class="preset-btn" onclick="applyMacro('brief')">Sourced brief</button>
-                </div>
-                <div class="params-grid" style="margin-top:12px;">
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="blind-watchlist">Blind watchlist</label>
-                        <div class="label-desc">Watchlist terms never leave the machine. Engines see placeholders — weaker recall.</div>
+
+                <div class="option-list">
+                    <label class="switch-row" for="blind-watchlist">
+                        <span>
+                            <span class="switch-title">Hide private words in queries</span>
+                            <span class="label-desc">Engines see placeholders instead of your list. Weaker matches.</span>
+                        </span>
                         <input type="checkbox" id="blind-watchlist" onchange="updatePreRunEstimate()">
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="decoy-queries">Decoy queries</label>
-                        <div class="label-desc">k-anonymity chaff. Decoy searches run for real and yield no evidence.</div>
+                    </label>
+                    <div class="switch-row">
+                        <label for="decoy-queries">
+                            <span class="switch-title">Decoy searches</span>
+                            <span class="label-desc">Extra fake queries run so yours is harder to spot. They find nothing useful.</span>
+                        </label>
                         <input type="number" id="decoy-queries" value="0" min="0" max="8" onchange="updatePreRunEstimate()">
                     </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="ai-planning">AI query planning</label>
-                        <div class="label-desc">Topic leaves the machine to expand search angles. Small spend.</div>
+                    <label class="switch-row" for="ai-planning">
+                        <span>
+                            <span class="switch-title">Let AI suggest extra angles</span>
+                            <span class="label-desc">Sends the topic (not your private list). Small cost.</span>
+                        </span>
                         <input type="checkbox" id="ai-planning" onchange="updatePreRunEstimate()">
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="ai-summary">AI sourced brief</label>
-                        <div class="label-desc">Redacted excerpts leave the machine. Spend scales with corpus.</div>
+                    </label>
+                    <label class="switch-row" for="ai-summary">
+                        <span>
+                            <span class="switch-title">Let AI write the summary</span>
+                            <span class="label-desc">Sends redacted source excerpts. Cost grows with how many sources you keep.</span>
+                        </span>
                         <input type="checkbox" id="ai-summary" onchange="updatePreRunEstimate()">
-                    </div>
-                </div>
-                <div id="confirm-weaker-wrap" style="display:none; margin-top:12px;">
-                    <label for="confirm-weaker-recall" style="display:flex; gap:8px; align-items:center;">
-                        <input type="checkbox" id="confirm-weaker-recall" onchange="syncLaunchEnabled()">
-                        <span>I accept weaker recall</span>
                     </label>
                 </div>
-            <!-- Deep Research Exploration & Spend Controls -->
-            <div class="form-group" style="margin-top: 16px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleParams()">
-                    <label style="cursor:pointer;">4. Deep Exploration & Spend Controls</label>
-                    <span id="params-toggle-btn" style="font-size:12px; color:var(--text-muted);">▼ Adjust Limits & Model</span>
-                </div>
-                <div class="label-desc">Configure multi-hop crawl depth, document limits, worker concurrency, and spending caps.</div>
 
-                <div id="params-body" class="params-grid" style="display:none; margin-top:12px;">
+                <div id="confirm-weaker-wrap" class="confirm-box" style="display:none;">
+                    <label for="confirm-weaker-recall">
+                        <input type="checkbox" id="confirm-weaker-recall" onchange="syncLaunchEnabled()">
+                        <span>I accept weaker results from hiding words or running decoys</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom:0;">
+                <button type="button" class="drawer-toggle" onclick="toggleParams()">
+                    <span>Limits and model</span>
+                    <span id="params-toggle-btn" class="drawer-caret">Show</span>
+                </button>
+                <div class="label-desc">How far to follow links, when to stop, and which model to use if AI is on.</div>
+                <div id="params-body" class="params-grid" style="display:none;">
                     <div class="form-group" style="margin-bottom:0;">
-                        <label for="max-depth">Max Depth <span class="label-desc">(Crawl Hops)</span></label>
+                        <label for="max-depth">Follow links this many hops</label>
                         <input type="number" id="max-depth" value="3" min="1" max="10">
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
-                        <label for="max-docs">Target Documents <span class="label-desc">(Corpus Size)</span></label>
+                        <label for="max-docs">Stop after this many sources</label>
                         <input type="number" id="max-docs" value="25" min="5" max="100">
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
-                        <label for="max-duration">Time Budget <span class="label-desc">(Seconds)</span></label>
+                        <label for="max-duration">Stop after this many seconds</label>
                         <input type="number" id="max-duration" value="180" min="30" max="1800">
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
-                        <label for="concurrency">Concurrency <span class="label-desc">(Parallel Workers)</span></label>
+                        <label for="concurrency">Fetch this many pages at once</label>
                         <div class="concurrency-row">
                             <input type="range" id="concurrency-range" min="1" max="10" value="4" oninput="syncConcurrency(this.value)">
                             <input type="number" id="concurrency" value="4" min="1" max="10" oninput="syncConcurrency(this.value)">
                         </div>
                         <div class="preset-group">
-                            <button type="button" class="preset-btn" onclick="setConcurrencyPreset(2)">2 (Gentle)</button>
-                            <button type="button" class="preset-btn active" id="preset-4" onclick="setConcurrencyPreset(4)">4 (Standard)</button>
-                            <button type="button" class="preset-btn" onclick="setConcurrencyPreset(8)">8 (Fast)</button>
+                            <button type="button" class="preset-btn" onclick="setConcurrencyPreset(2)">2 slow</button>
+                            <button type="button" class="preset-btn active" id="preset-4" onclick="setConcurrencyPreset(4)">4</button>
+                            <button type="button" class="preset-btn" onclick="setConcurrencyPreset(8)">8 fast</button>
                         </div>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
-                        <label for="openai-model">OpenAI Model <span class="label-desc">(When Active)</span></label>
+                        <label for="openai-model">Model (only if AI is on)</label>
                         <select id="openai-model">
-                            <option value="gpt-4o-mini" selected>gpt-4o-mini (Fast & Economical - $0.15/$0.60)</option>
-                            <option value="gpt-4o">gpt-4o (High Intelligence - $2.50/$10.00)</option>
-                            <option value="gpt-4.5">gpt-4.5 (Frontier Knowledge - $75.00/$150.00)</option>
-                            <option value="gpt-5-mini">gpt-5-mini (Next-Gen Compact - $0.25/$1.00)</option>
-                            <option value="gpt-5">gpt-5 (Next-Gen Foundation - $3.00/$12.00)</option>
-                            <option value="gpt-5.1">gpt-5.1 (Advanced Adaptive - $4.00/$16.00)</option>
-                            <option value="gpt-5.2">gpt-5.2 (High Precision - $5.00/$20.00)</option>
-                            <option value="gpt-5.4">gpt-5.4 (Ultra Synthesis - $7.50/$30.00)</option>
-                            <option value="gpt-5.6">gpt-5.6 (State-of-the-Art Frontier - $10.00/$40.00)</option>
-                            <option value="o3-mini">o3-mini (Deep Reasoning - $1.10/$4.40)</option>
-                            <option value="o1">o1 (Full Reasoning - $15.00/$60.00)</option>
-                            <option value="o1-pro">o1-pro (Deepest Reasoning - $150.00/$600.00)</option>
+                            <option value="gpt-4o-mini" selected>gpt-4o-mini — cheap and fast</option>
+                            <option value="gpt-4o">gpt-4o</option>
+                            <option value="gpt-4.5">gpt-4.5</option>
+                            <option value="gpt-5-mini">gpt-5-mini</option>
+                            <option value="gpt-5">gpt-5</option>
+                            <option value="gpt-5.1">gpt-5.1</option>
+                            <option value="gpt-5.2">gpt-5.2</option>
+                            <option value="gpt-5.4">gpt-5.4</option>
+                            <option value="gpt-5.6">gpt-5.6</option>
+                            <option value="o3-mini">o3-mini — reasoning</option>
+                            <option value="o1">o1 — reasoning</option>
+                            <option value="o1-pro">o1-pro — deepest reasoning</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
-                        <label for="reasoning-effort">Reasoning Effort <span class="label-desc">(o1/o3-mini)</span></label>
+                        <label for="reasoning-effort">Reasoning effort (o1 / o3)</label>
                         <select id="reasoning-effort">
-                            <option value="medium" selected>medium (Balanced)</option>
-                            <option value="low">low (Fast)</option>
-                            <option value="high">high (Exhaustive)</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="low">Low — faster</option>
+                            <option value="high">High — slower</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
-                        <label for="max-spend">Spending Cap <span class="label-desc">($ USD Max Limit)</span></label>
+                        <label for="max-spend">Stop spending after ($)</label>
                         <input type="number" id="max-spend" value="2.00" min="0.10" max="50.00" step="0.10">
                     </div>
                 </div>
             </div>
 
-            <!-- Live Pre-Run Cost & Workload Estimator -->
             <div class="estimate-card" id="pre-run-estimate-card">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span style="font-size:15px;">📊</span>
-                        <strong style="font-size:13px;">Search Preview</strong>
-                        <span id="estimate-mode-badge" class="badge-safe">Local</span>
-                    </div>
-                    <span id="estimate-spend-highlight" style="font-size:15px; font-weight:700; color:var(--primary);">$0.00</span>
+                <div class="estimate-head">
+                    <strong>Before you start</strong>
+                    <span id="estimate-mode-badge" class="badge-safe">Local</span>
+                    <span id="estimate-spend-highlight" class="estimate-spend">$0.00</span>
                 </div>
                 <div class="estimate-stats-grid">
                     <div class="estimate-stat-box">
                         <div class="estimate-stat-title">Hops</div>
-                        <div class="estimate-stat-val" id="est-hops">2</div>
-                        <div class="estimate-stat-sub" id="est-hops-sub">stops at hop 2</div>
+                        <div class="estimate-stat-val" id="est-hops">3</div>
+                        <div class="estimate-stat-sub" id="est-hops-sub">then stop following links</div>
                     </div>
                     <div class="estimate-stat-box">
                         <div class="estimate-stat-title">Sources</div>
-                        <div class="estimate-stat-val" id="est-sources">15</div>
-                        <div class="estimate-stat-sub" id="est-sources-sub">corpus cap</div>
+                        <div class="estimate-stat-val" id="est-sources">25</div>
+                        <div class="estimate-stat-sub" id="est-sources-sub">then stop collecting</div>
                     </div>
                     <div class="estimate-stat-box">
-                        <div class="estimate-stat-title">Time budget</div>
+                        <div class="estimate-stat-title">Time</div>
                         <div class="estimate-stat-val" id="est-duration">180s</div>
-                        <div class="estimate-stat-sub" id="est-duration-sub">unfinished hops drop</div>
+                        <div class="estimate-stat-sub" id="est-duration-sub">hard stop</div>
                     </div>
                     <div class="estimate-stat-box">
                         <div class="estimate-stat-title">Spend</div>
                         <div class="estimate-stat-val" id="est-spend">$0.00</div>
-                        <div class="estimate-stat-sub" id="est-spend-sub">offline unless AI is on</div>
+                        <div class="estimate-stat-sub" id="est-spend-sub">no AI unless you turned it on</div>
                     </div>
                 </div>
-                <div class="estimate-steps-breakdown" id="estimate-steps-breakdown">
-                    <!-- Dynamic breakdown rows -->
-                </div>
+                <div class="estimate-steps-breakdown" id="estimate-steps-breakdown"></div>
             </div>
 
-            <!-- Action Buttons: Run & Cancel -->
-            <div class="actions-row" style="margin-top: 16px;">
-                <button id="run-btn" class="btn-run" onclick="executeResearch()">🚀 Launch Deep Research</button>
-                <button id="cancel-btn" class="btn-cancel" onclick="cancelResearch()">🛑 Cancel / Stop Run</button>
+            <div class="actions-row">
+                <button id="run-btn" class="btn-run" onclick="executeResearch()">Start search</button>
+                <button id="cancel-btn" class="btn-cancel" onclick="cancelResearch()">Stop</button>
             </div>
-            <div id="status-box"></div>
+            <div id="status-box" role="status" aria-live="polite"></div>
         </div>
 
-        <!-- Research Results & Ranked Sources -->
         <div id="results-section" class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <h2>Research Results & Ranked Sources</h2>
+            <div class="results-head">
+                <h2>Results</h2>
                 <span id="result-status-badge" class="badge-safe">Complete</span>
             </div>
-
-            <!-- Execution Metrics Banner -->
             <div id="metrics-bar" class="metrics-bar"></div>
-
             <div id="queries-container"></div>
             <div id="summary-container"></div>
             <div id="evidence-container"></div>
-
             <div id="report-link-container"></div>
         </div>
 
-        <!-- Past Reports Archive Drawer -->
         <div class="card" id="reports-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleReportsArchive()">
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <span style="font-size:16px;">📚</span>
-                    <strong style="font-size:14px;">Archived Research Reports</strong>
-                    <span class="badge-metric" id="reports-count-badge">0 reports</span>
-                </div>
-                <span id="reports-toggle-btn" style="font-size:12px; color:var(--text-muted);">▼ View Archive</span>
-            </div>
-            <div id="reports-body" style="display:none; margin-top:14px;">
+            <button type="button" class="drawer-toggle" onclick="toggleReportsArchive()">
+                <span>Past reports <span class="badge-metric" id="reports-count-badge">0</span></span>
+                <span id="reports-toggle-btn" class="drawer-caret">Show</span>
+            </button>
+            <div id="reports-body" style="display:none;">
                 <div id="reports-list" class="reports-list">
-                    <p style="color:var(--text-muted); font-size:13px;">No archived reports found yet.</p>
+                    <p class="empty-note">No reports yet. Run a search.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card" id="settings-card">
+            <button type="button" class="drawer-toggle" onclick="toggleSettings()">
+                <span>API keys <span class="badge-safe" id="settings-badge">Not required</span></span>
+                <span id="settings-toggle-btn" class="drawer-caret">Show</span>
+            </button>
+            <div id="settings-body" style="display:none;">
+                <p class="label-desc" style="margin-bottom:12px;">
+                    Leave these blank to stay offline. Add a key only if you turned on AI or Brave web search.
+                </p>
+                <div class="settings-grid">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="openai-key">OpenAI key</label>
+                        <input type="password" id="openai-key" placeholder="sk-…" autocomplete="off">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="brave-key">Brave Search key</label>
+                        <input type="password" id="brave-key" placeholder="BSA…" autocomplete="off">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="searxng-url">Local search URL</label>
+                        <input type="text" id="searxng-url" placeholder="http://127.0.0.1:8080">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="local-llm-url">Local model URL</label>
+                        <input type="text" id="local-llm-url" placeholder="http://127.0.0.1:11434/v1">
+                    </div>
+                </div>
+                <div class="settings-actions">
+                    <span id="settings-status-msg" class="save-msg">Saved</span>
+                    <button class="btn-secondary" onclick="saveSettings()">Save keys</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Modular Frontend Application Scripts -->
     <script src="/js/api_client.js"></script>
     <script src="/js/state_manager.js"></script>
     <script src="/js/ui_renderer.js"></script>

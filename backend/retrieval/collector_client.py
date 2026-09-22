@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from backend.privacy.watchlist_redactor import redact, assert_safe_to_send
 from backend.privacy.encrypted_scratchpad import SecureZeroBuffer
 from backend.privacy.quarantine_zone import SanitizedQuarantine
@@ -18,6 +19,7 @@ class CollectorClient:
 
     def __init__(self):
         self.process = None
+        self._io_lock = threading.Lock()
         self._start_process()
 
     def _start_process(self):
@@ -59,16 +61,17 @@ class CollectorClient:
         # OUTBOUND SAFETY GUARD: Verify task payload contains zero watchlist terms
         assert_safe_to_send(task, watchlist)
 
-        if not self.process or self.process.poll() is not None:
-            self._start_process()
+        with self._io_lock:
+            if not self.process or self.process.poll() is not None:
+                self._start_process()
 
-        line = json.dumps(task)
-        self.process.stdin.write(line + "\n")
-        self.process.stdin.flush()
+            line = json.dumps(task)
+            self.process.stdin.write(line + "\n")
+            self.process.stdin.flush()
 
-        resp_line = self.process.stdout.readline()
-        if not resp_line:
-            return {"status": "error", "error": "Collector process terminated unexpectedly."}
+            resp_line = self.process.stdout.readline()
+            if not resp_line:
+                return {"status": "error", "error": "Collector process terminated unexpectedly."}
 
         # EPHEMERAL QUARANTINE: Load raw IPC bytes into zero-scrubbed buffer
         with SecureZeroBuffer(resp_line) as raw_buf:

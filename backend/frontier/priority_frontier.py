@@ -113,6 +113,7 @@ class ResearchFrontier:
         """Pop and reserve the highest-priority batch of candidate items across non-overlapping territory."""
         with self._lock:
             batch = []
+            deferred: list[FrontierItem] = []
             while self.queue and len(batch) < batch_size:
                 if self.documents_collected >= self.max_documents:
                     break
@@ -127,9 +128,9 @@ class ResearchFrontier:
 
                 domain = self.get_domain(item.url)
                 if domain and self.domain_counts.get(domain, 0) >= self.max_per_domain:
+                    deferred.append(item)
                     continue
 
-                # Reserve territory
                 self.visited_urls.add(item.url)
                 self.in_flight_urls.add(item.url)
                 if item.doi:
@@ -139,12 +140,21 @@ class ResearchFrontier:
 
                 batch.append(item)
 
+            if deferred:
+                self.queue = deferred + self.queue
+                self.queue.sort(key=lambda x: x.priority, reverse=True)
+
             return batch
 
-    def release_candidate(self, url: str) -> None:
-        """Release candidate reservation if fetch failed without consuming budget."""
+    def release_candidate(self, url: str, doi: str = "") -> None:
+        """Release a failed fetch without consuming document budget. Keep the URL visited so it is not retried; refund the domain slot."""
         with self._lock:
             self.in_flight_urls.discard(url)
+            domain = self.get_domain(url)
+            if domain and self.domain_counts.get(domain, 0) > 0:
+                self.domain_counts[domain] -= 1
+            if doi:
+                self.visited_dois.discard(doi.strip().lower())
 
     def record_document(self, url: str, content_bytes: int, text: str, doi: str = "") -> bool:
         """Record a successfully retrieved document; returns False if duplicate content."""

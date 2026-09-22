@@ -62,6 +62,10 @@ function applyMacro(name) {
     }
     const confirm = document.getElementById('confirm-weaker-recall');
     if (confirm) confirm.checked = false;
+    ['local', 'private', 'plan', 'brief'].forEach(key => {
+        const btn = document.getElementById(`macro-${key}`);
+        if (btn) btn.classList.toggle('active', key === name);
+    });
     updatePreRunEstimate();
 }
 
@@ -235,7 +239,7 @@ async function executeResearch() {
     window.appState.setRunning(true);
     if (runBtn) runBtn.disabled = true;
     if (resultsSection) resultsSection.style.display = 'none';
-    window.UiRenderer.renderStatus('running', 'Initializing Secret Core and launching concurrent workers...');
+    window.UiRenderer.renderStatus('running', 'Starting…');
 
     try {
         const data = await window.ApiClient.executeResearch(payload, (message) => {
@@ -259,12 +263,12 @@ window.appState.subscribe((event, value) => {
         const body = document.getElementById('settings-body');
         const btn = document.getElementById('settings-toggle-btn');
         if (body) body.style.display = value ? 'block' : 'none';
-        if (btn) btn.innerText = value ? '▲ Close' : '▼ Configure Keys';
+        if (btn) btn.innerText = value ? 'Hide' : 'Show';
     } else if (event === 'paramsOpen') {
         const body = document.getElementById('params-body');
         const btn = document.getElementById('params-toggle-btn');
         if (body) body.style.display = value ? 'grid' : 'none';
-        if (btn) btn.innerText = value ? '▲ Close Limits' : '▼ Adjust Limits & Model';
+        if (btn) btn.innerText = value ? 'Hide' : 'Show';
     } else if (event === 'reportsOpen') {
         const body = document.getElementById('reports-body');
         const btn = document.getElementById('reports-toggle-btn');
@@ -272,7 +276,7 @@ window.appState.subscribe((event, value) => {
             body.style.display = value ? 'block' : 'none';
             if (value) loadReports();
         }
-        if (btn) btn.innerText = value ? '▲ Close Archive' : '▼ View Archive';
+        if (btn) btn.innerText = value ? 'Hide' : 'Show';
     } else if (event === 'reports') {
         window.UiRenderer.renderReportsList(value);
     } else if (event === 'settings') {

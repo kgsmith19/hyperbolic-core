@@ -38,15 +38,13 @@ const UiRenderer = {
         if (!badge) return;
 
         if (settings.hasBrave && settings.hasOpenAI) {
-            badge.innerText = 'Brave & OpenAI Active';
+            badge.innerText = 'OpenAI and Brave saved';
         } else if (settings.hasBrave) {
-            badge.innerText = 'Brave Search Active';
+            badge.innerText = 'Brave saved';
         } else if (settings.hasOpenAI) {
-            badge.innerText = 'OpenAI Active';
-        } else if (settings.searxngActive) {
-            badge.innerText = '🟢 SearXNG (DDG+Bing) Active';
+            badge.innerText = 'OpenAI saved';
         } else {
-            badge.innerText = 'Free / Offline Ready';
+            badge.innerText = 'Not required';
         }
     },
 
@@ -70,7 +68,7 @@ const UiRenderer = {
         highlight.style.color = data.requires_confirm ? 'var(--warning)' : 'var(--success)';
         if (badge) {
             badge.className = data.requires_confirm ? 'badge-cost' : 'badge-safe';
-            badge.innerText = data.requires_confirm ? 'Confirm weaker recall' : 'Ready';
+            badge.innerText = data.requires_confirm ? 'Needs your OK' : 'Ready';
         }
         if (hops) hops.innerText = String(data.expected_hops ?? 2);
         if (hopsSub) hopsSub.innerText = `stops at hop ${data.expected_hops ?? 2}`;
