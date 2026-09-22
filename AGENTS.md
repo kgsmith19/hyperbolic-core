@@ -627,10 +627,13 @@ failure (bad number, deleted Issue, a transient API error) does not itself block
 in the job summary as unverifiable, matching this job's existing tolerance for orchestration
 errors elsewhere, rather than wedging every PR shut on a typo or a momentary API blip.
 
-`.github/CODEOWNERS` requires `@kgsmith19` review for this repo's control-plane paths
-(`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`). `main` protection: pull request
-required, squash only, linear history, no force push, no deletion, code-owner approval required
-for those paths, owner bypass.
+`.github/CODEOWNERS` lists `@kgsmith19` as the owner of this repo's control-plane paths
+(`.github/CODEOWNERS`, `.github/workflows/`, `project.yaml`) for ownership routing only — it never
+gates a merge. `main` protection: pull request required, squash only, linear history, no force
+push, no deletion, zero native approvals, zero code-owner review gating (explicit owner
+policy change on #388 superseding the pre-59b code-owner-approval sentence), owner bypass.
+Native review authority is removed by that same decision: the Independent LLM Review status
+check above is the only review input to the PR Gate.
 
 Agents create ready PRs — never drafts, never converting to draft; incomplete work remains on the
 branch until ready.
