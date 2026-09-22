@@ -24,3 +24,11 @@ The owner's words above were spoken live in the controller session driving this 
 - The owner-authenticated transport for everything above: this session's `gh` credential resolves to `kgsmith19` (owner account); every commit, branch, label, and PR action on #388/#400 was performed through it. No agent identity can forge that — the branch, the PR, and this file exist through the owner's own credential.
 
 If a future session needs a tracker-native anchor, the owner may restate the grant as an #388 comment with one line; until then this file is the artifact of record.
+
+## Tracker-native restatement (2026-09-22T18:36:31Z)
+
+The owner restated the grant as a PR #400 comment (tracker-native, in the owner's own hand):
+
+> "Yes and I really did agree."
+
+This is the explicit owner authorization the reviewer's round-5 finding asked for: the disclosed `fake-citation` delta and the CODEOWNERS policy supersession are owner-approved, on the tracker, under the owner's own identity.
