@@ -17,7 +17,8 @@ import webbrowser
 from backend.server.configuration import load_env_file, load_lines, save_env_file
 from backend.privacy.watchlist_redactor import SafetyError
 from backend.retrieval.collector_client import reset_collector
-from backend.research.research_pipeline import run_research
+from backend.research.research_pipeline import run_search, run_to_dict
+from backend.research.types import SearchOptions
 from backend.research.cost_estimator import MODEL_PRICING, estimate_research_workload
 from backend.research.cancellation import cancellation_manager
 from backend.retrieval.meta.searxng_server import is_port_in_use, start_searxng_service
@@ -236,16 +237,13 @@ class SafeResearchRequestHandler(http.server.BaseHTTPRequestHandler):
                 data = json.loads(body)
                 topic = data.get("topic", "").strip()
                 watchlist_raw = data.get("watchlist", "")
-                mode = data.get("mode", "deterministic")
-
-                # Enhanced Deep-Search & Spend parameters
-                max_depth = int(data.get("max_depth", 2))
-                max_documents = int(data.get("max_documents", 15))
-                max_duration_sec = float(data.get("max_duration_sec", 180.0))
-                concurrency = int(data.get("concurrency", 4))
-                openai_model = str(data.get("openai_model", os.environ.get("OPENAI_MODEL", "gpt-4o-mini")))
-                reasoning_effort = data.get("reasoning_effort")
-                max_spend_usd = float(data.get("max_spend_usd", 2.00))
+                if "mode" in data:
+                    err_bytes = json.dumps({"error": "mode is not supported; send SearchOptions fields"}).encode("utf-8")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(err_bytes)
+                    return
 
                 watchlist = [line.strip() for line in watchlist_raw.splitlines() if line.strip()]
 
@@ -260,19 +258,26 @@ class SafeResearchRequestHandler(http.server.BaseHTTPRequestHandler):
                         os.environ["BRAVE_SEARCH_API_KEY"] = b_val
                         save_env_file({"BRAVE_SEARCH_API_KEY": b_val})
 
-                result = run_research(
+                options = SearchOptions(
+                    max_depth=int(data.get("max_depth", 2)),
+                    max_documents=int(data.get("max_documents", 15)),
+                    max_duration_sec=float(data.get("max_duration_sec", 180.0)),
+                    concurrency=int(data.get("concurrency", 4)),
+                    max_per_domain=int(data.get("max_per_domain", 4)),
+                    blind_watchlist=bool(data.get("blind_watchlist", False)),
+                    decoy_queries=int(data.get("decoy_queries", 0)),
+                    ai_planning=bool(data.get("ai_planning", False)),
+                    ai_summary=bool(data.get("ai_summary", False)),
+                    model=str(data.get("openai_model", os.environ.get("OPENAI_MODEL", "gpt-4o-mini"))),
+                    reasoning_effort=data.get("reasoning_effort"),
+                    max_spend_usd=float(data.get("max_spend_usd", 2.00)),
+                )
+                result = run_to_dict(run_search(
                     topic=topic,
                     watchlist=watchlist,
-                    mode=mode,
-                    max_depth=max_depth,
-                    max_documents=max_documents,
-                    max_duration_sec=max_duration_sec,
-                    concurrency=concurrency,
-                    openai_model=openai_model,
-                    reasoning_effort=reasoning_effort,
-                    max_spend_usd=max_spend_usd,
+                    options=options,
                     run_id="default",
-                )
+                ))
                 response_bytes = json.dumps(result).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")

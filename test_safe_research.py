@@ -20,33 +20,23 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-from backend.retrieval import is_safe_url, validate_task_schema, extract_clean_content, RetrievalRouter
-from backend.frontier import ResearchFrontier
+from backend.retrieval import is_safe_url, validate_task_schema, extract_clean_content, RetrievalRouter, CollectorClient
+from backend.frontier import ResearchFrontier, canonicalize_url
 from backend.ranking import compute_bm25_scores, compute_dense_scores, reciprocal_rank_fusion, rank_items
-from safe_research import (
+from backend.privacy import (
     SafetyError,
     assert_safe_to_send,
     blind_text,
-    build_sanitized_evidence,
-    canonicalize_url,
     create_blinder,
-    expand_topic_queries,
-    expand_topic_queries_chaffed,
     extract_chaffed_response,
-    fetch_html_text,
     generate_chaffed_prompt,
-    load_lines,
-    main,
     normalize_for_match,
-    rank_evidence,
     redact,
     rehydrate_text,
-    run_research,
-    search_brave,
-    summarize_with_openai,
-    write_report,
-    CollectorClient,
+    enforce_secret_core_socket_block,
 )
+from backend.synthesis import write_report
+from backend.research import run_search, SearchOptions
 
 FAKE_SECRET = "DEMO-TOKEN-93417"
 WATCHLIST = [FAKE_SECRET]
@@ -412,17 +402,15 @@ Topic 3:
             }
         ]
 
-        result = run_research(
+        result = run_search(
             topic="Solid state battery degradation",
             watchlist=WATCHLIST,
-            mode="deterministic",
-            max_depth=1,
-            max_documents=2,
+            options=SearchOptions(max_depth=1, max_documents=2, max_duration_sec=30),
             collector=mock_collector,
         )
 
-        self.assertEqual(result["status"], "success")
-        self.assertTrue(len(result["evidence"]) >= 1)
+        self.assertEqual(result.status, "success")
+        self.assertTrue(len(result.evidence) >= 1)
         self.assertTrue(os.path.exists("report.md"))
 
         with open("report.md", "r", encoding="utf-8") as f:
@@ -473,7 +461,6 @@ Topic 3:
 
     def test_secret_core_socket_airgap_blocks_external(self):
         import socket
-        from safe_research import enforce_secret_core_socket_block
         enforce_secret_core_socket_block(allow_openai=False)
 
         # Loopback must be allowed

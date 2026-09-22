@@ -4,6 +4,7 @@ Verifies that each bounded context package in `backend/` functions independently
 with clear interfaces and invariant preservation.
 """
 
+import argparse
 import os
 import unittest
 from unittest.mock import MagicMock, patch
@@ -531,6 +532,23 @@ class TestRenamedContexts(unittest.TestCase):
         self.assertTrue(hasattr(backend.privacy, "SafetyError"))
         self.assertTrue(hasattr(backend.research, "run_search"))
         self.assertTrue(callable(LocalSynthesizer))
+
+
+class TestDeepSearchCLI(unittest.TestCase):
+    """CLI has option flags and no mode enum."""
+
+    def test_cli_has_no_mode_flag(self):
+        import deep_search
+        parser = argparse.ArgumentParser()
+        # Rebuild from module helper if present, else parse -h via main parser factory
+        built = deep_search.build_parser()
+        help_text = built.format_help()
+        self.assertNotIn("--mode", help_text)
+        self.assertIn("--blind-watchlist", help_text)
+        self.assertIn("--decoys", help_text)
+        self.assertIn("--ai-planning", help_text)
+        self.assertIn("--ai-summary", help_text)
+        self.assertIn("--preview", help_text)
 
 
 if __name__ == "__main__":

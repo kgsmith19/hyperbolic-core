@@ -9,8 +9,8 @@ from backend.research.query_planner import (
     expand_topic_queries_chaffed,
 )
 from backend.research.research_pipeline import (
-    run_research,
     run_search,
+    run_to_dict,
 )
 from backend.research.cost_estimator import (
     CostTracker,
@@ -37,8 +37,8 @@ from backend.research.explorer import explore
 __all__ = [
     "expand_topic_queries",
     "expand_topic_queries_chaffed",
-    "run_research",
     "run_search",
+    "run_to_dict",
     "CostTracker",
     "SpendLimitExceededError",
     "SpendReport",

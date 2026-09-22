@@ -13,11 +13,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements-core.txt .
 RUN pip install --no-cache-dir -r requirements-core.txt
 
-COPY safe_research.py ./
+COPY deep_search.py ./
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 
 # Run with strictly no network access
 ENV PYTHONUNBUFFERED=1
-ENTRYPOINT ["python", "safe_research.py"]
-CMD ["--topic", "topic.txt", "--watchlist", "watchlist.txt", "--mode", "deterministic"]
+ENTRYPOINT ["python", "deep_search.py"]
+CMD ["--topic", "topic.txt", "--watchlist", "watchlist.txt"]

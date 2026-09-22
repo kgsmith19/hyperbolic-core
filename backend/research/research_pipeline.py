@@ -120,46 +120,29 @@ def run_search(
     )
 
 
-def run_research(
-    topic: str,
-    watchlist: list[str],
-    mode: str = "deterministic",
-    max_depth: int = 2,
-    max_documents: int = 15,
-    max_duration_sec: float = 180.0,
-    max_per_domain: int = 4,
-    concurrency: int = 4,
-    openai_model: str = "gpt-4o-mini",
-    reasoning_effort: str | None = None,
-    max_spend_usd: float = 2.00,
-    run_id: str = "default",
-    progress_callback=None,
-    collector=None,
-) -> dict:
-    """Deprecated mode wrapper around run_search. Removed in the hard-cut CLI task."""
-    options = SearchOptions(
-        max_depth=max_depth,
-        max_documents=max_documents,
-        max_duration_sec=max_duration_sec,
-        concurrency=concurrency,
-        max_per_domain=max_per_domain,
-        blind_watchlist=(mode == "extreme"),
-        decoy_queries=3 if mode == "extreme" else 0,
-        ai_planning=mode in ("expansion", "full"),
-        ai_summary=(mode == "full"),
-        model=openai_model,
-        reasoning_effort=reasoning_effort,
-        max_spend_usd=max_spend_usd,
-    )
-    run = run_search(
-        topic,
-        watchlist,
-        options,
-        run_id=run_id,
-        progress_callback=progress_callback,
-        collector=collector,
-    )
-    return _run_to_legacy_dict(run, mode)
+def run_to_dict(run: ResearchRun) -> dict:
+    """Serialize a ResearchRun for HTTP JSON."""
+    spend = run.spend
+    real_queries = [q.text for q in run.queries if not q.is_decoy]
+    return {
+        "status": run.status,
+        "topic": run.topic,
+        "queries": real_queries,
+        "evidence": _evidence_as_dicts(run.evidence),
+        "summary": run.summary,
+        "report_markdown": run.report_markdown,
+        "report_archive": run.archive_path,
+        "spend_report": {
+            "model": spend.model if spend else "none",
+            "prompt_tokens": spend.prompt_tokens if spend else 0,
+            "completion_tokens": spend.completion_tokens if spend else 0,
+            "total_tokens": spend.total_tokens if spend else 0,
+            "estimated_cost_usd": spend.estimated_cost_usd if spend else 0.0,
+            "is_cap_exceeded": spend.is_cap_exceeded if spend else False,
+        },
+        "duration_seconds": run.duration_sec,
+        "requires_confirm": bool(run.options.blind_watchlist or run.options.decoy_queries > 0),
+    }
 
 
 def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token, progress_callback) -> str:
@@ -255,50 +238,3 @@ def _empty_run(status: str, topic: str, options: SearchOptions, cost_tracker, du
         archive_path="",
         status=status,
     )
-
-
-def _run_to_legacy_dict(run: ResearchRun, mode: str = "") -> dict:
-    spend = run.spend
-    real_queries = [q.text for q in run.queries if not q.is_decoy]
-    return {
-        "status": run.status,
-        "topic": run.topic,
-        "mode": mode,
-        "queries": real_queries,
-        "evidence": _evidence_as_dicts(run.evidence),
-        "summary": run.summary,
-        "report_markdown": run.report_markdown,
-        "report_archive": run.archive_path,
-        "spend_report": {
-            "model": spend.model if spend else "none",
-            "prompt_tokens": spend.prompt_tokens if spend else 0,
-            "completion_tokens": spend.completion_tokens if spend else 0,
-            "total_tokens": spend.total_tokens if spend else 0,
-            "estimated_cost_usd": spend.estimated_cost_usd if spend else 0.0,
-            "is_cap_exceeded": spend.is_cap_exceeded if spend else False,
-        },
-        "duration_seconds": run.duration_sec,
-    }
-
-
-def _build_response(status, topic, mode, queries, evidence, summary, report_md, archive_path, cost_tracker, duration):
-    spend = cost_tracker.get_report() if cost_tracker else None
-    return {
-        "status": status,
-        "topic": topic,
-        "mode": mode,
-        "queries": queries,
-        "evidence": evidence,
-        "summary": summary,
-        "report_markdown": report_md,
-        "report_archive": archive_path,
-        "spend_report": {
-            "model": spend.model if spend else "none",
-            "prompt_tokens": spend.prompt_tokens if spend else 0,
-            "completion_tokens": spend.completion_tokens if spend else 0,
-            "total_tokens": spend.total_tokens if spend else 0,
-            "estimated_cost_usd": spend.estimated_cost_usd if spend else 0.0,
-            "is_cap_exceeded": spend.is_cap_exceeded if spend else False,
-        },
-        "duration_seconds": round(duration, 2),
-    }
