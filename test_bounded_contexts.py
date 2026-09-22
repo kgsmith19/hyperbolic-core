@@ -310,5 +310,59 @@ class TestDirectBoundedContexts(unittest.TestCase):
         self.assertIn("/js/app.js", html_content)
 
 
+class TestSearchPreview(unittest.TestCase):
+    """Tradeoff preview for one search with explicit options."""
+
+    def test_defaults_do_not_require_confirm(self):
+        from backend.research_orchestrator.types import SearchOptions
+        from backend.research_orchestrator.preview import preview
+
+        p = preview("solid-state batteries", SearchOptions())
+        self.assertFalse(p.requires_confirm)
+        self.assertEqual(p.expected_hops, 2)
+        self.assertEqual(p.expected_sources, 15)
+        self.assertEqual(p.expected_duration_sec, 180.0)
+        self.assertEqual(p.expected_spend_usd, 0.0)
+        self.assertIn("Free", p.expected_cost_display)
+
+    def test_blind_requires_confirm_and_warns_weaker_recall(self):
+        from backend.research_orchestrator.types import SearchOptions
+        from backend.research_orchestrator.preview import preview
+
+        p = preview("topic", SearchOptions(blind_watchlist=True))
+        self.assertTrue(p.requires_confirm)
+        self.assertTrue(any("weaker recall" in w.lower() for w in p.warnings))
+
+    def test_decoys_require_confirm_and_warn_wasted_query_time(self):
+        from backend.research_orchestrator.types import SearchOptions
+        from backend.research_orchestrator.preview import preview
+
+        p = preview("topic", SearchOptions(decoy_queries=3))
+        self.assertTrue(p.requires_confirm)
+        self.assertTrue(any("decoy" in w.lower() for w in p.warnings))
+
+    def test_planning_and_summary_do_not_require_confirm(self):
+        from backend.research_orchestrator.types import SearchOptions
+        from backend.research_orchestrator.preview import preview
+
+        p = preview("topic", SearchOptions(ai_planning=True, ai_summary=True))
+        self.assertFalse(p.requires_confirm)
+        self.assertGreater(p.expected_spend_usd, 0.0)
+        self.assertTrue(
+            any("planning" in w.lower() or "leaves the machine" in w.lower() for w in p.warnings)
+        )
+
+    def test_requires_confirm_iff_blind_or_decoys(self):
+        from backend.research_orchestrator.types import SearchOptions
+        from backend.research_orchestrator.preview import preview
+
+        self.assertFalse(preview("t", SearchOptions()).requires_confirm)
+        self.assertTrue(preview("t", SearchOptions(blind_watchlist=True)).requires_confirm)
+        self.assertTrue(preview("t", SearchOptions(decoy_queries=1)).requires_confirm)
+        self.assertTrue(
+            preview("t", SearchOptions(blind_watchlist=True, decoy_queries=2)).requires_confirm
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

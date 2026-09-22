@@ -21,6 +21,14 @@ from backend.research_orchestrator.cancellation import (
     cancellation_manager,
     CancellationManager,
 )
+from backend.research_orchestrator.types import (
+    SearchOptions,
+    Evidence,
+    Query,
+    SearchPreview,
+    ResearchRun,
+)
+from backend.research_orchestrator.preview import preview
 
 __all__ = [
     "expand_topic_queries",
@@ -32,4 +40,10 @@ __all__ = [
     "MODEL_PRICING",
     "cancellation_manager",
     "CancellationManager",
+    "SearchOptions",
+    "Evidence",
+    "Query",
+    "SearchPreview",
+    "ResearchRun",
+    "preview",
 ]
