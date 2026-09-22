@@ -1,5 +1,12 @@
 // node --test docs/ops/stage59b-review-adoption.test.mjs (run from the repo root)
 //
+// Runtime basis: the .ts imports below run natively under Node's
+// type-stripping (Node >= 22.18; CI pins node-version "22" in
+// .github/actions/verify-tests-shell, and the Platform lane executes
+// exactly this file via `node --test docs/ops/*.test.mjs`). No loader,
+// transpiler, or dist build is involved — proven by the green Platform
+// run on the PR, not by assertion.
+//
 // Stage 59b (#388): adopt the frozen Stage 59a independent-review-and-
 // remediation contract into hyperbolic-core's live review lane while
 // preserving the proven fix/rebut/recheck behavior and the single PR Gate.
