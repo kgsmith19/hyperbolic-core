@@ -22,6 +22,11 @@ runs:
     - name: Setup · Configure Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
+        # Floor, not a suggestion: docs/ops/stage59b-review-adoption.test.mjs
+        # imports packages/review's .ts sources directly and relies on Node's
+        # native type-stripping (>= 22.18). "22" resolves to the latest 22.x
+        # (22.23.2 observed), which satisfies the floor; a future "22.0"
+        # resolution below 22.18 would break that file loudly, not silently.
         node-version: "22"
         cache: npm
         cache-dependency-path: package-lock.json
