@@ -364,5 +364,38 @@ class TestSearchPreview(unittest.TestCase):
         )
 
 
+class TestPlanner(unittest.TestCase):
+    """Planner emits tagged real and decoy Query objects."""
+
+    def test_defaults_return_single_real_query(self):
+        from backend.research_orchestrator.planner import plan_queries
+        from backend.research_orchestrator.types import SearchOptions
+
+        qs = plan_queries("solid-state batteries", [], SearchOptions())
+        self.assertEqual(len(qs), 1)
+        self.assertEqual(qs[0].text, "solid-state batteries")
+        self.assertFalse(qs[0].is_decoy)
+
+    def test_decoys_are_tagged_and_do_not_replace_real(self):
+        from backend.research_orchestrator.planner import plan_queries
+        from backend.research_orchestrator.types import SearchOptions
+
+        qs = plan_queries("solid-state batteries", [], SearchOptions(decoy_queries=3))
+        real = [q for q in qs if not q.is_decoy]
+        decoy = [q for q in qs if q.is_decoy]
+        self.assertEqual(len(real), 1)
+        self.assertEqual(real[0].text, "solid-state batteries")
+        self.assertEqual(len(decoy), 3)
+        self.assertTrue(all(d.text != "solid-state batteries" for d in decoy))
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False)
+    def test_ai_planning_without_key_falls_back_to_topic(self):
+        from backend.research_orchestrator.planner import plan_queries
+        from backend.research_orchestrator.types import SearchOptions
+
+        qs = plan_queries("topic", [], SearchOptions(ai_planning=True))
+        self.assertEqual([q.text for q in qs if not q.is_decoy], ["topic"])
+
+
 if __name__ == "__main__":
     unittest.main()

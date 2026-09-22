@@ -29,6 +29,7 @@ from backend.research_orchestrator.types import (
     ResearchRun,
 )
 from backend.research_orchestrator.preview import preview
+from backend.research_orchestrator.planner import plan_queries
 
 __all__ = [
     "expand_topic_queries",
@@ -46,4 +47,5 @@ __all__ = [
     "SearchPreview",
     "ResearchRun",
     "preview",
+    "plan_queries",
 ]
