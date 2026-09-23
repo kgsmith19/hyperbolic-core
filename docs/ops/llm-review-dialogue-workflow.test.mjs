@@ -3931,3 +3931,159 @@ test("dialogue: a resolvedByDefault finding renders its resolved-by-default expl
   assert.match(body, /Issue #​?325/);
   assert.doesNotMatch(body, /### Blocking findings/);
 });
+
+// ---------------------------------------------------------------------------
+// Issue #402: per-check verdict history in the single managed comment.
+// Written RED first (each failed against the pre-#402 posting script,
+// which carried no history state or rendering); GREEN via the history
+// state + render additions in llm-review-dialogue.yml.
+// ---------------------------------------------------------------------------
+
+// New head, no prior history: the posted body carries exactly one history
+// entry for this run (round, head, verdict, run link), inside the one
+// managed comment.
+test("dialogue #402: a new head appends one history row for the current run", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "402",
+    RUN_URL: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/402",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR });
+
+  const body = calls.createComment[0].body;
+  assert.match(body, /Verdict history/);
+  assert.match(body, new RegExp(HEAD.slice(0, 7)));
+  assert.match(body, /`block`/);
+  assert.match(body, /actions\/runs\/402/);
+});
+
+// New head with a prior history entry: the new run APPENDS without
+// removing or rewriting the prior row (append-only across rounds).
+test("dialogue #402: a new round appends without rewriting prior history rows", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const oldHead = "b".repeat(40);
+  const priorState = {
+    round: 1,
+    headSha: oldHead,
+    escalated: false,
+    verdict: "block",
+    history: [{ headSha: oldHead, round: 1, verdict: "block", blocking: 1, advisory: 0, runUrl: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/401" }],
+  };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "402",
+    RUN_URL: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/402",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR, existingComment });
+
+  const body = calls.updateComment[0].body;
+  // The embedded state marker is followed by " -->" (space before the
+  // close), not "-->": search from the marker itself, not from position 0.
+  const stateStart = body.indexOf("<!-- llm-review-state: ");
+  assert.match(body, new RegExp(oldHead.slice(0, 7)));
+  assert.match(body, /actions\/runs\/401/);
+  // New row present too.
+  assert.match(body, new RegExp(HEAD.slice(0, 7)));
+  assert.match(body, /actions\/runs\/402/);
+  const parsed = JSON.parse(body.slice(stateStart + "<!-- llm-review-state: ".length, body.indexOf(" -->", stateStart)));
+  assert.equal(parsed.history.length, 2);
+});
+
+// Same-head re-run (label/edit/re-run, no new push): the head's row is
+// updated in place, never duplicated.
+test("dialogue #402: a same-head re-run updates the head row without duplicating it", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const priorState = {
+    round: 1,
+    headSha: HEAD,
+    escalated: false,
+    verdict: "block",
+    history: [{ headSha: HEAD, round: 1, verdict: "block", blocking: 1, advisory: 0, runUrl: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/401" }],
+  };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "402",
+    RUN_URL: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/402",
+    RUN_HEAD_SHA: HEAD,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: HEAD, reviewOutcome: "failure", verdictPresent: true },
+      "review-verdict.json": BLOCKING_VERDICT,
+    },
+  }, { pr: BASE_PR, existingComment });
+
+  const body = calls.updateComment[0].body;
+  const stateStart = body.indexOf("<!-- llm-review-state: ");
+  const parsed = JSON.parse(body.slice(stateStart + "<!-- llm-review-state: ".length, body.indexOf(" -->", stateStart)));
+  assert.equal(parsed.history.length, 1);
+  assert.equal(parsed.history[0].runUrl, "https://github.com/kgsmith19/hyperbolic-core/actions/runs/402");
+  // The rendered history section shows the head's run link exactly once
+  // (the header's own [review run] link carries the same URL by design).
+  const historySection = body.slice(body.indexOf("### Verdict history"));
+  assert.equal(historySection.split("actions/runs/402").length - 1, 1);
+});
+
+// A passing verdict appends a resolved row and still preserves history.
+test("dialogue #402: a pass appends a resolved history row and preserves prior rows", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path_ = await import("node:path");
+  const oldHead = "b".repeat(40);
+  const newHead = "d".repeat(40);
+  const priorState = {
+    round: 2,
+    headSha: oldHead,
+    escalated: false,
+    verdict: "block",
+    history: [{ headSha: oldHead, round: 2, verdict: "block", blocking: 1, advisory: 0, runUrl: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/401" }],
+  };
+  const existingComment = {
+    id: 555,
+    body: `<!-- agent-engineering-standard:llm-review:v1 -->\n<!-- llm-review-state: ${JSON.stringify(priorState)} -->\nold`,
+  };
+  const { calls } = await runDialogue(fs, os, path_, {
+    RUN_ID: "402",
+    RUN_URL: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/402",
+    RUN_HEAD_SHA: newHead,
+    ESCALATE_AFTER: "3",
+    HAS_ANTHROPIC_OAUTH: "true",
+    HAS_ANTHROPIC_API_KEY: "true",
+    __files: {
+      "review-meta.json": { prNumber: 230, baseSha: "b".repeat(40), headSha: newHead, reviewOutcome: "success", verdictPresent: true },
+      "review-verdict.json": { verdict: "pass", findings: [], discarded: [], summary: "clean" },
+    },
+  }, { pr: { number: 230, head: { sha: newHead }, state: "open" }, existingComment });
+
+  const body = calls.updateComment[0].body;
+  assert.match(body, /actions\/runs\/401/);
+  assert.match(body, /actions\/runs\/402/);
+  assert.match(body, /`pass`/);
+});

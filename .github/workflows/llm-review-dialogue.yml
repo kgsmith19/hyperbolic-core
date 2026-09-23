@@ -1097,6 +1097,29 @@ jobs:
               }
             }
 
+            // ---------------------------------------------------------------
+            // Issue #402: per-check verdict history. Every completed run
+            // (block or pass) appends exactly one entry keyed by head SHA:
+            // a new head appends, a same-head re-run (label/edit/re-run
+            // with no new push) refreshes that head's entry in place.
+            // Append-only across rounds: a new round never removes or
+            // rewrites a prior head's entry. Entries carry only
+            // workflow-owned facts (head, round, verdict, finding counts,
+            // run URL) -- never model-authored text, so no neutralize()
+            // pass is needed for these fields (the run URL comes from the
+            // workflow's own RUN_URL env, not from the artifact).
+            // ---------------------------------------------------------------
+            const priorHistory = Array.isArray(prior.history) ? prior.history : [];
+            const thisEntry = {
+              headSha,
+              round,
+              verdict: verdict.verdict,
+              blocking: blockingFindings.length,
+              advisory: advisoryFindings.length,
+              runUrl: process.env.RUN_URL || "",
+            };
+            const history = [...priorHistory.filter((entry) => entry && entry.headSha !== headSha), thisEntry];
+
             const state = {
               round,
               headSha,
@@ -1107,12 +1130,30 @@ jobs:
               deferredIssues,
               confirmedIssues,
               suggestionComments,
+              history,
             };
 
             // ---------------------------------------------------------------
-            // Build the comment.
+            // Build the comment. Issue #402: the current round renders as
+            // today, then an append-only per-check history so no completed
+            // run's verdict lives only in the job log. Entries are keyed by
+            // head SHA (the state builder above already refreshed this
+            // head's entry in place); older rows collapse so the comment
+            // stays readable after many pushes while the current round
+            // stays visible.
             // ---------------------------------------------------------------
             const lines = [MARKER, `${STATE_OPEN}${JSON.stringify(state)}${STATE_CLOSE}`, ""];
+
+            // Issue #402: one history row per completed check. Workflow-owned
+            // facts only (round, head, verdict, counts, run link) -- the
+            // run URL is neutralized like any other rendered string so a
+            // crafted artifact value cannot break the link out of its parens.
+            function renderHistoryRow(entry) {
+              const short = String(entry.headSha || "").slice(0, 7);
+              const counts = `${entry.blocking ?? 0} blocking / ${entry.advisory ?? 0} advisory`;
+              const when = entry.runUrl ? ` · [run](${neutralize(entry.runUrl, 300)})` : "";
+              return `- round ${entry.round} · \`${short}\` · \`${neutralize(entry.verdict, 20)}\` · ${counts}${when}`;
+            }
 
             if (blocking) {
               lines.push(`## 🔍 LLM Review — round ${round}`, "");
@@ -1235,6 +1276,27 @@ jobs:
             }
 
             lines.push(reviewFooter, runFooter, "");
+
+            // Issue #402: append-only per-check history, newest last. The
+            // current round stays visible above; older rows collapse so the
+            // comment stays readable after many pushes. Exactly one managed
+            // comment still (the upsert below is unchanged) -- Issue #128's
+            // forbidden outcome stands.
+            lines.push("### Verdict history", "");
+            if (history.length <= 1) {
+              lines.push(renderHistoryRow(history[history.length - 1]), "");
+            } else {
+              lines.push(renderHistoryRow(history[history.length - 1]), "");
+              lines.push(
+                "<details>",
+                `<summary><b>Prior checks (${history.length - 1})</b> — earlier runs on this pull request</summary>`,
+                ""
+              );
+              for (let i = history.length - 2; i >= 0; i--) {
+                lines.push(renderHistoryRow(history[i]));
+              }
+              lines.push("", "</details>", "");
+            }
 
             const body = lines.join("\n");
 
