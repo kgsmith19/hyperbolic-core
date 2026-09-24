@@ -232,10 +232,82 @@ test("PR Gate: fail-closed shape, write permissions confined to this one job, no
 });
 
 // Stage 60b (Issue #389) control-plane pins: exact-head arming, trigger shape, pins.
-test("PR Gate arms auto-merge with expectedHeadOid on the exact head (Stage 60b stale-lane/head-moved)", () => {
-  const prGate = workflow.slice(workflow.indexOf("\n  pr-gate:\n"));
-  assert.match(prGate, /expectedHeadOid/, "armAutoMerge must pass expectedHeadOid so the arming binds the exact verified head");
-  assert.match(prGate, /pr\.head\.sha/, "the expected head OID must come from the live PR head SHA");
+// Behavioral, not grep-only: this loads the REAL pr-gate script and runs it
+// against a mocked GitHub API, asserting the armAutoMerge GraphQL mutation is
+// invoked with expectedHeadOid bound to the live PR head SHA. A structural
+// deletion of the parameter (or a rewire to a stale value) fails here because
+// the mock records the actual variables object, not the YAML text.
+test("PR Gate arms auto-merge with expectedHeadOid bound to the live head SHA (Stage 60b stale-lane/head-moved)", async () => {
+  const modulePath = loadPrGateModule();
+  const prGate = (await import(`file://${modulePath}`)).default;
+  const liveSha = "f".repeat(40);
+  const graphqlCalls = [];
+  const github = {
+    paginate: async () => [],
+    rest: {
+      pulls: {
+        get: async () => ({
+          data: {
+            number: 42,
+            node_id: "PR_x",
+            title: "Stage 60b arming probe",
+            draft: false,
+            mergeable_state: "clean",
+            labels: [],
+            head: { sha: liveSha, ref: "f", repo: { full_name: "kgsmith19/hyperbolic-core" } },
+            base: { sha: "c".repeat(40), ref: "main", repo: { full_name: "kgsmith19/hyperbolic-core" } },
+            body: "no linked issue here",
+          },
+        }),
+        updateBranch: async () => ({}),
+      },
+      issues: {
+        get: async (a) => ({ data: { number: a.issue_number, state: "closed", body: "" } }),
+        listEventsForTimeline: async () => ({ data: [] }),
+        listComments: async () => ({ data: [] }),
+        createComment: async () => {},
+        updateComment: async () => {},
+        removeLabel: async () => {},
+      },
+      repos: {
+        getContent: async () => ({
+          data: {
+            encoding: "base64",
+            content: Buffer.from("dev:\n  provider: anthropic\n  model: x\n", "utf8").toString("base64"),
+          },
+        }),
+      },
+    },
+    graphql: async (query, variables) => {
+      graphqlCalls.push({ query, variables });
+      return {};
+    },
+  };
+  let failed = null;
+  const core = {
+    info() {},
+    warning() {},
+    error() {},
+    setFailed(m) {
+      failed = m;
+    },
+    summary: { addHeading() {}, addRaw() {}, write: async () => {} },
+  };
+  const context = {
+    repo: { owner: "kgsmith19", repo: "hyperbolic-core" },
+    payload: {
+      pull_request: { number: 42 },
+      repository: { owner: { login: "kgsmith19" }, default_branch: "main" },
+    },
+  };
+  const gates = {};
+  for (const id of EXPECTED_WORKERS) gates[id] = { result: "success" };
+  await prGate(context, github, core, { env: { GATE_RESULTS: JSON.stringify(gates) } });
+  assert.equal(failed, null, "green verdict must not fail the job");
+  const armCalls = graphqlCalls.filter((c) => /enablePullRequestAutoMerge/.test(c.query));
+  assert.equal(armCalls.length, 1, "green verdict must arm auto-merge exactly once");
+  assert.match(armCalls[0].query, /expectedHeadOid: \$sha/, "arming mutation must bind expectedHeadOid");
+  assert.equal(armCalls[0].variables.sha, liveSha, "expectedHeadOid must equal the live PR head SHA");
 });
 
 test("control-plane shape: no pull_request_target anywhere (Stage 60b unsafe-target)", () => {
@@ -246,8 +318,13 @@ test("control-plane shape: no pull_request_target anywhere (Stage 60b unsafe-tar
 
 test("control-plane shape: no paths filters and full-SHA action pins (Stage 60b path-filter/floating-pin)", () => {
   assert.doesNotMatch(workflow, /^ {4,}paths(-ignore)?:/m, "no job may hide behind a paths: filter");
-  for (const match of workflow.matchAll(/uses:\s*(\S+)/g)) {
-    const ref = match[1];
+  // `uses:` values in this file are unquoted step scalars, but strip
+  // surrounding quotes anyway so a future quoted edit cannot slip a
+  // floating tag past this oracle as a false negative -- or trip it as a
+  // false positive. Local (`./`) and container (`docker://`) refs are the
+  // only legitimate non-pinned forms.
+  for (const match of workflow.matchAll(/uses:\s*(\S[^\n]*)/g)) {
+    const ref = match[1].trim().replace(/^["']|["']$/g, "").split(/\s/)[0];
     if (ref.startsWith("./") || ref.startsWith("docker://")) continue;
     assert.match(ref, /@[0-9a-f]{40}$/, "action pin must be a full 40-hex SHA, got: " + ref);
   }
@@ -261,11 +338,16 @@ test("control-plane shape: worker lanes stay least-privilege, write belongs to P
     assert.ok(start >= 0, "job " + id + " not found");
     // Slice this job's own block: from its header to the next 2-space job
     // header (any job id, not just expected ones -- an unexpected job hiding
-    // between two known ones must still terminate the slice). A job-level
-    // `permissions:` block lives at 4-space indent inside the job; step-level
-    // `with:` keys sit deeper, so scope the write-grant search to the job's
-    // own permissions block rather than the whole slice -- a step literally
-    // named "write" must never trip this oracle.
+    // between two known ones must still terminate the slice). The boundary
+    // search starts after the header's own newline and anchors the next
+    // header at column 2, so indentation depth, step names, and comments
+    // inside the job cannot shift it. The write-grant search then runs over
+    // the whole job slice: worker jobs in this workflow carry no
+    // job-level `permissions:` block at all (they inherit the read-only
+    // workflow default), so ANY `write` grant appearing anywhere inside a
+    // worker's slice -- job-level or smuggled into a step -- must fail.
+    // (A step literally named "write" contains no colon-grant, so it
+    // cannot trip these `scope: write` patterns.)
     const after = jobsBlock.slice(start + 1);
     const nextMatch = /\n  [a-z][a-z0-9-]*:\s*\n/.exec(after.slice(after.indexOf("\n")));
     const end = nextMatch ? start + 1 + after.indexOf("\n") + nextMatch.index + 1 : jobsBlock.length;
