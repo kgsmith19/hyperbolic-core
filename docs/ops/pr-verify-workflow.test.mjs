@@ -231,6 +231,55 @@ test("PR Gate: fail-closed shape, write permissions confined to this one job, no
   assert.doesNotMatch(prGate, /\n\s+run: \|/);
 });
 
+// Stage 60b (Issue #389) control-plane pins: exact-head arming, trigger shape, pins.
+test("PR Gate arms auto-merge with expectedHeadOid on the exact head (Stage 60b stale-lane/head-moved)", () => {
+  const prGate = workflow.slice(workflow.indexOf("\n  pr-gate:\n"));
+  assert.match(prGate, /expectedHeadOid/, "armAutoMerge must pass expectedHeadOid so the arming binds the exact verified head");
+  assert.match(prGate, /pr\.head\.sha/, "the expected head OID must come from the live PR head SHA");
+});
+
+test("control-plane shape: no pull_request_target anywhere (Stage 60b unsafe-target)", () => {
+  assert.doesNotMatch(workflow, /pull_request_target/, "no job may trigger on pull_request_target");
+});
+
+
+
+test("control-plane shape: no paths filters and full-SHA action pins (Stage 60b path-filter/floating-pin)", () => {
+  assert.doesNotMatch(workflow, /^ {4,}paths(-ignore)?:/m, "no job may hide behind a paths: filter");
+  for (const match of workflow.matchAll(/uses:\s*(\S+)/g)) {
+    const ref = match[1];
+    if (ref.startsWith("./") || ref.startsWith("docker://")) continue;
+    assert.match(ref, /@[0-9a-f]{40}$/, "action pin must be a full 40-hex SHA, got: " + ref);
+  }
+});
+
+test("control-plane shape: worker lanes stay least-privilege, write belongs to PR Gate only (Stage 60b excess-permission)", () => {
+  const jobsBlock = workflow.slice(workflow.indexOf("\njobs:\n"));
+  const prGateSlice = workflow.slice(workflow.indexOf("\n  pr-gate:\n"));
+  for (const id of EXPECTED_WORKERS) {
+    const start = jobsBlock.indexOf("\n  " + id + ":\n");
+    assert.ok(start >= 0, "job " + id + " not found");
+    // Slice this job's own block: from its header to the next 2-space job
+    // header (any job id, not just expected ones -- an unexpected job hiding
+    // between two known ones must still terminate the slice). A job-level
+    // `permissions:` block lives at 4-space indent inside the job; step-level
+    // `with:` keys sit deeper, so scope the write-grant search to the job's
+    // own permissions block rather than the whole slice -- a step literally
+    // named "write" must never trip this oracle.
+    const after = jobsBlock.slice(start + 1);
+    const nextMatch = /\n  [a-z][a-z0-9-]*:\s*\n/.exec(after.slice(after.indexOf("\n")));
+    const end = nextMatch ? start + 1 + after.indexOf("\n") + nextMatch.index + 1 : jobsBlock.length;
+    const slice = jobsBlock.slice(start, end);
+    assert.doesNotMatch(slice, /pull-requests:\s*write/, "worker lane " + id + " must never hold pull-requests:write");
+    assert.doesNotMatch(slice, /contents:\s*write/, "worker lane " + id + " must never hold contents:write");
+    assert.doesNotMatch(slice, /issues:\s*write/, "worker lane " + id + " must never hold issues:write");
+  }
+  assert.match(prGateSlice, /contents:\s*write/, "pr-gate keeps contents:write");
+  assert.match(prGateSlice, /pull-requests:\s*write/, "pr-gate keeps pull-requests:write");
+  assert.match(prGateSlice, /issues:\s*write/, "pr-gate keeps issues:write");
+});
+
+
 test("every doc that names a lane agrees with pr-verify.yml's actual job names", () => {
   // Doc drift is not cosmetic here: a required-checks list that disagreed
   // with the workflow is what stranded PRs #118, #120 and #160. This pins
