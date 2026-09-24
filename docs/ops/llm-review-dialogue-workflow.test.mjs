@@ -743,6 +743,20 @@ test("llm-review-dialogue.yml sources the dev agent's Anthropic credential from 
   assert.doesNotMatch(postingBlock, /secrets\.CLAUDE_CODE_OAUTH_TOKEN/, "must not fall back to a raw GitHub secret");
   assert.doesNotMatch(postingBlock, /secrets\.ANTHROPIC_API_KEY/, "must not fall back to a raw GitHub secret");
 
+// Issue #402 claim 1: the posting step wires the triggering run\'s own
+// creation time through, so each history entry carries the run\'s
+// timestamp rather than the posting time (with a posting-time fallback).
+test("llm-review-dialogue.yml threads the triggering run creation time into the posting step", () => {
+  const postingStartTs = dialogueYaml.indexOf("Dialogue \u00b7 Post findings");
+  assert.ok(postingStartTs >= 0, "posting step not found");
+  const postingBlockTs = dialogueYaml.slice(postingStartTs, dialogueYaml.indexOf("with:", postingStartTs));
+  assert.match(
+    postingBlockTs,
+    /RUN_STARTED_AT:\s*\$\{\{\s*github.event.workflow_run.created_at\s*\}\}/,
+    "RUN_STARTED_AT must carry the triggering run creation time, not an artifact value"
+  );
+});
+
   // Whole-file, not just the sliced blocks above: a stray reference anywhere
   // else in the file (a leftover comment, a second step) would otherwise go
   // undetected -- the block-scoped assertions above prove the WIRING is
@@ -3964,6 +3978,15 @@ test("dialogue #402: a new head appends one history row for the current run", as
   assert.match(body, new RegExp(HEAD.slice(0, 7)));
   assert.match(body, /`block`/);
   assert.match(body, /actions\/runs\/402/);
+  // Issue #402 claim 1: every history entry carries a timestamp. No
+  // RUN_STARTED_AT is wired in this run, so the posting-time fallback
+  // (new Date().toISOString()) must produce a valid ISO-8601 timestamp.
+  const stateStartTs1 = body.indexOf("<!-- llm-review-state: ");
+  const parsedTs1 = JSON.parse(body.slice(stateStartTs1 + "<!-- llm-review-state: ".length, body.indexOf(" -->", stateStartTs1)));
+  assert.ok(parsedTs1.history[0].timestamp, "history entry must carry a timestamp");
+  assert.ok(!Number.isNaN(Date.parse(parsedTs1.history[0].timestamp)), "timestamp must be ISO-8601 parseable");
+  const historySectionTs1 = body.slice(body.indexOf("### Verdict history"));
+  assert.match(historySectionTs1, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, "rendered history row must show the timestamp");
 });
 
 // New head with a prior history entry: the new run APPENDS without
@@ -3978,7 +4001,7 @@ test("dialogue #402: a new round appends without rewriting prior history rows", 
     headSha: oldHead,
     escalated: false,
     verdict: "block",
-    history: [{ headSha: oldHead, round: 1, verdict: "block", blocking: 1, advisory: 0, runUrl: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/401" }],
+    history: [{ headSha: oldHead, round: 1, verdict: "block", blocking: 1, advisory: 0, runUrl: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/401", timestamp: "2026-09-23T01:00:00.000Z" }],
   };
   const existingComment = {
     id: 555,
@@ -3988,6 +4011,7 @@ test("dialogue #402: a new round appends without rewriting prior history rows", 
     RUN_ID: "402",
     RUN_URL: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/402",
     RUN_HEAD_SHA: HEAD,
+    RUN_STARTED_AT: "2026-09-23T01:13:38Z",
     ESCALATE_AFTER: "3",
     HAS_ANTHROPIC_OAUTH: "true",
     HAS_ANTHROPIC_API_KEY: "true",
@@ -4008,6 +4032,12 @@ test("dialogue #402: a new round appends without rewriting prior history rows", 
   assert.match(body, /actions\/runs\/402/);
   const parsed = JSON.parse(body.slice(stateStart + "<!-- llm-review-state: ".length, body.indexOf(" -->", stateStart)));
   assert.equal(parsed.history.length, 2);
+  // Issue #402 claim 1: the new entry carries the run-start timestamp
+  // verbatim; the untouched prior row keeps its own stored timestamp.
+  assert.equal(parsed.history[0].timestamp, "2026-09-23T01:00:00.000Z");
+  assert.equal(parsed.history[1].timestamp, "2026-09-23T01:13:38Z");
+  const historySectionTs2 = body.slice(body.indexOf("### Verdict history"));
+  assert.match(historySectionTs2, /2026-09-23T01:13:38Z/, "rendered new row must show the run-start timestamp");
 });
 
 // Same-head re-run (label/edit/re-run, no new push): the head's row is
@@ -4021,7 +4051,7 @@ test("dialogue #402: a same-head re-run updates the head row without duplicating
     headSha: HEAD,
     escalated: false,
     verdict: "block",
-    history: [{ headSha: HEAD, round: 1, verdict: "block", blocking: 1, advisory: 0, runUrl: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/401" }],
+    history: [{ headSha: HEAD, round: 1, verdict: "block", blocking: 1, advisory: 0, runUrl: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/401", timestamp: "2026-09-23T01:00:00.000Z" }],
   };
   const existingComment = {
     id: 555,
@@ -4045,6 +4075,10 @@ test("dialogue #402: a same-head re-run updates the head row without duplicating
   const parsed = JSON.parse(body.slice(stateStart + "<!-- llm-review-state: ".length, body.indexOf(" -->", stateStart)));
   assert.equal(parsed.history.length, 1);
   assert.equal(parsed.history[0].runUrl, "https://github.com/kgsmith19/hyperbolic-core/actions/runs/402");
+  // Issue #402 claim 2 (keyed by head SHA): the same-head re-run refreshes
+  // the head row with the new run-start timestamp instead of duplicating it.
+  assert.ok(parsed.history[0].timestamp, "refreshed head row must carry a timestamp");
+  assert.ok(!Number.isNaN(Date.parse(parsed.history[0].timestamp)), "timestamp must be ISO-8601 parseable");
   // The rendered history section shows the head's run link exactly once
   // (the header's own [review run] link carries the same URL by design).
   const historySection = body.slice(body.indexOf("### Verdict history"));
@@ -4063,7 +4097,7 @@ test("dialogue #402: a pass appends a resolved history row and preserves prior r
     headSha: oldHead,
     escalated: false,
     verdict: "block",
-    history: [{ headSha: oldHead, round: 2, verdict: "block", blocking: 1, advisory: 0, runUrl: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/401" }],
+    history: [{ headSha: oldHead, round: 2, verdict: "block", blocking: 1, advisory: 0, runUrl: "https://github.com/kgsmith19/hyperbolic-core/actions/runs/401", timestamp: "2026-09-23T01:00:00.000Z" }],
   };
   const existingComment = {
     id: 555,
@@ -4086,4 +4120,14 @@ test("dialogue #402: a pass appends a resolved history row and preserves prior r
   assert.match(body, /actions\/runs\/401/);
   assert.match(body, /actions\/runs\/402/);
   assert.match(body, /`pass`/);
+  // Issue #402 claims 1+3: the resolved row carries a valid timestamp and
+  // the prior blocking row is preserved with its own stored timestamp.
+  const stateStartTs4 = body.indexOf("<!-- llm-review-state: ");
+  const parsedTs4 = JSON.parse(body.slice(stateStartTs4 + "<!-- llm-review-state: ".length, body.indexOf(" -->", stateStartTs4)));
+  assert.equal(parsedTs4.history.length, 2);
+  assert.equal(parsedTs4.history[0].timestamp, "2026-09-23T01:00:00.000Z");
+  assert.ok(parsedTs4.history[1].timestamp, "resolved row must carry a timestamp");
+  assert.ok(!Number.isNaN(Date.parse(parsedTs4.history[1].timestamp)), "timestamp must be ISO-8601 parseable");
+  const historySectionTs4 = body.slice(body.indexOf("### Verdict history"));
+  assert.match(historySectionTs4, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, "rendered history section must show timestamps");
 });
