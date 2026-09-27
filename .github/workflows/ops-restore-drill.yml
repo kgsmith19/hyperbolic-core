@@ -105,12 +105,26 @@ jobs:
               | python3 -c 'import json, sys; snaps = json.load(sys.stdin); print(snaps[0]["short_id"] if snaps else "")'
           }
 
+          # The latest snapshot's own creation time, as epoch seconds. RPO is
+          # then (now - this): how much data a restore-from-latest would lose
+          # -- a measured fact from the backup itself, never assumed (#408).
+          # python3 only extracts the JSON field (as latest_snapshot does);
+          # GNU date converts the ISO8601 timestamp (fractional seconds and Z
+          # included) to epoch.
+          snapshot_epoch() {
+            local repository="$1" iso
+            iso="$(restic -r "$repository" snapshots --latest 1 --json \
+              | python3 -c 'import json, sys; snaps = json.load(sys.stdin); print(snaps[0]["time"] if snaps else "")')"
+            test -n "$iso" || { echo ""; return 0; }
+            date -u -d "$iso" +%s
+          }
+
           summary="$tmp/summary.md"
           {
             echo "### Restore drill results"
             echo
-            echo "| Repository | check | snapshot | assertions |"
-            echo "| --- | --- | --- | --- |"
+            echo "| Repository | check | snapshot | RPO (s) | RTO (s) | assertions |"
+            echo "| --- | --- | --- | --- | --- | --- |"
           } > "$summary"
           overall_status=0
 
@@ -122,6 +136,18 @@ jobs:
             snapshot_id="$(latest_snapshot "$repository")"
             test -n "$snapshot_id"
 
+            # RPO: age of the latest snapshot at the moment we drill it.
+            local snapshot_epoch_value now_epoch rpo_seconds
+            snapshot_epoch_value="$(snapshot_epoch "$repository")"
+            test -n "$snapshot_epoch_value"
+            now_epoch="$(date +%s)"
+            rpo_seconds="$(( now_epoch - snapshot_epoch_value ))"
+
+            # RTO: wall-clock to recover to an operational database, bracketed
+            # from just before the restic restore to after the row-count
+            # verification below.
+            local restore_start restore_end rto_seconds
+            restore_start="$(date +%s)"
             local restore_dir="$tmp/restore-platform"
             mkdir -p "$restore_dir"
             restic -r "$repository" restore "$snapshot_id" --target "$restore_dir"
@@ -143,7 +169,9 @@ jobs:
               n="$(pg postgres:17 psql -h 127.0.0.1 -U postgres platform_restore_drill -X -At -c "select count(*) from $t")"
               counts="$counts $t=$n"
             done
-            echo "| \`platform\` | pass | \`$snapshot_id\` |$counts |" >> "$summary"
+            restore_end="$(date +%s)"
+            rto_seconds="$(( restore_end - restore_start ))"
+            echo "| \`platform\` | pass | \`$snapshot_id\` | $rpo_seconds | $rto_seconds |$counts |" >> "$summary"
           }
 
           drill_lifeos() {
@@ -154,6 +182,18 @@ jobs:
             snapshot_id="$(latest_snapshot "$repository")"
             test -n "$snapshot_id"
 
+            # RPO: age of the latest snapshot at the moment we drill it.
+            local snapshot_epoch_value now_epoch rpo_seconds
+            snapshot_epoch_value="$(snapshot_epoch "$repository")"
+            test -n "$snapshot_epoch_value"
+            now_epoch="$(date +%s)"
+            rpo_seconds="$(( now_epoch - snapshot_epoch_value ))"
+
+            # RTO: wall-clock to recover to an operational database, bracketed
+            # from just before the restic restore to after the row-count
+            # verification below.
+            local restore_start restore_end rto_seconds
+            restore_start="$(date +%s)"
             local restore_dir="$tmp/restore-lifeos"
             mkdir -p "$restore_dir"
             restic -r "$repository" restore "$snapshot_id" --target "$restore_dir"
@@ -181,11 +221,13 @@ jobs:
               n="$(pg postgres:17 psql -h 127.0.0.1 -U postgres lifeos_restore_drill -X -At -c "select count(*) from $t")"
               counts="$counts $t=$n"
             done
-            echo "| \`lifeos\` | pass | \`$snapshot_id\` |$counts, blob_files=$blob_file_count |" >> "$summary"
+            restore_end="$(date +%s)"
+            rto_seconds="$(( restore_end - restore_start ))"
+            echo "| \`lifeos\` | pass | \`$snapshot_id\` | $rpo_seconds | $rto_seconds |$counts, blob_files=$blob_file_count |" >> "$summary"
           }
 
-          drill_platform || { echo "| \`platform\` | **FAIL** | | see job log |" >> "$summary"; overall_status=1; }
-          drill_lifeos || { echo "| \`lifeos\` | **FAIL** | | see job log |" >> "$summary"; overall_status=1; }
+          drill_platform || { echo "| \`platform\` | **FAIL** | | | | see job log |" >> "$summary"; overall_status=1; }
+          drill_lifeos || { echo "| \`lifeos\` | **FAIL** | | | | see job log |" >> "$summary"; overall_status=1; }
 
           cat "$summary" >> "$GITHUB_STEP_SUMMARY"
           echo "See docs/ops/runbook.md's restore-drill section for how to read this table." >> "$GITHUB_STEP_SUMMARY"

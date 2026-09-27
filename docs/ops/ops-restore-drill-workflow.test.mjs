@@ -129,6 +129,52 @@ test("the summary is written to GITHUB_STEP_SUMMARY regardless of pass or fail, 
   assert.match(workflow, /runbook\.md's restore-drill section/);
 });
 
+test("RPO is measured as the latest snapshot's age (now minus snapshot time), per repository", () => {
+  // RPO = how much data a restore-from-latest would lose = the age of the
+  // most recent backup, derived from the snapshot's own timestamp, never
+  // assumed. #408.
+  assert.match(workflow, /snapshot_epoch\(\) \{/);
+  assert.match(workflow, /date -u -d "\$iso" \+%s/);
+  assert.match(workflow, /rpo_seconds="\$\(\( now_epoch - snapshot_epoch_value \)\)"/);
+  assert.equal(
+    (workflow.match(/rpo_seconds="\$\(\( now_epoch - snapshot_epoch_value \)\)"/g) ?? []).length,
+    2,
+    "expected one RPO computation per repository",
+  );
+});
+
+test("RTO is measured as the restore-to-usable wall-clock, per repository", () => {
+  // RTO = time to recover to an operational database: bracketed from just
+  // before the restic restore to after the row-count verification. #408.
+  assert.match(workflow, /restore_start="\$\(date \+%s\)"/);
+  assert.match(workflow, /restore_end="\$\(date \+%s\)"/);
+  assert.match(workflow, /rto_seconds="\$\(\( restore_end - restore_start \)\)"/);
+  assert.equal(
+    (workflow.match(/rto_seconds="\$\(\( restore_end - restore_start \)\)"/g) ?? []).length,
+    2,
+    "expected one RTO computation per repository",
+  );
+});
+
+test("RTO brackets the actual restore: restore_start precedes the restic restore, restore_end follows it", () => {
+  for (const label of ["platform", "lifeos"]) {
+    const fn = drillFunction(label);
+    const start = fn.indexOf('restore_start="$(date +%s)"');
+    const restore = fn.indexOf('restic -r "$repository" restore');
+    const end = fn.indexOf('restore_end="$(date +%s)"');
+    assert.ok(start > -1 && restore > -1 && end > -1, `${label}: missing RTO brackets`);
+    assert.ok(start < restore, `${label}: restore_start must precede restic restore`);
+    assert.ok(restore < end, `${label}: restore_end must follow the restore`);
+  }
+});
+
+test("the summary records measured RPO and RTO columns, one value per repository row", () => {
+  assert.match(workflow, /RPO \(s\)/);
+  assert.match(workflow, /RTO \(s\)/);
+  assert.ok((workflow.match(/\$rpo_seconds/g) ?? []).length >= 2, "each pass row must carry a measured RPO");
+  assert.ok((workflow.match(/\$rto_seconds/g) ?? []).length >= 2, "each pass row must carry a measured RTO");
+});
+
 test("the step runs under strict mode and cleans up its temp directory unconditionally", () => {
   assert.match(workflow, /set -euo pipefail/);
   assert.match(workflow, /trap 'rm -rf "\$tmp"' EXIT/);

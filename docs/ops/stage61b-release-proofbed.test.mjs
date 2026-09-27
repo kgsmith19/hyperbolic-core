@@ -188,7 +188,8 @@ test("mold-unqualified: this proofbed IS hyperbolic-core's built/attacked/qualif
 
 // --- Half 3: the disclosed gaps are real gaps, and the posture is honest ---
 
-test("the five gap rules map to their four tracking Issues, exactly", () => {
+test("the four remaining gap rules map to their three still-open tracking Issues, exactly", () => {
+  // #408 (restore RPO/RTO) has landed, so restore-rpo is no longer a gap.
   const gaps = gapsOf(ADOPTION);
   assert.deepEqual(
     gaps,
@@ -196,10 +197,9 @@ test("the five gap rules map to their four tracking Issues, exactly", () => {
       "missing-attestation": "#405",
       "invariant-breach": "#407",
       "missing-telemetry": "#407",
-      "restore-rpo": "#408",
       "canary-missing": "#406",
     },
-    "the gap->Issue mapping drifted from the filed Stage 61b gap Issues",
+    "the gap->Issue mapping drifted from the still-open Stage 61b gap Issues",
   );
 });
 
@@ -228,10 +228,18 @@ test("no canary telemetry/invariant evaluation exists yet", () => {
   assert.equal(ADOPTION["missing-telemetry"].gap, "#407");
 });
 
-test("restore RPO/RTO is not measured yet: the drill records no timing", () => {
+test("restore RPO/RTO is now measured: the drill records both, and restore-rpo maps to a real mechanism (#408)", () => {
+  // The bidirectional coupling working forward: #408 added RPO/RTO to the
+  // drill, so this pin flipped from "gap, no timing" to "measured", and the
+  // ADOPTION entry had to move off `gap` onto a real on-disk path in the
+  // same change.
   const drill = read(".github/workflows/ops-restore-drill.yml");
-  assert.doesNotMatch(drill, /\bRPO\b|\bRTO\b|restore_rpo_ok|restore_rto_ok/);
-  assert.equal(ADOPTION["restore-rpo"].gap, "#408");
+  assert.match(drill, /rpo_seconds="\$\(\( now_epoch - snapshot_epoch_value \)\)"/);
+  assert.match(drill, /rto_seconds="\$\(\( restore_end - restore_start \)\)"/);
+  assert.match(drill, /RPO \(s\)/);
+  assert.match(drill, /RTO \(s\)/);
+  assert.equal(ADOPTION["restore-rpo"].path, ".github/workflows/ops-restore-drill.yml");
+  assert.ok(!ADOPTION["restore-rpo"].gap, "restore-rpo is no longer a gap");
 });
 
 test("the aggregate posture is honest: the earliest unmet proof REFUSES, never a false PROMOTE", () => {
