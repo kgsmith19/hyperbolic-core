@@ -65,9 +65,11 @@ export const RULE_VERDICTS = {
   "clean-promote": "PROMOTE",
 };
 
-// The four Stage 61b gap Issues filed for the mechanisms hyperbolic-core
-// does not have yet. Any `gap` in ADOPTION must be one of these.
-export const GAP_ISSUES = ["#405", "#406", "#407", "#408"];
+// The Stage 61b gap Issues still open for mechanisms hyperbolic-core does not
+// have yet. Any `gap` in ADOPTION must be one of these. #408 (restore
+// RPO/RTO) has since landed and is no longer a gap — restore-rpo now maps to a
+// real mechanism below.
+export const GAP_ISSUES = ["#405", "#406", "#407"];
 
 // One hyperbolic-core mechanism per frozen 61a rule. Each entry names EXACTLY
 // ONE of:
@@ -97,7 +99,7 @@ export const ADOPTION = {
   },
   "unusable-backup": {
     path: ".github/workflows/ops-restore-drill.yml",
-    note: "the monthly drill proves a real restore (check -> restore -> row-count) against both restic repositories from the Storage Box; RPO/RTO measurement and live-run repair are tracked separately in #408.",
+    note: "the monthly drill proves a real restore (check -> restore -> row-count) against both restic repositories from the Storage Box, now with measured RPO/RTO per repository (#408); live execution still needs the owner-side Infisical OIDC subject + RESTIC_BACKUP_ENABLED.",
   },
   "missing-attestation": {
     gap: "#405",
@@ -120,8 +122,8 @@ export const ADOPTION = {
     note: "verification evidence binds to the exact head (expectedHeadOid arming, Stage 60b #389; llm-review-recheck re-runs a moved head); a stale verdict is never trusted. Canary-window freshness specifically arrives with #406/#407.",
   },
   "restore-rpo": {
-    gap: "#408",
-    note: "GAP: the restore drill proves restore WORKS (see unusable-backup) but does not yet MEASURE restore_rpo_ok/restore_rto_ok; the PROMOTE-on-measured-RPO/RTO path is tracked in #408.",
+    path: ".github/workflows/ops-restore-drill.yml",
+    note: "the monthly drill now MEASURES and records restore RPO (latest-snapshot age) and RTO (restore-to-usable wall-clock) per repository (#408 landed); the PROMOTE-on-measured-RPO/RTO path rests on recorded facts. Live execution still needs the owner-side Infisical OIDC subject + RESTIC_BACKUP_ENABLED.",
   },
   "mold-unqualified": {
     path: "docs/ops/stage61b-release-proofbed.test.mjs",
