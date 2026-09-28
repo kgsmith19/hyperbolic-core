@@ -12,13 +12,13 @@ test("deploy discovery covers every manifest-owned migration directory", () => {
   assert.match(workflow, /\^apps\/toolbelt\/\(\.\*\/\)\?supabase\/migrations\//);
 });
 
-test("all eight deploy jobs plus the migrations call, the smoke call, and the tag-release job retain the explicit production gate", () => {
+test("all eight deploy jobs plus the migrations call, the smoke call, the tag-release job, and the canary-observe job retain the explicit production gate", () => {
   // 8 build/deploy jobs (issue #185 adds build-broker/deploy-broker) +
   // migrate-platform (issue #135) + the post-deploy smoke call (issue
-  // #143) + tag-release (issue #189): every prod-touching job carries the
-  // gate.
+  // #143) + tag-release (issue #189) + canary-observe (issue #407): every
+  // prod-touching job carries the gate.
   const occurrences = workflow.match(/vars\.DEPLOY_ENABLED == 'true'/g) ?? [];
-  assert.equal(occurrences.length, 11);
+  assert.equal(occurrences.length, 12);
 });
 
 test("production migrations cannot be dispatched from a feature ref", () => {

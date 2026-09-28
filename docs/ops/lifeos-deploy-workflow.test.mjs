@@ -21,12 +21,15 @@ const backendJob = workflow.slice(
 );
 const uiJob = workflow.slice(workflow.indexOf("  deploy-ui:"));
 
-test("both deploy jobs carry BOTH production gates and the main-ref guard", () => {
+test("both deploy jobs and the canary-observe job carry BOTH production gates and the main-ref guard", () => {
+  // canary-observe (#407) is prod-touching (it reads release evidence and
+  // can keep the run red), so it carries the same double gate.
   // The double gate is the two-writers race breaker: LIFEOS_DEPLOY_ENABLED
   // stays unset until the standalone repo's pipeline is switched off, so this
   // workflow is provably inert until the ordered cutover. Losing either gate
   // on either job reopens the race (or deploys from a disabled repo).
-  for (const job of [backendJob, uiJob]) {
+  const observeJob = workflow.slice(workflow.indexOf("  canary-observe:"));
+  for (const job of [backendJob, uiJob, observeJob]) {
     assert.match(job, /vars\.DEPLOY_ENABLED == 'true'/);
     assert.match(job, /vars\.LIFEOS_DEPLOY_ENABLED == 'true'/);
     assert.match(job, /github\.ref == 'refs\/heads\/main'/);
