@@ -81,7 +81,7 @@ decision; technical risks may be stated once, concretely, without obstruction.
 | Information | Source of truth |
 | --- | --- |
 | Agent and engineering rules | `AGENTS.md` (this file) |
-| Claude / Gemini compatibility | `CLAUDE.md` / `GEMINI.md` (import-only) |
+| Claude / Gemini compatibility | `GEMINI.md` (thin `@AGENTS.md` adapter; no root `CLAUDE.md` — Claude Code reads `AGENTS.md` natively) |
 | Repository facts and exact commands | `project.yaml` |
 | Per-app facts and commands | that app's own `AGENTS.md` / `project.yaml` under `apps/<name>/` |
 | Work intent and acceptance criteria | GitHub Issue |
@@ -296,8 +296,10 @@ unrelated cleanup. Do not enforce arbitrary global limits on LOC, file length, o
 ## Documentation and handoff
 
 Keep `README.md`, this `AGENTS.md`, and `project.yaml` consistent with actual behavior in the
-same PR as the change. `CLAUDE.md` and `GEMINI.md` contain only the import line; never duplicate
-policy inside a provider adapter.
+same PR as the change. There is no root `CLAUDE.md` (Claude Code reads `AGENTS.md` natively);
+`GEMINI.md` contains only the import line, retained solely because Antigravity/Gemini's native
+`AGENTS.md` read is unconfigured on this harness — never duplicate policy inside a provider
+adapter.
 
 When stopping before a PR exists, leave a Work State comment on the Issue: branch, exact head,
 completed, remaining, current failure, last verified command, exact next command. Once a PR

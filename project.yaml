@@ -79,7 +79,7 @@ ci:
       action: .github/actions/{verify-secrets,verify-repo-policy,verify-pr-description}
       gate: "Repository Standards"
       covers: whole repo, every PR — no path filter; leaked-credential scan,
-        repo structure (CLAUDE.md/GEMINI.md/AGENTS.md/action pinning/YAML
+        repo structure (no-root-CLAUDE.md/GEMINI.md-adapter/AGENTS.md/action pinning/YAML
         validity/whitespace), PR body vs PULL_REQUEST_TEMPLATE.md's required
         sections, and exact-head consistency. Repository-wide concerns only
         — no app-specific engineering check (lint, typecheck, build,
