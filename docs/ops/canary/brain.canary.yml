@@ -1,0 +1,17 @@
+# See shell.canary.yml header for the shape contract + edit rules.
+unit: brain
+exposure: 0.01
+baseline: previous release tag (ghcr.io image sha-tag diff)
+window_hours: 24
+invariants:
+  - name: brain-health-ok
+    signal: platform-smoke /api/brain/health probe
+    halt_if: any probe failure during window
+  - name: brain-inference-latency-bounded
+    signal: brain inference p95 latency (G3 telemetry)
+    halt_if: p95 > 2x baseline for 15 consecutive minutes
+  - name: brain-error-rate-stable
+    signal: brain 5xx rate (G3 telemetry)
+    halt_if: 5xx rate > 1% over any 15-minute bucket
+success: all smoke probes green for the full window and no halt threshold tripped
+halt: any invariant breach halts promotion; previous image tag stays live

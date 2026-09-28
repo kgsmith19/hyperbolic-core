@@ -1,0 +1,14 @@
+# See shell.canary.yml header for the shape contract + edit rules.
+unit: lifeos-ui
+exposure: 0.01
+baseline: previous release tag (lifeos-ui bundle manifest diff)
+window_hours: 24
+invariants:
+  - name: lifeos-ui-index-serves
+    signal: platform-smoke /life/ index probe
+    halt_if: any probe failure during window
+  - name: lifeos-ui-capture-route-renders
+    signal: platform-smoke /life/capture document-route probe
+    halt_if: any probe failure during window
+success: all smoke probes green for the full window and no halt threshold tripped
+halt: any invariant breach halts promotion; previous bundle stays live
