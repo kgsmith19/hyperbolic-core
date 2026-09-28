@@ -152,10 +152,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # G1 (#405): id-token:write lets attest-build-provenance sign the SLSA
-    # statement with this job's own OIDC identity (no long-lived secret).
+    # statement with this job's own OIDC identity (no long-lived secret);
+    # attestations:write lets it persist the statement via the API.
     permissions:
       contents: read
       id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -381,6 +383,11 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # G1 (#405 hotfix): attest-build-provenance needs an OIDC token
+      # (id-token:write) and the attestations API scope
+      # (attestations:write) on each image-build job.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -607,6 +614,11 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # G1 (#405 hotfix): attest-build-provenance needs an OIDC token
+      # (id-token:write) and the attestations API scope
+      # (attestations:write) on each image-build job.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -808,6 +820,11 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # G1 (#405 hotfix): attest-build-provenance needs an OIDC token
+      # (id-token:write) and the attestations API scope
+      # (attestations:write) on each image-build job.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
