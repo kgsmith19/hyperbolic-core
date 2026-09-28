@@ -1,0 +1,44 @@
+# Release canary declaration (G2, issue #406) — READ THIS BEFORE EDITING
+#
+# One file per production deploy unit. Each file declares the canary the
+# Mold's `canary-missing` HOLD rule evaluates: exposure, baseline,
+# observation window, 2–5 named invariants, and success/halt thresholds.
+# Observing these invariants from real telemetry is G3 (#407) — this file
+# only makes the declaration exist and be validated.
+#
+# SHAPE CONTRACT (pinned by docs/ops/canary-declaration.test.mjs):
+#   unit:         deploy unit name (matches the file name)
+#   exposure:     fraction of traffic on the new release during canary
+#                 (0 < exposure <= 1; start small, e.g. 0.01)
+#   baseline:     what the canary is compared against (e.g. previous tag)
+#   window_hours: observation window in hours (> 0, e.g. 24)
+#   invariants:   2–5 named invariants, each with:
+#     name:       stable identifier (letters, digits, dashes, underscores)
+#     signal:     where the signal comes from (read by G3 telemetry)
+#     halt_if:    threshold expression — breach halts promotion (G3 enforces)
+#   success:      promotion criterion evaluated at window end
+#   halt:         halt criterion evaluated continuously during the window
+#
+# EDIT RULES:
+# - Keep 2–5 invariants. Fewer than 2 is not a canary; more than 5 is a
+#   dashboard, not a gate.
+# - Every invariant needs a halt_if. An invariant without a halt threshold
+#   is an observation, not a gate.
+# - Thresholds must be concrete (numbers, not "much worse"). G3 evaluates
+#   these against real telemetry; vague thresholds cannot be evaluated.
+unit: shell
+exposure: 0.01
+baseline: previous release tag (shell-dist manifest diff empty beyond version)
+window_hours: 24
+invariants:
+  - name: shell-healthz-ok
+    signal: platform-smoke /healthz probe
+    halt_if: any probe failure during window
+  - name: shell-index-serves-bundle
+    signal: platform-smoke / index bundle probe
+    halt_if: any probe failure during window
+  - name: shell-login-route-renders
+    signal: platform-smoke /login document-route probe
+    halt_if: any probe failure during window
+success: all smoke probes green for the full window
+halt: any invariant breach halts promotion; previous tag stays live

@@ -518,3 +518,17 @@ jobs:
           set -euo pipefail
           docs/ops/tag-release.sh lifeos-backend "$BACKEND_RESULT" "$SHA"
           docs/ops/tag-release.sh lifeos-ui "$UI_RESULT" "$SHA"
+      # G2 (#406, round-1 review): per-release canary stamp, mirroring
+      # deploy.yml — the tag carries the declaration the Mold evaluates.
+      - name: Stamp the canary declaration onto each release tag (G2, issue #406)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          BACKEND_RESULT: ${{ needs.deploy-backend.result }}
+          UI_RESULT: ${{ needs.deploy-ui.result }}
+        run: |
+          set -euo pipefail
+          docs/ops/stamp-canary.sh lifeos-backend "$BACKEND_RESULT" "$SHA"
+          docs/ops/stamp-canary.sh lifeos-ui "$UI_RESULT" "$SHA"

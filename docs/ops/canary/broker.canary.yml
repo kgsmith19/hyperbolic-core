@@ -1,0 +1,16 @@
+# See shell.canary.yml header for the shape contract + edit rules.
+# The broker is loopback-only (no nginx route): its signals are container-
+# local (docker exec / loopback probes), not platform-smoke origin probes.
+unit: broker
+exposure: 0.01
+baseline: previous release tag (ghcr.io image sha-tag diff)
+window_hours: 24
+invariants:
+  - name: broker-port-listening
+    signal: container-local :8300 listen check
+    halt_if: port not listening at any check during window
+  - name: broker-policy-loads
+    signal: broker startup log (broker-policy.json parsed, no error)
+    halt_if: any policy-load error during window
+success: loopback checks green for the full window and no halt threshold tripped
+halt: any invariant breach halts promotion; previous image tag stays live
