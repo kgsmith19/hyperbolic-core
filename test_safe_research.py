@@ -405,7 +405,8 @@ Topic 3:
         result = run_search(
             topic="Solid state battery degradation",
             watchlist=WATCHLIST,
-            options=SearchOptions(max_depth=1, max_documents=2, max_duration_sec=30),
+            options=SearchOptions(max_depth=1, max_documents=2, max_duration_sec=30,
+                                  query_rewrite=False),
             collector=mock_collector,
         )
 

@@ -31,6 +31,9 @@ function collectOptionsFromForm() {
         rerank_keep: parseInt(document.getElementById('rerank-keep')?.value || '12', 10),
         citation_expansion: document.getElementById('citation-expansion') ? Boolean(document.getElementById('citation-expansion').checked) : true,
         graph_prioritization: document.getElementById('graph-prioritization') ? Boolean(document.getElementById('graph-prioritization').checked) : true,
+        query_rewrite: document.getElementById('query-rewrite') ? Boolean(document.getElementById('query-rewrite').checked) : true,
+        hyde_queries: document.getElementById('hyde-queries') ? Boolean(document.getElementById('hyde-queries').checked) : true,
+        claim_verification: document.getElementById('claim-verification') ? Boolean(document.getElementById('claim-verification').checked) : true,
         concurrency: parseInt(document.getElementById('concurrency')?.value || '4', 10),
         openai_model: document.getElementById('openai-model')?.value || 'gpt-4o-mini',
         concealer_model: document.getElementById('concealer-model')?.value || document.getElementById('openai-model')?.value || 'gpt-4o-mini',
@@ -333,7 +336,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         // Defaults are optional
     }
 
-    const inputsToWatch = ['openai-model', 'concealer-model', 'deep-model', 'reasoning-effort', 'max-docs', 'max-depth', 'max-duration-min', 'max-gap-rounds', 'topic', 'blind-watchlist', 'decoy-queries', 'ai-planning', 'ai-summary', 'conceal-process', 'chunk-documents', 'rerank-results', 'citation-expansion', 'graph-prioritization'];
+    const inputsToWatch = ['openai-model', 'concealer-model', 'deep-model', 'reasoning-effort', 'max-docs', 'max-depth', 'max-duration-min', 'max-gap-rounds', 'topic', 'blind-watchlist', 'decoy-queries', 'ai-planning', 'ai-summary', 'conceal-process', 'chunk-documents', 'rerank-results', 'citation-expansion', 'graph-prioritization', 'query-rewrite', 'hyde-queries', 'claim-verification'];
     inputsToWatch.forEach(id => {
         const el = document.getElementById(id);
         if (el) {

@@ -13,6 +13,10 @@ from backend.research.research_pipeline import (
     run_search,
     run_to_dict,
 )
+from backend.research.query_rewriter import (
+    multiquery_variants,
+    hyde_draft_queries,
+)
 from backend.research.cost_estimator import (
     CostTracker,
     SpendLimitExceededError,
@@ -37,6 +41,8 @@ from backend.research.explorer import explore
 
 __all__ = [
     "expand_topic_queries",
+    "multiquery_variants",
+    "hyde_draft_queries",
     "propose_gap_queries",
     "run_search",
     "run_to_dict",

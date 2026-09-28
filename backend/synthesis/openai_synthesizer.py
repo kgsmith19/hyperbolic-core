@@ -44,7 +44,8 @@ def summarize_with_openai(
     watchlist: list[str],
     model: str = "gpt-4o-mini",
     reasoning_effort: str | None = None,
-    cost_tracker=None
+    cost_tracker=None,
+    verification: dict | None = None,
 ) -> str:
     """Generate a structured sourced research brief using OpenAI.
 
@@ -73,6 +74,19 @@ def summarize_with_openai(
         return clean_summary
 
     evidence_text = _format_sources(evidence, watchlist)
+    verification_block = ""
+    if verification:
+        try:
+            from backend.synthesis.claim_verifier import verification_brief
+            brief_text = verification_brief(verification)
+            if brief_text:
+                verification_block = (
+                    "\nPre-computed cross-source claim check (local analysis of the "
+                    "evidence above; treat contested items as disagreements to report, "
+                    "verified items as safe to cite):\n" + brief_text + "\n"
+                )
+        except Exception:
+            verification_block = ""
     prompt = (
         f"You are a research analyst. Write a sourced brief for the topic below using "
         f"ONLY the provided sanitized evidence. Cite sources inline as [1], [2], etc. "
@@ -80,7 +94,8 @@ def summarize_with_openai(
         f"not present in the evidence. If the evidence is thin on some aspect, say so "
         f"under open questions rather than guessing.\n\n"
         f"Topic: {topic}\n\n"
-        f"Evidence:\n{evidence_text}\n\n"
+        f"Evidence:\n{evidence_text}\n"
+        f"{verification_block}\n"
         f"Format your brief exactly as:\n"
         f"## Executive Summary\n(2-3 sentence overview)\n\n"
         f"## Key Findings\n(bulleted findings, each with [n] citations)\n\n"

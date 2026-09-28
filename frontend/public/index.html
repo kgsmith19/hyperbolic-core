@@ -132,6 +132,21 @@
                             <span class="label-desc">On-topic hops outrank drift; gaps come from the graph.</span></span>
                             <input type="checkbox" id="graph-prioritization" checked onchange="updatePreRunEstimate()">
                         </label>
+                        <label class="switch-row" for="query-rewrite">
+                            <span><span class="switch-title">Local query variants</span>
+                            <span class="label-desc">Extra keyword angles, free and private.</span></span>
+                            <input type="checkbox" id="query-rewrite" checked onchange="updatePreRunEstimate()">
+                        </label>
+                        <label class="switch-row" for="hyde-queries">
+                            <span><span class="switch-title">HyDE draft queries</span>
+                            <span class="label-desc">Hypothetical-answer angles (cheap model, needs AI planning).</span></span>
+                            <input type="checkbox" id="hyde-queries" checked onchange="updatePreRunEstimate()">
+                        </label>
+                        <label class="switch-row" for="claim-verification">
+                            <span><span class="switch-title">Cross-check claims</span>
+                            <span class="label-desc">Corroborated vs contested claims ground the brief.</span></span>
+                            <input type="checkbox" id="claim-verification" checked onchange="updatePreRunEstimate()">
+                        </label>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
                         <label for="concurrency">Fetch this many pages at once</label>

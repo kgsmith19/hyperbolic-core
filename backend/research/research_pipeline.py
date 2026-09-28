@@ -186,6 +186,20 @@ def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token,
     evidence_dicts = _evidence_as_dicts(evidence)
     has_openai = bool(os.environ.get("OPENAI_API_KEY", "").strip())
     cancelled = bool(cancel_token is not None and cancel_token.is_set())
+    verification = None
+    if options.claim_verification and evidence_dicts:
+        try:
+            from backend.synthesis.claim_verifier import verify_evidence
+            verification = verify_evidence(evidence_dicts)
+            n_contested = len(verification.get("contested", []))
+            n_verified = len(verification.get("verified", []))
+            if progress_callback and (n_contested or n_verified):
+                progress_callback(
+                    f"Cross-checked claims: {n_verified} corroborated, "
+                    f"{n_contested} contested across sources."
+                )
+        except Exception:
+            verification = None
     if options.ai_summary and has_openai and not cancelled:
         if progress_callback:
             progress_callback(f"Writing a sourced brief with {options.deep_model}...")
@@ -197,6 +211,7 @@ def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token,
                 model=options.deep_model,
                 reasoning_effort=options.reasoning_effort,
                 cost_tracker=cost_tracker,
+                verification=verification,
             )
         except CloudCallError as err:
             if progress_callback:

@@ -274,7 +274,7 @@ class TestExpansionWiring(unittest.TestCase):
             "solid state battery electrolytes", [],
             SearchOptions(max_depth=0, max_documents=5, concurrency=1,
                           max_gap_rounds=0, citation_expansion=False,
-                          rerank_keep=2),
+                          query_rewrite=False, rerank_keep=2),
             collector=collector,
         )
         self.assertEqual(run.status, "success")

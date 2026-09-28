@@ -24,6 +24,17 @@ def plan_queries(
 
     real: list[Query] = [Query(text=topic, is_decoy=False)]
 
+    # Query rewriting: local multiquery variants ALWAYS run (no egress),
+    # so even keyless runs get wider coverage than the bare topic.
+    if options.query_rewrite:
+        try:
+            from backend.research.query_rewriter import multiquery_variants
+            for variant in multiquery_variants(topic, watchlist):
+                if variant != topic and not any(q.text == variant for q in real):
+                    real.append(Query(text=variant, is_decoy=False))
+        except Exception:
+            pass
+
     if options.ai_planning:
         import os
         if not os.environ.get("OPENAI_API_KEY", "").strip() and progress_callback:
@@ -50,6 +61,30 @@ def plan_queries(
             if any(q.text == clean for q in real):
                 continue
             real.append(Query(text=clean, is_decoy=False))
+
+        # HyDE draft queries: hypothetical-answer content words become extra
+        # angles (concealer model, chaffed when conceal_process is on).
+        if options.hyde_queries:
+            try:
+                from backend.research.query_rewriter import hyde_draft_queries
+                from backend.research.cloud_errors import CloudCallError as _CCE
+                try:
+                    hyde_qs = hyde_draft_queries(
+                        topic, watchlist,
+                        model=options.concealer_model,
+                        reasoning_effort=options.reasoning_effort,
+                        cost_tracker=cost_tracker,
+                        conceal_process=options.conceal_process,
+                    )
+                except _CCE as herr:
+                    if progress_callback:
+                        progress_callback(f"HyDE expansion failed ({herr.cause_type}). Continuing.")
+                    hyde_qs = []
+                for hq in hyde_qs:
+                    if hq != topic and not any(q.text == hq for q in real):
+                        real.append(Query(text=hq, is_decoy=False))
+            except Exception:
+                pass
 
     decoys: list[Query] = []
     if options.decoy_queries > 0:

@@ -30,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-citations", action="store_true", help="Disable OpenAlex citation-edge expansion")
     parser.add_argument("--citation-per-doc", type=int, default=5, help="Citation edges followed per academic hit")
     parser.add_argument("--no-graph", action="store_true", help="Disable concept-graph frontier prioritization")
+    parser.add_argument("--no-rewrite", action="store_true", help="Disable local multiquery variants")
+    parser.add_argument("--no-hyde", action="store_true", help="Disable HyDE hypothetical-answer draft queries")
+    parser.add_argument("--no-verify", action="store_true", help="Disable cross-source claim verification")
     parser.add_argument("--concealer-model", default="gpt-4o-mini", help="Cheap model that hides process and expands topics")
     parser.add_argument("--deep-model", default="gpt-4o", help="Deep model that writes the final brief")
     parser.add_argument("--blind-watchlist", action="store_true", help="Pseudonymize watchlist terms (weaker recall)")
@@ -61,6 +64,9 @@ def build_options(args) -> SearchOptions:
         citation_expansion=not args.no_citations,
         citation_per_doc=args.citation_per_doc,
         graph_prioritization=not args.no_graph,
+        query_rewrite=not args.no_rewrite,
+        hyde_queries=not args.no_hyde,
+        claim_verification=not args.no_verify,
         blind_watchlist=args.blind_watchlist,
         decoy_queries=args.decoys,
         ai_planning=args.ai_planning,

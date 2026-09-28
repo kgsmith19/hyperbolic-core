@@ -50,9 +50,7 @@ def invoke_model(
         kwargs["max_output_tokens"] = max_output_tokens
 
     response = client.responses.create(**kwargs)
-    output_text = getattr(response, "output_text", "") or ""
-    if not output_text and hasattr(response, "output"):
-        output_text = str(response.output or "")
+    output_text = _extract_output_text(response)
 
     if cost_tracker:
         usage = getattr(response, "usage", None)
@@ -77,6 +75,34 @@ def invoke_model(
     return output_text
 
 
+def _extract_output_text(response) -> str:
+    """Extract assistant message text from a Responses API response.
+
+    The SDK's `output_text` convenience property is reliable for plain
+    text models but can come back empty for reasoning models (gpt-5, o3,
+    o4), whose `output` list leads with a reasoning item carrying an
+    encrypted blob. The old fallback `str(response.output)` stringified
+    that raw blob straight into the user-visible brief. Instead, walk the
+    output items and concatenate only message content text parts.
+    """
+    text = getattr(response, "output_text", "") or ""
+    if text:
+        return text
+    parts: list[str] = []
+    try:
+        for item in getattr(response, "output", None) or []:
+            if getattr(item, "type", None) != "message":
+                continue
+            for block in getattr(item, "content", None) or []:
+                if getattr(block, "type", None) in ("output_text", "text"):
+                    chunk = getattr(block, "text", "") or ""
+                    if chunk:
+                        parts.append(chunk)
+    except Exception:
+        pass
+    return "\n".join(parts)
+
+
 def check_openai_key(model: str = "gpt-4o-mini") -> dict:
     """Run one minimal live call to verify the configured key works.
 
@@ -86,7 +112,7 @@ def check_openai_key(model: str = "gpt-4o-mini") -> dict:
     prompt = "Reply with the single word: ready"
     client = openai.OpenAI(api_key=get_api_key())
     response = client.responses.create(model=model, input=prompt, max_output_tokens=200)
-    output_text = (getattr(response, "output_text", "") or "").strip()
+    output_text = _extract_output_text(response).strip()
     usage = getattr(response, "usage", None)
     p_tokens = (
         (getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", None))

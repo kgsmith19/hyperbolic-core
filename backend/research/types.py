@@ -50,6 +50,14 @@ class SearchOptions:
     # Score frontier candidates by concept overlap with collected evidence.
     graph_prioritization: bool = True
 
+    # Query rewriting: local multiquery variants (always, no egress) plus
+    # HyDE hypothetical-answer draft queries (concealer model, ai_planning).
+    query_rewrite: bool = True
+    hyde_queries: bool = True
+    # Claim verification: cross-check factual claims across sources before
+    # the brief; contested items ground Tensions & Gaps (local-only).
+    claim_verification: bool = True
+
     ai_planning: bool = False
     ai_summary: bool = False
     # Model routing: the cheap concealer hides process/expands topics; the deep

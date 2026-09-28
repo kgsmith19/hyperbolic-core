@@ -64,4 +64,51 @@ def extract_clean_content(raw_html: str, max_chars: int = 4000) -> tuple[str, li
             links.append(doi_url)
 
     bounded_text = extracted_text[:max_chars].strip() if extracted_text else ""
+
+    # PDF support: trafilatura returns nothing useful for PDFs, so extract
+    # text from the raw bytes with a dependency-free latin1/decode fallback.
+    # Scanned-image PDFs yield nothing here (no OCR dependency); the caller
+    # still gets links/DOIs discovered below.
+    if (not bounded_text or len(bounded_text) < 50) and raw_html:
+        pdf_text = _extract_pdf_text_fallback(raw_html)
+        if pdf_text and len(pdf_text.strip()) >= 50:
+            bounded_text = re.sub(r"\s+", " ", pdf_text).strip()[:max_chars]
+
     return bounded_text, links
+
+
+def _extract_pdf_text_fallback(raw: str) -> str:
+    """Best-effort text from PDF bytes decoded as latin1 string."""
+    try:
+        if not raw or "%PDF" not in raw[:10]:
+            # raw may already be decoded text; still try stream extraction
+            pass
+        texts: list[str] = []
+        # Text in BT...ET blocks: literal (parenthesized) and hex <...> strings
+        for block in re.findall(r"BT(.*?)ET", raw, flags=re.DOTALL):
+            for lit in re.findall(r"\((?:\\.|[^\\()])*\)", block):
+                try:
+                    unesc = re.sub(r"\\([\\()nrt])",
+                                   lambda m: {"\\": "\\", "(": "(", ")": ")",
+                                              "n": "\n", "r": "\r", "t": "\t"}[m.group(1)],
+                                   lit[1:-1])
+                    if len(unesc.strip()) >= 2:
+                        texts.append(unesc)
+                except Exception:
+                    continue
+            for hx in re.findall(r"<([0-9A-Fa-f]{4,})>", block):
+                try:
+                    dec = bytes.fromhex(hx).decode("latin1")
+                    if len(dec.strip()) >= 2 and sum(c.isprintable() for c in dec) > len(dec) / 2:
+                        texts.append(dec)
+                except Exception:
+                    continue
+            if len(texts) > 2000:
+                break
+        joined = re.sub(r"\s+", " ", " ".join(texts)).strip()
+        # Drop obvious binary garbage: require mostly printable ASCII/Latin
+        if joined and sum(c.isprintable() for c in joined) > len(joined) * 0.7:
+            return joined
+    except Exception:
+        pass
+    return ""

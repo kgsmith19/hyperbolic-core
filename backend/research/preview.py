@@ -21,6 +21,10 @@ WARN_CHUNK = "long documents split into focused passages for rerank and synthesi
 WARN_RERANK = "top {n} candidates reranked locally before synthesis (no extra egress)"
 WARN_CITES = "citation edges followed from top academic hits (references + cited-by)"
 WARN_GRAPH = "frontier scored by concept overlap with collected evidence"
+WARN_REWRITE = "local query variants widen coverage (no egress)"
+WARN_HYDE = "HyDE draft queries from the concealer model"
+WARN_HYDE_CONCEALED = "HyDE draft queries from the chaffed concealer prompt (process hidden)"
+WARN_VERIFY = "claims cross-checked across sources before the brief (local-only)"
 
 
 def preview(topic: str, options: SearchOptions) -> SearchPreview:
@@ -43,6 +47,12 @@ def preview(topic: str, options: SearchOptions) -> SearchPreview:
         warnings.append(WARN_CITES)
     if options.graph_prioritization:
         warnings.append(WARN_GRAPH)
+    if options.query_rewrite:
+        warnings.append(WARN_REWRITE)
+    if options.hyde_queries and options.ai_planning:
+        warnings.append(WARN_HYDE_CONCEALED if options.conceal_process else WARN_HYDE)
+    if options.claim_verification:
+        warnings.append(WARN_VERIFY)
     if options.concurrency > 4:
         warnings.append(WARN_CONCURRENCY)
     if options.blind_watchlist:
