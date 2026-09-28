@@ -201,16 +201,16 @@ test("mold-unqualified: this proofbed IS hyperbolic-core's built/attacked/qualif
 
 // --- Half 3: the disclosed gaps are real gaps, and the posture is honest ---
 
-test("the three remaining gap rules map to their two still-open tracking Issues, exactly", () => {
-  // #408 (restore RPO/RTO) and #405 (build provenance/SBOM) have landed,
-  // so restore-rpo and missing-attestation are no longer gaps.
+test("the two remaining gap rules map to the one still-open tracking Issue, exactly", () => {
+  // #408 (restore RPO/RTO), #405 (build provenance/SBOM), and #406
+  // (canary declaration) have landed, so restore-rpo, missing-attestation,
+  // and canary-missing are no longer gaps. Only G3 (#407) remains.
   const gaps = gapsOf(ADOPTION);
   assert.deepEqual(
     gaps,
     {
       "invariant-breach": "#407",
       "missing-telemetry": "#407",
-      "canary-missing": "#406",
     },
     "the gap->Issue mapping drifted from the still-open Stage 61b gap Issues",
   );
@@ -242,15 +242,21 @@ test("attestation is now produced: provenance+SBOM in both deploy pipelines, and
   assert.ok(!ADOPTION["missing-attestation"].gap, "missing-attestation is no longer a gap");
 });
 
-test("no canary is declared yet, and its declaration mechanism is the tracked gap", () => {
-  // If any workflow ever declares a canary exposure/window/invariants, this
-  // pin flips and the gap entry must be replaced with a real path — that is
-  // the intended coupling, not a false failure.
-  for (const wf of ["deploy.yml", "platform-smoke.yml"]) {
-    const text = read(path.join(".github/workflows", wf));
-    assert.doesNotMatch(text, /canary_exposure|observation.window|canary.invariants/i);
-  }
-  assert.equal(ADOPTION["canary-missing"].gap, "#406");
+test("a canary is now declared per unit and stamped per release, and canary-missing maps to the real mechanism (#406)", () => {
+  // The bidirectional coupling working forward: #406 added per-unit
+  // descriptors plus the per-release stamp, so this pin flipped from
+  // "gap, no declaration" to "mechanism present", and the ADOPTION entry
+  // had to move off `gap` onto real on-disk paths in the same change.
+  // The dual-file shape is asserted exactly: `paths` names the descriptor
+  // plus the stamp script, legacy `path` stays consistent.
+  assert.deepEqual(ADOPTION["canary-missing"].paths, [
+    "docs/ops/canary/shell.canary.yml",
+    "docs/ops/stamp-canary.sh",
+  ]);
+  assert.equal(ADOPTION["canary-missing"].path, "docs/ops/stamp-canary.sh");
+  assert.ok(!ADOPTION["canary-missing"].gap, "canary-missing is no longer a gap");
+  const deploy = read(path.join(".github/workflows", "deploy.yml"));
+  assert.match(deploy, /stamp-canary\.sh shell /);
 });
 
 test("no canary telemetry/invariant evaluation exists yet", () => {

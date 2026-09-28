@@ -70,7 +70,7 @@ export const RULE_VERDICTS = {
 // RPO/RTO) and #405 (build provenance/SBOM) have since landed and are no
 // longer gaps — restore-rpo and missing-attestation now map to real
 // mechanisms below.
-export const GAP_ISSUES = ["#406", "#407"];
+export const GAP_ISSUES = ["#407"];
 
 // One hyperbolic-core mechanism per frozen 61a rule. Each entry names EXACTLY
 // ONE of:
@@ -138,8 +138,14 @@ export const ADOPTION = {
     note: "hyperbolic-core's Release Mold is built/attacked/qualified by this proofbed itself: the frozen 61a contract transcribed with provenance, behavioral pins against the real topology, and targeted-mutation RED sensitivity recorded in the PR.",
   },
   "canary-missing": {
-    gap: "#406",
-    note: "GAP: no canary is declared (exposure, baseline, observation window, 2-5 invariants, success/halt thresholds); the Mold HOLDs until #406 adds a declaration.",
+    // Dual-file mechanism (round-1 review): per-unit descriptors +
+    // per-release stamp. The disk-existence oracle checks every `paths` entry.
+    paths: [
+      "docs/ops/canary/shell.canary.yml",
+      "docs/ops/stamp-canary.sh",
+    ],
+    path: "docs/ops/stamp-canary.sh",
+    note: "every production unit declares a canary (exposure, baseline, 24h window, 2-5 invariants with halt thresholds; docs/ops/canary/*.canary.yml) and every release tag carries its declaration via a stamped canary Release (#406 landed). Observing the invariants from real telemetry is G3 (#407); declaration alone does not promote.",
   },
   "clean-promote": {
     path: "docs/ops/stage61b-release-proofbed-lib.mjs",
