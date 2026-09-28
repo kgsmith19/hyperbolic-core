@@ -150,6 +150,7 @@ class ResearchFrontier:
         """Release a failed fetch without consuming document budget. Keep the URL visited so it is not retried; refund the domain slot."""
         with self._lock:
             self.in_flight_urls.discard(url)
+            self.visited_urls.add(url)
             domain = self.get_domain(url)
             if domain and self.domain_counts.get(domain, 0) > 0:
                 self.domain_counts[domain] -= 1

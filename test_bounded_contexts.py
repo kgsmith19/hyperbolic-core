@@ -238,9 +238,11 @@ class TestDirectBoundedContexts(unittest.TestCase):
         self.assertNotIn("https://example.org/concurrent_worker_1", frontier.in_flight_urls)
         self.assertIn("https://example.org/concurrent_worker_1", frontier.visited_urls)
 
-        # Worker 2 encounters an error and releases candidate
+        # Worker 2 encounters an error and releases candidate.
+        # The URL stays visited (never retried) but leaves in-flight.
         frontier.release_candidate("https://example.org/concurrent_worker_2")
         self.assertNotIn("https://example.org/concurrent_worker_2", frontier.in_flight_urls)
+        self.assertIn("https://example.org/concurrent_worker_2", frontier.visited_urls)
 
     def test_failed_fetch_refunds_domain_budget(self):
         frontier = ResearchFrontier(max_depth=1, max_documents=10, max_per_domain=1)
