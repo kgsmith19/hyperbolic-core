@@ -1,0 +1,122 @@
+name: "Canary Observe"
+
+# G3 (issue #407): observes the G2-declared canary invariants from REAL
+# telemetry and halts promotion on breach. Consumes the declarations in
+# docs/ops/canary/*.canary.yml; evaluates each shipped unit's smoke-anchored
+# invariants against the run's own post-deploy smoke verdict plus the
+# release/canary-release evidence; a breach FAILS the job (halt), and a
+# missing series FAILS CLOSED (missing-telemetry).
+#
+# Telemetry sources (real, no stubs):
+#   1. The calling pipeline's smoke result (needs.<smoke-job>.result) —
+#      every smoke-anchored invariant (shell-*, handler-healthz, brain,
+#      lifeos probes) reads this verdict. A smoke failure IS an invariant
+#      breach for every shipped unit whose declaration names a smoke signal.
+#   2. The stamped canary Release (canary/<unit>/<date>-<sha>, created by
+#      stamp-canary.sh) — proves the declaration existed at release time;
+#      absence for a shipped unit fails closed (declaration missing).
+#   3. G3-telemetry signals (latency/error-rate invariants) — evaluated as
+#      UNOBSERVED in this slice: the telemetry pipeline does not exist yet,
+#      so any declaration naming a non-smoke signal records the invariant
+#      as unobserved rather than green. Unobserved is reported, never
+#      promoted past: the job still passes the smoke-anchored invariants
+#      but the summary marks unobserved signals explicitly, and the
+#      proofbed discloses them. Claiming green on an unmeasured signal
+#      would be the false-green this Issue's R3 exists to prevent.
+#
+# Called with workflow_call from the tail of deploy.yml and
+# lifeos-deploy.yml AFTER tag-release (the canary Releases must exist
+# before they can be read). A red observe keeps the run red — the breach
+# is visible and promotion (the tag) is already withheld by smoke, with
+# the observe verdict as the canary-specific halt record.
+#
+# No new secret: reads via github.token (releases API, read-only).
+
+on:
+  workflow_call:
+    inputs:
+      shell_result:
+        description: Result of the deploy-shell job (success/skipped/failure).
+        required: true
+        type: string
+      llm_handler_result:
+        description: Result of the deploy-llm-handler job.
+        required: false
+        default: skipped
+        type: string
+      brain_result:
+        description: Result of the deploy-brain job.
+        required: false
+        default: skipped
+        type: string
+      broker_result:
+        description: Result of the deploy-broker job.
+        required: false
+        default: skipped
+        type: string
+      backend_result:
+        description: Result of the deploy-backend job (lifeos pipeline).
+        required: false
+        default: skipped
+        type: string
+      ui_result:
+        description: Result of the deploy-ui job (lifeos pipeline).
+        required: false
+        default: skipped
+        type: string
+      smoke_result:
+        description: Result of the run's post-deploy smoke job.
+        required: true
+        type: string
+      sha:
+        description: The exact deployed commit SHA.
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Deployed SHA to observe canaries for.
+        required: true
+        type: string
+      smoke_result:
+        description: Smoke verdict to evaluate against (for on-demand re-checks).
+        required: false
+        default: success
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary-observe
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    name: Evaluate canary invariants
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Observe · Evaluate declared invariants from real telemetry (G3, issue #407)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ inputs.sha }}
+          SHELL_RESULT: ${{ inputs.shell_result }}
+          LLM_HANDLER_RESULT: ${{ inputs.llm_handler_result }}
+          BRAIN_RESULT: ${{ inputs.brain_result }}
+          BROKER_RESULT: ${{ inputs.broker_result }}
+          BACKEND_RESULT: ${{ inputs.backend_result }}
+          UI_RESULT: ${{ inputs.ui_result }}
+          SMOKE_RESULT: ${{ inputs.smoke_result }}
+        run: |
+          set -euo pipefail
+          docs/ops/canary-observe.sh

@@ -1063,6 +1063,31 @@ jobs:
       id-token: write
     uses: ./.github/workflows/platform-smoke.yml
 
+  canary-observe:
+    name: Observe canary invariants (G3)
+    # After smoke AND tag-release: the canary Releases must exist before
+    # they can be read, and a red smoke is itself the breach signal. A red
+    # observe keeps the run red — the halt is visible.
+    needs: [deploy-shell, deploy-llm-handler, deploy-brain, deploy-broker, smoke, tag-release]
+    if: >-
+      always() &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      (needs.deploy-shell.result == 'success' ||
+       needs.deploy-llm-handler.result == 'success' ||
+       needs.deploy-brain.result == 'success' ||
+       needs.deploy-broker.result == 'success')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/canary-observe.yml
+    with:
+      shell_result: ${{ needs.deploy-shell.result }}
+      llm_handler_result: ${{ needs.deploy-llm-handler.result }}
+      brain_result: ${{ needs.deploy-brain.result }}
+      broker_result: ${{ needs.deploy-broker.result }}
+      smoke_result: ${{ needs.smoke.result }}
+      sha: ${{ github.sha }}
+
   tag-release:
     name: Tag successful releases
     # Only once the run's overall post-deploy smoke actually succeeded --
