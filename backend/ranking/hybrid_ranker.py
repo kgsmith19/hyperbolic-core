@@ -35,7 +35,8 @@ def rank_items(query: str, items: list, text_key_fn=None) -> list:
 
     if text_key_fn is None:
         text_key_fn = lambda it: (
-            f"{it.get('title', '')} {it.get('snippet', '')} {it.get('content', '')} {it.get('excerpt', '')}"
+            f"{it.get('title') or ''} {it.get('snippet') or ''} "
+            f"{it.get('content') or ''} {it.get('excerpt') or ''}"
         )
 
     corpus = [text_key_fn(item) for item in dicts]
@@ -66,14 +67,14 @@ def rank_items(query: str, items: list, text_key_fn=None) -> list:
     cls = type(items[0])
     return [
         cls(
-            title=d.get("title", ""),
-            url=d.get("url", ""),
-            snippet=d.get("snippet", ""),
-            excerpt=d.get("excerpt", "") or d.get("content", ""),
-            doi=d.get("doi", ""),
-            depth=int(d.get("depth", 0) or 0),
-            source=d.get("source", ""),
-            score=float(d.get("score", 0.0) or 0.0),
+            title=d.get("title") or "",
+            url=d.get("url") or "",
+            snippet=d.get("snippet") or "",
+            excerpt=d.get("excerpt") or d.get("content") or "",
+            doi=d.get("doi") or "",
+            depth=int(d.get("depth") or 0),
+            source=d.get("source") or "",
+            score=float(d.get("score") or 0.0),
         )
         for d in ranked_items
     ]

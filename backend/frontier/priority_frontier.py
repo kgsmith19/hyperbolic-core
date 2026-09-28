@@ -82,15 +82,17 @@ class ResearchFrontier:
         source_url: str = ""
     ) -> bool:
         """Add candidate to priority frontier if within budget, unvisited, and not in-flight."""
-        if not url or depth > self.max_depth:
+        if not url or not isinstance(url, str) or depth > self.max_depth:
             return False
 
         clean_url = url.strip()
+        if not clean_url:
+            return False
         with self._lock:
             if clean_url in self.visited_urls or clean_url in self.in_flight_urls:
                 return False
 
-            if doi and doi.strip().lower() in self.visited_dois:
+            if doi and isinstance(doi, str) and doi.strip().lower() in self.visited_dois:
                 return False
 
             domain = self.get_domain(clean_url)
@@ -99,10 +101,10 @@ class ResearchFrontier:
 
             item = FrontierItem(
                 url=clean_url,
-                doi=doi.strip(),
+                doi=doi.strip() if isinstance(doi, str) else "",
                 depth=depth,
                 priority=priority,
-                source_url=source_url
+                source_url=source_url if isinstance(source_url, str) else ""
             )
 
             self.queue.append(item)
@@ -150,11 +152,12 @@ class ResearchFrontier:
         """Release a failed fetch without consuming document budget. Keep the URL visited so it is not retried; refund the domain slot."""
         with self._lock:
             self.in_flight_urls.discard(url)
-            self.visited_urls.add(url)
-            domain = self.get_domain(url)
+            if isinstance(url, str) and url:
+                self.visited_urls.add(url)
+            domain = self.get_domain(url) if isinstance(url, str) else ""
             if domain and self.domain_counts.get(domain, 0) > 0:
                 self.domain_counts[domain] -= 1
-            if doi:
+            if doi and isinstance(doi, str):
                 self.visited_dois.discard(doi.strip().lower())
 
     def record_document(self, url: str, content_bytes: int, text: str, doi: str = "") -> bool:

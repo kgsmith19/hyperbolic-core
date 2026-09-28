@@ -559,6 +559,81 @@ class TestExplorer(unittest.TestCase):
         self.assertTrue(any("solid" in u or "electrolytes" in u for u in urls))
 
 
+class TestNonePayloadHardening(unittest.TestCase):
+    """Real connector payloads carry None titles/snippets/DOIs; nothing may crash."""
+
+    def test_none_fields_survive_frontier_rank_report(self):
+        from backend.frontier.priority_frontier import ResearchFrontier
+        from backend.ranking.hybrid_ranker import rank_items
+        from backend.synthesis.report_generator import write_report
+        from backend.research.explorer import _bm25_priorities, _snippet_from_content
+
+        hits = [
+            {"title": None, "url": "https://example.com/a", "snippet": None, "doi": None},
+            {"title": None, "url": None, "snippet": None},
+            "not-a-dict",
+        ]
+        frontier = ResearchFrontier(max_depth=0, max_documents=5)
+        from backend.frontier.url_canonicalizer import canonicalize_url
+        for h in hits:
+            if isinstance(h, dict):
+                raw = h.get("url", "")
+                url = canonicalize_url(raw if isinstance(raw, str) else "")
+                if url:
+                    frontier.add_candidate(url=url, doi=h.get("doi") if isinstance(h.get("doi"), str) else "")
+        self.assertEqual(len(frontier.queue), 1)
+
+        self.assertEqual(_bm25_priorities("topic", hits), [45.0, 45.0, 45.0])
+        self.assertEqual(_snippet_from_content(None), "")
+        self.assertEqual(_snippet_from_content(""), "")
+
+        ranked = rank_items("topic", [
+            {"title": None, "url": "https://example.com/a", "snippet": None,
+             "excerpt": "text about topic here", "doi": None},
+        ])
+        self.assertEqual(len(ranked), 1)
+        self.assertIsInstance(ranked[0]["score"], float)
+
+        archive = write_report(
+            topic="None payload probe",
+            evidence=[{"title": None, "url": None, "snippet": None, "excerpt": None}],
+            summary="summary",
+            watchlist=[],
+        )
+        self.assertTrue(os.path.exists(archive))
+
+    def test_dense_embedder_coerces_none(self):
+        from backend.ranking.dense_embedder import compute_dense_scores
+        scores = compute_dense_scores("topic", [None, "real text about topic"])
+        self.assertEqual(len(scores), 2)
+        self.assertTrue(all(isinstance(s, float) for s in scores))
+
+    def test_explore_with_none_hits_collects_evidence(self):
+        from backend.research.explorer import explore
+        from backend.research.types import Query, SearchOptions
+
+        collector = MagicMock()
+        collector.send_task.side_effect = [
+            {"status": "ok", "results": [
+                {"title": None, "url": "https://example.com/a", "snippet": None, "doi": None},
+            ]},
+            {"status": "ok",
+             "content": "Findings on renewable storage and grid integration. " * 10,
+             "links": [], "bytes": 400},
+        ]
+        ev = explore(
+            [Query(text="grid storage")],
+            [],
+            SearchOptions(max_depth=0, max_documents=5, concurrency=1,
+                           max_gap_rounds=0),
+            collector=collector,
+        )
+        self.assertEqual(len(ev), 1)
+        self.assertEqual(ev[0].url, "https://example.com/a")
+        self.assertTrue(ev[0].title)
+        self.assertTrue(ev[0].snippet)
+
+
 class TestRunSearch(unittest.TestCase):
     """run_search composes agents and never ranks decoy hits."""
 

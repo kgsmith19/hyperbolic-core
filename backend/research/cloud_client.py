@@ -50,9 +50,9 @@ def invoke_model(
         kwargs["max_output_tokens"] = max_output_tokens
 
     response = client.responses.create(**kwargs)
-    output_text = getattr(response, "output_text", "")
+    output_text = getattr(response, "output_text", "") or ""
     if not output_text and hasattr(response, "output"):
-        output_text = str(response.output)
+        output_text = str(response.output or "")
 
     if cost_tracker:
         usage = getattr(response, "usage", None)

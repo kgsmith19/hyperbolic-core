@@ -11,7 +11,7 @@ import re
 
 def tokenize(text: str) -> list[str]:
     """Tokenize text into lowercase alphanumeric words."""
-    if not text:
+    if not text or not isinstance(text, str):
         return []
     return [w.lower() for w in re.findall(r"\w+", text) if len(w) > 1]
 

@@ -30,6 +30,8 @@ def _cancelled(cancel_token) -> bool:
 
 
 def _snippet_from_content(content: str) -> str:
+    if not isinstance(content, str) or not content:
+        return ""
     snippet_text = content
     if "Abstract:" in content:
         snippet_text = content.split("Abstract:")[1].strip()
@@ -45,7 +47,11 @@ def _snippet_from_content(content: str) -> str:
 
 def _bm25_priorities(topic: str, items: list[dict]) -> list[float]:
     """Map raw BM25 scores onto frontier priorities in [30, 60]."""
-    corpus = [f"{it.get('title', '')} {it.get('snippet', '')}" for it in items]
+    corpus = [
+        f"{it.get('title') or ''} {it.get('snippet') or ''}"
+        if isinstance(it, dict) else ""
+        for it in items
+    ]
     if not corpus:
         return []
     raw = compute_bm25_scores(topic, corpus)
@@ -99,13 +105,18 @@ def _seed_frontier_from_results(
     else:
         priorities = [priority] * len(results)
     for item, item_priority in zip(results, priorities):
-        can_url = canonicalize_url(item.get("url", ""))
+        if not isinstance(item, dict):
+            continue
+        raw_url = item.get("url", "")
+        can_url = canonicalize_url(raw_url if isinstance(raw_url, str) else "")
         if can_url:
-            if item.get("title"):
-                titles[can_url] = item.get("title", "")
+            title = item.get("title")
+            if isinstance(title, str) and title:
+                titles[can_url] = title
+            raw_doi = item.get("doi", "")
             frontier.add_candidate(
                 url=can_url,
-                doi=item.get("doi", ""),
+                doi=raw_doi if isinstance(raw_doi, str) else "",
                 depth=depth,
                 priority=item_priority,
                 source_url=source_url,
@@ -131,14 +142,19 @@ def _run_gap_searches(
         gap_resp = collector.send_task(gap_task, watchlist)
         if gap_resp.get("status") != "ok":
             continue
-        for g_item in gap_resp.get("results", []):
-            can_g_url = canonicalize_url(g_item.get("url", ""))
+        for g_item in gap_resp.get("results", []) or []:
+            if not isinstance(g_item, dict):
+                continue
+            raw_url = g_item.get("url", "")
+            can_g_url = canonicalize_url(raw_url if isinstance(raw_url, str) else "")
             if can_g_url:
-                if g_item.get("title"):
-                    titles[can_g_url] = g_item.get("title", "")
+                title = g_item.get("title")
+                if isinstance(title, str) and title:
+                    titles[can_g_url] = title
+                raw_doi = g_item.get("doi", "")
                 frontier.add_candidate(
                     url=can_g_url,
-                    doi=g_item.get("doi", ""),
+                    doi=raw_doi if isinstance(raw_doi, str) else "",
                     depth=1,
                     priority=45.0,
                     source_url="gap_analysis",
@@ -308,18 +324,19 @@ def _explore(queries, watchlist, options, cancel_token, collector, progress_call
                 except Exception:
                     continue
 
-                if fetch_res.get("status") != "ok":
+                if not isinstance(fetch_res, dict) or fetch_res.get("status") != "ok":
                     frontier.release_candidate(frontier_item.url, doi=frontier_item.doi)
                     continue
 
                 content = fetch_res.get("content", "")
-                if not content or len(content.strip()) < 50 or is_bot_or_js_barrier(content):
+                if not isinstance(content, str) or not content or len(content.strip()) < 50 or is_bot_or_js_barrier(content):
                     frontier.release_candidate(frontier_item.url, doi=frontier_item.doi)
                     continue
 
+                raw_bytes = fetch_res.get("bytes", len(content))
                 is_new = frontier.record_document(
                     url=frontier_item.url,
-                    content_bytes=fetch_res.get("bytes", len(content)),
+                    content_bytes=raw_bytes if isinstance(raw_bytes, int) else len(content),
                     text=content,
                     doi=frontier_item.doi,
                 )

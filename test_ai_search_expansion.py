@@ -244,6 +244,62 @@ class TestKeyCheck(unittest.TestCase):
         self.assertGreaterEqual(report["estimated_cost_usd"], 0.0)
 
 
+class TestLiveApiKey(unittest.TestCase):
+    """Real-key smoke tests: opt-in via DEEPSEARCH_LIVE=1, skipped otherwise.
+
+    These are the only tests that touch the network. They use the key from
+    the local .env (loaded via load_env_file) and spend fractions of a cent:
+    one minimal key check plus one concealed planning call. Run with:
+
+        DEEPSEARCH_LIVE=1 python -m unittest test_ai_search_expansion.TestLiveApiKey -v
+    """
+
+    def _live_key(self):
+        from backend.server import load_env_file
+        from backend.research.cloud_client import get_api_key
+        load_env_file()
+        return get_api_key()
+
+    def test_live_key_check_replies_ready(self):
+        if os.environ.get("DEEPSEARCH_LIVE") != "1":
+            self.skipTest("set DEEPSEARCH_LIVE=1 to run live-key tests")
+        key = self._live_key()
+        if not key:
+            self.skipTest("no OPENAI_API_KEY in .env")
+        report = check_openai_key(model="gpt-4o-mini")
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["model"], "gpt-4o-mini")
+        self.assertIn("ready", report["output_text"].lower())
+        self.assertGreater(report["prompt_tokens"], 0)
+        print(f"\nlive key check: {report['prompt_tokens']} in / "
+              f"{report['completion_tokens']} out (~${report['estimated_cost_usd']:.6f})")
+
+    def test_live_concealed_planning_returns_real_angles(self):
+        if os.environ.get("DEEPSEARCH_LIVE") != "1":
+            self.skipTest("set DEEPSEARCH_LIVE=1 to run live-key tests")
+        if not self._live_key():
+            self.skipTest("no OPENAI_API_KEY in .env")
+        from backend.research.cost_estimator import CostTracker
+        tracker = CostTracker(model="gpt-4o-mini", max_spend_usd=1.00)
+        queries = expand_topic_queries(
+            "solid-state battery electrolytes", [], cost_tracker=tracker
+        )
+        # Concealed default: topic first plus extracted real-block angles.
+        # Angles legitimately restate topic words (they are about the topic);
+        # concealment means the *prompt* hid which of 8 topics was real and
+        # the response carries Topic-N structure, not a bare-topic answer.
+        self.assertEqual(queries[0], "solid-state battery electrolytes")
+        self.assertGreaterEqual(len(queries), 2)
+        for q in queries[1:]:
+            self.assertTrue(len(q) > 10)
+            self.assertNotEqual(q, queries[0])
+        report = tracker.get_report()
+        self.assertGreater(report.total_tokens, 0)
+        print(f"\nlive concealed planning: {queries[1:]}\n"
+              f"spend ~${report.estimated_cost_usd:.6f} "
+              f"({report.total_tokens} tokens)")
+
+
 class TestPricing(unittest.TestCase):
     def test_o4_mini_has_own_pricing(self):
         tracker = CostTracker(model="o4-mini", max_spend_usd=100.0)

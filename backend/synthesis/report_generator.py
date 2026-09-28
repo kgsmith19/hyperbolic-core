@@ -65,10 +65,12 @@ def write_report(
         report_lines.append("No evidence found.")
     else:
         for idx, item in enumerate(evidence, start=1):
-            title = redact(item.get("title", "Untitled"), watchlist)
-            url = redact(item.get("url", ""), watchlist)
-            snippet = redact(item.get("snippet", ""), watchlist)
-            excerpt = redact(item.get("excerpt", "") or item.get("content", ""), watchlist)
+            if not isinstance(item, dict):
+                continue
+            title = redact(item.get("title") or "Untitled", watchlist)
+            url = redact(item.get("url") or "", watchlist)
+            snippet = redact(item.get("snippet") or "", watchlist)
+            excerpt = redact(item.get("excerpt") or item.get("content") or "", watchlist)
             score = item.get("score")
 
             score_tag = f" (RRF Score: {score}%)" if score else ""

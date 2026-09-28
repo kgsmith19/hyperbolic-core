@@ -9,6 +9,9 @@ import urllib.parse
 
 def canonicalize_url(url: str) -> str:
     """Strip query parameters and fragments from a URL."""
+    if not url or not isinstance(url, str):
+        return ""
+    url = url.strip()
     if not url:
         return ""
     parsed = urllib.parse.urlparse(url)

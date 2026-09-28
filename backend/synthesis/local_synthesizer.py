@@ -85,8 +85,10 @@ class LocalSynthesizer:
         key_findings = []
 
         for idx, item in enumerate(evidence[:5], start=1):
-            text = item.get("excerpt", "") or item.get("content", "")
-            if not text:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("excerpt") or item.get("content") or ""
+            if not isinstance(text, str) or not text:
                 continue
 
             sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -121,7 +123,11 @@ class LocalSynthesizer:
         stopwords = {"the", "a", "an", "and", "or", "in", "on", "of", "to", "for", "with", "at", "by", "from", "is", "are", "was", "were"}
         core_topic_words = {w for w in topic_words if w not in stopwords and len(w) > 2}
 
-        corpus_text = " ".join([it.get("excerpt", "") + " " + it.get("content", "") for it in evidence]).lower()
+        corpus_text = " ".join([
+            f"{it.get('excerpt') or ''} {it.get('content') or ''}"
+            if isinstance(it, dict) else ""
+            for it in evidence
+        ]).lower()
         corpus_words = set(re.findall(r"\w+", corpus_text))
 
         standard_angles = [

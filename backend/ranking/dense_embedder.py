@@ -22,10 +22,15 @@ def compute_dense_scores(query: str, corpus: list[str]) -> list[float]:
     if not corpus:
         return []
 
+    # Connector payloads may carry None titles/snippets; FastEmbed's
+    # tokenizer raises TypeError on None, so coerce everything to str.
+    safe_query = query if isinstance(query, str) else ""
+    safe_corpus = [doc if isinstance(doc, str) else "" for doc in corpus]
+
     if _EMBEDDER is not None:
         try:
-            q_emb = list(_EMBEDDER.embed([query]))[0]
-            doc_embs = list(_EMBEDDER.embed(corpus))
+            q_emb = list(_EMBEDDER.embed([safe_query]))[0]
+            doc_embs = list(_EMBEDDER.embed(safe_corpus))
             scores = []
             for d in doc_embs:
                 dot = float(np.dot(q_emb, d))
@@ -37,13 +42,13 @@ def compute_dense_scores(query: str, corpus: list[str]) -> list[float]:
             pass
 
     # Fallback to subword n-gram vectorizer if FastEmbed is unavailable
-    return _compute_subword_fallback_scores(query, corpus)
+    return _compute_subword_fallback_scores(safe_query, safe_corpus)
 
 
 def _compute_subword_fallback_scores(query: str, corpus: list[str]) -> list[float]:
     """Pure NumPy subword character n-gram cosine similarity fallback."""
     def get_features(text: str):
-        words = re.findall(r"\w+", text.lower())
+        words = re.findall(r"\w+", (text if isinstance(text, str) else "").lower())
         feat = list(words)
         for w in words:
             if len(w) >= 3:

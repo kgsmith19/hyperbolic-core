@@ -17,11 +17,13 @@ def _format_sources(evidence: list[dict], watchlist: list[str]) -> str:
     """Render redacted, length-capped source blocks numbered for citation."""
     blocks = []
     for idx, item in enumerate(evidence[:MAX_SOURCES], start=1):
-        title = redact(item.get("title", ""), watchlist)
-        url = redact(item.get("url", ""), watchlist)
-        snippet = redact(item.get("snippet", ""), watchlist)
+        if not isinstance(item, dict):
+            continue
+        title = redact(item.get("title") or "", watchlist)
+        url = redact(item.get("url") or "", watchlist)
+        snippet = redact(item.get("snippet") or "", watchlist)
         excerpt = redact(
-            (item.get("excerpt", "") or item.get("content", ""))[:MAX_EXCERPT_CHARS],
+            (item.get("excerpt") or item.get("content") or "")[:MAX_EXCERPT_CHARS],
             watchlist,
         )
         block = (
@@ -54,11 +56,13 @@ def summarize_with_openai(
     from backend.research.cloud_client import get_api_key, invoke_model
 
     for item in evidence:
+        if not isinstance(item, dict):
+            continue
         assert_safe_to_send(
-            item.get("excerpt", "") or item.get("content", "") or "",
+            item.get("excerpt") or item.get("content") or "",
             watchlist,
         )
-        assert_safe_to_send(item.get("title", ""), watchlist)
+        assert_safe_to_send(item.get("title") or "", watchlist)
 
     if not get_api_key():
         # 100% Air-Gapped Local SLM Sourced Synthesis (Zero external network calls)
