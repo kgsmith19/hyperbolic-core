@@ -20,12 +20,16 @@ function collectOptionsFromForm() {
         blind_watchlist: Boolean(document.getElementById('blind-watchlist')?.checked),
         decoy_queries: parseInt(document.getElementById('decoy-queries')?.value || '0', 10),
         ai_planning: Boolean(document.getElementById('ai-planning')?.checked),
+        conceal_process: document.getElementById('conceal-process') ? Boolean(document.getElementById('conceal-process').checked) : true,
         ai_summary: Boolean(document.getElementById('ai-summary')?.checked),
-        max_depth: parseInt(document.getElementById('max-depth')?.value || '2', 10),
-        max_documents: parseInt(document.getElementById('max-docs')?.value || '15', 10),
-        max_duration_sec: parseFloat(document.getElementById('max-duration')?.value || '180'),
+        max_depth: parseInt(document.getElementById('max-depth')?.value || '4', 10),
+        max_documents: parseInt(document.getElementById('max-docs')?.value || '40', 10),
+        max_duration_min: parseFloat(document.getElementById('max-duration-min')?.value || document.getElementById('max-duration')?.value / 60 || '15'),
+        max_gap_rounds: parseInt(document.getElementById('max-gap-rounds')?.value || '3', 10),
         concurrency: parseInt(document.getElementById('concurrency')?.value || '4', 10),
         openai_model: document.getElementById('openai-model')?.value || 'gpt-4o-mini',
+        concealer_model: document.getElementById('concealer-model')?.value || document.getElementById('openai-model')?.value || 'gpt-4o-mini',
+        deep_model: document.getElementById('deep-model')?.value || 'gpt-4o',
         reasoning_effort: document.getElementById('reasoning-effort')?.value || 'medium',
         max_spend_usd: parseFloat(document.getElementById('max-spend')?.value || '2.00'),
         topic: document.getElementById('topic')?.value || ''
@@ -37,6 +41,7 @@ function applyMacro(name) {
     const decoys = document.getElementById('decoy-queries');
     const plan = document.getElementById('ai-planning');
     const summary = document.getElementById('ai-summary');
+    const conceal = document.getElementById('conceal-process');
     if (!blind || !decoys || !plan || !summary) return;
 
     if (name === 'local') {
@@ -44,21 +49,25 @@ function applyMacro(name) {
         decoys.value = 0;
         plan.checked = false;
         summary.checked = false;
+        if (conceal) conceal.checked = true;
     } else if (name === 'private') {
         blind.checked = true;
         decoys.value = 3;
         plan.checked = false;
         summary.checked = false;
+        if (conceal) conceal.checked = true;
     } else if (name === 'plan') {
         blind.checked = false;
         decoys.value = 0;
         plan.checked = true;
         summary.checked = false;
+        if (conceal) conceal.checked = true;
     } else if (name === 'brief') {
         blind.checked = false;
         decoys.value = 0;
         plan.checked = true;
         summary.checked = true;
+        if (conceal) conceal.checked = true;
     }
     const confirm = document.getElementById('confirm-weaker-recall');
     if (confirm) confirm.checked = false;
@@ -319,7 +328,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         // Defaults are optional
     }
 
-    const inputsToWatch = ['openai-model', 'reasoning-effort', 'max-docs', 'max-depth', 'max-duration', 'topic', 'blind-watchlist', 'decoy-queries', 'ai-planning', 'ai-summary'];
+    const inputsToWatch = ['openai-model', 'concealer-model', 'deep-model', 'reasoning-effort', 'max-docs', 'max-depth', 'max-duration-min', 'max-gap-rounds', 'topic', 'blind-watchlist', 'decoy-queries', 'ai-planning', 'ai-summary', 'conceal-process'];
     inputsToWatch.forEach(id => {
         const el = document.getElementById(id);
         if (el) {

@@ -70,11 +70,14 @@ const UiRenderer = {
             badge.className = data.requires_confirm ? 'badge-cost' : 'badge-safe';
             badge.innerText = data.requires_confirm ? 'Needs your OK' : 'Ready';
         }
-        if (hops) hops.innerText = String(data.expected_hops ?? 2);
-        if (hopsSub) hopsSub.innerText = `stops at hop ${data.expected_hops ?? 2}`;
-        if (sources) sources.innerText = String(data.expected_sources ?? 15);
+        if (hops) hops.innerText = String(data.expected_hops ?? 4);
+        if (hopsSub) hopsSub.innerText = `stops at hop ${data.expected_hops ?? 4}`;
+        if (sources) sources.innerText = String(data.expected_sources ?? 40);
         if (sourcesSub) sourcesSub.innerText = 'corpus cap';
-        if (duration) duration.innerText = `${Math.round(data.expected_duration_sec ?? 180)}s`;
+        if (duration) {
+            const secs = data.expected_duration_sec ?? 900;
+            duration.innerText = secs >= 120 ? `${(secs / 60).toFixed(secs % 60 ? 1 : 0)}m` : `${Math.round(secs)}s`;
+        }
         if (durationSub) durationSub.innerText = 'unfinished hops drop';
         if (spend) spend.innerText = costDisplay;
         if (spendSub) spendSub.innerText = data.requires_confirm ? 'privacy tradeoff on' : 'declared spend';

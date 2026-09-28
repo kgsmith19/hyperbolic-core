@@ -12,7 +12,14 @@ def plan_queries(
     cost_tracker=None,
     progress_callback=None,
 ) -> list[Query]:
-    """Return the topic as the first real query, optional AI angles, then decoys."""
+    """Return the topic as the first real query, optional AI angles, then decoys.
+
+    When ai_planning is on, expansion runs through conceal_process: the chaffed
+    multi-topic prompt (default, process hidden from the frontier model) or the
+    bare topic (conceal_process=False, better relevance). Decoy search queries
+    are orthogonal to this: they are tagged is_decoy and discarded before
+    ranking regardless of the concealment path.
+    """
     from backend.research.cloud_errors import CloudCallError
 
     real: list[Query] = [Query(text=topic, is_decoy=False)]
@@ -25,9 +32,10 @@ def plan_queries(
             expanded = expand_topic_queries(
                 topic,
                 watchlist,
-                model=options.model,
+                model=options.concealer_model,
                 reasoning_effort=options.reasoning_effort,
                 cost_tracker=cost_tracker,
+                conceal_process=options.conceal_process,
             )
         except CloudCallError as err:
             if progress_callback:

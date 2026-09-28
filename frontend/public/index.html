@@ -60,6 +60,13 @@
                         </span>
                         <input type="checkbox" id="ai-planning" onchange="updatePreRunEstimate()">
                     </label>
+                    <label class="switch-row" for="conceal-process">
+                        <span>
+                            <span class="switch-title">Hide the search process from AI</span>
+                            <span class="label-desc">Real topic goes out hidden among decoy topics; the model can't tell what's really being researched. Off = send the bare topic (more relevant angles).</span>
+                        </span>
+                        <input type="checkbox" id="conceal-process" checked onchange="updatePreRunEstimate()">
+                    </label>
                     <label class="switch-row" for="ai-summary">
                         <span>
                             <span class="switch-title">Let AI write the summary</span>
@@ -86,15 +93,22 @@
                 <div id="params-body" class="params-grid" style="display:none;">
                     <div class="form-group" style="margin-bottom:0;">
                         <label for="max-depth">Follow links this many hops</label>
-                        <input type="number" id="max-depth" value="3" min="1" max="10">
+                        <input type="number" id="max-depth" value="4" min="1" max="10">
+                        <div class="label-desc">Providers stop at 1–2. Depth is where this tool wins.</div>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
                         <label for="max-docs">Stop after this many sources</label>
-                        <input type="number" id="max-docs" value="25" min="5" max="100">
+                        <input type="number" id="max-docs" value="40" min="5" max="200">
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
-                        <label for="max-duration">Stop after this many seconds</label>
-                        <input type="number" id="max-duration" value="180" min="30" max="1800">
+                        <label for="max-duration-min">Run up to this many minutes</label>
+                        <input type="number" id="max-duration-min" value="15" min="1" max="120">
+                        <div class="label-desc">Providers cap research around 30 min. You can go to 120.</div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="max-gap-rounds">Coverage re-checks while evidence arrives</label>
+                        <input type="number" id="max-gap-rounds" value="3" min="0" max="10">
+                        <div class="label-desc">Each round hunts missing angles. Rounds 2+ stay local (nothing new leaves the machine).</div>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
                         <label for="concurrency">Fetch this many pages at once</label>
@@ -109,7 +123,26 @@
                         </div>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
-                        <label for="openai-model">Model (only if AI is on)</label>
+                        <label for="concealer-model">Concealer model (cheap — hides process, expands topics)</label>
+                        <select id="concealer-model">
+                            <option value="gpt-4o-mini" selected>gpt-4o-mini — cheap and fast</option>
+                            <option value="gpt-4o">gpt-4o</option>
+                            <option value="gpt-5-mini">gpt-5-mini</option>
+                            <option value="o4-mini">o4-mini — reasoning</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="deep-model">Deep model (writes the final brief)</label>
+                        <select id="deep-model">
+                            <option value="gpt-4o" selected>gpt-4o — deep synthesis</option>
+                            <option value="gpt-4o-mini">gpt-4o-mini — cheap</option>
+                            <option value="gpt-5">gpt-5</option>
+                            <option value="o3-mini">o3-mini — reasoning</option>
+                            <option value="o1">o1 — deepest reasoning</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="openai-model">Legacy model (sets both unless the above are chosen)</label>
                         <select id="openai-model">
                             <option value="gpt-4o-mini" selected>gpt-4o-mini — cheap and fast</option>
                             <option value="gpt-4o">gpt-4o</option>
@@ -159,7 +192,7 @@
                     </div>
                     <div class="estimate-stat-box">
                         <div class="estimate-stat-title">Time</div>
-                        <div class="estimate-stat-val" id="est-duration">180s</div>
+                        <div class="estimate-stat-val" id="est-duration">15m</div>
                         <div class="estimate-stat-sub" id="est-duration-sub">hard stop</div>
                     </div>
                     <div class="estimate-stat-box">

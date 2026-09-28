@@ -19,13 +19,13 @@ def search_brave(query: str) -> list[dict]:
             "X-Subscription-Token": api_key,
             "User-Agent": "DeepSearch/2.0",
         }
-        params = {"q": query, "count": 10}
+        params = {"q": query, "count": 20}
         with httpx.Client(timeout=8.0) as client:
             resp = client.get(endpoint, headers=headers, params=params)
             if resp.status_code == 200:
                 raw_results = resp.json().get("web", {}).get("results", [])
                 results = []
-                for item in raw_results[:10]:
+                for item in raw_results[:20]:
                     results.append({
                         "title": item.get("title", ""),
                         "url": item.get("url", ""),

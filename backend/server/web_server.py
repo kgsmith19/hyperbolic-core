@@ -41,17 +41,22 @@ class ThreadedUIServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 
 def _options_from_payload(data: dict) -> SearchOptions:
+    legacy_model = str(data.get("openai_model", data.get("model", os.environ.get("OPENAI_MODEL", "gpt-4o-mini"))))
     return SearchOptions(
-        max_depth=int(data.get("max_depth", 2)),
-        max_documents=int(data.get("max_documents", data.get("max_docs", 15))),
-        max_duration_sec=float(data.get("max_duration_sec", 180.0)),
+        max_depth=int(data.get("max_depth", 4)),
+        max_documents=int(data.get("max_documents", data.get("max_docs", 40))),
+        max_duration_min=float(data.get("max_duration_min", data.get("max_duration_sec", 900.0)) / 60.0) if "max_duration_sec" in data and "max_duration_min" not in data else float(data.get("max_duration_min", 15.0)),
         concurrency=int(data.get("concurrency", 4)),
-        max_per_domain=int(data.get("max_per_domain", 4)),
+        max_per_domain=int(data.get("max_per_domain", 6)),
+        max_gap_rounds=int(data.get("max_gap_rounds", 3)),
         blind_watchlist=bool(data.get("blind_watchlist", False)),
         decoy_queries=int(data.get("decoy_queries", 0)),
         ai_planning=bool(data.get("ai_planning", False)),
+        conceal_process=bool(data.get("conceal_process", True)),
         ai_summary=bool(data.get("ai_summary", False)),
-        model=str(data.get("openai_model", data.get("model", os.environ.get("OPENAI_MODEL", "gpt-4o-mini")))),
+        model=legacy_model,
+        concealer_model=str(data.get("concealer_model", legacy_model)),
+        deep_model=str(data.get("deep_model", "gpt-4o" if legacy_model == "gpt-4o-mini" else legacy_model)),
         reasoning_effort=data.get("reasoning_effort"),
         max_spend_usd=float(data.get("max_spend_usd", 2.00)),
     )

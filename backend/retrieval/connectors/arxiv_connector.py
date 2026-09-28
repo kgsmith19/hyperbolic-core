@@ -12,7 +12,7 @@ def search_arxiv(query: str) -> list[dict]:
     """Search arXiv preprint server."""
     try:
         clean_q = urllib.parse.quote(query)
-        url = f"https://export.arxiv.org/api/query?search_query=all:{clean_q}&start=0&max_results=8"
+        url = f"https://export.arxiv.org/api/query?search_query=all:{clean_q}&start=0&max_results=25"
         headers = {"User-Agent": "DeepSearch/2.0"}
         with httpx.Client(timeout=8.0, follow_redirects=True) as client:
             resp = client.get(url, headers=headers)

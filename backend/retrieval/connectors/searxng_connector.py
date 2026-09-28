@@ -35,7 +35,7 @@ def search_searxng(query: str, searxng_url: str | None = None) -> list[dict]:
             if resp.status_code == 200:
                 data = resp.json()
                 results = []
-                for item in data.get("results", [])[:10]:
+                for item in data.get("results", [])[:25]:
                     results.append({
                         "title": item.get("title", ""),
                         "url": item.get("url", ""),
@@ -49,7 +49,7 @@ def search_searxng(query: str, searxng_url: str | None = None) -> list[dict]:
 
     # Resilient fallback: Query built-in DuckDuckGo + Bing meta-search aggregator
     try:
-        meta_items = aggregate_meta_search(query, max_results=10)
+        meta_items = aggregate_meta_search(query, max_results=25)
         if meta_items:
             return [
                 {

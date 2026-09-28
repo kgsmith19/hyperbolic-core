@@ -20,11 +20,46 @@ class SearchOptions:
     blind_watchlist: bool = False
     decoy_queries: int = 0
 
+    # Process concealment: hide the real research process from the frontier model.
+    # True (default) = chaffed k-topic prompt + extraction. The model sees k decoy
+    # topics plus the real one and its response never names the real topic.
+    # False = bare-topic expansion. More relevant output, no process privacy.
+    conceal_process: bool = True
+
+    # Depth continuation: how many times the engine may run gap-analysis rounds
+    # when evidence keeps arriving. Gap rounds 2..N are local-only (snippets
+    # never reach the model). Set 0 to disable mid-run gap seeding entirely.
+    # Higher values are the deep-search edge over frontier APIs: the run keeps
+    # following citations instead of stopping after one shallow pass.
+    max_gap_rounds: int = 3
+    # Wall-clock minutes for a full run. OpenAI/Anthropic/Gemini cap research
+    # at ~30 min; expose up to 120 so a local run can genuinely go further.
+    max_duration_min: float = 3.0
+    # Per-connector search hits per query. More hits = broader seed frontier.
+    max_results_per_connector: int = 10
+
     ai_planning: bool = False
     ai_summary: bool = False
+    # Model routing: the cheap concealer hides process/expands topics; the deep
+    # model synthesizes the final brief. `model` is the legacy alias (defaults
+    # to gpt-4o-mini); explicit role values always win over it. A sentinel
+    # distinguishes "deep left at default" from "deep explicitly set".
     model: str = "gpt-4o-mini"
+    concealer_model: str | None = None
+    deep_model: str | None = None
     reasoning_effort: str | None = None
     max_spend_usd: float = 2.00
+
+    def __post_init__(self):
+        # Back-compat: `model` alone routes both roles; explicit roles win.
+        # Deep role defaults to gpt-4o unless the alias says otherwise.
+        if self.concealer_model is None:
+            object.__setattr__(self, "concealer_model", self.model)
+        if self.deep_model is None:
+            object.__setattr__(
+                self, "deep_model",
+                "gpt-4o" if self.model == "gpt-4o-mini" else self.model,
+            )
 
 
 @dataclass(frozen=True)

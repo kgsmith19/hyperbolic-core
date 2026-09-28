@@ -10,7 +10,7 @@ def search_crossref(query: str) -> list[dict]:
     """Search Crossref DOI registry."""
     try:
         url = "https://api.crossref.org/works"
-        params = {"query": query, "rows": 8}
+        params = {"query": query, "rows": 25}
         headers = {"User-Agent": "DeepSearch/2.0 (mailto:research@example.org)"}
         with httpx.Client(timeout=8.0) as client:
             resp = client.get(url, params=params, headers=headers)

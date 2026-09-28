@@ -10,7 +10,7 @@ def search_openalex(query: str) -> list[dict]:
     """Search OpenAlex academic works."""
     try:
         url = "https://api.openalex.org/works"
-        params = {"search": query, "per-page": 8}
+        params = {"search": query, "per-page": 25}
         headers = {"User-Agent": "DeepSearch/2.0 (mailto:research@example.org)"}
         with httpx.Client(timeout=8.0) as client:
             resp = client.get(url, params=params, headers=headers)

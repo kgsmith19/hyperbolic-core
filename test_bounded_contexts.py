@@ -300,6 +300,7 @@ class TestDirectBoundedContexts(unittest.TestCase):
         self.assertIn('id="decoy-queries"', html_content)
         self.assertIn('id="ai-planning"', html_content)
         self.assertIn('id="ai-summary"', html_content)
+        self.assertIn('id="conceal-process"', html_content)
         self.assertIn('id="confirm-weaker-recall"', html_content)
         self.assertNotIn("selectMode('extreme')", html_content)
         self.assertNotIn("selectMode('deterministic')", html_content)
@@ -319,6 +320,42 @@ class TestSearchPreview(unittest.TestCase):
         self.assertEqual(p.expected_duration_sec, 180.0)
         self.assertEqual(p.expected_spend_usd, 0.0)
         self.assertIn("Free", p.expected_cost_display)
+
+    def test_deep_defaults_declare_minutes_and_gap_rounds(self):
+        from backend.research.types import SearchOptions
+        from backend.research.preview import preview
+
+        p = preview(
+            "solid-state batteries",
+            SearchOptions(max_depth=4, max_documents=40, max_duration_min=15.0),
+        )
+        self.assertEqual(p.expected_hops, 4)
+        self.assertEqual(p.expected_sources, 40)
+        self.assertEqual(p.expected_duration_sec, 900.0)
+        self.assertTrue(any("re-checks" in w.lower() for w in p.warnings))
+
+    def test_long_run_declares_beyond_provider_cap(self):
+        from backend.research.types import SearchOptions
+        from backend.research.preview import preview
+
+        p = preview("topic", SearchOptions(max_duration_min=60.0))
+        self.assertTrue(any("30 min" in w or "provider cap" in w.lower() for w in p.warnings))
+        short = preview("topic", SearchOptions(max_duration_min=10.0))
+        self.assertFalse(any("provider cap" in w.lower() for w in short.warnings))
+
+    def test_concealer_deep_models_change_spend_estimate(self):
+        from backend.research.types import SearchOptions
+        from backend.research.preview import preview
+
+        cheap = preview(
+            "topic",
+            SearchOptions(ai_planning=True, ai_summary=True, deep_model="gpt-4o-mini"),
+        )
+        deep = preview(
+            "topic",
+            SearchOptions(ai_planning=True, ai_summary=True, deep_model="gpt-4o"),
+        )
+        self.assertGreater(deep.expected_spend_usd, cheap.expected_spend_usd)
 
     def test_blind_requires_confirm_and_warns_weaker_recall(self):
         from backend.research.types import SearchOptions
@@ -346,6 +383,15 @@ class TestSearchPreview(unittest.TestCase):
         self.assertTrue(
             any("planning" in w.lower() or "leaves the machine" in w.lower() for w in p.warnings)
         )
+
+    def test_planning_warning_states_concealment_or_bare(self):
+        from backend.research.types import SearchOptions
+        from backend.research.preview import preview
+
+        concealed = preview("topic", SearchOptions(ai_planning=True))
+        self.assertTrue(any("chaffed" in w.lower() for w in concealed.warnings))
+        bare = preview("topic", SearchOptions(ai_planning=True, conceal_process=False))
+        self.assertFalse(any("chaffed" in w.lower() for w in bare.warnings))
 
     def test_requires_confirm_iff_blind_or_decoys(self):
         from backend.research.types import SearchOptions
@@ -611,6 +657,7 @@ class TestDeepSearchCLI(unittest.TestCase):
         self.assertIn("--blind-watchlist", help_text)
         self.assertIn("--decoys", help_text)
         self.assertIn("--ai-planning", help_text)
+        self.assertIn("--no-conceal-process", help_text)
         self.assertIn("--ai-summary", help_text)
         self.assertIn("--preview", help_text)
 

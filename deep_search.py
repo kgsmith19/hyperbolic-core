@@ -18,19 +18,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a guarded deep search with explicit options.")
     parser.add_argument("--topic", default="topic.txt", help="Path to non-sensitive topic file")
     parser.add_argument("--watchlist", default="watchlist.txt", help="Path to local sensitive watchlist file")
-    parser.add_argument("--max-depth", type=int, default=2, help="Maximum multi-hop citation depth")
-    parser.add_argument("--max-docs", type=int, default=15, help="Maximum documents to retrieve")
+    parser.add_argument("--max-depth", type=int, default=4, help="Maximum multi-hop citation depth (deep default; providers stop at 1-2)")
+    parser.add_argument("--max-docs", type=int, default=40, help="Maximum documents to retrieve")
     parser.add_argument("--concurrency", type=int, default=4, help="Concurrent exploration workers")
-    parser.add_argument("--max-duration", type=float, default=180.0, help="Maximum run duration budget in seconds")
-    parser.add_argument("--max-per-domain", type=int, default=4, help="Maximum documents per domain")
+    parser.add_argument("--max-duration-min", type=float, default=15.0, help="Maximum run budget in minutes (up to 120; providers cap ~30)")
+    parser.add_argument("--max-per-domain", type=int, default=6, help="Maximum documents per domain")
+    parser.add_argument("--max-gap-rounds", type=int, default=3, help="Coverage re-check rounds while evidence arrives (0 disables; rounds 2+ stay local)")
+    parser.add_argument("--concealer-model", default="gpt-4o-mini", help="Cheap model that hides process and expands topics")
+    parser.add_argument("--deep-model", default="gpt-4o", help="Deep model that writes the final brief")
     parser.add_argument("--blind-watchlist", action="store_true", help="Pseudonymize watchlist terms (weaker recall)")
     parser.add_argument("--decoys", type=int, default=0, help="Number of k-anonymity decoy queries")
     parser.add_argument("--ai-planning", action="store_true", help="Expand the topic into extra query angles")
+    parser.add_argument("--no-conceal-process", action="store_true", help="Send the bare topic to the model for planning (no chaffed decoy topics). Better relevance; the model sees the real process.")
     parser.add_argument("--ai-summary", action="store_true", help="Write a cloud executive brief")
     parser.add_argument("--openai-model", default="gpt-4o-mini", help="OpenAI model for planning or summary")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default=None, help="Reasoning effort for o-series models")
     parser.add_argument("--max-spend", type=float, default=2.00, help="Maximum spending cap in USD")
     parser.add_argument("--preview", action="store_true", help="Print SearchPreview and exit")
+    parser.add_argument("--check-key", action="store_true", help="Verify the OpenAI key with one minimal live call and exit")
     parser.add_argument("--yes", action="store_true", help="Skip confirm for weaker-recall options")
     parser.add_argument("--ui", action="store_true", help="Launch local browser UI")
     return parser
@@ -41,13 +46,17 @@ def build_options(args) -> SearchOptions:
         max_depth=args.max_depth,
         max_documents=args.max_docs,
         concurrency=args.concurrency,
-        max_duration_sec=args.max_duration,
+        max_duration_min=args.max_duration_min,
         max_per_domain=args.max_per_domain,
+        max_gap_rounds=args.max_gap_rounds,
         blind_watchlist=args.blind_watchlist,
         decoy_queries=args.decoys,
         ai_planning=args.ai_planning,
+        conceal_process=not args.no_conceal_process,
         ai_summary=args.ai_summary,
         model=args.openai_model,
+        concealer_model=args.concealer_model,
+        deep_model=args.deep_model,
         reasoning_effort=args.reasoning_effort,
         max_spend_usd=args.max_spend,
     )
@@ -57,7 +66,7 @@ def print_preview(topic: str, options: SearchOptions) -> None:
     p = preview(topic, options)
     print(f"Hops: {p.expected_hops}")
     print(f"Sources: {p.expected_sources}")
-    print(f"Duration: {p.expected_duration_sec:.0f}s")
+    print(f"Duration: {p.expected_duration_sec:.0f}s ({p.expected_duration_sec / 60:.1f} min)")
     print(f"Spend: {p.expected_cost_display}")
     print(f"Requires confirm: {p.requires_confirm}")
     if p.warnings:
@@ -78,6 +87,25 @@ def main() -> None:
 
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.check_key:
+        from backend.research.cloud_client import get_api_key, check_openai_key
+
+        if not get_api_key():
+            print("OPENAI_API_KEY is not set. Add it to .env or the UI settings.", file=sys.stderr)
+            return
+        print(f"Pinging OpenAI ({args.openai_model}) with a minimal call...")
+        try:
+            report = check_openai_key(model=args.openai_model)
+        except Exception as err:
+            print(f"Key check FAILED: {type(err).__name__}: {err}", file=sys.stderr)
+            return
+        print(f"Key OK. model={report['model']} reply={report['output_text']!r}")
+        print(
+            f"Tokens: {report['prompt_tokens']} in / {report['completion_tokens']} out "
+            f"(~${report['estimated_cost_usd']:.6f})"
+        )
+        return
 
     if args.ui:
         start_ui_server()

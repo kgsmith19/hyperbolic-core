@@ -1,7 +1,7 @@
 """Search pipeline: compose guard, planner, explorer, ranker, synthesis, reporter."""
 
 from datetime import datetime
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import os
 import re
 import time
@@ -30,7 +30,7 @@ def run_search(
 ) -> ResearchRun:
     """Execute one progressive-depth search and return a ResearchRun."""
     start_time = time.time()
-    cost_tracker = CostTracker(model=options.model, max_spend_usd=options.max_spend_usd)
+    cost_tracker = CostTracker(model=options.deep_model if options.model == "gpt-4o-mini" else options.model, max_spend_usd=options.max_spend_usd)
     cancel_token = cancellation_manager.create_token(run_id)
 
     if progress_callback:
@@ -60,6 +60,9 @@ def run_search(
         progress_callback=note,
     )
 
+    duration_budget = max(60.0, float(options.max_duration_min) * 60.0)
+    options = replace(options, max_duration_sec=duration_budget)
+
     evidence = explore(
         queries,
         watchlist,
@@ -67,6 +70,7 @@ def run_search(
         cancel_token=cancel_token,
         collector=collector,
         progress_callback=progress_callback,
+        cost_tracker=cost_tracker,
     )
 
     if progress_callback:
@@ -76,7 +80,7 @@ def run_search(
     clean_eval_topic = re.sub(r"\[TARGET_ENTITY_\d+\]", "target component", effective_topic)
     summary = _synthesize(
         clean_eval_topic,
-        ranked[:5],
+        ranked[:8],
         watchlist,
         options,
         cost_tracker,
@@ -170,13 +174,13 @@ def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token,
     cancelled = bool(cancel_token is not None and cancel_token.is_set())
     if options.ai_summary and has_openai and not cancelled:
         if progress_callback:
-            progress_callback(f"Writing a sourced brief with {options.model}...")
+            progress_callback(f"Writing a sourced brief with {options.deep_model}...")
         try:
             return summarize_with_openai(
                 topic,
                 evidence_dicts,
                 watchlist,
-                model=options.model,
+                model=options.deep_model,
                 reasoning_effort=options.reasoning_effort,
                 cost_tracker=cost_tracker,
             )
@@ -206,6 +210,10 @@ def _option_flags(options: SearchOptions) -> str:
         parts.append("blind")
     if options.decoy_queries:
         parts.append(f"decoys={options.decoy_queries}")
+    if options.ai_planning and not options.conceal_process:
+        parts.append("unconcealed")
+    if options.concealer_model != "gpt-4o-mini" or options.deep_model != "gpt-4o":
+        parts.append(f"concealer={options.concealer_model} deep={options.deep_model}")
     if options.ai_planning:
         parts.append("planning")
     if options.ai_summary:
