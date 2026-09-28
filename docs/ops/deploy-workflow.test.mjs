@@ -412,6 +412,10 @@ test("G1 (#405): every registry-pushed image build emits provenance+SBOM subject
   // pinned attest-build-provenance step against the build's own digest.
   for (const unit of ["llm-handler", "brain", "broker"]) {
     const buildJob = workflow.slice(workflow.indexOf(`  build-${unit}:`), workflow.indexOf(`  deploy-${unit}:`));
+    // Hotfix (#405, live-deploy failure 2026-09-28): attest needs OIDC
+    // minting AND the attestations API scope on each image-build job.
+    assert.match(buildJob, /id-token: write/, unit);
+    assert.match(buildJob, /attestations: write/, unit);
     assert.match(buildJob, /provenance: true/, unit);
     assert.match(buildJob, /sbom: true/, unit);
     assert.match(buildJob, /uses: actions\/attest-build-provenance@[0-9a-f]{40} # v\d/, unit);
@@ -434,6 +438,7 @@ test("G1 (#405): the Shell static bundle records a provenance subject at build a
 test("G1 (#405, round-2 review): the Shell bundle gets a signed attestation like every other unit", () => {
   const buildShell = workflow.slice(workflow.indexOf("  build-shell:"), workflow.indexOf("  deploy-shell:"));
   assert.match(buildShell, /id-token: write/);
+  assert.match(buildShell, /attestations: write/);
   assert.match(buildShell, /uses: actions\/attest-build-provenance@[0-9a-f]{40} # v\d/);
   assert.match(buildShell, /subject-path: shell-dist\.sha256/);
 });
