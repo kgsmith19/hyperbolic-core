@@ -406,3 +406,27 @@ test("tag-release checks out with credentials not persisted, matching every othe
   const tagJob = workflow.slice(workflow.indexOf("  tag-release:"));
   assert.match(tagJob, /persist-credentials: false/);
 });
+
+test("G1 (#405): every registry-pushed image build emits provenance+SBOM subjects and a signed attestation", () => {
+  // llm-handler, brain, broker: build-push with provenance+sbom, then the
+  // pinned attest-build-provenance step against the build's own digest.
+  for (const unit of ["llm-handler", "brain", "broker"]) {
+    const buildJob = workflow.slice(workflow.indexOf(`  build-${unit}:`), workflow.indexOf(`  deploy-${unit}:`));
+    assert.match(buildJob, /provenance: true/, unit);
+    assert.match(buildJob, /sbom: true/, unit);
+    assert.match(buildJob, /uses: actions\/attest-build-provenance@[0-9a-f]{40} # v\d/, unit);
+    assert.match(buildJob, new RegExp(`subject-name:[^\\n]*${unit}`, "g"), unit);
+    assert.match(buildJob, /push-to-registry: true/, unit);
+    assert.match(buildJob, /uses: anchore\/sbom-action@[0-9a-f]{40} # v\d/, unit);
+    assert.match(buildJob, /format: spdx-json/, unit);
+  }
+});
+
+test("G1 (#405): the Shell static bundle records a provenance subject at build and re-verifies it before staging", () => {
+  const buildShell = workflow.slice(workflow.indexOf("  build-shell:"), workflow.indexOf("  deploy-shell:"));
+  assert.match(buildShell, /shell-dist\.sha256/, buildShell);
+  const deployShell = workflow.slice(workflow.indexOf("  deploy-shell:"), workflow.indexOf("  build-llm-handler:"));
+  assert.match(deployShell, /shell-dist-sha256-\$\{\{ github\.sha \}\}/);
+  assert.match(deployShell, /Verify Shell bundle provenance subject/);
+  assert.match(deployShell, /diff shell-provenance\/shell-dist\.sha256/);
+});

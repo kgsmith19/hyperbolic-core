@@ -170,6 +170,32 @@ jobs:
         run: |
           set -euo pipefail
           docker build --tag "$IMAGE" apps/lifeos/backend
+          # G1 (#405): provenance subject for the LifeOS backend image.
+          # The image never touches a registry (docker save/load over SSH),
+          # so the RepoDigest is recorded here at build time and the
+          # sha256 manifest below is the auditable build record.
+          docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE" > lifeos-backend-digest.txt || true
+          docker inspect --format='{{.Id}}' "$IMAGE" > lifeos-backend-imageid.txt
+          cat lifeos-backend-digest.txt lifeos-backend-imageid.txt
+      - name: Provenance · Record backend build SBOM manifest (G1, issue #405)
+        shell: bash
+        env:
+          IMAGE: lifeos:sha-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker save "$IMAGE" | tar -tv > lifeos-backend-layers.txt
+          sha256sum lifeos-backend-layers.txt lifeos-backend-imageid.txt > lifeos-backend-build.sha256
+          cat lifeos-backend-build.sha256
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lifeos-backend-provenance-${{ github.sha }}
+          path: |
+            lifeos-backend-build.sha256
+            lifeos-backend-layers.txt
+            lifeos-backend-imageid.txt
+            lifeos-backend-digest.txt
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Deploy · Ship image and configuration, activate, verify
         shell: bash
@@ -288,6 +314,16 @@ jobs:
           test -n "$VITE_SUPABASE_PUBLISHABLE_KEY"
           npm ci
           npm run build
+          # G1 (#405): provenance subject for the LifeOS UI bundle — the
+          # sha256 manifest is the auditable build record, mirroring the
+          # Shell bundle shape in deploy.yml.
+          ( find dist -type f -print0 | sort -z | xargs -0 sha256sum ) > "$GITHUB_WORKSPACE/lifeos-ui-dist.sha256"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lifeos-ui-provenance-${{ github.sha }}
+          path: lifeos-ui-dist.sha256
+          if-no-files-found: error
+          retention-days: 30
 
       # Secrets are pulled only AFTER npm ci + build have finished: the
       # Infisical action exports to GITHUB_ENV, and third-party npm install

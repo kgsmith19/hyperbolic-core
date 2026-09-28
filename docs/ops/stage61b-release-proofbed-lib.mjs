@@ -67,9 +67,10 @@ export const RULE_VERDICTS = {
 
 // The Stage 61b gap Issues still open for mechanisms hyperbolic-core does not
 // have yet. Any `gap` in ADOPTION must be one of these. #408 (restore
-// RPO/RTO) has since landed and is no longer a gap — restore-rpo now maps to a
-// real mechanism below.
-export const GAP_ISSUES = ["#405", "#406", "#407"];
+// RPO/RTO) and #405 (build provenance/SBOM) have since landed and are no
+// longer gaps — restore-rpo and missing-attestation now map to real
+// mechanisms below.
+export const GAP_ISSUES = ["#406", "#407"];
 
 // One hyperbolic-core mechanism per frozen 61a rule. Each entry names EXACTLY
 // ONE of:
@@ -102,8 +103,8 @@ export const ADOPTION = {
     note: "the monthly drill proves a real restore (check -> restore -> row-count) against both restic repositories from the Storage Box, now with measured RPO/RTO per repository (#408); live execution still needs the owner-side Infisical OIDC subject + RESTIC_BACKUP_ENABLED.",
   },
   "missing-attestation": {
-    gap: "#405",
-    note: "GAP: no SBOM/build-provenance attestation exists in either deploy pipeline; the Mold REFUSES until #405 adds one. Disclosed, not claimed.",
+    path: ".github/workflows/deploy.yml",
+    note: "every production deploy unit now produces a provenance record at deploy time (#405 landed): registry images (llm-handler, brain, broker) build with SLSA provenance + SBOM subjects and a signed attest-build-provenance statement; the Shell bundle records a sha256 manifest re-verified before staging; LifeOS backend/UI record image identity + SBOM/layers manifests and bundle sha256 as retained artifacts. The Mold evaluates the rule against these records. Live read-back (attestations on the releases surface) is recorded when the next production deploy runs.",
   },
   "invariant-breach": {
     gap: "#407",
@@ -135,7 +136,7 @@ export const ADOPTION = {
   },
   "clean-promote": {
     path: "docs/ops/stage61b-release-proofbed-lib.mjs",
-    note: "unreachable for a real hyperbolic-core release while G1-G4 (#405-#408) are open: the aggregate posture over today's mechanism set is REFUSE (earliest unmet proof is missing-attestation). The rule is retained; it becomes reachable once the gaps close.",
+    note: "unreachable for a real hyperbolic-core release while G2/G3 (#406/#407) are open: the aggregate posture over today's mechanism set is REFUSE (earliest unmet proof is invariant-breach). The rule is retained; it becomes reachable once the gaps close.",
   },
 };
 

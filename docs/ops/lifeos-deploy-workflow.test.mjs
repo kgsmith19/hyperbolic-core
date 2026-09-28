@@ -197,3 +197,16 @@ test("tag-release checks out with credentials not persisted, matching every othe
   const tagJob = workflow.slice(workflow.indexOf("  tag-release:"));
   assert.match(tagJob, /persist-credentials: false/);
 });
+
+test("G1 (#405): LifeOS backend records image identity + SBOM manifest as a provenance artifact", () => {
+  const backend = workflow.slice(workflow.indexOf("  deploy-backend:"), workflow.indexOf("  deploy-ui:"));
+  assert.match(backend, /lifeos-backend-imageid\.txt/);
+  assert.match(backend, /lifeos-backend-build\.sha256/);
+  assert.match(backend, /lifeos-backend-provenance-\$\{\{ github\.sha \}\}/);
+});
+
+test("G1 (#405): LifeOS UI records a bundle sha256 manifest as a provenance artifact", () => {
+  const ui = workflow.slice(workflow.indexOf("  deploy-ui:"));
+  assert.match(ui, /lifeos-ui-dist\.sha256/);
+  assert.match(ui, /lifeos-ui-provenance-\$\{\{ github\.sha \}\}/);
+});
