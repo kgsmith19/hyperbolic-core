@@ -96,6 +96,8 @@ test("all 14 frozen rules are adopted exactly once", () => {
 });
 
 test("every adopted rule names exactly one of {real mechanism, gap Issue} plus a note", () => {
+  // Dual-file mechanisms carry `paths` (every file) alongside the legacy
+  // single `path`; both must be present and consistent when `paths` exists.
   for (const [rule, entry] of Object.entries(ADOPTION)) {
     assert.ok(entry.note && entry.note.trim().length > 0, `rule ${rule} needs a note`);
     const hasPath = typeof entry.path === "string" && entry.path.length > 0;
@@ -109,11 +111,22 @@ test("every adopted rule names exactly one of {real mechanism, gap Issue} plus a
 
 test("every REAL mapped mechanism exists on disk", () => {
   for (const [rule, entry] of Object.entries(ADOPTION)) {
-    if (!entry.path) continue;
-    assert.ok(
-      existsSync(path.join(root, entry.path)),
-      `rule ${rule} names a missing mechanism: ${entry.path}`,
-    );
+    // Dual-file mechanisms (missing-attestation spans deploy.yml +
+    // lifeos-deploy.yml) list every file in `paths`; single-file entries
+    // keep the legacy `path`.
+    const files = entry.paths ?? (entry.path ? [entry.path] : []);
+    for (const file of files) {
+      assert.ok(
+        existsSync(path.join(root, file)),
+        `rule ${rule} names a missing mechanism: ${file}`,
+      );
+    }
+    if (entry.paths) {
+      assert.ok(
+        entry.paths.includes(entry.path),
+        `rule ${rule}: legacy path must be one of paths`,
+      );
+    }
   }
 });
 
@@ -188,13 +201,13 @@ test("mold-unqualified: this proofbed IS hyperbolic-core's built/attacked/qualif
 
 // --- Half 3: the disclosed gaps are real gaps, and the posture is honest ---
 
-test("the four remaining gap rules map to their three still-open tracking Issues, exactly", () => {
-  // #408 (restore RPO/RTO) has landed, so restore-rpo is no longer a gap.
+test("the three remaining gap rules map to their two still-open tracking Issues, exactly", () => {
+  // #408 (restore RPO/RTO) and #405 (build provenance/SBOM) have landed,
+  // so restore-rpo and missing-attestation are no longer gaps.
   const gaps = gapsOf(ADOPTION);
   assert.deepEqual(
     gaps,
     {
-      "missing-attestation": "#405",
       "invariant-breach": "#407",
       "missing-telemetry": "#407",
       "canary-missing": "#406",
@@ -203,13 +216,30 @@ test("the four remaining gap rules map to their three still-open tracking Issues
   );
 });
 
-test("attestation genuinely does not exist yet: no SBOM/attest step in either deploy pipeline", () => {
+test("attestation is now produced: provenance+SBOM in both deploy pipelines, and missing-attestation maps to a real mechanism (#405)", () => {
+  // The bidirectional coupling working forward: #405 added provenance and
+  // SBOM records to both deploy pipelines, so this pin flipped from "gap,
+  // no attestation" to "mechanism present", and the ADOPTION entry had
+  // to move off `gap` onto real on-disk paths in the same change. The
+  // dual-file shape is asserted exactly (round-2 review): `paths` names
+  // both mechanism files, legacy `path` stays consistent.
   const deploy = read(".github/workflows/deploy.yml");
   const lifeos = read(".github/workflows/lifeos-deploy.yml");
-  for (const text of [deploy, lifeos]) {
-    assert.doesNotMatch(text, /attest-build-provenance|\bsbom\b|cosign|sigstore/i);
-  }
-  assert.equal(ADOPTION["missing-attestation"].gap, "#405");
+  assert.match(deploy, /attest-build-provenance/);
+  assert.match(deploy, /sbom: true/);
+  assert.match(deploy, /spdx-json/);
+  assert.match(deploy, /shell-dist\.sha256/);
+  assert.match(deploy, /shell-dist-sbom\.spdx\.json/);
+  assert.match(lifeos, /lifeos-backend-build\.sha256/);
+  assert.match(lifeos, /lifeos-backend-sbom\.spdx\.json/);
+  assert.match(lifeos, /lifeos-ui-dist\.sha256/);
+  assert.match(lifeos, /lifeos-ui-sbom\.spdx\.json/);
+  assert.deepEqual(ADOPTION["missing-attestation"].paths, [
+    ".github/workflows/deploy.yml",
+    ".github/workflows/lifeos-deploy.yml",
+  ]);
+  assert.equal(ADOPTION["missing-attestation"].path, ".github/workflows/deploy.yml");
+  assert.ok(!ADOPTION["missing-attestation"].gap, "missing-attestation is no longer a gap");
 });
 
 test("no canary is declared yet, and its declaration mechanism is the tracked gap", () => {
@@ -244,12 +274,13 @@ test("restore RPO/RTO is now measured: the drill records both, and restore-rpo m
 
 test("the aggregate posture is honest: the earliest unmet proof REFUSES, never a false PROMOTE", () => {
   // In the frozen check order, the first rule whose hyperbolic-core
-  // mechanism is a gap is missing-attestation (a REFUSE rule). A real
+  // mechanism is a gap is now invariant-breach (a REFUSE rule): #405
+  // landed, so missing-attestation has a real mechanism. A real
   // hyperbolic release evaluated against today's mechanism set therefore
   // cannot reach clean-promote — the proofbed states REFUSE, not PROMOTE,
-  // until at least #405 lands.
+  // until at least #406/#407 land.
   const first = earliestGap(ADOPTION, FROZEN_RULES);
-  assert.equal(first, "missing-attestation");
+  assert.equal(first, "invariant-breach");
   assert.equal(RULE_VERDICTS[first], "REFUSE");
   assert.notEqual(RULE_VERDICTS[first], "PROMOTE");
 });

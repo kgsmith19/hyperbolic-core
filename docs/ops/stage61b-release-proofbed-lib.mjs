@@ -67,14 +67,15 @@ export const RULE_VERDICTS = {
 
 // The Stage 61b gap Issues still open for mechanisms hyperbolic-core does not
 // have yet. Any `gap` in ADOPTION must be one of these. #408 (restore
-// RPO/RTO) has since landed and is no longer a gap — restore-rpo now maps to a
-// real mechanism below.
-export const GAP_ISSUES = ["#405", "#406", "#407"];
+// RPO/RTO) and #405 (build provenance/SBOM) have since landed and are no
+// longer gaps — restore-rpo and missing-attestation now map to real
+// mechanisms below.
+export const GAP_ISSUES = ["#406", "#407"];
 
 // One hyperbolic-core mechanism per frozen 61a rule. Each entry names EXACTLY
 // ONE of:
 //   - `path`: a real mechanism on disk that satisfies the rule (the test
-//     enforces the file exists), or
+//     enforces every listed file exists), or
 //   - `gap`:  a #NNN tracking Issue for a mechanism that does not exist yet
 //     (the test enforces the mechanism is genuinely absent).
 // `note` states the observable behavior (or, for a gap, what is missing and
@@ -102,8 +103,15 @@ export const ADOPTION = {
     note: "the monthly drill proves a real restore (check -> restore -> row-count) against both restic repositories from the Storage Box, now with measured RPO/RTO per repository (#408); live execution still needs the owner-side Infisical OIDC subject + RESTIC_BACKUP_ENABLED.",
   },
   "missing-attestation": {
-    gap: "#405",
-    note: "GAP: no SBOM/build-provenance attestation exists in either deploy pipeline; the Mold REFUSES until #405 adds one. Disclosed, not claimed.",
+    // Dual-file mechanism (round-2 review): deploy.yml owns platform units,
+    // lifeos-deploy.yml owns LifeOS units. The disk-existence oracle below
+    // checks every entry of `paths`.
+    paths: [
+      ".github/workflows/deploy.yml",
+      ".github/workflows/lifeos-deploy.yml",
+    ],
+    path: ".github/workflows/deploy.yml",
+    note: "every production deploy unit now produces a SIGNED provenance attestation at deploy time (#405 landed): registry images (llm-handler, brain, broker) build with SLSA provenance + SBOM subjects and a signed attest-build-provenance statement; the Shell bundle, LifeOS backend, and LifeOS UI each sign their sha256/image-identity build manifest with attest-build-provenance (subject-path form) — plus SBOM/SPDX artifacts for registry images and retained manifests for the rest, the Shell manifest re-verified before staging. The Mold evaluates the rule against these signed statements. Live read-back (attestations on the releases surface) is recorded when the next production deploy runs.",
   },
   "invariant-breach": {
     gap: "#407",
@@ -135,7 +143,7 @@ export const ADOPTION = {
   },
   "clean-promote": {
     path: "docs/ops/stage61b-release-proofbed-lib.mjs",
-    note: "unreachable for a real hyperbolic-core release while G1-G4 (#405-#408) are open: the aggregate posture over today's mechanism set is REFUSE (earliest unmet proof is missing-attestation). The rule is retained; it becomes reachable once the gaps close.",
+    note: "unreachable for a real hyperbolic-core release while G2/G3 (#406/#407) are open: the aggregate posture over today's mechanism set is REFUSE (earliest unmet proof is invariant-breach). The rule is retained; it becomes reachable once the gaps close.",
   },
 };
 
