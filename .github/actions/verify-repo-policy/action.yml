@@ -58,7 +58,9 @@ runs:
           echo "A root CLAUDE.md must not exist: AGENTS.md is the single canonical instruction file and Claude Code >= 2.1.277 reads it natively (Issue #401)." >&2
           fail=1
         fi
-        if ! cmp -s GEMINI.md /tmp/expected-gemini.md; then
+        # Compare line-ending-insensitively: runners check out with different
+        # autocrlf settings, so strip CR before comparing (Issue #401 review).
+        if ! cmp -s <(tr -d '\r' < GEMINI.md) /tmp/expected-gemini.md; then
           echo "GEMINI.md is not the exact 2-line adapter (# GEMINI.md / blank / @AGENTS.md). It is retained only because Antigravity/Gemini's native AGENTS.md read is unconfigured on this harness (Issue #401)." >&2
           fail=1
         fi
