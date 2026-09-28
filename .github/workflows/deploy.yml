@@ -1100,3 +1100,23 @@ jobs:
           docs/ops/tag-release.sh llm-handler "$LLM_HANDLER_RESULT" "$SHA"
           docs/ops/tag-release.sh brain "$BRAIN_RESULT" "$SHA"
           docs/ops/tag-release.sh broker "$BROKER_RESULT" "$SHA"
+      # G2 (#406, round-1 review): the canary declaration is per-RELEASE,
+      # not per-unit-template. tag-release.sh stamps each release tag with
+      # the canary descriptor that governs its observation window, so the
+      # tag itself carries the declaration the Mold evaluates.
+      - name: Stamp the canary declaration onto each release tag (G2, issue #406)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          SHELL_RESULT: ${{ needs.deploy-shell.result }}
+          LLM_HANDLER_RESULT: ${{ needs.deploy-llm-handler.result }}
+          BRAIN_RESULT: ${{ needs.deploy-brain.result }}
+          BROKER_RESULT: ${{ needs.deploy-broker.result }}
+        run: |
+          set -euo pipefail
+          docs/ops/stamp-canary.sh shell "$SHELL_RESULT" "$SHA"
+          docs/ops/stamp-canary.sh llm-handler "$LLM_HANDLER_RESULT" "$SHA"
+          docs/ops/stamp-canary.sh brain "$BRAIN_RESULT" "$SHA"
+          docs/ops/stamp-canary.sh broker "$BROKER_RESULT" "$SHA"

@@ -11,7 +11,7 @@
 #   exposure:     fraction of traffic on the new release during canary
 #                 (0 < exposure <= 1; start small, e.g. 0.01)
 #   baseline:     what the canary is compared against (e.g. previous tag)
-#   window:       observation window in hours (> 0, e.g. 24)
+#   window_hours: observation window in hours (> 0, e.g. 24)
 #   invariants:   2–5 named invariants, each with:
 #     name:       stable identifier (letters, digits, dashes, underscores)
 #     signal:     where the signal comes from (read by G3 telemetry)
