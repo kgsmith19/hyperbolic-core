@@ -206,6 +206,53 @@ def _propose_gaps(
     return []
 
 
+def _expand_citation_edges(collected, options, collector, watchlist, titles, frontier, progress_callback) -> int:
+    """Seed the frontier along OpenAlex citation edges from top academic hits."""
+    try:
+        from backend.retrieval.connectors.openalex_connector import expand_citations
+    except Exception:
+        return 0
+    # Prefer academic sources with DOIs; fall back to any evidence with a DOI.
+    academic = [e for e in collected if e.doi] or [e for e in collected if "arxiv" in (e.url or "").lower()]
+    if not academic:
+        return 0
+    # Highest-depth first: expand from the frontier edge, not the seed core.
+    academic = sorted(academic, key=lambda e: (-e.depth, e.url))[:2]
+    added = 0
+    for hit in academic:
+        if progress_callback:
+            progress_callback(f"Following citations from: {(hit.title or hit.url)[:70]}...")
+        for direction in ("references", "cited_by"):
+            try:
+                edges = expand_citations(
+                    hit.doi or hit.url,
+                    direction=direction,
+                    per_page=max(1, options.citation_per_doc),
+                )
+            except Exception:
+                continue
+            for item in edges:
+                if not isinstance(item, dict):
+                    continue
+                raw_url = item.get("url", "")
+                can_url = canonicalize_url(raw_url if isinstance(raw_url, str) else "")
+                if not can_url:
+                    continue
+                title = item.get("title")
+                if isinstance(title, str) and title:
+                    titles[can_url] = title
+                raw_doi = item.get("doi", "")
+                if frontier.add_candidate(
+                    url=can_url,
+                    doi=raw_doi if isinstance(raw_doi, str) else "",
+                    depth=min(hit.depth + 1, frontier.max_depth),
+                    priority=55.0,
+                    source_url=f"citations:{direction}",
+                ):
+                    added += 1
+    return added
+
+
 def explore(
     queries: list[Query],
     watchlist: list[str],
@@ -345,16 +392,35 @@ def _explore(queries, watchlist, options, cancel_token, collector, progress_call
 
                 current_depth = max(current_depth, frontier_item.depth)
                 netloc = urllib.parse.urlparse(frontier_item.url).netloc
+                title = titles.get(frontier_item.url) or f"Source at {netloc}"
+                # Chunk long documents so downstream rerank/synthesis see
+                # focused passages; keep the best chunk as the excerpt plus
+                # a rerank hint. Short docs pass through unchanged.
+                excerpt_text = content[:3000]
+                rerank_hint = ""
+                if options.chunk_documents and len(content) > 1600:
+                    try:
+                        from backend.retrieval.text_chunker import chunk_text
+                        chunks = chunk_text(content)
+                        if chunks:
+                            excerpt_text = chunks[0][:3000]
+                            rerank_hint = excerpt_text[:800]
+                    except Exception:
+                        pass
                 collected.append(
                     Evidence(
-                        title=titles.get(frontier_item.url) or f"Source at {netloc}",
+                        title=title,
                         url=frontier_item.url,
                         snippet=_snippet_from_content(content),
-                        excerpt=content[:3000],
+                        excerpt=excerpt_text,
                         doi=frontier_item.doi,
                         depth=frontier_item.depth,
+                        source=(frontier_item.source_url or "") + ("|chunked" if rerank_hint else ""),
+                        rerank_score=0.0,
                     )
                 )
+                if rerank_hint:
+                    titles[f"{frontier_item.url}#chunk"] = rerank_hint
 
                 if frontier_item.depth < frontier.max_depth:
                     for link in fetch_res.get("links", []):
@@ -400,6 +466,23 @@ def _explore(queries, watchlist, options, cancel_token, collector, progress_call
             )
             if not gaps:
                 gaps = local_slm.analyze_gaps(gap_topic, evidence_dicts)
+            # Graph-grounded gaps: concepts with thin coverage become queries
+            # derived from retrieved evidence, not a hardcoded angle list.
+            if options.graph_prioritization:
+                try:
+                    from backend.retrieval.evidence_graph import EvidenceGraph
+                    graph = EvidenceGraph()
+                    for e in collected:
+                        graph.add_document(e.url, e.title, e.excerpt)
+                    for g in graph.coverage_gaps(gap_topic):
+                        if g not in gaps:
+                            gaps.append(g)
+                except Exception:
+                    pass
             _run_gap_searches(gaps, collector, watchlist, titles, frontier)
+            # Citation-graph expansion: follow OpenAlex reference/cited-by
+            # edges from the strongest academic hits (GraphRAG-lite).
+            if options.citation_expansion and not _cancelled(cancel_token):
+                _expand_citation_edges(collected, options, collector, watchlist, titles, frontier, progress_callback)
 
     return collected

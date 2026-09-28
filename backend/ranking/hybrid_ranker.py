@@ -65,8 +65,10 @@ def rank_items(query: str, items: list, text_key_fn=None) -> list:
         return ranked_items
 
     cls = type(items[0])
-    return [
-        cls(
+    fields = getattr(cls, "__dataclass_fields__", {})
+    out = []
+    for d in ranked_items:
+        kwargs = dict(
             title=d.get("title") or "",
             url=d.get("url") or "",
             snippet=d.get("snippet") or "",
@@ -76,5 +78,7 @@ def rank_items(query: str, items: list, text_key_fn=None) -> list:
             source=d.get("source") or "",
             score=float(d.get("score") or 0.0),
         )
-        for d in ranked_items
-    ]
+        if "rerank_score" in fields:
+            kwargs["rerank_score"] = float(d.get("rerank_score") or 0.0)
+        out.append(cls(**kwargs))
+    return out

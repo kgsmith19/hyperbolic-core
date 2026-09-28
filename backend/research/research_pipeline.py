@@ -77,6 +77,20 @@ def run_search(
         progress_callback("Ranking sources by relevance...")
     ranked = rank_items(topic, evidence)
 
+    # Stage-2 local rerank over fused candidates (no egress, milliseconds).
+    # Chunk hints collected during exploration sharpen the rerank signal.
+    if options.rerank_results and ranked:
+        if progress_callback:
+            progress_callback("Reranking top candidates for synthesis...")
+        try:
+            from backend.ranking.reranker import rerank_candidates
+            rerank_in = _evidence_as_dicts(ranked)
+            reranked = rerank_candidates(topic, rerank_in, keep=options.rerank_keep)
+            if reranked:
+                ranked = _dicts_as_evidence(reranked)
+        except Exception:
+            pass
+
     clean_eval_topic = re.sub(r"\[TARGET_ENTITY_\d+\]", "target component", effective_topic)
     summary = _synthesize(
         clean_eval_topic,
@@ -258,6 +272,7 @@ def _dicts_as_evidence(items: list) -> list[Evidence]:
                 depth=int(d.get("depth", 0) or 0),
                 source=d.get("source", ""),
                 score=float(d.get("score", 0.0) or 0.0),
+                rerank_score=float(d.get("rerank_score", 0.0) or 0.0),
             )
         )
     return out

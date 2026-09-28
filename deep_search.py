@@ -24,6 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-duration-min", type=float, default=15.0, help="Maximum run budget in minutes (up to 120; providers cap ~30)")
     parser.add_argument("--max-per-domain", type=int, default=6, help="Maximum documents per domain")
     parser.add_argument("--max-gap-rounds", type=int, default=3, help="Coverage re-check rounds while evidence arrives (0 disables; rounds 2+ stay local)")
+    parser.add_argument("--no-chunk", action="store_true", help="Disable passage chunking of long documents")
+    parser.add_argument("--no-rerank", action="store_true", help="Disable local stage-2 rerank before synthesis")
+    parser.add_argument("--rerank-keep", type=int, default=12, help="Top-N candidates kept by the reranker")
+    parser.add_argument("--no-citations", action="store_true", help="Disable OpenAlex citation-edge expansion")
+    parser.add_argument("--citation-per-doc", type=int, default=5, help="Citation edges followed per academic hit")
+    parser.add_argument("--no-graph", action="store_true", help="Disable concept-graph frontier prioritization")
     parser.add_argument("--concealer-model", default="gpt-4o-mini", help="Cheap model that hides process and expands topics")
     parser.add_argument("--deep-model", default="gpt-4o", help="Deep model that writes the final brief")
     parser.add_argument("--blind-watchlist", action="store_true", help="Pseudonymize watchlist terms (weaker recall)")
@@ -49,6 +55,12 @@ def build_options(args) -> SearchOptions:
         max_duration_min=args.max_duration_min,
         max_per_domain=args.max_per_domain,
         max_gap_rounds=args.max_gap_rounds,
+        chunk_documents=not args.no_chunk,
+        rerank_results=not args.no_rerank,
+        rerank_keep=args.rerank_keep,
+        citation_expansion=not args.no_citations,
+        citation_per_doc=args.citation_per_doc,
+        graph_prioritization=not args.no_graph,
         blind_watchlist=args.blind_watchlist,
         decoy_queries=args.decoys,
         ai_planning=args.ai_planning,

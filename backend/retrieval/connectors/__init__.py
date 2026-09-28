@@ -3,7 +3,7 @@
 Individual deep-web and academic data connectors.
 """
 
-from backend.retrieval.connectors.openalex_connector import search_openalex
+from backend.retrieval.connectors.openalex_connector import search_openalex, expand_citations
 from backend.retrieval.connectors.arxiv_connector import search_arxiv
 from backend.retrieval.connectors.crossref_connector import search_crossref
 from backend.retrieval.connectors.sec_edgar_connector import search_sec_edgar
@@ -13,6 +13,7 @@ from backend.retrieval.connectors.browser_crawler import fetch_with_browser
 
 __all__ = [
     "search_openalex",
+    "expand_citations",
     "search_arxiv",
     "search_crossref",
     "search_sec_edgar",

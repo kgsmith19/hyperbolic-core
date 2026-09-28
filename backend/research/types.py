@@ -38,6 +38,18 @@ class SearchOptions:
     # Per-connector search hits per query. More hits = broader seed frontier.
     max_results_per_connector: int = 10
 
+    # Evidence quality pipeline (additive; defaults deepen without new egress).
+    # Chunk long documents so rerank and synthesis see focused passages.
+    chunk_documents: bool = True
+    # Stage-2 local rerank of fused candidates before synthesis (no egress).
+    rerank_results: bool = True
+    rerank_keep: int = 12
+    # Follow OpenAlex citation edges from top academic hits (GraphRAG-lite).
+    citation_expansion: bool = True
+    citation_per_doc: int = 5
+    # Score frontier candidates by concept overlap with collected evidence.
+    graph_prioritization: bool = True
+
     ai_planning: bool = False
     ai_summary: bool = False
     # Model routing: the cheap concealer hides process/expands topics; the deep
@@ -74,6 +86,9 @@ class Evidence:
     depth: int = 0
     source: str = ""
     score: float = 0.0
+    # Stage-2 rerank diagnostics (0.0 when rerank is off). Kept on the type
+    # so the UI can show why a source outranked the fused order.
+    rerank_score: float = 0.0
 
 
 @dataclass(frozen=True)

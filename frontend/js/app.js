@@ -26,6 +26,11 @@ function collectOptionsFromForm() {
         max_documents: parseInt(document.getElementById('max-docs')?.value || '40', 10),
         max_duration_min: parseFloat(document.getElementById('max-duration-min')?.value || document.getElementById('max-duration')?.value / 60 || '15'),
         max_gap_rounds: parseInt(document.getElementById('max-gap-rounds')?.value || '3', 10),
+        chunk_documents: document.getElementById('chunk-documents') ? Boolean(document.getElementById('chunk-documents').checked) : true,
+        rerank_results: document.getElementById('rerank-results') ? Boolean(document.getElementById('rerank-results').checked) : true,
+        rerank_keep: parseInt(document.getElementById('rerank-keep')?.value || '12', 10),
+        citation_expansion: document.getElementById('citation-expansion') ? Boolean(document.getElementById('citation-expansion').checked) : true,
+        graph_prioritization: document.getElementById('graph-prioritization') ? Boolean(document.getElementById('graph-prioritization').checked) : true,
         concurrency: parseInt(document.getElementById('concurrency')?.value || '4', 10),
         openai_model: document.getElementById('openai-model')?.value || 'gpt-4o-mini',
         concealer_model: document.getElementById('concealer-model')?.value || document.getElementById('openai-model')?.value || 'gpt-4o-mini',
@@ -328,7 +333,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         // Defaults are optional
     }
 
-    const inputsToWatch = ['openai-model', 'concealer-model', 'deep-model', 'reasoning-effort', 'max-docs', 'max-depth', 'max-duration-min', 'max-gap-rounds', 'topic', 'blind-watchlist', 'decoy-queries', 'ai-planning', 'ai-summary', 'conceal-process'];
+    const inputsToWatch = ['openai-model', 'concealer-model', 'deep-model', 'reasoning-effort', 'max-docs', 'max-depth', 'max-duration-min', 'max-gap-rounds', 'topic', 'blind-watchlist', 'decoy-queries', 'ai-planning', 'ai-summary', 'conceal-process', 'chunk-documents', 'rerank-results', 'citation-expansion', 'graph-prioritization'];
     inputsToWatch.forEach(id => {
         const el = document.getElementById(id);
         if (el) {

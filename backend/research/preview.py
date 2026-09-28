@@ -17,6 +17,10 @@ WARN_GAP_ROUNDS = "coverage re-checks run {n}x while evidence arrives; rounds 2+
 WARN_DURATION_MIN = "run budget {m:.0f} min — beyond the ~30 min provider cap; the frontier keeps following citations"
 WARN_SUMMARY = "redacted excerpts leave the machine for a sourced brief; spend scales with corpus"
 WARN_SPEND = "hard spend ceiling ${cap:.2f}; run downgrades to local synthesis if the cap is hit"
+WARN_CHUNK = "long documents split into focused passages for rerank and synthesis"
+WARN_RERANK = "top {n} candidates reranked locally before synthesis (no extra egress)"
+WARN_CITES = "citation edges followed from top academic hits (references + cited-by)"
+WARN_GRAPH = "frontier scored by concept overlap with collected evidence"
 
 
 def preview(topic: str, options: SearchOptions) -> SearchPreview:
@@ -31,6 +35,14 @@ def preview(topic: str, options: SearchOptions) -> SearchPreview:
         warnings.append(WARN_DURATION_MIN.format(m=float(options.max_duration_min)))
     if options.max_gap_rounds > 0:
         warnings.append(WARN_GAP_ROUNDS.format(n=options.max_gap_rounds))
+    if options.chunk_documents:
+        warnings.append(WARN_CHUNK)
+    if options.rerank_results:
+        warnings.append(WARN_RERANK.format(n=options.rerank_keep))
+    if options.citation_expansion:
+        warnings.append(WARN_CITES)
+    if options.graph_prioritization:
+        warnings.append(WARN_GRAPH)
     if options.concurrency > 4:
         warnings.append(WARN_CONCURRENCY)
     if options.blind_watchlist:

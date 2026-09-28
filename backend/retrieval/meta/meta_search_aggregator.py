@@ -8,19 +8,21 @@ import concurrent.futures
 import logging
 from backend.retrieval.meta.duckduckgo_search_engine import search_duckduckgo
 from backend.retrieval.meta.bing_search_engine import search_bing
+from backend.retrieval.meta.mojeek_search_engine import search_mojeek
 
 logger = logging.getLogger("searxng_service")
 
 
 def aggregate_meta_search(query: str, max_results: int = 20) -> list[dict]:
-    """Execute concurrent multi-engine search across DuckDuckGo and Bing."""
+    """Execute concurrent multi-engine search across DuckDuckGo, Bing, and Mojeek."""
     results = []
     seen_urls = set()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         f_ddg = executor.submit(search_duckduckgo, query, 12)
         f_bing = executor.submit(search_bing, query, 12)
+        f_moj = executor.submit(search_mojeek, query, 12)
 
-        for f in (f_ddg, f_bing):
+        for f in (f_ddg, f_bing, f_moj):
             try:
                 items = f.result(timeout=10)
                 for item in items:

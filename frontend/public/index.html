@@ -111,6 +111,29 @@
                         <div class="label-desc">Each round hunts missing angles. Rounds 2+ stay local (nothing new leaves the machine).</div>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
+                        <label>Evidence quality (all local, nothing extra leaves the machine)</label>
+                        <label class="switch-row" for="chunk-documents">
+                            <span><span class="switch-title">Split long docs into passages</span>
+                            <span class="label-desc">Focused chunks for rerank + brief instead of whole pages.</span></span>
+                            <input type="checkbox" id="chunk-documents" checked onchange="updatePreRunEstimate()">
+                        </label>
+                        <label class="switch-row" for="rerank-results">
+                            <span><span class="switch-title">Rerank top candidates</span>
+                            <span class="label-desc">Stage-2 local rerank before the brief. Milliseconds.</span></span>
+                            <input type="checkbox" id="rerank-results" checked onchange="updatePreRunEstimate()">
+                        </label>
+                        <label class="switch-row" for="citation-expansion">
+                            <span><span class="switch-title">Follow citation edges</span>
+                            <span class="label-desc">References + cited-by from top academic hits.</span></span>
+                            <input type="checkbox" id="citation-expansion" checked onchange="updatePreRunEstimate()">
+                        </label>
+                        <label class="switch-row" for="graph-prioritization">
+                            <span><span class="switch-title">Concept-graph prioritization</span>
+                            <span class="label-desc">On-topic hops outrank drift; gaps come from the graph.</span></span>
+                            <input type="checkbox" id="graph-prioritization" checked onchange="updatePreRunEstimate()">
+                        </label>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
                         <label for="concurrency">Fetch this many pages at once</label>
                         <div class="concurrency-row">
                             <input type="range" id="concurrency-range" min="1" max="10" value="4" oninput="syncConcurrency(this.value)">
