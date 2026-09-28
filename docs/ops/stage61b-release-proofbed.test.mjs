@@ -201,19 +201,35 @@ test("mold-unqualified: this proofbed IS hyperbolic-core's built/attacked/qualif
 
 // --- Half 3: the disclosed gaps are real gaps, and the posture is honest ---
 
-test("the two remaining gap rules map to the one still-open tracking Issue, exactly", () => {
-  // #408 (restore RPO/RTO), #405 (build provenance/SBOM), and #406
-  // (canary declaration) have landed, so restore-rpo, missing-attestation,
-  // and canary-missing are no longer gaps. Only G3 (#407) remains.
+test("no gaps remain: every rule maps to a real mechanism (G1-G4 all landed)", () => {
+  // #408 (restore RPO/RTO), #405 (build provenance/SBOM), #406 (canary
+  // declaration), and #407 (canary observation) have all landed.
   const gaps = gapsOf(ADOPTION);
-  assert.deepEqual(
-    gaps,
-    {
-      "invariant-breach": "#407",
-      "missing-telemetry": "#407",
-    },
-    "the gap->Issue mapping drifted from the still-open Stage 61b gap Issues",
-  );
+  assert.deepEqual(gaps, {}, "a gap remains after G1-G4 all landed");
+  assert.deepEqual(GAP_ISSUES, [], "the declared gap set must be empty");
+});
+
+test("invariant observation is now wired: breach halts and missing series fails closed (#407)", () => {
+  // The bidirectional coupling working forward: #407 added the observer
+  // workflow + evaluation script, so these pins flipped from "gap" to
+  // "mechanism present", and the ADOPTION entries had to move off `gap`
+  // onto real on-disk paths in the same change. Dual-file shape asserted
+  // exactly for both rules.
+  for (const rule of ["invariant-breach", "missing-telemetry"]) {
+    const entry = ADOPTION[rule];
+    assert.deepEqual(entry.paths, [
+      ".github/workflows/canary-observe.yml",
+      "docs/ops/canary-observe.sh",
+    ], `${rule}: dual-file mechanism`);
+    assert.ok(!entry.gap, `${rule} is no longer a gap`);
+  }
+  const observe = read(".github/workflows/canary-observe.yml");
+  assert.match(observe, /canary-observe\.sh/);
+  const script = read("docs/ops/canary-observe.sh");
+  assert.match(script, /invariant-breach/);
+  assert.match(script, /missing-telemetry/);
+  assert.match(script, /promotion HALTED/);
+  assert.match(script, /FAIL CLOSED/);
 });
 
 test("attestation is now produced: provenance+SBOM in both deploy pipelines, and missing-attestation maps to a real mechanism (#405)", () => {
@@ -259,11 +275,6 @@ test("a canary is now declared per unit and stamped per release, and canary-miss
   assert.match(deploy, /stamp-canary\.sh shell /);
 });
 
-test("no canary telemetry/invariant evaluation exists yet", () => {
-  assert.equal(ADOPTION["invariant-breach"].gap, "#407");
-  assert.equal(ADOPTION["missing-telemetry"].gap, "#407");
-});
-
 test("restore RPO/RTO is now measured: the drill records both, and restore-rpo maps to a real mechanism (#408)", () => {
   // The bidirectional coupling working forward: #408 added RPO/RTO to the
   // drill, so this pin flipped from "gap, no timing" to "measured", and the
@@ -278,15 +289,12 @@ test("restore RPO/RTO is now measured: the drill records both, and restore-rpo m
   assert.ok(!ADOPTION["restore-rpo"].gap, "restore-rpo is no longer a gap");
 });
 
-test("the aggregate posture is honest: the earliest unmet proof REFUSES, never a false PROMOTE", () => {
-  // In the frozen check order, the first rule whose hyperbolic-core
-  // mechanism is a gap is now invariant-breach (a REFUSE rule): #405
-  // landed, so missing-attestation has a real mechanism. A real
-  // hyperbolic release evaluated against today's mechanism set therefore
-  // cannot reach clean-promote — the proofbed states REFUSE, not PROMOTE,
-  // until at least #406/#407 land.
+test("the aggregate posture is honest: no gap remains, so clean-promote is reachable and nothing REFUSEs by default", () => {
+  // G1-G4 all landed: earliestGap finds no gap, so a real hyperbolic
+  // release evaluated against today's mechanism set reaches clean-promote
+  // — earned per release by live green mechanisms, never assumed. The
+  // Mold still REFUSEs/HOLDs on a live breach or missing series; that
+  // behavior is pinned by the canary-observe oracles, not by a gap entry.
   const first = earliestGap(ADOPTION, FROZEN_RULES);
-  assert.equal(first, "invariant-breach");
-  assert.equal(RULE_VERDICTS[first], "REFUSE");
-  assert.notEqual(RULE_VERDICTS[first], "PROMOTE");
+  assert.equal(first, null);
 });

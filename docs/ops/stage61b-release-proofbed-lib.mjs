@@ -67,10 +67,10 @@ export const RULE_VERDICTS = {
 
 // The Stage 61b gap Issues still open for mechanisms hyperbolic-core does not
 // have yet. Any `gap` in ADOPTION must be one of these. #408 (restore
-// RPO/RTO) and #405 (build provenance/SBOM) have since landed and are no
-// longer gaps — restore-rpo and missing-attestation now map to real
-// mechanisms below.
-export const GAP_ISSUES = ["#407"];
+// RPO/RTO), #405 (build provenance/SBOM), #406 (canary declaration), and
+// #407 (canary observation) have all landed — no gaps remain. The Mold's
+// rules now all evaluate against real mechanisms.
+export const GAP_ISSUES = [];
 
 // One hyperbolic-core mechanism per frozen 61a rule. Each entry names EXACTLY
 // ONE of:
@@ -114,12 +114,22 @@ export const ADOPTION = {
     note: "every production deploy unit now produces a SIGNED provenance attestation at deploy time (#405 landed): registry images (llm-handler, brain, broker) build with SLSA provenance + SBOM subjects and a signed attest-build-provenance statement; the Shell bundle, LifeOS backend, and LifeOS UI each sign their sha256/image-identity build manifest with attest-build-provenance (subject-path form) — plus SBOM/SPDX artifacts for registry images and retained manifests for the rest, the Shell manifest re-verified before staging. The Mold evaluates the rule against these signed statements. Live read-back (attestations on the releases surface) is recorded when the next production deploy runs.",
   },
   "invariant-breach": {
-    gap: "#407",
-    note: "GAP: no canary telemetry or invariant evaluation exists, so no breach->halt is possible yet; tracked in #407 (depends on the canary declaration, #406).",
+    // Dual-file mechanism: the observer workflow + its evaluation script.
+    // The disk-existence oracle checks every `paths` entry.
+    paths: [
+      ".github/workflows/canary-observe.yml",
+      "docs/ops/canary-observe.sh",
+    ],
+    path: ".github/workflows/canary-observe.yml",
+    note: "the canary-observe job evaluates every shipped unit's smoke-anchored invariants from real telemetry (the run's own smoke verdict + the stamped canary Release) and FAILS the run on breach (#407 landed): breach->halt is wired (observe runs after smoke+tag-release; a red observe keeps the run red). Latency/error-rate signals are disclosed UNOBSERVED — never green-claimed — until a telemetry pipeline exists.",
   },
   "missing-telemetry": {
-    gap: "#407",
-    note: "GAP: no canary telemetry is collected; tracked in #407.",
+    paths: [
+      ".github/workflows/canary-observe.yml",
+      "docs/ops/canary-observe.sh",
+    ],
+    path: "docs/ops/canary-observe.sh",
+    note: "a missing series fails CLOSED (#407 landed): absent declaration, absent canary Release, or an unreadable release check each exit non-zero with an explicit ::error::, so a canary that cannot be observed can never read as green.",
   },
   "partial-green": {
     path: ".github/workflows/pr-verify.yml",
@@ -149,7 +159,7 @@ export const ADOPTION = {
   },
   "clean-promote": {
     path: "docs/ops/stage61b-release-proofbed-lib.mjs",
-    note: "unreachable for a real hyperbolic-core release while G2/G3 (#406/#407) are open: the aggregate posture over today's mechanism set is REFUSE (earliest unmet proof is invariant-breach). The rule is retained; it becomes reachable once the gaps close.",
+    note: "reachable now that G1-G4 (#405-#408) have all landed: every rule evaluates against a real mechanism and no gap remains. The Mold still REFUSEs/HOLDs on a live breach, a missing series, or an unmet proof — clean-promote is earned per release, never assumed.",
   },
 };
 

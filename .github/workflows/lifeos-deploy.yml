@@ -486,6 +486,26 @@ jobs:
       id-token: write
     uses: ./.github/workflows/platform-smoke.yml
 
+  canary-observe:
+    name: Observe canary invariants (G3)
+    needs: [deploy-backend, deploy-ui, smoke, tag-release]
+    if: >-
+      always() &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      vars.LIFEOS_DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      (needs.deploy-backend.result == 'success' ||
+       needs.deploy-ui.result == 'success')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/canary-observe.yml
+    with:
+      shell_result: skipped
+      backend_result: ${{ needs.deploy-backend.result }}
+      ui_result: ${{ needs.deploy-ui.result }}
+      smoke_result: ${{ needs.smoke.result }}
+      sha: ${{ github.sha }}
+
   tag-release:
     name: Tag successful releases
     # Only once the run's overall post-deploy smoke actually succeeded --

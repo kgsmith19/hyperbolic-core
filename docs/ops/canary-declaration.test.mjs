@@ -18,7 +18,9 @@ function parseCanary(file) {
   // top-level scalars, window_hours number, exposure number, and the
   // invariants list (name/signal/halt_if per item). Full YAML is not
   // needed — the shape is deliberately flat.
-  const text = readFileSync(path.join(canaryDir, file), "utf8");
+  // Normalize CRLF checkouts: committed bytes are LF; the Windows-local
+  // lane checks out CRLF, which would otherwise poison exact matching.
+  const text = readFileSync(path.join(canaryDir, file), "utf8").replace(/\r\n/g, "\n");
   const top = {};
   const invariants = [];
   let current = null;
