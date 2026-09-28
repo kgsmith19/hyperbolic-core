@@ -224,9 +224,9 @@ class TestStructuredSummary(unittest.TestCase):
         self.assertIn("## Key Findings", prompt)
         self.assertIn("[1]", prompt)
         self.assertIn("Never invent a source", prompt)
-        # 10 sources offered, only the top MAX_SOURCES included
-        self.assertIn("Source [8]:", prompt)
-        self.assertNotIn("Source [9]:", prompt)
+        # Fewer than MAX_SOURCES sources are all included.
+        self.assertIn("Source [10]:", prompt)
+        self.assertNotIn("Source [11]:", prompt)
         # Per-source excerpt capped
         self.assertNotIn("x" * (MAX_EXCERPT_CHARS + 1), prompt)
         self.assertIn("## Executive Summary", summary)

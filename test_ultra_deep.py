@@ -261,6 +261,52 @@ class TestLlmProcessHideShow(unittest.TestCase):
         self.assertTrue(any("chaffed" in w.lower() for w in hide.warnings))
 
 
+class TestDeepWebRouterAndSynthesis(unittest.TestCase):
+    """New public connectors remain selectable and participate in all-search."""
+
+    def test_deep_web_connectors_are_selectable_and_aggregated(self):
+        from backend.retrieval.retrieval_router import RetrievalRouter
+
+        router = RetrievalRouter()
+        connector_results = {
+            "search_openalex": [{"source": "openalex"}],
+            "search_arxiv": [{"source": "arxiv"}],
+            "search_crossref": [{"source": "crossref"}],
+            "search_sec_edgar": [{"source": "sec"}],
+            "search_searxng": [{"source": "searxng"}],
+            "search_brave": [{"source": "brave"}],
+            "search_pubmed": [{"source": "pubmed_pmc"}],
+            "search_wikipedia": [{"source": "wikipedia"}],
+            "search_hackernews": [{"source": "hackernews"}],
+        }
+        handlers = {
+            name: (lambda _query, result=result: result)
+            for name, result in connector_results.items()
+        }
+        with patch.multiple(router, **handlers):
+            self.assertEqual(router.search("topic", connector="pubmed"), connector_results["search_pubmed"])
+            self.assertEqual(router.search("topic", connector="wikipedia"), connector_results["search_wikipedia"])
+            self.assertEqual(router.search("topic", connector="hackernews"), connector_results["search_hackernews"])
+            sources = {item["source"] for item in router.search("topic")}
+
+        self.assertEqual(sources, {
+            "openalex", "arxiv", "crossref", "sec", "searxng", "brave",
+            "pubmed_pmc", "wikipedia", "hackernews",
+        })
+
+    def test_synthesis_formats_top_twenty_five_evidence_sources(self):
+        from backend.synthesis.openai_synthesizer import _format_sources
+
+        evidence = [
+            {"title": f"Source {number}", "url": f"https://example.com/{number}", "excerpt": "safe"}
+            for number in range(1, 27)
+        ]
+        formatted = _format_sources(evidence, [])
+
+        self.assertIn("Source [25]:", formatted)
+        self.assertNotIn("Source [26]:", formatted)
+
+
 class TestUltraDeepWiring(unittest.TestCase):
     def test_preview_declares_new_options(self):
         from backend.research.preview import preview

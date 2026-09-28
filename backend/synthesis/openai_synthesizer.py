@@ -9,7 +9,7 @@ air-gapped SLM engine (handled by the pipeline).
 from backend.privacy.watchlist_redactor import redact, assert_safe_to_send
 from backend.synthesis.local_synthesizer import LocalSynthesizer
 
-MAX_SOURCES = 8
+MAX_SOURCES = 25
 MAX_EXCERPT_CHARS = 1200
 
 

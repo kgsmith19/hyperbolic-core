@@ -14,6 +14,9 @@ from backend.retrieval.connectors import (
     search_openalex,
     search_arxiv,
     search_crossref,
+    search_pubmed,
+    search_wikipedia,
+    search_hackernews,
     search_sec_edgar,
     search_brave,
     search_searxng,
@@ -60,6 +63,15 @@ class RetrievalRouter:
     def search_arxiv(self, query: str) -> list[dict]:
         return search_arxiv(query)
 
+    def search_pubmed(self, query: str) -> list[dict]:
+        return search_pubmed(query)
+
+    def search_wikipedia(self, query: str) -> list[dict]:
+        return search_wikipedia(query)
+
+    def search_hackernews(self, query: str) -> list[dict]:
+        return search_hackernews(query)
+
     def search_sec_edgar(self, query: str) -> list[dict]:
         return search_sec_edgar(query)
 
@@ -74,6 +86,12 @@ class RetrievalRouter:
             return self.search_crossref(query)
         elif connector == "arxiv":
             return self.search_arxiv(query)
+        elif connector == "pubmed":
+            return self.search_pubmed(query)
+        elif connector == "wikipedia":
+            return self.search_wikipedia(query)
+        elif connector == "hackernews":
+            return self.search_hackernews(query)
         elif connector == "sec_edgar":
             return self.search_sec_edgar(query)
         elif connector == "searxng":
@@ -86,6 +104,9 @@ class RetrievalRouter:
             self.search_openalex,
             self.search_arxiv,
             self.search_crossref,
+            self.search_pubmed,
+            self.search_wikipedia,
+            self.search_hackernews,
             self.search_sec_edgar,
             self.search_searxng,
             self.search_brave,
