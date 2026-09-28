@@ -1,7 +1,7 @@
 name: Verify Repo Policy
 description: >-
-  Structural checks: CLAUDE.md/GEMINI.md are exact adapters, AGENTS.md has
-  every required section, every workflow action is SHA-pinned,
+  Structural checks: no root CLAUDE.md and GEMINI.md is the exact adapter,
+  AGENTS.md has every required section, every workflow action is SHA-pinned,
   project.yaml/standard.lock parse as valid YAML,
   dev and review providers are valid and distinct, and
   no trailing whitespace was introduced. Shared by pr-verify.yml's
@@ -48,19 +48,18 @@ runs:
       shell: bash
       run: pip install --quiet pyyaml
 
-    - name: Policy · Confirm CLAUDE.md and GEMINI.md are exact adapters
+    - name: Policy · Confirm no root CLAUDE.md and GEMINI.md is the exact adapter
       shell: bash
       run: |
         set -euo pipefail
-        printf '# CLAUDE.md\n\n@AGENTS.md\n' > /tmp/expected-claude.md
         printf '# GEMINI.md\n\n@AGENTS.md\n' > /tmp/expected-gemini.md
         fail=0
-        if ! cmp -s CLAUDE.md /tmp/expected-claude.md; then
-          echo "CLAUDE.md is not the exact 2-line adapter (# CLAUDE.md / blank / @AGENTS.md)." >&2
+        if [ -e CLAUDE.md ]; then
+          echo "A root CLAUDE.md must not exist: AGENTS.md is the single canonical instruction file and Claude Code >= 2.1.277 reads it natively (Issue #401)." >&2
           fail=1
         fi
         if ! cmp -s GEMINI.md /tmp/expected-gemini.md; then
-          echo "GEMINI.md is not the exact 2-line adapter (# GEMINI.md / blank / @AGENTS.md)." >&2
+          echo "GEMINI.md is not the exact 2-line adapter (# GEMINI.md / blank / @AGENTS.md). It is retained only because Antigravity/Gemini's native AGENTS.md read is unconfigured on this harness (Issue #401)." >&2
           fail=1
         fi
         exit "$fail"
