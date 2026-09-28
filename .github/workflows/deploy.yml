@@ -151,6 +151,11 @@ jobs:
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # G1 (#405): id-token:write lets attest-build-provenance sign the SLSA
+    # statement with this job's own OIDC identity (no long-lived secret).
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -199,6 +204,13 @@ jobs:
           path: shell-dist.sha256
           if-no-files-found: error
           retention-days: 7
+      # G1 (#405, round-2 review): the static bundle gets the same signed
+      # SLSA statement as the registry images — the sha256 manifest is the
+      # subject, exactly as attest's file-subject form intends.
+      - name: Attest Shell bundle provenance (G1, issue #405)
+        uses: actions/attest-build-provenance@00014ed6ed5efc5b1ab7f7f34a39eb55d41aa4f8 # v3.1.0
+        with:
+          subject-path: shell-dist.sha256
 
   deploy-shell:
     name: Deploy Shell

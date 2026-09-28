@@ -196,6 +196,13 @@ jobs:
             lifeos-backend-digest.txt
           if-no-files-found: error
           retention-days: 30
+      # G1 (#405, round-2 review): the registry-less backend gets the same
+      # signed SLSA statement as every other unit — the build manifest is
+      # the subject. id-token:write is already granted at the job level.
+      - name: Attest LifeOS backend provenance (G1, issue #405)
+        uses: actions/attest-build-provenance@00014ed6ed5efc5b1ab7f7f34a39eb55d41aa4f8 # v3.1.0
+        with:
+          subject-path: lifeos-backend-build.sha256
 
       - name: Deploy · Ship image and configuration, activate, verify
         shell: bash
@@ -324,6 +331,13 @@ jobs:
           path: lifeos-ui-dist.sha256
           if-no-files-found: error
           retention-days: 30
+      # G1 (#405, round-2 review): the UI bundle gets the same signed SLSA
+      # statement — the bundle manifest is the subject. id-token:write is
+      # already granted at the job level.
+      - name: Attest LifeOS UI provenance (G1, issue #405)
+        uses: actions/attest-build-provenance@00014ed6ed5efc5b1ab7f7f34a39eb55d41aa4f8 # v3.1.0
+        with:
+          subject-path: lifeos-ui-dist.sha256
 
       # Secrets are pulled only AFTER npm ci + build have finished: the
       # Infisical action exports to GITHUB_ENV, and third-party npm install

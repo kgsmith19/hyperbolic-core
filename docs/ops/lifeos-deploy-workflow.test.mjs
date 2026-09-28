@@ -210,3 +210,12 @@ test("G1 (#405): LifeOS UI records a bundle sha256 manifest as a provenance arti
   assert.match(ui, /lifeos-ui-dist\.sha256/);
   assert.match(ui, /lifeos-ui-provenance-\$\{\{ github\.sha \}\}/);
 });
+
+test("G1 (#405, round-2 review): LifeOS backend and UI get signed attestations like every other unit", () => {
+  const backend = workflow.slice(workflow.indexOf("  deploy-backend:"), workflow.indexOf("  deploy-ui:"));
+  assert.match(backend, /uses: actions\/attest-build-provenance@[0-9a-f]{40} # v\d/);
+  assert.match(backend, /subject-path: lifeos-backend-build\.sha256/);
+  const ui = workflow.slice(workflow.indexOf("  deploy-ui:"));
+  assert.match(ui, /uses: actions\/attest-build-provenance@[0-9a-f]{40} # v\d/);
+  assert.match(ui, /subject-path: lifeos-ui-dist\.sha256/);
+});

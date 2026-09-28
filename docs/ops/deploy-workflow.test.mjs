@@ -430,3 +430,10 @@ test("G1 (#405): the Shell static bundle records a provenance subject at build a
   assert.match(deployShell, /Verify Shell bundle provenance subject/);
   assert.match(deployShell, /diff shell-provenance\/shell-dist\.sha256/);
 });
+
+test("G1 (#405, round-2 review): the Shell bundle gets a signed attestation like every other unit", () => {
+  const buildShell = workflow.slice(workflow.indexOf("  build-shell:"), workflow.indexOf("  deploy-shell:"));
+  assert.match(buildShell, /id-token: write/);
+  assert.match(buildShell, /uses: actions\/attest-build-provenance@[0-9a-f]{40} # v\d/);
+  assert.match(buildShell, /subject-path: shell-dist\.sha256/);
+});

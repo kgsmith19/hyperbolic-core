@@ -96,6 +96,8 @@ test("all 14 frozen rules are adopted exactly once", () => {
 });
 
 test("every adopted rule names exactly one of {real mechanism, gap Issue} plus a note", () => {
+  // Dual-file mechanisms carry `paths` (every file) alongside the legacy
+  // single `path`; both must be present and consistent when `paths` exists.
   for (const [rule, entry] of Object.entries(ADOPTION)) {
     assert.ok(entry.note && entry.note.trim().length > 0, `rule ${rule} needs a note`);
     const hasPath = typeof entry.path === "string" && entry.path.length > 0;
@@ -109,11 +111,22 @@ test("every adopted rule names exactly one of {real mechanism, gap Issue} plus a
 
 test("every REAL mapped mechanism exists on disk", () => {
   for (const [rule, entry] of Object.entries(ADOPTION)) {
-    if (!entry.path) continue;
-    assert.ok(
-      existsSync(path.join(root, entry.path)),
-      `rule ${rule} names a missing mechanism: ${entry.path}`,
-    );
+    // Dual-file mechanisms (missing-attestation spans deploy.yml +
+    // lifeos-deploy.yml) list every file in `paths`; single-file entries
+    // keep the legacy `path`.
+    const files = entry.paths ?? (entry.path ? [entry.path] : []);
+    for (const file of files) {
+      assert.ok(
+        existsSync(path.join(root, file)),
+        `rule ${rule} names a missing mechanism: ${file}`,
+      );
+    }
+    if (entry.paths) {
+      assert.ok(
+        entry.paths.includes(entry.path),
+        `rule ${rule}: legacy path must be one of paths`,
+      );
+    }
   }
 });
 
