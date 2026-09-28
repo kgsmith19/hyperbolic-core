@@ -198,7 +198,7 @@ test("tag-release checks out with credentials not persisted, matching every othe
   assert.match(tagJob, /persist-credentials: false/);
 });
 
-test("G1 (#405): LifeOS backend records image identity + SBOM manifest as a provenance artifact", () => {
+test("G1 (#405): LifeOS backend records image identity + layers manifest as a provenance artifact", () => {
   const backend = workflow.slice(workflow.indexOf("  deploy-backend:"), workflow.indexOf("  deploy-ui:"));
   assert.match(backend, /lifeos-backend-imageid\.txt/);
   assert.match(backend, /lifeos-backend-build\.sha256/);
@@ -209,6 +209,15 @@ test("G1 (#405): LifeOS UI records a bundle sha256 manifest as a provenance arti
   const ui = workflow.slice(workflow.indexOf("  deploy-ui:"));
   assert.match(ui, /lifeos-ui-dist\.sha256/);
   assert.match(ui, /lifeos-ui-provenance-\$\{\{ github\.sha \}\}/);
+});
+
+test("G1 (#405, round-3 review): LifeOS backend and UI get SPDX SBOMs like every other unit", () => {
+  const backend = workflow.slice(workflow.indexOf("  deploy-backend:"), workflow.indexOf("  deploy-ui:"));
+  assert.match(backend, /uses: anchore\/sbom-action@[0-9a-f]{40} # v\d/);
+  assert.match(backend, /lifeos-backend-sbom\.spdx\.json/);
+  const ui = workflow.slice(workflow.indexOf("  deploy-ui:"));
+  assert.match(ui, /uses: anchore\/sbom-action@[0-9a-f]{40} # v\d/);
+  assert.match(ui, /lifeos-ui-sbom\.spdx\.json/);
 });
 
 test("G1 (#405, round-2 review): LifeOS backend and UI get signed attestations like every other unit", () => {

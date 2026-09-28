@@ -199,10 +199,25 @@ jobs:
       # G1 (#405, round-2 review): the registry-less backend gets the same
       # signed SLSA statement as every other unit — the build manifest is
       # the subject. id-token:write is already granted at the job level.
+      # The SPDX SBOM below inventories the backend image's package set;
+      # sbom-action's image form reads the local daemon image (built above),
+      # no registry push required.
       - name: Attest LifeOS backend provenance (G1, issue #405)
         uses: actions/attest-build-provenance@00014ed6ed5efc5b1ab7f7f34a39eb55d41aa4f8 # v3.1.0
         with:
           subject-path: lifeos-backend-build.sha256
+      - name: Generate LifeOS backend SBOM (G1, issue #405)
+        uses: anchore/sbom-action@d8a2c0130026bf585de5c176ab8f7ce62d75bf04 # v0.20.7
+        with:
+          image: lifeos:sha-${{ github.sha }}
+          format: spdx-json
+          output-file: lifeos-backend-sbom.spdx.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lifeos-backend-sbom-${{ github.sha }}
+          path: lifeos-backend-sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Deploy · Ship image and configuration, activate, verify
         shell: bash
@@ -333,11 +348,24 @@ jobs:
           retention-days: 30
       # G1 (#405, round-2 review): the UI bundle gets the same signed SLSA
       # statement — the bundle manifest is the subject. id-token:write is
-      # already granted at the job level.
+      # already granted at the job level. SPDX SBOM inventories the built
+      # bundle directory (path form, no registry image).
       - name: Attest LifeOS UI provenance (G1, issue #405)
         uses: actions/attest-build-provenance@00014ed6ed5efc5b1ab7f7f34a39eb55d41aa4f8 # v3.1.0
         with:
           subject-path: lifeos-ui-dist.sha256
+      - name: Generate LifeOS UI SBOM (G1, issue #405)
+        uses: anchore/sbom-action@d8a2c0130026bf585de5c176ab8f7ce62d75bf04 # v0.20.7
+        with:
+          path: apps/lifeos/frontend/dist/
+          format: spdx-json
+          output-file: lifeos-ui-sbom.spdx.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lifeos-ui-sbom-${{ github.sha }}
+          path: lifeos-ui-sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 30
 
       # Secrets are pulled only AFTER npm ci + build have finished: the
       # Infisical action exports to GITHUB_ENV, and third-party npm install

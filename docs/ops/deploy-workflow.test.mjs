@@ -437,3 +437,10 @@ test("G1 (#405, round-2 review): the Shell bundle gets a signed attestation like
   assert.match(buildShell, /uses: actions\/attest-build-provenance@[0-9a-f]{40} # v\d/);
   assert.match(buildShell, /subject-path: shell-dist\.sha256/);
 });
+
+test("G1 (#405, round-3 review): the Shell bundle gets an SPDX SBOM like every other unit", () => {
+  const buildShell = workflow.slice(workflow.indexOf("  build-shell:"), workflow.indexOf("  deploy-shell:"));
+  assert.match(buildShell, /uses: anchore\/sbom-action@[0-9a-f]{40} # v\d/);
+  assert.match(buildShell, /path: apps\/shell\/frontend\/dist\//);
+  assert.match(buildShell, /shell-dist-sbom\.spdx\.json/);
+});

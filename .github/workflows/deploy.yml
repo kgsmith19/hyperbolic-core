@@ -206,11 +206,26 @@ jobs:
           retention-days: 7
       # G1 (#405, round-2 review): the static bundle gets the same signed
       # SLSA statement as the registry images — the sha256 manifest is the
-      # subject, exactly as attest's file-subject form intends.
+      # subject, exactly as attest's file-subject form intends. The SPDX
+      # SBOM below inventories the bundle's own dependency closure
+      # (package-lock resolved tree); the sbom-action path form scans the
+      # built directory without a registry image.
       - name: Attest Shell bundle provenance (G1, issue #405)
         uses: actions/attest-build-provenance@00014ed6ed5efc5b1ab7f7f34a39eb55d41aa4f8 # v3.1.0
         with:
           subject-path: shell-dist.sha256
+      - name: Generate Shell bundle SBOM (G1, issue #405)
+        uses: anchore/sbom-action@d8a2c0130026bf585de5c176ab8f7ce62d75bf04 # v0.20.7
+        with:
+          path: apps/shell/frontend/dist/
+          format: spdx-json
+          output-file: shell-dist-sbom.spdx.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shell-dist-sbom-${{ github.sha }}
+          path: shell-dist-sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 30
 
   deploy-shell:
     name: Deploy Shell

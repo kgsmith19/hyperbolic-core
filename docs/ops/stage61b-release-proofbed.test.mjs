@@ -220,15 +220,24 @@ test("attestation is now produced: provenance+SBOM in both deploy pipelines, and
   // The bidirectional coupling working forward: #405 added provenance and
   // SBOM records to both deploy pipelines, so this pin flipped from "gap,
   // no attestation" to "mechanism present", and the ADOPTION entry had
-  // to move off `gap` onto a real on-disk path in the same change.
+  // to move off `gap` onto real on-disk paths in the same change. The
+  // dual-file shape is asserted exactly (round-2 review): `paths` names
+  // both mechanism files, legacy `path` stays consistent.
   const deploy = read(".github/workflows/deploy.yml");
   const lifeos = read(".github/workflows/lifeos-deploy.yml");
   assert.match(deploy, /attest-build-provenance/);
   assert.match(deploy, /sbom: true/);
   assert.match(deploy, /spdx-json/);
   assert.match(deploy, /shell-dist\.sha256/);
+  assert.match(deploy, /shell-dist-sbom\.spdx\.json/);
   assert.match(lifeos, /lifeos-backend-build\.sha256/);
+  assert.match(lifeos, /lifeos-backend-sbom\.spdx\.json/);
   assert.match(lifeos, /lifeos-ui-dist\.sha256/);
+  assert.match(lifeos, /lifeos-ui-sbom\.spdx\.json/);
+  assert.deepEqual(ADOPTION["missing-attestation"].paths, [
+    ".github/workflows/deploy.yml",
+    ".github/workflows/lifeos-deploy.yml",
+  ]);
   assert.equal(ADOPTION["missing-attestation"].path, ".github/workflows/deploy.yml");
   assert.ok(!ADOPTION["missing-attestation"].gap, "missing-attestation is no longer a gap");
 });
