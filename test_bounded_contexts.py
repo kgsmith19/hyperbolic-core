@@ -303,6 +303,8 @@ class TestDirectBoundedContexts(unittest.TestCase):
         self.assertIn('id="ai-planning"', html_content)
         self.assertIn('id="ai-summary"', html_content)
         self.assertIn('id="conceal-process"', html_content)
+        self.assertIn('id="llm-process-hide"', html_content)
+        self.assertIn('id="llm-process-show"', html_content)
         self.assertIn('id="confirm-weaker-recall"', html_content)
         self.assertNotIn("selectMode('extreme')", html_content)
         self.assertNotIn("selectMode('deterministic')", html_content)

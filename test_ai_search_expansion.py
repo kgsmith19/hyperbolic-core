@@ -169,7 +169,8 @@ class TestProposeGapQueries(unittest.TestCase):
         tracker = CostTracker(max_spend_usd=10.0)
         with patch("backend.research.cloud_client.openai.OpenAI", return_value=client) as mock_openai:
             queries = propose_gap_queries(
-                "grid storage", WATCHLIST, evidence, cost_tracker=tracker
+                "grid storage", WATCHLIST, evidence, cost_tracker=tracker,
+                conceal_process=False,
             )
         prompt = mock_openai.return_value.responses.create.call_args.kwargs["input"]
         self.assertIn("Battery Safety Survey", prompt)
@@ -181,6 +182,23 @@ class TestProposeGapQueries(unittest.TestCase):
     def test_without_key_returns_empty(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False):
             self.assertEqual(propose_gap_queries("t", WATCHLIST, []), [])
+
+    def test_hide_mode_chaffs_gap_prompt(self):
+        client = MagicMock()
+        client.responses.create.return_value = _mock_response(
+            "Topic 1:\n- ocean vents\n\nTopic 2:\n- missing angle one\n- missing angle two\n\nTopic 3:\n- drones\n"
+        )
+        with patch("backend.research.cloud_client.openai.OpenAI", return_value=client) as mock_openai:
+            queries = propose_gap_queries(
+                "grid storage", [], [{"title": "A", "excerpt": "storage paper"}],
+                conceal_process=True,
+            )
+        prompt = mock_openai.return_value.responses.create.call_args.kwargs["input"]
+        self.assertIn("Topic 1:", prompt)
+        self.assertIn("Topic 2: grid storage", prompt)
+        self.assertIn("Topic 3:", prompt)
+        self.assertIn("missing angle one", queries)
+        self.assertNotIn("ocean vents", queries)
 
 
 @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False)

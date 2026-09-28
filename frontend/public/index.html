@@ -60,13 +60,22 @@
                         </span>
                         <input type="checkbox" id="ai-planning" onchange="updatePreRunEstimate()">
                     </label>
-                    <label class="switch-row" for="conceal-process">
-                        <span>
-                            <span class="switch-title">Hide the search process from AI</span>
-                            <span class="label-desc">Real topic goes out hidden among decoy topics; the model can't tell what's really being researched. Off = send the bare topic (more relevant angles).</span>
-                        </span>
-                        <input type="checkbox" id="conceal-process" checked onchange="updatePreRunEstimate()">
-                    </label>
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label>LLM process</label>
+                        <div class="label-desc">How the model sees this search. Private words never leave in either mode.</div>
+                        <div class="starting-points" role="radiogroup" aria-label="LLM process">
+                            <label class="preset-btn" for="llm-process-hide">
+                                <input type="radio" name="llm-process" id="llm-process-hide" value="hide" checked onchange="updatePreRunEstimate()">
+                                Hide process
+                            </label>
+                            <label class="preset-btn" for="llm-process-show">
+                                <input type="radio" name="llm-process" id="llm-process-show" value="show" onchange="updatePreRunEstimate()">
+                                Show process
+                            </label>
+                        </div>
+                        <div class="label-desc">Hide: topic buried among decoy topics so the model cannot tell what is being researched. Show: send the bare topic and evidence for better angles.</div>
+                        <input type="checkbox" id="conceal-process" checked style="display:none" aria-hidden="true">
+                    </div>
                     <label class="switch-row" for="ai-summary">
                         <span>
                             <span class="switch-title">Let AI write the summary</span>

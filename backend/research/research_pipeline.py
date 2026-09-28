@@ -239,8 +239,7 @@ def _option_flags(options: SearchOptions) -> str:
         parts.append("blind")
     if options.decoy_queries:
         parts.append(f"decoys={options.decoy_queries}")
-    if options.ai_planning and not options.conceal_process:
-        parts.append("unconcealed")
+    parts.append(f"llm={options.llm_process}")
     if options.concealer_model != "gpt-4o-mini" or options.deep_model != "gpt-4o":
         parts.append(f"concealer={options.concealer_model} deep={options.deep_model}")
     if options.ai_planning:

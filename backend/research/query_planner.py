@@ -146,12 +146,15 @@ def propose_gap_queries(
     reasoning_effort: str | None = None,
     cost_tracker=None,
     max_queries: int = 3,
+    conceal_process: bool = True,
 ) -> list[str]:
     """Propose follow-up queries covering angles missing from collected evidence.
 
-    Sends the topic plus redacted titles and short snippets of what has been
-    gathered so far. Raises CloudCallError on any API failure so callers can
-    fall back to the local heuristic gap analysis.
+    Hide mode (conceal_process=True): the real topic and its sources sit
+    among decoy topics so the model cannot tell which coverage check is
+    the real one; only the target block is extracted.
+    Show mode: send the bare topic and redacted snippets.
+    Watchlist terms never leave in either mode.
     """
     assert_safe_to_send(topic, watchlist)
     from backend.research.cloud_client import get_api_key, invoke_model
@@ -166,15 +169,30 @@ def propose_gap_queries(
         gathered_blocks.append(f"{idx}. {title}: {snippet}")
     gathered_text = "\n".join(gathered_blocks) if gathered_blocks else "(nothing gathered yet)"
 
-    prompt = (
-        f"You are a research coordinator. The topic below was searched and the listed "
-        f"sources were gathered. Identify up to {max_queries} important angles that are "
-        f"missing or under-covered, and output one specific search query per line for each "
-        f"missing angle. If coverage is already thorough, output fewer lines or none.\n\n"
-        f"Topic: {topic}\n\n"
-        f"Sources gathered so far:\n{gathered_text}\n\n"
-        f"Output only one search query per line. Do not number or bullet the lines."
-    )
+    if conceal_process:
+        prompt = (
+            "For each topic below, identify up to "
+            f"{max_queries} missing research angles and output one search query "
+            "per line under a Topic {{N}} header. If coverage is thorough, output nothing.\n\n"
+            "Topic 1: deep ocean hydrothermal vent microbial metabolism\n"
+            "Sources: (nothing gathered yet)\n\n"
+            f"Topic 2: {topic}\n"
+            f"Sources gathered so far:\n{gathered_text}\n\n"
+            "Topic 3: precision agricultural drone multispectral imaging\n"
+            "Sources: (nothing gathered yet)\n"
+        )
+        target_idx = 2
+    else:
+        prompt = (
+            f"You are a research coordinator. The topic below was searched and the listed "
+            f"sources were gathered. Identify up to {max_queries} important angles that are "
+            f"missing or under-covered, and output one specific search query per line for each "
+            f"missing angle. If coverage is already thorough, output fewer lines or none.\n\n"
+            f"Topic: {topic}\n\n"
+            f"Sources gathered so far:\n{gathered_text}\n\n"
+            f"Output only one search query per line. Do not number or bullet the lines."
+        )
+        target_idx = 0
     assert_safe_to_send(prompt, watchlist)
 
     try:
@@ -185,6 +203,10 @@ def propose_gap_queries(
             cost_tracker=cost_tracker,
             max_output_tokens=300,
         )
+        if target_idx:
+            from backend.privacy.statistical_chaffer import extract_chaffed_response
+            lines = [ln for ln in extract_chaffed_response(output_text, target_idx) if ln]
+            return _parse_query_lines("\n".join(lines), watchlist, [topic])[:max_queries]
         return _parse_query_lines(output_text, watchlist, [topic])[:max_queries]
     except Exception as err:
         from backend.research.cloud_errors import CloudCallError

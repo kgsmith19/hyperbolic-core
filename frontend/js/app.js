@@ -20,7 +20,8 @@ function collectOptionsFromForm() {
         blind_watchlist: Boolean(document.getElementById('blind-watchlist')?.checked),
         decoy_queries: parseInt(document.getElementById('decoy-queries')?.value || '0', 10),
         ai_planning: Boolean(document.getElementById('ai-planning')?.checked),
-        conceal_process: document.getElementById('conceal-process') ? Boolean(document.getElementById('conceal-process').checked) : true,
+        llm_process: (document.querySelector('input[name="llm-process"]:checked')?.value) || (document.getElementById('conceal-process')?.checked === false ? 'show' : 'hide'),
+        conceal_process: (document.querySelector('input[name="llm-process"]:checked')?.value || 'hide') !== 'show',
         ai_summary: Boolean(document.getElementById('ai-summary')?.checked),
         max_depth: parseInt(document.getElementById('max-depth')?.value || '4', 10),
         max_documents: parseInt(document.getElementById('max-docs')?.value || '40', 10),
@@ -52,30 +53,37 @@ function applyMacro(name) {
     const conceal = document.getElementById('conceal-process');
     if (!blind || !decoys || !plan || !summary) return;
 
+    const hideRadio = document.getElementById('llm-process-hide');
+    const showRadio = document.getElementById('llm-process-show');
+    const setHide = (hidden) => {
+        if (conceal) conceal.checked = hidden;
+        if (hideRadio) hideRadio.checked = hidden;
+        if (showRadio) showRadio.checked = !hidden;
+    };
     if (name === 'local') {
         blind.checked = false;
         decoys.value = 0;
         plan.checked = false;
         summary.checked = false;
-        if (conceal) conceal.checked = true;
+        setHide(true);
     } else if (name === 'private') {
         blind.checked = true;
         decoys.value = 3;
         plan.checked = false;
         summary.checked = false;
-        if (conceal) conceal.checked = true;
+        setHide(true);
     } else if (name === 'plan') {
         blind.checked = false;
         decoys.value = 0;
         plan.checked = true;
         summary.checked = false;
-        if (conceal) conceal.checked = true;
+        setHide(true);
     } else if (name === 'brief') {
         blind.checked = false;
         decoys.value = 0;
         plan.checked = true;
         summary.checked = true;
-        if (conceal) conceal.checked = true;
+        setHide(false);
     }
     const confirm = document.getElementById('confirm-weaker-recall');
     if (confirm) confirm.checked = false;
@@ -336,7 +344,16 @@ window.addEventListener('DOMContentLoaded', async () => {
         // Defaults are optional
     }
 
-    const inputsToWatch = ['openai-model', 'concealer-model', 'deep-model', 'reasoning-effort', 'max-docs', 'max-depth', 'max-duration-min', 'max-gap-rounds', 'topic', 'blind-watchlist', 'decoy-queries', 'ai-planning', 'ai-summary', 'conceal-process', 'chunk-documents', 'rerank-results', 'citation-expansion', 'graph-prioritization', 'query-rewrite', 'hyde-queries', 'claim-verification'];
+    const inputsToWatch = ['openai-model', 'concealer-model', 'deep-model', 'reasoning-effort', 'max-docs', 'max-depth', 'max-duration-min', 'max-gap-rounds', 'topic', 'blind-watchlist', 'decoy-queries', 'ai-planning', 'ai-summary', 'conceal-process', 'chunk-documents', 'rerank-results', 'citation-expansion', 'graph-prioritization', 'query-rewrite', 'hyde-queries', 'claim-verification', 'llm-process-hide', 'llm-process-show'];
+    const syncConcealAlias = () => {
+        const hide = document.getElementById('llm-process-hide');
+        const alias = document.getElementById('conceal-process');
+        if (alias) alias.checked = Boolean(hide?.checked);
+    };
+    ['llm-process-hide', 'llm-process-show'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', syncConcealAlias);
+    });
     inputsToWatch.forEach(id => {
         const el = document.getElementById(id);
         if (el) {

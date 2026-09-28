@@ -197,6 +197,7 @@ def _propose_gaps(
             model=options.concealer_model,
             reasoning_effort=options.reasoning_effort,
             cost_tracker=cost_tracker,
+            conceal_process=options.conceal_process,
         )
     except CloudCallError:
         if progress_callback:

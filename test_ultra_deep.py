@@ -171,6 +171,96 @@ class TestClaimVerifier(unittest.TestCase):
         self.assertEqual(out, {"verified": [], "contested": [], "single_source": []})
 
 
+class TestLlmProcessHideShow(unittest.TestCase):
+    """Hide and show are first-class LLM-process modes. Watchlist never leaves."""
+
+    def test_defaults_to_hide(self):
+        from backend.research.types import SearchOptions
+        opts = SearchOptions()
+        self.assertEqual(opts.llm_process, "hide")
+        self.assertTrue(opts.conceal_process)
+
+    def test_show_alias_from_conceal_process_false(self):
+        from backend.research.types import SearchOptions
+        opts = SearchOptions(conceal_process=False)
+        self.assertEqual(opts.llm_process, "show")
+        self.assertFalse(opts.conceal_process)
+
+    def test_explicit_show_wins(self):
+        from backend.research.types import SearchOptions
+        opts = SearchOptions(llm_process="show")
+        self.assertEqual(opts.llm_process, "show")
+        self.assertFalse(opts.conceal_process)
+
+    def test_explicit_hide_wins_over_alias_default(self):
+        from backend.research.types import SearchOptions
+        opts = SearchOptions(llm_process="hide")
+        self.assertEqual(opts.llm_process, "hide")
+        self.assertTrue(opts.conceal_process)
+
+    def test_invalid_falls_back_to_hide(self):
+        from backend.research.types import SearchOptions
+        opts = SearchOptions(llm_process="whatever")
+        self.assertEqual(opts.llm_process, "hide")
+        self.assertTrue(opts.conceal_process)
+
+    def test_planner_show_sends_bare_topic(self):
+        from backend.research.planner import plan_queries
+        from backend.research.types import SearchOptions
+        seen = {}
+        def fake_expand(topic, watchlist, model="gpt-4o-mini", reasoning_effort=None,
+                        cost_tracker=None, conceal_process=True):
+            seen["conceal"] = conceal_process
+            seen["topic"] = topic
+            return [topic, "bare angle"]
+        with patch("backend.research.planner.expand_topic_queries", side_effect=fake_expand):
+            qs = plan_queries("topic", [], SearchOptions(ai_planning=True, llm_process="show",
+                                                         query_rewrite=False, hyde_queries=False))
+        self.assertFalse(seen["conceal"])
+        self.assertEqual(seen["topic"], "topic")
+        self.assertEqual([q.text for q in qs if not q.is_decoy], ["topic", "bare angle"])
+
+    def test_planner_hide_chaffs(self):
+        from backend.research.planner import plan_queries
+        from backend.research.types import SearchOptions
+        seen = {}
+        def fake_expand(topic, watchlist, model="gpt-4o-mini", reasoning_effort=None,
+                        cost_tracker=None, conceal_process=True):
+            seen["conceal"] = conceal_process
+            return [topic, "hidden angle"]
+        with patch("backend.research.planner.expand_topic_queries", side_effect=fake_expand):
+            plan_queries("topic", [], SearchOptions(ai_planning=True, llm_process="hide",
+                                                    query_rewrite=False, hyde_queries=False))
+        self.assertTrue(seen["conceal"])
+
+    def test_cli_llm_process_flag(self):
+        import sys
+        sys.path.insert(0, ".")
+        from deep_search import build_options, build_parser
+        hide = build_options(build_parser().parse_args([]))
+        self.assertEqual(hide.llm_process, "hide")
+        show = build_options(build_parser().parse_args(["--llm-process", "show"]))
+        self.assertEqual(show.llm_process, "show")
+        self.assertFalse(show.conceal_process)
+        alias = build_options(build_parser().parse_args(["--no-conceal-process"]))
+        self.assertEqual(alias.llm_process, "show")
+
+    def test_server_parses_llm_process(self):
+        from backend.server.web_server import _options_from_payload
+        self.assertEqual(_options_from_payload({}).llm_process, "hide")
+        self.assertEqual(_options_from_payload({"llm_process": "show"}).llm_process, "show")
+        self.assertEqual(_options_from_payload({"conceal_process": False}).llm_process, "show")
+
+    def test_preview_show_does_not_say_chaffed(self):
+        from backend.research.preview import preview
+        from backend.research.types import SearchOptions
+        show = preview("t", SearchOptions(ai_planning=True, llm_process="show"))
+        self.assertTrue(any("topic leaves the machine" in w.lower() for w in show.warnings))
+        self.assertFalse(any("chaffed" in w.lower() for w in show.warnings))
+        hide = preview("t", SearchOptions(ai_planning=True, llm_process="hide"))
+        self.assertTrue(any("chaffed" in w.lower() for w in hide.warnings))
+
+
 class TestUltraDeepWiring(unittest.TestCase):
     def test_preview_declares_new_options(self):
         from backend.research.preview import preview

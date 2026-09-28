@@ -61,7 +61,7 @@ def _options_from_payload(data: dict) -> SearchOptions:
         blind_watchlist=bool(data.get("blind_watchlist", False)),
         decoy_queries=int(data.get("decoy_queries", 0)),
         ai_planning=bool(data.get("ai_planning", False)),
-        conceal_process=bool(data.get("conceal_process", True)),
+        llm_process=str(data.get("llm_process", "hide" if data.get("conceal_process", True) else "show")),
         ai_summary=bool(data.get("ai_summary", False)),
         model=legacy_model,
         concealer_model=str(data.get("concealer_model", legacy_model)),

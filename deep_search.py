@@ -38,7 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--blind-watchlist", action="store_true", help="Pseudonymize watchlist terms (weaker recall)")
     parser.add_argument("--decoys", type=int, default=0, help="Number of k-anonymity decoy queries")
     parser.add_argument("--ai-planning", action="store_true", help="Expand the topic into extra query angles")
-    parser.add_argument("--no-conceal-process", action="store_true", help="Send the bare topic to the model for planning (no chaffed decoy topics). Better relevance; the model sees the real process.")
+    parser.add_argument("--llm-process", choices=["hide", "show"], default="hide", help="hide = conceal the research process from the LLM (chaffed prompts). show = send the bare topic and evidence. Watchlist never leaves in either mode.")
+    parser.add_argument("--no-conceal-process", action="store_true", help="Alias for --llm-process show. Send the bare topic to the model (no chaffed decoy topics).")
     parser.add_argument("--ai-summary", action="store_true", help="Write a cloud executive brief")
     parser.add_argument("--openai-model", default="gpt-4o-mini", help="OpenAI model for planning or summary")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default=None, help="Reasoning effort for o-series models")
@@ -70,7 +71,7 @@ def build_options(args) -> SearchOptions:
         blind_watchlist=args.blind_watchlist,
         decoy_queries=args.decoys,
         ai_planning=args.ai_planning,
-        conceal_process=not args.no_conceal_process,
+        llm_process="show" if args.no_conceal_process else args.llm_process,
         ai_summary=args.ai_summary,
         model=args.openai_model,
         concealer_model=args.concealer_model,
