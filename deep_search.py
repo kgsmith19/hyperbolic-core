@@ -7,7 +7,7 @@ import argparse
 import sys
 
 from backend.privacy import SafetyError
-from backend.research import SearchOptions, preview, run_search
+from backend.research import SearchOptions, preview, run_search, resume_search
 from backend.retrieval.meta import start_searxng_service
 from backend.server import load_env_file, load_lines, start_ui_server
 
@@ -17,6 +17,9 @@ load_env_file()
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a guarded deep search with explicit options.")
     parser.add_argument("--topic", default="topic.txt", help="Path to non-sensitive topic file")
+    parser.add_argument("--run-id", default="default", help="Local durable run identifier")
+    parser.add_argument("--resume", default="", help="Resume a local durable run identifier")
+    parser.add_argument("--ledger-root", default="research_runs", help="Local durable ledger directory")
     parser.add_argument("--watchlist", default="watchlist.txt", help="Path to local sensitive watchlist file")
     parser.add_argument("--max-depth", type=int, default=4, help="Maximum multi-hop citation depth (deep default; providers stop at 1-2)")
     parser.add_argument("--max-docs", type=int, default=40, help="Maximum documents to retrieve")
@@ -44,6 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--openai-model", default="gpt-4o-mini", help="OpenAI model for planning or summary")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default=None, help="Reasoning effort for o-series models")
     parser.add_argument("--max-spend", type=float, default=2.00, help="Maximum spending cap in USD")
+    parser.add_argument("--low-information-gain-rounds", type=int, default=0, help="Opt-in consecutive low-gain batch limit")
+    parser.add_argument("--low-information-gain-min-documents", type=int, default=0, help="Minimum evidence before low-gain stopping")
     parser.add_argument("--preview", action="store_true", help="Print SearchPreview and exit")
     parser.add_argument("--check-key", action="store_true", help="Verify the OpenAI key with one minimal live call and exit")
     parser.add_argument("--yes", action="store_true", help="Skip confirm for weaker-recall options")
@@ -78,6 +83,8 @@ def build_options(args) -> SearchOptions:
         deep_model=args.deep_model,
         reasoning_effort=args.reasoning_effort,
         max_spend_usd=args.max_spend,
+        low_information_gain_rounds=args.low_information_gain_rounds,
+        low_information_gain_min_documents=args.low_information_gain_min_documents,
     )
 
 
@@ -133,6 +140,10 @@ def main() -> None:
     topic_lines = load_lines(args.topic)
     topic = " ".join(topic_lines).strip()
     watchlist = load_lines(args.watchlist)
+    if args.resume:
+        run = resume_search(args.resume, watchlist, progress_callback=print_progress, ledger_root=args.ledger_root)
+        print(f"Run: {run.run_id}\nStatus: {run.status}\nStop reason: {run.stop_reason}\nLedger: {run.ledger_path}")
+        return
     if not topic:
         print("Topic is empty.", file=sys.stderr)
         return
@@ -152,12 +163,12 @@ def main() -> None:
             return
 
     try:
-        run = run_search(topic, watchlist, options, progress_callback=print_progress)
+        run = run_search(topic, watchlist, options, run_id=args.run_id, progress_callback=print_progress, ledger_root=args.ledger_root)
     except SafetyError:
         print("Blocked by local safety guard")
         return
 
-    print(f"Status: {run.status}")
+    print(f"Run: {run.run_id}\nStatus: {run.status}\nStop reason: {run.stop_reason}\nLedger: {run.ledger_path}")
     print(f"Sources: {len(run.evidence)}")
     if run.archive_path:
         print(f"Report: {run.archive_path}")

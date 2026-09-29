@@ -18,7 +18,7 @@ from backend.server.configuration import load_env_file, load_lines, save_env_fil
 from backend.privacy.watchlist_redactor import SafetyError
 from backend.retrieval.collector_client import reset_collector
 from dataclasses import asdict
-from backend.research.research_pipeline import run_search, run_to_dict
+from backend.research.research_pipeline import run_search, resume_search, run_to_dict
 from backend.research.types import SearchOptions
 from backend.research.preview import preview
 from backend.research.cost_estimator import MODEL_PRICING
@@ -68,6 +68,8 @@ def _options_from_payload(data: dict) -> SearchOptions:
         deep_model=str(data.get("deep_model", "gpt-4o" if legacy_model == "gpt-4o-mini" else legacy_model)),
         reasoning_effort=data.get("reasoning_effort"),
         max_spend_usd=float(data.get("max_spend_usd", 2.00)),
+        low_information_gain_rounds=int(data.get("low_information_gain_rounds", 0)),
+        low_information_gain_min_documents=int(data.get("low_information_gain_min_documents", 0)),
     )
 
 
@@ -230,6 +232,34 @@ class SafeResearchRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps({"status": "cancelled", "message": "Cancellation signal sent."}).encode("utf-8"))
+        elif self.path == "/api/resume":
+            content_length = int(self.headers.get("Content-Length", 0))
+            try:
+                data = json.loads(self.rfile.read(content_length).decode("utf-8") or "{}")
+                run_id = data.get("run_id", "")
+                if not isinstance(run_id, str) or not run_id.strip():
+                    raise ValueError("run_id is required")
+                watchlist = [line.strip() for line in str(data.get("watchlist", "")).splitlines() if line.strip()]
+            except (ValueError, json.JSONDecodeError) as err:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(err)}).encode("utf-8"))
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            def progress(message: str) -> None:
+                self.wfile.write(f"data: {json.dumps({'type': 'progress', 'message': message})}\n\n".encode("utf-8"))
+                self.wfile.flush()
+            try:
+                run = resume_search(run_id, watchlist, progress_callback=progress, ledger_root=os.path.join(_ROOT_DIR, "research_runs"))
+                self.wfile.write(f"data: {json.dumps({'type': 'result', **run_to_dict(run)})}\n\n".encode("utf-8"))
+                self.wfile.flush()
+            except Exception as err:
+                self.wfile.write(f"data: {json.dumps({'type': 'error', 'error': str(err)})}\n\n".encode("utf-8"))
+                self.wfile.flush()
         elif self.path == "/api/settings":
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length).decode("utf-8")
