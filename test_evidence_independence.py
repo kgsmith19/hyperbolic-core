@@ -127,5 +127,38 @@ class TestFamilyAssignment(unittest.TestCase):
         self.assertEqual(annotated[1].family_id, 1)
 
 
+from backend.synthesis.claim_verifier import verify_evidence
+
+
+class TestFamilyAwareVerification(unittest.TestCase):
+    CLAIM = "The Alpha Reactor produced 42 megawatts during the Boron Trial in 2021."
+
+    def _docs(self, urls):
+        return [{"url": u, "excerpt": self.CLAIM} for u in urls]
+
+    def test_same_family_repeats_are_single_source(self):
+        docs = self._docs(["https://a/1", "https://b/2", "https://c/3"])
+        fams = {"https://a/1": 0, "https://b/2": 0, "https://c/3": 0}
+        result = verify_evidence(docs, families=fams)
+        verified_claims = " ".join(c["claim"] for c in result["verified"])
+        self.assertNotIn("Alpha Reactor", verified_claims)
+        single = " ".join(c["claim"] for c in result["single_source"])
+        self.assertIn("Alpha Reactor", single)
+        self.assertGreaterEqual(result["independence"]["collapsed_claims"], 1)
+
+    def test_two_families_corroborate(self):
+        docs = self._docs(["https://a/1", "https://b/2"])
+        fams = {"https://a/1": 0, "https://b/2": 1}
+        result = verify_evidence(docs, families=fams)
+        verified_claims = " ".join(c["claim"] for c in result["verified"])
+        self.assertIn("Alpha Reactor", verified_claims)
+
+    def test_families_none_matches_url_behavior(self):
+        docs = self._docs(["https://a/1", "https://b/2"])
+        result = verify_evidence(docs)  # no families -> URL-based
+        verified_claims = " ".join(c["claim"] for c in result["verified"])
+        self.assertIn("Alpha Reactor", verified_claims)
+
+
 if __name__ == "__main__":
     unittest.main()
