@@ -25,6 +25,7 @@ WARN_REWRITE = "local query variants widen coverage (no egress)"
 WARN_HYDE = "HyDE draft queries from the concealer model"
 WARN_HYDE_CONCEALED = "HyDE draft queries from the chaffed concealer prompt (process hidden)"
 WARN_VERIFY = "claims cross-checked across sources before the brief (local-only)"
+WARN_INDEPENDENCE = "near-duplicate and syndicated sources grouped into families; corroboration counts independent families, not copies"
 
 
 def preview(topic: str, options: SearchOptions) -> SearchPreview:
@@ -53,6 +54,7 @@ def preview(topic: str, options: SearchOptions) -> SearchPreview:
         warnings.append(WARN_HYDE_CONCEALED if options.conceal_process else WARN_HYDE)
     if options.claim_verification:
         warnings.append(WARN_VERIFY)
+        warnings.append(WARN_INDEPENDENCE)
     if options.concurrency > 4:
         warnings.append(WARN_CONCURRENCY)
     if options.blind_watchlist:

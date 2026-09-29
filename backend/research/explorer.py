@@ -428,6 +428,7 @@ def _explore(queries, watchlist, options, cancel_token, collector, progress_call
                         depth=frontier_item.depth,
                         source=(frontier_item.source_url or "") + ("|chunked" if rerank_hint else ""),
                         rerank_score=0.0,
+                        simhash=frontier.content_simhashes.get(frontier_item.url, 0),
                     )
                 collected.append(accepted_evidence)
                 batch_accepted.append(accepted_evidence)

@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 import hashlib
 import threading
 import time
+
 import urllib.parse
 
 
@@ -49,6 +50,9 @@ class ResearchFrontier:
         self.visited_urls: set[str] = set()
         self.visited_dois: set[str] = set()
         self.content_hashes: set[str] = set()
+        # Record-only near-duplicate fingerprints (url -> 64-bit SimHash).
+        # Never used for dedup/budget decisions; consumed post-rank for families.
+        self.content_simhashes: dict[str, int] = {}
         self.domain_counts: dict[str, int] = {}
         self.in_flight_urls: set[str] = set()
         # Keep item metadata separately so an interrupted reservation can be
@@ -185,6 +189,10 @@ class ResearchFrontier:
             self.content_hashes.add(content_hash)
             self.total_bytes_consumed += content_bytes
             self.documents_collected += 1
+            # Lazy import avoids a circular import at module load
+            # (backend.research package imports the frontier).
+            from backend.research.independence import simhash as _simhash
+            self.content_simhashes[url] = _simhash(norm_text)
             return True
 
     def export_state(self) -> dict:
@@ -207,6 +215,7 @@ class ResearchFrontier:
                 "visited_urls": sorted(self.visited_urls),
                 "visited_dois": sorted(self.visited_dois),
                 "content_hashes": sorted(self.content_hashes),
+                "content_simhashes": dict(self.content_simhashes),
                 "domain_counts": dict(self.domain_counts),
             }
 
@@ -214,7 +223,8 @@ class ResearchFrontier:
     def from_state(cls, state: dict) -> "ResearchFrontier":
         """Restore a snapshot with no live reservation, worker, or lock state."""
         required = {"version", "limits", "elapsed_sec", "total_bytes_consumed", "documents_collected", "queue", "stale_in_flight", "visited_urls", "visited_dois", "content_hashes", "domain_counts"}
-        if not isinstance(state, dict) or set(state) != required or state["version"] != 1:
+        optional = {"content_simhashes"}
+        if not isinstance(state, dict) or not required.issubset(state) or not set(state).issubset(required | optional) or state["version"] != 1:
             raise ValueError("invalid frontier state")
         limits = state["limits"]
         names = ("max_depth", "max_documents", "max_bytes_budget", "max_per_domain", "max_duration_sec")
@@ -234,6 +244,7 @@ class ResearchFrontier:
         frontier.visited_urls = set(state["visited_urls"])
         frontier.visited_dois = set(state["visited_dois"])
         frontier.content_hashes = set(state["content_hashes"])
+        frontier.content_simhashes = {str(k): int(v) for k, v in (state.get("content_simhashes") or {}).items()}
         frontier.domain_counts = {str(key): int(value) for key, value in state["domain_counts"].items()}
         seen = set()
         for raw in state["queue"] + state["stale_in_flight"]:

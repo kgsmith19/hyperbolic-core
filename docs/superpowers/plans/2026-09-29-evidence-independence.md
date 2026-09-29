@@ -18,7 +18,7 @@
 - Determinism: use `hashlib.blake2b` (never salted builtin `hash`) so signatures are stable across processes/runs; all family logic is order-deterministic over the ranked input.
 - Local-first: family grouping and family-aware verification are pure local computation; the no-API-key path is unaffected.
 - Independence rides the existing `claim_verification` switch — no new `SearchOptions` knob.
-- Pinned constants: `SHINGLE_SIZE = 3`, `SIMHASH_BITS = 64`, `HAMMING_THRESHOLD = 3`, domain+title Jaccard tiebreak `>= 0.9`.
+- Pinned constants: `SHINGLE_SIZE = 3`, `SIMHASH_BITS = 64`, `HAMMING_THRESHOLD = 12`, domain+title Jaccard tiebreak `>= 0.9`.
 - Required full verification command must be green before any completion/merge claim:
   `python -m unittest test_safe_research.py test_bounded_contexts.py test_ai_search_expansion.py test_deep_expansion.py test_ultra_deep.py test_server_stream.py test_durable_research_ledger.py test_evidence_independence.py`.
 
@@ -59,7 +59,7 @@
 - Modify: `test_evidence_independence.py` (create)
 
 **Interfaces:**
-- Produces: `backend.research.independence.simhash(text: str) -> int`, `hamming(a: int, b: int) -> int`, constants `SHINGLE_SIZE=3`, `SIMHASH_BITS=64`, `HAMMING_THRESHOLD=3`. `ResearchFrontier.content_simhashes: dict[str,int]`. `Evidence.simhash: int = 0`, `Evidence.family_id: int = -1`, `Evidence.is_representative: bool = False`.
+- Produces: `backend.research.independence.simhash(text: str) -> int`, `hamming(a: int, b: int) -> int`, constants `SHINGLE_SIZE=3`, `SIMHASH_BITS=64`, `HAMMING_THRESHOLD=12`. `ResearchFrontier.content_simhashes: dict[str,int]`. `Evidence.simhash: int = 0`, `Evidence.family_id: int = -1`, `Evidence.is_representative: bool = False`.
 - Consumes: existing `record_document`, `export_state`, `from_state`.
 
 - [ ] **Step 1: Write failing SimHash primitive + frontier record tests**
@@ -152,7 +152,7 @@ import hashlib
 
 SHINGLE_SIZE = 3
 SIMHASH_BITS = 64
-HAMMING_THRESHOLD = 3
+HAMMING_THRESHOLD = 12
 _MASK = (1 << SIMHASH_BITS) - 1
 
 

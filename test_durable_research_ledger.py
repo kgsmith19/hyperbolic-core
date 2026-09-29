@@ -146,7 +146,7 @@ class TestDurablePipeline(unittest.TestCase):
              patch("backend.research.research_pipeline.plan_queries", return_value=[Query("topic")]), \
              patch("backend.research.research_pipeline.explore", return_value=evidence), \
              patch("backend.research.research_pipeline.rank_items", return_value=evidence), \
-             patch("backend.research.research_pipeline._synthesize", return_value="brief") as synthesize, \
+             patch("backend.research.research_pipeline._synthesize", return_value=("brief", None)) as synthesize, \
              patch("backend.research.research_pipeline.write_report", return_value="reports/test.md"):
             run_search("topic", [], options)
         self.assertEqual(len(synthesize.call_args.args[1]), 12)

@@ -45,13 +45,14 @@ def _claim_key(claim: str) -> str:
     return "|".join(entities[:3]) + "##" + "|".join(nums[:2])
 
 
-def verify_evidence(evidence: list[dict], max_claims_per_doc: int = 6) -> dict:
+def verify_evidence(evidence: list[dict], max_claims_per_doc: int = 6, families: dict | None = None) -> dict:
     """Cross-check claims across evidence docs.
 
-    Returns {verified: [...], contested: [...], single_source: [...]} where
-    each item is {claim, urls}. Verified = same key in 2+ docs without
-    negation divergence; contested = same entities but different numbers or
-    negation present; single_source = key seen once.
+    Returns {verified, contested, single_source, independence} where each verdict
+    item is {claim, urls, families}. When `families` (url -> family_id) is given,
+    corroboration counts distinct families instead of distinct URLs, so syndicated
+    copies of one source no longer inflate corroboration. `families=None` keeps the
+    original URL-based behavior exactly.
     """
     by_key: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for item in evidence:
@@ -62,20 +63,38 @@ def verify_evidence(evidence: list[dict], max_claims_per_doc: int = 6) -> dict:
         for claim in extract_claims(text, max_claims=max_claims_per_doc):
             by_key[_claim_key(claim)].append((claim, url))
 
+    def group_id(url: str):
+        if families is not None:
+            return families.get(url, url)  # unknown url stays distinct by its own url
+        return url
+
     verified, contested, single = [], [], []
+    collapsed = 0
+    all_groups: set = set()
     for key, occurrences in by_key.items():
         urls = sorted({u for _, u in occurrences})
+        groups = {group_id(u) for _, u in occurrences}
+        all_groups |= groups
         rep = occurrences[0][0]
-        if len(urls) >= 2:
-            nums = {n for _, u in occurrences for n in _NUMBER_RE.findall(u if False else _claim_numbers(rep))}
+        fam_ids = sorted(g for g in groups if isinstance(g, int))
+        item = {"claim": rep, "urls": urls, "families": fam_ids}
+        if len(urls) >= 2 and len(groups) < 2:
+            collapsed += 1
+        if len(groups) >= 2:
             negs = sum(1 for c, _ in occurrences if _NEGATION_RE.search(c))
-            if negs > 0 and negs < len(occurrences):
-                contested.append({"claim": rep, "urls": urls})
+            if 0 < negs < len(occurrences):
+                contested.append(item)
             else:
-                verified.append({"claim": rep, "urls": urls})
+                verified.append(item)
         elif key.strip("#|"):
-            single.append({"claim": rep, "urls": urls})
-    return {"verified": verified, "contested": contested, "single_source": single}
+            single.append(item)
+    n_families = len(all_groups) if families is not None else 0
+    return {
+        "verified": verified,
+        "contested": contested,
+        "single_source": single,
+        "independence": {"families": n_families, "collapsed_claims": collapsed},
+    }
 
 
 def _claim_numbers(claim: str) -> str:

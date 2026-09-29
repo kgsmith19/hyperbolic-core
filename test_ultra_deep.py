@@ -168,7 +168,8 @@ class TestClaimVerifier(unittest.TestCase):
     def test_empty_evidence(self):
         from backend.synthesis.claim_verifier import verify_evidence
         out = verify_evidence([])
-        self.assertEqual(out, {"verified": [], "contested": [], "single_source": []})
+        self.assertEqual(out, {"verified": [], "contested": [], "single_source": [],
+                               "independence": {"families": 0, "collapsed_claims": 0}})
 
 
 class TestLlmProcessHideShow(unittest.TestCase):

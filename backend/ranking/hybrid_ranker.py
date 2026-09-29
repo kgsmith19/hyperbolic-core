@@ -22,6 +22,9 @@ def _item_to_dict(item) -> dict:
         "depth": getattr(item, "depth", 0),
         "source": getattr(item, "source", ""),
         "score": getattr(item, "score", 0.0),
+        "simhash": getattr(item, "simhash", 0),
+        "family_id": getattr(item, "family_id", -1),
+        "is_representative": getattr(item, "is_representative", False),
     }
 
 
@@ -80,5 +83,8 @@ def rank_items(query: str, items: list, text_key_fn=None) -> list:
         )
         if "rerank_score" in fields:
             kwargs["rerank_score"] = float(d.get("rerank_score") or 0.0)
+        for extra in ("simhash", "family_id", "is_representative"):
+            if extra in fields:
+                kwargs[extra] = d.get(extra, fields[extra].default)
         out.append(cls(**kwargs))
     return out

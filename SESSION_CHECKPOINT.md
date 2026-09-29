@@ -15,6 +15,11 @@ CLI: `python deep_search.py` — flags `--blind-watchlist --decoys --ai-planning
 
 privacy, retrieval (+ retrieval/meta), frontier, ranking, synthesis, research, server.
 
+Evidence independence lives in `backend/research/independence.py` (SimHash fingerprints
++ deterministic family grouping). The frontier records a per-document 64-bit SimHash
+(record-only; budgets unchanged); `claim_verifier.verify_evidence(..., families=...)`
+counts corroboration by independent family, and the report gains an Independence section.
+
 ## Tradeoffs
 
 Every option declares gain and depth cost in `backend/research/preview.py`. Decoy hits never rank. Cancel works because the UI server is threaded.
