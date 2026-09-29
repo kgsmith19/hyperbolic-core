@@ -7,7 +7,7 @@ Manages the exploration graph:
 - Thread-safe concurrency coordination and in-flight territory reservation to prevent duplicate work.
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import threading
 import time
@@ -51,6 +51,9 @@ class ResearchFrontier:
         self.content_hashes: set[str] = set()
         self.domain_counts: dict[str, int] = {}
         self.in_flight_urls: set[str] = set()
+        # Keep item metadata separately so an interrupted reservation can be
+        # returned to the queue without serializing a worker or lock.
+        self.in_flight_items: dict[str, FrontierItem] = {}
 
         self._lock = threading.Lock()
 
@@ -135,6 +138,7 @@ class ResearchFrontier:
 
                 self.visited_urls.add(item.url)
                 self.in_flight_urls.add(item.url)
+                self.in_flight_items[item.url] = item
                 if item.doi:
                     self.visited_dois.add(item.doi.lower())
                 if domain:
@@ -152,6 +156,7 @@ class ResearchFrontier:
         """Release a failed fetch without consuming document budget. Keep the URL visited so it is not retried; refund the domain slot."""
         with self._lock:
             self.in_flight_urls.discard(url)
+            self.in_flight_items.pop(url, None)
             if isinstance(url, str) and url:
                 self.visited_urls.add(url)
             domain = self.get_domain(url) if isinstance(url, str) else ""
@@ -165,6 +170,7 @@ class ResearchFrontier:
         if not text:
             with self._lock:
                 self.in_flight_urls.discard(url)
+                self.in_flight_items.pop(url, None)
             return False
 
         norm_text = " ".join(text.split()).lower()
@@ -172,6 +178,7 @@ class ResearchFrontier:
 
         with self._lock:
             self.in_flight_urls.discard(url)
+            self.in_flight_items.pop(url, None)
             if content_hash in self.content_hashes:
                 return False
 
@@ -179,3 +186,72 @@ class ResearchFrontier:
             self.total_bytes_consumed += content_bytes
             self.documents_collected += 1
             return True
+
+    def export_state(self) -> dict:
+        """Return a JSON-only snapshot; active reservations become stale work."""
+        with self._lock:
+            return {
+                "version": 1,
+                "limits": {
+                    "max_depth": self.max_depth,
+                    "max_documents": self.max_documents,
+                    "max_bytes_budget": self.max_bytes_budget,
+                    "max_per_domain": self.max_per_domain,
+                    "max_duration_sec": self.max_duration_sec,
+                },
+                "elapsed_sec": max(0.0, time.time() - self.start_time),
+                "total_bytes_consumed": self.total_bytes_consumed,
+                "documents_collected": self.documents_collected,
+                "queue": [asdict(item) for item in self.queue],
+                "stale_in_flight": [asdict(item) for item in self.in_flight_items.values()],
+                "visited_urls": sorted(self.visited_urls),
+                "visited_dois": sorted(self.visited_dois),
+                "content_hashes": sorted(self.content_hashes),
+                "domain_counts": dict(self.domain_counts),
+            }
+
+    @classmethod
+    def from_state(cls, state: dict) -> "ResearchFrontier":
+        """Restore a snapshot with no live reservation, worker, or lock state."""
+        required = {"version", "limits", "elapsed_sec", "total_bytes_consumed", "documents_collected", "queue", "stale_in_flight", "visited_urls", "visited_dois", "content_hashes", "domain_counts"}
+        if not isinstance(state, dict) or set(state) != required or state["version"] != 1:
+            raise ValueError("invalid frontier state")
+        limits = state["limits"]
+        names = ("max_depth", "max_documents", "max_bytes_budget", "max_per_domain", "max_duration_sec")
+        if not isinstance(limits, dict) or set(limits) != set(names):
+            raise ValueError("invalid frontier limits")
+        if any(not isinstance(limits[name], (int, float)) or isinstance(limits[name], bool) or limits[name] < 0 for name in names):
+            raise ValueError("invalid frontier limit value")
+        numeric = ("elapsed_sec", "total_bytes_consumed", "documents_collected")
+        if any(not isinstance(state[name], (int, float)) or isinstance(state[name], bool) or state[name] < 0 for name in numeric):
+            raise ValueError("invalid frontier counters")
+        if not all(isinstance(state[name], list) for name in ("queue", "stale_in_flight", "visited_urls", "visited_dois", "content_hashes")) or not isinstance(state["domain_counts"], dict):
+            raise ValueError("invalid frontier collections")
+        frontier = cls(**limits)
+        frontier.start_time = time.time() - float(state["elapsed_sec"])
+        frontier.total_bytes_consumed = int(state["total_bytes_consumed"])
+        frontier.documents_collected = int(state["documents_collected"])
+        frontier.visited_urls = set(state["visited_urls"])
+        frontier.visited_dois = set(state["visited_dois"])
+        frontier.content_hashes = set(state["content_hashes"])
+        frontier.domain_counts = {str(key): int(value) for key, value in state["domain_counts"].items()}
+        seen = set()
+        for raw in state["queue"] + state["stale_in_flight"]:
+            if not isinstance(raw, dict) or set(raw) != {"url", "doi", "depth", "priority", "source_url"}:
+                raise ValueError("invalid frontier item")
+            item = FrontierItem(**raw)
+            if item.url in seen:
+                continue
+            seen.add(item.url)
+            if raw in state["stale_in_flight"]:
+                # Undo only the old reservation. The item is still eligible.
+                frontier.visited_urls.discard(item.url)
+                if item.doi:
+                    frontier.visited_dois.discard(item.doi.lower())
+                domain = frontier.get_domain(item.url)
+                if domain and frontier.domain_counts.get(domain, 0) > 0:
+                    frontier.domain_counts[domain] -= 1
+            if item.url not in frontier.visited_urls:
+                frontier.queue.append(item)
+        frontier.queue.sort(key=lambda item: item.priority, reverse=True)
+        return frontier

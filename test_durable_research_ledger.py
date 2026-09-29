@@ -7,6 +7,7 @@ import unittest
 
 from backend.research.types import Evidence, SearchOptions
 from backend.research.run_store import RunStore, RunStoreError
+from backend.frontier.priority_frontier import ResearchFrontier
 
 FAKE_SECRET = "LEDGER-SECRET-721"
 WATCHLIST = [FAKE_SECRET]
@@ -65,6 +66,29 @@ class TestRunStore(unittest.TestCase):
             self.assertEqual(sum(event["kind"] == "finished" for event in events), 1)
             with self.assertRaises(ValueError):
                 store.finish("success", "cancelled", [])
+
+
+class TestFrontierPersistence(unittest.TestCase):
+    def test_snapshot_requeues_stale_work_once_and_preserves_bounds(self):
+        frontier = ResearchFrontier(max_depth=2, max_documents=4, max_per_domain=2)
+        frontier.add_candidate("https://accepted.example/a", doi="10.1/accepted", priority=90)
+        frontier.add_candidate("https://inflight.example/a", doi="10.1/inflight", priority=80)
+        frontier.add_candidate("https://queued.example/a", priority=70)
+        accepted, stale = frontier.pop_next_batch(2)
+        self.assertTrue(frontier.record_document(accepted.url, 10, "accepted unique", accepted.doi))
+        existing_hash = next(iter(frontier.content_hashes))
+        restored = ResearchFrontier.from_state(frontier.export_state())
+        self.assertEqual(restored.in_flight_urls, set())
+        batch = restored.pop_next_batch(2)
+        self.assertEqual([item.url for item in batch], [stale.url, "https://queued.example/a"])
+        self.assertEqual(restored.documents_collected, 1)
+        self.assertIn(existing_hash, restored.content_hashes)
+        self.assertFalse(restored.add_candidate(accepted.url, priority=99))
+        self.assertFalse(restored.add_candidate("https://new.example/a", doi="10.1/accepted", priority=99))
+
+    def test_rejects_incomplete_snapshot(self):
+        with self.assertRaises(ValueError):
+            ResearchFrontier.from_state({"version": 1})
 
 
 if __name__ == "__main__":
