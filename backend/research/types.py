@@ -122,6 +122,10 @@ class Evidence:
     # Stage-2 rerank diagnostics (0.0 when rerank is off). Kept on the type
     # so the UI can show why a source outranked the fused order.
     rerank_score: float = 0.0
+    # Evidence-independence annotations (additive; 0/-1/False when unused).
+    simhash: int = 0
+    family_id: int = -1
+    is_representative: bool = False
 
 
 @dataclass(frozen=True)
