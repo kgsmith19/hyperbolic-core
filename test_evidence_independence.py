@@ -70,5 +70,62 @@ class TestFrontierRecordsSimHash(unittest.TestCase):
         self.assertEqual(restored.content_simhashes, {})
 
 
+from dataclasses import replace
+from backend.research.types import Evidence
+from backend.research.independence import assign_families
+
+
+def _ev(url, excerpt, doi="", title=""):
+    return Evidence(title=title or url, url=url, snippet="", excerpt=excerpt, doi=doi)
+
+
+class TestFamilyAssignment(unittest.TestCase):
+    def test_empty(self):
+        self.assertEqual(assign_families([]), ([], []))
+
+    def test_near_duplicates_collapse_to_one_family(self):
+        body = "the quick brown fox jumps over the lazy dog in autumn light again"
+        alt = "the quick brown fox jumps over the lazy dog in autumn sunlight again"
+        items = [_ev("https://a.example/1", body), _ev("https://b.example/2", alt),
+                 _ev("https://c.example/3", body)]
+        items = [replace(e, simhash=simhash(e.excerpt)) for e in items]
+        annotated, families = assign_families(items)
+        self.assertEqual(len({e.family_id for e in annotated}), 1)
+        self.assertEqual(len(families), 1)
+        self.assertEqual(families[0].size, 3)
+
+    def test_unrelated_stay_separate(self):
+        a = _ev("https://a.example/1", "semiconductor revenue rose across every node")
+        b = _ev("https://b.example/2", "songbirds navigate using magnetic field cues")
+        items = [replace(e, simhash=simhash(e.excerpt)) for e in (a, b)]
+        annotated, families = assign_families(items)
+        self.assertEqual(len(families), 2)
+        self.assertEqual(len({e.family_id for e in annotated}), 2)
+
+    def test_shared_doi_groups_even_if_text_differs(self):
+        a = _ev("https://arxiv.org/x", "preprint abstract wording one", doi="10.1/x")
+        b = _ev("https://journal.org/x", "published version different abstract wording", doi="10.1/x")
+        items = [replace(e, simhash=simhash(e.excerpt)) for e in (a, b)]
+        _, families = assign_families(items)
+        self.assertEqual(len(families), 1)
+
+    def test_representative_is_first_in_ranked_order(self):
+        body = "identical body content used across syndicated copies for the test"
+        items = [replace(_ev(f"https://s{i}.example/{i}", body), simhash=simhash(body)) for i in range(3)]
+        annotated, families = assign_families(items)
+        reps = [e for e in annotated if e.is_representative]
+        self.assertEqual(len(reps), 1)
+        self.assertEqual(reps[0].url, "https://s0.example/0")
+        self.assertEqual(families[0].representative_url, "https://s0.example/0")
+
+    def test_family_ids_first_appearance_order(self):
+        a = _ev("https://a.example/1", "unrelated alpha content about markets")
+        b = _ev("https://b.example/2", "unrelated beta content about biology")
+        items = [replace(e, simhash=simhash(e.excerpt)) for e in (a, b)]
+        annotated, _ = assign_families(items)
+        self.assertEqual(annotated[0].family_id, 0)
+        self.assertEqual(annotated[1].family_id, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
