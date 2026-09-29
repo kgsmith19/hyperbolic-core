@@ -23,3 +23,5 @@ report.md
 *.onnx
 .fastembed_cache/
 node_modules/
+.agent-runtime/
+research_runs/
