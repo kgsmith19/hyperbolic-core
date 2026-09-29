@@ -8,6 +8,7 @@ import unittest
 from backend.research.types import Evidence, SearchOptions
 from backend.research.run_store import RunStore, RunStoreError
 from backend.frontier.priority_frontier import ResearchFrontier
+from backend.research.information_gain import InformationGainTracker
 
 FAKE_SECRET = "LEDGER-SECRET-721"
 WATCHLIST = [FAKE_SECRET]
@@ -89,6 +90,33 @@ class TestFrontierPersistence(unittest.TestCase):
     def test_rejects_incomplete_snapshot(self):
         with self.assertRaises(ValueError):
             ResearchFrontier.from_state({"version": 1})
+
+
+class TestInformationGain(unittest.TestCase):
+    def test_stops_only_after_configured_consecutive_low_gain_batches(self):
+        frontier = ResearchFrontier()
+        tracker = InformationGainTracker(consecutive_round_limit=2)
+        tracker.observe_batch([Evidence(title="A", url="https://a.example/1", snippet="first", excerpt="first unique body")], frontier)
+        self.assertFalse(tracker.should_stop(minimum_documents=2))
+        tracker.observe_batch([], frontier)
+        self.assertFalse(tracker.should_stop(minimum_documents=1))
+        tracker.observe_batch([], frontier)
+        self.assertTrue(tracker.should_stop(minimum_documents=1))
+
+    def test_new_domain_doi_or_content_resets_low_gain_streak(self):
+        frontier = ResearchFrontier()
+        tracker = InformationGainTracker(consecutive_round_limit=2)
+        tracker.observe_batch([], frontier)
+        tracker.observe_batch([Evidence(title="A", url="https://a.example/1", snippet="one", doi="10.1/a", excerpt="one")], frontier)
+        self.assertFalse(tracker.should_stop(minimum_documents=0))
+        tracker.observe_batch([], frontier)
+        tracker.observe_batch([Evidence(title="B", url="https://b.example/1", snippet="two", excerpt="two")], frontier)
+        self.assertFalse(tracker.should_stop(minimum_documents=0))
+
+    def test_zero_threshold_never_stops(self):
+        tracker = InformationGainTracker(consecutive_round_limit=0)
+        tracker.observe_batch([], ResearchFrontier())
+        self.assertFalse(tracker.should_stop(minimum_documents=0))
 
 
 if __name__ == "__main__":

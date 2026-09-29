@@ -22,6 +22,7 @@ from backend.retrieval.bot_barrier_detector import is_bot_or_js_barrier
 from backend.retrieval.collector_client import CollectorClient, get_collector
 from backend.research.cloud_errors import CloudCallError
 from backend.research.types import Evidence, Query, SearchOptions
+from backend.research.information_gain import InformationGainTracker
 from backend.synthesis.local_synthesizer import LocalSynthesizer
 
 
@@ -262,12 +263,17 @@ def explore(
     collector=None,
     progress_callback=None,
     cost_tracker=None,
+    frontier_state: dict | None = None,
+    prior_evidence: list[Evidence] | None = None,
+    checkpoint_callback=None,
+    stop_callback=None,
 ) -> list[Evidence]:
     """Search, fetch, and hop. Decoy-originated hits never enter the frontier."""
     pool, extras = _open_collectors(collector, options.concurrency)
     try:
         return _explore(
-            queries, watchlist, options, cancel_token, pool, progress_callback, cost_tracker
+            queries, watchlist, options, cancel_token, pool, progress_callback, cost_tracker,
+            frontier_state, prior_evidence, checkpoint_callback, stop_callback
         )
     finally:
         for extra in extras:
@@ -277,8 +283,9 @@ def explore(
                 pass
 
 
-def _explore(queries, watchlist, options, cancel_token, collector, progress_callback, cost_tracker=None) -> list[Evidence]:
-    frontier = ResearchFrontier(
+def _explore(queries, watchlist, options, cancel_token, collector, progress_callback, cost_tracker=None,
+             frontier_state=None, prior_evidence=None, checkpoint_callback=None, stop_callback=None) -> list[Evidence]:
+    frontier = ResearchFrontier.from_state(frontier_state) if frontier_state else ResearchFrontier(
         max_depth=options.max_depth,
         max_documents=options.max_documents,
         max_per_domain=options.max_per_domain,
@@ -304,7 +311,7 @@ def _explore(queries, watchlist, options, cancel_token, collector, progress_call
             f"Searching {len(real_queries)} angle(s) across academic, SEC, and web sources..."
         )
 
-    search_jobs = real_queries + decoy_queries
+    search_jobs = [] if frontier_state and frontier.queue else real_queries + decoy_queries
     with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = [executor.submit(_execute_search, q) for q in search_jobs]
         for f in concurrent.futures.as_completed(futures):
@@ -316,6 +323,8 @@ def _explore(queries, watchlist, options, cancel_token, collector, progress_call
                 continue
             if originating.is_decoy:
                 continue
+            if checkpoint_callback:
+                checkpoint_callback("search", {"provider": "all", "status": str(resp.get("status", "error")), "error": str(resp.get("error", "")), "frontier": frontier.export_state()})
             if resp.get("status") != "ok":
                 continue
             _seed_frontier_from_results(
@@ -329,7 +338,8 @@ def _explore(queries, watchlist, options, cancel_token, collector, progress_call
                 relevance_scale=True,
             )
 
-    collected: list[Evidence] = []
+    collected: list[Evidence] = list(prior_evidence or [])
+    gain_tracker = InformationGainTracker(options.low_information_gain_rounds, collected)
     current_depth = 0
     batch_size = max(1, options.concurrency)
     gap_rounds_done = 0
@@ -360,6 +370,7 @@ def _explore(queries, watchlist, options, cancel_token, collector, progress_call
         if not batch:
             break
 
+        batch_accepted: list[Evidence] = []
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=min(len(batch), batch_size)
         ) as executor:
@@ -408,8 +419,7 @@ def _explore(queries, watchlist, options, cancel_token, collector, progress_call
                             rerank_hint = excerpt_text[:800]
                     except Exception:
                         pass
-                collected.append(
-                    Evidence(
+                accepted_evidence = Evidence(
                         title=title,
                         url=frontier_item.url,
                         snippet=_snippet_from_content(content),
@@ -419,7 +429,10 @@ def _explore(queries, watchlist, options, cancel_token, collector, progress_call
                         source=(frontier_item.source_url or "") + ("|chunked" if rerank_hint else ""),
                         rerank_score=0.0,
                     )
-                )
+                collected.append(accepted_evidence)
+                batch_accepted.append(accepted_evidence)
+                if checkpoint_callback:
+                    checkpoint_callback("evidence", {"provider": "fetch", "status": "ok", "evidence": accepted_evidence, "frontier": frontier.export_state()})
                 if rerank_hint:
                     titles[f"{frontier_item.url}#chunk"] = rerank_hint
 
@@ -433,6 +446,17 @@ def _explore(queries, watchlist, options, cancel_token, collector, progress_call
                                 priority=30.0,
                                 source_url=frontier_item.url,
                             )
+
+        observation = gain_tracker.observe_batch(batch_accepted, frontier)
+        if checkpoint_callback:
+            checkpoint_callback("fetch", {"provider": "fetch", "status": "ok", "accepted": len(batch_accepted), "low_gain": observation.low_gain, "frontier": frontier.export_state()})
+        if gain_tracker.should_stop(options.low_information_gain_min_documents):
+            queued_citations = [item for item in frontier.queue if item.source_url.startswith("citations:")]
+            best_ordinary = max((item.priority for item in frontier.queue if not item.source_url.startswith("citations:")), default=float("-inf"))
+            if not any(item.priority > best_ordinary for item in queued_citations):
+                if stop_callback:
+                    stop_callback("low_information_gain")
+                break
 
         # Continuation rounds: while evidence keeps arriving and rounds remain,
         # re-check coverage after every hop level and seed fresh angles. This is
