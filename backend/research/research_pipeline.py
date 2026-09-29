@@ -49,7 +49,10 @@ def run_search(
         checkpoint = store._checkpoint(_resume_data["manifest"])
 
     if cancel_token.is_set():
-        return _empty_run("cancelled", topic, options, cost_tracker, time.time() - start_time)
+        store.finish("cancelled", "cancelled", watchlist)
+        cancelled = _empty_run("cancelled", topic, options, cost_tracker, time.time() - start_time)
+        cancelled.run_id, cancelled.stop_reason, cancelled.ledger_path = run_id, "cancelled", checkpoint.ledger_path
+        return cancelled
 
     warnings: list[str] = []
 
@@ -75,6 +78,15 @@ def run_search(
     duration_budget = max(60.0, float(options.max_duration_min) * 60.0)
     options = replace(options, max_duration_sec=duration_budget)
 
+    terminal_stop = [None]
+    def ledger_checkpoint(phase, payload):
+        evidence_item = payload.get("evidence") if isinstance(payload, dict) else None
+        if isinstance(evidence_item, Evidence):
+            store.append_evidence(evidence_item, watchlist)
+        store.checkpoint("fetching" if phase in ("fetch", "evidence") else "searching", payload, watchlist)
+    def record_stop(reason):
+        terminal_stop[0] = reason
+
     evidence = explore(
         queries,
         watchlist,
@@ -83,7 +95,8 @@ def run_search(
         collector=collector,
         progress_callback=progress_callback,
         cost_tracker=cost_tracker,
-        checkpoint_callback=lambda phase, payload: store.checkpoint("fetching" if phase in ("fetch", "evidence") else "searching", payload, watchlist),
+        checkpoint_callback=ledger_checkpoint,
+        stop_callback=record_stop,
         frontier_state=_resume_data["manifest"].get("frontier") if _resume_data else None,
         prior_evidence=[_dicts_as_evidence(_resume_data.get("evidence", []))[i] for i in range(len(_resume_data.get("evidence", [])))] if _resume_data else None,
     )
@@ -152,7 +165,7 @@ def run_search(
             report_md = ""
 
     status = "cancelled" if cancel_token.is_set() else "success"
-    stop_reason = "cancelled" if status == "cancelled" else "completed"
+    stop_reason = "cancelled" if status == "cancelled" else (terminal_stop[0] or "completed")
     store.finish(status, stop_reason, watchlist)
     cancellation_manager.clear_token(run_id)
     if progress_callback:
@@ -184,6 +197,7 @@ def resume_search(run_id: str, watchlist: list[str], *, progress_callback=None, 
     manifest = data["manifest"]
     if manifest.get("status") == "success":
         raise RuntimeError("completed successful runs cannot be resumed")
+    store.reopen_for_resume(watchlist)
     options = SearchOptions(**manifest["options"])
     return run_search(manifest["topic"], watchlist, options, run_id=run_id,
                       progress_callback=progress_callback, collector=collector,

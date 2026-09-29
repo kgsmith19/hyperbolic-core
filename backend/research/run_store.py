@@ -35,7 +35,7 @@ class RunStore:
         "ranking", "synthesizing", "reporting", "completed",
     })
     _TERMINAL_REASONS = {
-        "success": {"completed"},
+        "success": {"completed", "low_information_gain"},
         "cancelled": {"cancelled"},
         "interrupted": {"internal_error"},
         "failed": {"provider_failure", "internal_error"},
@@ -107,6 +107,15 @@ class RunStore:
         record = self._sanitize(asdict(evidence), watchlist)
         self._append_jsonl(run_dir / "evidence.jsonl", record)
         self._append_event("evidence", record, watchlist)
+
+    def reopen_for_resume(self, watchlist: list[str]) -> None:
+        """Mark a resumable local run active again before fresh exploration."""
+        manifest = self._manifest()
+        if manifest.get("status") == "success":
+            raise RunStoreError("completed successful runs cannot be resumed")
+        manifest.update({"status": "running", "stop_reason": None})
+        self._append_event("resumed", {}, watchlist, manifest)
+        self._write_manifest(manifest)
 
     def finish(self, status: str, stop_reason: str, watchlist: list[str]) -> None:
         if stop_reason not in self._TERMINAL_REASONS.get(status, set()):
