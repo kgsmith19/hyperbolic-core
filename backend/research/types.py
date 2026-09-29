@@ -73,6 +73,10 @@ class SearchOptions:
     reasoning_effort: str | None = None
     max_spend_usd: float = 2.00
 
+    # Opt-in deterministic stopping after consecutive unproductive batches.
+    low_information_gain_rounds: int = 0
+    low_information_gain_min_documents: int = 0
+
     def __post_init__(self):
         # llm_process is canonical. conceal_process is the derived alias:
         # an older payload that only sets conceal_process still works; an
@@ -156,3 +160,7 @@ class ResearchRun:
     status: str
     report_markdown: str = ""
     warnings: list[str] = field(default_factory=list)
+    run_id: str = ""
+    stop_reason: str | None = None
+    ledger_path: str = ""
+    phase: str = "completed"

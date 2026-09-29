@@ -38,6 +38,7 @@ from backend.research.preview import preview
 from backend.research.planner import plan_queries
 from backend.research.guard import prepare_topic
 from backend.research.explorer import explore
+from backend.research.run_store import RunCheckpoint, RunStore, RunStoreError
 
 __all__ = [
     "expand_topic_queries",
@@ -61,4 +62,7 @@ __all__ = [
     "plan_queries",
     "prepare_topic",
     "explore",
+    "RunCheckpoint",
+    "RunStore",
+    "RunStoreError",
 ]
