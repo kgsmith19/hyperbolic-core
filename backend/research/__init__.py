@@ -11,6 +11,7 @@ from backend.research.query_planner import (
 )
 from backend.research.research_pipeline import (
     run_search,
+    resume_search,
     run_to_dict,
 )
 from backend.research.query_rewriter import (
@@ -46,6 +47,7 @@ __all__ = [
     "hyde_draft_queries",
     "propose_gap_queries",
     "run_search",
+    "resume_search",
     "run_to_dict",
     "CostTracker",
     "SpendLimitExceededError",

@@ -96,7 +96,7 @@ class RunStore:
         manifest = self._manifest()
         safe_payload = self._sanitize(payload, watchlist)
         manifest["phase"] = phase
-        for key in ("frontier", "budget"):
+        for key in ("frontier", "budget", "queries"):
             if key in safe_payload:
                 manifest[key] = safe_payload[key]
         self._append_event("checkpoint", {"phase": phase, **safe_payload}, watchlist, manifest)

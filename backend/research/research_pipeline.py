@@ -1,6 +1,7 @@
 """Search pipeline: compose guard, planner, explorer, ranker, synthesis, reporter."""
 
 from datetime import datetime
+import uuid
 from dataclasses import asdict, replace
 import os
 import re
@@ -18,6 +19,7 @@ from backend.research.types import Evidence, Query, ResearchRun, SearchOptions
 from backend.research.guard import prepare_topic
 from backend.research.planner import plan_queries
 from backend.research.explorer import explore
+from backend.research.run_store import RunStore
 
 
 def run_search(
@@ -27,8 +29,12 @@ def run_search(
     run_id: str = "default",
     progress_callback=None,
     collector=None,
+    ledger_root: str = "research_runs",
+    _resume_data: dict | None = None,
 ) -> ResearchRun:
     """Execute one progressive-depth search and return a ResearchRun."""
+    if run_id == "default" and (RunStore(ledger_root).root / run_id).exists():
+        run_id = f"run-{uuid.uuid4().hex}"
     start_time = time.time()
     cost_tracker = CostTracker(model=options.deep_model if options.model == "gpt-4o-mini" else options.model, max_spend_usd=options.max_spend_usd)
     cancel_token = cancellation_manager.create_token(run_id)
@@ -36,6 +42,11 @@ def run_search(
     if progress_callback:
         progress_callback("Checking the topic against your private list...")
     effective_topic = prepare_topic(topic, watchlist, options)
+    store = RunStore(ledger_root)
+    if _resume_data is None:
+        checkpoint = store.create(run_id, effective_topic, options, watchlist)
+    else:
+        checkpoint = store._checkpoint(_resume_data["manifest"])
 
     if cancel_token.is_set():
         return _empty_run("cancelled", topic, options, cost_tracker, time.time() - start_time)
@@ -52,14 +63,15 @@ def run_search(
             progress_callback("Asking the model for extra search angles...")
         else:
             progress_callback("Preparing search queries...")
-    queries = plan_queries(
-        effective_topic,
-        watchlist,
-        options,
-        cost_tracker=cost_tracker,
-        progress_callback=note,
-    )
-
+    if _resume_data is None:
+        queries = plan_queries(
+            effective_topic, watchlist, options, cost_tracker=cost_tracker, progress_callback=note,
+        )
+        store.checkpoint("planned", {"queries": [asdict(query) for query in queries]}, watchlist)
+    else:
+        queries = [Query(**item) for item in _resume_data["manifest"].get("queries", [])]
+        if not queries:
+            queries = plan_queries(effective_topic, watchlist, options, cost_tracker=cost_tracker, progress_callback=note)
     duration_budget = max(60.0, float(options.max_duration_min) * 60.0)
     options = replace(options, max_duration_sec=duration_budget)
 
@@ -71,6 +83,9 @@ def run_search(
         collector=collector,
         progress_callback=progress_callback,
         cost_tracker=cost_tracker,
+        checkpoint_callback=lambda phase, payload: store.checkpoint("fetching" if phase in ("fetch", "evidence") else "searching", payload, watchlist),
+        frontier_state=_resume_data["manifest"].get("frontier") if _resume_data else None,
+        prior_evidence=[_dicts_as_evidence(_resume_data.get("evidence", []))[i] for i in range(len(_resume_data.get("evidence", [])))] if _resume_data else None,
     )
 
     if progress_callback:
@@ -94,7 +109,7 @@ def run_search(
     clean_eval_topic = re.sub(r"\[TARGET_ENTITY_\d+\]", "target component", effective_topic)
     summary = _synthesize(
         clean_eval_topic,
-        ranked[:8],
+        ranked,
         watchlist,
         options,
         cost_tracker,
@@ -137,6 +152,8 @@ def run_search(
             report_md = ""
 
     status = "cancelled" if cancel_token.is_set() else "success"
+    stop_reason = "cancelled" if status == "cancelled" else "completed"
+    store.finish(status, stop_reason, watchlist)
     cancellation_manager.clear_token(run_id)
     if progress_callback:
         progress_callback("Done.")
@@ -153,7 +170,24 @@ def run_search(
         status=status,
         report_markdown=report_md,
         warnings=warnings,
+        run_id=run_id,
+        stop_reason=stop_reason,
+        ledger_path=checkpoint.ledger_path,
+        phase="completed",
     )
+
+
+def resume_search(run_id: str, watchlist: list[str], *, progress_callback=None, collector=None, ledger_root: str = "research_runs") -> ResearchRun:
+    """Resume a non-successful local ledger with fresh collector processes."""
+    store = RunStore(ledger_root)
+    data = store.load(run_id, watchlist)
+    manifest = data["manifest"]
+    if manifest.get("status") == "success":
+        raise RuntimeError("completed successful runs cannot be resumed")
+    options = SearchOptions(**manifest["options"])
+    return run_search(manifest["topic"], watchlist, options, run_id=run_id,
+                      progress_callback=progress_callback, collector=collector,
+                      ledger_root=ledger_root, _resume_data=data)
 
 
 def run_to_dict(run: ResearchRun) -> dict:
@@ -179,6 +213,10 @@ def run_to_dict(run: ResearchRun) -> dict:
         "duration_seconds": run.duration_sec,
         "requires_confirm": bool(run.options.blind_watchlist or run.options.decoy_queries > 0),
         "warnings": list(run.warnings),
+        "run_id": run.run_id,
+        "phase": run.phase,
+        "stop_reason": run.stop_reason,
+        "ledger_path": run.ledger_path,
     }
 
 

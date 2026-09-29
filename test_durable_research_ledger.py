@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from backend.research.types import Evidence, SearchOptions
 from backend.research.run_store import RunStore, RunStoreError
@@ -117,6 +118,38 @@ class TestInformationGain(unittest.TestCase):
         tracker = InformationGainTracker(consecutive_round_limit=0)
         tracker.observe_batch([], ResearchFrontier())
         self.assertFalse(tracker.should_stop(minimum_documents=0))
+
+
+class TestDurablePipeline(unittest.TestCase):
+    def test_pipeline_persists_additive_run_metadata(self):
+        from backend.research.research_pipeline import run_search
+        from backend.research.types import Query
+        options = SearchOptions(max_gap_rounds=0, citation_expansion=False, rerank_results=False)
+        with tempfile.TemporaryDirectory() as root, \
+             patch("backend.research.research_pipeline.prepare_topic", return_value="topic"), \
+             patch("backend.research.research_pipeline.plan_queries", return_value=[Query("topic")]), \
+             patch("backend.research.research_pipeline.explore", return_value=[]), \
+             patch("backend.research.research_pipeline.rank_items", return_value=[]), \
+             patch("backend.research.research_pipeline.write_report", return_value="reports/test.md"):
+            run = run_search("topic", [], options, run_id="durable-1", ledger_root=root)
+            manifest = json.loads(Path(root, "durable-1", "manifest.json").read_text())
+        self.assertEqual(run.run_id, "durable-1")
+        self.assertEqual(run.stop_reason, "completed")
+        self.assertEqual(manifest["status"], "success")
+
+    def test_pipeline_passes_all_ranked_evidence_to_synthesis(self):
+        from backend.research.research_pipeline import run_search
+        from backend.research.types import Query
+        evidence = [Evidence(title=str(i), url=f"https://e{i}.org", snippet="s", excerpt="safe") for i in range(12)]
+        options = SearchOptions(max_gap_rounds=0, citation_expansion=False, rerank_results=False)
+        with patch("backend.research.research_pipeline.prepare_topic", return_value="topic"), \
+             patch("backend.research.research_pipeline.plan_queries", return_value=[Query("topic")]), \
+             patch("backend.research.research_pipeline.explore", return_value=evidence), \
+             patch("backend.research.research_pipeline.rank_items", return_value=evidence), \
+             patch("backend.research.research_pipeline._synthesize", return_value="brief") as synthesize, \
+             patch("backend.research.research_pipeline.write_report", return_value="reports/test.md"):
+            run_search("topic", [], options)
+        self.assertEqual(len(synthesize.call_args.args[1]), 12)
 
 
 if __name__ == "__main__":
