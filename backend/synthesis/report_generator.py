@@ -25,7 +25,8 @@ def write_report(
     summary: str,
     watchlist: list[str],
     output_path: str = "report.md",
-    metadata: dict | None = None
+    metadata: dict | None = None,
+    independence: dict | None = None
 ) -> str:
     """Write the research findings to report.md and an archived timestamped report in reports/."""
     clean_topic = redact(topic, watchlist)
@@ -58,6 +59,22 @@ def write_report(
         "## Executive Summary",
         summary.strip() if summary.strip() else "Summary not available (evidence only).",
         "",
+    ]
+
+    if independence and (independence.get("families", 0) or independence.get("multi")):
+        report_lines.append("## Independence")
+        fam_n = independence.get("families", 0)
+        largest = independence.get("largest_family", 0)
+        report_lines.append(
+            f"Grouped into {fam_n} independent source-families"
+            + (f"; largest family has {largest} near-duplicate copies." if largest and largest > 1 else ".")
+        )
+        for fam in independence.get("multi", []):
+            fam_title = redact(fam.get("title") or "Untitled", watchlist)
+            report_lines.append(f"- {fam_title} ({fam.get('size', 0)} copies)")
+        report_lines.append("")
+
+    report_lines += [
         "## Evidence & Sources",
     ]
 

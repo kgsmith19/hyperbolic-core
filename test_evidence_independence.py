@@ -160,5 +160,39 @@ class TestFamilyAwareVerification(unittest.TestCase):
         self.assertIn("Alpha Reactor", verified_claims)
 
 
+import os
+import tempfile
+from backend.synthesis.report_generator import write_report
+from backend.research.preview import preview
+from backend.research.types import SearchOptions
+
+
+class TestReportAndPreview(unittest.TestCase):
+    def test_report_none_independence_has_no_section(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "report.md")
+            write_report("topic", [{"title": "T", "url": "https://a/1", "snippet": "s", "excerpt": "e"}],
+                         "summary", [], output_path=out)
+            text = open(out, encoding="utf-8").read()
+        self.assertNotIn("## Independence", text)
+
+    def test_report_with_independence_section_and_redaction(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "report.md")
+            indep = {"families": 2, "largest_family": 3,
+                     "multi": [{"title": "SECRETCO wire story", "size": 3}]}
+            write_report("topic about SECRETCO", [{"title": "SECRETCO", "url": "https://a/1", "snippet": "", "excerpt": ""}],
+                         "summary", ["SECRETCO"], output_path=out, independence=indep)
+            text = open(out, encoding="utf-8").read()
+        self.assertIn("## Independence", text)
+        self.assertNotIn("SECRETCO", text)
+
+    def test_preview_includes_independence_warning_when_verification_on(self):
+        p_on = preview("topic", SearchOptions(claim_verification=True))
+        p_off = preview("topic", SearchOptions(claim_verification=False))
+        self.assertTrue(any("independent families" in w for w in p_on.warnings))
+        self.assertFalse(any("independent families" in w for w in p_off.warnings))
+
+
 if __name__ == "__main__":
     unittest.main()

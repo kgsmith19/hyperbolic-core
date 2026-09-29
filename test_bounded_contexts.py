@@ -481,7 +481,7 @@ class TestCloudFallback(unittest.TestCase):
                 "backend.research.research_pipeline.summarize_with_openai",
                 side_effect=CloudCallError("summary", RuntimeError("timeout")),
             ):
-                summary = _synthesize(
+                summary, _independence = _synthesize(
                     "solid electrolytes",
                     evidence,
                     [],

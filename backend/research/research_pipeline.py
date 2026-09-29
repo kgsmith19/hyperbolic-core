@@ -9,6 +9,7 @@ import time
 
 from backend.privacy.watchlist_redactor import redact
 from backend.ranking.hybrid_ranker import rank_items
+from backend.research.independence import assign_families
 from backend.synthesis.local_synthesizer import LocalSynthesizer
 from backend.synthesis.openai_synthesizer import summarize_with_openai
 from backend.synthesis.report_generator import write_report
@@ -120,7 +121,17 @@ def run_search(
             pass
 
     clean_eval_topic = re.sub(r"\[TARGET_ENTITY_\d+\]", "target component", effective_topic)
-    summary = _synthesize(
+
+    # Group ranked evidence into near-duplicate/syndication families (local-only).
+    # Records family_id/is_representative on each Evidence; degrades to no families
+    # on any failure so the run always completes.
+    families_records = []
+    try:
+        ranked, families_records = assign_families(ranked)
+    except Exception:
+        families_records = []
+
+    summary, independence_report = _synthesize(
         clean_eval_topic,
         ranked,
         watchlist,
@@ -128,6 +139,7 @@ def run_search(
         cost_tracker,
         cancel_token,
         note,
+        families_records=families_records,
     )
 
     duration = time.time() - start_time
@@ -154,6 +166,7 @@ def run_search(
         summary,
         watchlist,
         metadata=meta,
+        independence=independence_report,
     )
 
     report_md = ""
@@ -234,21 +247,45 @@ def run_to_dict(run: ResearchRun) -> dict:
     }
 
 
-def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token, progress_callback) -> str:
+def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token, progress_callback, families_records=None):
     evidence_dicts = _evidence_as_dicts(evidence)
     has_openai = bool(os.environ.get("OPENAI_API_KEY", "").strip())
     cancelled = bool(cancel_token is not None and cancel_token.is_set())
+
+    # Independence: count corroboration by family, not URL. Built from the
+    # family_id already annotated on each Evidence by assign_families.
+    family_map = None
+    if families_records:
+        family_map = {e.url: e.family_id for e in evidence if getattr(e, "family_id", -1) >= 0} or None
+    independence_report = None
+    if families_records:
+        multi = sorted([f for f in families_records if f.size > 1], key=lambda f: -f.size)
+        title_by_url = {e.url: e.title for e in evidence}
+        independence_report = {
+            "families": len(families_records),
+            "largest_family": max((f.size for f in families_records), default=0),
+            "multi": [
+                {"title": title_by_url.get(f.representative_url, f.representative_url), "size": f.size}
+                for f in multi
+            ],
+        }
+
     verification = None
     if options.claim_verification and evidence_dicts:
         try:
             from backend.synthesis.claim_verifier import verify_evidence
-            verification = verify_evidence(evidence_dicts)
+            verification = verify_evidence(evidence_dicts, families=family_map)
             n_contested = len(verification.get("contested", []))
             n_verified = len(verification.get("verified", []))
+            collapsed = (verification.get("independence") or {}).get("collapsed_claims", 0)
             if progress_callback and (n_contested or n_verified):
                 progress_callback(
                     f"Cross-checked claims: {n_verified} corroborated, "
                     f"{n_contested} contested across sources."
+                )
+            if progress_callback and collapsed:
+                progress_callback(
+                    f"Independence check: {collapsed} claim(s) collapsed to a single source-family."
                 )
         except Exception:
             verification = None
@@ -264,7 +301,7 @@ def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token,
                 reasoning_effort=options.reasoning_effort,
                 cost_tracker=cost_tracker,
                 verification=verification,
-            )
+            ), independence_report
         except CloudCallError as err:
             if progress_callback:
                 if err.cause_type == "SpendLimitExceededError":
@@ -282,7 +319,7 @@ def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token,
         progress_callback("Writing a local summary from the sources...")
     local_slm = LocalSynthesizer()
     summary = local_slm.synthesize(topic, evidence_dicts)
-    return redact(summary, watchlist)
+    return redact(summary, watchlist), independence_report
 
 
 def _option_flags(options: SearchOptions) -> str:
@@ -339,6 +376,9 @@ def _dicts_as_evidence(items: list) -> list[Evidence]:
                 source=d.get("source", ""),
                 score=float(d.get("score", 0.0) or 0.0),
                 rerank_score=float(d.get("rerank_score", 0.0) or 0.0),
+                simhash=int(d.get("simhash", 0) or 0),
+                family_id=int(d.get("family_id", -1) if d.get("family_id", -1) is not None else -1),
+                is_representative=bool(d.get("is_representative", False)),
             )
         )
     return out
