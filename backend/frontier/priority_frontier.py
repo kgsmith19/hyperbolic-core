@@ -12,7 +12,6 @@ import hashlib
 import threading
 import time
 
-from backend.research.independence import simhash as _simhash
 import urllib.parse
 
 
@@ -190,6 +189,9 @@ class ResearchFrontier:
             self.content_hashes.add(content_hash)
             self.total_bytes_consumed += content_bytes
             self.documents_collected += 1
+            # Lazy import avoids a circular import at module load
+            # (backend.research package imports the frontier).
+            from backend.research.independence import simhash as _simhash
             self.content_simhashes[url] = _simhash(norm_text)
             return True
 
