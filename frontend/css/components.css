@@ -446,6 +446,16 @@ input[type="number"]:focus {
     background: var(--primary-hover);
 }
 
+.app-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; border-color:rgba(255,255,255,.24); }
+.app-header h1, .app-header p { color:#fff; }
+.app-header p { color:#d4e2e2; }
+.plan-toggle { padding:14px 0; border-top:1px solid var(--border); }
+.live-progress { margin-top:16px; padding:14px; background:#eaf3f2; border:1px solid #b7d5d1; border-radius:8px; }
+.progress-stages { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin-bottom:10px; }
+.progress-stage { font-size:12px; color:var(--text-muted); padding:5px 6px; border-bottom:2px solid var(--border); }
+.progress-stage.active { color:var(--primary); border-color:var(--primary); font-weight:700; }
+#progress-detail { font-size:13px; color:var(--text); }
+
 #status-box {
     display: none;
     margin-top: 16px;

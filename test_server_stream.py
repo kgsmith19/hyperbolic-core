@@ -177,6 +177,12 @@ class TestResearchStreamBrowser(unittest.TestCase):
                     page = browser.new_page()
                     page.goto(base, wait_until="domcontentloaded")
 
+                    self.assertTrue(page.is_visible("#research-plan"))
+                    self.assertFalse(page.is_visible("#params-body"))
+                    page.click("#research-plan")
+                    self.assertTrue(page.is_visible("#params-body"))
+                    self.assertEqual(page.locator(".progress-stage").count(), 5)
+
                     page.fill("#topic", "solid-state batteries")
                     page.click("#run-btn")
 

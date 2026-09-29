@@ -10,9 +10,9 @@
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>Deep Search</h1>
-            <p>Research a public topic. Private words stay on this machine.</p>
+        <header class="app-header">
+            <div><h1>Deep Search</h1><p>Public research, with private terms kept on this machine.</p></div>
+            <span class="badge-safe">Local-first research</span>
         </header>
 
         <div class="card" id="search-card">
@@ -94,11 +94,10 @@
             </div>
 
             <div class="form-group" style="margin-bottom:0;">
-                <button type="button" class="drawer-toggle" onclick="toggleParams()">
-                    <span>Limits and model</span>
-                    <span id="params-toggle-btn" class="drawer-caret">Show</span>
+                <button type="button" id="research-plan" class="drawer-toggle plan-toggle" aria-controls="params-body" aria-expanded="false" onclick="toggleParams()">
+                    <span><strong>Research plan</strong><span class="label-desc">Scope, privacy, quality, and budget controls</span></span>
+                    <span id="params-toggle-btn" class="drawer-caret">Customize</span>
                 </button>
-                <div class="label-desc">How far to follow links, when to stop, and which model to use if AI is on.</div>
                 <div id="params-body" class="params-grid" style="display:none;">
                     <div class="form-group" style="margin-bottom:0;">
                         <label for="max-depth">Follow links this many hops</label>
@@ -255,6 +254,12 @@
                 <button id="run-btn" class="btn-run" onclick="executeResearch()">Start search</button>
                 <button id="cancel-btn" class="btn-cancel" onclick="cancelResearch()">Stop</button>
             </div>
+            <section id="live-progress" class="live-progress" aria-label="Research progress" hidden>
+                <div class="progress-stages" aria-hidden="true">
+                    <span class="progress-stage" data-stage="prepare">Prepare</span><span class="progress-stage" data-stage="discover">Discover</span><span class="progress-stage" data-stage="read">Read</span><span class="progress-stage" data-stage="evaluate">Evaluate</span><span class="progress-stage" data-stage="report">Report</span>
+                </div>
+                <p id="progress-detail" aria-live="polite">Preparing your research plan…</p>
+            </section>
             <div id="status-box" role="status" aria-live="polite"></div>
         </div>
 

@@ -239,7 +239,8 @@ async function executeResearch() {
     const resultsSection = document.getElementById('results-section');
 
     if (!topic) {
-        alert('Please enter a research topic.');
+        window.UiRenderer.renderStatus('error', 'Add a public research topic before starting. Private terms belong in the optional local-only field.');
+        document.getElementById('topic').focus();
         return;
     }
 
@@ -247,7 +248,8 @@ async function executeResearch() {
     const preview = window.appState.lastPreview;
     const confirm = document.getElementById('confirm-weaker-recall');
     if (preview && preview.requires_confirm && !confirm?.checked) {
-        alert('This combination reduces recall. Check "I accept weaker recall" to launch.');
+        window.UiRenderer.renderStatus('error', 'This plan trades recall for privacy. Confirm that trade-off below before starting.');
+        confirm?.focus();
         return;
     }
 

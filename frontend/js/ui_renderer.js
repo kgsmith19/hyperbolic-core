@@ -14,6 +14,8 @@ const UiRenderer = {
     renderStatus(type, message) {
         const statusBox = document.getElementById('status-box');
         const cancelBtn = document.getElementById('cancel-btn');
+        const progress = document.getElementById('live-progress');
+        const detail = document.getElementById('progress-detail');
 
         if (!statusBox) return;
 
@@ -22,14 +24,22 @@ const UiRenderer = {
         }
 
         if (!type) {
+            if (progress) progress.hidden = true;
             statusBox.className = '';
             statusBox.style.display = 'none';
             statusBox.innerText = '';
             return;
         }
 
+        if (progress) {
+            progress.hidden = type !== 'running';
+            const lower = String(message).toLowerCase();
+            const stage = lower.includes('report') || lower.includes('summary') ? 'report' : lower.includes('rank') || lower.includes('rerank') || lower.includes('coverage') ? 'evaluate' : lower.includes('reading') || lower.includes('retriev') ? 'read' : lower.includes('search') || lower.includes('frontier') ? 'discover' : 'prepare';
+            progress.querySelectorAll('.progress-stage').forEach(item => item.classList.toggle('active', item.dataset.stage === stage));
+            if (detail) detail.innerText = message;
+        }
         statusBox.className = type;
-        statusBox.style.display = 'block';
+        statusBox.style.display = type === 'error' || type === 'cancelled' ? 'block' : 'none';
         statusBox.innerText = message;
     },
 
