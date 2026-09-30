@@ -222,6 +222,34 @@ async function saveSettings() {
     }
 }
 
+let progressTimer = null;
+
+function startProgressClock() {
+    stopProgressClock();
+    const elapsedEl = document.getElementById('progress-elapsed');
+    const sourcesEl = document.getElementById('progress-sources');
+    const fill = document.getElementById('progress-bar-fill');
+    if (elapsedEl) elapsedEl.innerText = '0:00';
+    if (sourcesEl) { sourcesEl.hidden = true; sourcesEl.innerText = ''; }
+    if (fill) {
+        fill.classList.add('indeterminate');
+        fill.style.width = '';
+    }
+    const startedAt = Date.now();
+    progressTimer = setInterval(() => {
+        if (!elapsedEl) return;
+        const s = Math.floor((Date.now() - startedAt) / 1000);
+        elapsedEl.innerText = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    }, 1000);
+}
+
+function stopProgressClock() {
+    if (progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = null;
+    }
+}
+
 async function cancelResearch() {
     try {
         window.UiRenderer.renderStatus('running', 'Cancellation requested. Terminating workers and compiling partial results...');
@@ -267,20 +295,25 @@ async function executeResearch() {
     if (runBtn) runBtn.disabled = true;
     if (resultsSection) resultsSection.style.display = 'none';
     window.UiRenderer.renderStatus('running', 'Starting…');
+    startProgressClock();
 
     try {
         const data = await window.ApiClient.executeResearch(payload, (message) => {
             // Live progress: repaint the status box as each stage streams in.
             window.UiRenderer.renderStatus('running', message);
+            window.UiRenderer.renderSourceCount(message);
         });
         window.UiRenderer.renderStatus('', '');
+        stopProgressClock();
         window.appState.setResult(data);
         window.UiRenderer.renderResults(data);
         await loadReports();
     } catch (err) {
-        window.UiRenderer.renderStatus('error', '⚠️ ' + err.message);
+        window.UiRenderer.renderStatus('error', err.message);
+        stopProgressClock();
     } finally {
         window.appState.setRunning(false);
+        stopProgressClock();
         syncLaunchEnabled();
     }
 }
@@ -290,12 +323,18 @@ window.appState.subscribe((event, value) => {
         const body = document.getElementById('settings-body');
         const btn = document.getElementById('settings-toggle-btn');
         if (body) body.style.display = value ? 'block' : 'none';
-        if (btn) btn.innerText = value ? 'Hide' : 'Show';
+        if (btn) {
+            btn.innerText = value ? 'Hide' : 'Show';
+            btn.closest('.drawer-toggle')?.setAttribute('aria-expanded', String(value));
+        }
     } else if (event === 'paramsOpen') {
         const body = document.getElementById('params-body');
         const btn = document.getElementById('params-toggle-btn');
         if (body) body.style.display = value ? 'grid' : 'none';
-        if (btn) btn.innerText = value ? 'Hide' : 'Show';
+        if (btn) {
+            btn.innerText = value ? 'Hide' : 'Customize';
+            document.getElementById('research-plan')?.setAttribute('aria-expanded', String(value));
+        }
     } else if (event === 'reportsOpen') {
         const body = document.getElementById('reports-body');
         const btn = document.getElementById('reports-toggle-btn');
@@ -303,7 +342,10 @@ window.appState.subscribe((event, value) => {
             body.style.display = value ? 'block' : 'none';
             if (value) loadReports();
         }
-        if (btn) btn.innerText = value ? 'Hide' : 'Show';
+        if (btn) {
+            btn.innerText = value ? 'Hide' : 'Show';
+            btn.closest('.drawer-toggle')?.setAttribute('aria-expanded', String(value));
+        }
     } else if (event === 'reports') {
         window.UiRenderer.renderReportsList(value);
     } else if (event === 'settings') {

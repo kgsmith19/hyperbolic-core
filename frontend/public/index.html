@@ -12,314 +12,323 @@
     <div class="container">
         <header class="app-header">
             <div><h1>Deep Search</h1><p>Public research, with private terms kept on this machine.</p></div>
-            <span class="badge-safe">Local-first research</span>
+            <span class="badge badge-safe">Local-first research</span>
         </header>
 
-        <div class="card" id="search-card">
-            <div class="form-group">
-                <label for="topic">What are you researching?</label>
-                <div class="label-desc">A public question or brief. This is what the search engines will see unless you hide private words below.</div>
-                <textarea id="topic" rows="3" placeholder="e.g. Recent breakthroughs in solid-state battery electrolytes"></textarea>
-            </div>
+        <main>
+            <div class="card" id="search-card">
+                <h2 class="visually-hidden">Start a search</h2>
 
-            <div class="form-group">
-                <label for="watchlist">Private words <span class="badge-safe">Stay on this PC</span></label>
-                <div class="label-desc">Optional. One per line. These never go to search engines or AI. Leave blank if you have nothing to hide.</div>
-                <textarea id="watchlist" rows="2" placeholder="Project names, tokens, or other words to keep off the network"></textarea>
-            </div>
-
-            <div class="form-group">
-                <label>How should this search run?</label>
-                <div class="label-desc">Pick a starting point, then change any row. Each choice says what you gain and what you give up.</div>
-                <div class="starting-points" role="group" aria-label="Starting points">
-                    <button type="button" class="preset-btn" id="macro-local" onclick="applyMacro('local')">Stay local</button>
-                    <button type="button" class="preset-btn" id="macro-private" onclick="applyMacro('private')">Stay private</button>
-                    <button type="button" class="preset-btn" id="macro-plan" onclick="applyMacro('plan')">Find more angles</button>
-                    <button type="button" class="preset-btn" id="macro-brief" onclick="applyMacro('brief')">Write a brief</button>
+                <div class="form-group">
+                    <label for="topic">What are you researching?</label>
+                    <div class="label-desc">A public question or brief. This is what the search engines will see unless you hide private words below.</div>
+                    <textarea id="topic" rows="3" placeholder="e.g. Recent breakthroughs in solid-state battery electrolytes"></textarea>
                 </div>
 
-                <div class="option-list">
-                    <label class="switch-row" for="blind-watchlist">
-                        <span>
-                            <span class="switch-title">Hide private words in queries</span>
-                            <span class="label-desc">Engines see placeholders instead of your list. Weaker matches.</span>
-                        </span>
-                        <input type="checkbox" id="blind-watchlist" onchange="updatePreRunEstimate()">
-                    </label>
-                    <div class="switch-row">
-                        <label for="decoy-queries">
-                            <span class="switch-title">Decoy searches</span>
-                            <span class="label-desc">Extra fake queries run so yours is harder to spot. They find nothing useful.</span>
-                        </label>
-                        <input type="number" id="decoy-queries" value="0" min="0" max="8" onchange="updatePreRunEstimate()">
+                <div class="form-group">
+                    <label for="watchlist">Private words <span class="badge badge-safe">Stay on this PC</span></label>
+                    <div class="label-desc">Optional. One per line. These never go to search engines or AI. Leave blank if you have nothing to hide.</div>
+                    <textarea id="watchlist" rows="2" placeholder="Project names, tokens, or other words to keep off the network"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>How should this search run?</label>
+                    <div class="label-desc">Pick a starting point, then change any row. Each choice says what you gain and what you give up.</div>
+                    <div class="starting-points" role="group" aria-label="Starting points">
+                        <button type="button" class="preset-btn" id="macro-local" onclick="applyMacro('local')">Stay local</button>
+                        <button type="button" class="preset-btn" id="macro-private" onclick="applyMacro('private')">Stay private</button>
+                        <button type="button" class="preset-btn" id="macro-plan" onclick="applyMacro('plan')">Find more angles</button>
+                        <button type="button" class="preset-btn" id="macro-brief" onclick="applyMacro('brief')">Write a brief</button>
                     </div>
-                    <label class="switch-row" for="ai-planning">
-                        <span>
-                            <span class="switch-title">Let AI suggest extra angles</span>
-                            <span class="label-desc">Sends the topic (not your private list). Small cost.</span>
-                        </span>
-                        <input type="checkbox" id="ai-planning" onchange="updatePreRunEstimate()">
-                    </label>
-                    <div class="form-group" style="margin-bottom:8px;">
-                        <label>LLM process</label>
-                        <div class="label-desc">How the model sees this search. Private words never leave in either mode.</div>
-                        <div class="starting-points" role="radiogroup" aria-label="LLM process">
-                            <label class="preset-btn" for="llm-process-hide">
-                                <input type="radio" name="llm-process" id="llm-process-hide" value="hide" checked onchange="updatePreRunEstimate()">
-                                Hide process
+
+                    <div class="option-list">
+                        <label class="switch-row" for="blind-watchlist">
+                            <span>
+                                <span class="switch-title">Hide private words in queries</span>
+                                <span class="label-desc">Engines see placeholders instead of your list. Weaker matches.</span>
+                            </span>
+                            <input type="checkbox" id="blind-watchlist" onchange="updatePreRunEstimate()">
+                        </label>
+                        <div class="switch-row">
+                            <label for="decoy-queries">
+                                <span class="switch-title">Decoy searches</span>
+                                <span class="label-desc">Extra fake queries run so yours is harder to spot. They find nothing useful.</span>
                             </label>
-                            <label class="preset-btn" for="llm-process-show">
-                                <input type="radio" name="llm-process" id="llm-process-show" value="show" onchange="updatePreRunEstimate()">
-                                Show process
+                            <input type="number" id="decoy-queries" value="0" min="0" max="8" onchange="updatePreRunEstimate()">
+                        </div>
+                        <label class="switch-row" for="ai-planning">
+                            <span>
+                                <span class="switch-title">Let AI suggest extra angles</span>
+                                <span class="label-desc">Sends the topic (not your private list). Small cost.</span>
+                            </span>
+                            <input type="checkbox" id="ai-planning" onchange="updatePreRunEstimate()">
+                        </label>
+                        <div class="switch-row switch-row-stack">
+                            <label>LLM process</label>
+                            <div class="label-desc">How the model sees this search. Private words never leave in either mode. Hide: topic buried among decoy topics so the model cannot tell what is being researched. Show: send the bare topic and evidence for better angles.</div>
+                            <div class="segmented" role="radiogroup" aria-label="LLM process">
+                                <label class="segment"><input type="radio" name="llm-process" id="llm-process-hide" value="hide" checked onchange="updatePreRunEstimate()"><span>Hide process</span></label>
+                                <label class="segment"><input type="radio" name="llm-process" id="llm-process-show" value="show" onchange="updatePreRunEstimate()"><span>Show process</span></label>
+                            </div>
+                            <input type="checkbox" id="conceal-process" checked style="display:none" aria-hidden="true">
+                        </div>
+                        <label class="switch-row" for="ai-summary">
+                            <span>
+                                <span class="switch-title">Let AI write the summary</span>
+                                <span class="label-desc">Sends redacted source excerpts. Cost grows with how many sources you keep.</span>
+                            </span>
+                            <input type="checkbox" id="ai-summary" onchange="updatePreRunEstimate()">
+                        </label>
+                    </div>
+
+                    <div id="confirm-weaker-wrap" class="confirm-box" style="display:none;">
+                        <label for="confirm-weaker-recall">
+                            <input type="checkbox" id="confirm-weaker-recall" onchange="syncLaunchEnabled()">
+                            <span>I accept weaker results from hiding words or running decoys</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom:0;">
+                    <button type="button" id="research-plan" class="drawer-toggle plan-toggle" aria-controls="params-body" aria-expanded="false" onclick="toggleParams()">
+                        <span><strong>Research plan</strong><span class="label-desc"> Scope, privacy, quality, and budget controls</span></span>
+                        <span id="params-toggle-btn" class="drawer-caret">Customize</span>
+                    </button>
+                    <div id="params-body" class="params-grid" style="display:none;">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="max-depth">Follow links this many hops</label>
+                            <input type="number" id="max-depth" value="4" min="1" max="10">
+                            <div class="label-desc">Providers stop at 1–2. Depth is where this tool wins.</div>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="max-docs">Stop after this many sources</label>
+                            <input type="number" id="max-docs" value="40" min="5" max="200">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="max-duration-min">Run up to this many minutes</label>
+                            <input type="number" id="max-duration-min" value="15" min="1" max="120">
+                            <div class="label-desc">Providers cap research around 30 min. You can go to 120.</div>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="max-gap-rounds">Coverage re-checks while evidence arrives</label>
+                            <input type="number" id="max-gap-rounds" value="3" min="0" max="10">
+                            <div class="label-desc">Each round hunts missing angles. Rounds 2+ stay local (nothing new leaves the machine).</div>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>Evidence quality (all local, nothing extra leaves the machine)</label>
+                            <label class="switch-row" for="chunk-documents">
+                                <span><span class="switch-title">Split long docs into passages</span>
+                                <span class="label-desc">Focused chunks for rerank + brief instead of whole pages.</span></span>
+                                <input type="checkbox" id="chunk-documents" checked onchange="updatePreRunEstimate()">
+                            </label>
+                            <label class="switch-row" for="rerank-results">
+                                <span><span class="switch-title">Rerank top candidates</span>
+                                <span class="label-desc">Stage-2 local rerank before the brief. Milliseconds.</span></span>
+                                <input type="checkbox" id="rerank-results" checked onchange="updatePreRunEstimate()">
+                            </label>
+                            <label class="switch-row" for="citation-expansion">
+                                <span><span class="switch-title">Follow citation edges</span>
+                                <span class="label-desc">References + cited-by from top academic hits.</span></span>
+                                <input type="checkbox" id="citation-expansion" checked onchange="updatePreRunEstimate()">
+                            </label>
+                            <label class="switch-row" for="graph-prioritization">
+                                <span><span class="switch-title">Concept-graph prioritization</span>
+                                <span class="label-desc">On-topic hops outrank drift; gaps come from the graph.</span></span>
+                                <input type="checkbox" id="graph-prioritization" checked onchange="updatePreRunEstimate()">
+                            </label>
+                            <label class="switch-row" for="query-rewrite">
+                                <span><span class="switch-title">Local query variants</span>
+                                <span class="label-desc">Extra keyword angles, free and private.</span></span>
+                                <input type="checkbox" id="query-rewrite" checked onchange="updatePreRunEstimate()">
+                            </label>
+                            <label class="switch-row" for="hyde-queries">
+                                <span><span class="switch-title">HyDE draft queries</span>
+                                <span class="label-desc">Hypothetical-answer angles (cheap model, needs AI planning).</span></span>
+                                <input type="checkbox" id="hyde-queries" checked onchange="updatePreRunEstimate()">
+                            </label>
+                            <label class="switch-row" for="claim-verification">
+                                <span><span class="switch-title">Cross-check claims</span>
+                                <span class="label-desc">Corroborated vs contested claims ground the brief.</span></span>
+                                <input type="checkbox" id="claim-verification" checked onchange="updatePreRunEstimate()">
                             </label>
                         </div>
-                        <div class="label-desc">Hide: topic buried among decoy topics so the model cannot tell what is being researched. Show: send the bare topic and evidence for better angles.</div>
-                        <input type="checkbox" id="conceal-process" checked style="display:none" aria-hidden="true">
-                    </div>
-                    <label class="switch-row" for="ai-summary">
-                        <span>
-                            <span class="switch-title">Let AI write the summary</span>
-                            <span class="label-desc">Sends redacted source excerpts. Cost grows with how many sources you keep.</span>
-                        </span>
-                        <input type="checkbox" id="ai-summary" onchange="updatePreRunEstimate()">
-                    </label>
-                </div>
-
-                <div id="confirm-weaker-wrap" class="confirm-box" style="display:none;">
-                    <label for="confirm-weaker-recall">
-                        <input type="checkbox" id="confirm-weaker-recall" onchange="syncLaunchEnabled()">
-                        <span>I accept weaker results from hiding words or running decoys</span>
-                    </label>
-                </div>
-            </div>
-
-            <div class="form-group" style="margin-bottom:0;">
-                <button type="button" id="research-plan" class="drawer-toggle plan-toggle" aria-controls="params-body" aria-expanded="false" onclick="toggleParams()">
-                    <span><strong>Research plan</strong><span class="label-desc">Scope, privacy, quality, and budget controls</span></span>
-                    <span id="params-toggle-btn" class="drawer-caret">Customize</span>
-                </button>
-                <div id="params-body" class="params-grid" style="display:none;">
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="max-depth">Follow links this many hops</label>
-                        <input type="number" id="max-depth" value="4" min="1" max="10">
-                        <div class="label-desc">Providers stop at 1–2. Depth is where this tool wins.</div>
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="max-docs">Stop after this many sources</label>
-                        <input type="number" id="max-docs" value="40" min="5" max="200">
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="max-duration-min">Run up to this many minutes</label>
-                        <input type="number" id="max-duration-min" value="15" min="1" max="120">
-                        <div class="label-desc">Providers cap research around 30 min. You can go to 120.</div>
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="max-gap-rounds">Coverage re-checks while evidence arrives</label>
-                        <input type="number" id="max-gap-rounds" value="3" min="0" max="10">
-                        <div class="label-desc">Each round hunts missing angles. Rounds 2+ stay local (nothing new leaves the machine).</div>
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label>Evidence quality (all local, nothing extra leaves the machine)</label>
-                        <label class="switch-row" for="chunk-documents">
-                            <span><span class="switch-title">Split long docs into passages</span>
-                            <span class="label-desc">Focused chunks for rerank + brief instead of whole pages.</span></span>
-                            <input type="checkbox" id="chunk-documents" checked onchange="updatePreRunEstimate()">
-                        </label>
-                        <label class="switch-row" for="rerank-results">
-                            <span><span class="switch-title">Rerank top candidates</span>
-                            <span class="label-desc">Stage-2 local rerank before the brief. Milliseconds.</span></span>
-                            <input type="checkbox" id="rerank-results" checked onchange="updatePreRunEstimate()">
-                        </label>
-                        <label class="switch-row" for="citation-expansion">
-                            <span><span class="switch-title">Follow citation edges</span>
-                            <span class="label-desc">References + cited-by from top academic hits.</span></span>
-                            <input type="checkbox" id="citation-expansion" checked onchange="updatePreRunEstimate()">
-                        </label>
-                        <label class="switch-row" for="graph-prioritization">
-                            <span><span class="switch-title">Concept-graph prioritization</span>
-                            <span class="label-desc">On-topic hops outrank drift; gaps come from the graph.</span></span>
-                            <input type="checkbox" id="graph-prioritization" checked onchange="updatePreRunEstimate()">
-                        </label>
-                        <label class="switch-row" for="query-rewrite">
-                            <span><span class="switch-title">Local query variants</span>
-                            <span class="label-desc">Extra keyword angles, free and private.</span></span>
-                            <input type="checkbox" id="query-rewrite" checked onchange="updatePreRunEstimate()">
-                        </label>
-                        <label class="switch-row" for="hyde-queries">
-                            <span><span class="switch-title">HyDE draft queries</span>
-                            <span class="label-desc">Hypothetical-answer angles (cheap model, needs AI planning).</span></span>
-                            <input type="checkbox" id="hyde-queries" checked onchange="updatePreRunEstimate()">
-                        </label>
-                        <label class="switch-row" for="claim-verification">
-                            <span><span class="switch-title">Cross-check claims</span>
-                            <span class="label-desc">Corroborated vs contested claims ground the brief.</span></span>
-                            <input type="checkbox" id="claim-verification" checked onchange="updatePreRunEstimate()">
-                        </label>
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="concurrency">Fetch this many pages at once</label>
-                        <div class="concurrency-row">
-                            <input type="range" id="concurrency-range" min="1" max="10" value="4" oninput="syncConcurrency(this.value)">
-                            <input type="number" id="concurrency" value="4" min="1" max="10" oninput="syncConcurrency(this.value)">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="concurrency">Fetch this many pages at once</label>
+                            <div class="concurrency-row">
+                                <input type="range" id="concurrency-range" min="1" max="10" value="4" oninput="syncConcurrency(this.value)">
+                                <input type="number" id="concurrency" value="4" min="1" max="10" oninput="syncConcurrency(this.value)">
+                            </div>
+                            <div class="preset-group">
+                                <button type="button" class="preset-btn" id="preset-2" onclick="setConcurrencyPreset(2)">2 slow</button>
+                                <button type="button" class="preset-btn active" id="preset-4" onclick="setConcurrencyPreset(4)">4</button>
+                                <button type="button" class="preset-btn" id="preset-8" onclick="setConcurrencyPreset(8)">8 fast</button>
+                            </div>
                         </div>
-                        <div class="preset-group">
-                            <button type="button" class="preset-btn" onclick="setConcurrencyPreset(2)">2 slow</button>
-                            <button type="button" class="preset-btn active" id="preset-4" onclick="setConcurrencyPreset(4)">4</button>
-                            <button type="button" class="preset-btn" onclick="setConcurrencyPreset(8)">8 fast</button>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="concealer-model">Concealer model (cheap — hides process, expands topics)</label>
+                            <select id="concealer-model">
+                                <option value="gpt-4o-mini" selected>gpt-4o-mini — cheap and fast</option>
+                                <option value="gpt-4o">gpt-4o</option>
+                                <option value="gpt-5-mini">gpt-5-mini</option>
+                                <option value="o4-mini">o4-mini — reasoning</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="deep-model">Deep model (writes the final brief)</label>
+                            <select id="deep-model">
+                                <option value="gpt-4o" selected>gpt-4o — deep synthesis</option>
+                                <option value="gpt-4o-mini">gpt-4o-mini — cheap</option>
+                                <option value="gpt-5">gpt-5</option>
+                                <option value="o3-mini">o3-mini — reasoning</option>
+                                <option value="o1">o1 — deepest reasoning</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="openai-model">Legacy model (sets both unless the above are chosen)</label>
+                            <select id="openai-model">
+                                <option value="gpt-4o-mini" selected>gpt-4o-mini — cheap and fast</option>
+                                <option value="gpt-4o">gpt-4o</option>
+                                <option value="gpt-4.5">gpt-4.5</option>
+                                <option value="gpt-5-mini">gpt-5-mini</option>
+                                <option value="gpt-5">gpt-5</option>
+                                <option value="gpt-5.1">gpt-5.1</option>
+                                <option value="gpt-5.2">gpt-5.2</option>
+                                <option value="gpt-5.4">gpt-5.4</option>
+                                <option value="gpt-5.6">gpt-5.6</option>
+                                <option value="o3-mini">o3-mini — reasoning</option>
+                                <option value="o1">o1 — reasoning</option>
+                                <option value="o1-pro">o1-pro — deepest reasoning</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="reasoning-effort">Reasoning effort (o1 / o3)</label>
+                            <select id="reasoning-effort">
+                                <option value="medium" selected>Medium</option>
+                                <option value="low">Low — faster</option>
+                                <option value="high">High — slower</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="max-spend">Stop spending after ($)</label>
+                            <input type="number" id="max-spend" value="2.00" min="0.10" max="50.00" step="0.10">
                         </div>
                     </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="concealer-model">Concealer model (cheap — hides process, expands topics)</label>
-                        <select id="concealer-model">
-                            <option value="gpt-4o-mini" selected>gpt-4o-mini — cheap and fast</option>
-                            <option value="gpt-4o">gpt-4o</option>
-                            <option value="gpt-5-mini">gpt-5-mini</option>
-                            <option value="o4-mini">o4-mini — reasoning</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="deep-model">Deep model (writes the final brief)</label>
-                        <select id="deep-model">
-                            <option value="gpt-4o" selected>gpt-4o — deep synthesis</option>
-                            <option value="gpt-4o-mini">gpt-4o-mini — cheap</option>
-                            <option value="gpt-5">gpt-5</option>
-                            <option value="o3-mini">o3-mini — reasoning</option>
-                            <option value="o1">o1 — deepest reasoning</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="openai-model">Legacy model (sets both unless the above are chosen)</label>
-                        <select id="openai-model">
-                            <option value="gpt-4o-mini" selected>gpt-4o-mini — cheap and fast</option>
-                            <option value="gpt-4o">gpt-4o</option>
-                            <option value="gpt-4.5">gpt-4.5</option>
-                            <option value="gpt-5-mini">gpt-5-mini</option>
-                            <option value="gpt-5">gpt-5</option>
-                            <option value="gpt-5.1">gpt-5.1</option>
-                            <option value="gpt-5.2">gpt-5.2</option>
-                            <option value="gpt-5.4">gpt-5.4</option>
-                            <option value="gpt-5.6">gpt-5.6</option>
-                            <option value="o3-mini">o3-mini — reasoning</option>
-                            <option value="o1">o1 — reasoning</option>
-                            <option value="o1-pro">o1-pro — deepest reasoning</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="reasoning-effort">Reasoning effort (o1 / o3)</label>
-                        <select id="reasoning-effort">
-                            <option value="medium" selected>Medium</option>
-                            <option value="low">Low — faster</option>
-                            <option value="high">High — slower</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="max-spend">Stop spending after ($)</label>
-                        <input type="number" id="max-spend" value="2.00" min="0.10" max="50.00" step="0.10">
-                    </div>
                 </div>
+
+                <div class="estimate-strip" id="pre-run-estimate-card">
+                    <div class="estimate-head">
+                        <strong>Before you start</strong>
+                        <span id="estimate-mode-badge" class="badge badge-safe">Ready</span>
+                    </div>
+                    <dl class="estimate-stats">
+                        <div class="estimate-stat">
+                            <dt>Hops</dt>
+                            <dd id="est-hops">4</dd>
+                            <small id="est-hops-sub">then stop following links</small>
+                        </div>
+                        <div class="estimate-stat">
+                            <dt>Sources</dt>
+                            <dd id="est-sources">40</dd>
+                            <small id="est-sources-sub">corpus cap</small>
+                        </div>
+                        <div class="estimate-stat">
+                            <dt>Time</dt>
+                            <dd id="est-duration">15m</dd>
+                            <small id="est-duration-sub">hard stop</small>
+                        </div>
+                        <div class="estimate-stat">
+                            <dt>Spend</dt>
+                            <dd id="est-spend">$0.00</dd>
+                            <small id="est-spend-sub">no AI unless you turned it on</small>
+                        </div>
+                    </dl>
+                    <div class="estimate-warnings" id="estimate-steps-breakdown"></div>
+                </div>
+
+                <div class="actions-row">
+                    <button id="run-btn" class="btn-run" onclick="executeResearch()">Start search</button>
+                    <button id="cancel-btn" class="btn-cancel" onclick="cancelResearch()" hidden>Stop</button>
+                </div>
+                <div id="status-box" role="status" aria-live="polite"></div>
             </div>
 
-            <div class="estimate-card" id="pre-run-estimate-card">
-                <div class="estimate-head">
-                    <strong>Before you start</strong>
-                    <span id="estimate-mode-badge" class="badge-safe">Local</span>
-                    <span id="estimate-spend-highlight" class="estimate-spend">$0.00</span>
+            <section class="card progress-card" id="live-progress" aria-label="Research progress" hidden>
+                <div class="progress-top">
+                    <strong id="progress-title">Searching</strong>
+                    <span class="progress-meta">
+                        <span id="progress-elapsed">0:00</span>
+                        <span id="progress-sources" hidden></span>
+                    </span>
                 </div>
-                <div class="estimate-stats-grid">
-                    <div class="estimate-stat-box">
-                        <div class="estimate-stat-title">Hops</div>
-                        <div class="estimate-stat-val" id="est-hops">3</div>
-                        <div class="estimate-stat-sub" id="est-hops-sub">then stop following links</div>
-                    </div>
-                    <div class="estimate-stat-box">
-                        <div class="estimate-stat-title">Sources</div>
-                        <div class="estimate-stat-val" id="est-sources">25</div>
-                        <div class="estimate-stat-sub" id="est-sources-sub">then stop collecting</div>
-                    </div>
-                    <div class="estimate-stat-box">
-                        <div class="estimate-stat-title">Time</div>
-                        <div class="estimate-stat-val" id="est-duration">15m</div>
-                        <div class="estimate-stat-sub" id="est-duration-sub">hard stop</div>
-                    </div>
-                    <div class="estimate-stat-box">
-                        <div class="estimate-stat-title">Spend</div>
-                        <div class="estimate-stat-val" id="est-spend">$0.00</div>
-                        <div class="estimate-stat-sub" id="est-spend-sub">no AI unless you turned it on</div>
-                    </div>
-                </div>
-                <div class="estimate-steps-breakdown" id="estimate-steps-breakdown"></div>
-            </div>
-
-            <div class="actions-row">
-                <button id="run-btn" class="btn-run" onclick="executeResearch()">Start search</button>
-                <button id="cancel-btn" class="btn-cancel" onclick="cancelResearch()">Stop</button>
-            </div>
-            <section id="live-progress" class="live-progress" aria-label="Research progress" hidden>
-                <div class="progress-stages" aria-hidden="true">
-                    <span class="progress-stage" data-stage="prepare">Prepare</span><span class="progress-stage" data-stage="discover">Discover</span><span class="progress-stage" data-stage="read">Read</span><span class="progress-stage" data-stage="evaluate">Evaluate</span><span class="progress-stage" data-stage="report">Report</span>
-                </div>
-                <p id="progress-detail" aria-live="polite">Preparing your research plan…</p>
+                <div class="progress-bar" aria-hidden="true"><div class="progress-bar-fill" id="progress-bar-fill"></div></div>
+                <ol class="progress-stages">
+                    <li class="progress-stage" data-stage="prepare">Prepare</li>
+                    <li class="progress-stage" data-stage="discover">Discover</li>
+                    <li class="progress-stage" data-stage="read">Read</li>
+                    <li class="progress-stage" data-stage="evaluate">Evaluate</li>
+                    <li class="progress-stage" data-stage="report">Report</li>
+                </ol>
+                <p id="progress-detail" aria-live="polite"></p>
             </section>
-            <div id="status-box" role="status" aria-live="polite"></div>
-        </div>
 
-        <div id="results-section" class="card">
-            <div class="results-head">
-                <h2>Results</h2>
-                <span id="result-status-badge" class="badge-safe">Complete</span>
+            <div id="results-section" class="card">
+                <div class="results-head">
+                    <h2>Results</h2>
+                    <span id="result-status-badge" class="badge badge-safe">Complete</span>
+                </div>
+                <div id="metrics-bar" class="metrics-bar"></div>
+                <div id="queries-container"></div>
+                <div id="summary-container"></div>
+                <div id="evidence-container"></div>
+                <div id="report-link-container"></div>
             </div>
-            <div id="metrics-bar" class="metrics-bar"></div>
-            <div id="queries-container"></div>
-            <div id="summary-container"></div>
-            <div id="evidence-container"></div>
-            <div id="report-link-container"></div>
-        </div>
 
-        <div class="card" id="reports-card">
-            <button type="button" class="drawer-toggle" onclick="toggleReportsArchive()">
-                <span>Past reports <span class="badge-metric" id="reports-count-badge">0</span></span>
-                <span id="reports-toggle-btn" class="drawer-caret">Show</span>
-            </button>
-            <div id="reports-body" style="display:none;">
-                <div id="reports-list" class="reports-list">
-                    <p class="empty-note">No reports yet. Run a search.</p>
+            <div class="card" id="reports-card">
+                <button type="button" class="drawer-toggle" aria-controls="reports-body" aria-expanded="false" onclick="toggleReportsArchive()">
+                    <span>Past reports <span class="badge badge-metric" id="reports-count-badge">0</span></span>
+                    <span id="reports-toggle-btn" class="drawer-caret">Show</span>
+                </button>
+                <div id="reports-body" style="display:none;">
+                    <div id="reports-list" class="reports-list">
+                        <p class="empty-note">No reports yet. Run a search.</p>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div class="card" id="settings-card">
-            <button type="button" class="drawer-toggle" onclick="toggleSettings()">
-                <span>API keys <span class="badge-safe" id="settings-badge">Not required</span></span>
-                <span id="settings-toggle-btn" class="drawer-caret">Show</span>
-            </button>
-            <div id="settings-body" style="display:none;">
-                <p class="label-desc" style="margin-bottom:12px;">
-                    Leave these blank to stay offline. Add a key only if you turned on AI or Brave web search.
-                </p>
-                <div class="settings-grid">
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="openai-key">OpenAI key</label>
-                        <input type="password" id="openai-key" placeholder="sk-…" autocomplete="off">
+            <div class="card" id="settings-card">
+                <button type="button" class="drawer-toggle" aria-controls="settings-body" aria-expanded="false" onclick="toggleSettings()">
+                    <span>API keys <span class="badge badge-safe" id="settings-badge">Not required</span></span>
+                    <span id="settings-toggle-btn" class="drawer-caret">Show</span>
+                </button>
+                <div id="settings-body" style="display:none;">
+                    <p class="label-desc" style="margin-bottom:12px;">
+                        Leave these blank to stay offline. Add a key only if you turned on AI or Brave web search.
+                    </p>
+                    <div class="settings-grid">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="openai-key">OpenAI key</label>
+                            <input type="password" id="openai-key" placeholder="sk-…" autocomplete="off">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="brave-key">Brave Search key</label>
+                            <input type="password" id="brave-key" placeholder="BSA…" autocomplete="off">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="searxng-url">Local search URL</label>
+                            <input type="text" id="searxng-url" placeholder="http://127.0.0.1:8080">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="local-llm-url">Local model URL</label>
+                            <input type="text" id="local-llm-url" placeholder="http://127.0.0.1:11434/v1">
+                        </div>
                     </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="brave-key">Brave Search key</label>
-                        <input type="password" id="brave-key" placeholder="BSA…" autocomplete="off">
+                    <div class="settings-actions">
+                        <span id="settings-status-msg" class="save-msg">Saved</span>
+                        <button class="btn-secondary" onclick="saveSettings()">Save keys</button>
                     </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="searxng-url">Local search URL</label>
-                        <input type="text" id="searxng-url" placeholder="http://127.0.0.1:8080">
-                    </div>
-                    <div class="form-group" style="margin-bottom:0;">
-                        <label for="local-llm-url">Local model URL</label>
-                        <input type="text" id="local-llm-url" placeholder="http://127.0.0.1:11434/v1">
-                    </div>
-                </div>
-                <div class="settings-actions">
-                    <span id="settings-status-msg" class="save-msg">Saved</span>
-                    <button class="btn-secondary" onclick="saveSettings()">Save keys</button>
                 </div>
             </div>
-        </div>
+        </main>
     </div>
 
     <script src="/js/api_client.js"></script>
