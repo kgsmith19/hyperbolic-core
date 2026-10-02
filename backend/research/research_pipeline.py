@@ -506,7 +506,7 @@ def _options_public(options: SearchOptions) -> dict:
 
 def _write_json_archive(run: ResearchRun, watchlist) -> None:
     """Store the full structured result next to the markdown archive so the UI can reopen it."""
-    if not run.archive_path:
+    if not run.archive_path or not os.path.exists(run.archive_path):
         return
     try:
         payload = run_to_dict(run)

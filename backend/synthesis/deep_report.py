@@ -338,6 +338,8 @@ def build_llm_brief(topic: str, evidence: list, watchlist: list[str], plan=None,
     from backend.research.cloud_client import invoke_model
 
     assert_safe_to_send(topic, watchlist)
+    if not evidence:
+        raise ValueError("no evidence to write from")
     n = len(evidence)
     all_idx = list(range(n))
     sections: list[tuple[str, str]] = []
@@ -398,6 +400,7 @@ def build_llm_brief(topic: str, evidence: list, watchlist: list[str], plan=None,
     final = invoke_model(prompt, model=model, reasoning_effort=reasoning_effort, cost_tracker=cost_tracker,
                          max_output_tokens=2200)
     final = _fix_citations(redact(final.strip(), watchlist), n)
+    final = re.sub(r"^#\s+", "## ", final, flags=re.M)  # keep one H1 (the report title)
     parts = [final]
     if sections:
         parts.append("## Findings by Research Question")

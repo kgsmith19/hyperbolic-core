@@ -128,7 +128,17 @@ def best_passages(text: str, focus: str, max_chars: int = 2800) -> str:
         s += 0.05 if idx == 0 else 0.0  # leads/abstracts carry the gist
         scored.append((s, idx, chunk))
     scored.sort(key=lambda x: (-x[0], x[1]))
-    picked = sorted(scored[:3], key=lambda x: x[1])
+    best = scored[0][0]
+    # Keep only chunks that are genuinely relevant, best first, within budget;
+    # then restore document order for readability.
+    candidates = [x for x in scored[:4] if x[0] >= max(0.05, best * 0.5)] or scored[:1]
+    picked, budget = [], 0
+    for item in candidates:
+        if picked and budget + len(item[2]) > max_chars:
+            continue
+        picked.append(item)
+        budget += len(item[2])
+    picked.sort(key=lambda x: x[1])
     out, total, seen = [], 0, set()
     for _, _, chunk in picked:
         # Chunks overlap by a sentence or paragraph; drop text already kept.
