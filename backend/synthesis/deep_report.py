@@ -81,6 +81,11 @@ def _sentences_for(evidence: list, idxs: list[int], focus: str, max_items: int, 
     for i in idxs:
         item = evidence[i]
         text = _get(item, "excerpt", "") or _get(item, "snippet", "") or ""
+        title = (_get(item, "title", "") or "").strip()
+        # Extracted pages often start with the title fused onto the first sentence.
+        if title and len(title) > 12 and text.startswith(title[: min(len(title), 60)]):
+            text = text[len(title):].lstrip(" :.-|")
+        text = re.sub(r"\b(read more|related|advertisement|sponsored)\s*[:.]?\s*", " ", text, flags=re.I)
         quality = float(_get(item, "quality", 0.5) or 0.5)
         lane = _get(item, "lane", "") or ""
         doc_best = []
@@ -93,7 +98,8 @@ def _sentences_for(evidence: list, idxs: list[int], focus: str, max_items: int, 
             if value <= 0.4:
                 continue
             rel = overlap_score(focus_terms, sent)
-            if rel <= 0:
+            # Require real topical overlap: two shared terms once the focus is specific.
+            if rel <= 0 or (len(focus_terms) >= 4 and rel * len(focus_terms) < 2):
                 continue
             s = rel * value + 0.35 * quality
             doc_best.append((s, sent))
