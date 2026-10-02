@@ -111,8 +111,12 @@ class TestResearchStreamHTTP(unittest.TestCase):
 
         self.assertGreaterEqual(len(events), len(self.MESSAGES) + 1)
         types = [event["type"] for event in events]
-        self.assertTrue(all(t in ("progress", "result", "error") for t in types))
-        self.assertEqual(types[0], "progress")
+        allowed = ("run", "progress", "stage", "stats", "plan", "round", "source", "learning", "result", "error")
+        self.assertTrue(all(t in allowed for t in types))
+        # The run id is announced first so the UI can cancel or re-attach.
+        self.assertEqual(types[0], "run")
+        self.assertTrue(events[0]["run_id"])
+        self.assertEqual(types[1], "progress")
         self.assertEqual(types[-1], "result")
 
         messages = [event["message"] for event in events if event["type"] == "progress"]

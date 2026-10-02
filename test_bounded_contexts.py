@@ -392,7 +392,7 @@ class TestSearchPreview(unittest.TestCase):
         from backend.research.types import SearchOptions
         from backend.research.preview import preview
 
-        concealed = preview("topic", SearchOptions(ai_planning=True))
+        concealed = preview("topic", SearchOptions(ai_planning=True, llm_process="hide"))
         self.assertTrue(any("chaffed" in w.lower() for w in concealed.warnings))
         bare = preview("topic", SearchOptions(ai_planning=True, conceal_process=False))
         self.assertFalse(any("chaffed" in w.lower() for w in bare.warnings))

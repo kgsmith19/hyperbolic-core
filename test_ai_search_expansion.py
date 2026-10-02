@@ -4,6 +4,7 @@ All OpenAI interactions are mocked; no test in this file touches the network.
 """
 
 import os
+import re
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -147,7 +148,7 @@ class TestExpandTopicQueries(unittest.TestCase):
             self.assertFalse(seen["conceal"])
             self.assertEqual([q.text for q in qs if not q.is_decoy], ["topic", "angle"])
 
-            qs2 = plan_queries("topic", [], SearchOptions(ai_planning=True))  # default True
+            qs2 = plan_queries("topic", [], SearchOptions(ai_planning=True, conceal_process=True))
             self.assertTrue(seen["conceal"])
             self.assertEqual([q.text for q in qs2 if not q.is_decoy], ["topic", "angle"])
 
@@ -346,12 +347,12 @@ class TestRelevancePriorities(unittest.TestCase):
 
 @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False)
 class TestConcealProcessToggle(unittest.TestCase):
-    """Both paths work: concealed (default) and unconcealed. Preview reflects it."""
+    """Both paths work: concealed (opt-in privacy layer) and shown (default). Preview reflects it."""
 
     def test_preview_states_concealment(self):
         from backend.research.preview import preview
 
-        concealed = preview("t", SearchOptions(ai_planning=True))
+        concealed = preview("t", SearchOptions(ai_planning=True, conceal_process=True))
         self.assertTrue(any("chaffed" in w.lower() for w in concealed.warnings))
         bare = preview("t", SearchOptions(ai_planning=True, conceal_process=False))
         self.assertTrue(any("topic leaves the machine" in w.lower() for w in bare.warnings))
@@ -360,7 +361,9 @@ class TestConcealProcessToggle(unittest.TestCase):
     def test_server_parses_conceal_process(self):
         from backend.server.web_server import _options_from_payload
 
-        self.assertTrue(_options_from_payload({}).conceal_process)
+        # Privacy is an opt-in layer: the default shows the process to the model.
+        self.assertFalse(_options_from_payload({}).conceal_process)
+        self.assertTrue(_options_from_payload({"conceal_process": True}).conceal_process)
         self.assertFalse(_options_from_payload({"conceal_process": False}).conceal_process)
 
     def test_cli_flag_flips_conceal_process(self):
@@ -369,6 +372,8 @@ class TestConcealProcessToggle(unittest.TestCase):
         from deep_search import build_options, build_parser
 
         args = build_parser().parse_args([])
+        self.assertFalse(build_options(args).conceal_process)
+        args = build_parser().parse_args(["--llm-process", "hide"])
         self.assertTrue(build_options(args).conceal_process)
         args = build_parser().parse_args(["--no-conceal-process"])
         self.assertFalse(build_options(args).conceal_process)
@@ -444,43 +449,29 @@ class TestExplorerModelGapIntegration(unittest.TestCase):
         from backend.research.explorer import explore
         from backend.research.types import Query
 
+        # Protocol-agnostic fake collector: every search returns a unique hit,
+        # every fetch returns readable content. The engine may issue extra
+        # local follow-up searches (leads, coverage) without exhausting a list.
         mock_collector = MagicMock()
-        mock_collector.send_task.side_effect = [
-            # Seed search: two hits
-            {
-                "status": "ok",
-                "results": [
-                    {"title": "Electrolyte Study", "url": "https://example.com/a"},
-                    {"title": "Grid Storage Review", "url": "https://example.com/b"},
-                ],
-            },
-            # Fetch both
-            {"status": "ok", "content": "Findings on electrolyte conductivity and stability. " * 4, "links": [], "bytes": 400},
-            {"status": "ok", "content": "Review of grid integration and storage economics. " * 4, "links": [], "bytes": 400},
-            # Gap searches seeded by the model (up to max_gap_rounds rounds).
-            {
-                "status": "ok",
-                "results": [{"title": "Cost Analysis", "url": "https://example.com/c"}],
-            },
-            {"status": "ok", "content": "Detailed cost per kWh projections and trends. " * 4, "links": [], "bytes": 400},
-        ]
-        # Continuation rounds keep searching while evidence arrives; serve
-        # an unbounded tail of extra gap hits + fetches so the mock never
-        # exhausts regardless of how many rounds the engine runs. Each tail
-        # URL is unique so dedup never collapses the tail into zero evidence.
-        tail = []
-        for i in range(40):
-            tail.append({
-                "status": "ok",
-                "results": [{"title": f"Appendix {i}", "url": f"https://example.com/extra-{i}"}],
-            })
-            tail.append({
-                "status": "ok",
-                "content": f"Supplementary technical appendix material {i}. " * 4,
-                "links": [],
-                "bytes": 400,
-            })
-        mock_collector.send_task.side_effect = list(mock_collector.send_task.side_effect) + tail
+        counter = {"n": 0}
+
+        def respond(task, watchlist):
+            if task.get("action") == "search":
+                q = task["query"]
+                if q == "grid storage economics":
+                    return {"status": "ok", "results": [
+                        {"title": "Electrolyte Study", "url": "https://example.com/a"},
+                        {"title": "Grid Storage Review", "url": "https://example.com/b"},
+                    ]}
+                counter["n"] += 1
+                slug = re.sub(r"[^a-z0-9]+", "-", q.lower())
+                return {"status": "ok", "results": [{"title": q, "url": f"https://example.com/{slug}-{counter['n']}"}]}
+            if task.get("action") == "fetch":
+                return {"status": "ok", "content": f"Grid storage economics material for {task['url']}. " * 4,
+                        "links": [], "bytes": 400}
+            return {"status": "ok", "results": []}
+
+        mock_collector.send_task.side_effect = respond
 
         with patch(
             "backend.research.query_planner.propose_gap_queries",

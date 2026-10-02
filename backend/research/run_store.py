@@ -35,7 +35,7 @@ class RunStore:
         "ranking", "synthesizing", "reporting", "completed",
     })
     _TERMINAL_REASONS = {
-        "success": {"completed", "low_information_gain"},
+        "success": {"completed", "low_information_gain", "document_budget", "time_budget"},
         "cancelled": {"cancelled"},
         "interrupted": {"internal_error"},
         "failed": {"provider_failure", "internal_error"},

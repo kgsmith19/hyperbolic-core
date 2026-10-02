@@ -50,6 +50,12 @@ def run_ipc_loop():
             else:
                 results = router.search(query, connector=connector)
             resp = {"task_id": task_id, "status": "ok", "results": results}
+        elif action == "citations":
+            from backend.retrieval.connectors.openalex_connector import expand_citations
+            limit = task.get("limit") if isinstance(task.get("limit"), int) else 10
+            results = expand_citations(task["url"], direction=task.get("connector") or "references",
+                                       per_page=max(1, min(50, limit)))
+            resp = {"task_id": task_id, "status": "ok", "results": results}
         elif action == "fetch":
             url = task["url"]
             fetch_result = router.fetch_url(url)

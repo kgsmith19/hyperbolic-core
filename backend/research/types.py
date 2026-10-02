@@ -21,11 +21,12 @@ class SearchOptions:
     decoy_queries: int = 0
 
     # How the LLM sees the research process. Independent of watchlist blinding.
-    # hide (default) = chaffed k-topic prompts; the model cannot tell which topic
-    #     is real. Planning, HyDE, and gap analysis all use this path.
-    # show = send the bare topic and evidence. Better relevance, no concealment.
+    # show (default) = send the bare topic and evidence. Best relevance.
+    # hide = optional privacy layer: chaffed k-topic prompts so the model cannot
+    #     tell which topic is real. Planning, HyDE, and gap analysis use it.
     # Watchlist terms never leave the machine in either mode.
-    llm_process: str = "hide"
+    # None means "not set": the conceal_process alias decides, else "show".
+    llm_process: str | None = None
     # Derived alias kept for older callers and payloads. True iff llm_process=="hide".
     conceal_process: bool | None = None
 
@@ -77,6 +78,32 @@ class SearchOptions:
     low_information_gain_rounds: int = 0
     low_information_gain_min_documents: int = 0
 
+    # ---- Deep research strategy (library defaults stay conservative; the UI
+    # and CLI presets turn these up). ----
+    # Source mix: share of the corpus aimed at the evidence group (academic,
+    # institutional, reference, filings) vs the discussion group (community,
+    # video, experts). 0.5 = balanced.
+    academic_weight: float = 0.5
+    # Lanes to search. None = classic all-connector search (no lane routing).
+    source_lanes: list[str] | None = None
+    # Base result budget per lane per query (scaled by the mix).
+    results_per_lane: int = 8
+    # Number of research angles (sub-questions) in the plan. 1 = topic only.
+    breadth: int = 1
+    # User-approved plan: [{"question": str, "queries": [str], "lanes": [str]}].
+    plan: list[dict] | None = None
+    # Reflection rounds allowed to consult the model for follow-ups (when
+    # ai_planning is on). Rounds beyond this use local lead-following only.
+    llm_gap_rounds: int = 1
+    # Snowball: turn recurring entities/concepts in the evidence into new queries.
+    follow_leads: bool = True
+    # Follow-up queries issued per reflection round.
+    queries_per_round: int = 4
+    # Dig-deeper runs: URLs already covered by a parent run are skipped.
+    exclude_urls: list[str] | None = None
+    # Parent topic for dig-deeper runs (sharpens planning; never a watchlist term).
+    context_topic: str = ""
+
     def __post_init__(self):
         # llm_process is canonical. conceal_process is the derived alias:
         # an older payload that only sets conceal_process still works; an
@@ -87,14 +114,25 @@ class SearchOptions:
         # 2. conceal_process alias (True=hide, False=show) when llm_process
         #    was left at its default
         # 3. hide
-        process = (self.llm_process or "hide").strip().lower()
-        llm_explicit = process in ("hide", "show") and self.llm_process != "hide"
-        if process not in ("hide", "show"):
-            process = "hide"
-        if not llm_explicit and self.conceal_process is not None:
+        if self.llm_process is not None:
+            process = str(self.llm_process).strip().lower()
+            if process not in ("hide", "show"):
+                process = "hide"  # unknown values fail safe
+        elif self.conceal_process is not None:
             process = "hide" if self.conceal_process else "show"
+        else:
+            process = "show"
         object.__setattr__(self, "llm_process", process)
         object.__setattr__(self, "conceal_process", process == "hide")
+
+        try:
+            weight = float(self.academic_weight)
+        except (TypeError, ValueError):
+            weight = 0.5
+        if weight > 1.0:
+            weight = weight / 100.0
+        object.__setattr__(self, "academic_weight", max(0.0, min(1.0, weight)))
+        object.__setattr__(self, "breadth", max(1, min(16, int(self.breadth or 1))))
 
         # Back-compat: `model` alone routes both roles; explicit roles win.
         # Deep role defaults to gpt-4o unless the alias says otherwise.
@@ -126,6 +164,13 @@ class Evidence:
     simhash: int = 0
     family_id: int = -1
     is_representative: bool = False
+    # Source lane (academic, community, video, ...) and 0..1 quality prior.
+    lane: str = ""
+    quality: float = 0.0
+    # Plan sub-question this source best answers ("" when no plan).
+    subq: str = ""
+    # Connector metadata: authors, year, venue, citations, score, community...
+    meta: dict = field(default_factory=dict, hash=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -168,3 +213,7 @@ class ResearchRun:
     stop_reason: str | None = None
     ledger_path: str = ""
     phase: str = "completed"
+    plan: dict = field(default_factory=dict)
+    learnings: list = field(default_factory=list)
+    followups: list = field(default_factory=list)
+    stats: dict = field(default_factory=dict)

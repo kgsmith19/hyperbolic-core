@@ -8,6 +8,7 @@ import sys
 
 from backend.privacy import SafetyError
 from backend.research import SearchOptions, preview, run_search, resume_search
+from backend.research.presets import ALL_LANES, DEFAULT_LANES, PRESETS, preset_values
 from backend.retrieval.meta import start_searxng_service
 from backend.server import load_env_file, load_lines, start_ui_server
 
@@ -21,12 +22,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume", default="", help="Resume a local durable run identifier")
     parser.add_argument("--ledger-root", default="research_runs", help="Local durable ledger directory")
     parser.add_argument("--watchlist", default="watchlist.txt", help="Path to local sensitive watchlist file")
-    parser.add_argument("--max-depth", type=int, default=4, help="Maximum multi-hop citation depth (deep default; providers stop at 1-2)")
-    parser.add_argument("--max-docs", type=int, default=40, help="Maximum documents to retrieve")
-    parser.add_argument("--concurrency", type=int, default=4, help="Concurrent exploration workers")
-    parser.add_argument("--max-duration-min", type=float, default=15.0, help="Maximum run budget in minutes (up to 120; providers cap ~30)")
-    parser.add_argument("--max-per-domain", type=int, default=6, help="Maximum documents per domain")
-    parser.add_argument("--max-gap-rounds", type=int, default=3, help="Coverage re-check rounds while evidence arrives (0 disables; rounds 2+ stay local)")
+    parser.add_argument("--preset", choices=sorted(PRESETS), default=None,
+                        help="Depth preset: scout (~3 min), standard (~12 min), deep (~45 min), marathon (hours). Explicit flags override it.")
+    parser.add_argument("--max-depth", type=int, default=None, help="Maximum link/citation hops (default 4, or the preset)")
+    parser.add_argument("--max-docs", type=int, default=None, help="Maximum documents to keep (default 40, or the preset)")
+    parser.add_argument("--concurrency", type=int, default=None, help="Concurrent collector workers (default 4, or the preset)")
+    parser.add_argument("--max-duration-min", type=float, default=None, help="Run budget in minutes (default 15, up to 720)")
+    parser.add_argument("--max-per-domain", type=int, default=None, help="Maximum documents per domain (hubs get more)")
+    parser.add_argument("--max-gap-rounds", type=int, default=None, help="Reflection rounds (0 disables follow-up rounds)")
+    parser.add_argument("--breadth", type=int, default=None, help="Research angles / sub-questions in the plan (1 = topic only)")
+    parser.add_argument("--academic-weight", type=float, default=0.5, help="Share of research vs discussion sources, 0..1 (default 0.5)")
+    parser.add_argument("--lanes", default=None, help=f"Comma-separated source lanes ({','.join(ALL_LANES)}). Defaults to the preset lanes; 'classic' disables lane routing.")
+    parser.add_argument("--queries-per-round", type=int, default=None, help="Follow-up queries per reflection round")
+    parser.add_argument("--llm-gap-rounds", type=int, default=None, help="Reflection rounds allowed to consult the model (needs --ai-planning)")
+    parser.add_argument("--no-leads", action="store_true", help="Disable lead-following (entity snowball) queries")
     parser.add_argument("--no-chunk", action="store_true", help="Disable passage chunking of long documents")
     parser.add_argument("--no-rerank", action="store_true", help="Disable local stage-2 rerank before synthesis")
     parser.add_argument("--rerank-keep", type=int, default=12, help="Top-N candidates kept by the reranker")
@@ -41,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--blind-watchlist", action="store_true", help="Pseudonymize watchlist terms (weaker recall)")
     parser.add_argument("--decoys", type=int, default=0, help="Number of k-anonymity decoy queries")
     parser.add_argument("--ai-planning", action="store_true", help="Expand the topic into extra query angles")
-    parser.add_argument("--llm-process", choices=["hide", "show"], default="hide", help="hide = conceal the research process from the LLM (chaffed prompts). show = send the bare topic and evidence. Watchlist never leaves in either mode.")
+    parser.add_argument("--llm-process", choices=["hide", "show"], default="show", help="show (default) = send the bare topic and evidence. hide = optional privacy layer: conceal the research among chaffed decoy topics. Watchlist never leaves in either mode.")
     parser.add_argument("--no-conceal-process", action="store_true", help="Alias for --llm-process show. Send the bare topic to the model (no chaffed decoy topics).")
     parser.add_argument("--ai-summary", action="store_true", help="Write a cloud executive brief")
     parser.add_argument("--openai-model", default="gpt-4o-mini", help="OpenAI model for planning or summary")
@@ -57,16 +66,38 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def build_options(args) -> SearchOptions:
+    base = {"max_depth": 4, "max_documents": 40, "concurrency": 4, "max_duration_min": 15.0, "max_per_domain": 6,
+            "max_gap_rounds": 3, "breadth": 1, "queries_per_round": 4, "llm_gap_rounds": 1, "results_per_lane": 8}
+    base.update(preset_values(getattr(args, "preset", None)))
+
+    def pick(value, key):
+        return base[key] if value is None else value
+
+    lanes_arg = getattr(args, "lanes", None)
+    if lanes_arg == "classic":
+        lanes = None
+    elif lanes_arg:
+        lanes = [lane.strip() for lane in lanes_arg.split(",") if lane.strip() in ALL_LANES] or None
+    else:
+        lanes = list(DEFAULT_LANES) if getattr(args, "preset", None) else None
+    max_docs = pick(args.max_docs, "max_documents")
     return SearchOptions(
-        max_depth=args.max_depth,
-        max_documents=args.max_docs,
-        concurrency=args.concurrency,
-        max_duration_min=args.max_duration_min,
-        max_per_domain=args.max_per_domain,
-        max_gap_rounds=args.max_gap_rounds,
+        max_depth=pick(args.max_depth, "max_depth"),
+        max_documents=max_docs,
+        concurrency=pick(args.concurrency, "concurrency"),
+        max_duration_min=pick(args.max_duration_min, "max_duration_min"),
+        max_per_domain=pick(args.max_per_domain, "max_per_domain"),
+        max_gap_rounds=pick(args.max_gap_rounds, "max_gap_rounds"),
+        breadth=pick(getattr(args, "breadth", None), "breadth"),
+        academic_weight=getattr(args, "academic_weight", 0.5),
+        source_lanes=lanes,
+        results_per_lane=base["results_per_lane"],
+        queries_per_round=pick(getattr(args, "queries_per_round", None), "queries_per_round"),
+        llm_gap_rounds=pick(getattr(args, "llm_gap_rounds", None), "llm_gap_rounds"),
+        follow_leads=not getattr(args, "no_leads", False),
         chunk_documents=not args.no_chunk,
         rerank_results=not args.no_rerank,
-        rerank_keep=args.rerank_keep,
+        rerank_keep=max(args.rerank_keep, max_docs) if getattr(args, "preset", None) else args.rerank_keep,
         citation_expansion=not args.no_citations,
         citation_per_doc=args.citation_per_doc,
         graph_prioritization=not args.no_graph,

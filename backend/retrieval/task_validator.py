@@ -10,12 +10,12 @@ def validate_task_schema(task: dict) -> tuple[bool, str]:
     if not isinstance(task, dict):
         return False, "Task must be a JSON object"
 
-    allowed_keys = {"task_id", "action", "connector", "query", "url", "doi", "timeout_sec", "lanes"}
+    allowed_keys = {"task_id", "action", "connector", "query", "url", "doi", "timeout_sec", "lanes", "limit"}
     if not set(task.keys()).issubset(allowed_keys):
         return False, "Task contains forbidden keys"
 
     action = task.get("action")
-    if action not in ("search", "fetch", "ping"):
+    if action not in ("search", "fetch", "ping", "citations"):
         return False, f"Unsupported action: {action}"
 
     if action == "search":
@@ -30,6 +30,13 @@ def validate_task_schema(task: dict) -> tuple[bool, str]:
         for key, value in lanes.items():
             if not isinstance(key, str) or len(key) > 24 or not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 200:
                 return False, "lanes values must be integers between 0 and 200"
+
+    if action == "citations":
+        work = task.get("url")
+        if not work or not isinstance(work, str):
+            return False, "Citations action requires a work url/DOI"
+        if task.get("connector") not in (None, "references", "cited_by"):
+            return False, "Citations direction must be references or cited_by"
 
     if action == "fetch":
         url = task.get("url")

@@ -26,7 +26,8 @@ def write_report(
     watchlist: list[str],
     output_path: str = "report.md",
     metadata: dict | None = None,
-    independence: dict | None = None
+    independence: dict | None = None,
+    appendix: list[tuple[str, str]] | None = None,
 ) -> str:
     """Write the research findings to report.md and an archived timestamped report in reports/."""
     clean_topic = redact(topic, watchlist)
@@ -51,15 +52,17 @@ def write_report(
 
     meta_line = " | ".join(meta_parts)
 
+    summary_text = summary.strip() if summary and summary.strip() else "Summary not available (evidence only)."
     report_lines = [
         f"# Research Report: {clean_topic}",
         "",
         f"> {meta_line}",
         "",
-        "## Executive Summary",
-        summary.strip() if summary.strip() else "Summary not available (evidence only).",
-        "",
     ]
+    if "## Executive Summary" in summary_text:
+        report_lines += [summary_text, ""]
+    else:
+        report_lines += ["## Executive Summary", summary_text, ""]
 
     if independence and (independence.get("families", 0) or independence.get("multi")):
         report_lines.append("## Independence")
@@ -73,6 +76,10 @@ def write_report(
             fam_title = redact(fam.get("title") or "Untitled", watchlist)
             report_lines.append(f"- {fam_title} ({fam.get('size', 0)} copies)")
         report_lines.append("")
+
+    for heading, body in appendix or []:
+        if body and body.strip():
+            report_lines += [f"## {heading}", body.strip(), ""]
 
     report_lines += [
         "## Evidence & Sources",
@@ -93,11 +100,25 @@ def write_report(
             score_tag = f" (RRF Score: {score}%)" if score else ""
             report_lines.append(f"### {idx}. {title}{score_tag}")
             report_lines.append(f"- **URL**: {url}")
+            lane = item.get("lane") or ""
+            if lane:
+                meta = item.get("meta") or {}
+                bits = [lane]
+                for key in ("venue", "year", "community", "author"):
+                    if meta.get(key):
+                        bits.append(redact(str(meta[key]), watchlist))
+                if meta.get("citations"):
+                    bits.append(f"cited {meta['citations']}x")
+                if item.get("quality"):
+                    bits.append(f"quality {float(item['quality']):.2f}")
+                report_lines.append(f"- **Source**: {' · '.join(bits)}")
             if item.get("doi"):
                 report_lines.append(f"- **DOI**: {item.get('doi')}")
             if snippet:
                 report_lines.append(f"- **Snippet**: {snippet}")
             if excerpt:
+                if len(excerpt) > 900:
+                    excerpt = excerpt[:900].rsplit(" ", 1)[0] + " …"
                 report_lines.append(f"- **Excerpt**: {excerpt}")
             report_lines.append("")
 

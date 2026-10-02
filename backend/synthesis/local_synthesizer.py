@@ -15,10 +15,10 @@ import httpx
 class LocalSynthesizer:
     """Local offline inference and extractive synthesis engine."""
 
-    def __init__(self, local_api_url: str | None = None, model_name: str | None = None):
+    def __init__(self, local_api_url: str | None = None, model_name: str | None = None, probe: bool = True):
         self.local_api_url = local_api_url or os.environ.get("LOCAL_LLM_URL", "http://127.0.0.1:11434/v1")
         self.model_name = model_name or os.environ.get("LOCAL_LLM_MODEL", "qwen2.5:0.5b")
-        self.has_local_server = self._probe_local_server()
+        self.has_local_server = self._probe_local_server() if probe else False
 
     def _probe_local_server(self) -> bool:
         """Check if a local LLM server (Ollama, LM-Studio, vLLM) is running on localhost."""
@@ -131,11 +131,11 @@ class LocalSynthesizer:
         corpus_words = set(re.findall(r"\w+", corpus_text))
 
         standard_angles = [
-            "manufacturing yield and defect rates",
-            "lifecycle degradation and aging mechanisms",
-            "thermal runaway and safety metrics",
-            "regulatory compliance and standard benchmarks",
-            "cost per unit and economic scalability",
+            "limitations criticism and counter evidence",
+            "long-term outcomes and real world results",
+            "practitioner experience and community discussion",
+            "cost access and practical implementation",
+            "latest research developments and open questions",
         ]
 
         gaps = []
@@ -143,6 +143,8 @@ class LocalSynthesizer:
             angle_words = set(re.findall(r"\w+", angle))
             # If fewer than 2 words of the angle appear in the corpus, flag as gap
             if len(angle_words & corpus_words) < 2:
-                gaps.append(f"{' '.join(list(core_topic_words)[:2])} {angle}")
+                core = " ".join(w for w in re.findall(r"\w+", topic.lower()) if w in core_topic_words)
+                core = " ".join(core.split()[:4])
+                gaps.append(f"{core} {angle}".strip())
 
         return gaps[:3]

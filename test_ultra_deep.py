@@ -175,11 +175,12 @@ class TestClaimVerifier(unittest.TestCase):
 class TestLlmProcessHideShow(unittest.TestCase):
     """Hide and show are first-class LLM-process modes. Watchlist never leaves."""
 
-    def test_defaults_to_hide(self):
+    def test_defaults_to_show(self):
+        # Privacy is an optional layer: the default shows the process to the model.
         from backend.research.types import SearchOptions
         opts = SearchOptions()
-        self.assertEqual(opts.llm_process, "hide")
-        self.assertTrue(opts.conceal_process)
+        self.assertEqual(opts.llm_process, "show")
+        self.assertFalse(opts.conceal_process)
 
     def test_show_alias_from_conceal_process_false(self):
         from backend.research.types import SearchOptions
@@ -238,7 +239,9 @@ class TestLlmProcessHideShow(unittest.TestCase):
         import sys
         sys.path.insert(0, ".")
         from deep_search import build_options, build_parser
-        hide = build_options(build_parser().parse_args([]))
+        default = build_options(build_parser().parse_args([]))
+        self.assertEqual(default.llm_process, "show")
+        hide = build_options(build_parser().parse_args(["--llm-process", "hide"]))
         self.assertEqual(hide.llm_process, "hide")
         show = build_options(build_parser().parse_args(["--llm-process", "show"]))
         self.assertEqual(show.llm_process, "show")
@@ -248,7 +251,8 @@ class TestLlmProcessHideShow(unittest.TestCase):
 
     def test_server_parses_llm_process(self):
         from backend.server.web_server import _options_from_payload
-        self.assertEqual(_options_from_payload({}).llm_process, "hide")
+        self.assertEqual(_options_from_payload({}).llm_process, "show")
+        self.assertEqual(_options_from_payload({"llm_process": "hide"}).llm_process, "hide")
         self.assertEqual(_options_from_payload({"llm_process": "show"}).llm_process, "show")
         self.assertEqual(_options_from_payload({"conceal_process": False}).llm_process, "show")
 
