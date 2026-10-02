@@ -8,6 +8,8 @@ import logging
 import re
 import urllib.parse
 
+from backend.retrieval.meta import engine_health
+
 logger = logging.getLogger("searxng_service")
 
 # Check curl_cffi availability
@@ -30,6 +32,8 @@ def search_duckduckgo(query: str, max_results: int = 10) -> list[dict]:
     """Search DuckDuckGo HTML using Chrome TLS impersonation or standard HTTP."""
     if not query.strip():
         return []
+    if not engine_health.available("duckduckgo"):
+        return []
     url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -39,7 +43,8 @@ def search_duckduckgo(query: str, max_results: int = 10) -> list[dict]:
     raw_html = ""
     try:
         if HAS_CURL_CFFI:
-            resp = cffi_requests.get(url, headers=headers, impersonate="chrome124", timeout=8)
+            with engine_health.throttle("duckduckgo"):
+                resp = cffi_requests.get(url, headers=headers, impersonate="chrome124", timeout=8)
             if resp.status_code == 200:
                 raw_html = resp.text
         else:
@@ -48,9 +53,11 @@ def search_duckduckgo(query: str, max_results: int = 10) -> list[dict]:
                 raw_html = r.read().decode("utf-8", errors="ignore")
     except Exception as e:
         logger.debug(f"DuckDuckGo fetch failed: {e}")
+        engine_health.report("duckduckgo", False)
         return []
 
     if not raw_html:
+        engine_health.report("duckduckgo", False)
         return []
 
     items = []
@@ -67,7 +74,7 @@ def search_duckduckgo(query: str, max_results: int = 10) -> list[dict]:
                     qs = urllib.parse.parse_qs(parsed.query)
                     target_url = qs.get("uddg", [raw_href])[0] if "uddg" in qs else raw_href
                     snippet = snippet_elem[0].text_content().strip() if snippet_elem else ""
-                    if target_url.startswith("http"):
+                    if target_url.startswith("http") and "duckduckgo.com/y.js" not in target_url and "ad_provider=" not in target_url:
                         items.append({
                             "title": title,
                             "url": target_url,
@@ -85,11 +92,12 @@ def search_duckduckgo(query: str, max_results: int = 10) -> list[dict]:
             parsed = urllib.parse.urlparse(raw_href)
             qs = urllib.parse.parse_qs(parsed.query)
             target_url = qs.get("uddg", [raw_href])[0] if "uddg" in qs else raw_href
-            if target_url.startswith("http"):
+            if target_url.startswith("http") and "duckduckgo.com/y.js" not in target_url and "ad_provider=" not in target_url:
                 items.append({
                     "title": clean_title,
                     "url": target_url,
                     "content": "",
                     "engine": "duckduckgo",
                 })
+    engine_health.report("duckduckgo", bool(items))
     return items

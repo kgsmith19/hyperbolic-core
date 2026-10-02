@@ -7,6 +7,7 @@ Manages the exploration graph:
 - Thread-safe concurrency coordination and in-flight territory reservation to prevent duplicate work.
 """
 
+from bisect import insort
 from dataclasses import asdict, dataclass
 import hashlib
 import threading
@@ -23,6 +24,23 @@ class FrontierItem:
     depth: int = 0
     priority: float = 0.0
     source_url: str = ""
+
+
+# Hub domains host many independent works; a flat per-domain cap would let
+# only a handful of DOIs or Reddit threads into a run. Hubs get a finer key
+# (DOI prefix, subreddit) and/or a larger multiplier.
+_HUB_MULTIPLIER = {
+    "doi.org": 1, "reddit.com": 1, "arxiv.org": 6, "ncbi.nlm.nih.gov": 6, "pmc.ncbi.nlm.nih.gov": 6,
+    "pubmed.ncbi.nlm.nih.gov": 6, "europepmc.org": 6, "news.ycombinator.com": 5, "stackoverflow.com": 4,
+    "youtube.com": 5, "en.wikipedia.org": 3, "github.com": 3, "medium.com": 3, "archive.org": 3,
+    "semanticscholar.org": 4, "openalex.org": 4, "sciencedirect.com": 4, "link.springer.com": 4,
+    "nature.com": 3, "mdpi.com": 3, "frontiersin.org": 3, "journals.plos.org": 3, "biorxiv.org": 4,
+    "medrxiv.org": 4, "stackexchange.com": 3,
+}
+
+
+def _priority_key(item: "FrontierItem") -> float:
+    return -item.priority
 
 
 class ResearchFrontier:
@@ -80,6 +98,52 @@ class ResearchFrontier:
         except Exception:
             return ""
 
+    def domain_key(self, url: str) -> str:
+        """Budget key: netloc, refined for hubs (DOI prefix, subreddit)."""
+        domain = self.get_domain(url)
+        if not domain:
+            return ""
+        bare = domain[4:] if domain.startswith("www.") else domain
+        try:
+            path = urllib.parse.urlparse(url).path
+        except Exception:
+            path = ""
+        if bare in ("doi.org", "dx.doi.org"):
+            prefix = path.strip("/").split("/")[0] if path else ""
+            return f"doi.org/{prefix}" if prefix else "doi.org"
+        if bare.endswith("reddit.com"):
+            parts = [p for p in path.split("/") if p]
+            if len(parts) >= 2 and parts[0] == "r":
+                return f"reddit.com/r/{parts[1].lower()}"
+        return domain
+
+    def domain_cap(self, key: str) -> int:
+        bare = key[4:] if key.startswith("www.") else key
+        base = bare.split("/")[0]
+        mult = _HUB_MULTIPLIER.get(base, 1)
+        if base.endswith(".stackexchange.com"):
+            mult = 3
+        return max(1, self.max_per_domain * mult)
+
+    def _queue_cap(self) -> int:
+        return max(500, int(self.max_documents) * 25)
+
+    def _enqueue(self, item: "FrontierItem") -> None:
+        insort(self.queue, item, key=_priority_key)
+        cap = self._queue_cap()
+        if len(self.queue) > cap:
+            del self.queue[cap:]
+
+    def reprioritize(self, scorer) -> None:
+        """Recompute queued priorities with scorer(item) -> float (round boundaries)."""
+        with self._lock:
+            for item in self.queue:
+                try:
+                    item.priority = float(scorer(item))
+                except Exception:
+                    continue
+            self.queue.sort(key=_priority_key)
+
     def add_candidate(
         self,
         url: str,
@@ -102,8 +166,8 @@ class ResearchFrontier:
             if doi and isinstance(doi, str) and doi.strip().lower() in self.visited_dois:
                 return False
 
-            domain = self.get_domain(clean_url)
-            if domain and self.domain_counts.get(domain, 0) >= self.max_per_domain:
+            domain = self.domain_key(clean_url)
+            if domain and self.domain_counts.get(domain, 0) >= self.domain_cap(domain):
                 return False
 
             item = FrontierItem(
@@ -114,8 +178,7 @@ class ResearchFrontier:
                 source_url=source_url if isinstance(source_url, str) else ""
             )
 
-            self.queue.append(item)
-            self.queue.sort(key=lambda x: x.priority, reverse=True)
+            self._enqueue(item)
             return True
 
     def pop_next_batch(self, batch_size: int = 4) -> list[FrontierItem]:
@@ -135,8 +198,8 @@ class ResearchFrontier:
                 if item.url in self.visited_urls or item.url in self.in_flight_urls:
                     continue
 
-                domain = self.get_domain(item.url)
-                if domain and self.domain_counts.get(domain, 0) >= self.max_per_domain:
+                domain = self.domain_key(item.url)
+                if domain and self.domain_counts.get(domain, 0) >= self.domain_cap(domain):
                     deferred.append(item)
                     continue
 
@@ -151,8 +214,8 @@ class ResearchFrontier:
                 batch.append(item)
 
             if deferred:
-                self.queue = deferred + self.queue
-                self.queue.sort(key=lambda x: x.priority, reverse=True)
+                for item in deferred:
+                    insort(self.queue, item, key=_priority_key)
 
             return batch
 
@@ -163,7 +226,7 @@ class ResearchFrontier:
             self.in_flight_items.pop(url, None)
             if isinstance(url, str) and url:
                 self.visited_urls.add(url)
-            domain = self.get_domain(url) if isinstance(url, str) else ""
+            domain = self.domain_key(url) if isinstance(url, str) else ""
             if domain and self.domain_counts.get(domain, 0) > 0:
                 self.domain_counts[domain] -= 1
             if doi and isinstance(doi, str):
@@ -259,10 +322,10 @@ class ResearchFrontier:
                 frontier.visited_urls.discard(item.url)
                 if item.doi:
                     frontier.visited_dois.discard(item.doi.lower())
-                domain = frontier.get_domain(item.url)
+                domain = frontier.domain_key(item.url)
                 if domain and frontier.domain_counts.get(domain, 0) > 0:
                     frontier.domain_counts[domain] -= 1
             if item.url not in frontier.visited_urls:
                 frontier.queue.append(item)
-        frontier.queue.sort(key=lambda item: item.priority, reverse=True)
+        frontier.queue.sort(key=_priority_key)
         return frontier

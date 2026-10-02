@@ -112,3 +112,87 @@ def _extract_pdf_text_fallback(raw: str) -> str:
     except Exception:
         pass
     return ""
+
+
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_OG_TITLE_RE = re.compile(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', re.IGNORECASE)
+_ANCHOR_RE = re.compile(r'<a\b[^>]*href=["\'](https?://[^"\'>\s]+)["\'][^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
+_JUNK_LINK_RE = re.compile(
+    r"(/login|/signin|/signup|/register|/account|/cart|/privacy|/terms|/cookie|/share\?|sharer|"
+    r"/intent/tweet|mailto:|javascript:|/tag/|/tags/|/category/|/author/|/feed/?$|\.(?:jpg|jpeg|png|gif|svg|webp|css|js|ico|zip|mp4|mp3)(?:\?|$))",
+    re.IGNORECASE,
+)
+
+
+def extract_title(raw_html: str) -> str:
+    """Best page title: og:title, then <title>, cleaned of site suffixes."""
+    if not raw_html or not isinstance(raw_html, str):
+        return ""
+    head = raw_html[:200000]
+    m = _OG_TITLE_RE.search(head) or _TITLE_RE.search(head)
+    if not m:
+        return ""
+    title = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", m.group(1)))).strip()
+    return title[:300]
+
+
+def extract_links_with_text(raw_html: str, max_links: int = 60) -> list[list[str]]:
+    """Return [url, anchor text] pairs for content links, skipping chrome/junk."""
+    if not raw_html or not isinstance(raw_html, str):
+        return []
+    out: list[list[str]] = []
+    seen: set[str] = set()
+    for m in _ANCHOR_RE.finditer(raw_html):
+        url = m.group(1).strip()
+        if url in seen or _JUNK_LINK_RE.search(url) or not is_safe_url(url):
+            continue
+        text = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.group(2)))).strip()
+        if len(text) < 3:
+            continue
+        seen.add(url)
+        out.append([url, text[:160]])
+        if len(out) >= max_links:
+            break
+    return out
+
+
+def extract_pdf_text(data: bytes, max_chars: int = 60000) -> str:
+    """Extract text from PDF bytes with the best available library."""
+    if not data:
+        return ""
+    try:
+        import pymupdf  # type: ignore
+        with pymupdf.open(stream=data, filetype="pdf") as doc:
+            parts = []
+            for page in doc:
+                parts.append(page.get_text())
+                if sum(len(p) for p in parts) > max_chars:
+                    break
+            text = "\n".join(parts)
+            if len(text.strip()) > 100:
+                return text[:max_chars]
+    except Exception:
+        pass
+    try:
+        import io
+        from pypdf import PdfReader  # type: ignore
+        reader = PdfReader(io.BytesIO(data))
+        parts = []
+        for page in reader.pages[:60]:
+            parts.append(page.extract_text() or "")
+            if sum(len(p) for p in parts) > max_chars:
+                break
+        text = "\n".join(parts)
+        if len(text.strip()) > 100:
+            return text[:max_chars]
+    except Exception:
+        pass
+    try:
+        import io
+        from pdfminer.high_level import extract_text  # type: ignore
+        text = extract_text(io.BytesIO(data), maxpages=40)
+        if len(text.strip()) > 100:
+            return text[:max_chars]
+    except Exception:
+        pass
+    return _extract_pdf_text_fallback(data.decode("latin1", errors="ignore"))[:max_chars]

@@ -44,7 +44,11 @@ def run_ipc_loop():
         elif action == "search":
             query = task["query"]
             connector = task.get("connector", "all")
-            results = router.search(query, connector=connector)
+            lanes = task.get("lanes")
+            if lanes:
+                results = router.search_lanes(query, lanes)
+            else:
+                results = router.search(query, connector=connector)
             resp = {"task_id": task_id, "status": "ok", "results": results}
         elif action == "fetch":
             url = task["url"]

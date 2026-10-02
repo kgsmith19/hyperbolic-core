@@ -9,6 +9,8 @@ import logging
 import re
 import urllib.parse
 
+from backend.retrieval.meta import engine_health
+
 logger = logging.getLogger("searxng_service")
 
 # Check curl_cffi availability
@@ -49,6 +51,8 @@ def search_bing(query: str, max_results: int = 10) -> list[dict]:
     """Search Bing HTML using Chrome TLS impersonation and direct URL unmasking."""
     if not query.strip():
         return []
+    if not engine_health.available("bing"):
+        return []
     url = f"https://www.bing.com/search?q={urllib.parse.quote_plus(query)}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -58,7 +62,8 @@ def search_bing(query: str, max_results: int = 10) -> list[dict]:
     raw_html = ""
     try:
         if HAS_CURL_CFFI:
-            resp = cffi_requests.get(url, headers=headers, impersonate="chrome124", timeout=8)
+            with engine_health.throttle("bing"):
+                resp = cffi_requests.get(url, headers=headers, impersonate="chrome124", timeout=8)
             if resp.status_code == 200:
                 raw_html = resp.text
         else:
@@ -67,9 +72,11 @@ def search_bing(query: str, max_results: int = 10) -> list[dict]:
                 raw_html = r.read().decode("utf-8", errors="ignore")
     except Exception as e:
         logger.debug(f"Bing fetch failed: {e}")
+        engine_health.report("bing", False)
         return []
 
     if not raw_html:
+        engine_health.report("bing", False)
         return []
 
     items = []
@@ -107,4 +114,5 @@ def search_bing(query: str, max_results: int = 10) -> list[dict]:
                     "content": "",
                     "engine": "bing",
                 })
+    engine_health.report("bing", bool(items))
     return items

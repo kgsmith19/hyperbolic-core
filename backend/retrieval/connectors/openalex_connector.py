@@ -17,6 +17,18 @@ _API = "https://api.openalex.org/works"
 _HEADERS = {"User-Agent": "DeepSearch/2.0 (mailto:research@example.org)"}
 
 
+def _rebuild_abstract(inverted) -> str:
+    """OpenAlex ships abstracts as an inverted index; rebuild the plain text."""
+    if not isinstance(inverted, dict) or not inverted:
+        return ""
+    positions = []
+    for word, idxs in inverted.items():
+        if isinstance(idxs, list):
+            positions.extend((i, word) for i in idxs if isinstance(i, int))
+    positions.sort()
+    return " ".join(w for _, w in positions)[:6000]
+
+
 def _work_to_result(item: dict) -> dict:
     authorships = item.get("authorships", []) or []
     authors = ", ".join(
@@ -24,7 +36,10 @@ def _work_to_result(item: dict) -> dict:
         for a in authorships[:3]
     )
     concepts = [c.get("display_name", "") for c in (item.get("concepts", []) or [])[:3]]
-    venue = (item.get("host_venue", {}) or {}).get("display_name", "")
+    venue = (item.get("host_venue", {}) or {}).get("display_name", "") or (
+        ((item.get("primary_location") or {}).get("source") or {}).get("display_name", "")
+        if isinstance((item.get("primary_location") or {}).get("source"), dict) else ""
+    )
     year = item.get("publication_year", "")
     cited_by = item.get("cited_by_count", 0)
     snippet_bits = [f"Published {year}" + (f" in {venue}" if venue else "")]
@@ -34,7 +49,15 @@ def _work_to_result(item: dict) -> dict:
         snippet_bits.append(f"Topics: {', '.join(concepts)}")
     if cited_by:
         snippet_bits.append(f"Cited by {cited_by}")
+    abstract = _rebuild_abstract(item.get("abstract_inverted_index"))
+    oa = item.get("open_access") or {}
+    work_type = item.get("type") or ""
     return {
+        "abstract": abstract,
+        "oa_url": (oa.get("oa_url") if isinstance(oa, dict) else "") or "",
+        "lane": "academic",
+        "meta": {"authors": authors, "year": str(year or ""), "venue": venue or "",
+                 "citations": int(cited_by or 0), "kind": work_type},
         "title": item.get("display_name", "") or "Untitled OpenAlex Work",
         "url": item.get("doi") or item.get("id") or "",
         "doi": item.get("doi", "") or "",
@@ -47,10 +70,10 @@ def _work_to_result(item: dict) -> dict:
     }
 
 
-def search_openalex(query: str) -> list[dict]:
-    """Search OpenAlex academic works, enriched with citation metadata."""
+def search_openalex(query: str, per_page: int = 25) -> list[dict]:
+    """Search OpenAlex academic works, enriched with abstracts and citation metadata."""
     try:
-        params = {"search": query, "per-page": 25}
+        params = {"search": query, "per-page": max(1, min(200, per_page))}
         with httpx.Client(timeout=8.0) as client:
             resp = client.get(_API, params=params, headers=_HEADERS)
             if resp.status_code == 200:

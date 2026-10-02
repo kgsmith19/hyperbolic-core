@@ -9,6 +9,8 @@ import logging
 import re
 import urllib.parse
 
+from backend.retrieval.meta import engine_health
+
 logger = logging.getLogger("searxng_service")
 
 try:
@@ -29,6 +31,8 @@ def search_mojeek(query: str, max_results: int = 10) -> list[dict]:
     """Search Mojeek HTML using Chrome TLS impersonation."""
     if not query or not query.strip():
         return []
+    if not engine_health.available("mojeek"):
+        return []
     url = f"https://www.mojeek.com/search?q={urllib.parse.quote_plus(query)}"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -38,7 +42,8 @@ def search_mojeek(query: str, max_results: int = 10) -> list[dict]:
     raw_html = ""
     try:
         if HAS_CURL_CFFI:
-            resp = cffi_requests.get(url, headers=headers, impersonate="chrome124", timeout=8)
+            with engine_health.throttle("mojeek"):
+                resp = cffi_requests.get(url, headers=headers, impersonate="chrome124", timeout=8)
             if resp.status_code == 200:
                 raw_html = resp.text
         else:
@@ -47,9 +52,11 @@ def search_mojeek(query: str, max_results: int = 10) -> list[dict]:
                 raw_html = r.read().decode("utf-8", errors="ignore")
     except Exception as e:
         logger.debug(f"Mojeek fetch failed: {e}")
+        engine_health.report("mojeek", False)
         return []
 
     if not raw_html:
+        engine_health.report("mojeek", False)
         return []
 
     items = []
@@ -88,4 +95,5 @@ def search_mojeek(query: str, max_results: int = 10) -> list[dict]:
                     "content": "",
                     "engine": "mojeek",
                 })
+    engine_health.report("mojeek", bool(items))
     return items
