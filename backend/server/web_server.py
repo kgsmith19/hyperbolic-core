@@ -117,7 +117,8 @@ def _options_from_payload(data: dict) -> SearchOptions:
         decoy_queries=_num(data, "decoy_queries", 0),
         ai_planning=bool(data.get("ai_planning", False)),
         llm_process=str(llm_process) if llm_process is not None else None,
-        ai_summary=bool(data.get("ai_summary", False)),
+        # The AI-written report is the default whenever a key is configured.
+        ai_summary=bool(data.get("ai_summary", bool(os.environ.get("OPENAI_API_KEY", "").strip()))),
         model=legacy_model,
         concealer_model=str(data.get("concealer_model", legacy_model)),
         deep_model=str(data.get("deep_model", "gpt-4o" if legacy_model == "gpt-4o-mini" else legacy_model)),

@@ -4,6 +4,7 @@ One search with explicit options. No mode enum, no barrel re-exports.
 """
 
 import argparse
+import os
 import sys
 
 from backend.privacy import SafetyError
@@ -52,7 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ai-planning", action="store_true", help="Expand the topic into extra query angles")
     parser.add_argument("--llm-process", choices=["hide", "show"], default="show", help="show (default) = send the bare topic and evidence. hide = optional privacy layer: conceal the research among chaffed decoy topics. Watchlist never leaves in either mode.")
     parser.add_argument("--no-conceal-process", action="store_true", help="Alias for --llm-process show. Send the bare topic to the model (no chaffed decoy topics).")
-    parser.add_argument("--ai-summary", action="store_true", help="Write a cloud executive brief")
+    parser.add_argument("--ai-summary", action="store_true", default=None, help="Write the AI report (default when OPENAI_API_KEY is set)")
+    parser.add_argument("--no-ai-summary", action="store_true", help="Write the local extractive report instead of the AI report")
     parser.add_argument("--openai-model", default="gpt-4o-mini", help="OpenAI model for planning or summary")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default=None, help="Reasoning effort for o-series models")
     parser.add_argument("--max-spend", type=float, default=2.00, help="Maximum spending cap in USD")
@@ -108,7 +110,9 @@ def build_options(args) -> SearchOptions:
         decoy_queries=args.decoys,
         ai_planning=args.ai_planning,
         llm_process="show" if args.no_conceal_process else args.llm_process,
-        ai_summary=args.ai_summary,
+        ai_summary=(False if getattr(args, "no_ai_summary", False)
+                    else True if args.ai_summary
+                    else bool(os.environ.get("OPENAI_API_KEY", "").strip())),
         model=args.openai_model,
         concealer_model=args.concealer_model,
         deep_model=args.deep_model,

@@ -182,6 +182,11 @@ const UiRenderer = {
             const box = el(id);
             if (box) box.disabled = !settings.hasOpenAI;
         });
+        // The AI report is the default whenever a key exists; without one it cannot run.
+        const report = el('ai-summary');
+        if (report && !settings.hasOpenAI) report.checked = false;
+        if (report && settings.hasOpenAI && !this._aiDefaultApplied) report.checked = true;
+        if (settings.hasOpenAI) this._aiDefaultApplied = true;
         if (note && !settings.hasOpenAI) {
             note.innerHTML = 'Needs an OpenAI key. <button type="button" class="link-btn" data-open-settings>Add one in Settings</button>.';
         } else if (note) {

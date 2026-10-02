@@ -393,6 +393,51 @@ class TestDeepPipeline(unittest.TestCase):
         self.assertEqual(_fix_citations("A [1] B [2, 9] C [7]", 3), "A [1] B [2] C ")
 
 
+class TestProductDefaults(unittest.TestCase):
+    """AI report is the default when a key exists; every privacy/hiding option is opt-in."""
+
+    def _assert_privacy_off(self, opts):
+        self.assertFalse(opts.blind_watchlist)
+        self.assertEqual(opts.decoy_queries, 0)
+        self.assertEqual(opts.llm_process, "show")
+        self.assertFalse(opts.conceal_process)
+
+    def test_server_defaults(self):
+        from backend.server.web_server import _options_from_payload
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+            for payload in ({}, {"preset": "deep"}, {"preset": "scout"}):
+                opts = _options_from_payload(payload)
+                self.assertTrue(opts.ai_summary)
+                self._assert_privacy_off(opts)
+            self.assertFalse(_options_from_payload({"ai_summary": False}).ai_summary)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}):
+            self.assertFalse(_options_from_payload({}).ai_summary)
+
+    def test_cli_defaults(self):
+        import sys
+        sys.path.insert(0, ".")
+        from deep_search import build_options, build_parser
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+            for argv in ([], ["--preset", "marathon"]):
+                opts = build_options(build_parser().parse_args(argv))
+                self.assertTrue(opts.ai_summary)
+                self._assert_privacy_off(opts)
+            self.assertFalse(build_options(build_parser().parse_args(["--no-ai-summary"])).ai_summary)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}):
+            self.assertFalse(build_options(build_parser().parse_args([])).ai_summary)
+            self.assertTrue(build_options(build_parser().parse_args(["--ai-summary"])).ai_summary)
+
+    def test_ui_defaults(self):
+        base = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(base, "frontend", "public", "index.html"), encoding="utf-8") as handle:
+            html = handle.read()
+        self.assertIn('id="ai-summary" checked', html)
+        for privacy_id in ("blind-watchlist", "conceal-process", "confirm-weaker-recall"):
+            self.assertNotRegex(html, rf'id="{privacy_id}"[^>]*checked')
+        self.assertIn('id="decoy-queries" min="0" max="8" value="0"', html)
+        self.assertNotRegex(html, r'<details[^>]*id="privacy-panel"[^>]*open')
+
+
 class TestRunRegistry(unittest.TestCase):
     def test_buffered_events_and_reattach(self):
         from backend.server.run_registry import RunRegistry
