@@ -3,8 +3,9 @@
 A local deep-research engine that goes further than commercial deep research:
 more rounds, more hops, more sources, and more of the web — peer-reviewed papers
 **and** the forums, threads, videos, and expert writing where practitioners
-actually talk. Runs last minutes or hours. Everything runs on your machine;
-AI is optional.
+actually talk. Runs last minutes or hours. Retrieval runs on your machine; when an OpenAI key
+is configured the AI-written report is on by default (turn it off for a fully
+local run). Privacy and concealment options are opt-in and never on by default.
 
 ```
 python deep_search.py --ui        # http://127.0.0.1:8765
@@ -46,7 +47,7 @@ Plan ──► Search ──► Read ──► Reflect ──► (repeat rounds)
    into independent families, and claims are cross-checked. The report has an
    executive summary, findings per research question, an explicit **Research vs.
    Community** comparison, corroborated vs. contested claims, notable voices,
-   top videos, next digs, and a methodology log. With *AI-written report* on,
+   top videos, next digs, and a methodology log. With *AI-written report* on (the default when a key is set),
    each section is drafted from its own evidence and then synthesised, with
    every `[n]` citation validated.
 

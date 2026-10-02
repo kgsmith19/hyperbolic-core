@@ -22,9 +22,10 @@ Privacy is an **optional layer**, not the main service.
 4. **SearXNG resilience**: `127.0.0.1:8080` with fallback to in-process
    DDG + Bing + Mojeek (per-engine throttling and cooldowns).
 5. **Decoy hits never enter evidence.**
-6. **Library defaults stay conservative** (`SearchOptions()` = classic,
+6. **Product defaults**: AI-written report ON when `OPENAI_API_KEY` is set (UI, API, CLI); every privacy/hiding option (`blind_watchlist`, `decoy_queries`, `llm_process=hide`, watchlist) is opt-in and never default.
+7. **Library defaults stay conservative** (`SearchOptions()` = classic,
    breadth 1, no lanes); the UI/CLI presets turn depth up.
-7. **Tests must pass** (all network-free):
+8. **Tests must pass** (all network-free):
    `python -m unittest test_safe_research.py test_bounded_contexts.py test_ai_search_expansion.py test_deep_expansion.py test_durable_research_ledger.py test_evidence_independence.py test_ultra_deep.py test_server_stream.py test_deep_research.py`
 
 ## Architecture Map
