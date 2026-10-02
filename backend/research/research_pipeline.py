@@ -163,6 +163,14 @@ def run_search(
         followups = []
 
     telemetry.stage("report", "Writing the report")
+
+    def synth_note(message: str) -> None:
+        # Only fallbacks and failures are warnings; the rest is progress.
+        if re.search(r"failed|cap reached|no openai key|unavailable", message, re.I):
+            note(message)
+        else:
+            telemetry.log(message)
+
     summary, independence_report = _synthesize(
         clean_eval_topic,
         ranked,
@@ -170,7 +178,7 @@ def run_search(
         options,
         cost_tracker,
         cancel_token,
-        note,
+        synth_note,
         families_records=families_records,
         plan=use_plan,
         learnings=learnings,

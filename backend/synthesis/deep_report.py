@@ -22,7 +22,7 @@ import re
 from collections import Counter
 
 from backend.privacy.watchlist_redactor import assert_safe_to_send, redact
-from backend.research.reflection import overlap_score, sentence_value, split_sentences, terms
+from backend.research.reflection import overlap_score, sentence_value, split_sentences, strip_label, terms
 from backend.retrieval.evidence_graph import extract_concepts
 from backend.retrieval.source_quality import DISCUSSION_LANES, EVIDENCE_LANES, LANE_LABELS
 
@@ -64,6 +64,10 @@ def _doc_relevance(topic: str, evidence: list) -> list[float]:
 
 
 def _relevant_idxs(rel: list[float], idxs: list[int], floor: float = 0.66, keep_min: int = 5) -> list[int]:
+    if idxs:
+        ordered = sorted((rel[i] for i in idxs), reverse=True)
+        top_quartile = ordered[max(0, len(ordered) // 4 - 1)]
+        floor = max(floor, min(0.74, top_quartile - 0.1))
     good = [i for i in idxs if rel[i] >= floor]
     if len(good) >= min(keep_min, len(idxs)):
         return good
@@ -85,6 +89,7 @@ def _sentences_for(evidence: list, idxs: list[int], focus: str, max_items: int, 
             if len(sent) < 55 or len(sent) > 360 or _BOILER_RE.search(sent):
                 continue
             value = sentence_value(sent)
+            sent = strip_label(sent)[0]
             if value <= 0.4:
                 continue
             rel = overlap_score(focus_terms, sent)
@@ -151,9 +156,13 @@ def suggest_followups(topic: str, plan, evidence: list, learnings: list, max_ite
             if cov.get(sq.id, 0) < 3:
                 out.append(sq.question)
     try:
+        from backend.research.research_plan import core_terms
+        core = core_terms(topic, 4)
         for q in lead_queries(topic, evidence, set(), [], max_n=max_items):
-            if q not in out:
-                out.append(q)
+            lead = q[len(core):].strip() if q.lower().startswith(core.lower()) else q
+            text = f"How does {lead} relate to {core}?" if lead and lead != q else q
+            if text not in out:
+                out.append(text)
     except Exception:
         pass
     return out[:max_items]

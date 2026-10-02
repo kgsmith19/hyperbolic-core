@@ -303,9 +303,14 @@ class TestDirectBoundedContexts(unittest.TestCase):
         self.assertIn('id="ai-planning"', html_content)
         self.assertIn('id="ai-summary"', html_content)
         self.assertIn('id="conceal-process"', html_content)
-        self.assertIn('id="llm-process-hide"', html_content)
-        self.assertIn('id="llm-process-show"', html_content)
         self.assertIn('id="confirm-weaker-recall"', html_content)
+        # Deep-research controls: depth presets, research/community mix,
+        # plan review, and privacy as an optional, collapsed layer.
+        self.assertIn('id="presets"', html_content)
+        self.assertIn('id="academic-weight"', html_content)
+        self.assertIn('id="plan-first"', html_content)
+        self.assertIn('id="privacy-panel"', html_content)
+        self.assertIn('id="sounding"', html_content)
         self.assertNotIn("selectMode('extreme')", html_content)
         self.assertNotIn("selectMode('deterministic')", html_content)
 

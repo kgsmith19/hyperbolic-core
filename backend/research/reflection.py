@@ -44,19 +44,47 @@ _METHOD_RE = re.compile(
     r"(search strategy|databases? (?:were|was) searched|we searched|inclusion criteria|exclusion criteria|data extraction|"
     r"were included|was conducted|prisma|checklist|risk of bias|methodological quality|this (?:study|review|paper|article) "
     r"(?:aims?|investigat\w*|examin\w*|explor\w*|discuss\w*|focus\w*)|objective of this|the aim of|aims? to|keywords?:|"
-    r"registered (?:in|with)|were screened|full[- ]text|study selection|eligib\w+)", re.I)
+    r"registered (?:in|with)|were screened|full[- ]text|study selection|eligib\w+|we conducted|we performed|"
+    r"was performed through|were searched|^(?:methods?|background|objectives?|design|setting|introduction)\b)", re.I)
+# Structured-abstract labels: findings sections earn a bonus, setup sections a penalty.
+_LABEL_RE = re.compile(r"^(conclusions?|results?|findings|data analysis|key points|takeaways?|tl;?dr|summary|"
+                       r"methods?|background|objectives?|design|setting|introduction|context|purpose|aims?)\s*[:.\-]\s*", re.I)
+_GOOD_LABELS = {"conclusion", "conclusions", "result", "results", "findings", "data analysis", "key points",
+                "takeaway", "takeaways", "tldr", "tl;dr", "summary"}
 _NOISE_RE = re.compile(
     r"(^reddit thread|^original post|points, \d+ comments|^top community|^hacker news discussion|^youtube video|"
-    r"^channel:|^description:|^transcript:|^\[|https?://|\bdoi:|^figure|^table|^\d+(?:\.\d+)+\s)", re.I)
+    r"^channel:|^description:|^transcript:|^\[|https?://|\bdoi:|^figure|^table|^\d+(?:\.\d+)+\s|member-only|"
+    r" - date:| - source:|^abstract:\s*\)|subscribe to|sign in to|^\W)", re.I)
+
+
+_CAPS_LABEL_RE = re.compile(r"^(CONCLUSIONS?|RESULTS?|FINDINGS|METHODS?|BACKGROUND|OBJECTIVES?|DESIGN|SETTING|"
+                            r"INTRODUCTION|CONTEXT|PURPOSE|AIMS?)\s+(?=[A-Z])")
+
+
+def strip_label(sent: str) -> tuple[str, float]:
+    """Remove a structured-abstract label; return (text, bonus)."""
+    m = _LABEL_RE.match(sent or "") or _CAPS_LABEL_RE.match(sent or "")
+    if not m:
+        if sent.lower().startswith("abstract"):
+            return re.sub(r"^abstract\s*[:.\-]?\s*", "", sent, flags=re.I), 0.0
+        return sent, 0.0
+    label = m.group(1).lower()
+    rest = sent[m.end():].strip()
+    if rest:
+        rest = rest[0].upper() + rest[1:]
+    return rest, (0.4 if label in _GOOD_LABELS else -0.9)
 
 
 def sentence_value(sent: str) -> float:
     """How much a sentence reads like a citable *finding* (0 = discard)."""
+    if not sent:
+        return 0.0
+    sent, label_bonus = strip_label(sent)
     if not sent or _NOISE_RE.search(sent) or _BOILER_RE.search(sent):
         return 0.0
     if sent[0].islower() or sent[0] in "([,;":
         return 0.0  # mid-sentence fragment
-    value = 1.0
+    value = 1.0 + label_bonus
     if _FINDING_RE.search(sent):
         value += 0.5
     if _NUM_RE.search(sent):
@@ -127,9 +155,10 @@ def extract_learnings(topic: str, evidence: list, max_items: int = 6, per_doc: i
         best = []
         for sent in split_sentences(text)[:80]:
             sent = re.sub(r"^-?\s*\[\d+ pts\]\s*", "", sent.strip(" -•*"))
+            value = sentence_value(sent)
+            sent = strip_label(sent)[0]
             if len(sent) < 60 or len(sent) > 340:
                 continue
-            value = sentence_value(sent)
             rel = overlap_score(topic_terms, sent)
             if rel <= 0 or value <= 0.4:
                 continue
@@ -195,6 +224,10 @@ _LEAD_STOP = frozenset({
     "july", "august", "september", "october", "november", "december", "january", "february", "monday", "tuesday",
     "springer", "elsevier", "wiley", "nature", "frontiers", "mdpi", "ncbi", "nih", "pmc", "doi", "isbn", "issn",
     "the", "this", "these", "those", "there", "here", "when", "while", "what", "why", "how", "who", "which", "if",
+    "smd", "rct", "rcts", "ci", "usd", "faq", "api", "pdf", "html", "url", "www", "isrctn", "nct", "prospero",
+    "effect", "effects", "impact", "impacts", "role", "level", "levels", "benefit", "benefits", "outcome", "outcomes",
+    "measure", "measures", "group", "groups", "participants", "subjects", "analysis", "evidence", "findings",
+    "author", "authors", "editor", "member-only", "story", "guide", "members", "click", "posts", "post",
 })
 _ACRONYM_RE = re.compile(r"\b([A-Z]{3,6}s?)\b")
 _MULTI_CAPS_RE = re.compile(r"\b([A-Z][a-z][a-zA-Z\-]+(?:\s+[A-Z][a-zA-Z\-]+){1,3})\b")

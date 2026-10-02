@@ -181,14 +181,22 @@ class TestResearchStreamBrowser(unittest.TestCase):
                     page = browser.new_page()
                     page.goto(base, wait_until="domcontentloaded")
 
+                    # Fine-tune controls start collapsed and open on demand.
                     self.assertTrue(page.is_visible("#research-plan"))
                     self.assertFalse(page.is_visible("#params-body"))
-                    page.click("#research-plan")
+                    page.click("#research-plan > summary")
                     self.assertTrue(page.is_visible("#params-body"))
-                    self.assertEqual(page.locator(".progress-stage").count(), 5)
+                    self.assertEqual(page.locator(".progress-stage").count(), 6)
+                    # Depth presets render from /api/presets.
+                    page.wait_for_selector(".preset", timeout=5000)
+                    self.assertEqual(page.locator(".preset").count(), 4)
 
                     page.fill("#topic", "solid-state batteries")
+                    # Skip plan review so the run starts immediately.
+                    page.locator("#plan-first").uncheck(force=True)
+                    page.wait_for_function("document.getElementById('run-btn').textContent.includes('Start search')")
                     page.click("#run-btn")
+                    self.assertTrue(page.is_visible("#view-run"))
 
                     # Live updates: the status box must show early AND late
                     # messages while the request is still in flight.
