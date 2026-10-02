@@ -366,8 +366,8 @@ function onRunEvent(event) {
             break;
         case 'source':
             run.sources.push(event);
-            if (event.subq !== undefined) run.coverage = coverage();
             R.pushSource(event, run.sources.length);
+            if (run.plan && event.subq) R.renderQuestions(run.plan, coverage());
             break;
         case 'learning':
             run.learnings.push(event);
@@ -379,16 +379,8 @@ function onRunEvent(event) {
 }
 
 function coverage() {
-    // Sources do not carry sub-question ids live; approximate by lane affinity.
-    const plan = S.run.plan;
-    if (!plan || !plan.sub_questions) return {};
     const counts = {};
-    const laneCounts = {};
-    S.run.sources.forEach(s => { laneCounts[s.lane] = (laneCounts[s.lane] || 0) + 1; });
-    plan.sub_questions.forEach(sq => {
-        const lanes = sq.lanes && sq.lanes.length ? sq.lanes : Object.keys(laneCounts);
-        counts[sq.id] = Math.round(lanes.reduce((a, l) => a + (laneCounts[l] || 0), 0) / Math.max(1, plan.sub_questions.length / 2));
-    });
+    S.run.sources.forEach(s => { if (s.subq) counts[s.subq] = (counts[s.subq] || 0) + 1; });
     return counts;
 }
 

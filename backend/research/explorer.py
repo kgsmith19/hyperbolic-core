@@ -617,7 +617,7 @@ class _Explorer:
         self._stat(fetched=1)
         if self.telemetry is not None:
             self.telemetry.source(title, frontier_item.url, lane, quality, frontier_item.depth,
-                                  str(meta.get("renderer", "")))
+                                  str(meta.get("renderer", "")), subq=sid)
         if chunked:
             self.titles[f"{frontier_item.url}#chunk"] = excerpt_text[:800]
 
@@ -781,7 +781,12 @@ class _Explorer:
                 f"{frontier.documents_collected}/{frontier.max_documents} kept, "
                 f"{len(frontier.queue)} waiting)..."
             )
-            batch = frontier.pop_next_batch(batch_size=self.batch_size)
+            if self.targets and self.batch_size > 1:
+                batch = frontier.pop_next_batch(
+                    batch_size=self.batch_size,
+                    group_of=lambda item: self.cands.get(item.url, {}).get("lane", "web"))
+            else:
+                batch = frontier.pop_next_batch(batch_size=self.batch_size)
             if not batch:
                 break
 

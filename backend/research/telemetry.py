@@ -83,13 +83,15 @@ class Telemetry:
             self.state["max_rounds"] = max_rounds
         self._emit({"type": "round", "round": number, "max_rounds": max_rounds, "queries": list(queries)[:12]})
 
-    def source(self, title: str, url: str, lane: str, quality: float, depth: int, renderer: str = "") -> None:
+    def source(self, title: str, url: str, lane: str, quality: float, depth: int, renderer: str = "",
+               subq: str = "") -> None:
         with self._lock:
             lanes = self.state["lanes"]
             lanes[lane] = lanes.get(lane, 0) + 1
             self.state["kept"] += 1
         self._emit({"type": "source", "title": title, "url": url, "lane": lane,
-                    "quality": round(float(quality or 0), 3), "depth": depth, "renderer": renderer})
+                    "quality": round(float(quality or 0), 3), "depth": depth, "renderer": renderer,
+                    "subq": subq})
         self.stats()
 
     def learning(self, text: str, url: str = "", lane: str = "") -> None:

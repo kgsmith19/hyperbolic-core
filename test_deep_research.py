@@ -79,6 +79,24 @@ class TestFrontierHubs(unittest.TestCase):
         f.pop_next_batch(2)
         self.assertTrue(f.add_candidate("https://doi.org/10.3390/c", priority=10))
 
+    def test_batches_diversify_across_lanes(self):
+        from backend.frontier.priority_frontier import ResearchFrontier
+        f = ResearchFrontier(max_depth=1, max_documents=20, max_per_domain=5)
+        lanes = {}
+        for i in range(6):
+            url = f"https://paper{i}.org/x"
+            f.add_candidate(url, priority=90 - i)
+            lanes[url] = "academic"
+        f.add_candidate("https://forum.org/t", priority=10)
+        lanes["https://forum.org/t"] = "community"
+        batch = f.pop_next_batch(4, group_of=lambda item: lanes[item.url])
+        urls = [item.url for item in batch]
+        # The low-priority forum thread jumps ahead of academic items 3-6...
+        self.assertIn("https://forum.org/t", urls)
+        # ...and the leftover slot is refilled so no reader sits idle.
+        self.assertEqual(len(batch), 4)
+        self.assertEqual(len(f.queue), 3)
+
     def test_queue_stays_sorted_and_reprioritizes(self):
         from backend.frontier.priority_frontier import ResearchFrontier
         f = ResearchFrontier(max_depth=1, max_documents=10, max_per_domain=5)

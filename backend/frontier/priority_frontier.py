@@ -181,43 +181,73 @@ class ResearchFrontier:
             self._enqueue(item)
             return True
 
-    def pop_next_batch(self, batch_size: int = 4) -> list[FrontierItem]:
-        """Pop and reserve the highest-priority batch of candidate items across non-overlapping territory."""
+    def pop_next_batch(self, batch_size: int = 4, group_of=None, max_group_share: float = 0.5) -> list[FrontierItem]:
+        """Pop and reserve the highest-priority batch of candidate items across non-overlapping territory.
+
+        group_of(item) -> str optionally diversifies the batch: no group (e.g. source
+        lane) takes more than max_group_share of the slots while other groups are
+        waiting in the look-ahead window. Slots nobody else can fill go back to
+        the capped groups, so diversity never leaves readers idle.
+        """
         with self._lock:
-            batch = []
-            deferred: list[FrontierItem] = []
-            while self.queue and len(batch) < batch_size:
-                if self.documents_collected >= self.max_documents:
-                    break
-                if self.total_bytes_consumed >= self.max_bytes_budget:
-                    break
-                if (time.time() - self.start_time) >= self.max_duration_sec:
-                    break
+            batch: list[FrontierItem] = []
+            if group_of is None:
+                self._pop_locked(batch, batch_size, None, batch_size)
+            else:
+                cap = max(1, int(batch_size * max_group_share + 0.999))
+                self._pop_locked(batch, batch_size, group_of, cap, lookahead=batch_size * 6)
+                if len(batch) < batch_size:
+                    self._pop_locked(batch, batch_size, None, batch_size)
+            return batch
 
-                item = self.queue.pop(0)
-                if item.url in self.visited_urls or item.url in self.in_flight_urls:
-                    continue
+    def _pop_locked(self, batch, batch_size, group_of, group_cap, lookahead: int = 0) -> None:
+        deferred: list[FrontierItem] = []
+        group_counts: dict[str, int] = {}
+        if group_of is not None:
+            for existing in batch:
+                g = group_of(existing)
+                group_counts[g] = group_counts.get(g, 0) + 1
+        scanned = 0
+        while self.queue and len(batch) < batch_size:
+            if self.documents_collected >= self.max_documents:
+                break
+            if self.total_bytes_consumed >= self.max_bytes_budget:
+                break
+            if (time.time() - self.start_time) >= self.max_duration_sec:
+                break
+            if group_of is not None and lookahead and scanned >= lookahead:
+                break
 
-                domain = self.domain_key(item.url)
-                if domain and self.domain_counts.get(domain, 0) >= self.domain_cap(domain):
+            item = self.queue.pop(0)
+            if item.url in self.visited_urls or item.url in self.in_flight_urls:
+                continue
+            scanned += 1
+
+            domain = self.domain_key(item.url)
+            if domain and self.domain_counts.get(domain, 0) >= self.domain_cap(domain):
+                deferred.append(item)
+                continue
+            if group_of is not None:
+                try:
+                    group = group_of(item)
+                except Exception:
+                    group = ""
+                if group_counts.get(group, 0) >= group_cap:
                     deferred.append(item)
                     continue
+                group_counts[group] = group_counts.get(group, 0) + 1
 
-                self.visited_urls.add(item.url)
-                self.in_flight_urls.add(item.url)
-                self.in_flight_items[item.url] = item
-                if item.doi:
-                    self.visited_dois.add(item.doi.lower())
-                if domain:
-                    self.domain_counts[domain] = self.domain_counts.get(domain, 0) + 1
+            self.visited_urls.add(item.url)
+            self.in_flight_urls.add(item.url)
+            self.in_flight_items[item.url] = item
+            if item.doi:
+                self.visited_dois.add(item.doi.lower())
+            if domain:
+                self.domain_counts[domain] = self.domain_counts.get(domain, 0) + 1
+            batch.append(item)
 
-                batch.append(item)
-
-            if deferred:
-                for item in deferred:
-                    insort(self.queue, item, key=_priority_key)
-
-            return batch
+        for item in deferred:
+            insort(self.queue, item, key=_priority_key)
 
     def release_candidate(self, url: str, doi: str = "") -> None:
         """Release a failed fetch without consuming document budget. Keep the URL visited so it is not retried; refund the domain slot."""
