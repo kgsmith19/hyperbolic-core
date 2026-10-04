@@ -141,7 +141,7 @@ for (const key of gapsOf()) {
   });
 }
 
-test("S1 · S1 posture never claims full v5 coverage", () => {
+test("S1 · cumulative ADOPTION posture (S1+S2) never claims full v5 coverage", () => {
   // Counts grow as later slices extend ADOPTION: S1=8/4, S2=12/4.
   // Each slice's own test file pins the cumulative counts at its head.
   assert.equal(mappedOf().length, 12, "S1+S2 map exactly 12 mechanisms");
