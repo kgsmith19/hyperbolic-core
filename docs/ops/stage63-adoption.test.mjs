@@ -142,12 +142,11 @@ for (const key of gapsOf()) {
 }
 
 test("S1 · S1 posture never claims full v5 coverage", () => {
-  assert.ok(gapsOf().length > 0, "S1 with zero gaps would be a false-coverage claim");
+  assert.equal(mappedOf().length, 8, "S1 maps exactly 8 mechanisms");
+  assert.equal(gapsOf().length, 4, "S1 discloses exactly 4 gaps");
   for (const key of Object.keys(ADOPTION)) {
     const entry = ADOPTION[key];
-    assert.ok((entry.mechanism !== null) !== (entry.gap === null) ||
-      (entry.mechanism !== null && entry.gap === null) ||
-      (entry.mechanism === null && entry.gap !== null),
-      `${key} must have exactly one of mechanism/gap`);
+    assert.equal(entry.mechanism !== null, entry.gap === null,
+      `${key} must have exactly one of mechanism/gap (XOR)`);
   }
 });
