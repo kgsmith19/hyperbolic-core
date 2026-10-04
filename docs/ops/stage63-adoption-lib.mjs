@@ -63,6 +63,35 @@ const HAT_SAT_TRIGGERS = [
   "new-provider", "high-risk", "privileged-path", "authority-change",
 ];
 
+// --- Frozen contract: tools/thinness.py (slice S2, #420) ---
+const THIN_AXES = [
+  "independent_behaviors", "unknowns", "state_irreversibility",
+  "external_boundary", "verification_burden", "write_overlap",
+];
+const THIN_HARD = [
+  "one_sentence_outcome", "one_observable_boundary", "independent_merge_or_recovery",
+  "one_writer", "one_reviewer_understands", "one_evidence_strategy",
+  "one_to_five_claims", "non_goals_explicit", "no_write_overlap", "capsule_sufficient",
+];
+const THIN_BANDS = ["micro", "preferred", "medium", "large"];
+
+// --- Frozen contract: tools/ready.py (slice S2, #420) ---
+const DOR_FULL = [
+  "outcome", "claims", "forbidden_outcomes", "non_goals", "risk",
+  "autonomy_envelope", "focus_envelope", "allowed_paths", "protected_paths",
+  "dependencies", "thinness_total", "disposition", "recovery",
+  "owner_decisions", "evidence_strategy", "context_budget_ok", "extension_profile_ok",
+];
+const DOR_COMPACT = ["outcome", "scope", "proof"];
+
+// --- Frozen contract: tools/disposition.py (slice S2, #420) ---
+const DISP_OUTCOMES = [
+  "IMPLEMENT", "NO_CHANGE", "INSUFFICIENT_EVIDENCE", "OWNER_DECISION",
+];
+const DISP_OBS_FIELDS = [
+  "environment", "command", "head", "expected", "observed", "evidence",
+];
+
 export const FROZEN = {
   repo_map: {
     PLANES: REPO_MAP_PLANES,
@@ -90,10 +119,23 @@ export const FROZEN = {
     FINDING_FIELDS: HAT_FIELDS,
     SAT_TRIGGERS: HAT_SAT_TRIGGERS,
   },
+  thinness: {
+    AXES: THIN_AXES,
+    HARD_CONDITIONS: THIN_HARD,
+    BANDS: THIN_BANDS,
+  },
+  ready: {
+    FULL_FIELDS: DOR_FULL,
+    COMPACT_FIELDS: DOR_COMPACT,
+  },
+  disposition: {
+    DISPOSITIONS: DISP_OUTCOMES,
+    OBSERVATION_FIELDS: DISP_OBS_FIELDS,
+  },
 };
 
 export function provenance() {
-  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py @ 9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
+  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py @ 9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
 }
 
 // Slices S2–S10 extend ADOPTION with their own rows; S1 owns context-rules.
@@ -113,6 +155,11 @@ export const ADOPTION = {
   // Maps plane: live topology and relevance.
   "maps:lane-relevance": { mechanism: ".github/workflows/pr-verify.yml", gap: null },
   "maps:repo-topology": { mechanism: "project.yaml", gap: null },
+  // Thinness plane (slice S2, #420): thinness/DoR/NO_CHANGE contract.
+  "thinness:axes-bands": { mechanism: "docs/ops/stage63-thinness.test.mjs", gap: null },
+  "thinness:hard-conditions": { mechanism: "docs/ops/stage63-thinness.test.mjs", gap: null },
+  "thinness:dor-receipt": { mechanism: ".github/PULL_REQUEST_TEMPLATE.md", gap: null },
+  "thinness:disposition": { mechanism: ".github/workflows/pr-verify.yml", gap: null },
   // Continuity plane: rotation, capsule, handoff acceptance.
   "continuity:work-state": { mechanism: "AGENTS.md", gap: null },
   "continuity:goal-scratch": { mechanism: null, gap: 423 },

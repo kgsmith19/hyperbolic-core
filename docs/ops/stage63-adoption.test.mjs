@@ -142,8 +142,10 @@ for (const key of gapsOf()) {
 }
 
 test("S1 · S1 posture never claims full v5 coverage", () => {
-  assert.equal(mappedOf().length, 8, "S1 maps exactly 8 mechanisms");
-  assert.equal(gapsOf().length, 4, "S1 discloses exactly 4 gaps");
+  // Counts grow as later slices extend ADOPTION: S1=8/4, S2=12/4.
+  // Each slice's own test file pins the cumulative counts at its head.
+  assert.equal(mappedOf().length, 12, "S1+S2 map exactly 12 mechanisms");
+  assert.equal(gapsOf().length, 4, "S1+S2 disclose exactly 4 gaps");
   for (const key of Object.keys(ADOPTION)) {
     const entry = ADOPTION[key];
     assert.equal(entry.mechanism !== null, entry.gap === null,
