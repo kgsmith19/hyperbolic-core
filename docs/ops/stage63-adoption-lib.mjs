@@ -92,6 +92,83 @@ const DISP_OBS_FIELDS = [
   "environment", "command", "head", "expected", "observed", "evidence",
 ];
 
+// --- Frozen contract: tools/verification_mold.py (slice S3, #421) ---
+const MOLD_RULES = [
+  "missing-claim", "duplicate-weak-evidence",
+  "implementation-coupled-oracle", "mocked-behavior-under-test",
+  "overconstrained-internals", "unobservable-assertion",
+];
+const MOLD_RISKS = ["R0", "R1", "R2", "R3"];
+const MOLD_SEVERITIES = ["blocker", "major", "minor"];
+const MOLD_FINDING_FIELDS = ["id", "rule", "finding", "severity", "excerpt"];
+const MOLD_TECHNIQUES = [
+  "example_based", "property_based", "mutation_check",
+  "contract_test", "scenario_test",
+];
+const MOLD_TECHNIQUE_MAP = {
+  crud: "example_based",
+  state: "scenario_test",
+  auth: "example_based",
+  parse: "property_based",
+  migration: "scenario_test",
+  workflow: "scenario_test",
+  ui: "example_based",
+  control_plane: "contract_test",
+};
+const MOLD_FAILURE_SHAPES = [
+  "crud", "state", "auth", "parse", "migration", "workflow",
+  "ui", "control_plane",
+];
+const MOLD_IMPLEMENTATION_MARKERS = [
+  "library", "table", "column", "sql", "redis", "postgres",
+  "orm", "framework", ".py", ".ts", ".json", "internal",
+];
+const MOLD_POSITIVE_CLASSES = [
+  "crud", "retry", "auth", "parser", "migration", "workflow",
+  "ui", "control-plane",
+];
+const MOLD_NEGATIVE_CLASSES = [
+  "missing-claim", "duplicate-weak-evidence",
+  "implementation-coupled-oracle", "mocked-behavior-under-test",
+  "overconstrained-internals", "unobservable-assertion",
+];
+
+// --- Frozen contract: tools/mold_qualification.py (slice S3, #421) ---
+const QUAL_RULES = [
+  "skipped_or_filtered", "empty_or_placeholder", "hard_coded_example",
+  "omitted_state", "swallowed_error", "mock_only_assertion",
+  "setup_self_assertion", "structural_failure_not_red",
+  "equivalent_mutant", "no_alternative_acceptance", "no_true_red",
+];
+const QUAL_RECEIPT_FIELDS = [
+  "mold", "mold_digest", "head", "provider",
+  "verdict", "run_digest", "qualified_by",
+];
+const QUAL_STATUSES = ["passed", "failed", "skipped", "filtered", "error"];
+const QUAL_COVERAGE_KINDS = ["full", "empty", "placeholder"];
+
+// --- Frozen contract: tools/verification_portfolio.py (slice S3, #421) ---
+// Not transcribed: TECHNIQUE_COST_S / CHEAPEST_FIRST (Stage 32 cost
+// estimates, explicitly recalibratable by Stages 40-41) — pinning mutable
+// cost estimates as frozen would over-claim. Frozen surface is rules,
+// classes, fields, techniques.
+const PORT_RULES = ["budget_exceeded", "missing_command", "excessive_portfolio"];
+const PORT_TECHNIQUES = [
+  "example_based", "property_based", "mutation_check",
+  "contract_test", "scenario_test", "fuzz",
+  "e2e_focused", "state_matrix",
+];
+const PORT_KINDS = ["parser", "adapter", "ui", "auth", "state", "docs", "generic"];
+const PORT_FAILURE_SHAPES = [
+  "state", "auth", "parse", "migration", "workflow", "ui",
+  "control_plane", "crud", "adapter", "docs",
+];
+const PORT_SELECTION_CLASSES = [
+  "js", "python", "dotnet", "mixed", "parser", "adapter",
+  "ui", "auth-state-matrix", "r0-docs",
+];
+const PORT_REJECTION_CLASSES = ["missing-command", "excessive-portfolio"];
+
 export const FROZEN = {
   repo_map: {
     PLANES: REPO_MAP_PLANES,
@@ -132,10 +209,36 @@ export const FROZEN = {
     DISPOSITIONS: DISP_OUTCOMES,
     OBSERVATION_FIELDS: DISP_OBS_FIELDS,
   },
+  mold: {
+    RULES: MOLD_RULES,
+    RISKS: MOLD_RISKS,
+    SEVERITIES: MOLD_SEVERITIES,
+    FINDING_FIELDS: MOLD_FINDING_FIELDS,
+    TECHNIQUES: MOLD_TECHNIQUES,
+    TECHNIQUE_MAP: MOLD_TECHNIQUE_MAP,
+    FAILURE_SHAPES: MOLD_FAILURE_SHAPES,
+    IMPLEMENTATION_MARKERS: MOLD_IMPLEMENTATION_MARKERS,
+    POSITIVE_CLASSES: MOLD_POSITIVE_CLASSES,
+    NEGATIVE_CLASSES: MOLD_NEGATIVE_CLASSES,
+  },
+  qualification: {
+    RULES: QUAL_RULES,
+    RECEIPT_FIELDS: QUAL_RECEIPT_FIELDS,
+    STATUSES: QUAL_STATUSES,
+    COVERAGE_KINDS: QUAL_COVERAGE_KINDS,
+  },
+  portfolio: {
+    RULES: PORT_RULES,
+    TECHNIQUES: PORT_TECHNIQUES,
+    KINDS: PORT_KINDS,
+    FAILURE_SHAPES: PORT_FAILURE_SHAPES,
+    SELECTION_CLASSES: PORT_SELECTION_CLASSES,
+    REJECTION_CLASSES: PORT_REJECTION_CLASSES,
+  },
 };
 
 export function provenance() {
-  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py @ 9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
+  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py @ 9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
 }
 
 // Slices S2–S10 extend ADOPTION with their own rows; S1 owns context-rules.
@@ -165,6 +268,14 @@ export const ADOPTION = {
   "continuity:goal-scratch": { mechanism: null, gap: 423 },
   "continuity:handoff-acceptance": { mechanism: null, gap: 423 },
   "continuity:context-budget": { mechanism: null, gap: 423 },
+  // Molds plane (slice S3, #421): the v5 Verification Mold family —
+  // critique (Stage 29), qualification (Stage 31), portfolio router
+  // (Stage 32), and the mold substrates 59b/61b already bind.
+  "molds:critique-rules": { mechanism: "docs/ops/stage63-molds.test.mjs", gap: null },
+  "molds:qualification-rules": { mechanism: "docs/ops/stage63-molds.test.mjs", gap: null },
+  "molds:portfolio-router": { mechanism: "docs/ops/stage63-molds.test.mjs", gap: null },
+  "molds:release-substrate": { mechanism: "docs/ops/stage61b-release-proofbed-lib.mjs", gap: null },
+  "molds:proof-invalidation": { mechanism: null, gap: 428 },
 };
 
 export function gapsOf() {
