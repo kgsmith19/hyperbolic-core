@@ -141,11 +141,11 @@ for (const key of gapsOf()) {
   });
 }
 
-test("S1 · cumulative ADOPTION posture (S1+S2) never claims full v5 coverage", () => {
-  // Counts grow as later slices extend ADOPTION: S1=8/4, S2=12/4.
+test("S1 · cumulative ADOPTION posture (S1–S3) never claims full v5 coverage", () => {
+  // Counts grow as later slices extend ADOPTION: S1=8/4, S2=12/4, S3=16/5.
   // Each slice's own test file pins the cumulative counts at its head.
-  assert.equal(mappedOf().length, 12, "S1+S2 map exactly 12 mechanisms");
-  assert.equal(gapsOf().length, 4, "S1+S2 disclose exactly 4 gaps");
+  assert.equal(mappedOf().length, 16, "S1+S2+S3 map exactly 16 mechanisms");
+  assert.equal(gapsOf().length, 5, "S1+S2+S3 disclose exactly 5 gaps");
   for (const key of Object.keys(ADOPTION)) {
     const entry = ADOPTION[key];
     assert.equal(entry.mechanism !== null, entry.gap === null,
