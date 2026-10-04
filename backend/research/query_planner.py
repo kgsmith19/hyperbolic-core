@@ -36,6 +36,8 @@ def expand_topic_queries(
     reasoning_effort: str | None = None,
     cost_tracker=None,
     conceal_process: bool = True,
+    strictness: float = 0.9,
+    force_direction: bool = True,
 ) -> list[str]:
     """Generate 3-4 diverse sub-queries for broad search using blind LLM planning.
 
@@ -47,7 +49,7 @@ def expand_topic_queries(
     assert_safe_to_send(topic, watchlist)
     from backend.research.cloud_client import get_api_key
 
-    if not get_api_key():
+    if not get_api_key(model):
         return [topic]
 
     try:
@@ -56,7 +58,8 @@ def expand_topic_queries(
                 topic, watchlist, model, reasoning_effort, cost_tracker
             )
         return _expand_topic_queries_bare(
-            topic, watchlist, model, reasoning_effort, cost_tracker
+            topic, watchlist, model, reasoning_effort, cost_tracker,
+            strictness=strictness, force_direction=force_direction,
         )
     except Exception as err:
         from backend.research.cloud_errors import CloudCallError
@@ -71,12 +74,21 @@ def _expand_topic_queries_bare(
     model: str,
     reasoning_effort: str | None,
     cost_tracker,
+    strictness: float = 0.9,
+    force_direction: bool = True,
 ) -> list[str]:
     """Expand the bare topic directly (no process concealment)."""
     from backend.research.cloud_client import invoke_model
 
+    direction_note = ""
+    if force_direction:
+        direction_note = (
+            f" Maintain strict adherence to the exact direction and scope of the topic "
+            f"without assuming an alternative topic is what is sought."
+        )
+
     prompt = (
-        f"Generate 3 to 4 distinct, highly specific search queries to thoroughly research the public topic below.\n"
+        f"Generate 3 to 4 distinct, highly specific search queries to thoroughly research the public topic below.{direction_note}\n"
         f"Topic: {topic}\n\n"
         f"Output only one search query per line. Do not number or bullet the lines."
     )

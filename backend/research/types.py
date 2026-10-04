@@ -78,6 +78,13 @@ class SearchOptions:
     low_information_gain_rounds: int = 0
     low_information_gain_min_documents: int = 0
 
+    # ---- Enhancement & Flexibility Options ----
+    # Strictness (0.0 to 1.0) and forcing direction strictly adhere to user prompts
+    strictness: float = 0.9
+    force_direction: bool = True
+    # Report format: "comprehensive" (exhaustive/mass), "structured" (2-3 pages), or "both"
+    report_format: str = "comprehensive"
+
     # ---- Deep research strategy (library defaults stay conservative; the UI
     # and CLI presets turn these up). ----
     # Source mix: share of the corpus aimed at the evidence group (academic,

@@ -36,18 +36,30 @@ def plan_queries(
             pass
 
     if options.ai_planning:
-        import os
-        if not os.environ.get("OPENAI_API_KEY", "").strip() and progress_callback:
-            progress_callback("No OpenAI key. Searching the topic as written.")
+        from backend.research.cloud_client import has_api_key
+        if not has_api_key(options.concealer_model) and progress_callback:
+            progress_callback(f"No API key configured for {options.concealer_model}. Searching the topic as written.")
         try:
-            expanded = expand_topic_queries(
-                topic,
-                watchlist,
-                model=options.concealer_model,
-                reasoning_effort=options.reasoning_effort,
-                cost_tracker=cost_tracker,
-                conceal_process=options.conceal_process,
-            )
+            try:
+                expanded = expand_topic_queries(
+                    topic,
+                    watchlist,
+                    model=options.concealer_model,
+                    reasoning_effort=options.reasoning_effort,
+                    cost_tracker=cost_tracker,
+                    conceal_process=options.conceal_process,
+                    strictness=getattr(options, "strictness", 0.9),
+                    force_direction=getattr(options, "force_direction", True),
+                )
+            except TypeError:
+                expanded = expand_topic_queries(
+                    topic,
+                    watchlist,
+                    model=options.concealer_model,
+                    reasoning_effort=options.reasoning_effort,
+                    cost_tracker=cost_tracker,
+                    conceal_process=options.conceal_process,
+                )
         except CloudCallError as err:
             if progress_callback:
                 progress_callback(

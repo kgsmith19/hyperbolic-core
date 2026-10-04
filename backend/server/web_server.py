@@ -118,7 +118,7 @@ def _options_from_payload(data: dict) -> SearchOptions:
         ai_planning=bool(data.get("ai_planning", False)),
         llm_process=str(llm_process) if llm_process is not None else None,
         # The AI-written report is the default whenever a key is configured.
-        ai_summary=bool(data.get("ai_summary", bool(os.environ.get("OPENAI_API_KEY", "").strip()))),
+        ai_summary=bool(data.get("ai_summary", bool(os.environ.get("OPENAI_API_KEY", "").strip() or os.environ.get("ANTHROPIC_API_KEY", "").strip() or os.environ.get("GEMINI_API_KEY", "").strip() or os.environ.get("GOOGLE_API_KEY", "").strip()))),
         model=legacy_model,
         concealer_model=str(data.get("concealer_model", legacy_model)),
         deep_model=str(data.get("deep_model", "gpt-4o" if legacy_model == "gpt-4o-mini" else legacy_model)),
@@ -126,6 +126,9 @@ def _options_from_payload(data: dict) -> SearchOptions:
         max_spend_usd=_num(data, "max_spend_usd", 2.00, float),
         low_information_gain_rounds=_num(data, "low_information_gain_rounds", 0),
         low_information_gain_min_documents=_num(data, "low_information_gain_min_documents", 0),
+        strictness=_num(data, "strictness", 0.9, float),
+        force_direction=bool(data.get("force_direction", True)),
+        report_format=str(data.get("report_format", "comprehensive")),
         academic_weight=_num(data, "academic_weight", 0.5, float),
         source_lanes=lanes,
         results_per_lane=_num(data, "results_per_lane", base["results_per_lane"]),
@@ -291,6 +294,8 @@ class SafeResearchRequestHandler(http.server.BaseHTTPRequestHandler):
         elif clean_path == "/api/settings":
             brave_key = os.environ.get("BRAVE_SEARCH_API_KEY", "")
             openai_key = os.environ.get("OPENAI_API_KEY", "")
+            anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            gemini_key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
             s2_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY", "")
             searxng_active = False
             try:
@@ -302,6 +307,10 @@ class SafeResearchRequestHandler(http.server.BaseHTTPRequestHandler):
                 "brave_preview": f"{brave_key[:4]}...{brave_key[-3:]}" if len(brave_key) > 7 else ("***" if brave_key else ""),
                 "has_openai": bool(openai_key),
                 "openai_preview": f"{openai_key[:3]}...{openai_key[-4:]}" if len(openai_key) > 7 else ("***" if openai_key else ""),
+                "has_anthropic": bool(anthropic_key),
+                "anthropic_preview": f"{anthropic_key[:3]}...{anthropic_key[-4:]}" if len(anthropic_key) > 7 else ("***" if anthropic_key else ""),
+                "has_gemini": bool(gemini_key),
+                "gemini_preview": f"{gemini_key[:3]}...{gemini_key[-4:]}" if len(gemini_key) > 7 else ("***" if gemini_key else ""),
                 "has_s2": bool(s2_key),
                 "searxng_url": os.environ.get("SEARXNG_URL", "http://127.0.0.1:8080"),
                 "searxng_active": searxng_active,
@@ -365,6 +374,7 @@ class SafeResearchRequestHandler(http.server.BaseHTTPRequestHandler):
                 data = self._body()
                 updates = {}
                 for field, env in (("brave_key", "BRAVE_SEARCH_API_KEY"), ("openai_key", "OPENAI_API_KEY"),
+                                   ("anthropic_key", "ANTHROPIC_API_KEY"), ("gemini_key", "GEMINI_API_KEY"),
                                    ("s2_key", "SEMANTIC_SCHOLAR_API_KEY")):
                     if field in data and isinstance(data[field], str) and not data[field].startswith("***"):
                         updates[env] = data[field].strip()
@@ -454,7 +464,8 @@ class SafeResearchRequestHandler(http.server.BaseHTTPRequestHandler):
 
         topic = str(data.get("topic", "")).strip()
         watchlist = [line.strip() for line in str(data.get("watchlist", "")).splitlines() if line.strip()]
-        for field, env in (("openai_key", "OPENAI_API_KEY"), ("brave_key", "BRAVE_SEARCH_API_KEY")):
+        for field, env in (("openai_key", "OPENAI_API_KEY"), ("anthropic_key", "ANTHROPIC_API_KEY"),
+                            ("gemini_key", "GEMINI_API_KEY"), ("brave_key", "BRAVE_SEARCH_API_KEY")):
             val = data.get(field)
             if val and not str(val).startswith("***") and str(val).strip():
                 os.environ[env] = str(val).strip()

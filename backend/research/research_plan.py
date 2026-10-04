@@ -153,18 +153,26 @@ def _parse_json_block(text: str):
 
 
 def model_plan(topic: str, watchlist: list[str], breadth: int, model: str, reasoning_effort=None,
-               cost_tracker=None, context_topic: str = "") -> ResearchPlan | None:
+               cost_tracker=None, context_topic: str = "", strictness: float = 0.9,
+               force_direction: bool = True) -> ResearchPlan | None:
     """Ask the model for a structured plan (show-process mode only)."""
     from backend.research.cloud_client import get_api_key, invoke_model
 
-    if not get_api_key():
+    if not get_api_key(model):
         return None
     assert_safe_to_send(topic, watchlist)
     year = datetime.now().year
     ctx = f"\nThis is a follow-up dig inside a broader investigation of: {context_topic}\n" if context_topic else ""
+    direction_guidance = ""
+    if force_direction:
+        direction_guidance = (
+            f"\nStrict adherence constraint (strictness {strictness:.2f}): Strictly maintain the exact direction, "
+            "premise, and specific requirements of the user topic without assuming alternative or broader topics "
+            "are preferred.\n"
+        )
     prompt = (
         "You are the lead researcher planning an exhaustive deep-research investigation.\n"
-        f"Topic: {topic}\n{ctx}Current year: {year}\n\n"
+        f"Topic: {topic}\n{ctx}Current year: {year}\n{direction_guidance}\n"
         f"Decompose the topic into {breadth} complementary sub-questions that together cover: the strongest "
         "scientific evidence, real-world practitioner/community experience, expert opinion, risks and "
         "counter-evidence, recent developments, and practical application. Prefer specific, answerable questions.\n"
@@ -233,8 +241,12 @@ def build_research_plan(topic: str, watchlist: list[str], options, cost_tracker=
                             source="local")
     if options.ai_planning and not options.conceal_process:
         try:
-            plan = model_plan(topic, watchlist, breadth, options.concealer_model, options.reasoning_effort,
-                              cost_tracker, context_topic=options.context_topic)
+            plan = model_plan(
+                topic, watchlist, breadth, options.concealer_model, options.reasoning_effort,
+                cost_tracker, context_topic=options.context_topic,
+                strictness=getattr(options, "strictness", 0.9),
+                force_direction=getattr(options, "force_direction", True),
+            )
             if plan:
                 return plan
         except Exception as err:  # CloudCallError, parsing, spend cap

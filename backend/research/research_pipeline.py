@@ -221,6 +221,7 @@ def run_search(
         metadata=meta,
         independence=independence_report,
         appendix=_appendix(use_plan, queries, learnings, stats, options),
+        report_format=getattr(options, "report_format", "comprehensive"),
     )
 
     report_md = ""
@@ -314,8 +315,9 @@ def run_to_dict(run: ResearchRun) -> dict:
 
 def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token, progress_callback,
                 families_records=None, plan=None, learnings=None, followups=None):
+    from backend.research.cloud_client import has_api_key
     evidence_dicts = _evidence_as_dicts(evidence)
-    has_openai = bool(os.environ.get("OPENAI_API_KEY", "").strip())
+    has_model_key = has_api_key(options.deep_model)
     cancelled = bool(cancel_token is not None and cancel_token.is_set())
     deep = bool(plan is not None and len(getattr(plan, "sub_questions", []) or []) > 1) or bool(options.source_lanes)
 
@@ -357,10 +359,10 @@ def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token,
             verification = None
 
     if deep:
-        return _deep_brief(topic, evidence_dicts, watchlist, options, cost_tracker, cancelled, has_openai,
+        return _deep_brief(topic, evidence_dicts, watchlist, options, cost_tracker, cancelled, has_model_key,
                            progress_callback, plan, learnings, followups, verification), independence_report
 
-    if options.ai_summary and has_openai and not cancelled:
+    if options.ai_summary and has_model_key and not cancelled:
         if progress_callback:
             progress_callback(f"Writing a sourced brief with {options.deep_model}...")
         try:
@@ -384,8 +386,8 @@ def _synthesize(topic, evidence, watchlist, options, cost_tracker, cancel_token,
         except SpendLimitExceededError:
             if progress_callback:
                 progress_callback("Spend cap reached. Writing a local summary instead.")
-    elif options.ai_summary and not has_openai and progress_callback:
-        progress_callback("No OpenAI key. Writing a local summary instead.")
+    elif options.ai_summary and not has_model_key and progress_callback:
+        progress_callback(f"No API key configured for {options.deep_model}. Writing a local summary instead.")
     if progress_callback:
         progress_callback("Writing a local summary from the sources...")
     local_slm = LocalSynthesizer()
@@ -412,7 +414,7 @@ def _deep_brief(topic, evidence_dicts, watchlist, options, cost_tracker, cancell
             if progress_callback:
                 progress_callback(f"AI report failed ({type(err).__name__}). Writing a local summary instead.")
     elif options.ai_summary and not has_openai and progress_callback:
-        progress_callback("No OpenAI key. Writing a local summary instead.")
+        progress_callback(f"No API key configured for {options.deep_model}. Writing a local summary instead.")
     if progress_callback:
         progress_callback("Writing a structured local report from the sources...")
     brief = build_local_brief(topic, evidence_dicts, plan=plan, learnings=learnings,

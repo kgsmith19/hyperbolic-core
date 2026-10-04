@@ -11,18 +11,45 @@ import openai
 from backend.research.cost_estimator import CostTracker
 
 
-def get_api_key() -> str:
-    """Return the configured OpenAI API key, or "" when absent."""
+def _load_env_file():
+    env_path = os.path.join(os.getcwd(), ".env")
+    if not os.path.exists(env_path):
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        k, v = k.strip(), v.strip()
+                        if k and v and not os.environ.get(k):
+                            os.environ[k] = v
+        except Exception:
+            pass
+
+_load_env_file()
+
+
+def get_api_key(model: str = "gpt-4o-mini") -> str:
+    """Return the configured API key for the given model, or "" when absent."""
+    lowered = (model or "").lower()
+    if lowered.startswith("claude"):
+        return os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    elif lowered.startswith("gemini"):
+        return (os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")).strip()
     return os.environ.get("OPENAI_API_KEY", "").strip()
 
 
-def has_api_key() -> bool:
-    return bool(get_api_key())
+def has_api_key(model: str = "gpt-4o-mini") -> bool:
+    return bool(get_api_key(model))
 
 
 def is_reasoning_model(model: str) -> bool:
     """Models that accept a reasoning-effort parameter on the Responses API."""
-    lowered = model.lower()
+    lowered = (model or "").lower()
     return any(k in lowered for k in ("o1", "o3", "o4", "gpt-5"))
 
 
@@ -33,12 +60,14 @@ def invoke_model(
     cost_tracker: CostTracker | None = None,
     max_output_tokens: int | None = None,
 ) -> str:
-    """Send one prompt to the Responses API and return the output text.
+    """Send one prompt to the appropriate model API (OpenAI, Anthropic, or Google) and return the output text."""
+    lowered = (model or "").lower()
+    if lowered.startswith("claude"):
+        return _invoke_anthropic(prompt, model, cost_tracker, max_output_tokens)
+    elif lowered.startswith("gemini"):
+        return _invoke_google(prompt, model, cost_tracker, max_output_tokens)
 
-    Records usage on the cost tracker when provided. Raises CloudCallError-free
-    exceptions; callers wrap failures in CloudCallError for stage context.
-    """
-    api_key = get_api_key()
+    api_key = get_api_key(model)
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured")
 
@@ -72,6 +101,73 @@ def invoke_model(
             model=model,
         )
 
+    return output_text
+
+
+def _invoke_anthropic(prompt: str, model: str, cost_tracker: CostTracker | None = None, max_output_tokens: int | None = None) -> str:
+    import anthropic
+    api_key = get_api_key(model)
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY is not configured")
+    client = anthropic.Anthropic(api_key=api_key)
+    response = client.messages.create(
+        model=model,
+        max_tokens=max_output_tokens or 2048,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    output_text = "".join(block.text for block in response.content if hasattr(block, "text"))
+    if cost_tracker:
+        usage = getattr(response, "usage", None)
+        p_tokens = getattr(usage, "input_tokens", 0) if usage else 0
+        c_tokens = getattr(usage, "output_tokens", 0) if usage else 0
+        cost_tracker.record_usage(
+            prompt_tokens=p_tokens,
+            completion_tokens=c_tokens,
+            prompt_text=prompt,
+            completion_text=output_text,
+            model=model,
+        )
+    return output_text
+
+
+def _invoke_google(prompt: str, model: str, cost_tracker: CostTracker | None = None, max_output_tokens: int | None = None) -> str:
+    import urllib.request
+    import json
+    api_key = get_api_key(model)
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY or GOOGLE_API_KEY is not configured")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"maxOutputTokens": max_output_tokens or 2048}
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    output_text = ""
+    try:
+        candidates = data.get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            output_text = "".join(p.get("text", "") for p in parts)
+    except Exception:
+        pass
+    if cost_tracker:
+        usage = data.get("usageMetadata", {})
+        p_tokens = usage.get("promptTokenCount", 0)
+        c_tokens = usage.get("candidatesTokenCount", 0)
+        cost_tracker.record_usage(
+            prompt_tokens=p_tokens,
+            completion_tokens=c_tokens,
+            prompt_text=prompt,
+            completion_text=output_text,
+            model=model,
+        )
     return output_text
 
 

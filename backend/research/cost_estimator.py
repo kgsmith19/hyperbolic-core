@@ -39,6 +39,17 @@ MODEL_PRICING = {
     "o1": {"input": 15.00, "output": 60.00},
     "o1-pro": {"input": 150.00, "output": 600.00},
     "gpt-4.5": {"input": 75.00, "output": 150.00},
+    # Anthropic Tier
+    "claude-3-5-sonnet": {"input": 3.00, "output": 15.00},
+    "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
+    "claude-3-5-haiku": {"input": 0.80, "output": 4.00},
+    "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00},
+    "claude-3-opus": {"input": 15.00, "output": 75.00},
+    "claude-3-opus-20240229": {"input": 15.00, "output": 75.00},
+    # Google Gemini Tier
+    "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
+    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
 }
 @dataclass
 class SpendReport:

@@ -19,6 +19,75 @@ def slugify(text: str, max_words: int = 6) -> str:
     return slug or "untitled-research"
 
 
+def build_exhaustive_metrics_table(evidence: list[dict], watchlist: list[str]) -> str:
+    lines = [
+        "## Exhaustive Inventory & Objective Metrics Table",
+        "| Item / Solution / Idea | Direct Source URL | Category / Lane | Objective Score / Quality | Completeness & Source Notes |",
+        "| :--- | :--- | :--- | :--- | :--- |"
+    ]
+    if not evidence:
+        lines.append("| No items found | - | - | - | - |")
+        return "\n".join(lines)
+    
+    for idx, item in enumerate(evidence, start=1):
+        if not isinstance(item, dict):
+            continue
+        title = redact(item.get("title") or f"Item {idx}", watchlist).replace("|", "-")
+        url = redact(item.get("url") or "", watchlist)
+        lane = redact(item.get("lane") or "web", watchlist)
+        score = item.get("score", 0.0)
+        quality = item.get("quality", 0.0)
+        metrics_str = f"RRF: {score}%, Quality: {quality:.2f}" if score else f"Quality: {quality:.2f}"
+        
+        snippet = item.get("snippet", "")
+        excerpt = item.get("excerpt", "")
+        notes_list = []
+        if not (snippet or excerpt):
+            notes_list.append("Sub-par / Missing detailed excerpt")
+        if not url:
+            notes_list.append("Missing direct URL (secondary mention)")
+        notes = "; ".join(notes_list) if notes_list else "Complete data"
+        
+        url_md = f"[Source {idx}]({url})" if url else "No direct URL"
+        lines.append(f"| **{title}** | {url_md} | `{lane}` | {metrics_str} | {notes} |")
+    
+    return "\n".join(lines)
+
+
+def build_structured_report(topic: str, evidence: list[dict], summary: str, watchlist: list[str], metadata: dict | None = None) -> str:
+    clean_topic = redact(topic, watchlist)
+    meta = metadata or {}
+    meta_line = " | ".join(f"**{k}**: {v}" for k, v in meta.items())
+    lines = [
+        f"# Structured Brief: {clean_topic}",
+        "",
+        f"> {meta_line}" if meta_line else "",
+        "",
+        "## 1. Executive Summary",
+        summary.strip()[:1500] if summary else "Summary unavailable.",
+        "",
+        "## 2. Key Insights & Findings",
+    ]
+    for idx, item in enumerate(evidence[:12], start=1):
+        title = redact(item.get("title") or "", watchlist)
+        snippet = redact(item.get("snippet") or item.get("excerpt", "")[:200], watchlist)
+        url = redact(item.get("url") or "", watchlist)
+        if title:
+            lines.append(f"- **{title}**: {snippet} [Link]({url})" if url else f"- **{title}**: {snippet}")
+    
+    lines += [
+        "",
+        "## 3. Objective Metrics & Summary Table",
+        build_exhaustive_metrics_table(evidence[:20], watchlist),
+        "",
+        "## 4. Strategic Recommendations & Actionable Next Steps",
+        "- **Immediate Action**: Prioritize items with verified direct source URLs and top quality scores.",
+        "- **Gaps & Mitigation**: Note sub-par entries and address missing primary references.",
+        "- **Extended Research**: Trigger refinement passes or alternative lane searches for exhaustive coverage."
+    ]
+    return "\n".join(lines)
+
+
 def write_report(
     topic: str,
     evidence: list[dict],
@@ -28,6 +97,7 @@ def write_report(
     metadata: dict | None = None,
     independence: dict | None = None,
     appendix: list[tuple[str, str]] | None = None,
+    report_format: str = "comprehensive",
 ) -> str:
     """Write the research findings to report.md and an archived timestamped report in reports/."""
     clean_topic = redact(topic, watchlist)
@@ -81,6 +151,10 @@ def write_report(
         if body and body.strip():
             report_lines += [f"## {heading}", body.strip(), ""]
 
+    # Insert Exhaustive Inventory & Objective Metrics Table
+    report_lines.append(build_exhaustive_metrics_table(evidence, watchlist))
+    report_lines.append("")
+
     report_lines += [
         "## Evidence & Sources",
     ]
@@ -125,6 +199,14 @@ def write_report(
     report_content = "\n".join(report_lines).strip() + "\n"
     final_report = redact(report_content, watchlist)
     assert_safe_to_send(final_report, watchlist)
+
+    if report_format == "structured":
+        final_report = build_structured_report(topic, evidence, summary, watchlist, metadata=meta)
+    elif report_format == "both":
+        struct_text = build_structured_report(topic, evidence, summary, watchlist, metadata=meta)
+        struct_path = output_path.replace(".md", "_structured.md")
+        with open(struct_path, "w", encoding="utf-8") as f:
+            f.write(struct_text)
 
     # 1. Write to standard output_path (default report.md) for backward compatibility
     with open(output_path, "w", encoding="utf-8") as file:
