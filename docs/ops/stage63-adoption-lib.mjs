@@ -127,6 +127,9 @@ const MOLD_POSITIVE_CLASSES = [
   "crud", "retry", "auth", "parser", "migration", "workflow",
   "ui", "control-plane",
 ];
+// `control-plane` is a corpus fixture class, while `control_plane` below is
+// a claim failure-shape token. These spellings intentionally mirror their
+// distinct frozen source vocabularies; do not normalize across namespaces.
 const MOLD_NEGATIVE_CLASSES = [
   "missing-claim", "duplicate-weak-evidence",
   "implementation-coupled-oracle", "mocked-behavior-under-test",
