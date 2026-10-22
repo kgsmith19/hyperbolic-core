@@ -127,9 +127,12 @@ const MOLD_POSITIVE_CLASSES = [
   "crud", "retry", "auth", "parser", "migration", "workflow",
   "ui", "control-plane",
 ];
-// `control-plane` is a corpus fixture class, while `control_plane` below is
-// a claim failure-shape token. These spellings intentionally mirror their
-// distinct frozen source vocabularies; do not normalize across namespaces.
+// The frozen corpus fixture vocabulary uses `control-plane`; the frozen claim
+// failure-shape vocabulary uses `control_plane`. Keep the source transcription
+// exact and make the only cross-vocabulary equivalence explicit below.
+const MOLD_CORPUS_CLASS_TO_FAILURE_SHAPE = Object.freeze({
+  "control-plane": "control_plane",
+});
 const MOLD_NEGATIVE_CLASSES = [
   "missing-claim", "duplicate-weak-evidence",
   "implementation-coupled-oracle", "mocked-behavior-under-test",
@@ -287,4 +290,11 @@ export function gapsOf() {
 
 export function mappedOf() {
   return Object.keys(ADOPTION).filter((k) => ADOPTION[k].mechanism !== null);
+}
+
+// Boundary adapter for consumers that compare a mold corpus class with a
+// claim failure shape. It deliberately maps only the documented upstream
+// spelling divergence and leaves unrelated corpus classes unchanged.
+export function moldCorpusClassToFailureShape(corpusClass) {
+  return MOLD_CORPUS_CLASS_TO_FAILURE_SHAPE[corpusClass] ?? corpusClass;
 }
