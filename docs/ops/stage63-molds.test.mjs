@@ -103,10 +103,12 @@ test("S3 · mold corpus classes frozen (8 positive, 6 negative)", async () => {
   ]);
 });
 
-test("S3 · corpus classes and failure shapes retain their distinct frozen vocabularies", async () => {
-  const { FROZEN } = await import("./stage63-adoption-lib.mjs");
+test("S3 · corpus-class adapter maps the one frozen spelling divergence", async () => {
+  const { FROZEN, moldCorpusClassToFailureShape } = await import("./stage63-adoption-lib.mjs");
   assert.ok(FROZEN.mold.POSITIVE_CLASSES.includes("control-plane"));
   assert.ok(FROZEN.mold.FAILURE_SHAPES.includes("control_plane"));
+  assert.equal(moldCorpusClassToFailureShape("control-plane"), "control_plane");
+  assert.equal(moldCorpusClassToFailureShape("crud"), "crud");
 });
 
 // --- S3: Stage 31 mold_qualification contract fidelity ---
