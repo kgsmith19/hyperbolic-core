@@ -94,7 +94,7 @@ test("S3 · mold corpus classes frozen (8 positive, 6 negative)", async () => {
   const { FROZEN } = await import("./stage63-adoption-lib.mjs");
   assert.deepEqual([...FROZEN.mold.POSITIVE_CLASSES], [
     "crud", "retry", "auth", "parser", "migration", "workflow",
-    "ui", "control-plane",
+    "ui", "control_plane",
   ]);
   assert.deepEqual([...FROZEN.mold.NEGATIVE_CLASSES], [
     "missing-claim", "duplicate-weak-evidence",
@@ -103,12 +103,11 @@ test("S3 · mold corpus classes frozen (8 positive, 6 negative)", async () => {
   ]);
 });
 
-test("S3 · corpus-class adapter maps the one frozen spelling divergence", async () => {
-  const { FROZEN, moldCorpusClassToFailureShape } = await import("./stage63-adoption-lib.mjs");
-  assert.ok(FROZEN.mold.POSITIVE_CLASSES.includes("control-plane"));
+test("S3 · exported mold classes use the canonical failure-shape vocabulary", async () => {
+  const { FROZEN } = await import("./stage63-adoption-lib.mjs");
+  assert.ok(FROZEN.mold.POSITIVE_CLASSES.includes("control_plane"));
+  assert.ok(!FROZEN.mold.POSITIVE_CLASSES.includes("control-plane"));
   assert.ok(FROZEN.mold.FAILURE_SHAPES.includes("control_plane"));
-  assert.equal(moldCorpusClassToFailureShape("control-plane"), "control_plane");
-  assert.equal(moldCorpusClassToFailureShape("crud"), "crud");
 });
 
 // --- S3: Stage 31 mold_qualification contract fidelity ---
