@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 // Read-only cutover preflight. A missing observation is never treated as disabled.
 // Input is explicit evidence from each repository's current deployment switch.
 // The program intentionally does not contact production or change GitHub settings.
@@ -27,7 +29,7 @@ export function assessLifeosWriters({ standalone, monorepo }) {
 // Example: node docs/ops/lifeos-writer-preflight.mjs disabled enabled
 // These inputs MUST be independently read from current repository configuration.
 // A passing verdict cannot replace verifying credentials, health, or rollback.
-if (process.argv[1]?.endsWith("/lifeos-writer-preflight.mjs")) {
+if (fileURLToPath(import.meta.url) === process.argv[1]) {
   const [, , standalone, monorepo] = process.argv;
   const verdict = assessLifeosWriters({ standalone, monorepo });
   console.log(JSON.stringify(verdict));
