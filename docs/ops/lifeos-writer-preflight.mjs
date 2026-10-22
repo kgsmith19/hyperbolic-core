@@ -3,19 +3,25 @@
 // The program intentionally does not contact production or change GitHub settings.
 export function assessLifeosWriters({ standalone, monorepo }) {
   const valid = (v) => v === "enabled" || v === "disabled";
+  // Preserve only normalized, non-sensitive observations. Invalid input is
+  // reported as unknown rather than echoed back as though it were evidence.
+  const observed = {
+    standalone: valid(standalone) ? standalone : null,
+    monorepo: valid(monorepo) ? monorepo : null,
+  };
   if (!valid(standalone) || !valid(monorepo)) {
-    return { ready: false, reason: "unknown-writer-state" };
+    return { ...observed, ready: false, reason: "unknown-writer-state" };
   }
   if (standalone === "enabled" && monorepo === "enabled") {
-    return { ready: false, reason: "dual-writer-risk" };
+    return { ...observed, ready: false, reason: "dual-writer-risk" };
   }
   if (standalone === "enabled") {
-    return { ready: false, reason: "standalone-writer-active" };
+    return { ...observed, ready: false, reason: "standalone-writer-active" };
   }
   if (monorepo === "disabled") {
-    return { ready: false, reason: "no-active-monorepo-writer" };
+    return { ...observed, ready: false, reason: "no-active-monorepo-writer" };
   }
-  return { ready: true, reason: "single-monorepo-writer" };
+  return { ...observed, ready: true, reason: "single-monorepo-writer" };
 }
 
 // Example: node docs/ops/lifeos-writer-preflight.mjs disabled enabled
