@@ -123,16 +123,18 @@ const MOLD_IMPLEMENTATION_MARKERS = [
   "library", "table", "column", "sql", "redis", "postgres",
   "orm", "framework", ".py", ".ts", ".json", "internal",
 ];
-const MOLD_POSITIVE_CLASSES = [
+// Keep the upstream fixture literal private. The public frozen contract uses
+// the repository-wide failure-shape vocabulary, so consumers cannot observe
+// or compare two spellings for the same semantic token.
+const MOLD_SOURCE_POSITIVE_CLASSES = [
   "crud", "retry", "auth", "parser", "migration", "workflow",
   "ui", "control-plane",
 ];
-// The frozen corpus fixture vocabulary uses `control-plane`; the frozen claim
-// failure-shape vocabulary uses `control_plane`. Keep the source transcription
-// exact and make the only cross-vocabulary equivalence explicit below.
-const MOLD_CORPUS_CLASS_TO_FAILURE_SHAPE = Object.freeze({
+const MOLD_CANONICAL_TOKENS = Object.freeze({
   "control-plane": "control_plane",
 });
+const canonicalMoldToken = (token) => MOLD_CANONICAL_TOKENS[token] ?? token;
+const MOLD_POSITIVE_CLASSES = MOLD_SOURCE_POSITIVE_CLASSES.map(canonicalMoldToken);
 const MOLD_NEGATIVE_CLASSES = [
   "missing-claim", "duplicate-weak-evidence",
   "implementation-coupled-oracle", "mocked-behavior-under-test",
@@ -290,11 +292,4 @@ export function gapsOf() {
 
 export function mappedOf() {
   return Object.keys(ADOPTION).filter((k) => ADOPTION[k].mechanism !== null);
-}
-
-// Boundary adapter for consumers that compare a mold corpus class with a
-// claim failure shape. It deliberately maps only the documented upstream
-// spelling divergence and leaves unrelated corpus classes unchanged.
-export function moldCorpusClassToFailureShape(corpusClass) {
-  return MOLD_CORPUS_CLASS_TO_FAILURE_SHAPE[corpusClass] ?? corpusClass;
 }
