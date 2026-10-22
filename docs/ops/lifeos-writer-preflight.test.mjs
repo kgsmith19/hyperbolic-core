@@ -5,42 +5,34 @@ import { fileURLToPath } from "node:url";
 import { assessLifeosWriters } from "./lifeos-writer-preflight.mjs";
 
 const cases = [
-  ["disabled", "enabled", true, "single-monorepo-writer"],
-  ["enabled", "disabled", false, "standalone-writer-active"],
-  ["enabled", "enabled", false, "dual-writer-risk"],
-  ["disabled", "disabled", false, "no-active-monorepo-writer"],
-  ["unknown", "enabled", false, "unknown-writer-state"],
-  ["disabled", "unknown", false, "unknown-writer-state"],
-  [undefined, "enabled", false, "unknown-writer-state"],
-  ["enabled", undefined, false, "unknown-writer-state"],
-  ["false", "true", false, "unknown-writer-state"],
+  ["disabled", "enabled", { standalone: "disabled", monorepo: "enabled", ready: true, reason: "single-monorepo-writer" }],
+  ["enabled", "disabled", { standalone: "enabled", monorepo: "disabled", ready: false, reason: "standalone-writer-active" }],
+  ["enabled", "enabled", { standalone: "enabled", monorepo: "enabled", ready: false, reason: "dual-writer-risk" }],
+  ["disabled", "disabled", { standalone: "disabled", monorepo: "disabled", ready: false, reason: "no-active-monorepo-writer" }],
+  ["unknown", "enabled", { standalone: null, monorepo: "enabled", ready: false, reason: "unknown-writer-state" }],
+  ["disabled", "unknown", { standalone: "disabled", monorepo: null, ready: false, reason: "unknown-writer-state" }],
+  [undefined, "enabled", { standalone: null, monorepo: "enabled", ready: false, reason: "unknown-writer-state" }],
+  ["enabled", undefined, { standalone: "enabled", monorepo: null, ready: false, reason: "unknown-writer-state" }],
+  ["false", "true", { standalone: null, monorepo: null, ready: false, reason: "unknown-writer-state" }],
 ];
-for (const [standalone, monorepo, ready, reason] of cases) {
-  test(`writer state ${String(standalone)}/${String(monorepo)} is ${reason}`, () => {
-    assert.deepEqual(assessLifeosWriters({ standalone, monorepo }), {
-      standalone: ["enabled", "disabled"].includes(standalone) ? standalone : null,
-      monorepo: ["enabled", "disabled"].includes(monorepo) ? monorepo : null,
-      ready,
-      reason,
-    });
+for (const [standalone, monorepo, expected] of cases) {
+  test(`writer state ${String(standalone)}/${String(monorepo)} is ${expected.reason}`, () => {
+    assert.deepEqual(assessLifeosWriters({ standalone, monorepo }), expected);
   });
 }
 
 test("CLI fails closed for unknown and dual writers while reporting normalized observations", () => {
   const script = fileURLToPath(new URL("./lifeos-writer-preflight.mjs", import.meta.url));
-  for (const args of [[], ["enabled", "enabled"], ["unknown", "enabled"]]) {
+  // These process tests are intentionally separate from unit fixtures: they
+  // prove the exported evaluator is actually wired to JSON output and exit 1.
+  for (const [args, expected] of [
+    [[], { standalone: null, monorepo: null, ready: false, reason: "unknown-writer-state" }],
+    [["enabled", "enabled"], { standalone: "enabled", monorepo: "enabled", ready: false, reason: "dual-writer-risk" }],
+    [["unknown", "enabled"], { standalone: null, monorepo: "enabled", ready: false, reason: "unknown-writer-state" }],
+  ]) {
     const result = spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
     assert.equal(result.status, 1);
-    assert.deepEqual(JSON.parse(result.stdout),
-      args.length === 2
-        ? {
-            standalone: ["enabled", "disabled"].includes(args[0]) ? args[0] : null,
-            monorepo: ["enabled", "disabled"].includes(args[1]) ? args[1] : null,
-            ready: false,
-            reason: args[0] === "enabled" ? "dual-writer-risk" : "unknown-writer-state",
-          }
-        : { standalone: null, monorepo: null, ready: false, reason: "unknown-writer-state" },
-    );
+    assert.deepEqual(JSON.parse(result.stdout), expected);
     assert.equal(result.stderr, "");
   }
 });
