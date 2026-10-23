@@ -128,7 +128,11 @@ test("auto-merge issue closer is workflow_run-only, binds a named/path source, a
   assert.match(workflow, /app-id:\s*\$\{\{\s*env\.DEV_GITHUB_APP_ID\s*\}\}/);
   assert.match(workflow, /private-key:\s*\$\{\{\s*env\.DEV_GITHUB_APP_PRIVATE_KEY\s*\}\}/);
   assert.match(workflow, /github-token:\s*\$\{\{\s*steps\.dev-app-token\.outputs\.token\s*\}\}/);
-  assert.doesNotMatch(workflow, /REVIEW_GITHUB_APP_|INFISICAL_REVIEW_IDENTITY_ID/);
+  assert.match(workflow, /identity-id:\s*\$\{\{\s*vars\.INFISICAL_REVIEW_IDENTITY_ID\s*\}\}/);
+  assert.match(workflow, /secret-path:\s*["']\/review\/["']/);
+  assert.match(workflow, /id:\s*review-app-token[\s\S]*?app-id:\s*\$\{\{\s*env\.REVIEW_GITHUB_APP_ID\s*\}\}/);
+  assert.match(workflow, /Review App installation token minted and read-only repository access verified/);
+  assert.match(workflow, /Dev App installation token minted and linked-Issue reconciliation completed/);
   assert.doesNotMatch(workflow, /EXPECTED_WORKFLOW_ID|workflow_id/);
 
   const { document } = parsedReconcilerWorkflow();
