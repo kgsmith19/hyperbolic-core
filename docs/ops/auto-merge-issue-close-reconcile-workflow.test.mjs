@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(root, ".github/workflows/auto-merge-issue-close-reconcile.yml");
@@ -18,20 +19,13 @@ const workflow = readFileSync(workflowPath, "utf8");
 const REPO = "kgsmith19/hyperbolic-core";
 const HEAD_SHA = "a".repeat(40);
 
-function extractScript(yamlText) {
-  const marker = "script: |";
-  const markerIndex = yamlText.indexOf(marker);
-  assert.ok(markerIndex >= 0, "reconciler workflow must contain one github-script block");
-  const lines = yamlText.slice(markerIndex + marker.length + 1).split("\n");
-  const firstCodeLine = lines.find((line) => line.trim().length > 0);
-  assert.ok(firstCodeLine, "reconciler script must not be empty");
-  const indent = firstCodeLine.match(/^ */)[0].length;
-  const body = [];
-  for (const line of lines) {
-    if (line.trim().length > 0 && line.match(/^ */)[0].length < indent) break;
-    body.push(line.slice(indent));
-  }
-  return body.join("\n");
+function parsedReconcilerWorkflow() {
+  const document = parse(workflow);
+  const steps = document?.jobs?.reconcile?.steps;
+  assert.ok(Array.isArray(steps), "reconciler job must declare steps");
+  const githubScriptSteps = steps.filter((step) => step?.uses?.startsWith("actions/github-script@"));
+  assert.equal(githubScriptSteps.length, 1, "reconciler must contain exactly one github-script step");
+  return { document, script: githubScriptSteps[0]?.with?.script };
 }
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -39,11 +33,13 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 function loadReconciler() {
   // The production interval stays deliberately nonzero; only the test copy
   // avoids sleeping while exercising the same retry branches.
-  const script = extractScript(workflow).replace(
+  const { script } = parsedReconcilerWorkflow();
+  assert.equal(typeof script, "string", "reconciler github-script step must contain a script");
+  const testScript = script.replace(
     "const POLL_INTERVAL_MS = 5000;",
     "const POLL_INTERVAL_MS = 0;",
   );
-  return new AsyncFunction("context", "github", "core", script);
+  return new AsyncFunction("context", "github", "core", testScript);
 }
 
 function workflowRun(overrides = {}) {
@@ -134,6 +130,21 @@ test("auto-merge issue closer is workflow_run-only, binds a named/path source, a
   assert.match(workflow, /github-token:\s*\$\{\{\s*steps\.dev-app-token\.outputs\.token\s*\}\}/);
   assert.doesNotMatch(workflow, /REVIEW_GITHUB_APP_|INFISICAL_REVIEW_IDENTITY_ID/);
   assert.doesNotMatch(workflow, /EXPECTED_WORKFLOW_ID|workflow_id/);
+
+  const { document } = parsedReconcilerWorkflow();
+  const reviewJob = document.jobs["verify-review-app-identity"];
+  assert.deepEqual(reviewJob.permissions, { contents: "read", "id-token": "write" });
+  const reviewTokenStep = reviewJob.steps.find((step) => step.id === "review-app-token");
+  assert.equal(reviewTokenStep.with["permission-contents"], "read");
+  assert.deepEqual(
+    Object.keys(reviewTokenStep.with).sort(),
+    ["app-id", "permission-contents", "private-key"],
+    "the Review App proof must not request write permissions",
+  );
+  const reviewProofStep = reviewJob.steps.find((step) => step.name === "Reconcile · Verify the Review App token without mutation");
+  assert.equal(reviewProofStep.with["github-token"], "${{ steps.review-app-token.outputs.token }}");
+  assert.match(reviewProofStep.with.script, /github\.rest\.repos\.get/);
+  assert.doesNotMatch(reviewProofStep.with.script, /issues\.|pulls\.(?:create|update)|repos\.create/);
 });
 
 test("auto-merge issue closer rejects a differently named or located source workflow before mutation", async () => {
