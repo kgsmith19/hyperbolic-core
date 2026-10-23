@@ -51,7 +51,6 @@ function workflowRun(overrides = {}) {
     id: 9001,
     name: "PR Verification",
     path: ".github/workflows/pr-verify.yml",
-    workflow_id: 335930003,
     event: "pull_request",
     conclusion: "success",
     head_sha: HEAD_SHA,
@@ -118,7 +117,7 @@ function makeMocks({ run = workflowRun(), associated = pr(), live = [pr()], stat
   return { context, github, core, calls, warnings, closed, comments };
 }
 
-test("auto-merge issue closer is workflow_run-only and has no broader permissions", () => {
+test("auto-merge issue closer is workflow_run-only, binds a named/path source, and mints only the dev App token", () => {
   assert.match(workflow, /workflow_run:\s*\n\s+workflows: \["PR Verification"\]\s*\n\s+types: \[completed\]/);
   assert.doesNotMatch(workflow, /pull_request(?:_target)?\s*:/);
   const permissions = workflow.match(/permissions:\n([\s\S]*?)\n\nconcurrency:/)?.[1] || "";
@@ -126,6 +125,26 @@ test("auto-merge issue closer is workflow_run-only and has no broader permission
   assert.match(permissions, /^  pull-requests: read$/m);
   assert.match(permissions, /^  issues: write$/m);
   assert.equal(permissions.split("\n").filter((line) => /^  [a-z-]+: /.test(line)).length, 3);
+  assert.match(workflow, /name:\s*Reconcile auto-merged linked Issues[\s\S]*?id-token:\s*write/);
+  assert.match(workflow, /identity-id:\s*\$\{\{\s*vars\.INFISICAL_DEV_IDENTITY_ID\s*\}\}/);
+  assert.match(workflow, /secret-path:\s*["']\/dev\/["']/);
+  assert.match(workflow, /uses:\s*actions\/create-github-app-token@[0-9a-f]{40}\s+# v3\.2\.0/);
+  assert.match(workflow, /app-id:\s*\$\{\{\s*env\.DEV_GITHUB_APP_ID\s*\}\}/);
+  assert.match(workflow, /private-key:\s*\$\{\{\s*env\.DEV_GITHUB_APP_PRIVATE_KEY\s*\}\}/);
+  assert.match(workflow, /github-token:\s*\$\{\{\s*steps\.dev-app-token\.outputs\.token\s*\}\}/);
+  assert.doesNotMatch(workflow, /REVIEW_GITHUB_APP_|INFISICAL_REVIEW_IDENTITY_ID/);
+  assert.doesNotMatch(workflow, /EXPECTED_WORKFLOW_ID|workflow_id/);
+});
+
+test("auto-merge issue closer rejects a differently named or located source workflow before mutation", async () => {
+  for (const run of [
+    workflowRun({ name: "Untrusted workflow" }),
+    workflowRun({ path: ".github/workflows/lookalike.yml" }),
+  ]) {
+    const m = makeMocks({ run });
+    await assert.rejects(loadReconciler()(m.context, m.github, m.core), /expected pull-request PR Verification workflow/i);
+    assert.deepEqual(m.closed, []);
+  }
 });
 
 test("auto-merge issue closer closes only explicit linked Issues after the live PR is merged", async () => {
