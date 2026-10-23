@@ -9,5 +9,8 @@
   ],
   "scripts": {
     "tool:new": "node packages/toolbelt-cli/bin/tool.mjs"
+  },
+  "devDependencies": {
+    "yaml": "^2.8.2"
   }
 }
