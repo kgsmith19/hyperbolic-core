@@ -1,0 +1,192 @@
+name: "Auto-Merge Issue Close Reconcile"
+
+# A GITHUB_TOKEN-armed native auto-merge suppresses the pull_request/push
+# events it causes. Consume the completed trusted PR Verification workflow
+# instead, then bind its reviewed SHA to the live same-repository PR and wait
+# for GitHub to settle the merge. This keeps prompt Issue closure outside the
+# PR check rollup without trusting or executing pull-request content.
+on:
+  workflow_run:
+    workflows: ["PR Verification"]
+    types: [completed]
+
+run-name: Reconcile linked Issues for ${{ github.event.workflow_run.head_sha }}
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: auto-merge-issue-close-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile auto-merged linked Issues
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Reconcile · Close linked Issues after the exact live merge settles
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const EXPECTED_WORKFLOW_ID = 335930003;
+            const EXPECTED_WORKFLOW_NAME = "PR Verification";
+            const EXPECTED_WORKFLOW_PATH = ".github/workflows/pr-verify.yml";
+            const POLL_INTERVAL_MS = 5000;
+            const MERGE_POLL_MAX_ATTEMPTS = 60;
+            const ISSUE_CLOSE_MARKER =
+              "<!-- agent-engineering-standard:issue-close-reconcile:v1 -->";
+
+            const { owner, repo } = context.repo;
+            const repositoryFullName = `${owner}/${repo}`;
+            const payloadRepository = context.payload.repository;
+            const run = context.payload.workflow_run;
+            const summaryLines = [];
+
+            function fail(message) {
+              throw new Error(`Auto-merge Issue closure refused: ${message}`);
+            }
+
+            function isSha(value) {
+              return typeof value === "string" && /^[0-9a-f]{40}$/i.test(value);
+            }
+
+            function sameRepositoryPr(pr, defaultBranch, label) {
+              const headRepo = pr?.head?.repo;
+              const baseRepo = pr?.base?.repo;
+              if (
+                !headRepo ||
+                !baseRepo ||
+                headRepo.fork === true ||
+                headRepo.full_name !== repositoryFullName ||
+                baseRepo.full_name !== repositoryFullName
+              ) {
+                fail(`${label} is not a same-repository pull request.`);
+              }
+              if (pr.head.sha !== run.head_sha) {
+                fail(`${label} head mismatch: expected ${run.head_sha}, got ${pr.head.sha}.`);
+              }
+              if (pr.base.ref !== defaultBranch) {
+                fail(`${label} targets ${pr.base.ref}, not default branch ${defaultBranch}.`);
+              }
+            }
+
+            function linkedIssueNumbers(body) {
+              const matches = [...(body || "").matchAll(/\b(?:closes|fixes|resolves)\s+#(\d+)\b/gi)];
+              return [...new Set(matches.map((match) => Number(match[1])))];
+            }
+
+            function sleep(ms) {
+              return new Promise((resolve) => setTimeout(resolve, ms));
+            }
+
+            if (!payloadRepository || payloadRepository.full_name !== repositoryFullName) {
+              fail("event repository does not match the executing repository.");
+            }
+            if (
+              !run ||
+              run.workflow_id !== EXPECTED_WORKFLOW_ID ||
+              run.name !== EXPECTED_WORKFLOW_NAME ||
+              run.path !== EXPECTED_WORKFLOW_PATH ||
+              run.event !== "pull_request"
+            ) {
+              fail("source is not the expected pull-request PR Verification workflow.");
+            }
+            if (run.conclusion !== "success") {
+              core.info(`PR Verification concluded ${run.conclusion}; no merge is eligible for Issue closure.`);
+              return;
+            }
+            if (!isSha(run.head_sha)) fail("workflow_run.head_sha is not an exact SHA.");
+            if (
+              !run.head_repository ||
+              run.head_repository.fork === true ||
+              run.head_repository.full_name !== repositoryFullName
+            ) {
+              fail("workflow run did not originate from this same repository.");
+            }
+
+            const defaultBranch = payloadRepository.default_branch;
+            if (typeof defaultBranch !== "string" || defaultBranch.length === 0) {
+              fail("repository default branch is missing.");
+            }
+
+            // workflow_run payloads can omit pull_requests. Bind through the
+            // reviewed commit, which remains queryable after source-branch
+            // deletion, then require exactly one eligible association.
+            const associated = await github.paginate(
+              github.rest.repos.listPullRequestsAssociatedWithCommit,
+              { owner, repo, commit_sha: run.head_sha, per_page: 100 },
+            );
+            const candidates = associated.filter((candidate) => {
+              try {
+                sameRepositoryPr(candidate, defaultBranch, "associated pull request");
+                return true;
+              } catch (error) {
+                return false;
+              }
+            });
+            if (candidates.length !== 1) {
+              fail(`expected exactly one eligible pull request association, found ${candidates.length}.`);
+            }
+            const candidate = candidates[0];
+
+            let mergedPr = null;
+            for (let attempt = 1; attempt <= MERGE_POLL_MAX_ATTEMPTS; attempt += 1) {
+              const { data: livePr } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: candidate.number,
+              });
+              sameRepositoryPr(livePr, defaultBranch, "live pull request");
+              if (livePr.merged === true && livePr.state === "closed") {
+                mergedPr = livePr;
+                break;
+              }
+              await sleep(POLL_INTERVAL_MS);
+            }
+
+            if (!mergedPr) {
+              const message = `PR #${candidate.number} did not settle as merged within the bounded reconciliation window.`;
+              core.warning(message);
+              summaryLines.push(`- ${message}`);
+            } else {
+              const issueNumbers = linkedIssueNumbers(mergedPr.body);
+              let closedCount = 0;
+              for (const issueNumber of issueNumbers) {
+                try {
+                  const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                  if (issue.state !== "open") continue;
+                  if (issue.pull_request) {
+                    core.warning(`PR #${candidate.number} linked #${issueNumber}, which is itself a pull request; skipped.`);
+                    continue;
+                  }
+                  await github.rest.issues.update({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    state: "closed",
+                    state_reason: "completed",
+                  });
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    body: [
+                      ISSUE_CLOSE_MARKER,
+                      `Closed automatically after linked pull request #${candidate.number} was independently observed merged by auto-merge-issue-close-reconcile.yml.`,
+                    ].join("\n"),
+                  });
+                  closedCount += 1;
+                } catch (error) {
+                  core.warning(`Could not reconcile linked Issue #${issueNumber} from PR #${candidate.number}: ${error.message}`);
+                }
+              }
+              summaryLines.push(`- PR #${candidate.number} was independently observed merged.`);
+              summaryLines.push(`- Closed ${closedCount} linked Issue(s) through prompt reconciliation.`);
+            }
+
+            core.summary.addHeading("Auto-Merge Issue Close Reconcile");
+            core.summary.addRaw(summaryLines.join("\n") || "_No action required._", true);
+            await core.summary.write();
