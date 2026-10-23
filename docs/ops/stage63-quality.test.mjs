@@ -53,6 +53,15 @@ test("S4 · incorrect code loses even when it is shorter", async () => {
   ]);
 });
 
+test("S4 · findings retain the frozen ID shape and bound excerpts at 200 characters", async () => {
+  const { scoreQuality } = await import("./stage63-adoption-lib.mjs");
+  const id = "x".repeat(250);
+  const [finding] = scoreQuality({ id, correct: false }).findings;
+  assert.equal(finding.id, "correctness-1");
+  assert.equal(finding.excerpt, id.slice(0, 200));
+  assert.equal(finding.excerpt.length, 200);
+});
+
 test("S4 · each conformance miss costs ten, complexity is capped, disagreement costs five", async () => {
   const { scoreQuality } = await import("./stage63-adoption-lib.mjs");
   const result = scoreQuality({
