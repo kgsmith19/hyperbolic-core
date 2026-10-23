@@ -254,6 +254,15 @@ export function scoreQuality(solution) {
   return { points: Math.max(0, points), wins: true, findings };
 }
 
+const compareQualityRank = (left, right) => {
+  if (left.wins !== right.wins) return left.wins ? -1 : 1;
+  const pointDelta = right.points - left.points;
+  if (pointDelta !== 0) return pointDelta;
+  const ownershipDelta = left.owned_loc - right.owned_loc;
+  if (ownershipDelta !== 0) return ownershipDelta;
+  return left.id.localeCompare(right.id);
+};
+
 // Mirrors quality_eval.rank. The final ID tie-breaker makes the proof
 // reproducible without treating the score as an enforcement mechanism.
 export function rankQuality(solutions) {
@@ -261,12 +270,7 @@ export function rankQuality(solutions) {
   return input.map((solution) => {
     const item = normalizedQualitySolution(solution);
     return { ...scoreQuality(solution), id: item.id, owned_loc: item.owned_loc };
-  }).sort((left, right) => (
-    (left.wins === right.wins ? 0 : left.wins ? -1 : 1)
-    || right.points - left.points
-    || left.owned_loc - right.owned_loc
-    || left.id.localeCompare(right.id)
-  )).map(({ id, points, wins }) => ({ id, points, wins }));
+  }).sort(compareQualityRank).map(({ id, points, wins }) => ({ id, points, wins }));
 }
 
 export const FROZEN = {
