@@ -177,6 +177,102 @@ const PORT_SELECTION_CLASSES = [
 ];
 const PORT_REJECTION_CLASSES = ["missing-command", "excessive-portfolio"];
 
+// --- Frozen contract: tools/quality_eval.py (slice S4, #422) ---
+// This is a characterization oracle only. It evaluates supplied plain data
+// locally; it is intentionally not wired to a workflow gate or deployment.
+const QUALITY_DIMENSIONS = [
+  "correctness", "charter", "quality", "plane", "dependency", "parsimony",
+];
+const QUALITY_SEVERITIES = ["blocker", "major", "minor"];
+const QUALITY_FINDING_FIELDS = ["id", "rule", "finding", "severity", "excerpt"];
+
+const qualityFinding = (rule, finding, excerpt, severity = "major") => ({
+  id: `${rule}-1`,
+  rule,
+  finding,
+  severity,
+  excerpt: String(excerpt).slice(0, 200),
+});
+
+const normalizedQualitySolution = (solution) => {
+  const item = solution && typeof solution === "object" ? solution : {};
+  const numericLoc = Number(item.owned_loc || 0);
+  return {
+    id: String(item.id || ""),
+    correct: Boolean(item.correct),
+    charter_clean: Boolean(item.charter_clean),
+    quality_ok: Boolean(item.quality_ok),
+    plane_clean: Boolean(item.plane_clean),
+    dependency_ok: Boolean(item.dependency_ok),
+    owned_loc: Number.isFinite(numericLoc) ? Math.trunc(numericLoc) : 0,
+    reviewers_agree: Boolean(item.reviewers_agree),
+  };
+};
+
+// Mirrors quality_eval.score: correctness gates every later quality signal;
+// only a correct solution can be a winner, regardless of its owned LOC.
+export function scoreQuality(solution) {
+  const item = normalizedQualitySolution(solution);
+  if (!item.correct) {
+    return {
+      points: 0,
+      wins: false,
+      findings: [qualityFinding(
+        "correctness",
+        "incorrect solution loses however small: no shortness reward, ever",
+        item.id || "(solution)",
+        "blocker",
+      )],
+    };
+  }
+  let points = 100;
+  const findings = [];
+  for (const [dimension, conforms] of [
+    ["charter", item.charter_clean],
+    ["quality", item.quality_ok],
+    ["plane", item.plane_clean],
+    ["dependency", item.dependency_ok],
+  ]) {
+    if (!conforms) {
+      points -= 10;
+      findings.push(qualityFinding(
+        dimension,
+        `${dimension} non-conformance costs 10 points`,
+        item.id || "(solution)",
+      ));
+    }
+  }
+  points -= Math.min(40, Math.trunc(item.owned_loc / 50));
+  if (!item.reviewers_agree) {
+    points -= 5;
+    findings.push(qualityFinding(
+      "parsimony",
+      "reviewers disagree: agreement costs 5 points until rule-grounded consensus",
+      item.id || "(solution)",
+    ));
+  }
+  return { points: Math.max(0, points), wins: true, findings };
+}
+
+const compareQualityRank = (left, right) => {
+  if (left.wins !== right.wins) return left.wins ? -1 : 1;
+  const pointDelta = right.points - left.points;
+  if (pointDelta !== 0) return pointDelta;
+  const ownershipDelta = left.owned_loc - right.owned_loc;
+  if (ownershipDelta !== 0) return ownershipDelta;
+  return left.id.localeCompare(right.id);
+};
+
+// Mirrors quality_eval.rank. The final ID tie-breaker makes the proof
+// reproducible without treating the score as an enforcement mechanism.
+export function rankQuality(solutions) {
+  const input = Array.isArray(solutions) ? solutions : [];
+  return input.map((solution) => {
+    const item = normalizedQualitySolution(solution);
+    return { ...scoreQuality(solution), id: item.id, owned_loc: item.owned_loc };
+  }).sort(compareQualityRank).map(({ id, points, wins }) => ({ id, points, wins }));
+}
+
 export const FROZEN = {
   repo_map: {
     PLANES: REPO_MAP_PLANES,
@@ -243,10 +339,15 @@ export const FROZEN = {
     SELECTION_CLASSES: PORT_SELECTION_CLASSES,
     REJECTION_CLASSES: PORT_REJECTION_CLASSES,
   },
+  quality: {
+    DIMENSIONS: QUALITY_DIMENSIONS,
+    SEVERITIES: QUALITY_SEVERITIES,
+    FINDING_FIELDS: QUALITY_FINDING_FIELDS,
+  },
 };
 
 export function provenance() {
-  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py @ 9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
+  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py @ 9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
 }
 
 // Slices S2–S10 extend ADOPTION with their own rows; S1 owns context-rules.
@@ -284,6 +385,12 @@ export const ADOPTION = {
   "molds:portfolio-router": { mechanism: "docs/ops/stage63-molds.test.mjs", gap: null },
   "molds:release-substrate": { mechanism: "docs/ops/stage61b-release-proofbed-lib.mjs", gap: null },
   "molds:proof-invalidation": { mechanism: null, gap: 428 },
+  // Implementation quality plane (slice S4, #422): offline advisory
+  // characterization only; no PR Gate or production action consumes it.
+  "quality:correctness-gate": { mechanism: "docs/ops/stage63-quality.test.mjs", gap: null },
+  "quality:conformance-and-parsimony": { mechanism: "docs/ops/stage63-quality.test.mjs", gap: null },
+  "quality:deterministic-ranking": { mechanism: "docs/ops/stage63-quality.test.mjs", gap: null },
+  "quality:independent-agreement": { mechanism: "docs/ops/stage63-quality.test.mjs", gap: null },
 };
 
 export function gapsOf() {
