@@ -214,6 +214,52 @@ jobs:
               summaryLines.push(`- Closed ${closedCount} linked Issue(s) through prompt reconciliation.`);
             }
 
+            summaryLines.push("- Dev App installation token minted and linked-Issue reconciliation completed.");
             core.summary.addHeading("Auto-Merge Issue Close Reconcile");
             core.summary.addRaw(summaryLines.join("\n") || "_No action required._", true);
+            await core.summary.write();
+
+  # The Review App is deliberately a separate, read-only proof path. It
+  # neither chooses nor mutates the Issue target: the Dev App owns the
+  # reconciler mutation above. This job proves that the independently scoped
+  # reviewer identity can mint its own installation token and read this
+  # repository without ever exposing a credential or widening it to Issues.
+  verify-review-app-identity:
+    name: Verify Review App identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Reconcile · Pull the Review App credentials from Infisical
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_REVIEW_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/review/"
+          domain: https://app.infisical.com
+
+      - name: Reconcile · Mint the Review App installation token
+        id: review-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ env.REVIEW_GITHUB_APP_ID }}
+          private-key: ${{ env.REVIEW_GITHUB_APP_PRIVATE_KEY }}
+          permission-contents: read
+
+      - name: Reconcile · Verify the Review App token without mutation
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          github-token: ${{ steps.review-app-token.outputs.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            await github.rest.repos.get({ owner, repo });
+            core.summary.addHeading("Review App identity proof");
+            core.summary.addRaw(
+              "- Review App installation token minted and read-only repository access verified.",
+              true,
+            );
             await core.summary.write();
