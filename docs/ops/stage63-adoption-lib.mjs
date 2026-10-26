@@ -897,6 +897,51 @@ export function selectCandidates(descriptors, capabilities, { budgetTokens = nul
 const PY_SPACE = "\\t-\\r\\x1c-\\x20\\x85\\xa0\\u{1680}\\u{2000}-\\u{200a}\\u{2028}\\u{2029}\\u{202f}\\u{205f}\\u{3000}";
 const PY_STRIP_RE = new RegExp(`^[${PY_SPACE}]+|[${PY_SPACE}]+$`, "gu");
 const pyStrip = (text) => text.replace(PY_STRIP_RE, "");
+// str.lower(): full Unicode lowering with the final-sigma rule, as
+// String.prototype.toLowerCase (proven per code point by S8, up to skew).
+const pyLower = (text) => text.toLowerCase();
+// re's \w and \d over a str pattern are Unicode: exactly [\p{L}\p{N}_] and
+// \p{Nd} (proven per code point by S8), where a JS \w and \d are ASCII-only.
+const PY_WORD = "\\p{L}\\p{N}_";
+const PY_WORD_CHAR_RE = new RegExp(`^[${PY_WORD}]$`, "u");
+const PY_DIGIT_RE = /\p{Nd}/u;
+const pyIsWordChar = (ch) => PY_WORD_CHAR_RE.test(ch);
+const pyIsDigit = (ch) => /^\p{Nd}$/u.test(ch);
+// \b<pattern>\b for a pattern that starts and ends with a word character,
+// so each \b is "no word character on the outside".
+const pyBoundedSource = (source) => `(?<![${PY_WORD}])(?:${source})(?![${PY_WORD}])`;
+const pyWordRe = (word) => new RegExp(pyBoundedSource(word.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&")), "u");
+// type(value).__name__ of JSON plain data (an integral number is an int).
+const pyTypeName = (value) => {
+  if (value === null || value === undefined) return "NoneType";
+  if (typeof value === "boolean") return "bool";
+  if (typeof value === "number") return Number.isInteger(value) ? "int" : "float";
+  if (typeof value === "string") return "str";
+  return Array.isArray(value) ? "list" : "dict";
+};
+const pyTypeError = (message) => {
+  const error = new TypeError(message);
+  error.name = "TypeError";
+  return error;
+};
+// sorted() of JSON plain data: str in code point order; int, float and bool
+// numerically (bool is an int), stably; a str iterates its code points and a
+// dict its keys. Anything else of two or more raises TypeError, as Python does
+// for None, dicts and mixed kinds. Disclosed narrowing: Python orders nested
+// lists lexicographically; this raises for them (no caller sorts those).
+const pySortedPlain = (values) => {
+  if (typeof values === "string") return pySorted([...values]);
+  if (isMapping(values)) return pySorted(Object.keys(values));
+  if (!Array.isArray(values)) throw pyTypeError(`'${pyTypeName(values)}' object is not iterable`);
+  const kind = (value) => {
+    if (typeof value === "string") return "str";
+    return typeof value === "number" || typeof value === "boolean" ? "number" : null;
+  };
+  if (values.length < 2) return [...values];
+  const kinds = new Set(values.map(kind));
+  if (kinds.size !== 1 || kinds.has(null)) throw pyTypeError("'<' not supported between these instances");
+  return kinds.has("str") ? pySorted(values) : [...values].sort((a, b) => Number(a) - Number(b));
+};
 // re.IGNORECASE against an ASCII pattern: ASCII letters fold to lower case, and
 // so do the four non-ASCII code points CPython also matches against an ASCII
 // letter (dotted capital I, dotless i, long s, Kelvin sign). Matching a
@@ -948,7 +993,7 @@ const scalarExcerpt = (item, keys, fallback) => {
 
 export const pythonSemantics = Object.freeze({
   strip: pyStrip, foldAscii: pyFoldAscii, compareCodePoints: pyCompareCodePoints, repr: pyRepr,
-  jsonDumps: pyJsonDumps,
+  jsonDumps: pyJsonDumps, lower: pyLower, isWordChar: pyIsWordChar, isDigit: pyIsDigit,
 });
 
 // --- Frozen contract: tools/standards_route.py (Stage 52) ---
@@ -1278,6 +1323,382 @@ export function compileCapabilities(profile) {
   };
 }
 
+// --- Frozen contract: tools/independent_review.py (Stage 59a) ---
+// hyperbolic-core's live review lane adopted these 15 rules in Stage 59b
+// (stage59b-review-adoption-lib.mjs); this port is the deterministic oracle
+// the lane's disclosed deltas are pinned against, not the lane itself.
+const REVIEW_VERDICTS = ["PASS", "BLOCK", "INCONCLUSIVE", "INFRASTRUCTURE_FAIL", "POLICY_FAIL"];
+const REVIEW_REMEDIATION = ["FIXED", "DISPUTE", "RECHECK", "REFUSE"];
+const REVIEW_SEVERITIES = ["blocker", "major", "minor"];
+const REVIEW_FINDING_FIELDS = ["id", "rule", "finding", "severity", "excerpt"];
+const REVIEW_BLOCKING_SEVERITIES = ["blocker", "major"];
+const REVIEW_RULES = [
+  "clean", "p1-block", "p2-advisory", "fake-citation", "oracle-weakening", "prompt-injection", "malformed-input",
+  "reviewer-outage", "stale-head", "same-provider", "verdict-shopping", "scope-creep", "dispute",
+  "repeat-non-engage", "owner-override",
+];
+const REVIEW_OWNER = "kgsmith19";
+const REVIEW_INJECTION_PATTERN = "(ignore (previous|all) instructions|disregard .*instructions|override .*rules?|bypass .*gate|reveal .*prompt)";
+// The pattern is ASCII and compiled IGNORECASE, so matching its lower-case
+// form against pyFoldAscii(text) is exact; Python's "." stops only at "\n".
+const REVIEW_INJECTION_RE = new RegExp(REVIEW_INJECTION_PATTERN.replaceAll(".*", "[^\\n]*"), "u");
+
+// Mirrors independent_review.clean_request: one clean request, a fresh copy per call.
+export function cleanReviewRequest() {
+  const head = "a".repeat(40);
+  return {
+    head, live_head: head, builder_family: "anthropic", reviewer_family: "openai", reviewer_available: true,
+    malformed: false, tainted: false, findings: [], criteria: ["AC-1"],
+  };
+}
+
+const normalizeReviewRequest = (request) => {
+  const raw = isMapping(request) ? request : {};
+  const findings = pyGet(raw, "findings");
+  return {
+    head: pyStrAny(pyGet(raw, "head", "")),
+    live_head: pyOrStrAny(raw, "live_head"),
+    builder_family: pyOrStrAny(raw, "builder_family"),
+    reviewer_family: pyOrStrAny(raw, "reviewer_family"),
+    reviewer_available: pyBool(pyGet(raw, "reviewer_available", true)),
+    malformed: pyBool(pyGet(raw, "malformed", false)),
+    tainted: pyBool(pyGet(raw, "tainted", false)),
+    findings: Array.isArray(findings) ? findings.filter(isMapping) : [],
+    criteria: pyScalarStrs(pyGet(raw, "criteria", [])),
+  };
+};
+
+// Mirrors independent_review.review: one request to its verdict, first hit decides.
+export function reviewDecision(request) {
+  const item = normalizeReviewRequest(request);
+  const tag = pySlice(item.head || "(review)", 200);
+  const decide = (verdict, rule, finding, severity) => ({
+    verdict, rule, findings: [continuityFinding(rule, finding, tag, severity)],
+  });
+  if (item.malformed) {
+    return decide("INCONCLUSIVE", "malformed-input", "malformed review input: INCONCLUSIVE, fix the input and re-review");
+  }
+  if (!item.reviewer_available) {
+    return decide("INFRASTRUCTURE_FAIL", "reviewer-outage", "reviewer unavailable: INFRASTRUCTURE_FAIL, retry the lane",
+      "blocker");
+  }
+  if (item.live_head && item.head && item.live_head !== item.head) {
+    return decide("INCONCLUSIVE", "stale-head", "review of a stale head: INCONCLUSIVE, recheck at the live head");
+  }
+  if (item.builder_family && item.reviewer_family && item.builder_family === item.reviewer_family) {
+    return decide("POLICY_FAIL", "same-provider", "reviewer family equals builder: POLICY_FAIL, reselect a separated reviewer",
+      "blocker");
+  }
+  if (item.tainted) {
+    return decide("INCONCLUSIVE", "prompt-injection", "review scope tainted by injection: INCONCLUSIVE, sanitize and re-review",
+      "blocker");
+  }
+  const blockers = [];
+  const advisories = [];
+  for (const finding of item.findings) {
+    const text = `${pyStrAny(pyGet(finding, "finding", ""))} ${pyStrAny(pyGet(finding, "excerpt", ""))}`;
+    if (REVIEW_INJECTION_RE.test(pyFoldAscii(text))) {
+      return decide("BLOCK", "prompt-injection", "injected content in review scope: BLOCK the tainted scope", "blocker");
+    }
+    const lowered = pyLower(text);
+    if (lowered.includes("weaken") && lowered.includes("oracle")) {
+      if (lowered.includes("policy")) {
+        return decide("POLICY_FAIL", "oracle-weakening", "finding asks to weaken a policy oracle: POLICY_FAIL", "blocker");
+      }
+      return decide("BLOCK", "oracle-weakening", "finding asks to weaken an oracle: BLOCK", "blocker");
+    }
+    const citation = pyOrStrAny(finding, "citation");
+    if (!(citation && item.criteria.includes(citation))) {
+      return decide("BLOCK", "fake-citation", "citation names no real criterion: BLOCK the review as untrustworthy",
+        "blocker");
+    }
+    const severity = pyOrStrAny(finding, "severity");
+    if (REVIEW_BLOCKING_SEVERITIES.includes(severity)) {
+      blockers.push(continuityFinding("p1-block", "P0/P1 evidence-grounded finding: BLOCK", tag, "blocker"));
+    } else {
+      advisories.push(continuityFinding("p2-advisory", "P2 finding: advisory only", tag, "minor"));
+    }
+  }
+  if (blockers.length > 0) return { verdict: "BLOCK", rule: "p1-block", findings: blockers };
+  if (advisories.length > 0) return { verdict: "PASS", rule: "p2-advisory", findings: advisories };
+  return decide("PASS", "clean", "no material finding: PASS", "minor");
+}
+
+const normalizeRemediationRound = (round) => {
+  const raw = isMapping(round) ? round : {};
+  const flag = (key, fallback = false) => pyBool(pyGet(raw, key, fallback));
+  return {
+    original_rule: pyOrStrAny(raw, "original_rule"),
+    fixes: flag("fixes"),
+    disputes: flag("disputes"),
+    dispute_grounded: flag("dispute_grounded"),
+    shopping: flag("shopping"),
+    widens_scope: flag("widens_scope"),
+    engages: flag("engages", true),
+    repeat: flag("repeat"),
+    owner: pyOrStrAny(raw, "owner"),
+    owner_explicit: flag("owner_explicit"),
+    criterion: pyOrStrAny(raw, "criterion"),
+  };
+};
+
+// Mirrors independent_review.remediate: one round to FIXED / DISPUTE / RECHECK / REFUSE.
+export function remediateRound(round) {
+  const item = normalizeRemediationRound(round);
+  const tag = pySlice(item.criterion || "(remediation)", 200);
+  const decide = (outcome, rule, finding, severity) => ({
+    outcome, rule, findings: [continuityFinding(rule, finding, tag, severity)],
+  });
+  if (item.shopping) {
+    return decide("REFUSE", "verdict-shopping", "second review seeking a softer verdict: REFUSE the round", "blocker");
+  }
+  if (item.widens_scope) {
+    return decide("REFUSE", "scope-creep", "remediation widens scope: REFUSE the round, scope locks to the reviewed diff",
+      "blocker");
+  }
+  if (item.repeat && !item.engages) {
+    return decide("REFUSE", "repeat-non-engage", "repeat round not engaging the finding: REFUSE the round", "blocker");
+  }
+  if (item.disputes && item.dispute_grounded && item.criterion) {
+    return decide("DISPUTE", "dispute",
+      `evidence-grounded dispute through ${pyRepr(item.criterion)}: route to the original criterion`);
+  }
+  if (item.owner === REVIEW_OWNER && item.owner_explicit) {
+    return decide("FIXED", "owner-override", "explicit owner override: FIXED with override provenance", "minor");
+  }
+  return decide("RECHECK", "dispute", "recheck through the original criterion", "minor");
+}
+
+// Mirrors independent_review.fingerprint: sorted citations, verdict and head, bound (16 hex).
+export function reviewFingerprint(citations, verdict, head) {
+  const canonical = pyJsonDumps({ citations: pySortedPlain(citations), verdict, head: pyStrAny(head) },
+    { sortKeys: true, separators: [",", ":"] });
+  return sha256Hex16(canonical);
+}
+
+// Mirrors independent_review.validate_finding: repair strings, empty means valid.
+export function validateReviewFinding(finding) {
+  if (!isMapping(finding)) return [`finding must be a mapping of plain data, not ${pyTypeName(finding)}`];
+  const repairs = REVIEW_FINDING_FIELDS.filter((key) => !hasKey(finding, key))
+    .map((key) => `finding is missing required key ${pyRepr(key)}`);
+  if (hasKey(finding, "rule") && !REVIEW_RULES.includes(finding.rule)) {
+    repairs.push(`finding rule ${pyRepr(finding.rule)} is not a frozen Stage 59a review rule`);
+  }
+  if (hasKey(finding, "severity") && !REVIEW_SEVERITIES.includes(finding.severity)) {
+    repairs.push(`finding severity ${pyRepr(finding.severity)} must be blocker|major|minor`);
+  }
+  return repairs;
+}
+
+// --- Frozen contract: tools/spec_critic.py (Stage 28) ---
+const CRITIC_RISKS = ["R0", "R1", "R2", "R3"];
+const CRITIC_FINDING_FIELDS = ["id", "rule", "finding", "severity", "excerpt"];
+const CRITIC_SEVERITIES = ["blocker", "major", "minor"];
+const CRITIC_RULES = [
+  "ambiguous_owner", "contradictory_examples", "untestable_adjective", "missing_timeout", "hidden_migration_order",
+  "overconstrained_implementation", "giant_spec",
+];
+const CRITIC_CLASSES = [
+  "tenant-ambiguity", "contradictory-examples", "untestable-adjective", "missing-timeout", "migration-order",
+  "overconstraint", "giant-spec", "compact-control",
+];
+const CRITIC_VAGUE_ADJECTIVES = [
+  "fast", "scalable", "robust", "user-friendly", "simple", "clean", "efficient", "flexible", "intuitive", "maintainable",
+];
+const CRITIC_IMPLEMENTATION_MARKERS = [
+  "library", "table", "column", "sql", "redis", "postgres", "orm", "framework", ".py", ".ts", ".json",
+];
+const CRITIC_OWNERSHIP_KEYWORDS = ["tenant", "multi-tenant", "workspace", "account"];
+const CRITIC_OWNERSHIP_PHRASES = ["owned by", "per-tenant", "per tenant"];
+const CRITIC_NAMED_OWNERS = ["owner", "admin", "member", "accountant", "viewer"];
+// Substring tests upstream, so "border" carries "order" (pinned defect).
+const CRITIC_ORDER_WORDS = ["before", "after", "order", "phase"];
+// Declared upstream; the timeout check spells its own tests out.
+const CRITIC_TIMEOUT_WORDS = ["timeout", "deadline", "seconds", "second"];
+const CRITIC_MEASURE_UNITS = [
+  "ms", "millisecond", "milliseconds", "second", "seconds", "minute", "minutes", "hour", "hours", "percent", "%",
+];
+const CRITIC_DEFAULTS = {
+  title: "", risk: "R1", assured: false, statements: [], examples: [], criteria: [], migration_steps: [],
+  external_calls: [],
+};
+const CRITIC_ADJECTIVE_RES = CRITIC_VAGUE_ADJECTIVES.map(pyWordRe);
+const CRITIC_OWNER_RES = CRITIC_NAMED_OWNERS.map(pyWordRe);
+const CRITIC_UNIT_RES = CRITIC_MEASURE_UNITS.filter((unit) => unit !== "ms" && unit !== "%").map(pyWordRe);
+const CRITIC_MARKER_RES = CRITIC_IMPLEMENTATION_MARKERS.map((marker) => (marker.startsWith(".") ? null : pyWordRe(marker)));
+// \bmilliseconds?\b|\bms\b|% and \bseconds?\b
+const CRITIC_MS_RE = new RegExp(`${pyBoundedSource("milliseconds?")}|${pyBoundedSource("ms")}|%`, "u");
+const CRITIC_SECONDS_RE = new RegExp(pyBoundedSource("seconds?"), "u");
+const CRITIC_SENTENCE_RE = /[^.!?;]+[.!?;]?/gu;
+
+const normalizeSpec = (spec) => {
+  const raw = isMapping(spec) ? spec : {};
+  const riskValue = pyGet(raw, "risk", CRITIC_DEFAULTS.risk);
+  const risk = (pyBool(riskValue) ? pyStrAny(riskValue) : "").toUpperCase();
+  const examples = pyGet(raw, "examples");
+  return {
+    title: pyStrAny(pyGet(raw, "title", CRITIC_DEFAULTS.title)),
+    risk: CRITIC_RISKS.includes(risk) ? risk : CRITIC_DEFAULTS.risk,
+    assured: pyBool(pyGet(raw, "assured", false)),
+    statements: pyScalarStrs(pyGet(raw, "statements")),
+    criteria: pyScalarStrs(pyGet(raw, "criteria")),
+    migration_steps: pyScalarStrs(pyGet(raw, "migration_steps")),
+    external_calls: pyScalarStrs(pyGet(raw, "external_calls")),
+    examples: Array.isArray(examples)
+      ? examples.filter(isMapping).map((entry) => ({
+        given: pyStrAny(pyGet(entry, "given", "")),
+        when: pyStrAny(pyGet(entry, "when", "")),
+        then: pyStrAny(pyGet(entry, "then", "")),
+      }))
+      : [],
+  };
+};
+
+const isCompactSpec = (spec) => !spec.assured || spec.risk === "R0" || spec.risk === "R1";
+const critic = (rule, findings, finding, severity, excerpt) => ({
+  id: `${rule}-${findings.length + 1}`, rule, finding, severity, excerpt,
+});
+const sentencesOf = (text) => (text.match(CRITIC_SENTENCE_RE) ?? []).map(pyStrip).filter(Boolean);
+const sentenceHasMeasure = (sentence) => {
+  if (PY_DIGIT_RE.test(sentence)) return true;
+  const lower = pyLower(sentence);
+  return CRITIC_MS_RE.test(lower) || CRITIC_UNIT_RES.some((re) => re.test(lower));
+};
+
+const checkAmbiguousOwner = (spec) => {
+  const findings = [];
+  for (const statement of spec.statements) {
+    const lower = pyLower(statement);
+    if (!CRITIC_OWNERSHIP_KEYWORDS.some((keyword) => lower.includes(keyword))) continue;
+    if (CRITIC_OWNERSHIP_PHRASES.some((phrase) => lower.includes(phrase)) || CRITIC_OWNER_RES.some((re) => re.test(lower))) {
+      continue;
+    }
+    findings.push(critic("ambiguous_owner", findings,
+      "ambiguous tenant ownership: name the owning actor (owned by / per-tenant) so isolation cannot drift",
+      "blocker", pySlice(statement, 200)));
+  }
+  return findings;
+};
+
+const checkContradictoryExamples = (spec) => {
+  const { examples } = spec;
+  for (let i = 0; i < examples.length; i += 1) {
+    for (let j = i + 1; j < examples.length; j += 1) {
+      const [first, second] = [examples[i], examples[j]];
+      if (first.given === second.given && first.when === second.when && first.then !== second.then) {
+        const r = (text) => pyRepr(pySlice(text, 80));
+        return [critic("contradictory_examples", [],
+          "contradictory examples: the same given+when promises two different thens; pin one outcome", "blocker",
+          `given ${r(first.given)} when ${r(first.when)} then ${r(first.then)} vs ${r(second.then)}`)];
+      }
+    }
+  }
+  return [];
+};
+
+const checkUntestableAdjective = (spec) => {
+  const findings = [];
+  for (const text of [...spec.statements, ...spec.criteria]) {
+    for (const sentence of sentencesOf(text)) {
+      const lower = pyLower(sentence);
+      const index = CRITIC_ADJECTIVE_RES.findIndex((re) => re.test(lower));
+      if (index === -1 || sentenceHasMeasure(sentence)) continue;
+      findings.push(critic("untestable_adjective", findings,
+        `untestable adjective ${pyRepr(CRITIC_VAGUE_ADJECTIVES[index])}: replace with a measured bound (digits + unit) so a test can pass or fail`,
+        "major", pySlice(sentence, 200)));
+    }
+  }
+  return findings;
+};
+
+const checkMissingTimeout = (spec) => {
+  if (spec.external_calls.length === 0) return [];
+  for (const text of [...spec.statements, ...spec.criteria]) {
+    const lower = pyLower(text);
+    if (lower.includes("timeout") || lower.includes("deadline") || CRITIC_SECONDS_RE.test(lower) || CRITIC_MS_RE.test(lower)) {
+      return [];
+    }
+  }
+  const [call] = spec.external_calls;
+  return [critic("missing_timeout", [],
+    `missing timeout: external call ${pyRepr(pySlice(call, 80))} has no timeout/deadline bound; name the bound so verification can observe it`,
+    "blocker", pySlice(call, 200))];
+};
+
+const checkHiddenMigrationOrder = (spec) => {
+  const steps = spec.migration_steps;
+  if (steps.length <= 1) return [];
+  const ordered = [...spec.statements, ...spec.criteria]
+    .some((text) => CRITIC_ORDER_WORDS.some((word) => pyLower(text).includes(word)));
+  if (ordered) return [];
+  return [critic("hidden_migration_order", [],
+    `hidden migration order: ${steps.length} steps with no before/after/order/phase wording; state the ordering so steps cannot run out of sequence`,
+    "blocker", pySlice(steps.join("; "), 200))];
+};
+
+const checkOverconstrained = (spec) => {
+  const findings = [];
+  for (const criterion of spec.criteria) {
+    const lower = pyLower(criterion);
+    const index = CRITIC_IMPLEMENTATION_MARKERS.findIndex((marker, i) => (CRITIC_MARKER_RES[i] === null
+      ? lower.includes(marker) : CRITIC_MARKER_RES[i].test(lower)));
+    if (index === -1) continue;
+    findings.push(critic("overconstrained_implementation", findings,
+      `overconstrained implementation ${pyRepr(CRITIC_IMPLEMENTATION_MARKERS[index])}: state the observable behavior, not the storage or library, so the Spec stays implementation-free`,
+      "major", pySlice(criterion, 200)));
+  }
+  return findings;
+};
+
+const checkGiantSpec = (spec) => {
+  const total = spec.statements.length + spec.criteria.length;
+  if (total <= 20) return [];
+  return [critic("giant_spec", [],
+    `giant Spec: ${total} statements + criteria exceed the 20-item ceiling; split the Spec into thin slices`,
+    "blocker", pySlice(spec.title, 200) || `${total} items`)];
+};
+
+// Mirrors spec_critic.critique: compact scope skips; assured R2/R3 runs the
+// seven rules in frozen precedence order. Mappings are read in key order, so
+// integer-like keys (which a JS object hoists) are outside the port's domain.
+export function critiqueSpec(spec) {
+  const normalized = normalizeSpec(spec);
+  if (isCompactSpec(normalized)) return { status: "skipped", findings: [], scope: "compact", ok: true };
+  const findings = [checkAmbiguousOwner, checkContradictoryExamples, checkUntestableAdjective, checkMissingTimeout,
+    checkHiddenMigrationOrder, checkOverconstrained, checkGiantSpec].flatMap((check) => check(normalized));
+  return { status: "critiqued", findings, scope: "assured", ok: findings.length === 0 };
+}
+
+// Mirrors spec_critic.gates_ready: [ready, reasons]; assured R2/R3 needs zero blockers.
+export function specGatesReady(spec) {
+  const normalized = normalizeSpec(spec);
+  if (isCompactSpec(normalized)) return [true, []];
+  const blockers = critiqueSpec(normalized).findings.filter((f) => f.severity === "blocker");
+  return blockers.length > 0 ? [false, blockers.map((f) => `${f.rule}: ${f.finding}`)] : [true, []];
+}
+
+// Mirrors spec_critic.validate_finding: repair strings, empty means valid.
+export function validateCritiqueFinding(finding) {
+  if (!isMapping(finding)) return [`finding must be a mapping of plain data, not ${pyTypeName(finding)}`];
+  const repairs = [];
+  for (const field of CRITIC_FINDING_FIELDS) {
+    if (!hasKey(finding, field)) repairs.push(`missing field ${pyRepr(field)}: add it to the finding`);
+    else if (!pyStrip(pyStrAny(finding[field]))) repairs.push(`field ${pyRepr(field)} must be a non-empty string`);
+  }
+  for (const key of Object.keys(finding)) {
+    if (!CRITIC_FINDING_FIELDS.includes(key)) repairs.push(`unknown field ${pyRepr(key)}: remove it from the finding`);
+  }
+  const severity = pyGet(finding, "severity", null);
+  if (severity !== null && !CRITIC_SEVERITIES.includes(severity)) {
+    repairs.push(`unknown severity ${pyRepr(severity)}: severity is one of ${CRITIC_SEVERITIES.join(", ")}`);
+  }
+  const rule = pyGet(finding, "rule", null);
+  if (rule !== null && !CRITIC_RULES.includes(rule)) {
+    repairs.push(`unknown rule ${pyRepr(rule)}: rule is one of ${CRITIC_RULES.join(", ")}`);
+  }
+  return repairs;
+}
+
 export const FROZEN = {
   repo_map: {
     PLANES: REPO_MAP_PLANES,
@@ -1409,10 +1830,35 @@ export const FROZEN = {
     RULE_VERDICTS: CAPABILITY_RULE_VERDICTS,
     FROZEN_MOLD_MARKERS,
   },
+  independent_review: {
+    VERDICTS: REVIEW_VERDICTS,
+    REMEDIATION: REVIEW_REMEDIATION,
+    SEVERITIES: REVIEW_SEVERITIES,
+    FINDING_FIELDS: REVIEW_FINDING_FIELDS,
+    BLOCKING_SEVERITIES: REVIEW_BLOCKING_SEVERITIES,
+    RULES: REVIEW_RULES,
+    INJECTION_PATTERN: REVIEW_INJECTION_PATTERN,
+  },
+  spec_critic: {
+    RISKS: CRITIC_RISKS,
+    FINDING_FIELDS: CRITIC_FINDING_FIELDS,
+    SEVERITIES: CRITIC_SEVERITIES,
+    RULES: CRITIC_RULES,
+    CLASSES: CRITIC_CLASSES,
+    VAGUE_ADJECTIVES: CRITIC_VAGUE_ADJECTIVES,
+    IMPLEMENTATION_MARKERS: CRITIC_IMPLEMENTATION_MARKERS,
+    OWNERSHIP_KEYWORDS: CRITIC_OWNERSHIP_KEYWORDS,
+    OWNERSHIP_PHRASES: CRITIC_OWNERSHIP_PHRASES,
+    NAMED_OWNERS: CRITIC_NAMED_OWNERS,
+    ORDER_WORDS: CRITIC_ORDER_WORDS,
+    TIMEOUT_WORDS: CRITIC_TIMEOUT_WORDS,
+    MEASURE_UNITS: CRITIC_MEASURE_UNITS,
+    DEFAULTS: CRITIC_DEFAULTS,
+  },
 };
 
 export function provenance() {
-  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py + tools/standards_route.py + tools/standards_receipt.py + tools/capability_compiler.py @9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
+  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py + tools/standards_route.py + tools/standards_receipt.py + tools/capability_compiler.py + tools/independent_review.py + tools/spec_critic.py @9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
 }
 
 // Slices S2–S10 extend ADOPTION with their own rows; S1 owns context-rules.
@@ -1471,6 +1917,14 @@ export const ADOPTION = {
   "standards:receipt-binding": { mechanism: "docs/ops/stage63-standards.test.mjs", gap: null },
   "capability:sharp-edge-bounds": { mechanism: "docs/ops/stage63-standards.test.mjs", gap: null },
   "capability:agent-boundaries": { mechanism: "AGENTS.md", gap: null },
+  // Review plane (slice S8, #426): the Stage 59a review and remediation
+  // contract and the Stage 28 Spec critic, characterized against golden Python
+  // output and both frozen upstream corpora; the live lane's deltas stay
+  // single-sourced in the Stage 59b mapping and are pinned both ways.
+  "review:verdict-contract": { mechanism: "docs/ops/stage63-review.test.mjs", gap: null },
+  "review:remediation-contract": { mechanism: "docs/ops/stage63-review.test.mjs", gap: null },
+  "review:spec-critic": { mechanism: "docs/ops/stage63-review.test.mjs", gap: null },
+  "review:live-lane-deltas": { mechanism: "docs/ops/stage59b-review-adoption-lib.mjs", gap: null },
   // Implementation quality plane (slice S4, #422): offline advisory
   // characterization only; no PR Gate or production action consumes it.
   "quality:correctness-gate": { mechanism: "docs/ops/stage63-quality.test.mjs", gap: null },
