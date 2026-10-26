@@ -21,6 +21,8 @@
 // Issues #420–#428) extend ADOPTION with their own rows; the helpers below
 // already operate over the whole map.
 
+import { createHash } from "node:crypto";
+
 // --- Frozen contract: tools/repo_map.py ---
 const REPO_MAP_PLANES = [
   "source", "generated", "artifact", "cache", "evidence", "protected",
@@ -322,6 +324,11 @@ const pyOrStr = (item, key) => (pyBool(item[key]) ? pyStr(item[key]) : ""); // s
 const pyList = (value) => (Array.isArray(value) ? [...value] : []);
 const pySlice = (text, n) => [...text].slice(0, n).join("");
 // repr() of JSON plain data: str quoting rules, None/True/False, list and dict forms.
+// A str escapes exactly what str.isprintable() rejects (categories Cc, Cf, Cs,
+// Co, Cn, Zl, Zp and every Zs but the ASCII space) as \xNN, \uNNNN or
+// \UNNNNNNNN. The categories come from the runtime's Unicode tables, so only
+// code points one Unicode version leaves unassigned can render differently.
+const PY_NONPRINTABLE_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}]/u;
 const pyRepr = (value) => {
   if (typeof value !== "string") {
     if (value === null || value === undefined || typeof value === "boolean") return pyStr(value);
@@ -341,6 +348,10 @@ const pyRepr = (value) => {
     if (ch === "\r") return "\\r";
     if (ch === "\t") return "\\t";
     if (code < 0x20 || code === 0x7f) return `\\x${code.toString(16).padStart(2, "0")}`;
+    if (code > 0x7f && PY_NONPRINTABLE_RE.test(ch)) {
+      if (code <= 0xff) return `\\x${code.toString(16).padStart(2, "0")}`;
+      return code <= 0xffff ? `\\u${code.toString(16).padStart(4, "0")}` : `\\U${code.toString(16).padStart(8, "0")}`;
+    }
     return ch;
   }).join("");
   return quote + body + quote;
@@ -362,20 +373,22 @@ const pyJsonString = (text, ensureAscii) => {
   }
   return `${out}"`;
 };
-const pyJsonDumps = (value, { sortKeys = false, indent = null, ensureAscii = true } = {}, level = 0) => {
+const pyJsonDumps = (value, {
+  sortKeys = false, indent = null, ensureAscii = true, separators = [", ", ": "],
+} = {}, level = 0) => {
   if (value === null || value === undefined) return "null";
   if (value === true) return "true";
   if (value === false) return "false";
   if (typeof value === "number") return String(value);
   if (typeof value === "string") return pyJsonString(value, ensureAscii);
-  const options = { sortKeys, indent, ensureAscii };
+  const options = { sortKeys, indent, ensureAscii, separators };
   const entries = Array.isArray(value)
     ? value.map((item) => pyJsonDumps(item, options, level + 1))
     : (sortKeys ? Object.keys(value).sort() : Object.keys(value))
-      .map((key) => `${pyJsonString(key, ensureAscii)}: ${pyJsonDumps(value[key], options, level + 1)}`);
+      .map((key) => `${pyJsonString(key, ensureAscii)}${separators[1]}${pyJsonDumps(value[key], options, level + 1)}`);
   const [open, close] = Array.isArray(value) ? ["[", "]"] : ["{", "}"];
   if (entries.length === 0) return open + close;
-  if (indent === null) return open + entries.join(", ") + close;
+  if (indent === null) return open + entries.join(separators[0]) + close;
   const pad = " ".repeat(indent * (level + 1));
   return `${open}\n${pad}${entries.join(`,\n${pad}`)}\n${" ".repeat(indent * level)}${close}`;
 };
@@ -874,6 +887,396 @@ export function selectCandidates(descriptors, capabilities, { budgetTokens = nul
   };
 }
 
+// --- Python Unicode semantics the S7 boundary modules rely on ------------------
+// Exhaustively proven against golden tables computed by CPython, so a JS
+// built-in that differs (String.prototype.trim, /i, `.`, Array.prototype.sort)
+// never stands in for its Python namesake.
+
+// str.strip(): exactly the code points str.isspace() names. Unlike trim(), the
+// BOM (U+FEFF) stays and U+001C..U+001F and NEL (U+0085) go.
+const PY_SPACE = "\\t-\\r\\x1c-\\x20\\x85\\xa0\\u{1680}\\u{2000}-\\u{200a}\\u{2028}\\u{2029}\\u{202f}\\u{205f}\\u{3000}";
+const PY_STRIP_RE = new RegExp(`^[${PY_SPACE}]+|[${PY_SPACE}]+$`, "gu");
+const pyStrip = (text) => text.replace(PY_STRIP_RE, "");
+// re.IGNORECASE against an ASCII pattern: ASCII letters fold to lower case, and
+// so do the four non-ASCII code points CPython also matches against an ASCII
+// letter (dotted capital I, dotless i, long s, Kelvin sign). Matching a
+// lower-case pattern against the folded text reproduces Python exactly.
+const PY_ASCII_FOLDS = Object.freeze({ "\u{130}": "i", "\u{131}": "i", "\u{17f}": "s", "\u{212a}": "k" });
+const pyFoldAscii = (text) => text.replace(/[A-Z\u{130}\u{131}\u{17f}\u{212a}]/gu,
+  (ch) => PY_ASCII_FOLDS[ch] ?? ch.toLowerCase());
+// sorted() over str: code point order, not UTF-16 unit order.
+const pyCompareCodePoints = (left, right) => {
+  const a = [...left];
+  const b = [...right];
+  for (let i = 0; i < Math.min(a.length, b.length); i += 1) {
+    const diff = a[i].codePointAt(0) - b[i].codePointAt(0);
+    if (diff !== 0) return diff;
+  }
+  return a.length - b.length;
+};
+const pySorted = (values) => [...values].sort(pyCompareCodePoints);
+const sameList = (left, right) => left.length === right.length && left.every((value, i) => value === right[i]);
+// str() of JSON plain data: containers render as their repr, scalars as str.
+const pyStrAny = (value) => (value !== null && typeof value === "object" ? pyRepr(value) : pyStr(value));
+const pyOrStrAny = (mapping, key) => {
+  const value = pyGet(mapping, key, "");
+  return pyBool(value) ? pyStrAny(value) : "";
+};
+// isinstance(value, (str, int, float)): bool is an int in Python.
+const isPyScalar = (value) => ["string", "number", "boolean"].includes(typeof value);
+const pyScalarStrs = (value) => (Array.isArray(value) ? value.filter(isPyScalar).map(pyStr) : []);
+// text.encode("utf-8") raises on a lone surrogate; so does this.
+const pyUtf8 = (text) => {
+  if (/[\u{d800}-\u{dfff}]/u.test(text)) {
+    const error = new Error(`'utf-8' codec can't encode a surrogate in ${pyRepr(text)}`);
+    error.name = "UnicodeEncodeError";
+    throw error;
+  }
+  return Buffer.from(text, "utf8");
+};
+const sha256Hex16 = (text) => createHash("sha256").update(pyUtf8(text)).digest("hex").slice(0, 16);
+// A plain object can carry any rule id as an own key, "__proto__" included.
+const setOwn = (mapping, key, value) => Object.defineProperty(mapping, key,
+  { value, enumerable: true, writable: true, configurable: true });
+const scalarExcerpt = (item, keys, fallback) => {
+  for (const key of keys) {
+    const value = item[key];
+    if (isPyScalar(value) && pyStrip(pyStr(value))) return pySlice(pyStr(value), 200);
+  }
+  return fallback;
+};
+
+export const pythonSemantics = Object.freeze({
+  strip: pyStrip, foldAscii: pyFoldAscii, compareCodePoints: pyCompareCodePoints, repr: pyRepr,
+});
+
+// --- Frozen contract: tools/standards_route.py (Stage 52) ---
+const ROUTE_CLASSES = ["AWARE", "ACK", "GUARD", "VERIFY", "GATE", "OWNER"];
+const ROUTE_RULES = [
+  "duplicate-id", "missing-id", "orphan-rule", "stale-hash", "contradictory-triggers", "path-expansion",
+  "missing-capability", "registry-overload", "malicious-task", "critical-demotion", "minimal-route",
+];
+const ROUTE_MIN = 5;
+const ROUTE_MAX = 15;
+const ROUTE_INDEX = [
+  ["thin-outcome", ["implement"], "ACK", false],
+  ["one-writer", ["implement", "parallel"], "GATE", true],
+  ["exact-head", ["implement", "verify", "merge"], "GUARD", true],
+  ["lease-fencing", ["implement", "parallel"], "GATE", true],
+  ["no-resident-skill", ["implement"], "ACK", false],
+  ["plane-source", ["implement"], "GUARD", false],
+  ["plane-generated", ["implement"], "GUARD", false],
+  ["lint-real", ["implement", "verify"], "VERIFY", false],
+  ["dead-code", ["implement"], "VERIFY", false],
+  ["duplication", ["implement"], "VERIFY", false],
+  ["dependency-decision", ["implement"], "ACK", false],
+  ["charter-clean", ["implement", "review"], "ACK", false],
+  ["checkpoint-finalize", ["checkpoint", "resume"], "GATE", true],
+  ["journal-order", ["resume", "replay"], "GUARD", true],
+  ["wake-verdict", ["resume", "wake"], "GATE", true],
+  ["hat-sat", ["resume", "handoff"], "GATE", true],
+  ["idempotent-retry", ["execute", "retry"], "GUARD", true],
+  ["safe-parallel", ["parallel"], "GATE", true],
+  ["one-producer", ["orchestrate"], "ACK", false],
+  ["route-minimal", ["plan"], "AWARE", false],
+  ["receipt-accept", ["verify", "review"], "VERIFY", false],
+  ["no-shortness-reward", ["evaluate"], "ACK", false],
+  ["owner-escalation", ["escalate", "merge"], "OWNER", true],
+  ["gate-aggregator", ["merge"], "GATE", true],
+  ["evidence-index", ["merge", "verify"], "VERIFY", false],
+];
+// Lower-case and `.` written as [^\n], matched against pyFoldAscii(text).
+const ROUTE_INJECTION_RE = /(ignore (previous|all) instructions|disregard [^\n]*instructions|override [^\n]*rules?|bypass [^\n]*gate|reveal [^\n]*prompt|system prompt|__[a-z_]+__)/u;
+
+// Mirrors standards_route.default_index: the canonical index entries.
+export function defaultRouteIndex() {
+  return ROUTE_INDEX.map(([id, triggers, cls, critical]) => ({
+    id, home: `standards/${id.replaceAll("-", "_")}.md`, triggers: [...triggers], class: cls, critical,
+    source_hash: sha256Hex16(id),
+  }));
+}
+
+const normalizeRouteIndex = (entries) => (Array.isArray(entries) ? entries.filter(isMapping).map((entry) => {
+  const triggers = pyGet(entry, "triggers");
+  return {
+    id: pyStrAny(pyGet(entry, "id", "")),
+    home: pyOrStrAny(entry, "home"),
+    triggers: Array.isArray(triggers) ? [...triggers] : [],
+    class: pyOrStrAny(entry, "class"),
+    critical: pyBool(pyGet(entry, "critical", false)),
+    source_hash: pyOrStrAny(entry, "source_hash"),
+  };
+}) : []);
+
+// Mirrors standards_route._check_index: unique named homed rules, known classes, fresh hashes.
+const checkRouteIndex = (entries) => {
+  const findings = [];
+  const seen = new Map();
+  entries.forEach((entry, index) => {
+    const rid = entry.id;
+    if (!rid) {
+      findings.push(continuityFinding("missing-id", `entries[${index}] has no id: every normative rule needs one`,
+        `entries[${index}]`, "blocker"));
+      return;
+    }
+    if (seen.has(rid)) {
+      findings.push(continuityFinding("duplicate-id",
+        `duplicate rule id ${pyRepr(rid)} (entries ${seen.get(rid)} and ${index})`, rid, "blocker"));
+      return;
+    }
+    seen.set(rid, index);
+    if (!entry.home) {
+      findings.push(continuityFinding("orphan-rule", `rule ${pyRepr(rid)} has no normative home: every rule lives somewhere`, rid));
+    }
+    if (!ROUTE_CLASSES.includes(entry.class)) {
+      findings.push(continuityFinding("contradictory-triggers",
+        `rule ${pyRepr(rid)} names unknown class ${pyRepr(entry.class)}: use one of ${ROUTE_CLASSES.join(", ")}`, rid));
+    }
+    const expected = sha256Hex16(rid);
+    if (entry.source_hash && entry.source_hash !== expected) {
+      findings.push(continuityFinding("stale-hash", `rule ${pyRepr(rid)} source hash drifted: re-derive the index`, rid));
+    }
+  });
+  return findings;
+};
+
+const normalizeRouteTask = (task) => {
+  const raw = isMapping(task) ? task : {};
+  const criticalCaps = pyGet(raw, "critical_caps");
+  return {
+    kind: pyStrAny(pyGet(raw, "kind", "")),
+    paths: pyScalarStrs(pyGet(raw, "paths")),
+    phase: pyOrStrAny(raw, "phase"),
+    risk: pyOrStrAny(raw, "risk"),
+    capabilities: pyScalarStrs(pyGet(raw, "capabilities")),
+    critical_caps: Array.isArray(criticalCaps) ? criticalCaps.map(pyStrAny) : [],
+  };
+};
+
+// Mirrors standards_route.compile: one task to its minimal rule-ID route.
+export function compileRoute(task, { entries = null, index = null } = {}) {
+  const none = (value) => value === null || value === undefined;
+  const raw = none(entries) && none(index) ? defaultRouteIndex() : (none(entries) ? index : entries);
+  const normalized = normalizeRouteIndex(pyBool(raw) ? raw : []);
+  const findings = checkRouteIndex(normalized);
+  if (findings.length > 0) return { route: [], classes: {}, findings };
+  const item = normalizeRouteTask(task);
+  const tag = scalarExcerpt(item, ["kind"], "(route)");
+  const refuse = (rule, finding) => ({ route: [], classes: {}, findings: [continuityFinding(rule, finding, tag, "blocker")] });
+  const blob = pyJsonDumps({ kind: item.kind, paths: item.paths, phase: item.phase }, { sortKeys: true });
+  if (ROUTE_INJECTION_RE.test(pyFoldAscii(blob)) || ROUTE_INJECTION_RE.test(pyFoldAscii(item.kind))) {
+    return refuse("malicious-task", "task data carries injection or template tokens: refuse before routing");
+  }
+  for (const cap of item.critical_caps) {
+    if (!item.capabilities.includes(cap)) {
+      return refuse("missing-capability",
+        `critical capability ${pyRepr(cap)} absent from the provider profile: route nothing until it resolves`);
+    }
+  }
+  const route = [];
+  const classes = {};
+  const highRisk = ["R2", "R3"].includes(item.risk);
+  for (const entry of normalized) {
+    const hit = entry.triggers.includes(item.kind) || entry.triggers.includes(item.phase)
+      || item.paths.some((p) => entry.triggers.includes(p)) || (highRisk && entry.critical);
+    if (!hit) continue;
+    route.push(entry.id);
+    let cls = entry.class;
+    if (entry.critical && cls === "AWARE") {
+      findings.push(continuityFinding("critical-demotion",
+        `critical rule ${pyRepr(entry.id)} reduced to AWARE-only: critical rules keep at least ACK`, tag, "blocker"));
+      cls = "ACK";
+    }
+    setOwn(classes, entry.id, cls);
+  }
+  const sorted = pySorted(new Set(route));
+  if (sorted.length > 40) {
+    return refuse("registry-overload",
+      `route holds ${sorted.length} rules: the whole registry loaded accidentally; narrow the task`);
+  }
+  if (item.paths.length > 20) {
+    findings.push(continuityFinding("path-expansion", `${item.paths.length} paths expand the route: bound the focus envelope`, tag));
+  }
+  if (["R0", "R1", ""].includes(item.risk) && sorted.length > 0 && sorted.length <= 4) {
+    findings.push(continuityFinding("minimal-route",
+      `low-risk task routes ${sorted.length} rules: minimal route confirmed`, tag, "minor"));
+  }
+  return { route: sorted, classes, findings };
+}
+
+// --- Frozen contract: tools/standards_receipt.py (Stage 53) ---
+const RECEIPT_VERDICTS = ["ISSUED", "QUIZ", "REFUSE"];
+const RECEIPT_RULE_VERDICTS = Object.freeze({
+  "wrong-ack": "REFUSE", "missing-critical": "REFUSE", "stale-spec": "REFUSE", "stale-path": "REFUSE",
+  "stale-phase": "REFUSE", "stale-standard": "REFUSE", "r0-no-quiz": "ISSUED", "r3-required": "QUIZ",
+  "adapter-omitted": "REFUSE", "own-receipt": "REFUSE", "lower-trust": "REFUSE", "clean-receipt": "ISSUED",
+});
+const RECEIPT_RULES = Object.keys(RECEIPT_RULE_VERDICTS);
+const RECEIPT_SAT_TRIGGERS = ["new-provider", "high-risk", "privileged-scope", "authority-change"];
+const RECEIPT_LOWER_TRUST_RE = /(skip (the |this )?(quiz|sat|receipt|check)|weaken [^\n]*receipt|self-?certify|lower-?trust [^\n]*approv|ignore [^\n]*standards?)/u;
+
+// Mirrors standards_receipt.receipt_hash: route, acknowledgement and standard hash, bound.
+export function receiptHash(route, ack, standardHash) {
+  const canonical = pyJsonDumps({ ack: pySorted(ack), route: pySorted(route), standard: pyStrAny(standardHash) },
+    { sortKeys: true, separators: [",", ":"] });
+  return sha256Hex16(canonical);
+}
+
+const normalizeReceiptAttempt = (attempt) => {
+  const raw = isMapping(attempt) ? attempt : {};
+  const triggers = pyGet(raw, "sat_triggers");
+  const item = { slice: pyStrAny(pyGet(raw, "slice", "")) };
+  for (const key of ["routed", "critical", "acknowledged", "paths", "routed_paths"]) item[key] = pyScalarStrs(pyGet(raw, key));
+  for (const key of ["risk", "ack_text", "route_text", "spec_hash", "routed_spec", "phase", "routed_phase",
+    "standard_hash", "routed_standard", "instruction"]) item[key] = pyOrStrAny(raw, key);
+  item.sat_triggers = Array.isArray(triggers) ? [...triggers] : [];
+  item.sat_passed = pyBool(pyGet(raw, "sat_passed", false));
+  item.adapter_present = pyBool(pyGet(raw, "adapter_present", true));
+  item.adapter_required = pyBool(pyGet(raw, "adapter_required", false));
+  item.self_issued = pyBool(pyGet(raw, "self_issued", false));
+  return item;
+};
+
+// Mirrors standards_receipt.issue: one attempt to ISSUED / QUIZ / REFUSE, first hit decides.
+export function issueReceipt(attempt) {
+  const item = normalizeReceiptAttempt(attempt);
+  const tag = pyStrip(item.slice) ? pySlice(item.slice, 200) : (item.routed.length > 0 ? pySlice(item.routed[0], 200) : "(receipt)");
+  const decide = (rule, finding, { digest = "", severity = "major" } = {}) => ({
+    verdict: RECEIPT_RULE_VERDICTS[rule], rule, digest, findings: [continuityFinding(rule, finding, tag, severity)],
+  });
+  const drifted = (routed, current) => item[routed] && item[current] && item[routed] !== item[current];
+  if (drifted("route_text", "ack_text")) {
+    return decide("wrong-ack", "acknowledgement diverges from the routed rule text: acknowledge exactly", { severity: "blocker" });
+  }
+  const missing = item.critical.find((rule) => !item.acknowledged.includes(rule));
+  if (missing !== undefined) {
+    return decide("missing-critical",
+      `routed critical rule ${pyRepr(missing)} absent from the receipt: acknowledge every critical rule`, { severity: "blocker" });
+  }
+  if (drifted("routed_spec", "spec_hash")) return decide("stale-spec", "Spec changed since routing: re-route before issuing");
+  if (item.routed_paths.length > 0 && !sameList(pySorted(item.paths), pySorted(item.routed_paths))) {
+    return decide("stale-path", "touched paths changed since routing: re-route before issuing");
+  }
+  if (drifted("routed_phase", "phase")) return decide("stale-phase", "phase changed since routing: re-route before issuing");
+  if (drifted("routed_standard", "standard_hash")) {
+    return decide("stale-standard", "standard hash moved since routing: re-route before issuing");
+  }
+  if (RECEIPT_LOWER_TRUST_RE.test(pyFoldAscii(item.instruction))) {
+    return decide("lower-trust", "lower-trust instruction to skip or weaken the receipt: refuse", { severity: "blocker" });
+  }
+  if (item.adapter_required && !item.adapter_present) {
+    return decide("adapter-omitted", "required adapter capability omitted: attach it before issuing", { severity: "blocker" });
+  }
+  if (item.self_issued) {
+    return decide("own-receipt",
+      "subagent self-issued receipt is not independent proof: obtain independent acknowledgement", { severity: "blocker" });
+  }
+  const digest = receiptHash(item.routed, item.acknowledged, item.standard_hash);
+  const triggered = ["R2", "R3"].includes(item.risk) || item.sat_triggers.some((t) => RECEIPT_SAT_TRIGGERS.includes(t));
+  if (["R0", "R1", ""].includes(item.risk) && !triggered) {
+    return decide("r0-no-quiz", "R0/R1 receipt issued without a quiz: receipt plus capability/tests suffice",
+      { digest, severity: "minor" });
+  }
+  if (triggered && !item.sat_passed) {
+    return decide("r3-required",
+      "structured SAT required (new provider, R2/R3, privileged scope, or authority change): pass SAT before issuing",
+      { severity: "blocker" });
+  }
+  return decide("clean-receipt", "complete routed acknowledgement: receipt issued with route/receipt/SAT hashes",
+    { digest, severity: "minor" });
+}
+
+// --- Frozen contract: tools/capability_compiler.py (Stage 54a) ---
+const CAPABILITY_CLASSES = ["read", "write", "execute", "network", "secrets", "effects"];
+const CAPABILITY_VERDICTS = ["ALLOW", "DENY", "ESCALATE"];
+const CAPABILITY_RULE_VERDICTS = Object.freeze({
+  "foreign-read": "DENY", "foreign-write": "DENY", "frozen-mold": "DENY", "direct-main": "DENY",
+  "secret-mount": "DENY", "arbitrary-egress": "DENY", "mcp-research-write": "DENY", "no-sandbox": "ESCALATE",
+  "owner-escalation": "ALLOW", "focused-edit": "ALLOW", "test-command": "ALLOW",
+});
+const CAPABILITY_RULES = Object.keys(CAPABILITY_RULE_VERDICTS);
+const FROZEN_MOLD_MARKERS = ["Canonical/corpus/", "Canonical/schemas/", "Canonical/capabilities.json"];
+
+const slashed = (text) => text.replaceAll("\\", "/");
+const lstripSlashes = (text) => text.replace(/^\/+/, "");
+// Mirrors capability_compiler._under_any: the path equals a root or sits beneath it.
+const underAnyRoot = (target, roots) => {
+  const text = lstripSlashes(pyStrip(slashed(target)));
+  return roots.some((root) => {
+    const guard = lstripSlashes(pyStrip(slashed(root)));
+    return guard !== "" && (text === guard || text.startsWith(`${guard.replace(/\/+$/, "")}/`));
+  });
+};
+
+const normalizeCapabilityAction = (action) => {
+  const raw = isMapping(action) ? action : {};
+  const item = { kind: pyStrAny(pyGet(raw, "kind", "")) };
+  for (const key of ["target", "command", "endpoint", "phase", "handle"]) item[key] = pyOrStrAny(raw, key);
+  for (const key of ["direct_main", "raw_secret", "sandbox", "wrapper", "owner_approved", "test_command", "mcp_write"]) {
+    item[key] = pyBool(pyGet(raw, key, false));
+  }
+  for (const key of ["read_roots", "write_roots", "exec_allow", "net_allow"]) item[key] = pyScalarStrs(pyGet(raw, key));
+  return item;
+};
+
+// Mirrors capability_compiler.check: one requested action to ALLOW / DENY / ESCALATE.
+export function checkCapability(action) {
+  const item = normalizeCapabilityAction(action);
+  const tag = scalarExcerpt(item, ["target", "command", "endpoint"], "(capability)");
+  const decide = (rule, finding, severity = "major") => ({
+    verdict: CAPABILITY_RULE_VERDICTS[rule], rule, findings: [continuityFinding(rule, finding, tag, severity)],
+  });
+  const allow = { verdict: "ALLOW", rule: "focused-edit", findings: [] };
+  switch (item.kind) {
+    case "read":
+      return underAnyRoot(item.target, item.read_roots) ? allow
+        : decide("foreign-read", `read of ${pyRepr(item.target)} outside read roots: DENY`, "blocker");
+    case "write":
+      if (FROZEN_MOLD_MARKERS.some((marker) => lstripSlashes(slashed(item.target)).startsWith(marker))) {
+        return decide("frozen-mold", `write to frozen Mold ${pyRepr(item.target)}: DENY, regenerate via the owning tool`, "blocker");
+      }
+      if (item.direct_main) return decide("direct-main", "direct-to-main mutation: DENY, land via PR only", "blocker");
+      if (!underAnyRoot(item.target, item.write_roots)) {
+        return decide("foreign-write", `write to ${pyRepr(item.target)} outside write roots: DENY`, "blocker");
+      }
+      if (item.phase === "research" && item.mcp_write) {
+        return decide("mcp-research-write", "MCP write during research: DENY, research is read-only");
+      }
+      return decide("focused-edit", "focused edit inside write roots: ALLOW", "minor");
+    case "secret":
+      return item.raw_secret || !item.handle
+        ? decide("secret-mount", "raw secret where a handle belongs: DENY, mount the scoped handle", "blocker") : allow;
+    case "egress":
+      return !underAnyRoot(item.endpoint, item.net_allow) && !item.net_allow.includes(item.endpoint)
+        ? decide("arbitrary-egress", `egress to ${pyRepr(item.endpoint)} outside the allowlist: DENY`, "blocker") : allow;
+    case "execute":
+      if (item.test_command && item.exec_allow.includes(item.command)) {
+        return decide("test-command", "allowlisted test command: ALLOW", "minor");
+      }
+      if (item.owner_approved) return decide("owner-escalation", "owner-approved escalation: ALLOW with the approval recorded", "minor");
+      if (!item.sandbox && !item.wrapper) return decide("no-sandbox", "provider without sandbox nor wrapper: ESCALATE dry-run/report");
+      if (!item.exec_allow.includes(item.command)) {
+        return decide("arbitrary-egress", `command ${pyRepr(item.command)} outside the execute allowlist: DENY`);
+      }
+      return allow;
+    default:
+      return decide("foreign-read", `unknown action kind ${pyRepr(item.kind)}: DENY by default`, "blocker");
+  }
+}
+
+// Mirrors capability_compiler.compile: one role/phase/task profile to its bounds.
+export function compileCapabilities(profile) {
+  const role = pyOrStrAny(isMapping(profile) ? profile : {}, "role") || "builder";
+  return {
+    read_roots: ["tools/", "tests/", "Canonical/corpus/"],
+    write_roots: role === "builder" ? ["tools/", "tests/"] : ["evidence/"],
+    exec_allow: ["python tools/standardctl.py verify", "python -m unittest"],
+    net_allow: ["api.github.com"],
+    secret_handles: ["scoped-secret-handle"],
+    mode: "dry-run/report with sharp-edge enforcement",
+  };
+}
+
 export const FROZEN = {
   repo_map: {
     PLANES: REPO_MAP_PLANES,
@@ -979,10 +1382,36 @@ export const FROZEN = {
     DESCRIPTOR_FIELDS,
     PROCESS_PLUS_DOMAIN_BUDGET,
   },
+  standards_route: {
+    CLASSES: ROUTE_CLASSES,
+    SEVERITIES: ["blocker", "major", "minor"],
+    FINDING_FIELDS: ["id", "rule", "finding", "severity", "excerpt"],
+    RULES: ROUTE_RULES,
+    ROUTE_MIN,
+    ROUTE_MAX,
+    INDEX: ROUTE_INDEX,
+  },
+  standards_receipt: {
+    VERDICTS: RECEIPT_VERDICTS,
+    SEVERITIES: ["blocker", "major", "minor"],
+    FINDING_FIELDS: ["id", "rule", "finding", "severity", "excerpt"],
+    RULES: RECEIPT_RULES,
+    RULE_VERDICTS: RECEIPT_RULE_VERDICTS,
+    SAT_TRIGGERS: RECEIPT_SAT_TRIGGERS,
+  },
+  capability_compiler: {
+    CLASSES: CAPABILITY_CLASSES,
+    VERDICTS: CAPABILITY_VERDICTS,
+    SEVERITIES: ["blocker", "major", "minor"],
+    FINDING_FIELDS: ["id", "rule", "finding", "severity", "excerpt"],
+    RULES: CAPABILITY_RULES,
+    RULE_VERDICTS: CAPABILITY_RULE_VERDICTS,
+    FROZEN_MOLD_MARKERS,
+  },
 };
 
 export function provenance() {
-  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py @9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
+  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py + tools/standards_route.py + tools/standards_receipt.py + tools/capability_compiler.py @9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
 }
 
 // Slices S2–S10 extend ADOPTION with their own rows; S1 owns context-rules.
@@ -1033,6 +1462,14 @@ export const ADOPTION = {
   "extensions:registry-consistency": { mechanism: "docs/ops/stage63-profiles.test.mjs", gap: null },
   "extensions:profile-selection": { mechanism: "docs/ops/stage63-profiles.test.mjs", gap: null },
   "extensions:provisioning": { mechanism: ".claude/hooks/session-start.sh", gap: null },
+  // Standards/capability boundary plane (slice S7, #425): route, receipt and
+  // capability contracts characterized against golden Python output and the
+  // frozen upstream corpora; AGENTS.md's agent prohibitions are the live
+  // boundary each sharp-edge DENY binds to.
+  "standards:route-index": { mechanism: "docs/ops/stage63-standards.test.mjs", gap: null },
+  "standards:receipt-binding": { mechanism: "docs/ops/stage63-standards.test.mjs", gap: null },
+  "capability:sharp-edge-bounds": { mechanism: "docs/ops/stage63-standards.test.mjs", gap: null },
+  "capability:agent-boundaries": { mechanism: "AGENTS.md", gap: null },
   // Implementation quality plane (slice S4, #422): offline advisory
   // characterization only; no PR Gate or production action consumes it.
   "quality:correctness-gate": { mechanism: "docs/ops/stage63-quality.test.mjs", gap: null },
