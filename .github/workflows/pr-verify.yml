@@ -148,6 +148,13 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Explicit and read-only (#445): the workflow default plus issues: read,
+    # which the queue guard needs to read the PR timeline when checking the
+    # owner provenance of owner:queue-exempt. No write grant, ever.
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
     steps:
       # fetch-depth: 0 because the secret scan needs the commit range and
       # the whitespace check needs history back to the base commit.

@@ -22,6 +22,9 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         set -euo pipefail
+        # Deliberately std main, unpinned (#445 AC1): the queue's rules and
+        # its state both live in std, so the guard must be std's current
+        # code; pinning would let this repo enforce stale queue rules.
         base="${STANDARD_BASE_URL:-https://raw.githubusercontent.com/kgsmith19/agent-engineering-standard/main/tools}"
         dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/queue-guard.XXXXXX")"
         for module in queue_core.py queue_store.py work_queue.py; do
