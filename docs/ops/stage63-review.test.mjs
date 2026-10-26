@@ -247,24 +247,24 @@ test("S8 · every frozen spec-critic corpus entry critiques as upstream adjudica
     "the corpus covers all 8 critic classes");
 });
 
-// --- Characterized upstream defects (fixed upstream before the S10 lock bump) --
+// --- Characterized upstream defects (tracked upstream in std#293) ------------
 
-test("S8 · upstream defect is pinned: findings of one rule share one id", () => {
+test("S8 · upstream defect std#293 is pinned: findings of one rule share one id", () => {
   const two = golden.review.review.find((c) => c.label === "two-blockers-share-an-id");
   const ids = reviewDecision(two.request).findings.map((f) => f.id);
   assert.deepEqual(ids, ["p1-block-1", "p1-block-1"],
-    "colliding ids characterized; when the upstream fix lands this pin flips with the S10 bump");
+    "colliding ids characterized; this pin flips with the lock bump that picks up std#293");
   const ambiguous = critiqueSpec({ ...golden.critic.critique[0].spec,
     statements: ["Tenant rows are isolated.", "The account sees data."] });
   assert.deepEqual(ambiguous.findings.map((f) => f.id), ["ambiguous_owner-1", "ambiguous_owner-2"],
     "the sibling spec_critic numbers its findings");
 });
 
-test("S8 · upstream defect is pinned: migration order words match inside other words", () => {
+test("S8 · upstream defect std#293 is pinned: migration order words match inside other words", () => {
   const spec = { ...golden.critic.critique[0].spec, migration_steps: ["add column", "backfill"] };
   for (const text of ["The border is red.", "Runs in the afternoon.", "Both emphases hold."]) {
     assert.deepEqual(critiqueSpec({ ...spec, criteria: [text] }).findings, [],
-      `${JSON.stringify(text)}: the blocker is suppressed fail-open; the pin flips with the S10 bump`);
+      `${JSON.stringify(text)}: the blocker is suppressed fail-open; flips with the lock bump that picks up std#293`);
   }
   assert.deepEqual(critiqueSpec({ ...spec, criteria: ["A replay returns the receipt."] }).findings.map((f) => f.rule),
     ["hidden_migration_order"], "without a substring hit the blocker fires");
