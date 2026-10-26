@@ -139,6 +139,21 @@ test("S7 · repr escapes exactly what Python's str.isprintable() rejects, up to 
   assert.equal(pythonSemantics.repr("\ud800"), "'\\ud800'", "a lone surrogate escapes like Python's");
 });
 
+// The golden file is written with sorted keys, so each value is replayed with
+// reversed key insertion order: the port must sort, not trust the input order.
+const reversedKeys = (value) => (value && typeof value === "object" && !Array.isArray(value)
+  ? Object.fromEntries(Object.entries(value).reverse().map(([k, v]) => [k, reversedKeys(v)]))
+  : value);
+
+test("S7 · json.dumps forms match Python, sort_keys in code-point order", () => {
+  for (const c of golden.json_dumps) {
+    const { sort_keys: sortKeys = false, separators, ensure_ascii: ensureAscii = true, indent = null } = c.options;
+    const options = { sortKeys, ensureAscii, indent, ...(separators ? { separators } : {}) };
+    assert.equal(pythonSemantics.jsonDumps(c.value, options), c.dumps, c.label);
+    assert.equal(pythonSemantics.jsonDumps(reversedKeys(c.value), options), c.dumps, `${c.label} (reversed keys)`);
+  }
+});
+
 test("S7 · sorting compares code points like Python, not UTF-16 units", () => {
   assert.deepEqual(["\u{1F600}", "\uffff", "a"].sort(pythonSemantics.compareCodePoints), ["a", "\uffff", "\u{1F600}"]);
   assert.deepEqual(["\u{1F600}", "\uffff"].sort(), ["\u{1F600}", "\uffff"], "the JS default differs, so the comparator matters");

@@ -466,6 +466,19 @@ def whitespace_table():
     return ["%04X" % code for code in range(0x110000) if chr(code).isspace()]
 
 
+def json_dumps_cases():
+    """json.dumps forms the ports rely on: sort_keys orders by code point."""
+    value = {"\uffff": 1, "\U0001F600": [True, None], "a": {"z": "\u00e9", "B": "\x7f"}}
+    forms = [
+        ("sorted-ascii", {"sort_keys": True}),
+        ("sorted-compact", {"sort_keys": True, "separators": (",", ":")}),
+        ("sorted-unicode-indent", {"sort_keys": True, "ensure_ascii": False, "indent": 2}),
+    ]
+    return [{"label": label, "value": value, "options": {k: list(v) if isinstance(v, tuple) else v
+                                                         for k, v in options.items()},
+             "dumps": json.dumps(value, **options)} for label, options in forms]
+
+
 def render(golden):
     """Sections of cases, one case per line (same layout as the S5/S6 goldens)."""
     def dumps(value):
@@ -479,7 +492,8 @@ def render(golden):
              '"_python":%s' % dumps(golden["_python"]),
              '"casefold":%s' % dumps(golden["casefold"]),
              '"whitespace":%s' % dumps(golden["whitespace"]),
-             '"unicode":%s' % dumps(golden["unicode"])]
+             '"unicode":%s' % dumps(golden["unicode"]),
+             '"json_dumps":%s' % dumps(golden["json_dumps"])]
     for section in ("route", "receipt", "capability", "corpus"):
         parts = []
         for key in sorted(golden[section]):
@@ -500,6 +514,7 @@ def main():
         "_generator": "docs/ops/stage63-standards-golden.py",
         "_python": "%d.%d" % sys.version_info[:2],
         "casefold": casefold_table(),
+        "json_dumps": json_dumps_cases(),
         "whitespace": whitespace_table(),
         # repr() escapes exactly the code points str.isprintable() rejects; the
         # Unicode database version decides which are still unassigned (Cn).

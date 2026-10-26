@@ -384,7 +384,7 @@ const pyJsonDumps = (value, {
   const options = { sortKeys, indent, ensureAscii, separators };
   const entries = Array.isArray(value)
     ? value.map((item) => pyJsonDumps(item, options, level + 1))
-    : (sortKeys ? Object.keys(value).sort() : Object.keys(value))
+    : (sortKeys ? pySorted(Object.keys(value)) : Object.keys(value))
       .map((key) => `${pyJsonString(key, ensureAscii)}${separators[1]}${pyJsonDumps(value[key], options, level + 1)}`);
   const [open, close] = Array.isArray(value) ? ["[", "]"] : ["{", "}"];
   if (entries.length === 0) return open + close;
@@ -948,6 +948,7 @@ const scalarExcerpt = (item, keys, fallback) => {
 
 export const pythonSemantics = Object.freeze({
   strip: pyStrip, foldAscii: pyFoldAscii, compareCodePoints: pyCompareCodePoints, repr: pyRepr,
+  jsonDumps: pyJsonDumps,
 });
 
 // --- Frozen contract: tools/standards_route.py (Stage 52) ---
