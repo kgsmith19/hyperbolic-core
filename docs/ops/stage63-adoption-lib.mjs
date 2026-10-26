@@ -942,6 +942,54 @@ const pySortedPlain = (values) => {
   if (kinds.size !== 1 || kinds.has(null)) throw pyTypeError("'<' not supported between these instances");
   return kinds.has("str") ? pySorted(values) : [...values].sort((a, b) => Number(a) - Number(b));
 };
+// == over JSON plain data: bool is an int, containers compare by value, a
+// missing key (undefined) is None.
+const pyIsNumeric = (value) => typeof value === "number" || typeof value === "boolean";
+const pyEquals = (left, right) => {
+  if (pyIsNumeric(left) && pyIsNumeric(right)) return Number(left) === Number(right);
+  const a = left ?? null;
+  const b = right ?? null;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return a === b;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) return a.length === b.length && a.every((item, i) => pyEquals(item, b[i]));
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => hasKey(b, key) && pyEquals(a[key], b[key]));
+};
+// value in (tuple, ...): membership by ==, so no hashing is involved.
+const pyIn = (value, members) => members.some((member) => pyEquals(value, member));
+// dict.get(key): None when absent.
+const pyGetNone = (mapping, key) => (hasKey(mapping, key) ? mapping[key] : null);
+// for item in value: a str yields code points, a dict its keys; None, int and
+// bool are not iterable.
+const pyIterate = (value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") return [...value];
+  if (isMapping(value)) return Object.keys(value);
+  throw pyTypeError(`'${pyTypeName(value)}' object is not iterable`);
+};
+// for item in (value or []).
+const pyIterOr = (value) => pyIterate(pyBool(value) ? value : []);
+// set(left) == set(right): a list or dict member is unhashable (TypeError,
+// left first); scalars hash by ==, so 1, 1.0 and True are one member.
+const pySetEqual = (left, right) => {
+  for (const member of [...left, ...right]) {
+    if (member !== null && typeof member === "object") throw pyTypeError(`unhashable type: '${pyTypeName(member)}'`);
+  }
+  return left.every((member) => pyIn(member, right)) && right.every((member) => pyIn(member, left));
+};
+// The validate_finding shared by the five-key finding modules (Stage 57, 59a).
+const validateFiveKeyFinding = (finding, rules, ruleSet) => {
+  if (!isMapping(finding)) return [`finding must be a mapping of plain data, not ${pyTypeName(finding)}`];
+  const repairs = ["id", "rule", "finding", "severity", "excerpt"].filter((key) => !hasKey(finding, key))
+    .map((key) => `finding is missing required key ${pyRepr(key)}`);
+  if (hasKey(finding, "rule") && !rules.includes(finding.rule)) {
+    repairs.push(`finding rule ${pyRepr(finding.rule)} is not a frozen ${ruleSet}`);
+  }
+  if (hasKey(finding, "severity") && !["blocker", "major", "minor"].includes(finding.severity)) {
+    repairs.push(`finding severity ${pyRepr(finding.severity)} must be blocker|major|minor`);
+  }
+  return repairs;
+};
 // re.IGNORECASE against an ASCII pattern: ASCII letters fold to lower case, and
 // so do the four non-ASCII code points CPython also matches against an ASCII
 // letter (dotted capital I, dotless i, long s, Kelvin sign). Matching a
@@ -1478,16 +1526,7 @@ export function reviewFingerprint(citations, verdict, head) {
 
 // Mirrors independent_review.validate_finding: repair strings, empty means valid.
 export function validateReviewFinding(finding) {
-  if (!isMapping(finding)) return [`finding must be a mapping of plain data, not ${pyTypeName(finding)}`];
-  const repairs = REVIEW_FINDING_FIELDS.filter((key) => !hasKey(finding, key))
-    .map((key) => `finding is missing required key ${pyRepr(key)}`);
-  if (hasKey(finding, "rule") && !REVIEW_RULES.includes(finding.rule)) {
-    repairs.push(`finding rule ${pyRepr(finding.rule)} is not a frozen Stage 59a review rule`);
-  }
-  if (hasKey(finding, "severity") && !REVIEW_SEVERITIES.includes(finding.severity)) {
-    repairs.push(`finding severity ${pyRepr(finding.severity)} must be blocker|major|minor`);
-  }
-  return repairs;
+  return validateFiveKeyFinding(finding, REVIEW_RULES, "Stage 59a review rule");
 }
 
 // --- Frozen contract: tools/spec_critic.py (Stage 28) ---
@@ -1699,6 +1738,360 @@ export function validateCritiqueFinding(finding) {
   return repairs;
 }
 
+// --- Frozen contract: tools/gate_compliance.py (Stage 57) ---
+// The read-only Standards Compliance lane: it reports PASS / FAIL to the one
+// final aggregator, which stays the sole required check.
+const LANE_VERDICTS = ["PASS", "FAIL"];
+const LANE_RULE_VERDICTS = Object.freeze({
+  "missing-receipt": "FAIL", "stale-route": "FAIL", "adapter-degraded": "FAIL", "mold-violation": "FAIL",
+  "self-certify": "FAIL", "compact-valid": "PASS", "lane-skipped": "FAIL", "head-moved": "FAIL",
+});
+const LANE_RULES = Object.keys(LANE_RULE_VERDICTS);
+const LANE_PROFILES = ["simple", "monorepo"];
+
+// Mirrors gate_compliance.clean_observation: one fully evidenced R2 lane, a fresh copy per call.
+export function cleanLaneObservation() {
+  const head = "a".repeat(40);
+  return {
+    pr: "PR-1", profile: "simple", tests_green: true, receipt_present: true, route_fresh: true,
+    adapter_healthy: true, mold_authorized: true, policy_pr: false, self_certified: false, risk: "R2",
+    receipt_valid: true, lane_present: true, evidence_head: head, live_head: head,
+  };
+}
+
+const normalizeLaneObservation = (observation) => {
+  const raw = isMapping(observation) ? observation : {};
+  const flag = (key, fallback) => pyBool(pyGet(raw, key, fallback));
+  return {
+    pr: pyStrAny(pyGet(raw, "pr", "")),
+    profile: pyOrStrAny(raw, "profile"),
+    tests_green: flag("tests_green", false),
+    receipt_present: flag("receipt_present", false),
+    route_fresh: flag("route_fresh", true),
+    adapter_healthy: flag("adapter_healthy", true),
+    mold_authorized: flag("mold_authorized", true),
+    policy_pr: flag("policy_pr", false),
+    self_certified: flag("self_certified", false),
+    risk: pyOrStrAny(raw, "risk"),
+    receipt_valid: flag("receipt_valid", true),
+    lane_present: flag("lane_present", true),
+    evidence_head: pyOrStrAny(raw, "evidence_head"),
+    live_head: pyOrStrAny(raw, "live_head"),
+  };
+};
+
+// Mirrors gate_compliance.evaluate: one lane observation to PASS / FAIL, first hit decides.
+// Upstream reads the excerpt from the normalized item, so "head" never names it.
+export function evaluateComplianceLane(observation) {
+  const item = normalizeLaneObservation(observation);
+  const tag = scalarExcerpt(item, ["pr", "head", "profile"], "(lane)");
+  const decide = (rule, finding, severity = "major") => ({
+    verdict: LANE_RULE_VERDICTS[rule], rule, findings: [continuityFinding(rule, finding, tag, severity)],
+  });
+  if (item.tests_green && !item.receipt_present) {
+    return decide("missing-receipt", "product tests green but no Standards Context Receipt: FAIL until the receipt lands",
+      "blocker");
+  }
+  if (!item.route_fresh) return decide("stale-route", "route stale after path expansion: FAIL and re-route");
+  if (!item.adapter_healthy) return decide("adapter-degraded", "adapter DEGRADED: FAIL until the adapter is healthy");
+  if (!item.mold_authorized) return decide("mold-violation", "unauthorized Mold write: FAIL", "blocker");
+  if (item.policy_pr && item.self_certified) {
+    return decide("self-certify", "policy-PR self-certifying its own control-plane change: FAIL", "blocker");
+  }
+  // Checked before lane-skipped and head-moved upstream (pinned defect).
+  if (["R0", "R1", ""].includes(item.risk) && item.receipt_present && item.receipt_valid && item.route_fresh) {
+    return decide("compact-valid", "low-risk valid compact work: PASS without theater", "minor");
+  }
+  if (!item.lane_present) {
+    return decide("lane-skipped", "compliance lane missing/skipped: FAIL (the lane never silently absents)", "blocker");
+  }
+  if (item.evidence_head && item.live_head && item.evidence_head !== item.live_head) {
+    return decide("head-moved", "exact head moved since evidence: FAIL and re-verify at the live head", "blocker");
+  }
+  if (!item.receipt_present || !item.receipt_valid) {
+    return decide("missing-receipt", "standards evidence missing or invalid: FAIL", "blocker");
+  }
+  return { verdict: "PASS", rule: "compact-valid",
+    findings: [continuityFinding("compact-valid", "fully evidenced lane: PASS to the aggregator", tag, "minor")] };
+}
+
+// Mirrors gate_compliance.validate_finding: repair strings, empty means valid.
+export function validateLaneFinding(finding) {
+  return validateFiveKeyFinding(finding, LANE_RULES, "Stage 57 lane rule");
+}
+
+// --- Frozen contract: tools/tracker_pipeline_gate.py (T05) ---
+// GitHub YAML is the authoritative rendering; these checks never replace it.
+const TPG_TRACKER_CONTRACT = ["atomic-claim", "one-writer-per-slice", "close-by-merge-receipt"];
+const TPG_PIPELINE_CONTRACT = [
+  "staged-execution", "required-check-aggregation", "metadata-only-merge-policy", "review-result-delivery",
+  "artifact-upload",
+];
+const TPG_GATE_CONTRACT = [
+  "always-run-aggregator", "exact-success", "exact-head", "summary", "sole-required-check", "owner-bypass-only",
+];
+const TPG_EXACT_SUCCESS_ONLY = ["success"];
+const TPG_NON_SUCCESS_CONCLUSIONS = ["failure", "cancelled", "skipped", "neutral"];
+const TPG_AUTHORITATIVE_RENDERING = "github-yaml";
+const TPG_MERGE_POLICY_FORBIDDEN_STEPS = ["checkout", "download-artifact", "shell"];
+const TPG_REVIEW_REQUIRED_INPUTS = ["builder_provider_family", "reviewer_provider_family", "reviewer_model"];
+const TPG_GITHUB_HARNESSES = ["github", "github-actions", "github-yaml"];
+
+// Mirrors tracker_pipeline_gate.check_tracker_claim: one writer, one slice, one tracker.
+export function checkTrackerClaim(claim) {
+  if (!isMapping(claim)) return [`tracker claim must be a mapping, not ${pyTypeName(claim)}`];
+  const violations = [];
+  const writers = pyGetNone(claim, "writers");
+  if (!Array.isArray(writers) || writers.length !== 1) {
+    violations.push(`atomic claim requires exactly one writer per slice, found ${pyRepr(writers)}`);
+  }
+  if (!pyBool(pyGetNone(claim, "slice"))) violations.push("atomic claim requires a slice identifier");
+  if (pyBool(pyGetNone(claim, "second_tracker"))) violations.push("second tracker forbidden: one claim, fail if exists");
+  return violations;
+}
+
+// Mirrors tracker_pipeline_gate.check_gate_aggregation: exact-success, exact head, summary.
+// A record without tested_sha or head_sha skips exact-head upstream (pinned defect).
+export function checkGateAggregation(results) {
+  if (!isMapping(results)) return ["gate results must be a mapping of job to conclusion"];
+  const jobs = pyGetNone(results, "jobs");
+  if (!isMapping(jobs) || Object.keys(jobs).length === 0) return ["gate requires a non-empty jobs mapping"];
+  const violations = [];
+  for (const job of pySorted(Object.keys(jobs))) {
+    if (!pyIn(jobs[job], TPG_EXACT_SUCCESS_ONLY)) {
+      violations.push(`job ${job} concluded ${pyRepr(jobs[job])}: exact-success only (rejecting failure, cancelled, skipped, neutral, or missing)`);
+    }
+  }
+  const tested = pyGetNone(results, "tested_sha");
+  const head = pyGetNone(results, "head_sha");
+  if (tested !== null && head !== null && !pyEquals(tested, head)) {
+    violations.push(`stale tested SHA: tested ${pyStrAny(tested)} != head ${pyStrAny(head)}; a fresh run gates the new head`);
+  }
+  if (pyGetNone(results, "summary") !== true) violations.push("gate must publish a concise summary");
+  return violations;
+}
+
+// Mirrors tracker_pipeline_gate.check_render_sync: needs == EXPECTED_JOBS as sets, no stubs.
+export function checkRenderSync(render) {
+  if (!isMapping(render)) return ["render must be a mapping of needs, expected, stubs"];
+  const needs = pyGetNone(render, "needs");
+  const expected = pyGetNone(render, "expected_jobs");
+  if (!Array.isArray(needs) || !Array.isArray(expected)) return ["render needs and expected_jobs must be lists"];
+  const violations = [];
+  if (!pySetEqual(needs, expected)) {
+    violations.push(`needs ${pyRepr(pySortedPlain(needs))} != EXPECTED_JOBS ${pyRepr(pySortedPlain(expected))}: deleted jobs leave both, never one`);
+  }
+  for (const stub of pyIterOr(pyGetNone(render, "stubs"))) {
+    violations.push(`stub forbidden: edition-off job ${pyRepr(stub)} must be deleted from the render, never an empty success`);
+  }
+  return violations;
+}
+
+// Mirrors tracker_pipeline_gate.check_review_ownership: skip by not calling; once called, fail closed.
+export function checkReviewOwnership(review) {
+  if (!isMapping(review)) return ["review record must be a mapping"];
+  if (pyGetNone(review, "called") !== true) return [];
+  const violations = TPG_REVIEW_REQUIRED_INPUTS.filter((name) => !pyBool(pyGetNone(review, name)))
+    .map((name) => `review called with empty ${pyRepr(name)}: fail closed, never empty success`);
+  const builder = pyGetNone(review, "builder_provider_family");
+  const reviewer = pyGetNone(review, "reviewer_provider_family");
+  if (pyBool(builder) && pyBool(reviewer) && pyEquals(builder, reviewer)) {
+    violations.push(`reviewer provider family ${pyRepr(reviewer)} must differ from the builder's ${pyRepr(builder)}`);
+  }
+  if (pyBool(pyGetNone(review, "paths_filter"))) {
+    violations.push("paths filter forbidden on the review workflow: an unreported required check blocks the merge forever");
+  }
+  return violations;
+}
+
+// Mirrors tracker_pipeline_gate.check_merge_policy_metadata: metadata-only, exact mirror, never required.
+export function checkMergePolicyMetadata(policy) {
+  if (!isMapping(policy)) return ["merge-policy record must be a mapping"];
+  const violations = [];
+  for (const step of pyIterOr(pyGetNone(policy, "steps"))) {
+    if (pyIn(step, TPG_MERGE_POLICY_FORBIDDEN_STEPS)) {
+      violations.push(`merge policy is metadata-only: ${pyRepr(step)} step forbidden (no checkout/download/shell)`);
+    }
+  }
+  if (pyGetNone(policy, "mirror_equivalent") !== true) {
+    violations.push("owner_label_authorized mirror diverged from tools/standardctl.py: metadata-only decisions need the exact mirror");
+  }
+  if (pyGetNone(policy, "required") === true) {
+    violations.push("merge policy must never be a required check: the final aggregator gate is the sole required check");
+  }
+  return violations;
+}
+
+// Mirrors tracker_pipeline_gate.check_rendering_docs_only: any non-GitHub rendering is docs-only.
+export function checkRenderingDocsOnly(rendering) {
+  if (!isMapping(rendering)) return ["rendering record must be a mapping"];
+  const harness = pyGetNone(rendering, "harness");
+  if (pyIn(harness, TPG_GITHUB_HARNESSES)) return [];
+  const violations = [];
+  if (!pyEquals(pyGetNone(rendering, "kind"), "docs")) {
+    violations.push(`second live rendering forbidden for harness ${pyRepr(harness)}: Azure/other renderings are docs-only`);
+  }
+  if (pyBool(pyGetNone(rendering, "live_yaml"))) {
+    violations.push("live Azure YAML artifact forbidden: docs-only, no second shipped rendering");
+  }
+  return violations;
+}
+
+// The tracker_pipeline_gate clean_* builders, a fresh copy per call.
+export const cleanTrackerClaim = () => ({ writers: ["builder"], slice: "issue-202" });
+export function cleanGateResults(jobs = null) {
+  const defaults = Object.fromEntries(["setup", "policy", "lint", "security", "tests", "evidence", "llm_review"]
+    .map((job) => [job, "success"]));
+  return { jobs: { ...(jobs ?? defaults) }, tested_sha: "head-1", head_sha: "head-1", summary: true };
+}
+export function cleanGateRender() {
+  const jobs = ["setup", "policy", "lint", "security", "tests", "evidence"];
+  return { needs: [...jobs], expected_jobs: [...jobs], stubs: [] };
+}
+export function cleanReviewRecord({ uncalled = false } = {}) {
+  if (uncalled) return { called: false };
+  return {
+    called: true, builder_provider_family: "anthropic", reviewer_provider_family: "openai",
+    reviewer_model: "reviewer-model", reviewer_credential: "present", paths_filter: null,
+  };
+}
+export const cleanMergePolicy = () => ({ steps: ["reconcile", "comment"], mirror_equivalent: true, required: false });
+export const cleanRendering = () => ({ harness: "azure", kind: "docs", live_yaml: false });
+
+// --- Frozen contract: tools/completion_receipts.py (T20) ---
+const RECEIPT_STATES = ["MERGED", "CLEANED", "CLEANUP_PENDING", "RECOVERY_REQUIRED", "EXCLUDED"];
+
+// Mirrors completion_receipts.check_merged_receipt. Any truthy pr_state is
+// accepted upstream (pinned defect: GitHub's test-merge SHA).
+export function checkMergedReceipt(receipt) {
+  if (!isMapping(receipt)) return ["merged receipt must be a mapping"];
+  if (pyBool(pyGetNone(receipt, "local_only"))) {
+    return ["MERGED from local-only evidence refused: remote merge truth (PR state + merge commit via API) only"];
+  }
+  if (!pyBool(pyGetNone(receipt, "pr_state")) || !pyBool(pyGetNone(receipt, "merge_commit"))) {
+    return ["MERGED needs PR state + merge commit via API"];
+  }
+  return [];
+}
+
+// Mirrors completion_receipts.check_cleaned_receipt: CLEANED only with a cleanup receipt.
+export function checkCleanedReceipt(receipt, cleanupReceipt) {
+  if (!isMapping(receipt)) return ["cleaned receipt must be a mapping"];
+  const state = pyGetNone(receipt, "state");
+  if (pyIn(state, ["CLEANUP_PENDING", "RECOVERY_REQUIRED"])) return [];
+  if (pyEquals(state, "CLEANED") && !pyBool(cleanupReceipt ?? null)) return ["CLEANED without a #214 cleanup receipt forbidden"];
+  if (!pyIn(state, RECEIPT_STATES)) return [`unknown receipt state ${pyRepr(state)}`];
+  return [];
+}
+
+// Mirrors completion_receipts.check_exclusion. Upstream spells the close
+// reason "not-planned"; GitHub's is "not_planned" (pinned defect).
+export function checkExclusion(item) {
+  if (!isMapping(item)) return ["exclusion item must be a mapping"];
+  const violations = [];
+  const counted = pyBool(pyGetNone(item, "counted_delivered"));
+  if (pyBool(pyGetNone(item, "excluded"))) {
+    if (!pyBool(pyGetNone(item, "rationale_url"))) violations.push("exclusion needs a rationale URL");
+    if (counted) violations.push("excluded item counted delivered: excluded is never delivered");
+  }
+  const reason = pyGetNone(item, "close_reason");
+  if (pyIn(reason, ["duplicate", "not-planned"]) && counted) {
+    violations.push(`${pyStrAny(reason)} closes are excluded, never delivered`);
+  }
+  return violations;
+}
+
+// Mirrors completion_receipts.check_parent_gate: every required child settled, plus integration proof.
+export function checkParentGate(parent) {
+  if (!isMapping(parent)) return ["parent record must be a mapping"];
+  const children = pyGetNone(parent, "children");
+  if (!pyBool(pyGetNone(parent, "closing"))) return [];
+  const violations = [];
+  for (const child of pyIterOr(children)) {
+    if (!isMapping(child)) {
+      violations.push("child record must be a mapping");
+      continue;
+    }
+    const state = pyGetNone(child, "state");
+    if (!pyIn(state, ["MERGED", "CLEANED", "EXCLUDED"])) {
+      violations.push(`parent close refused: required child ${pyRepr(pyGet(child, "id", "?"))} is ${pyRepr(state)} (need MERGED/CLEANED/EXCLUDED)`);
+    }
+  }
+  if (!pyBool(pyGetNone(parent, "integration_proof"))) {
+    violations.push("parent close refused: child counts alone never close a parent; parent integration proof required");
+  }
+  return violations;
+}
+
+// Mirrors completion_receipts.check_duplicate_noop: a replay neither counts nor effects.
+export function checkDuplicateNoop(first, replay) {
+  if (!isMapping(first) || !isMapping(replay)) return ["receipt events must be mappings"];
+  const violations = [];
+  const delta = pyGet(replay, "count_delta", 0);
+  if (!pyEquals(delta, 0)) violations.push(`duplicate replay double-counts: delta ${pyRepr(delta)} (want 0)`);
+  if (pyBool(pyGetNone(replay, "second_effect"))) violations.push("duplicate replay re-effects: idempotent no-op required");
+  return violations;
+}
+
+// Mirrors completion_receipts.check_membership_race: a race refuses visibly.
+export function checkMembershipRace(close) {
+  if (!isMapping(close)) return ["close record must be a mapping"];
+  const changed = pyBool(pyGetNone(close, "membership_changed"));
+  const outcome = pyGetNone(close, "outcome");
+  const violations = [];
+  if (changed && pyEquals(outcome, "closed")) {
+    violations.push("membership race silently succeeded: close must refuse and re-evaluate");
+  }
+  if (changed && !pyIn(outcome, ["refused", "re-evaluate", "closed"])) {
+    violations.push(`race outcome ${pyRepr(outcome)} is not a visible refuse/re-evaluate`);
+  }
+  return violations;
+}
+
+// Mirrors completion_receipts.check_tracker_math: completed comes only from merged-child receipts.
+export function checkTrackerMath(counts) {
+  if (!isMapping(counts)) return ["tracker counts must be a mapping"];
+  const violations = [];
+  const receipts = pyGet(counts, "merged_child_receipts", 0);
+  const completed = pyGet(counts, "completed", 0);
+  if (!pyEquals(completed, receipts)) {
+    violations.push(`tracker math wrong: completed ${pyRepr(completed)} != merged-child receipts ${pyRepr(receipts)}`);
+  }
+  if (pyBool(pyGetNone(counts, "counts_excluded_delivered"))) {
+    violations.push("tracker counts excluded as delivered: excluded is never delivered");
+  }
+  return violations;
+}
+
+// --- standardctl.owner_label_authorized (the mirror the merge-policy contract requires) ---
+// True iff the latest "labeled" event for label is by ownerLogin and no later
+// "unlabeled" removed it. A non-mapping event raises, as event.get() does.
+export function ownerLabelAuthorized(events, label, ownerLogin) {
+  let authorized = false;
+  for (const event of pyIterate(events)) {
+    if (!isMapping(event)) {
+      const error = new Error(`'${pyTypeName(event)}' object has no attribute 'get'`);
+      error.name = "AttributeError";
+      throw error;
+    }
+    const labelValue = pyGetNone(event, "label");
+    const labelObj = pyBool(labelValue) ? labelValue : {};
+    const named = isMapping(labelObj) ? pyGetNone(labelObj, "name") : null;
+    const name = pyBool(named) ? named : pyGetNone(event, "label_name");
+    if (!pyEquals(name, label)) continue;
+    const kind = pyGetNone(event, "event");
+    if (pyEquals(kind, "labeled")) {
+      const actorValue = pyGetNone(event, "actor");
+      const actor = pyBool(actorValue) ? actorValue : {};
+      const login = isMapping(actor) ? pyGetNone(actor, "login") : null;
+      authorized = pyEquals(pyBool(login) ? login : pyGetNone(event, "actor_login"), ownerLogin);
+    } else if (pyEquals(kind, "unlabeled")) {
+      authorized = false;
+    }
+  }
+  return authorized;
+}
+
 export const FROZEN = {
   repo_map: {
     PLANES: REPO_MAP_PLANES,
@@ -1855,10 +2248,31 @@ export const FROZEN = {
     MEASURE_UNITS: CRITIC_MEASURE_UNITS,
     DEFAULTS: CRITIC_DEFAULTS,
   },
+  gate_compliance: {
+    VERDICTS: LANE_VERDICTS,
+    SEVERITIES: ["blocker", "major", "minor"],
+    FINDING_FIELDS: ["id", "rule", "finding", "severity", "excerpt"],
+    RULES: LANE_RULES,
+    RULE_VERDICTS: LANE_RULE_VERDICTS,
+    PROFILES: LANE_PROFILES,
+  },
+  tracker_pipeline_gate: {
+    TRACKER_CONTRACT: TPG_TRACKER_CONTRACT,
+    PIPELINE_CONTRACT: TPG_PIPELINE_CONTRACT,
+    GATE_CONTRACT: TPG_GATE_CONTRACT,
+    EXACT_SUCCESS_ONLY: TPG_EXACT_SUCCESS_ONLY,
+    NON_SUCCESS_CONCLUSIONS: TPG_NON_SUCCESS_CONCLUSIONS,
+    AUTHORITATIVE_RENDERING: TPG_AUTHORITATIVE_RENDERING,
+    MERGE_POLICY_FORBIDDEN_STEPS: TPG_MERGE_POLICY_FORBIDDEN_STEPS,
+    REVIEW_REQUIRED_INPUTS: TPG_REVIEW_REQUIRED_INPUTS,
+  },
+  completion_receipts: {
+    RECEIPT_STATES,
+  },
 };
 
 export function provenance() {
-  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py + tools/standards_route.py + tools/standards_receipt.py + tools/capability_compiler.py + tools/independent_review.py + tools/spec_critic.py @9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
+  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py + tools/standards_route.py + tools/standards_receipt.py + tools/capability_compiler.py + tools/independent_review.py + tools/spec_critic.py + tools/gate_compliance.py + tools/tracker_pipeline_gate.py + tools/completion_receipts.py + tools/standardctl.py @9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
 }
 
 // Slices S2–S10 extend ADOPTION with their own rows; S1 owns context-rules.
@@ -1925,6 +2339,16 @@ export const ADOPTION = {
   "review:remediation-contract": { mechanism: "docs/ops/stage63-review.test.mjs", gap: null },
   "review:spec-critic": { mechanism: "docs/ops/stage63-review.test.mjs", gap: null },
   "review:live-lane-deltas": { mechanism: "docs/ops/stage59b-review-adoption-lib.mjs", gap: null },
+  // Gate/evidence plane (slice S9, #427): the Stage 57 compliance lane, the T05
+  // gate/tracker/merge-policy contracts and the T20 close receipts,
+  // characterized against golden Python output and the frozen corpora, and
+  // bound to the executed PR Gate and issue-close sweep. hyperbolic-core's PR
+  // Gate is also its merge orchestrator, so the "merge policy is never a
+  // required check" rule is a disclosed delta, pinned both ways.
+  "gate:compliance-lane": { mechanism: "docs/ops/stage63-gate.test.mjs", gap: null },
+  "gate:aggregator-contract": { mechanism: ".github/workflows/pr-verify.yml", gap: null },
+  "gate:merge-policy-delta": { mechanism: ".github/workflows/pr-verify.yml", gap: null },
+  "evidence:close-receipts": { mechanism: ".github/workflows/issue-close-sweep.yml", gap: null },
   // Implementation quality plane (slice S4, #422): offline advisory
   // characterization only; no PR Gate or production action consumes it.
   "quality:correctness-gate": { mechanism: "docs/ops/stage63-quality.test.mjs", gap: null },
