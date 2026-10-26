@@ -321,7 +321,17 @@ const pyGetStr = (item, key) => (key in item ? pyStr(item[key]) : ""); // str(d.
 const pyOrStr = (item, key) => (pyBool(item[key]) ? pyStr(item[key]) : ""); // str(d.get(k, "") or "")
 const pyList = (value) => (Array.isArray(value) ? [...value] : []);
 const pySlice = (text, n) => [...text].slice(0, n).join("");
-const pyRepr = (text) => {
+// repr() of JSON plain data: str quoting rules, None/True/False, list and dict forms.
+const pyRepr = (value) => {
+  if (typeof value !== "string") {
+    if (value === null || value === undefined || typeof value === "boolean") return pyStr(value);
+    if (Array.isArray(value)) return `[${value.map(pyRepr).join(", ")}]`;
+    if (typeof value === "object") {
+      return `{${Object.entries(value).map(([key, item]) => `${pyRepr(key)}: ${pyRepr(item)}`).join(", ")}}`;
+    }
+    return String(value);
+  }
+  const text = value;
   const quote = text.includes("'") && !text.includes('"') ? '"' : "'";
   const body = [...text].map((ch) => {
     const code = ch.codePointAt(0);
@@ -563,6 +573,307 @@ export function renderCapsule(capsule) {
   return `${pyJsonDumps(clean, { sortKeys: true, indent: 2, ensureAscii: false })}\n`;
 }
 
+// --- Frozen contract: extension profiles (slice S6, #424) ---
+// tools/mcp_profile.py (Stage 21b), tools/extensions_registry.py and
+// tools/profile_compiler.py (Stage 20b). Offline characterization only; the
+// oracle is stage63-profiles-golden.json, computed by the upstream Python at
+// the pinned SHA. profile_compiler's JIT body activation is not ported: bodies
+// live in agent-extensions, which owns that half.
+const MCP_SERVER_FIELDS = [
+  "name", "transport", "endpoint", "capabilities", "kind", "schema_bytes", "idempotent",
+  "activated_at", "ttl_seconds",
+];
+const MCP_TRANSPORTS = ["stdio", "http"];
+const MCP_KINDS = ["read", "write"];
+const MCP_PHASES = ["research", "task"];
+const MCP_TRANSPORT_KEYS = Object.freeze({ claude: "url", codex: "serverUrl", antigravity: "serverUrl", local: "url" });
+const MCP_EGRESS_ALLOWLIST = ["localhost", "127.0.0.1", "github.com", "api.anthropic.com"];
+const MCP_SECRET_MARKERS = [
+  ["sk-ant-", "anthropic"], ["sk-", "api key"], ["xoxb-", "slack token"], ["xoxp-", "slack token"],
+  ["ghp_", "github token"], ["AKIA", "aws access key"], ["AIza", "google api key"],
+];
+const MCP_ADVISORY_LIMITS = Object.freeze({ active_max: 2, candidate_max: 5, pilot_cap: 12, schema_bytes_max: 64 * 1024 });
+const REGISTRY_RESERVED_KEYS = ["adapters", "profile"];
+const REGISTRY_REQUIRED = ["catalog", "profile", "lock"];
+const DESCRIPTOR_FIELDS = [
+  "name", "semantic_id", "description", "body_bytes", "body_tokens_est", "dependencies",
+  "body_digest", "source_path",
+];
+const PROCESS_PLUS_DOMAIN_BUDGET = 2;
+
+const isMapping = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const hasKey = (mapping, key) => Object.prototype.hasOwnProperty.call(mapping, key);
+const pyGet = (mapping, key, fallback) => (hasKey(mapping, key) ? mapping[key] : fallback);
+const pyIsInt = (value) => Number.isInteger(value);
+const pyInt = (value) => (typeof value === "boolean" ? Number(value) : Math.trunc(Number(value)));
+const pyLen = (text) => [...text].length;
+const pyIter = (value) => {
+  if (!pyBool(value)) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") return [...value];
+  return Object.keys(value);
+};
+// datetime.fromisoformat for the ISO shapes the activation stamp uses; a
+// value without an offset is UTC, as mcp_profile assumes.
+const pyIsoTimestamp = (text) => {
+  const match = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?))?([+-]\d{2}:\d{2})?$/.exec(text);
+  if (!match) return null;
+  const millis = Date.parse(`${match[1]}T${match[2] ?? "00:00"}${match[3] ?? "+00:00"}`);
+  return Number.isNaN(millis) ? null : millis / 1000;
+};
+
+// Mirrors mcp_profile.validate_server: repairs against the Stage 21a McpServer schema.
+const validateMcpServer = (server) => {
+  const repairs = [];
+  const name = pyRepr(pyGet(server, "name", "<unnamed>"));
+  for (const field of MCP_SERVER_FIELDS) {
+    if (!hasKey(server, field)) repairs.push(`server ${name} missing required field ${pyRepr(field)}`);
+  }
+  const { transport, kind } = server;
+  if (transport !== undefined && transport !== null && !MCP_TRANSPORTS.includes(transport)) {
+    repairs.push(`server ${name}: transport must be one of ${pyRepr(MCP_TRANSPORTS)}, got ${pyRepr(transport)}`);
+  }
+  if (kind !== undefined && kind !== null && !MCP_KINDS.includes(kind)) {
+    repairs.push(`server ${name}: kind must be one of ${pyRepr(MCP_KINDS)}, got ${pyRepr(kind)}`);
+  }
+  if (hasKey(server, "schema_bytes") && !pyIsInt(server.schema_bytes)) {
+    repairs.push(`server ${name}: schema_bytes must be a non-negative int`);
+  }
+  return repairs;
+};
+
+const mcpEgressFinding = (endpoint) => {
+  if (!endpoint || endpoint.startsWith("stdio:") || endpoint.startsWith("cmd:")) return "";
+  const host = endpoint.replaceAll("https://", "").replaceAll("http://", "").split("/")[0].split(":")[0];
+  if (MCP_EGRESS_ALLOWLIST.includes(host)) return "";
+  return `egress violation: ${pyRepr(host)} not in allowlist ${pyRepr(MCP_EGRESS_ALLOWLIST)}`;
+};
+
+const mcpStaleFinding = (server) => {
+  const activatedAt = pyGet(server, "activated_at", null);
+  const ttlSeconds = pyGet(server, "ttl_seconds", null);
+  if (!pyBool(activatedAt) || !pyBool(ttlSeconds)) return "";
+  const activated = pyIsoTimestamp(pyStr(activatedAt).replaceAll("Z", "+00:00"));
+  if (activated === null) return `server ${pyRepr(pyGet(server, "name", null))}: unparseable activated_at`;
+  if (activated + pyInt(ttlSeconds) <= Date.now() / 1000) {
+    return `stale session: server ${pyRepr(pyGet(server, "name", null))} activation expired`;
+  }
+  return "";
+};
+
+const mcpAdvisoryWarnings = (active, candidates) => {
+  const warnings = [];
+  if (active.length > MCP_ADVISORY_LIMITS.active_max) {
+    warnings.push(`advisory: ${active.length} active servers over pilot suggestion ${MCP_ADVISORY_LIMITS.active_max}`);
+  }
+  if (candidates.length > MCP_ADVISORY_LIMITS.candidate_max) {
+    warnings.push(`advisory: ${candidates.length} candidate servers over pilot suggestion ${MCP_ADVISORY_LIMITS.candidate_max}`);
+  }
+  if (active.length + candidates.length > MCP_ADVISORY_LIMITS.pilot_cap) {
+    warnings.push("advisory: pilot cap exceeded (informational only)");
+  }
+  for (const server of [...active, ...candidates]) {
+    if (pyInt(pyGet(server, "schema_bytes", 0)) > MCP_ADVISORY_LIMITS.schema_bytes_max) {
+      warnings.push(`advisory: server ${pyRepr(pyGet(server, "name", null))} has a giant schema; consider pruning`);
+    }
+  }
+  const unused = candidates.filter((server) => !pyBool(server.capabilities)).map((server) => pyStr(pyGet(server, "name", null)));
+  if (unused.length > 0) warnings.push(`advisory: unused capabilities: ${pyRepr(unused)}`);
+  return warnings;
+};
+
+// Mirrors mcp_profile.validate_activation: findings refuse (fail closed); warnings are advisory.
+export function validateActivation(server, profile) {
+  const findings = validateMcpServer(server);
+  const name = pyStr(pyGet(server, "name", "<unnamed>"));
+  const capabilities = pyIter(pyGet(server, "capabilities", []));
+  const endpoint = pyStr(pyGet(server, "endpoint", ""));
+  const scanned = `${endpoint} ${capabilities.map(pyStr).join(" ")}`;
+  const secret = MCP_SECRET_MARKERS.find(([marker]) => scanned.includes(marker));
+  if (secret) findings.push(`secret exposure in ${name}: ${secret[0]} ${secret[1]}…`);
+  const egress = mcpEgressFinding(endpoint);
+  if (egress) findings.push(`${name}: ${egress}`);
+  const phase = pyStr(pyGet(profile, "phase", "task"));
+  if (phase === "research" && server.kind === "write") {
+    findings.push(`write connector ${name} activated during research phase`);
+  }
+  if (server.kind === "write" && !pyBool(server.idempotent)) {
+    findings.push(`write connector ${name} must declare idempotency`);
+  }
+  const stale = mcpStaleFinding(server);
+  if (stale) findings.push(stale);
+  const native = pyIter(profile.native_capabilities);
+  for (const capability of capabilities) {
+    if (native.includes(capability)) {
+      findings.push(`duplicate capability ${pyStr(capability)}: native tool wins over MCP ${name}`);
+    }
+  }
+  const provider = pyStr(pyGet(profile, "provider", "local"));
+  if (server.transport === "http" && !hasKey(MCP_TRANSPORT_KEYS, provider)) {
+    findings.push(`server ${name}: no MCP transport key for provider ${pyRepr(provider)}`);
+  }
+  const warnings = mcpAdvisoryWarnings(pyIter(profile.active_servers), pyIter(profile.candidate_servers));
+  return { findings, warnings };
+}
+
+// Mirrors mcp_profile.validate_profile: zero standing servers is binding; counts stay advisory.
+export function validateMcpProfile(profile) {
+  const findings = [];
+  const standing = pyIter(profile.standing_servers);
+  if (standing.length > 0) {
+    findings.push(`standing_servers must be empty: zero standing MCPs is the default posture (${standing.length} declared)`);
+  }
+  const active = pyIter(profile.active_servers);
+  const candidates = pyIter(profile.candidate_servers);
+  for (const server of [...active, ...candidates]) findings.push(...validateMcpServer(server));
+  return { findings, warnings: mcpAdvisoryWarnings(active, candidates) };
+}
+
+const REGISTRY_MISMATCH = "catalog/profile/lock mismatch";
+
+// Mirrors extensions_registry.check_registry_set: catalog, profile and lock agree as a set.
+export function checkRegistrySet(registry) {
+  if (!isMapping(registry)) return ["registry record must be a mapping"];
+  const violations = Object.keys(registry).sort().filter((key) => !REGISTRY_REQUIRED.includes(key))
+    .map((key) => `unknown registry key ${pyRepr(key)}: catalog/profile/lock only`);
+  const { catalog, profile, lock } = registry;
+  if (!Array.isArray(catalog)) return [...violations, "catalog must be a list of entries"];
+  if (!Array.isArray(profile)) return [...violations, "profile must be a list of selections"];
+  if (!isMapping(lock)) return [...violations, "lock must be a mapping of pins"];
+  const catalogIds = new Set(catalog.filter(isMapping).map((entry) => pyStr(pyGet(entry, "id", ""))));
+  for (const selection of profile) {
+    const name = pyStr(selection);
+    if (!catalogIds.has(name)) violations.push(`profile selects ${pyRepr(name)} missing from the catalog: ${REGISTRY_MISMATCH}`);
+    if (!hasKey(lock, name)) violations.push(`profile selects ${pyRepr(name)} missing from the lock: ${REGISTRY_MISMATCH}`);
+  }
+  const selected = new Set(profile.map(pyStr));
+  for (const pinned of Object.keys(lock).sort()) {
+    if (!selected.has(pinned)) violations.push(`lock pins ${pyRepr(pinned)} with no profile selection: ${REGISTRY_MISMATCH}`);
+  }
+  return violations;
+}
+
+// Mirrors extensions_registry.check_capability_exists.
+export function checkCapabilityExists(selection, registry) {
+  if (!isMapping(selection)) return ["capability selection must be a mapping"];
+  const declared = new Set((Array.isArray(registry) ? registry : isMapping(registry) ? Object.keys(registry) : []).map(pyStr));
+  const violations = [];
+  for (const key of Object.keys(selection).sort()) {
+    for (const capability of Array.isArray(selection[key]) ? selection[key] : [selection[key]]) {
+      if (!declared.has(pyStr(capability))) {
+        violations.push(`edition/flag ${pyRepr(key)} references unknown capability ${pyRepr(capability)}: it must exist in the capability registry`);
+      }
+    }
+  }
+  return violations;
+}
+
+// Mirrors extensions_registry.check_reserved_keys (Q8: adapters/profile stay reserved).
+export function checkReservedKeys(config) {
+  if (!isMapping(config)) return ["config must be a mapping"];
+  return REGISTRY_RESERVED_KEYS.filter((key) => hasKey(config, key))
+    .map((key) => `reserved key ${pyRepr(key)} is not a schema key; it is held for a later stage (Q8)`);
+}
+
+const SUPPLY_MARKERS = ["extensions/adapters/", "extensions/supply/", "Canonical/sibling-contract.json"];
+
+// Mirrors extensions_registry.check_supply_boundary: supply-side files belong in agent-extensions.
+export function checkSupplyBoundary(files) {
+  if (!Array.isArray(files)) return ["diff file list must be a list"];
+  return files.filter((file) => SUPPLY_MARKERS.some((marker) => pyStr(file).startsWith(marker)))
+    .map((file) => `supply-side file ${pyRepr(file)} belongs in the linked native agent-extensions issue, not this repo`);
+}
+
+const DESCRIPTOR_STRING_FIELDS = ["name", "semantic_id", "description", "body_digest", "source_path"];
+const DESCRIPTOR_INT_FIELDS = ["body_bytes", "body_tokens_est"];
+const SEMANTIC_ID_RE = /^capability\.[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+// Mirrors profile_compiler.validate_descriptor (Stage 20a descriptor shape).
+export function validateDescriptor(record) {
+  const repairs = DESCRIPTOR_FIELDS.filter((field) => !hasKey(record, field))
+    .map((field) => `descriptor missing ${pyRepr(field)}: Stage 20a descriptors need it`);
+  for (const field of DESCRIPTOR_STRING_FIELDS) {
+    if (hasKey(record, field) && !pyOrStr(record, field).trim()) {
+      repairs.push(`descriptor field ${pyRepr(field)} must be a non-empty string`);
+    }
+  }
+  for (const field of DESCRIPTOR_INT_FIELDS) {
+    if (hasKey(record, field) && (!pyIsInt(record[field]) || record[field] < 0)) {
+      repairs.push(`descriptor field ${pyRepr(field)} must be a non-negative int`);
+    }
+  }
+  if (hasKey(record, "dependencies") && !Array.isArray(record.dependencies)) {
+    repairs.push("descriptor field 'dependencies' must be a list");
+  }
+  const semanticId = pyGetStr(record, "semantic_id");
+  if (semanticId && !SEMANTIC_ID_RE.test(semanticId)) repairs.push(`semantic_id ${pyRepr(semanticId)} is not capability.<slug>`);
+  return repairs;
+}
+
+// Mirrors profile_compiler.select_candidates: metadata-first selection, never bodies.
+export function selectCandidates(descriptors, capabilities, { budgetTokens = null, provider = "claude" } = {}) {
+  const table = new Map();
+  for (const descriptor of descriptors) {
+    const semanticId = pyGetStr(descriptor, "semantic_id");
+    if (table.has(semanticId)) throw new Error(`duplicate capability in discovery index: ${semanticId}`);
+    table.set(semanticId, descriptor);
+  }
+  const discoveryTokens = Math.floor(descriptors.reduce((chars, d) => chars
+    + pyLen(pyGetStr(d, "name")) + pyLen(pyGetStr(d, "semantic_id")) + pyLen(pyGetStr(d, "description")), 0) / 4);
+  const findings = [];
+  const resolved = [];
+  const resolve = (request) => {
+    if (table.has(request)) return [request];
+    if (table.has(`capability.${request}`)) return [`capability.${request}`];
+    const term = request.toLowerCase();
+    return [...table].filter(([, d]) => pyGetStr(d, "name").toLowerCase().includes(term)
+      || pyGetStr(d, "description").toLowerCase().includes(term)).map(([id]) => id).sort();
+  };
+  for (const request of capabilities) {
+    const candidates = resolve(pyStr(request));
+    if (candidates.length === 0) {
+      findings.push(`capability ${pyRepr(request)} absent from discovery index: repair the catalog or correct the request`);
+    } else if (candidates.length > 1) {
+      findings.push(`ambiguous descriptor ${pyRepr(request)}: ${candidates.length} candidates (${candidates.join(", ")}); disambiguate by semantic ID`);
+    } else if (!resolved.includes(candidates[0])) {
+      resolved.push(candidates[0]);
+    }
+  }
+  if (resolved.length > PROCESS_PLUS_DOMAIN_BUDGET) {
+    findings.push(`${resolved.length} top-level capabilities exceed the one-process-plus-one-domain policy (${PROCESS_PLUS_DOMAIN_BUDGET}); narrow the selection`);
+  }
+  let selected = [];
+  const visited = new Set();
+  const trail = [];
+  const expand = (semanticId) => {
+    if (visited.has(semanticId)) {
+      if (trail.includes(semanticId)) {
+        findings.push(`dependency cycle detected: ${[...trail, semanticId].join(" -> ")}; refuse binding`);
+      }
+      return;
+    }
+    visited.add(semanticId);
+    trail.push(semanticId);
+    const descriptor = table.get(semanticId);
+    for (const dep of pyIter(pyGet(descriptor, "dependencies", []))) {
+      const depId = pyStr(dep).startsWith("capability.") ? dep : `capability.${pyStr(dep)}`;
+      if (table.has(depId)) expand(depId);
+    }
+    trail.pop();
+    selected.push({ ...descriptor });
+  };
+  for (const semanticId of resolved) expand(semanticId);
+  const bodyTokensEst = selected.reduce((sum, d) => sum + pyInt(pyGet(d, "body_tokens_est", 0)), 0);
+  if (budgetTokens !== null && budgetTokens !== undefined && bodyTokensEst > budgetTokens) {
+    findings.push(`over budget: activated set needs ${bodyTokensEst} tokens, budget is ${budgetTokens}; selection rejected, not truncated`);
+    selected = [];
+  }
+  return {
+    selected, findings, discovery_tokens: discoveryTokens, body_tokens_est: bodyTokensEst,
+    provider, requested: [...capabilities], ok: findings.length === 0,
+  };
+}
+
 export const FROZEN = {
   repo_map: {
     PLANES: REPO_MAP_PLANES,
@@ -648,10 +959,30 @@ export const FROZEN = {
     BUDGET_BYTES_MAX: CAPSULE_BYTES_MAX,
     CAPSULE_FIELDS,
   },
+  mcp_profile: {
+    SIBLING_CONTRACT_VERSION: "1.0.0",
+    SERVER_FIELDS: MCP_SERVER_FIELDS,
+    TRANSPORTS: MCP_TRANSPORTS,
+    KINDS: MCP_KINDS,
+    PHASES: MCP_PHASES,
+    TRANSPORT_KEYS: MCP_TRANSPORT_KEYS,
+    EGRESS_ALLOWLIST: MCP_EGRESS_ALLOWLIST,
+    SECRET_MARKERS: MCP_SECRET_MARKERS,
+    ADVISORY_LIMITS: MCP_ADVISORY_LIMITS,
+  },
+  extensions_registry: {
+    RESERVED_KEYS: REGISTRY_RESERVED_KEYS,
+    REGISTRY_REQUIRED,
+  },
+  profile_compiler: {
+    CONTRACT_VERSION: "1.0.0",
+    DESCRIPTOR_FIELDS,
+    PROCESS_PLUS_DOMAIN_BUDGET,
+  },
 };
 
 export function provenance() {
-  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py @ 9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
+  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py @9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
 }
 
 // Slices S2–S10 extend ADOPTION with their own rows; S1 owns context-rules.
@@ -693,6 +1024,15 @@ export const ADOPTION = {
   "molds:portfolio-router": { mechanism: "docs/ops/stage63-molds.test.mjs", gap: null },
   "molds:release-substrate": { mechanism: "docs/ops/stage61b-release-proofbed-lib.mjs", gap: null },
   "molds:proof-invalidation": { mechanism: null, gap: 428 },
+  // Extension plane (slice S6, #424): the profile contracts are characterized
+  // against golden Python output and bound to hyperbolic-core's live surface
+  // (LifeOS read-only stdio MCP server, project.yaml, tracked tree); the
+  // capability layer itself is provisioned machine-globally at session start.
+  "extensions:mcp-zero-standing": { mechanism: "docs/ops/stage63-profiles.test.mjs", gap: null },
+  "extensions:mcp-activation-gate": { mechanism: "docs/ops/stage63-profiles.test.mjs", gap: null },
+  "extensions:registry-consistency": { mechanism: "docs/ops/stage63-profiles.test.mjs", gap: null },
+  "extensions:profile-selection": { mechanism: "docs/ops/stage63-profiles.test.mjs", gap: null },
+  "extensions:provisioning": { mechanism: ".claude/hooks/session-start.sh", gap: null },
   // Implementation quality plane (slice S4, #422): offline advisory
   // characterization only; no PR Gate or production action consumes it.
   "quality:correctness-gate": { mechanism: "docs/ops/stage63-quality.test.mjs", gap: null },
