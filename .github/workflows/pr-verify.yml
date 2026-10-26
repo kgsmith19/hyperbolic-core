@@ -148,6 +148,13 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Explicit and read-only (#445): the workflow default plus issues: read,
+    # which the queue guard needs to read the PR timeline when checking the
+    # owner provenance of owner:queue-exempt. No write grant, ever.
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
     steps:
       # fetch-depth: 0 because the secret scan needs the commit range and
       # the whitespace check needs history back to the base commit.
@@ -179,6 +186,14 @@ jobs:
         uses: ./.github/actions/verify-pr-description
         with:
           pr_number: ${{ github.event.pull_request.number }}
+          github_token: ${{ github.token }}
+
+      # Queue v2 guard (#445): the PR must close only Issues on the active
+      # item of the owner's execution queue (or carry the owner-applied
+      # owner:queue-exempt label). Rule and code live in std.
+      - name: Standards · Work matches the execution queue
+        uses: ./.github/actions/verify-queue-guard
+        with:
           github_token: ${{ github.token }}
 
       - name: Standards · Confirm tested SHA matches the live PR head
