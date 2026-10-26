@@ -181,6 +181,14 @@ jobs:
           pr_number: ${{ github.event.pull_request.number }}
           github_token: ${{ github.token }}
 
+      # Queue v2 guard (#445): the PR must close only Issues on the active
+      # item of the owner's execution queue (or carry the owner-applied
+      # owner:queue-exempt label). Rule and code live in std.
+      - name: Standards · Work matches the execution queue
+        uses: ./.github/actions/verify-queue-guard
+        with:
+          github_token: ${{ github.token }}
+
       - name: Standards · Confirm tested SHA matches the live PR head
         shell: bash
         env:

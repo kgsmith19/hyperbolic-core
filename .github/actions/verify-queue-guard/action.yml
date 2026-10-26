@@ -1,0 +1,30 @@
+name: Verify Queue Guard
+description: >-
+  Queue v2 guard (#445; kgsmith19/agent-engineering-standard#287): every
+  Issue this pull request closes must belong to the ACTIVE item of the
+  owner's execution queue (agent-engineering-standard#277), unless the
+  owner applied owner:queue-exempt. The rule is std's
+  `tools/work_queue.py guard --pr-event`; this action fetches std's three
+  queue modules from std main (the queue's own home) and runs it isolated.
+  Read-only, and fails closed: an unreachable std or queue fails the lane.
+
+inputs:
+  github_token:
+    description: Read-only job token, for the queue Issue and the PR timeline (owner provenance of the exemption label).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Queue guard · Every closing Issue is on the active queue item
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        set -euo pipefail
+        base="${STANDARD_BASE_URL:-https://raw.githubusercontent.com/kgsmith19/agent-engineering-standard/main/tools}"
+        dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/queue-guard.XXXXXX")"
+        for module in queue_core.py queue_store.py work_queue.py; do
+          curl --fail --silent --show-error --max-time 30 -o "$dir/$module" "$base/$module"
+        done
+        python3 -I "$dir/work_queue.py" guard --pr-event "$GITHUB_EVENT_PATH"
