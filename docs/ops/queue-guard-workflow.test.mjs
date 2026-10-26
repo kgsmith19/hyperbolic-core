@@ -128,3 +128,18 @@ test("a half-fetched std never runs and fails the lane closed", () => {
   assert.notEqual(partial.status, 0);
   assert.deepEqual(partial.calls, []);
 });
+
+test("Repository Standards holds an explicit read-only token: contents, pull-requests and issues read, nothing else", () => {
+  // The guard reads the queue Issue and, for owner:queue-exempt, the PR
+  // timeline (issues: read). Its token must provably be read-only.
+  const standards = job("repository-standards");
+  const block = standards.split("\n    permissions:\n")[1];
+  assert.ok(block, "repository-standards declares job-level permissions");
+  const grants = {};
+  for (const line of block.split("\n")) {
+    if (!/^      [a-z-]+:/.test(line)) break;
+    const [key, value] = line.trim().split(":").map((part) => part.trim());
+    grants[key] = value.split("#")[0].trim();
+  }
+  assert.deepEqual(grants, { contents: "read", "pull-requests": "read", issues: "read" });
+});
