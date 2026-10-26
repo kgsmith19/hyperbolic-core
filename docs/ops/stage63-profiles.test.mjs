@@ -163,17 +163,40 @@ test("S6 · golden corpus exercises every fail-closed class", () => {
 
 const lifeosServer = path.join(root, "apps/lifeos/backend/src/mcp_server/server.py");
 
-function lifeosDeclaration() {
-  const source = readFileSync(lifeosServer, "utf8");
-  const registered = source.match(/for _tool in \(([^)]*)\):\s*\n(?:.*\n)*?\s*mcp\.tool\(\)\(_tool\)/);
+// The registered tool names, from the single `for _tool in (...): ... mcp.tool()(_tool)`
+// loop. Line endings and layout (one-line or multi-line loop, comments between
+// the tuple and the registration) do not matter; a second registration path does.
+function parseLifeosTools(source) {
+  const text = source.replace(/\r\n?/g, "\n");
+  const registered = /for\s+_tool\s+in\s+\(([^)]*)\)\s*:[\s\S]*?\bmcp\.tool\(\)\(_tool\)/.exec(text);
   assert.ok(registered, "LifeOS MCP tools must be registered through the single read-only tuple loop");
-  assert.equal((source.match(/mcp\.tool\(/g) ?? []).length, 1, "a second registration path would bypass this binding");
+  assert.equal((text.match(/\bmcp\.tool\(/g) ?? []).length, 1, "a second registration path would bypass this binding");
+  return registered[1].split(",").map((name) => name.replace(/#.*$/gm, "").trim()).filter(Boolean);
+}
+
+function lifeosDeclaration() {
   return {
     name: "lifeos", transport: "stdio", endpoint: "stdio:python -m mcp_server",
-    capabilities: registered[1].split(",").map((name) => name.trim()).filter(Boolean),
+    capabilities: parseLifeosTools(readFileSync(lifeosServer, "utf8")),
     kind: "read", schema_bytes: 0, idempotent: true, activated_at: null, ttl_seconds: null,
   };
 }
+
+test("S6 · the LifeOS tool extractor is layout-independent and refuses a second registration path", () => {
+  const tools = ["list_types", "find", "get_entity", "history"];
+  const variants = {
+    multiline: "for _tool in (list_types, find, get_entity, history):\n    _tool.__doc__ = D[_tool.__name__]\n    mcp.tool()(_tool)\n",
+    crlf: "for _tool in (list_types, find, get_entity, history):\r\n    mcp.tool()(_tool)\r\n",
+    oneLine: "for _tool in (list_types, find, get_entity, history): mcp.tool()(_tool)\n",
+    commented: "for _tool in (\n    list_types,  # read\n    find,\n    get_entity,\n    history,\n):\n    # register\n    mcp.tool()(_tool)\n",
+  };
+  for (const [label, source] of Object.entries(variants)) {
+    assert.deepEqual(parseLifeosTools(source), tools, label);
+  }
+  assert.throws(() => parseLifeosTools(`${variants.multiline}mcp.tool()(write_entity)\n`),
+    /second registration path/);
+  assert.throws(() => parseLifeosTools("mcp.tool()(list_types)\n"), /single read-only tuple loop/);
+});
 
 test("S6 · the LifeOS MCP server is a read-only stdio connector that activates even in research", () => {
   const declaration = lifeosDeclaration();
@@ -198,7 +221,9 @@ test("S6 · the tracked tree holds no supply-side files and no committed capabil
   const listing = spawnSync("git", ["ls-files"], { cwd: root, encoding: "utf8" });
   assert.equal(listing.status, 0, listing.stderr);
   const files = listing.stdout.split("\n").filter(Boolean);
-  assert.ok(files.length > 100, "git ls-files must list the real tree");
+  for (const known of ["project.yaml", "apps/lifeos/backend/src/mcp_server/server.py", "docs/ops/stage63-profiles.test.mjs"]) {
+    assert.ok(files.includes(known), `git ls-files must list the real tree (missing ${known})`);
+  }
   assert.deepEqual(checkSupplyBoundary(files), []);
   assert.deepEqual(files.filter((file) => /(^|\/)extensions\.lock$/.test(file)), [],
     "the catalog/profile/lock triple lives in agent-extensions, provisioned machine-globally");
