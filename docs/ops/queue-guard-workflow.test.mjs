@@ -81,9 +81,9 @@ function stubDir(code, modules = MODULES) {
     const body = module === "work_queue.py"
       ? [
           "import os, sys",
+          "open(os.environ['STUB_LOG'], 'a').write(' '.join(sys.argv[1:]) + '\\n')",
           "sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))",
           "import queue_core, queue_store",
-          "open(os.environ['STUB_LOG'], 'a').write(' '.join(sys.argv[1:]) + '\\n')",
           `print('guard stub exit ${code}')`,
           `sys.exit(${code})`,
         ].join("\n")
