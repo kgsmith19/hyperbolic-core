@@ -144,6 +144,16 @@ for (const c of golden.owner_label) {
   });
 }
 
+// The golden file is written with sorted keys, so the gate cases are replayed
+// with reversed key insertion order: the port must sort jobs, not trust order.
+const reversedKeys = (value) => (value && typeof value === "object" && !Array.isArray(value)
+  ? Object.fromEntries(Object.entries(value).reverse().map(([k, v]) => [k, reversedKeys(v)]))
+  : value);
+
+test("S9 · checkGateAggregation reports failing jobs in sorted order whatever the input key order", () => {
+  for (const c of golden.tpg.gate) replay(() => checkGateAggregation(reversedKeys(c.record)), c.result);
+});
+
 test("S9 · port inputs are never mutated", () => {
   const records = [
     ...golden.lane.evaluate.map((c) => [evaluateComplianceLane, c.observation]),
