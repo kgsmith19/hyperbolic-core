@@ -25,9 +25,12 @@ fi
 
 # Workspace dependencies, exactly as CI installs them (npm ci keeps the
 # lockfile untouched). Skipped when node_modules matches the current lock.
-lock_sha="$(sha256sum "$ROOT/package-lock.json" 2>/dev/null | cut -d' ' -f1)"
+# Hashed with node, which npm ci needs anyway, so no extra tool is assumed.
+lock_sha="$(node -e 'process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"))' "$ROOT/package-lock.json" 2>/dev/null)"
 stamp="$ROOT/node_modules/.session-start-lock-sha256"
-if [ -n "$lock_sha" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$lock_sha" ]; then
+if ! command -v node >/dev/null 2>&1; then
+  echo "deps: skipped (node is not installed)"
+elif [ -n "$lock_sha" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$lock_sha" ]; then
   echo "deps: present (node_modules matches package-lock.json)"
 elif (cd "$ROOT" && npm ci --no-audit --no-fund --loglevel=error >/dev/null 2>&1); then
   printf '%s\n' "$lock_sha" > "$stamp"
