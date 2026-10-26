@@ -1,0 +1,1 @@
+Deliberately out-of-order PR: CI proof for #445 AC3. It closes an Issue on a later queue item, so Repository Standards' queue guard must refuse it. Never merged.
