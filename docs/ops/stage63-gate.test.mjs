@@ -216,9 +216,9 @@ for (const [name, checkers, minimum] of [["tracker-pipeline-gate", corpusChecker
   });
 }
 
-// --- Characterized upstream defects (tracked upstream; flipped by the bump that picks up the fix) --
+// --- Characterized upstream defects (tracked upstream in std#294) -------------
 
-test("S9 · upstream defect is pinned: compact-valid PASSes before lane-skipped and head-moved are checked", () => {
+test("S9 · upstream defect std#294 is pinned: compact-valid PASSes before lane-skipped and head-moved are checked", () => {
   const clean = cleanLaneObservation();
   const moved = "b".repeat(40);
   for (const [label, observation] of [
@@ -234,14 +234,14 @@ test("S9 · upstream defect is pinned: compact-valid PASSes before lane-skipped 
   assert.deepEqual(evaluateComplianceLane({ ...clean, live_head: moved }).rule, "head-moved", "R2 fails closed");
 });
 
-test("S9 · upstream defect is pinned: a gate record without tested_sha skips the exact-head rule", () => {
+test("S9 · upstream defect std#294 is pinned: a gate record without tested_sha skips the exact-head rule", () => {
   const { tested_sha: _tested, ...unproven } = cleanGateResults();
   assert.deepEqual(checkGateAggregation({ ...unproven, head_sha: "new" }), [],
     "exact-SHA-equals-head is not proven, yet the gate passes");
   assert.match(checkGateAggregation({ ...cleanGateResults(), tested_sha: "old", head_sha: "new" })[0], /stale tested SHA/);
 });
 
-test("S9 · upstream defect is pinned: MERGED accepts any PR state with a merge commit", () => {
+test("S9 · upstream defect std#294 is pinned: MERGED accepts any PR state with a merge commit", () => {
   // GitHub fills merge_commit_sha with the test-merge commit for open and for
   // closed-unmerged pull requests, so "PR state + merge commit" is not remote
   // merge truth unless the state is checked.
@@ -250,7 +250,7 @@ test("S9 · upstream defect is pinned: MERGED accepts any PR state with a merge 
   }
 });
 
-test("S9 · upstream defect is pinned: an exclusion check misses GitHub's not_planned close reason", () => {
+test("S9 · upstream defect std#294 is pinned: an exclusion check misses GitHub's not_planned close reason", () => {
   assert.deepEqual(checkExclusion({ close_reason: "not_planned", counted_delivered: true }), [],
     "GitHub's state_reason spelling is counted delivered today");
   assert.equal(checkExclusion({ close_reason: "not-planned", counted_delivered: true }).length, 1);
