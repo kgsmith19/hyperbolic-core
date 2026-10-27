@@ -808,6 +808,19 @@ test("an installation with Pull requests write mints contents read + pull-reques
   assert.ok(run.logs.some((line) => /installation 155589128 grants: contents: read, metadata: read, pull_requests: write/.test(line)));
 });
 
+// Issue #440 AC2 sensitivity: the reviewer App token must never carry Contents
+// write, even when the installation grants it. The grants step caps contents at
+// read; a pass-through of the granted level would fail here.
+test("the mint never requests contents write, even when the installation grants it (Issue #440 AC2)", async () => {
+  const run = await runGrants({ grants: { contents: "write", pull_requests: "admin", issues: "write" } });
+  assert.equal(run.outputs.contents, "read", "contents is capped at read whatever the installation grants");
+  assert.equal(run.outputs.pull_requests, "write", "admin is requested as write, never above what posting needs");
+  assert.equal(run.outputs.issues, "write");
+  for (const value of Object.values(run.outputs)) {
+    assert.ok(["read", "write", "true", "false", ""].includes(value), `unexpected requested level ${value}`);
+  }
+});
+
 test("an installation with only Issues write still posts, requesting issues write alone", async () => {
   const run = await runGrants({ grants: { issues: "write", metadata: "read" } });
   assert.deepEqual(run.outputs, { contents: "", pull_requests: "", issues: "write", can_post: "true" });
