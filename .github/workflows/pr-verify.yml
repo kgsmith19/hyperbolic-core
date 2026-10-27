@@ -844,6 +844,41 @@ jobs:
             // issue number or a momentary API blip must not wedge every PR
             // shut, and PR Gate re-evaluates on every subsequent event, so a
             // transient failure does not persist past the run that hit it.
+            // Issue #457: counts the open items in an Issue checklist. A
+            // checkbox group introduced by a "Select exactly one" line (the
+            // template's Risk R0-R3) is ONE choice: complete when exactly one
+            // box is ticked, one unresolved item when none or several are.
+            // Its unticked siblings are never unfinished work. The group is
+            // the run of checkbox lines after the prompt (blank lines before
+            // the first box are skipped); the first non-checkbox line ends it.
+            // Every box outside such a group counts exactly as before.
+            function countOpenChecklistItems(body) {
+              const lines = (body || "").split(/\r?\n/);
+              const anyBox = /^\s*-\s*\[(?:\s?|[xX])\]/;
+              const openBox = /^\s*-\s*\[\s?\]/;
+              let open = 0;
+              for (let i = 0; i < lines.length; i += 1) {
+                if (/select exactly one/i.test(lines[i]) && !anyBox.test(lines[i])) {
+                  let j = i + 1;
+                  while (j < lines.length && lines[j].trim() === "") j += 1;
+                  let items = 0;
+                  let ticked = 0;
+                  while (j < lines.length && anyBox.test(lines[j])) {
+                    items += 1;
+                    if (!openBox.test(lines[j])) ticked += 1;
+                    j += 1;
+                  }
+                  if (items > 0) {
+                    if (ticked !== 1) open += 1;
+                    i = j - 1;
+                  }
+                  continue;
+                }
+                if (openBox.test(lines[i])) open += 1;
+              }
+              return open;
+            }
+
             async function checkLinkedIssueChecklists(pr) {
               const confirmedIssueNumbers = await readConfirmedIssueNumbers(pr.number);
               const issueNumbers = [...new Set([...parseLinkedIssues(pr.body), ...confirmedIssueNumbers])];
@@ -860,7 +895,7 @@ jobs:
                   continue;
                 }
                 if (issue.state !== "open") continue;
-                const uncheckedCount = ((issue.body || "").match(/^\s*-\s*\[\s?\]/gim) || []).length;
+                const uncheckedCount = countOpenChecklistItems(issue.body);
                 if (uncheckedCount > 0) {
                   incomplete.push({ number: issueNumber, uncheckedCount });
                 }
