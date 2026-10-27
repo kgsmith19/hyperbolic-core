@@ -19,7 +19,7 @@ import subprocess
 import sys
 import types
 
-SHA = "9e50c9c3518e5bed2ba93e194cb157a78ee0278d"
+SHA = "516fdb25d091f2f3f467fb48eaee01cb7f805c88"
 MODULES = ("context_rotation", "context_budget", "handoff_acceptance", "capsule")
 
 
