@@ -281,10 +281,13 @@ jobs:
       # installation grants, and GitHub refuses the WHOLE mint (HTTP 422) when
       # any requested permission is missing, so every finding silently posted
       # as github-actions[bot]. This step reads the installation's real grants
-      # with a short-lived App JWT and resolves the smallest posting set the
-      # installation has: contents read when granted, plus pull-requests write
-      # and/or issues write (either one can post a PR comment). When neither
-      # write is granted it names the exact grant to add and the mint is
+      # with a short-lived App JWT and resolves what to request. A PR comment
+      # needs pull-requests write (GitHub refused issues write alone with 403
+      # on #460, Issue #461), so posting requires it; issues write rides along
+      # when granted. Contents follows the grant, read or write (owner,
+      # 2026-10-27: the agents work with contents read and write, and the dev
+      # wake needs contents write). Every level is capped at write. Without
+      # pull-requests write it names the exact grant to add and the mint is
       # skipped, so the visible github-actions[bot] fallback below still
       # posts. Plain fetch, not `github.request`: github-script's auth hook
       # would replace the JWT with GITHUB_TOKEN.
@@ -338,7 +341,8 @@ jobs:
             const canWrite = (name) => granted[name] === "write" || granted[name] === "admin";
             const pullRequests = canWrite("pull_requests") ? "write" : "";
             const issues = canWrite("issues") ? "write" : "";
-            if (!pullRequests && !issues) {
+            const contents = canWrite("contents") ? "write" : granted.contents ? "read" : "";
+            if (!pullRequests) {
               core.warning(
                 `Reviewer App installation ${installation.id} cannot post a pull request comment: it grants ${listed}. ` +
                   'Grant "Pull requests: Read and write" in the App\'s permissions and accept the installation update; ' +
@@ -347,7 +351,7 @@ jobs:
               core.setOutput("can_post", "false");
               return;
             }
-            core.setOutput("contents", granted.contents ? "read" : "");
+            core.setOutput("contents", contents);
             core.setOutput("pull_requests", pullRequests);
             core.setOutput("issues", issues);
             core.setOutput("can_post", "true");
