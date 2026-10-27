@@ -2,7 +2,7 @@
 //
 // S4 RED characterization (Issue #422): implementation-quality semantics
 // from agent-engineering-standard tools/quality_eval.py @
-// 9e50c9c3518e5bed2ba93e194cb157a78ee0278d. This oracle is deliberately
+// 516fdb25d091f2f3f467fb48eaee01cb7f805c88. This oracle is deliberately
 // offline and pure: it characterizes advisory evaluation semantics without
 // changing any PR Gate, workflow, deployment, or production behavior.
 
@@ -24,7 +24,7 @@ test("S4 · dimensions, severities, and finding fields are frozen", async () => 
     "id", "rule", "finding", "severity", "excerpt",
   ]);
   assert.match(provenance(), /tools\/quality_eval\.py/);
-  assert.match(provenance(), /9e50c9c3518e5bed2ba93e194cb157a78ee0278d/);
+  assert.match(provenance(), /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
 });
 
 test("S4 · missing or partial input stays deterministic and defaults to incorrect", async () => {

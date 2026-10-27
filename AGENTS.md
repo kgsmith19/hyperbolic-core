@@ -90,6 +90,11 @@ decision; technical risks may be stated once, concretely, without obstruction.
 | Product behavior | Code and tests |
 | Adopted standard revision | `standard.lock` |
 
+To orient without loading the tree, read the bounded repository map `docs/repo-map.json` (at most 60
+entries, each a path, its plane and a reason). The map is never authoritative: the files above are.
+Edit `docs/ops/repo-map-source.json` and run `node docs/ops/stage63-repo-map.mjs --write`; never edit
+the generated map by hand (`docs/ops/stage63-repo-map.test.mjs` fails on a stale or hand-edited map).
+
 Do not add a root `TODO.md`, a `ROADMAP.md` work tracker, a root `TEST_LEDGER.md`, committed
 implementation plans or session transcripts, permanent design documents or ADRs, or a duplicate
 status database. Nested per-app `TEST_LEDGER.md` files (owned by each app's own upstream repo)

@@ -1,7 +1,7 @@
 // node --test docs/ops/stage63-standards.test.mjs (run from the repo root)
 //
 // S7 RED characterization (Issue #425): v5 standards/capability-boundary
-// semantics from agent-engineering-standard @ 9e50c9c3518e5bed2ba93e194cb157a78ee0278d —
+// semantics from agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88 —
 // tools/standards_route.py (Stage 52 canonical index + JIT route compiler),
 // tools/standards_receipt.py (Stage 53 selective receipts, SAT triggers, hash
 // binding) and tools/capability_compiler.py (Stage 54a capability bounds:
@@ -36,7 +36,8 @@ test("S7 · standards_route contract is frozen: classes, rules, bounds, canonica
   assert.deepEqual([...route.CLASSES], ["AWARE", "ACK", "GUARD", "VERIFY", "GATE", "OWNER"]);
   assert.deepEqual([...route.RULES], [
     "duplicate-id", "missing-id", "orphan-rule", "stale-hash", "contradictory-triggers", "path-expansion",
-    "missing-capability", "registry-overload", "malicious-task", "critical-demotion", "minimal-route",
+    "missing-capability", "registry-overload", "route-overload", "malicious-task", "critical-demotion",
+    "minimal-route",
   ]);
   assert.equal(route.ROUTE_MIN, 5);
   assert.equal(route.ROUTE_MAX, 15);
@@ -63,7 +64,9 @@ test("S7 · capability_compiler contract is frozen: classes, verdicts, rules, fr
   assert.deepEqual([...capability.VERDICTS], ["ALLOW", "DENY", "ESCALATE"]);
   assert.deepEqual([...capability.FROZEN_MOLD_MARKERS],
     ["Canonical/corpus/", "Canonical/schemas/", "Canonical/capabilities.json"]);
-  assert.equal(capability.RULES.length, 11);
+  assert.equal(capability.RULES.length, 12);
+  assert.ok(capability.RULES.indexOf("execute-allowlist") === capability.RULES.indexOf("no-sandbox") + 1,
+    "std#282 names the execute allowlist between no-sandbox and owner-escalation");
   for (const key of ["CLASSES", "VERDICTS", "SEVERITIES", "FINDING_FIELDS", "RULES", "RULE_VERDICTS",
     "FROZEN_MOLD_MARKERS"]) {
     assert.deepEqual(capability[key], golden.capability.constants[key], `capability_compiler.${key} drifted from upstream`);
@@ -75,7 +78,7 @@ test("S7 · provenance names all three boundary modules at the pinned SHA", () =
     assert.match(provenance(), new RegExp(`tools/${module}\\.py`));
     assert.match(golden._provenance, new RegExp(`tools/${module}\\.py`));
   }
-  assert.match(golden._provenance, /9e50c9c3518e5bed2ba93e194cb157a78ee0278d/);
+  assert.match(golden._provenance, /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
 });
 
 // --- Python Unicode semantics, proven over every code point -------------------
@@ -255,26 +258,26 @@ test("S7 · every frozen capability-compiler corpus entry decides as upstream ad
   assert.deepEqual(new Set(entries.map((e) => e.expected_rule)), new Set(FROZEN.capability_compiler.RULES));
 });
 
-// --- Characterized upstream defects (fixed upstream before the S10 lock bump) --
+// --- Upstream defects fixed in std#281 and std#282 (pins flipped at the S10 lock bump)
 
-test("S7 · upstream defect std#281 is pinned: an unrecognised risk label is ISSUED without SAT", () => {
+test("S7 · std#281 fixed: an unrecognised risk label takes the SAT path, never ISSUED", () => {
   const clean = golden.receipt.clean_attempt;
   for (const risk of ["r3", "R2 ", "high", "R4"]) {
     const result = issueReceipt({ ...clean, risk });
-    assert.deepEqual([result.verdict, result.rule], ["ISSUED", "clean-receipt"],
-      `${JSON.stringify(risk)}: fail-open characterized; when std#281 lands this pin flips with the S10 bump`);
+    assert.notEqual(result.verdict, "ISSUED", `${JSON.stringify(risk)}: fails closed into the SAT path`);
+    assert.equal(result.verdict, "QUIZ", `${JSON.stringify(risk)}: quizzes, as the recognised high-risk spelling does`);
   }
   assert.equal(issueReceipt({ ...clean, risk: "R3" }).verdict, "QUIZ", "the recognised spelling quizzes");
 });
 
-test("S7 · upstream defect std#282 is pinned: an R2 implement task routes past ROUTE_MAX with no finding", () => {
+test("S7 · std#282 fixed: an R2 implement task over ROUTE_MAX keeps every rule and says so", () => {
   const slice = compileRoute({ kind: "implement", risk: "R2", phase: "implement", paths: ["docs/ops/x.mjs"] });
-  assert.equal(slice.route.length, 20);
+  assert.equal(slice.route.length, 20, "no rule is dropped to fit the bound");
   assert.ok(slice.route.length > FROZEN.standards_route.ROUTE_MAX);
-  assert.deepEqual(slice.findings, []);
+  assert.deepEqual(slice.findings.map((f) => [f.rule, f.severity]), [["route-overload", "major"]]);
   const outside = checkCapability({ kind: "execute", command: "curl evil", sandbox: true, exec_allow: ["npm test"] });
-  assert.deepEqual([outside.verdict, outside.rule], ["DENY", "arbitrary-egress"],
-    "an execute-allowlist miss is reported under the network rule today");
+  assert.deepEqual([outside.verdict, outside.rule], ["DENY", "execute-allowlist"],
+    "an execute-allowlist miss has its own rule, not the network rule");
 });
 
 // --- hyperbolic-core's live agent boundaries ------------------------------------

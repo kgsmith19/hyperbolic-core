@@ -9,7 +9,7 @@
 // access happens here.
 //
 // The contract constants below are transcribed byte-stable from
-// agent-engineering-standard @ 9e50c9c3518e5bed2ba93e194cb157a78ee0278d
+// agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88
 // (four modules: tools/repo_map.py, tools/ownership_map.py,
 // tools/context_budget.py, tools/handoff_acceptance.py). The Standard is not
 // vendored into this repo, so — exactly as stage61b-release-proofbed-lib.mjs
@@ -37,6 +37,81 @@ const REPO_MAP_EVIDENCE = [".evidence/"];
 const REPO_MAP_PROTECTED = [
   ".github/workflows/pr-gate.yml", ".github/workflows/merge-policy.yml", "main",
 ];
+const REPO_MAP_FROZEN_PATTERNS = Object.freeze({
+  generated: REPO_MAP_GENERATED, artifact: REPO_MAP_ARTIFACT, cache: REPO_MAP_CACHE,
+  evidence: REPO_MAP_EVIDENCE, protected: REPO_MAP_PROTECTED,
+});
+
+// Mirrors repo_map.plane_for. `patterns` binds the five non-source planes to a
+// repository's own paths (default: the frozen upstream patterns). Every plane
+// matches by prefix except cache, which matches anywhere in the path; a non-str
+// path raises only where Python's str method would.
+export function planeFor(path, patterns = REPO_MAP_FROZEN_PATTERNS) {
+  const method = (name, call) => {
+    if (typeof path !== "string") {
+      const error = new Error(`'${pyTypeName(path)}' object has no attribute '${name}'`);
+      error.name = "AttributeError";
+      throw error;
+    }
+    return call();
+  };
+  const starts = (pattern) => method("startswith", () => path.startsWith(pattern));
+  if (patterns.protected.some((pattern) => path === pattern || starts(pattern))) return "protected";
+  if (patterns.evidence.some(starts)) return "evidence";
+  if (patterns.cache.some((pattern) => {
+    if (typeof path !== "string") throw pyTypeError(`argument of type '${pyTypeName(path)}' is not iterable`);
+    return path.includes(pattern);
+  })) return "cache";
+  if (patterns.artifact.some(starts)) return "artifact";
+  if (patterns.generated.some(starts)) return "generated";
+  return "source";
+}
+
+// Mirrors repo_map.build: a bounded map, every path with a reason, each listed
+// once, each in the plane it declares (if it declares one), sorted by path in
+// code point order. Refusals raise ValueError with upstream's message. Unlike
+// upstream, the caller's entries are copied, never mutated.
+export function buildRepoMap(entries, patterns = REPO_MAP_FROZEN_PATTERNS) {
+  const refuse = (message) => {
+    const error = new Error(message);
+    error.name = "ValueError";
+    return error;
+  };
+  if (entries.length > REPO_MAP_BUDGET) {
+    throw refuse(`map holds ${entries.length} entries, over the ${REPO_MAP_BUDGET}-entry budget: narrow the focus envelope instead`);
+  }
+  const seen = new Set();
+  const built = entries.map((entry) => {
+    if (!isMapping(entry)) {
+      const error = new Error(`'${pyTypeName(entry)}' object has no attribute 'get'`);
+      error.name = "AttributeError";
+      throw error;
+    }
+    const path = pyGet(entry, "path", "");
+    if (!pyBool(path)) throw refuse("map entry without a path");
+    if (!pyStrip(pyOrStrAny(entry, "reason"))) throw refuse(`map entry ${pyRepr(path)} has no reason: every path needs one`);
+    if (path !== null && typeof path === "object") throw pyTypeError(`unhashable type: '${pyTypeName(path)}'`);
+    // str and int keys never collide in Python; a bool equals its int.
+    const key = typeof path === "string" ? `s:${path}` : `n:${Number(path)}`;
+    if (seen.has(key)) throw refuse(`cyclic map: ${pyRepr(path)} listed twice`);
+    seen.add(key);
+    const declared = pyGet(entry, "plane", "");
+    const actual = planeFor(path, patterns);
+    if (pyBool(declared) && declared !== actual) {
+      throw refuse(`wrong plane for ${pyRepr(path)}: declared ${pyRepr(declared)}, actual ${pyRepr(actual)}`);
+    }
+    return { ...entry, plane: actual };
+  });
+  return { version: "5.0.0", entries: built.sort((a, b) => pyCompareCodePoints(a.path, b.path)) };
+}
+
+// Mirrors repo_map.validate_edit: null means the edit may proceed.
+export function validateMapEdit(path, plane) {
+  if (plane === "generated") {
+    return `direct generated edit of ${pyRepr(path)} refused: regenerate via the owning tool instead`;
+  }
+  return null;
+}
 
 // --- Frozen contract: tools/ownership_map.py ---
 const OWNERSHIP_INVARIANTS = [
@@ -1042,13 +1117,16 @@ const scalarExcerpt = (item, keys, fallback) => {
 export const pythonSemantics = Object.freeze({
   strip: pyStrip, foldAscii: pyFoldAscii, compareCodePoints: pyCompareCodePoints, repr: pyRepr,
   jsonDumps: pyJsonDumps, lower: pyLower, isWordChar: pyIsWordChar, isDigit: pyIsDigit,
+  // S10 (#428): the str/bool/dict helpers the release-lib ports share.
+  str: pyStr, strAny: pyStrAny, truthy: pyBool, get: pyGet, slice: pySlice, isScalar: isPyScalar,
+  scalarStrs: pyScalarStrs, orStrAny: pyOrStrAny, typeName: pyTypeName, iterate: pyIterate,
 });
 
 // --- Frozen contract: tools/standards_route.py (Stage 52) ---
 const ROUTE_CLASSES = ["AWARE", "ACK", "GUARD", "VERIFY", "GATE", "OWNER"];
 const ROUTE_RULES = [
   "duplicate-id", "missing-id", "orphan-rule", "stale-hash", "contradictory-triggers", "path-expansion",
-  "missing-capability", "registry-overload", "malicious-task", "critical-demotion", "minimal-route",
+  "missing-capability", "registry-overload", "route-overload", "malicious-task", "critical-demotion", "minimal-route",
 ];
 const ROUTE_MIN = 5;
 const ROUTE_MAX = 15;
@@ -1188,6 +1266,11 @@ export function compileRoute(task, { entries = null, index = null } = {}) {
     return refuse("registry-overload",
       `route holds ${sorted.length} rules: the whole registry loaded accidentally; narrow the task`);
   }
+  // std#282: an over-bound route keeps every rule and says so, never drops one to fit.
+  if (sorted.length > ROUTE_MAX) {
+    findings.push(continuityFinding("route-overload",
+      `route holds ${sorted.length} rules: above ROUTE_MAX ${ROUTE_MAX}; every routed rule is kept, so split the task or record why it must stay this large`, tag));
+  }
   if (item.paths.length > 20) {
     findings.push(continuityFinding("path-expansion", `${item.paths.length} paths expand the route: bound the focus envelope`, tag));
   }
@@ -1266,7 +1349,8 @@ export function issueReceipt(attempt) {
       "subagent self-issued receipt is not independent proof: obtain independent acknowledgement", { severity: "blocker" });
   }
   const digest = receiptHash(item.routed, item.acknowledged, item.standard_hash);
-  const triggered = ["R2", "R3"].includes(item.risk) || item.sat_triggers.some((t) => RECEIPT_SAT_TRIGGERS.includes(t));
+  // std#281: any risk label other than R0, R1 or empty is high risk and takes the SAT path.
+  const triggered = !["R0", "R1", ""].includes(item.risk) || item.sat_triggers.some((t) => RECEIPT_SAT_TRIGGERS.includes(t));
   if (["R0", "R1", ""].includes(item.risk) && !triggered) {
     return decide("r0-no-quiz", "R0/R1 receipt issued without a quiz: receipt plus capability/tests suffice",
       { digest, severity: "minor" });
@@ -1286,7 +1370,7 @@ const CAPABILITY_VERDICTS = ["ALLOW", "DENY", "ESCALATE"];
 const CAPABILITY_RULE_VERDICTS = Object.freeze({
   "foreign-read": "DENY", "foreign-write": "DENY", "frozen-mold": "DENY", "direct-main": "DENY",
   "secret-mount": "DENY", "arbitrary-egress": "DENY", "mcp-research-write": "DENY", "no-sandbox": "ESCALATE",
-  "owner-escalation": "ALLOW", "focused-edit": "ALLOW", "test-command": "ALLOW",
+  "execute-allowlist": "DENY", "owner-escalation": "ALLOW", "focused-edit": "ALLOW", "test-command": "ALLOW",
 });
 const CAPABILITY_RULES = Object.keys(CAPABILITY_RULE_VERDICTS);
 const FROZEN_MOLD_MARKERS = ["Canonical/corpus/", "Canonical/schemas/", "Canonical/capabilities.json"];
@@ -1350,7 +1434,7 @@ export function checkCapability(action) {
       if (item.owner_approved) return decide("owner-escalation", "owner-approved escalation: ALLOW with the approval recorded", "minor");
       if (!item.sandbox && !item.wrapper) return decide("no-sandbox", "provider without sandbox nor wrapper: ESCALATE dry-run/report");
       if (!item.exec_allow.includes(item.command)) {
-        return decide("arbitrary-egress", `command ${pyRepr(item.command)} outside the execute allowlist: DENY`);
+        return decide("execute-allowlist", `command ${pyRepr(item.command)} outside the execute allowlist: DENY`);
       }
       return allow;
     default:
@@ -1467,8 +1551,10 @@ export function reviewDecision(request) {
       advisories.push(continuityFinding("p2-advisory", "P2 finding: advisory only", tag, "minor"));
     }
   }
-  if (blockers.length > 0) return { verdict: "BLOCK", rule: "p1-block", findings: blockers };
-  if (advisories.length > 0) return { verdict: "PASS", rule: "p2-advisory", findings: advisories };
+  // std#293: every finding of one rule gets its own id (rule-1, rule-2, ...).
+  const numbered = (findings) => findings.map((finding, index) => ({ ...finding, id: `${finding.rule}-${index + 1}` }));
+  if (blockers.length > 0) return { verdict: "BLOCK", rule: "p1-block", findings: numbered(blockers) };
+  if (advisories.length > 0) return { verdict: "PASS", rule: "p2-advisory", findings: numbered(advisories) };
   return decide("PASS", "clean", "no material finding: PASS", "minor");
 }
 
@@ -1550,8 +1636,9 @@ const CRITIC_IMPLEMENTATION_MARKERS = [
 const CRITIC_OWNERSHIP_KEYWORDS = ["tenant", "multi-tenant", "workspace", "account"];
 const CRITIC_OWNERSHIP_PHRASES = ["owned by", "per-tenant", "per tenant"];
 const CRITIC_NAMED_OWNERS = ["owner", "admin", "member", "accountant", "viewer"];
-// Substring tests upstream, so "border" carries "order" (pinned defect).
+// Whole words upstream since std#293: "border" no longer carries "order".
 const CRITIC_ORDER_WORDS = ["before", "after", "order", "phase"];
+const CRITIC_ORDER_RES = CRITIC_ORDER_WORDS.map((word) => pyWordRe(word));
 // Declared upstream; the timeout check spells its own tests out.
 const CRITIC_TIMEOUT_WORDS = ["timeout", "deadline", "seconds", "second"];
 const CRITIC_MEASURE_UNITS = [
@@ -1668,7 +1755,7 @@ const checkHiddenMigrationOrder = (spec) => {
   const steps = spec.migration_steps;
   if (steps.length <= 1) return [];
   const ordered = [...spec.statements, ...spec.criteria]
-    .some((text) => CRITIC_ORDER_WORDS.some((word) => pyLower(text).includes(word)));
+    .some((text) => CRITIC_ORDER_RES.some((re) => re.test(pyLower(text))));
   if (ordered) return [];
   return [critic("hidden_migration_order", [],
     `hidden migration order: ${steps.length} steps with no before/after/order/phase wording; state the ordering so steps cannot run out of sequence`,
@@ -1798,15 +1885,15 @@ export function evaluateComplianceLane(observation) {
   if (item.policy_pr && item.self_certified) {
     return decide("self-certify", "policy-PR self-certifying its own control-plane change: FAIL", "blocker");
   }
-  // Checked before lane-skipped and head-moved upstream (pinned defect).
-  if (["R0", "R1", ""].includes(item.risk) && item.receipt_present && item.receipt_valid && item.route_fresh) {
-    return decide("compact-valid", "low-risk valid compact work: PASS without theater", "minor");
-  }
   if (!item.lane_present) {
     return decide("lane-skipped", "compliance lane missing/skipped: FAIL (the lane never silently absents)", "blocker");
   }
   if (item.evidence_head && item.live_head && item.evidence_head !== item.live_head) {
     return decide("head-moved", "exact head moved since evidence: FAIL and re-verify at the live head", "blocker");
+  }
+  // std#294: compact-valid is checked after lane-skipped and head-moved, and only R0/R1 are low risk.
+  if (["R0", "R1"].includes(item.risk) && item.receipt_present && item.receipt_valid && item.route_fresh) {
+    return decide("compact-valid", "low-risk valid compact work: PASS without theater", "minor");
   }
   if (!item.receipt_present || !item.receipt_valid) {
     return decide("missing-receipt", "standards evidence missing or invalid: FAIL", "blocker");
@@ -1851,7 +1938,7 @@ export function checkTrackerClaim(claim) {
 }
 
 // Mirrors tracker_pipeline_gate.check_gate_aggregation: exact-success, exact head, summary.
-// A record without tested_sha or head_sha skips exact-head upstream (pinned defect).
+// A record without tested_sha or head_sha leaves the exact head unproven (std#294).
 export function checkGateAggregation(results) {
   if (!isMapping(results)) return ["gate results must be a mapping of job to conclusion"];
   const jobs = pyGetNone(results, "jobs");
@@ -1864,7 +1951,9 @@ export function checkGateAggregation(results) {
   }
   const tested = pyGetNone(results, "tested_sha");
   const head = pyGetNone(results, "head_sha");
-  if (tested !== null && head !== null && !pyEquals(tested, head)) {
+  if (tested === null || head === null) {
+    violations.push("exact head unproven: tested_sha and head_sha are both required");
+  } else if (!pyEquals(tested, head)) {
     violations.push(`stale tested SHA: tested ${pyStrAny(tested)} != head ${pyStrAny(head)}; a fresh run gates the new head`);
   }
   if (pyGetNone(results, "summary") !== true) violations.push("gate must publish a concise summary");
@@ -1961,15 +2050,16 @@ export const cleanRendering = () => ({ harness: "azure", kind: "docs", live_yaml
 // --- Frozen contract: tools/completion_receipts.py (T20) ---
 const RECEIPT_STATES = ["MERGED", "CLEANED", "CLEANUP_PENDING", "RECOVERY_REQUIRED", "EXCLUDED"];
 
-// Mirrors completion_receipts.check_merged_receipt. Any truthy pr_state is
-// accepted upstream (pinned defect: GitHub's test-merge SHA).
+// Mirrors completion_receipts.check_merged_receipt. Only a merged PR state (or
+// merged_at) counts as merged since std#294: a closed PR's test-merge SHA does not.
 export function checkMergedReceipt(receipt) {
   if (!isMapping(receipt)) return ["merged receipt must be a mapping"];
   if (pyBool(pyGetNone(receipt, "local_only"))) {
     return ["MERGED from local-only evidence refused: remote merge truth (PR state + merge commit via API) only"];
   }
-  if (!pyBool(pyGetNone(receipt, "pr_state")) || !pyBool(pyGetNone(receipt, "merge_commit"))) {
-    return ["MERGED needs PR state + merge commit via API"];
+  const merged = pyLower(pyOrStrAny(receipt, "pr_state")) === "merged" || pyBool(pyGetNone(receipt, "merged_at"));
+  if (!merged || !pyBool(pyGetNone(receipt, "merge_commit"))) {
+    return ["MERGED needs a merged PR state (or merged_at) + merge commit via API"];
   }
   return [];
 }
@@ -1984,8 +2074,8 @@ export function checkCleanedReceipt(receipt, cleanupReceipt) {
   return [];
 }
 
-// Mirrors completion_receipts.check_exclusion. Upstream spells the close
-// reason "not-planned"; GitHub's is "not_planned" (pinned defect).
+// Mirrors completion_receipts.check_exclusion. Since std#294 the close reason
+// is matched after "_" becomes "-", so GitHub's "not_planned" is excluded too.
 export function checkExclusion(item) {
   if (!isMapping(item)) return ["exclusion item must be a mapping"];
   const violations = [];
@@ -1994,9 +2084,9 @@ export function checkExclusion(item) {
     if (!pyBool(pyGetNone(item, "rationale_url"))) violations.push("exclusion needs a rationale URL");
     if (counted) violations.push("excluded item counted delivered: excluded is never delivered");
   }
-  const reason = pyGetNone(item, "close_reason");
-  if (pyIn(reason, ["duplicate", "not-planned"]) && counted) {
-    violations.push(`${pyStrAny(reason)} closes are excluded, never delivered`);
+  const reason = pyOrStrAny(item, "close_reason").replaceAll("_", "-");
+  if (["duplicate", "not-planned"].includes(reason) && counted) {
+    violations.push(`${pyStrAny(pyGetNone(item, "close_reason"))} closes are excluded, never delivered`);
   }
   return violations;
 }
@@ -2272,11 +2362,13 @@ export const FROZEN = {
 };
 
 export function provenance() {
-  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py + tools/standards_route.py + tools/standards_receipt.py + tools/capability_compiler.py + tools/independent_review.py + tools/spec_critic.py + tools/gate_compliance.py + tools/tracker_pipeline_gate.py + tools/completion_receipts.py + tools/standardctl.py @9e50c9c3518e5bed2ba93e194cb157a78ee0278d";
+  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py + tools/standards_route.py + tools/standards_receipt.py + tools/capability_compiler.py + tools/independent_review.py + tools/spec_critic.py + tools/gate_compliance.py + tools/tracker_pipeline_gate.py + tools/completion_receipts.py + tools/standardctl.py + tools/release_mold.py + tools/proof_invalidation.py + tools/edition_packaging.py @516fdb25d091f2f3f467fb48eaee01cb7f805c88";
 }
 
 // Slices S2–S10 extend ADOPTION with their own rows; S1 owns context-rules.
-export const GAP_SLICES = [420, 421, 422, 423, 424, 425, 426, 427, 428];
+// Every Stage 63 gap is closed: S10 (#428) grounded the last two rows
+// (molds:proof-invalidation, docs:bounded-map-artifact).
+export const GAP_SLICES = [];
 
 // Each ADOPTION row: exactly one of `mechanism` (real on-disk path, relative
 // to repo root) or `gap` (tracking Stage 63 slice number) must be set.
@@ -2288,7 +2380,7 @@ export const ADOPTION = {
   // Docs plane: contract/proof artifacts that ARE the map.
   "docs:proofbed-family": { mechanism: "docs/ops/stage61b-release-proofbed.test.mjs", gap: null },
   "docs:gate-oracles": { mechanism: "docs/ops/pr-verify-workflow.test.mjs", gap: null },
-  "docs:bounded-map-artifact": { mechanism: null, gap: 420 },
+  "docs:bounded-map-artifact": { mechanism: "docs/repo-map.json", gap: null },
   // Maps plane: live topology and relevance.
   "maps:lane-relevance": { mechanism: ".github/workflows/pr-verify.yml", gap: null },
   "maps:repo-topology": { mechanism: "project.yaml", gap: null },
@@ -2313,7 +2405,12 @@ export const ADOPTION = {
   "molds:qualification-rules": { mechanism: "docs/ops/stage63-molds.test.mjs", gap: null },
   "molds:portfolio-router": { mechanism: "docs/ops/stage63-molds.test.mjs", gap: null },
   "molds:release-substrate": { mechanism: "docs/ops/stage61b-release-proofbed-lib.mjs", gap: null },
-  "molds:proof-invalidation": { mechanism: null, gap: 428 },
+  "molds:proof-invalidation": { mechanism: "docs/ops/stage63-release.test.mjs", gap: null },
+  // Release/runtime plane (slice S10, #428): release_mold's evaluation and the
+  // T10 Full/Lite VERIFY checks, characterized against golden Python output; the
+  // 61b proofbed keeps the release rule names and the release substrate row.
+  "release:verdict-evaluation": { mechanism: "docs/ops/stage63-release.test.mjs", gap: null },
+  "release:edition-verify": { mechanism: "docs/ops/stage63-release.test.mjs", gap: null },
   // Extension plane (slice S6, #424): the profile contracts are characterized
   // against golden Python output and bound to hyperbolic-core's live surface
   // (LifeOS read-only stdio MCP server, project.yaml, tracked tree); the

@@ -1,7 +1,7 @@
 // node --test docs/ops/stage63-gate.test.mjs (run from the repo root)
 //
 // S9 RED characterization (Issue #427): v5 Gate/evidence semantics from
-// agent-engineering-standard @ 9e50c9c3518e5bed2ba93e194cb157a78ee0278d —
+// agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88 —
 // tools/gate_compliance.py (Stage 57: the read-only Standards Compliance lane
 // feeding the single final aggregator), tools/tracker_pipeline_gate.py (T05:
 // tracker, pipeline and gate contracts with GitHub YAML as the authoritative
@@ -74,7 +74,7 @@ test("S9 · provenance names every Gate/evidence module at the pinned SHA", () =
     assert.match(provenance(), new RegExp(`tools/${module}\\.py`));
     assert.match(golden._provenance, new RegExp(`tools/${module}\\.py`));
   }
-  assert.match(golden._provenance, /9e50c9c3518e5bed2ba93e194cb157a78ee0278d/);
+  assert.match(golden._provenance, /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
 });
 
 test("S9 · clean builders match upstream and hand out fresh copies", () => {
@@ -216,43 +216,40 @@ for (const [name, checkers, minimum] of [["tracker-pipeline-gate", corpusChecker
   });
 }
 
-// --- Characterized upstream defects (tracked upstream in std#294) -------------
+// --- Upstream defects fixed in std#294 (their pins flipped at the S10 lock bump)
 
-test("S9 · upstream defect std#294 is pinned: compact-valid PASSes before lane-skipped and head-moved are checked", () => {
+test("S9 · std#294 fixed: compact-valid waits for lane-skipped and head-moved, and only R0/R1 qualify", () => {
   const clean = cleanLaneObservation();
   const moved = "b".repeat(40);
-  for (const [label, observation] of [
-    ["R1, lane absent", { ...clean, risk: "R1", lane_present: false }],
-    ["R0, head moved", { ...clean, risk: "R0", live_head: moved }],
-    ["risk absent, lane absent", (({ risk, ...rest }) => ({ ...rest, lane_present: false }))(clean)],
-  ]) {
-    const result = evaluateComplianceLane(observation);
-    assert.deepEqual([result.verdict, result.rule], ["PASS", "compact-valid"],
-      `${label}: fails open today ("the lane never silently absents" holds only for R2/R3)`);
-  }
-  assert.deepEqual(evaluateComplianceLane({ ...clean, lane_present: false }).rule, "lane-skipped", "R2 fails closed");
-  assert.deepEqual(evaluateComplianceLane({ ...clean, live_head: moved }).rule, "head-moved", "R2 fails closed");
+  assert.deepEqual(evaluateComplianceLane({ ...clean, risk: "R1", lane_present: false }).rule, "lane-skipped");
+  assert.deepEqual(evaluateComplianceLane({ ...clean, risk: "R0", live_head: moved }).rule, "head-moved");
+  const riskless = (({ risk, ...rest }) => ({ ...rest, lane_present: false }))(clean);
+  assert.deepEqual(evaluateComplianceLane(riskless).rule, "lane-skipped", "an absent risk is not low risk");
+  assert.deepEqual([evaluateComplianceLane(clean).verdict, evaluateComplianceLane(clean).rule], ["PASS", "compact-valid"],
+    "a clean R0/R1 lane still passes compact-valid");
 });
 
-test("S9 · upstream defect std#294 is pinned: a gate record without tested_sha skips the exact-head rule", () => {
+test("S9 · std#294 fixed: a gate record without tested_sha leaves the exact head unproven", () => {
   const { tested_sha: _tested, ...unproven } = cleanGateResults();
-  assert.deepEqual(checkGateAggregation({ ...unproven, head_sha: "new" }), [],
-    "exact-SHA-equals-head is not proven, yet the gate passes");
+  assert.deepEqual(checkGateAggregation({ ...unproven, head_sha: "new" }),
+    ["exact head unproven: tested_sha and head_sha are both required"]);
   assert.match(checkGateAggregation({ ...cleanGateResults(), tested_sha: "old", head_sha: "new" })[0], /stale tested SHA/);
 });
 
-test("S9 · upstream defect std#294 is pinned: MERGED accepts any PR state with a merge commit", () => {
+test("S9 · std#294 fixed: MERGED needs a merged PR state (or merged_at) with a merge commit", () => {
   // GitHub fills merge_commit_sha with the test-merge commit for open and for
-  // closed-unmerged pull requests, so "PR state + merge commit" is not remote
-  // merge truth unless the state is checked.
+  // closed-unmerged pull requests, so the state must be checked as well.
   for (const pr_state of ["closed", "open"]) {
-    assert.deepEqual(checkMergedReceipt({ pr_state, merge_commit: "abc" }), [], `${pr_state}: fails open today`);
+    assert.deepEqual(checkMergedReceipt({ pr_state, merge_commit: "abc" }),
+      ["MERGED needs a merged PR state (or merged_at) + merge commit via API"], `${pr_state}: refused`);
   }
+  assert.deepEqual(checkMergedReceipt({ pr_state: "MERGED", merge_commit: "abc" }), []);
+  assert.deepEqual(checkMergedReceipt({ merged_at: "2026-10-26T00:00:00Z", merge_commit: "abc" }), []);
 });
 
-test("S9 · upstream defect std#294 is pinned: an exclusion check misses GitHub's not_planned close reason", () => {
-  assert.deepEqual(checkExclusion({ close_reason: "not_planned", counted_delivered: true }), [],
-    "GitHub's state_reason spelling is counted delivered today");
+test("S9 · std#294 fixed: an exclusion check matches GitHub's not_planned close reason", () => {
+  assert.deepEqual(checkExclusion({ close_reason: "not_planned", counted_delivered: true }),
+    ["not_planned closes are excluded, never delivered"]);
   assert.equal(checkExclusion({ close_reason: "not-planned", counted_delivered: true }).length, 1);
 });
 
@@ -473,8 +470,9 @@ test("S9 · the issue-close sweep records MERGED only on remote merge truth, str
   const updates = await liveSweep([merged, unmerged], new Map());
   assert.deepEqual(updates, [[900, "closed", "completed"]], "only the merged PR closes its Issue, as completed");
   assert.deepEqual(checkMergedReceipt({ pr_state: "merged", merge_commit: merged.merge_commit_sha }), []);
-  assert.deepEqual(checkMergedReceipt({ pr_state: unmerged.state, merge_commit: unmerged.merge_commit_sha }), [],
-    "the oracle would accept the unmerged PR (pinned defect above); the live sweep keys on merged_at");
+  assert.deepEqual(checkMergedReceipt({ pr_state: unmerged.state, merge_commit: unmerged.merge_commit_sha }),
+    ["MERGED needs a merged PR state (or merged_at) + merge commit via API"],
+    "the oracle refuses the unmerged PR (std#294); the live sweep also keys on merged_at");
 });
 
 test("S9 · the issue-close sweep replays as an idempotent no-op", async () => {

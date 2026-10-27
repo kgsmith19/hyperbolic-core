@@ -2,7 +2,7 @@
 //
 // S5 RED characterization (Issue #423): v5 continuity and context-rotation
 // semantics from agent-engineering-standard @
-// 9e50c9c3518e5bed2ba93e194cb157a78ee0278d — tools/context_rotation.py
+// 516fdb25d091f2f3f467fb48eaee01cb7f805c88 — tools/context_rotation.py
 // (Stage 48), tools/context_budget.py (zero-compaction governor),
 // tools/handoff_acceptance.py (Stage 45 HAT/SAT) and tools/capsule.py (the
 // provider-neutral goal/scratch recovery packet).
@@ -67,8 +67,8 @@ test("S5 · provenance names all four continuity modules at the pinned SHA", () 
   for (const module of ["context_rotation", "context_budget", "handoff_acceptance", "capsule"]) {
     assert.match(provenance(), new RegExp(`tools/${module}\\.py`));
   }
-  assert.match(provenance(), /9e50c9c3518e5bed2ba93e194cb157a78ee0278d/);
-  assert.match(golden._provenance, /9e50c9c3518e5bed2ba93e194cb157a78ee0278d/);
+  assert.match(provenance(), /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
+  assert.match(golden._provenance, /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
 });
 
 // --- Differential characterization against the upstream Python ----------------
