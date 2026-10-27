@@ -451,6 +451,8 @@ async function liveSweep(pulls, states) {
           states.set(number, state);
         },
         createComment: async () => {},
+        // The replay has no cursor comment, so the sweep bootstraps: an empty listing.
+        listComments: async () => ({ data: [] }),
       },
     },
   };
