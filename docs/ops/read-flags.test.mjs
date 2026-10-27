@@ -51,11 +51,13 @@ test("a malformed flags file fails loudly instead of silently turning a backup o
   assert.throws(() => resolveFlags('{"restic_backup_enabld": true}', {}), /unknown flag/);
 });
 
-test("ops/flags.json is committed, valid, and keeps restic off until the Infisical fixes land", async () => {
+test("ops/flags.json is committed, valid, and turns restic on now that the Infisical fixes landed", async () => {
   const resolveFlags = await loadResolver();
   const text = read("ops/flags.json");
   const flags = resolveFlags(text, {});
-  assert.equal(flags.restic_backup_enabled, "false", "turning restic on is a separate reviewed PR (#455 AC4)");
+  // #455 AC4 kept restic off until the OIDC subject and secret fixes landed
+  // (applied 2026-10-27); #464 is the separate reviewed PR that turns it on.
+  assert.equal(flags.restic_backup_enabled, "true", "restic is enabled by #464; turning it off again is a reviewed flag PR");
 });
 
 const readReusable = () => read(".github/workflows/read-flags.yml");
