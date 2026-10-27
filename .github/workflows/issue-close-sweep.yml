@@ -153,7 +153,12 @@ jobs:
             // Adds a failed close to the retry ledger, once per Issue.
             function recordFailure(state, issueNumber, pr) {
               if (!state.failed.some((f) => f.issue === issueNumber)) {
-                state.failed.push({ issue: issueNumber, pr: pr.number, sha: pr.merge_commit_sha || null });
+                state.failed.push({
+                  issue: issueNumber,
+                  pr: pr.number,
+                  sha: pr.merge_commit_sha || null,
+                  merged_at: pr.merged_at || null,
+                });
               }
             }
 
@@ -202,6 +207,43 @@ jobs:
                 resolveFailure(state, issueNumber);
                 summaryLines.push(`- #${issueNumber}: reopened by a human after the sweep closed it; left open.`);
                 return;
+              }
+
+              // Issue #459: a person may have reopened this Issue after ANY close
+              // (native linkage, PR Gate, the reconcile workflow), not only one the
+              // sweep made. GitHub marks such an Issue state_reason "reopened"; its
+              // latest "reopened" event says when. Close only when this PR merged
+              // at or after that reopen. An unknown merge or reopen time fails safe:
+              // the Issue stays open and is remembered as reopened.
+              if (issue.state_reason === "reopened") {
+                let reopenedAt = NaN;
+                try {
+                  const events = await github.paginate(github.rest.issues.listEvents, {
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    per_page: 100,
+                  });
+                  for (const event of events) {
+                    if (event.event !== "reopened") continue;
+                    const at = Date.parse(event.created_at);
+                    if (Number.isFinite(at) && !(at <= reopenedAt)) reopenedAt = at;
+                  }
+                } catch (error) {
+                  core.warning(
+                    `Issue Close Sweep: could not read the timeline of reopened #${issueNumber} (linked from PR #${pr.number}): ${error.message}`
+                  );
+                  recordFailure(state, issueNumber, pr);
+                  summaryLines.push(`- #${issueNumber}: reopened, timeline unreadable, queued for retry: ${error.message}`);
+                  return;
+                }
+                const mergedAt = Date.parse(pr.merged_at);
+                if (!(Number.isFinite(mergedAt) && Number.isFinite(reopenedAt) && mergedAt >= reopenedAt)) {
+                  if (!state.reopened.includes(issueNumber)) state.reopened.push(issueNumber);
+                  resolveFailure(state, issueNumber);
+                  summaryLines.push(`- #${issueNumber}: reopened by a person after PR #${pr.number} merged; left open.`);
+                  return;
+                }
               }
 
               try {
@@ -304,7 +346,11 @@ jobs:
               // leaves the ledger only when its close resolves, so an error part-way
               // through cannot drop the rest.
               for (const entry of [...state.failed]) {
-                await closeLinked(state, entry.issue, { number: entry.pr, merge_commit_sha: entry.sha });
+                await closeLinked(state, entry.issue, {
+                  number: entry.pr,
+                  merge_commit_sha: entry.sha,
+                  merged_at: entry.merged_at,
+                });
               }
 
               // Walks the pulls newest-updated first, page by page. A merged PR's
