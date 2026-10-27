@@ -702,25 +702,150 @@ test("llm-review-dialogue.yml mints the reviewer's own App identity from Infisic
   assert.match(githubTokenLine, /github-token:\s*\$\{\{\s*steps\.review-app-token\.outputs\.token\s*\|\|\s*github\.token\s*\}\}/);
 });
 
-// Issue #440: the reviewer App's installation grants Contents read-only. A mint
-// that asks for more is refused outright (HTTP 422, "The level of access for
-// permissions requested are not granted to this installation"); the step is
-// continue-on-error, so the run still looks green while every finding posts as
-// github-actions[bot]. The mint must request exactly what the posting step
-// uses: Contents read, Pull requests write, Issues write. Defect caught: a
-// re-widening to contents: write, or any extra permission the installation
-// does not grant.
-test("llm-review-dialogue.yml mints the reviewer App token with Contents read only (Issue #440)", () => {
-  const tokenStart = dialogueYaml.indexOf("Dialogue · Mint the reviewer App's installation token");
-  assert.ok(tokenStart >= 0, "no reviewer App mint step found");
-  const step = parseYaml(dialogueYaml).jobs.dialogue.steps.find((entry) => entry.id === "review-app-token");
+// Issue #440 (AC3 reopened 2026-10-27): a fixed permission request keeps
+// drifting from what the installation actually grants. Run 40453169274 asked
+// for contents: read + pull-requests: write + issues: write and got HTTP 422
+// ("The level of access for permissions requested are not granted to this
+// installation"); the step is continue-on-error, so every finding silently
+// posted as github-actions[bot]. A grants step now reads the installation's
+// real permissions with a short-lived App JWT, and the mint requests exactly
+// the posting permissions the installation has. When it can post at all, it
+// posts as the App; when it cannot, the run names the missing grant.
+const GRANTS_STEP = "Dialogue · Read what the reviewer App installation grants";
+
+function loadGrantsScript() {
+  const marker = dialogueYaml.indexOf(GRANTS_STEP);
+  assert.ok(marker >= 0, "llm-review-dialogue.yml: reviewer App grants step not found");
+  return new AsyncFunction("require", "context", "core", "process", "fetch", extractScript(dialogueYaml, marker));
+}
+
+function dialogueStep(id) {
+  return parseYaml(dialogueYaml).jobs.dialogue.steps.find((entry) => entry.id === id);
+}
+
+async function runGrants({ grants = {}, status = 200, privateKey, appId = "123456", apiUrl = "https://api.github.com" } = {}) {
+  const crypto = createRequire(import.meta.url)("node:crypto");
+  const keys = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pem = privateKey ?? keys.privateKey.export({ type: "pkcs1", format: "pem" });
+  const requests = [];
+  const outputs = {};
+  const secrets = [];
+  const logs = [];
+  const core = {
+    info: (m) => logs.push(m),
+    warning: (m) => logs.push(m),
+    error: (m) => logs.push(m),
+    setOutput: (k, v) => { outputs[k] = v; },
+    setSecret: (v) => secrets.push(v),
+  };
+  const fetchStub = async (url, init) => {
+    requests.push({ url, init });
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => ({ id: 155589128, permissions: grants }),
+      text: async () => "simulated",
+    };
+  };
+  await loadGrantsScript()(
+    createRequire(import.meta.url),
+    { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } },
+    core,
+    { env: { REVIEW_GITHUB_APP_ID: appId, REVIEW_GITHUB_APP_PRIVATE_KEY: pem, GITHUB_API_URL: apiUrl } },
+    fetchStub,
+  );
+  return { outputs, requests, secrets, logs, publicKey: keys.publicKey, crypto };
+}
+
+test("the reviewer App mint requests exactly what the grants step resolved, and only when posting is possible (Issue #440)", () => {
+  const step = dialogueStep("review-app-token");
   assert.ok(step, "the mint step keeps id review-app-token (the posting step reads its outputs)");
   const permissions = Object.fromEntries(Object.entries(step.with).filter(([key]) => key.startsWith("permission-")));
   assert.deepEqual(permissions, {
-    "permission-contents": "read",
-    "permission-pull-requests": "write",
-    "permission-issues": "write",
+    "permission-contents": "${{ steps.review-app-grants.outputs.contents }}",
+    "permission-pull-requests": "${{ steps.review-app-grants.outputs.pull_requests }}",
+    "permission-issues": "${{ steps.review-app-grants.outputs.issues }}",
   });
+  assert.match(step.if, /steps\.review-app-grants\.outputs\.can_post == 'true'/);
+  assert.equal(step["continue-on-error"], true, "a failed mint must still fall back, never block the findings");
+});
+
+test("the grants step runs after the credential pull and before the mint, and can never fail the job", () => {
+  const steps = parseYaml(dialogueYaml).jobs.dialogue.steps;
+  const ids = steps.map((entry) => entry.id);
+  const grants = dialogueStep("review-app-grants");
+  assert.ok(grants, "no step with id review-app-grants");
+  assert.equal(grants.name, GRANTS_STEP);
+  assert.ok(ids.indexOf("review-app-secrets") < ids.indexOf("review-app-grants"));
+  assert.ok(ids.indexOf("review-app-grants") < ids.indexOf("review-app-token"));
+  assert.equal(grants["continue-on-error"], true);
+  assert.match(grants.uses, /^actions\/github-script@[0-9a-f]{40}$/);
+  assert.match(grants.if, /steps\.review-app-secrets\.outcome == 'success'/);
+});
+
+test("the grants call authenticates with a genuine RS256 App JWT for this App, to this repository's installation", async () => {
+  const run = await runGrants({ grants: { pull_requests: "write" } });
+  assert.equal(run.requests.length, 1);
+  const { url, init } = run.requests[0];
+  assert.equal(url, "https://api.github.com/repos/kgsmith19/hyperbolic-core/installation");
+  const jwt = init.headers.Authorization.replace(/^Bearer /, "");
+  const [header, payload, signature] = jwt.split(".");
+  const decode = (part) => JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
+  assert.deepEqual(decode(header), { alg: "RS256", typ: "JWT" });
+  const claims = decode(payload);
+  assert.equal(claims.iss, "123456");
+  assert.ok(claims.exp - claims.iat <= 600, "GitHub refuses App JWTs that live longer than 10 minutes");
+  assert.ok(claims.iat <= Math.floor(Date.now() / 1000), "iat is backdated for clock skew, never in the future");
+  const valid = run.crypto.verify("RSA-SHA256", Buffer.from(`${header}.${payload}`), run.publicKey, Buffer.from(signature, "base64url"));
+  assert.ok(valid, "the JWT must verify against the App's public key");
+  assert.ok(run.secrets.includes(jwt), "the JWT is masked before anything else runs");
+  assert.ok(!run.logs.some((line) => line.includes(jwt)), "the JWT is never logged");
+});
+
+test("an installation with Pull requests write mints contents read + pull-requests write, and never asks for issues", async () => {
+  const run = await runGrants({ grants: { contents: "read", metadata: "read", pull_requests: "write" } });
+  assert.deepEqual(run.outputs, { contents: "read", pull_requests: "write", issues: "", can_post: "true" });
+  assert.ok(run.logs.some((line) => /installation 155589128 grants: contents: read, metadata: read, pull_requests: write/.test(line)));
+});
+
+// Issue #440 AC2 sensitivity: the reviewer App token must never carry Contents
+// write, even when the installation grants it. The grants step caps contents at
+// read; a pass-through of the granted level would fail here.
+test("the mint never requests contents write, even when the installation grants it (Issue #440 AC2)", async () => {
+  const run = await runGrants({ grants: { contents: "write", pull_requests: "admin", issues: "write" } });
+  assert.equal(run.outputs.contents, "read", "contents is capped at read whatever the installation grants");
+  assert.equal(run.outputs.pull_requests, "write", "admin is requested as write, never above what posting needs");
+  assert.equal(run.outputs.issues, "write");
+  for (const value of Object.values(run.outputs)) {
+    assert.ok(["read", "write", "true", "false", ""].includes(value), `unexpected requested level ${value}`);
+  }
+});
+
+test("an installation with only Issues write still posts, requesting issues write alone", async () => {
+  const run = await runGrants({ grants: { issues: "write", metadata: "read" } });
+  assert.deepEqual(run.outputs, { contents: "", pull_requests: "", issues: "write", can_post: "true" });
+});
+
+test("an installation that cannot post names the exact grant to add and skips the mint, keeping the visible fallback", async () => {
+  const run = await runGrants({ grants: { contents: "read", metadata: "read", pull_requests: "read" } });
+  assert.equal(run.outputs.can_post, "false");
+  assert.equal(run.outputs.pull_requests ?? "", "");
+  assert.equal(run.outputs.issues ?? "", "");
+  assert.ok(run.logs.some((line) => /Pull requests: Read and write/.test(line) && /155589128/.test(line)));
+});
+
+test("a refused grants call degrades to the fallback with its status, and never throws", async () => {
+  const run = await runGrants({ status: 401 });
+  assert.equal(run.outputs.can_post, "false");
+  assert.ok(run.logs.some((line) => /HTTP 401/.test(line)));
+});
+
+test("a private key stored with escaped newlines is accepted", async () => {
+  const crypto = createRequire(import.meta.url)("node:crypto");
+  const { privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const escaped = privateKey.export({ type: "pkcs1", format: "pem" }).trim().replace(/\n/g, "\\n");
+  const run = await runGrants({ grants: { pull_requests: "write" }, privateKey: escaped });
+  assert.equal(run.outputs.can_post, "true");
 });
 
 // The dev agent's own Anthropic credential (model key, distinct from the App
