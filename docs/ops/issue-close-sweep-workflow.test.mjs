@@ -9,9 +9,9 @@
 // check-run reports done, which requires the poll to finish first (see
 // pr-verify.yml's own comment above pollForMergeAfterArming, and PR #280's
 // timing evidence). This workflow runs every 15 minutes, independent of any
-// pull-request event or any single job's lifecycle, and re-parses
-// Closes/Fixes/Resolves #N out of every PR merged in roughly the last 24
-// hours, closing the linked Issue itself if it is still open.
+// pull-request event or any single job's lifecycle. It keeps a durable cursor
+// (hyperbolic-core#396) so catch-up starts at the last processed merge, not a
+// fixed 24h window, and closes the linked Issue itself if it is still open.
 //
 // Two invariants matter here, same reasoning as pr-verify-workflow.test.mjs:
 //
@@ -570,6 +570,7 @@ test("issue-close-sweep (AC3 revert relink): a revert PR reopens the Issue the r
   assert.ok(m.calls.includes("issues.update:915:open:reopened"), "the reverted PR's Issue must be relinked to open");
   assert.ok(!m.calls.includes("issues.update:915:closed:completed"), "the reverted PR must never close the Issue again");
   assert.deepEqual(readCursor(m).reverted, [915], "the reverted Issue must be recorded so repair skips it");
+  assert.deepEqual(readCursor(m).reopened, [], "a revert relink is not a human reopen and must never be recorded as one");
 });
 
 // Cross-repo scope (AC5): a closing reference to another repository must
