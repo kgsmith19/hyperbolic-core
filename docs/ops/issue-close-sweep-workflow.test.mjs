@@ -690,3 +690,14 @@ test("issue-close-sweep (#459): a retry of a reopened Issue with no recorded mer
   assert.deepEqual(readCursor(m).reopened, [934]);
   assert.deepEqual(readCursor(m).failed, [], "resolved as a human reopen, so it leaves the retry ledger");
 });
+
+test("issue-close-sweep (#459): a retry carries its merge time, so a merge newer than the reopen still closes", async () => {
+  const m = await run({
+    pulls: [],
+    issuesByNumber: { 935: { state: "open", state_reason: "reopened", reopenedAt: recentIso(120) } },
+    cursor: baseCursor({ failed: [{ issue: 935, pr: 525, sha: "abcdef525", merged_at: recentIso(10) }] }),
+  });
+
+  assert.ok(m.calls.includes("issues.update:935:closed:completed"), "the retried close compares the recorded merge time");
+  assert.deepEqual(readCursor(m).failed, []);
+});
