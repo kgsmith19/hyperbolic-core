@@ -733,6 +733,60 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
     assert.ok(m.calls.includes("ARM"), "an Issue with no checklist items is not incomplete -- nothing to check");
     assert.equal(m.failed, null);
 
+    // ---- Issue #457: a "Select exactly one" group is ONE choice -----------
+    //
+    // A single-choice group (the Issue template's Risk R0-R3) is complete when
+    // exactly one option is ticked; its unticked siblings are not unfinished
+    // work. It still blocks, as one unresolved item, with zero or several
+    // ticks. Every box outside such a group counts exactly as before.
+    const filledTemplate = (overrides = {}) =>
+      [
+        "## Acceptance Criteria",
+        "",
+        overrides.ac ?? "- [x] AC1: done",
+        "",
+        "## Risk",
+        "",
+        overrides.prompt ?? "Select exactly one:",
+        "",
+        overrides.r0 ?? "- [ ] R0: mechanical",
+        "- [ ] R1: local and reversible",
+        overrides.r2 ?? "- [ ] R2: shared, integrated, or stateful",
+        overrides.r3 ?? "- [x] R3: critical",
+        "",
+        overrides.tail ?? "## Test strategy",
+      ].join("\n");
+
+    m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: filledTemplate() } } });
+    assert.ok(m.calls.includes("ARM"), "a fully filled template (all ACs ticked, exactly one Risk) must arm");
+    assert.equal(m.failed, null);
+
+    m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: filledTemplate({ ac: "- [ ] AC1: not done" }) } } });
+    assert.ok(!m.calls.includes("ARM"), "an unticked acceptance criterion still blocks");
+    assert.match(m.failed || "", /#7 \(1 unchecked\)/, "only the AC counts, never the three unselected Risk options");
+
+    m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: filledTemplate({ r3: "- [ ] R3: critical" }) } } });
+    assert.ok(!m.calls.includes("ARM"), "a single-choice group with nothing selected blocks");
+    assert.match(m.failed || "", /#7 \(1 unchecked\)/, "an unanswered group counts as one unresolved item");
+
+    m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: filledTemplate({ r2: "- [x] R2: shared" }) } } });
+    assert.ok(!m.calls.includes("ARM"), "a single-choice group with two selections blocks");
+    assert.match(m.failed || "", /#7 \(1 unchecked\)/);
+
+    m = await run({
+      gates: GREEN,
+      issueChecklists: { 7: { state: "open", body: filledTemplate({ tail: "Follow-ups:\n- [ ] F1: not part of the group" }) } },
+    });
+    assert.ok(!m.calls.includes("ARM"), "a box after the group ends (a blank line, then other text) is an ordinary item");
+    assert.match(m.failed || "", /#7 \(1 unchecked\)/);
+
+    m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: filledTemplate({ prompt: "SELECT EXACTLY ONE:" }) } } });
+    assert.ok(m.calls.includes("ARM"), "the group prompt is matched case-insensitively");
+
+    m = await run({ gates: GREEN, issueChecklists: { 7: { state: "open", body: filledTemplate({ prompt: "Select any that apply:" }) } } });
+    assert.ok(!m.calls.includes("ARM"), "a multi-select prompt is not a single-choice group: its unticked boxes still count");
+    assert.match(m.failed || "", /#7 \(3 unchecked\)/);
+
     // ---- Issue #319 (Option B): confirmed-and-filed blocking Issues -------
     //
     // A proposed blocking Issue that AI Review's dialogue filed after
