@@ -121,6 +121,7 @@ function makeMocks({
   issuesByNumber = {},
   issuesGetErrorFor = [],
   updateErrorFor = [],
+  eventsErrorFor = [],
   defaultBranch = "main",
   pullsListError = null,
   cursor = undefined,
@@ -194,7 +195,8 @@ function makeMocks({
             throw new Error(`simulated read failure for #${issue_number}`);
           }
           const state = stateByIssue.has(issue_number) ? stateByIssue.get(issue_number) : "open";
-          return { data: { number: issue_number, state } };
+          const reason = issuesByNumber[issue_number]?.state_reason ?? null;
+          return { data: { number: issue_number, state, state_reason: reason } };
         },
         update: async ({ issue_number, state, state_reason }) => {
           calls.push(`issues.update:${issue_number}:${state}:${state_reason}`);
@@ -213,6 +215,18 @@ function makeMocks({
           list.push(body);
           commentsByIssue.set(issue_number, list);
           addComment(issue_number, body);
+        },
+        // Issue #459: the Issue's timeline events, so the sweep can tell when a
+        // human reopened it. Fixtures give `reopenedAt` (ISO) per Issue.
+        listEvents: async ({ issue_number, page = 1, per_page = 100 }) => {
+          calls.push("events:" + issue_number);
+          if (eventsErrorFor.includes(issue_number)) {
+            throw new Error(`simulated events failure for #${issue_number}`);
+          }
+          const at = issuesByNumber[issue_number]?.reopenedAt;
+          const all = at ? [{ event: "closed", created_at: "2026-01-01T00:00:00Z" }, { event: "reopened", created_at: at }] : [];
+          const start = (page - 1) * per_page;
+          return { data: all.slice(start, start + per_page) };
         },
         listComments: async ({ issue_number, page = 1, per_page = 100 }) => {
           const all = commentStore.get(issue_number) || [];
@@ -521,12 +535,18 @@ test("issue-close-sweep (AC2 cursor gap): a stale full repair re-examines a PR b
 });
 
 test("issue-close-sweep (AC4): a failed close is recorded in the ledger, retried exactly on the next run, and cleared on success without duplication", async () => {
+  const merged513 = recentIso(10);
   const first = await run({
-    pulls: [{ number: 513, merged_at: recentIso(10), body: "closes #913", base: { ref: "main" } }],
+    pulls: [{ number: 513, merged_at: merged513, body: "closes #913", base: { ref: "main" } }],
     issuesByNumber: { 913: { state: "open" } },
     updateErrorFor: [913],
   });
-  assert.deepEqual(readCursor(first).failed, [{ issue: 913, pr: 513, sha: "abcdef513" }], "the failed close must be persisted for an exact retry");
+  first.mergedAt513 = merged513;
+  assert.deepEqual(
+    readCursor(first).failed,
+    [{ issue: 913, pr: 513, sha: "abcdef513", merged_at: first.mergedAt513 }],
+    "the failed close must be persisted for an exact retry, with the merge time a later reopen check needs"
+  );
   assert.deepEqual(first.failures, [], "a per-Issue write failure must stay tolerant, never failing the run");
 
   const second = await run({
@@ -606,4 +626,78 @@ test("issue-close-sweep (bootstrap): with no cursor yet, the first run creates t
 test("issue-close-sweep (AC6): the workflow never checks out repository code, so no PR code is ever present while it holds write credentials", () => {
   assert.doesNotMatch(workflow, /actions\/checkout/, "must not check out any code");
   assert.doesNotMatch(workflow, /contents:\s*write/, "must never hold contents write");
+});
+
+// ---------------------------------------------------------------------------
+// hyperbolic-core#459: a human reopen after ANY close is respected, not only a
+// reopen of an Issue the sweep itself closed. Observed: the first durable-cursor
+// run replayed PR #452 and re-closed #440 13 minutes after the owner reopened it.
+// ---------------------------------------------------------------------------
+
+test("issue-close-sweep (#459): an Issue reopened after its PR merged is never closed, and the reopen is remembered", async () => {
+  const m = await run({
+    pulls: [{ number: 520, merged_at: recentIso(120), body: "closes #930", base: { ref: "main" } }],
+    issuesByNumber: { 930: { state: "open", state_reason: "reopened", reopenedAt: recentIso(30) } },
+  });
+
+  assert.ok(m.calls.includes("events:930"), "a reopened Issue's timeline must be read");
+  assert.ok(!m.calls.some((c) => c.startsWith("issues.update:930")), "a human reopen after the merge must win");
+  assert.ok(!m.calls.includes("comment:930"));
+  assert.deepEqual(readCursor(m).reopened, [930], "recorded so later runs skip it without another lookup");
+  assert.equal(readCursor(m).closed["930"], undefined, "never recorded as a sweep closure");
+});
+
+test("issue-close-sweep (#459): an Issue reopened BEFORE its PR merged is closed normally, because the merge is newer", async () => {
+  const m = await run({
+    pulls: [{ number: 521, merged_at: recentIso(10), body: "closes #931", base: { ref: "main" } }],
+    issuesByNumber: { 931: { state: "open", state_reason: "reopened", reopenedAt: recentIso(120) } },
+  });
+
+  assert.ok(m.calls.includes("issues.update:931:closed:completed"), "a merge after the reopen still closes the Issue");
+});
+
+test("issue-close-sweep (#459): an Issue that was never reopened needs no timeline lookup", async () => {
+  const m = await run({
+    pulls: [{ number: 522, merged_at: recentIso(10), body: "closes #932", base: { ref: "main" } }],
+    issuesByNumber: { 932: { state: "open" } },
+  });
+
+  assert.ok(!m.calls.includes("events:932"), "only a reopened Issue costs an events call");
+  assert.ok(m.calls.includes("issues.update:932:closed:completed"));
+});
+
+test("issue-close-sweep (#459): a failed timeline read is tolerated: not closed, queued for exact retry, run not failed", async () => {
+  const m = await run({
+    pulls: [{ number: 523, merged_at: recentIso(10), body: "closes #933", base: { ref: "main" } }],
+    issuesByNumber: { 933: { state: "open", state_reason: "reopened", reopenedAt: recentIso(30) } },
+    eventsErrorFor: [933],
+  });
+
+  assert.ok(!m.calls.some((c) => c.startsWith("issues.update:933")), "an unknown reopen time must never be read as permission to close");
+  assert.deepEqual(readCursor(m).failed.map((f) => f.issue), [933]);
+  assert.ok(m.warnings.some((w) => w.includes("933")));
+  assert.deepEqual(m.failures, []);
+});
+
+test("issue-close-sweep (#459): a retry of a reopened Issue with no recorded merge time is not closed", async () => {
+  const m = await run({
+    pulls: [],
+    issuesByNumber: { 934: { state: "open", state_reason: "reopened", reopenedAt: recentIso(30) } },
+    cursor: baseCursor({ failed: [{ issue: 934, pr: 524, sha: "abcdef524" }] }),
+  });
+
+  assert.ok(!m.calls.some((c) => c.startsWith("issues.update:934")), "a legacy ledger entry without merged_at must fail safe");
+  assert.deepEqual(readCursor(m).reopened, [934]);
+  assert.deepEqual(readCursor(m).failed, [], "resolved as a human reopen, so it leaves the retry ledger");
+});
+
+test("issue-close-sweep (#459): a retry carries its merge time, so a merge newer than the reopen still closes", async () => {
+  const m = await run({
+    pulls: [],
+    issuesByNumber: { 935: { state: "open", state_reason: "reopened", reopenedAt: recentIso(120) } },
+    cursor: baseCursor({ failed: [{ issue: 935, pr: 525, sha: "abcdef525", merged_at: recentIso(10) }] }),
+  });
+
+  assert.ok(m.calls.includes("issues.update:935:closed:completed"), "the retried close compares the recorded merge time");
+  assert.deepEqual(readCursor(m).failed, []);
 });
