@@ -13,6 +13,7 @@ No secret material appears here. Handles are references only.
 | `infisical://hyperbolic-core/prod/dev/*` | `.github/workflows/dev-agent-dispatch.yml` | `/dev/` | `.github/workflows/dev-agent-dispatch.yml` | 2026-09-22 |
 | `infisical://hyperbolic-core/prod/review/*` | `.github/workflows/llm-review*.yml` | `/review/` | `.github/workflows/llm-review.yml` | 2026-09-22 |
 | `infisical://hyperbolic-core/prod/platform/*` | `.github/workflows/platform-*.yml` | `/platform/` | `.github/workflows/platform-backup.yml` | 2026-09-22 |
+| `infisical://hyperbolic-core/prod/platform/db-backup/*` | `.github/workflows/platform-backup.yml` | `/platform/db-backup/` | `.github/workflows/platform-backup.yml` | 2026-10-27 |
 | `infisical://hyperbolic-core/prod/platform/backup/*` | `.github/workflows/platform-backup.yml` | `/platform/backup/` | `.github/workflows/platform-backup.yml` | 2026-09-22 |
 | `infisical://hyperbolic-core/prod/platform/broker/*` | `.github/workflows/*broker*` | `/platform/broker/` | `.github/workflows/` | 2026-09-22 |
 | `infisical://hyperbolic-core/prod/platform/edge/*` | `.github/workflows/*edge*` | `/platform/edge/` | `.github/workflows/` | 2026-09-22 |

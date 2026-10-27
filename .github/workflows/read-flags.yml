@@ -1,0 +1,52 @@
+name: "Read Flags"
+
+# Flags-as-code (hyperbolic-core#455). Operational on/off flags live in
+# ops/flags.json and change by reviewed PR, never by a repository-settings
+# write. A key present in the file is authoritative; a key absent falls back to
+# the matching repo variable, so adopting the file changed nothing until a PR
+# set a key. See docs/ops/read-flags.mjs for the exact resolution rule.
+#
+# workflow_call ONLY: callers run `flags: uses: ./.github/workflows/read-flags.yml`
+# and gate on `needs.flags.outputs.<flag> == 'true'`. No trigger of its own, so
+# it adds no PR check row.
+on:
+  workflow_call:
+    outputs:
+      restic_backup_enabled:
+        description: "Restic Storage Box backups and the restore drill"
+        value: ${{ jobs.read.outputs.restic_backup_enabled }}
+      platform_backup_enabled:
+        description: "The platform schema backup bundle"
+        value: ${{ jobs.read.outputs.platform_backup_enabled }}
+      lifeos_backup_enabled:
+        description: "The LifeOS backup bundle"
+        value: ${{ jobs.read.outputs.lifeos_backup_enabled }}
+
+permissions:
+  contents: read
+
+jobs:
+  read:
+    name: Read ops/flags.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      restic_backup_enabled: ${{ steps.flags.outputs.restic_backup_enabled }}
+      platform_backup_enabled: ${{ steps.flags.outputs.platform_backup_enabled }}
+      lifeos_backup_enabled: ${{ steps.flags.outputs.lifeos_backup_enabled }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            ops/flags.json
+            docs/ops/read-flags.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve each flag from ops/flags.json, falling back to its repo variable
+        id: flags
+        env:
+          FALLBACK_RESTIC_BACKUP_ENABLED: ${{ vars.RESTIC_BACKUP_ENABLED }}
+          FALLBACK_PLATFORM_BACKUP_ENABLED: ${{ vars.PLATFORM_BACKUP_ENABLED }}
+          FALLBACK_LIFEOS_BACKUP_ENABLED: ${{ vars.LIFEOS_BACKUP_ENABLED }}
+        run: node docs/ops/read-flags.mjs ops/flags.json >> "$GITHUB_OUTPUT"

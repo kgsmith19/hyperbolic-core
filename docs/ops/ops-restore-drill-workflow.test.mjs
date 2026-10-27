@@ -13,9 +13,16 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflow = readFileSync(path.join(root, ".github/workflows/ops-restore-drill.yml"), "utf8");
 
-test("the drill job is gated behind the same RESTIC_BACKUP_ENABLED var as the two backup pipelines", () => {
+test("the drill job is gated behind the same restic flag as the two backup pipelines", () => {
   // There is nothing to drill until restic backups are actually live.
-  assert.match(workflow, /if: vars\.RESTIC_BACKUP_ENABLED == 'true'/);
+  assert.match(workflow, /\n {4}needs: flags\n {4}if: needs\.flags\.outputs\.restic_backup_enabled == 'true'\n/);
+});
+
+test("the drill job runs in its own environment, so its OIDC subject is a narrow environment, not ref:refs/heads/main (#455)", () => {
+  // Without an environment the subject is ref:refs/heads/main, which the
+  // platform-restic identity rightly refuses; widening that identity to every
+  // main-branch job would hand restic credentials to any workflow on main.
+  assert.match(workflow, /\n {4}environment: ops-restore-drill-production\n/);
 });
 
 test("the cron is monthly, distinct from every nightly cron already scheduled", () => {

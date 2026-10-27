@@ -220,7 +220,7 @@ signup, same as any other SaaS org. Everything after that is scriptable.
    | `/platform/llm-handler/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `TOOLBELT_GITHUB_INTAKE_PAT`, `SUPABASE_SERVICE_ROLE_KEY`, and optionally `LLM_KEYS_ANTHROPIC` / `LLM_KEYS_OPENAI` / `LLM_KEYS_GEMINI` (provider keys for the service's LLM routes; omitted from the rendered `.env` when absent) |
    | `/brain/` | `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `BRAIN_ANTHROPIC_API_KEY` |
    | `/platform/` | `SUPABASE_DB_URL` (table-owner Postgres connection string -- read by `platform-migrations.yml`, which sets `secret-path: "/platform/"`) |
-   | `/toolbelt/` | `SUPABASE_DB_URL` (same connection string, a second copy -- read by `platform-backup.yml`, which sets `secret-path: "/toolbelt/"`; the two pipelines deliberately read different paths so their identities' grants stay disjoint) |
+   | `/platform/db-backup/` | `SUPABASE_DB_URL` only, as an Infisical reference to `/platform/`'s copy (#455) -- read by `platform-backup.yml`, which sets `secret-path: "/platform/db-backup/"`; the two pipelines deliberately read different paths so their identities' grants stay disjoint, and the backup job never sees `/platform/`'s `SUPABASE_ACCESS_TOKEN` |
    | `/review/` | Exactly one of `REVIEW_ANTHROPIC_API_KEY` / `REVIEW_OPENAI_API_KEY` / `REVIEW_GEMINI_API_KEY` -- the reviewer credential for the LLM Review gate (#128). Only the key matching `vars.REVIEW_PROVIDER` is read; the others need not exist. Before this path is read, `verify-llm-review` names any empty `vars.DEV_PROVIDER` or `vars.DEV_MODEL` and fails, then reuses `packages/review/src/config.ts` to reject same-company pairs. Both builder variables are required and neither is defaulted (#354): the builder identity is stated by the owner, never assumed, and no credential is imported until it is. Kept off `/platform/llm-handler/` deliberately: that path's `LLM_KEYS_*` are the *product's* provider keys, and the gate that judges a change must not share a grant with the service under change. Also: `REVIEW_GITHUB_APP_ID` / `REVIEW_GITHUB_APP_PRIVATE_KEY` -- the reviewer's own GitHub App identity (Issue #272), minted via `actions/create-github-app-token` by `llm-review-dialogue.yml` so the managed review comment posts as that App rather than `github-actions[bot]`. |
    | `/dev/` | `DEV_GITHUB_APP_ID` / `DEV_GITHUB_APP_PRIVATE_KEY` -- the dev agent's own GitHub App identity, minted the same way by `dev-agent-dispatch.yml` and handed to `claude-code-action` as its `github_token`, so dispatched commits and comments post as that App rather than borrowing the vendor action's own bundled identity. Also exactly one of `DEV_ANTHROPIC_API_KEY` / `DEV_CLAUDE_CODE_OAUTH_TOKEN` -- the model-API credential the dispatched agent authenticates with; unrelated to the App credential above (one is a GitHub identity, the other is how the agent talks to its own model provider). |
 
@@ -729,12 +729,16 @@ reviewers on a database migration without forcing the same gate onto a read-only
 | `lifeos-deploy.yml` | `deploy-ui` | `lifeos-ui-deploy-production` |
 | `platform-backup.yml` | `bundle` | `platform-backup-production` |
 | `lifeos-backup.yml` | `bundle` | `lifeos-backup-production` |
+| `ops-restore-drill.yml` | `drill` (#455) | `ops-restore-drill-production` |
 | `ops-serve-apply.yml` | `apply` | `ops-serve-apply-production` |
 | `ops-edge.yml` | `deploy` | `ops-edge-production` |
 
-Deliberately excluded (read-only or never touches the deployed box): `smoke`, `tag-release`, and
-`ops-restore-drill.yml` (runs entirely against a throwaway Postgres in the CI runner -- no Tailscale
-join, no SSH to the box).
+Deliberately excluded (read-only or never touches the deployed box): `smoke` and `tag-release`.
+`ops-restore-drill.yml` never touches the box either, but it declares its own environment (#455) so its
+OIDC subject is that narrow environment rather than `ref:refs/heads/main`: the `platform-restic`
+identity trusts exactly `{platform-backup-production,lifeos-backup-production,ops-restore-drill-production}`.
+GitHub creates an environment automatically the first time a job references it, so this needs no
+settings write; protection rules on it remain optional.
 
 **Owner action, not agent-completable.** Creating a repository Environment and setting its protection
 rules both require the *Administration* repository permission, which this repo's routine agent
@@ -758,7 +762,7 @@ real run, not after:
 The standalone `kgsmith19/lifeos` repository ran the live LifeOS pipeline
 until this cutover; the monorepo's `lifeos-deploy.yml`, `lifeos-backup.yml`,
 and `lifeos-ops.yml` land dark behind `LIFEOS_DEPLOY_ENABLED` /
-`LIFEOS_BACKUP_ENABLED` precisely so that flipping ownership is one ordered,
+the `lifeos_backup_enabled` flag (`ops/flags.json`, #455) precisely so that flipping ownership is one ordered,
 reversible sequence with no window in which two pipelines write to the same
 VPS. Execute the steps in this order; do not parallelize them.
 
@@ -784,8 +788,8 @@ used it).
    and prove `curl -fsS http://127.0.0.1:8080/healthz` on the VPS returns the
    exact nginx health payload. nginx must already own `/life/` and
    `/life/api/` before the monorepo deploy is armed.
-4. **Arm the monorepo.** Here, set `LIFEOS_DEPLOY_ENABLED=true` and
-   `LIFEOS_BACKUP_ENABLED=true`.
+4. **Arm the monorepo.** Here, set `LIFEOS_DEPLOY_ENABLED=true`, and merge a PR
+   setting `"lifeos_backup_enabled": true` in `ops/flags.json` (#455).
 5. **Fully verified deploy.** Dispatch `lifeos-deploy.yml` with its defaults.
    The UI activation creates `lifeos-ui/current`; live verification is never
    skippable. Both units must go green, including the live `/life/` verify
@@ -823,26 +827,30 @@ Next, follow `apps/toolbelt/docs/notes/2026-08-12-platform-idp-owner-setup.md`: 
 
 `platform-backup.yml` (m6-03, `docs/planning/10-cicd-deployment.md` sections 8.4/9) produces an age-encrypted recovery bundle of the platform Supabase project's (woltgcggxaehtuypkxqk) own schemas -- `platform`, `core`, `idea`, `prompt`, `intake`, every schema that carries real operator data -- daily on a schedule and on demand via `workflow_dispatch`. It extends the pattern already proven in the LifeOS standalone pipeline (`apps/lifeos/.github/workflows/backup.yml` -- inert here, that pipeline runs only from the standalone kgsmith19/lifeos repo) to a second target. `test` (a CI-only fence schema, `06-supabase-schema.md`) and the Supabase-managed schemas (`auth`, `storage`, `realtime`) are deliberately excluded: the platform restores those itself, and a restore must not replay them.
 
-Setup, one time. Configure these repository variables before enabling it:
+Setup, one time. Configure these repository variables before enabling it. On/off flags are not
+repository variables any more: they live in `ops/flags.json` and change by reviewed PR (#455,
+`.github/workflows/read-flags.yml`). A key present in that file wins; a key absent falls back to the
+matching repository variable, so the variables below named as fallbacks only matter while the file
+leaves them unset. A malformed file fails the run loudly instead of silently turning a backup off.
 
 | Variable | Purpose |
 | --- | --- |
-| `INFISICAL_PLATFORM_BACKUP_IDENTITY_ID` | Dedicated OIDC identity for this pipeline (ADR-05's one-identity-per-pipeline rule -- never `INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID`; the backup reads `/toolbelt/`'s `SUPABASE_DB_URL` while migrations read `/platform/`'s own copy, so the grants never overlap, and a compromised backup identity should not also be able to apply migrations, and vice versa). |
+| `INFISICAL_PLATFORM_BACKUP_IDENTITY_ID` | Dedicated OIDC identity for this pipeline (ADR-05's one-identity-per-pipeline rule -- never `INFISICAL_PLATFORM_MIGRATIONS_IDENTITY_ID`; the backup reads `/platform/db-backup/`'s `SUPABASE_DB_URL` while migrations read `/platform/`'s own copy, so the grants never overlap, and a compromised backup identity should not also be able to apply migrations, and vice versa). |
 | `PLATFORM_AGE_PUBLIC_KEY` | An `age1...` recipient whose matching private identity is held offline and never stored in GitHub or Infisical. Deliberately a distinct repository variable from the (inert) LifeOS pipeline's own `AGE_PUBLIC_KEY`, so the two pipelines never share a key pair even if the LifeOS workflow is ever activated from this repo. |
-| `PLATFORM_BACKUP_ENABLED` | Set to `true` once the identity and key above are provisioned; the job's whole `bundle` step is skipped otherwise. |
+| `PLATFORM_BACKUP_ENABLED` | Fallback only (#455): the `platform_backup_enabled` flag in `ops/flags.json` decides when present. The job's whole `bundle` step is skipped unless the resolved flag is `true`. |
 
 CI can create a bundle and can never open one; that asymmetry is deliberate, so a compromised runner cannot read the data it just backed up.
 
 **restic primary (issue #166), gated separately from the age path above.** The age->GitHub-artifact
-path is unconditional and always runs once `PLATFORM_BACKUP_ENABLED` is on; restic backup to the
+path is unconditional and always runs once the platform backup flag is on; restic backup to the
 Hetzner Storage Box is an additional, independently gated step using the same dump. Configure these
 before flipping the gate:
 
 | Variable | Purpose |
 | --- | --- |
-| `INFISICAL_PLATFORM_RESTIC_IDENTITY_ID` | A second, dedicated OIDC identity reading `/platform/backup/` -- never `INFISICAL_PLATFORM_BACKUP_IDENTITY_ID` above, which reads `/toolbelt/`'s `SUPABASE_DB_URL`. A compromised restic credential must not also unlock the database, and vice versa. `/platform/backup/` must contain `RESTIC_PASSWORD` and `STORAGEBOX_SSH_KEY` (see [`docs/ops/vendors.md`](vendors.md#infisical)). |
+| `INFISICAL_PLATFORM_RESTIC_IDENTITY_ID` | A second, dedicated OIDC identity reading `/platform/backup/` -- never `INFISICAL_PLATFORM_BACKUP_IDENTITY_ID` above, which reads `/platform/db-backup/`'s `SUPABASE_DB_URL`. A compromised restic credential must not also unlock the database, and vice versa. `/platform/backup/` must contain `RESTIC_PASSWORD` and `STORAGEBOX_SSH_KEY` (see [`docs/ops/vendors.md`](vendors.md#infisical)). |
 | `STORAGEBOX_HOST` / `STORAGEBOX_USER` | The Storage Box hostname and the `platform` repository's sub-account username (not secret -- same non-sensitive-fact pattern as `DEPLOY_HOST`). |
-| `RESTIC_BACKUP_ENABLED` | Set to `true` once the Storage Box exists, the `platform` repository has been initialized (`docs/ops/restic-setup.sh`, [above](#hetzner-storage-box-bootstrap-restic)), and the identity/variables above are provisioned. Off by default; the age path is completely unaffected either way. |
+| `RESTIC_BACKUP_ENABLED` | Fallback only (#455): the `restic_backup_enabled` flag in `ops/flags.json` decides, and it is committed as `false`. Flip it by PR to `true` once the Storage Box exists, the `platform` repository has been initialized (`docs/ops/restic-setup.sh`, [above](#hetzner-storage-box-bootstrap-restic)), and the identity/variables above are provisioned. Off by default; the age path is completely unaffected either way. |
 
 The restic step reuses `docs/ops/restic-setup.sh --apply --repos=platform` to install/configure
 before every run (idempotent -- a no-op once the repository already exists), then runs `restic
@@ -860,7 +868,7 @@ Recency matters more than existence here: a backup from before the base commit d
 ### Restore drill
 
 This is the manual procedure for the age-encrypted GitHub-artifact backup above. Once restic is live
-(`RESTIC_BACKUP_ENABLED`), `ops-restore-drill.yml` (issue #168) runs an equivalent drill against both
+(`restic_backup_enabled` in `ops/flags.json`), `ops-restore-drill.yml` (issue #168) runs an equivalent drill against both
 restic repositories automatically, monthly and on demand -- see
 ["Restic restore drill (automated)"](#restic-restore-drill-automated) below. Run this manual
 procedure against a scratch database, never the platform project. Record the date, the backup run id, and the row counts in the table below on each drill.
@@ -904,7 +912,7 @@ Executing the first drill against a real `platform-backup.yml` artifact and fill
 
 ## LifeOS restic backup: dump + live blob volume, distinct from the platform restore path above
 
-`lifeos-backup.yml`'s restic step (issue #167) shares `RESTIC_BACKUP_ENABLED` and the
+`lifeos-backup.yml`'s restic step (issue #167) shares the `restic_backup_enabled` flag and the
 `INFISICAL_PLATFORM_RESTIC_IDENTITY_ID` / `/platform/backup/` identity with `platform-backup.yml`'s
 own restic step above -- one switch, one credential set, for both pipelines, since both back up to
 the same Storage Box account and `restic-setup.sh` already shares one `RESTIC_PASSWORD` across every
@@ -934,7 +942,7 @@ What differs from the platform restore path above:
 ## Restic restore drill (automated)
 
 `ops-restore-drill.yml` (issue #168, closes gap G-17 from the deployment research) runs monthly and
-on demand once `RESTIC_BACKUP_ENABLED` is on. Unlike the manual age-based drill above, it needs no
+on demand once the `restic_backup_enabled` flag is on. Unlike the manual age-based drill above, it needs no
 operator: it runs entirely in the GitHub Actions runner, over SFTP straight to the Hetzner Storage
 Box (no Tailscale join, no SSH to the VPS -- both restic repositories are reachable directly).
 

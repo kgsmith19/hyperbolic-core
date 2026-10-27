@@ -161,9 +161,16 @@ test("ops-serve-apply.yml and ops-edge.yml queue every direct mutation while a n
 
 // --- ops-restore-drill.yml: explicitly excluded ---
 
-test("ops-restore-drill.yml never touches the deployed box (runs entirely against a throwaway Postgres in the runner) and gets no environment", () => {
+test("ops-restore-drill.yml never touches the deployed box, and its only environment is its own narrow OIDC binding (#455)", () => {
+  // It still runs entirely against a throwaway Postgres in the runner. The
+  // environment exists only so its OIDC subject is
+  // environment:ops-restore-drill-production rather than ref:refs/heads/main,
+  // which the platform-restic identity rightly refuses.
   const opsRestoreDrill = readWorkflow("ops-restore-drill.yml");
-  assert.doesNotMatch(opsRestoreDrill, /environment:/);
+  const environments = opsRestoreDrill.match(/environment:.*$/gm) ?? [];
+  assert.deepEqual(environments, ["environment: ops-restore-drill-production"]);
+  assert.doesNotMatch(opsRestoreDrill, /tailscale\/github-action@/);
+  assert.doesNotMatch(opsRestoreDrill, /DEPLOY_HOST/);
 });
 
 // --- existing dark-gate discipline unchanged ---
@@ -191,11 +198,12 @@ test("adding an environment: does not remove any existing vars.*_ENABLED gate --
   );
   assert.match(
     jobBlock(platformBackup, "bundle"),
-    /vars\.PLATFORM_BACKUP_ENABLED == 'true'/,
+    // Flags-as-code (#455): the same gate, resolved by read-flags.yml.
+    /needs\.flags\.outputs\.platform_backup_enabled == 'true'/,
   );
   assert.match(
     jobBlock(lifeosBackup, "bundle"),
-    /vars\.LIFEOS_BACKUP_ENABLED == 'true'/,
+    /needs\.flags\.outputs\.lifeos_backup_enabled == 'true'/,
   );
   assert.match(
     jobBlock(opsServeApply, "apply"),
