@@ -142,7 +142,7 @@ function makeMocks({
   // Fixtures default updated_at to merged_at and merge_commit_sha to a stable
   // per-PR value, matching what the real pulls API returns for a PR that has
   // not been touched since it merged.
-  const prs = pulls.map((pr) => ({ updated_at: pr.merged_at, merge_commit_sha: `sha${pr.number}`, ...pr }));
+  const prs = pulls.map((pr) => ({ updated_at: pr.merged_at, merge_commit_sha: `abcdef${pr.number}`, ...pr }));
   const stateByIssue = new Map(Object.entries(issuesByNumber).map(([k, v]) => [Number(k), v.state]));
 
   const github = {
@@ -470,6 +470,7 @@ const baseCursor = (over = {}) => ({
   lastFullRepairAt: recentIso(60),
   failed: [],
   closed: {},
+  epoch: "2000-01-01T00:00:00.000Z",
   reverted: [],
   reopened: [],
   ...over,
@@ -497,7 +498,7 @@ test("issue-close-sweep (AC2): the cursor advances to the newest processed merge
   });
   const persisted = readCursor(first);
   assert.equal(persisted.watermark, pr.merged_at, "watermark must advance to the newest processed merged_at");
-  assert.deepEqual(persisted.closed["911"], { pr: 511, sha: "sha511" }, "the closure must be recorded with its PR and merge SHA");
+  assert.deepEqual(persisted.closed["911"], { pr: 511, sha: "abcdef511" }, "the closure must be recorded with its PR and merge SHA");
 
   const second = await run({
     pulls: [pr],
@@ -525,7 +526,7 @@ test("issue-close-sweep (AC4): a failed close is recorded in the ledger, retried
     issuesByNumber: { 913: { state: "open" } },
     updateErrorFor: [913],
   });
-  assert.deepEqual(readCursor(first).failed, [{ issue: 913, pr: 513 }], "the failed close must be persisted for an exact retry");
+  assert.deepEqual(readCursor(first).failed, [{ issue: 913, pr: 513, sha: "abcdef513" }], "the failed close must be persisted for an exact retry");
   assert.deepEqual(first.failures, [], "a per-Issue write failure must stay tolerant, never failing the run");
 
   const second = await run({
@@ -544,7 +545,7 @@ test("issue-close-sweep (AC3 reopen): an Issue the sweep closed and a human late
     issuesByNumber: { 914: { state: "open" } },
     cursor: baseCursor({
       lastFullRepairAt: recentIso(2 * DAY_MIN),
-      closed: { 914: { pr: 514, sha: "sha514" } },
+      closed: { 914: { pr: 514, sha: "abcdef514" } },
     }),
   });
 
@@ -555,13 +556,14 @@ test("issue-close-sweep (AC3 reopen): an Issue the sweep closed and a human late
 test("issue-close-sweep (AC3 revert relink): a revert PR reopens the Issue the reverted PR closed, and repair never closes it again", async () => {
   const m = await run({
     pulls: [
-      { number: 516, merged_at: recentIso(60), body: "This reverts commit sha515.", base: { ref: "main" } },
+      { number: 516, merged_at: recentIso(60), body: "This reverts commit abcdef515.", base: { ref: "main" } },
       { number: 515, merged_at: recentIso(2 * DAY_MIN), body: "closes #915", base: { ref: "main" } },
     ],
     issuesByNumber: { 915: { state: "closed" } },
     cursor: baseCursor({
+      watermark: recentIso(3 * DAY_MIN),
       lastFullRepairAt: recentIso(2 * DAY_MIN),
-      closed: { 915: { pr: 515, sha: "sha515" } },
+      closed: { 915: { pr: 515, sha: "abcdef515" } },
     }),
   });
 
