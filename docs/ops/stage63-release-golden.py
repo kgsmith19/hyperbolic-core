@@ -72,6 +72,9 @@ def release_result(rm, package):
 
 def release_cases(rm, corpus_doc):
     base = rm.clean_package()
+    # restore-rpo promotes before the canary gate, so canary fields are only
+    # reached without a proven restore.
+    gated = variant(base, {"restore_rpo_ok": False})
     cases = []
 
     def add(label, package):
@@ -88,16 +91,17 @@ def release_cases(rm, corpus_doc):
     for value in ("", "   ", "　", "v5 ", "é", 123, True, None, ["x"],
                   {"a": 1}, "x" * 250):
         add("release=" + json.dumps(value), variant(base, {"release": value}))
+    add("gated-clean", gated)
     for value in ("", None, 0, "1%", ["x"]):
-        add("canary_exposure=" + json.dumps(value), variant(base, {"canary_exposure": value}))
+        add("canary_exposure=" + json.dumps(value), variant(gated, {"canary_exposure": value}))
     for value in ("", None):
-        add("canary_window=" + json.dumps(value), variant(base, {"canary_window": value}))
+        add("canary_window=" + json.dumps(value), variant(gated, {"canary_window": value}))
     invariant_sets = ([], ["a"], ["a", "b"], ["a", "b", "c", "d", "e"],
                       ["a", "b", "c", "d", "e", "f"], ["a", 1, None, True], "abc", None,
                       [["x"], "y", "z"])
     for value in invariant_sets:
         add("canary_invariants=" + json.dumps(value),
-            variant(base, {"canary_invariants": value}))
+            variant(gated, {"canary_invariants": value}))
     claim_sets = ([], [c for c in rm.CLAIMS if c != "canary-proof"],
                   list(rm.CLAIMS) + ["extra"], "integrated-behavior", None,
                   ["integrated-behavior", 5, None, True])
@@ -203,6 +207,9 @@ def invalidation_cases(pi, corpus_doc):
                                           {"command": "pytest -q", "digest": "d1"}]}),
         ("command-dup-frozen", {"frozen_commands": [{"command": "pytest -q", "digest": "d1"},
                                                     {"command": "pytest -q", "digest": "d9"}]}),
+        ("command-unnamed-frozen", {"frozen_commands": [{"digest": "d1"},
+                                                        {"command": "", "digest": "x"},
+                                                        {"command": "pytest -q", "digest": "d1"}]}),
         ("command-quotes", {"frozen_commands": [{"command": "say 'hi'", "digest": "d1"}],
                             "commands": [{"command": "say 'hi'", "digest": "d1"}]}),
         ("command-not-list", {"commands": "pytest -q"}),
