@@ -3,30 +3,42 @@ name: "Issue Close Sweep"
 # The DOCUMENTED PRIMARY MECHANISM for closing an Issue after a
 # GITHUB_TOKEN-armed auto-merge (Issue #283). pr-verify.yml's "PR Gate" job
 # also polls briefly after arming auto-merge and runs the fallback inline if
-# it observes the merge complete (see that job's own pollForMergeAfterArming)
-# -- but that poll is deliberately only 15 seconds, and structurally cannot
-# observe the merge THIS job's own arming call just armed: `pr-gate` is the
-# sole required status check in this repo's branch ruleset, so the merge
-# cannot complete until that job's own check-run reports done, which
-# requires the poll (and the rest of the job) to finish first. See
-# pr-verify.yml's own comment above `pollForMergeAfterArming` for the full
-# reasoning and the PR #280 timing evidence. That poll exists only as cheap
-# insurance for the rare case a DIFFERENT event completes the merge while
-# that job happens to still be running.
+# it observes the merge complete (see that job's own pollForMergeAfterArming),
+# but that poll is deliberately only 15 seconds and structurally cannot
+# observe the merge its own arming call armed: `pr-gate` is the sole required
+# status check in this repo's branch ruleset, so the merge cannot complete
+# until that job's own check-run reports done. See pr-verify.yml's comment
+# above `pollForMergeAfterArming` for the full reasoning. That poll exists only
+# as cheap insurance for the rare case a different event completes the merge
+# while that job is still running.
 #
 # This workflow runs on its own schedule, independent of any pull-request
-# event and of any single job's lifecycle, and re-parses
-# `Closes/Fixes/Resolves #N` out of every PR merged in roughly the last 24
-# hours, closing the linked Issue itself if it is still open. Because it is
-# the primary mechanism, its cadence directly bounds worst-case Issue-close
-# latency: every 15 minutes, not hourly. It re-implements a small subset of
-# pr-verify.yml's own parseLinkedIssues/handleIssueCloseFallback logic rather
-# than importing it -- pr-gate stays checkout-free by design, and this is a
-# deliberate small duplication (see AGENTS.md's Global Constraints for this
-# plan). It posts under the SAME ISSUE_CLOSE_FALLBACK_MARKER comment marker
-# pr-verify.yml uses, with wording that names the scheduled sweep explicitly,
-# so a future debugging session can tell which of the two mechanisms closed a
-# given Issue from the comment text alone.
+# event and of any single job's lifecycle. It keeps a DURABLE CURSOR (hyperbolic-core#396,
+# Q11) in one marker comment on the standing Issue CURSOR_ISSUE (#453). The
+# cursor holds:
+#   - watermark:        the newest merged_at processed. Catch-up starts here, so
+#                       a long outage replays from the cursor, not from a fixed
+#                       24h window.
+#   - epoch:            the bootstrap instant. The periodic full repair never
+#                       looks at merges older than this, so it cannot close an
+#                       Issue that was left open on purpose before this sweep existed.
+#   - lastFullRepairAt: a full repair runs at most once every 24 hours. It repairs
+#                       cursor gaps: merges the incremental pass missed.
+#   - failed:           exact-task retry ledger. A failed close is retried exactly,
+#                       and a success clears it, so nothing is duplicated.
+#   - closed:           per-Issue closure record {pr, sha}. Used to detect a
+#                       human reopen and to relink a revert.
+#   - reverted:         Issues relinked after a revert. Never closed again.
+#   - reopened:         Issues a human reopened after the sweep closed them.
+#                       Never closed again.
+# A closing reference names an Issue as `#N` or `owner/repo#N`. Only this
+# repository is in scope. A reference to another repository is logged and
+# skipped, because this token cannot write there and the sweep must not try.
+#
+# Nothing broader than the calls this job makes: reading merged PRs
+# (pull-requests: read), and closing or commenting on Issues, including the
+# cursor comment (issues: write). It never checks out the repository, so no PR
+# code is present while it holds write credentials.
 #
 # schedule ONLY: no pull_request trigger, so this adds no PR check row and
 # sits entirely outside PR Gate's rollup.
@@ -53,39 +65,116 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
+            const thisRepo = `${owner}/${repo}`.toLowerCase();
 
-            // Same marker pr-verify.yml's own issue-close fallback uses
-            // (see handleIssueCloseFallback there) -- this workflow closes
-            // the same class of Issue through the same auditable marker,
-            // distinguished only by wording that names the scheduled sweep,
-            // so a future debugging session can tell the two mechanisms
-            // apart from the comment text alone.
+            // Same marker pr-verify.yml's own issue-close fallback uses. This
+            // workflow closes the same class of Issue through the same auditable
+            // marker, distinguished only by wording that names the scheduled sweep.
             const ISSUE_CLOSE_FALLBACK_MARKER =
               "<!-- agent-engineering-standard:issue-close-fallback:v1 -->";
+            const ISSUE_RELINK_MARKER = "<!-- agent-engineering-standard:issue-relink:v1 -->";
+            const CURSOR_MARKER = "<!-- agent-engineering-standard:issue-close-sweep-cursor:v1 -->";
 
-            // A generous, rough window: this job runs every 15 minutes, so a
-            // PR that merged within the last 24 hours has had roughly 96
-            // earlier chances to already be caught by a previous run -- this
-            // only widens the net for the rare case where PR Gate's own
-            // post-arm poll (a 15-second window, see pr-verify.yml) missed
-            // the merge entirely.
-            const WINDOW_MS = 24 * 60 * 60 * 1000;
+            // The standing Issue whose comment holds the durable cursor (#453).
+            const CURSOR_ISSUE = 453;
 
-            // Same keyword convention as pr-verify.yml's own
-            // parseLinkedIssues: case-insensitive, present-tense
-            // closes/fixes/resolves. Re-implemented here rather than
-            // imported -- see AGENTS.md's Global Constraints on why
-            // pr-gate stays checkout-free and this is a deliberate small
-            // duplication.
-            function parseLinkedIssues(body) {
-              const matches = [...(body || "").matchAll(/\b(?:closes|fixes|resolves)\s+#(\d+)\b/gi)];
-              return [...new Set(matches.map((entry) => Number(entry[1])))];
+            // Bootstrap catch-up window: the first run replays what the pre-cursor
+            // sweep covered (24h), and then the cursor takes over.
+            const BOOTSTRAP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+            // Periodic full repair cadence. It is bounded by the cursor epoch, not
+            // by time, so it never reaches history older than the sweep itself.
+            const FULL_REPAIR_MS = 24 * 60 * 60 * 1000;
+
+            // Same keyword convention as pr-verify.yml: case-insensitive,
+            // present-tense closes/fixes/resolves. An optional owner/repo prefix
+            // names a cross-repo target. Re-implemented here, not imported, to keep
+            // this job checkout-free.
+            const LINK_RE = /\b(?:closes|fixes|resolves)\s+(?:([\w.-]+)\/([\w.-]+))?#(\d+)\b/gi;
+
+            // A GitHub revert PR's body names the reverted commit.
+            const REVERT_RE = /This reverts commit ([0-9a-f]{7,40})\b/i;
+
+            // Returns [{ repo: "owner/repo" (lowercase), number }], de-duplicated.
+            // A bare `#N` is this repository.
+            function parseLinks(body) {
+              const seen = new Map();
+              for (const match of (body || "").matchAll(LINK_RE)) {
+                const repoName = match[1] && match[2] ? `${match[1]}/${match[2]}`.toLowerCase() : thisRepo;
+                const number = Number(match[3]);
+                seen.set(`${repoName}#${number}`, { repo: repoName, number });
+              }
+              return [...seen.values()];
             }
 
             const summaryLines = [];
             let closedCount = 0;
 
-            async function closeIssueIfStillOpen(issueNumber, pr) {
+            // Reads and parses the durable cursor. A malformed cursor throws, which
+            // fails the run loudly rather than silently resetting the state.
+            async function loadCursor() {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: CURSOR_ISSUE,
+                per_page: 100,
+              });
+              const found = comments.find((c) => (c.body || "").includes(CURSOR_MARKER));
+              if (!found) {
+                const now = Date.now();
+                return {
+                  commentId: null,
+                  state: {
+                    v: 1,
+                    watermark: new Date(now - BOOTSTRAP_WINDOW_MS).toISOString(),
+                    epoch: new Date(now).toISOString(),
+                    lastFullRepairAt: new Date(now).toISOString(),
+                    failed: [],
+                    closed: {},
+                    reverted: [],
+                    reopened: [],
+                  },
+                };
+              }
+              const json = found.body.match(/```json\n([\s\S]*?)\n```/);
+              if (!json) throw new Error("cursor comment has no JSON block");
+              return { commentId: found.id, state: JSON.parse(json[1]) };
+            }
+
+            async function saveCursor(commentId, state) {
+              const body = `${CURSOR_MARKER}\n\`\`\`json\n${JSON.stringify(state, null, 2)}\n\`\`\``;
+              if (commentId) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: commentId, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number: CURSOR_ISSUE, body });
+              }
+            }
+
+            // Adds a failed close to the retry ledger, once per Issue.
+            function recordFailure(state, issueNumber, pr) {
+              if (!state.failed.some((f) => f.issue === issueNumber)) {
+                state.failed.push({ issue: issueNumber, pr: pr.number, sha: pr.merge_commit_sha || null });
+              }
+            }
+
+            // Drops an Issue from the retry ledger once its close is resolved.
+            function resolveFailure(state, issueNumber) {
+              state.failed = state.failed.filter((f) => f.issue !== issueNumber);
+            }
+
+            // Closes one linked Issue from one merged PR, honoring every guard.
+            // Returns nothing. A failed read or write goes to the retry ledger.
+            async function closeLinked(state, issueNumber, pr) {
+              if (state.reverted.includes(issueNumber)) {
+                resolveFailure(state, issueNumber);
+                summaryLines.push(`- #${issueNumber}: reverted by a later PR, left closed for review.`);
+                return;
+              }
+              if (state.reopened.includes(issueNumber)) {
+                resolveFailure(state, issueNumber);
+                return;
+              }
+
               let issue;
               try {
                 const { data } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
@@ -94,14 +183,26 @@ jobs:
                 core.warning(
                   `Issue Close Sweep: could not read #${issueNumber} (linked from PR #${pr.number}): ${error.message}`
                 );
-                summaryLines.push(`- #${issueNumber}: could not be read, skipped: ${error.message}`);
+                recordFailure(state, issueNumber, pr);
+                summaryLines.push(`- #${issueNumber}: could not be read, queued for retry: ${error.message}`);
                 return;
               }
 
-              // Idempotent no-op: GitHub's native linkage or PR Gate's own
-              // post-arm poll already closed it -- no duplicate close, no
-              // duplicate comment.
-              if (issue.state !== "open") return;
+              // Already closed by GitHub's native linkage, PR Gate's poll, or an earlier
+              // run. Idempotent no-op.
+              if (issue.state !== "open") {
+                resolveFailure(state, issueNumber);
+                return;
+              }
+
+              // The sweep closed this Issue before, and it is open again: a human reopened it.
+              // Respect that and never close it again.
+              if (state.closed[issueNumber]) {
+                state.reopened.push(issueNumber);
+                resolveFailure(state, issueNumber);
+                summaryLines.push(`- #${issueNumber}: reopened by a human after the sweep closed it; left open.`);
+                return;
+              }
 
               try {
                 await github.rest.issues.update({
@@ -111,19 +212,8 @@ jobs:
                   state: "closed",
                   state_reason: "completed",
                 });
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number: issueNumber,
-                  body: [
-                    ISSUE_CLOSE_FALLBACK_MARKER,
-                    `Closed automatically: linked pull request #${pr.number} merged, but this Issue was still ` +
-                      "open roughly 24 hours later -- neither GitHub's native closing-keyword linkage nor PR " +
-                      "Gate's own post-arm merge poll (a 15-second window; see Issue #283) caught it in time. " +
-                      "This is a scheduled sweep close, performed every 15 minutes by issue-close-sweep.yml, " +
-                      "the documented primary mechanism for this scenario, not PR Gate's own in-job fallback.",
-                  ].join("\n"),
-                });
+                state.closed[issueNumber] = { pr: pr.number, sha: pr.merge_commit_sha || null };
+                resolveFailure(state, issueNumber);
                 closedCount += 1;
                 summaryLines.push(
                   `- #${issueNumber}: was still open after PR #${pr.number} merged; closed via scheduled sweep.`
@@ -132,69 +222,160 @@ jobs:
                 core.warning(
                   `Issue Close Sweep: failed to close #${issueNumber} (linked from PR #${pr.number}): ${error.message}`
                 );
-                summaryLines.push(`- #${issueNumber}: attempted close failed: ${error.message}`);
+                recordFailure(state, issueNumber, pr);
+                summaryLines.push(`- #${issueNumber}: attempted close failed, queued for retry: ${error.message}`);
+                return;
+              }
+
+              try {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  body: [
+                    ISSUE_CLOSE_FALLBACK_MARKER,
+                    `Closed automatically: linked pull request #${pr.number} merged, but this Issue was still ` +
+                      "open when the scheduled sweep ran -- neither GitHub's native closing-keyword linkage nor PR " +
+                      "Gate's own post-arm merge poll (a 15-second window; see Issue #283) caught it in time. " +
+                      "This is a scheduled sweep close, performed by issue-close-sweep.yml, " +
+                      "the documented primary mechanism for this scenario, not PR Gate's own in-job fallback.",
+                  ].join("\n"),
+                });
+              } catch (error) {
+                core.warning(`Issue Close Sweep: closed #${issueNumber} but could not comment: ${error.message}`);
               }
             }
 
+            // Relinks the Issues a revert PR undoes: the sweep closed them for the
+            // reverted PR, so they reopen here, and repair never closes them again.
+            async function relinkReverted(state, revertPr, sha) {
+              for (const [key, entry] of Object.entries(state.closed)) {
+                if (!entry.sha) continue;
+                if (!(entry.sha.startsWith(sha) || sha.startsWith(entry.sha))) continue;
+                const issueNumber = Number(key);
+                if (state.reverted.includes(issueNumber)) continue;
+                try {
+                  const { data } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                  if (data.state === "closed") {
+                    await github.rest.issues.update({
+                      owner,
+                      repo,
+                      issue_number: issueNumber,
+                      state: "open",
+                      state_reason: "reopened",
+                    });
+                    await github.rest.issues.createComment({
+                      owner,
+                      repo,
+                      issue_number: issueNumber,
+                      body: [
+                        ISSUE_RELINK_MARKER,
+                        `Reopened automatically: PR #${revertPr.number} reverts commit ${entry.sha}, the change ` +
+                          `that PR #${entry.pr} made when the scheduled sweep closed this Issue. The work is no longer on ` +
+                          "the default branch, so this Issue is open again.",
+                      ].join("\n"),
+                    });
+                  }
+                  state.reverted.push(issueNumber);
+                  summaryLines.push(`- #${issueNumber}: reverted by PR #${revertPr.number}; relinked open.`);
+                } catch (error) {
+                  core.warning(`Issue Close Sweep: failed to relink #${issueNumber} (reverted by PR #${revertPr.number}): ${error.message}`);
+                  summaryLines.push(`- #${issueNumber}: relink failed: ${error.message}`);
+                }
+              }
+            }
+
+            const state0 = await loadCursor();
+            const state = state0.state;
+            const commentId = state0.commentId;
+
             try {
-              // Same eligibility check as pr-verify.yml's own
-              // handleIssueCloseFallback (`sameRepo && targetsDefaultBranch`
-              // there): a PR merged into a non-default base branch is never
-              // eligible for either mechanism, so the sweep must not close
-              // an Issue neither GitHub's native linkage nor PR Gate's own
-              // fallback would ever have closed for that PR. Fetched once
-              // per run, not once per PR.
+              // Eligibility is read against the repository's REAL default branch,
+              // matching pr-verify.yml's own rule (sameRepo && base === default).
               const { data: repoData } = await github.rest.repos.get({ owner, repo });
               const defaultBranch = repoData.default_branch;
 
-              // Paginated, not a single page: a repository with more than
-              // 100 closed PRs since the last merge inside the window would
-              // otherwise silently drop PRs merged in that window once they
-              // fall past page 1, breaking the "scans PRs merged within
-              // roughly the last 24 hours" acceptance criterion for no
-              // reason a reader of this file could see.
-              const pulls = await github.paginate(github.rest.pulls.list, {
-                owner,
-                repo,
-                state: "closed",
-                sort: "updated",
-                direction: "desc",
-                per_page: 100,
-              });
+              const now = Date.now();
+              const fullRepair =
+                !state.lastFullRepairAt || now - Date.parse(state.lastFullRepairAt) >= FULL_REPAIR_MS;
+              const floorMs = Date.parse(fullRepair ? state.epoch : state.watermark);
 
-              const cutoff = Date.now() - WINDOW_MS;
-              const recentlyMerged = pulls.filter((pr) => {
-                if (!pr.merged_at) return false;
-                if (!pr.base || pr.base.ref !== defaultBranch) return false;
-                const mergedAt = Date.parse(pr.merged_at);
-                return Number.isFinite(mergedAt) && mergedAt >= cutoff;
-              });
-
-              summaryLines.push(
-                `- Scanned ${pulls.length} closed PR(s); ${recentlyMerged.length} merged into ${defaultBranch} within roughly the last 24h.`
-              );
-
-              for (const pr of recentlyMerged) {
-                for (const issueNumber of parseLinkedIssues(pr.body)) {
-                  await closeIssueIfStillOpen(issueNumber, pr);
-                }
+              // Retry the exact failed closes from the previous run first. Each entry
+              // leaves the ledger only when its close resolves, so an error part-way
+              // through cannot drop the rest.
+              for (const entry of [...state.failed]) {
+                await closeLinked(state, entry.issue, { number: entry.pr, merge_commit_sha: entry.sha });
               }
 
+              // Walks the pulls newest-updated first, page by page. A merged PR's
+              // updated_at is never older than its merged_at, so once a page reaches
+              // updated_at < floor, no later page can contain an eligible merge.
+              // That is the early stop, and it avoids a full scan on every run.
+              const candidates = [];
+              for (let page = 1; ; page += 1) {
+                const { data } = await github.rest.pulls.list({
+                  owner,
+                  repo,
+                  state: "closed",
+                  sort: "updated",
+                  direction: "desc",
+                  per_page: 100,
+                  page,
+                });
+                if (data.length === 0) break;
+                let reachedFloor = false;
+                for (const pr of data) {
+                  if (Date.parse(pr.updated_at) < floorMs) {
+                    reachedFloor = true;
+                    break;
+                  }
+                  if (!pr.merged_at) continue;
+                  if (!pr.base || pr.base.ref !== defaultBranch) continue;
+                  const mergedAt = Date.parse(pr.merged_at);
+                  if (!Number.isFinite(mergedAt)) continue;
+                  if (fullRepair ? mergedAt >= floorMs : mergedAt > floorMs) candidates.push(pr);
+                }
+                if (reachedFloor || data.length < 100) break;
+              }
+
+              summaryLines.push(
+                `- ${fullRepair ? "Full repair" : "Incremental pass"}: ${candidates.length} merged PR(s) into ${defaultBranch} since the ${fullRepair ? "epoch" : "watermark"}.`
+              );
+
+              let newWatermark = state.watermark;
+              for (const pr of candidates) {
+                const revert = (pr.body || "").match(REVERT_RE);
+                if (revert) await relinkReverted(state, pr, revert[1]);
+
+                for (const link of parseLinks(pr.body)) {
+                  if (link.repo !== thisRepo) {
+                    core.warning(
+                      `Issue Close Sweep: skipped ${link.repo}#${link.number} (linked from PR #${pr.number}): outside this repository's scope.`
+                    );
+                    summaryLines.push(`- ${link.repo}#${link.number}: outside scope, skipped (linked from PR #${pr.number}).`);
+                    continue;
+                  }
+                  await closeLinked(state, link.number, pr);
+                }
+
+                if (Date.parse(pr.merged_at) > Date.parse(newWatermark)) newWatermark = pr.merged_at;
+              }
+
+              state.watermark = newWatermark;
+              if (fullRepair) state.lastFullRepairAt = new Date(now).toISOString();
               summaryLines.push(`- Closed ${closedCount} Issue(s) via the scheduled sweep.`);
             } catch (error) {
               core.error(`Issue Close Sweep: orchestration error: ${error.message}`);
-              // Nothing else watches this workflow -- it has no PR check row
-              // by design (see the on: block's own comment) -- so a real
-              // orchestration failure (pulls.list/repos.get throwing, a
-              // permission change, an API outage, a future edit that breaks
-              // this script) must fail the run loudly via setFailed, not
-              // just log via core.error, or this scheduled run reports green
-              // while doing nothing. This is the outer, whole-run catch;
-              // the per-Issue/per-PR inner try/catch above (closeIssueIfStillOpen)
-              // is intentionally more tolerant and must stay that way.
+              // A real orchestration failure fails the run, because nothing else
+              // watches this workflow. Per-Issue failures stay tolerant (above).
               core.setFailed(`Issue Close Sweep: orchestration error: ${error.message}`);
               summaryLines.push(`- Orchestration error: ${error.message}`);
             } finally {
+              try {
+                await saveCursor(commentId, state);
+              } catch (cursorError) {
+                core.setFailed(`Issue Close Sweep: could not save the cursor: ${cursorError.message}`);
+              }
               try {
                 core.summary.addHeading("Issue Close Sweep");
                 core.summary.addRaw(summaryLines.join("\n") || "_No actions recorded._", true);

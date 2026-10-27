@@ -9,9 +9,9 @@
 // check-run reports done, which requires the poll to finish first (see
 // pr-verify.yml's own comment above pollForMergeAfterArming, and PR #280's
 // timing evidence). This workflow runs every 15 minutes, independent of any
-// pull-request event or any single job's lifecycle, and re-parses
-// Closes/Fixes/Resolves #N out of every PR merged in roughly the last 24
-// hours, closing the linked Issue itself if it is still open.
+// pull-request event or any single job's lifecycle. It keeps a durable cursor
+// (hyperbolic-core#396) so catch-up starts at the last processed merge, not a
+// fixed 24h window, and closes the linked Issue itself if it is still open.
 //
 // Two invariants matter here, same reasoning as pr-verify-workflow.test.mjs:
 //
@@ -103,17 +103,46 @@ test("issue-close-sweep.yml contains exactly one embedded script block", () => {
   assert.equal(scriptOccurrences, 1, "issue-close-sweep.yml must contain exactly one `script: |` block");
 });
 
+// The durable cursor lives in one marker comment on CURSOR_ISSUE (#453), as a
+// fenced JSON block. Tests seed it with cursorComment(...) and read it back
+// with readCursor(...) so assertions see the persisted state, not the script's
+// internals.
+const CURSOR_ISSUE = 453;
+const CURSOR_MARKER = "<!-- agent-engineering-standard:issue-close-sweep-cursor:v1 -->";
+const cursorComment = (state) => `${CURSOR_MARKER}\n\`\`\`json\n${JSON.stringify(state)}\n\`\`\``;
+const readCursor = (m) => {
+  const body = (m.commentStore.get(CURSOR_ISSUE) || []).find((c) => c.body.includes(CURSOR_MARKER))?.body;
+  assert.ok(body, "the cursor comment must exist on the cursor Issue after a run");
+  return JSON.parse(body.match(/```json\n([\s\S]*?)\n```/)[1]);
+};
+
 function makeMocks({
   pulls,
   issuesByNumber = {},
   issuesGetErrorFor = [],
+  updateErrorFor = [],
   defaultBranch = "main",
   pullsListError = null,
+  cursor = undefined,
 }) {
   const calls = [];
   const warnings = [];
   const failures = [];
   const commentsByIssue = new Map();
+  const commentStore = new Map();
+  let nextCommentId = 1;
+  const addComment = (issue_number, body) => {
+    const list = commentStore.get(issue_number) || [];
+    const comment = { id: nextCommentId++, body };
+    list.push(comment);
+    commentStore.set(issue_number, list);
+    return comment;
+  };
+  if (cursor !== undefined) addComment(CURSOR_ISSUE, cursorComment(cursor));
+  // Fixtures default updated_at to merged_at and merge_commit_sha to a stable
+  // per-PR value, matching what the real pulls API returns for a PR that has
+  // not been touched since it merged.
+  const prs = pulls.map((pr) => ({ updated_at: pr.merged_at, merge_commit_sha: `abcdef${pr.number}`, ...pr }));
   const stateByIssue = new Map(Object.entries(issuesByNumber).map(([k, v]) => [Number(k), v.state]));
 
   const github = {
@@ -155,7 +184,7 @@ function makeMocks({
           const perPage = args.per_page || 30;
           const page = args.page || 1;
           const start = (page - 1) * perPage;
-          return { data: pulls.slice(start, start + perPage) };
+          return { data: prs.slice(start, start + perPage) };
         },
       },
       issues: {
@@ -169,13 +198,33 @@ function makeMocks({
         },
         update: async ({ issue_number, state, state_reason }) => {
           calls.push(`issues.update:${issue_number}:${state}:${state_reason}`);
+          if (updateErrorFor.includes(issue_number)) {
+            throw new Error(`simulated write failure for #${issue_number}`);
+          }
           stateByIssue.set(issue_number, state);
         },
         createComment: async ({ issue_number, body }) => {
-          calls.push("comment:" + issue_number);
+          if (issue_number === CURSOR_ISSUE) {
+            calls.push("cursor:create");
+          } else {
+            calls.push("comment:" + issue_number);
+          }
           const list = commentsByIssue.get(issue_number) || [];
           list.push(body);
           commentsByIssue.set(issue_number, list);
+          addComment(issue_number, body);
+        },
+        listComments: async ({ issue_number, page = 1, per_page = 100 }) => {
+          const all = commentStore.get(issue_number) || [];
+          const start = (page - 1) * per_page;
+          return { data: all.slice(start, start + per_page) };
+        },
+        updateComment: async ({ comment_id, body }) => {
+          calls.push("cursor:update");
+          for (const list of commentStore.values()) {
+            const comment = list.find((c) => c.id === comment_id);
+            if (comment) comment.body = body;
+          }
         },
       },
     },
@@ -204,7 +253,7 @@ function makeMocks({
 
   const context = { repo: { owner: "kgsmith19", repo: "hyperbolic-core" } };
 
-  return { github, core, context, calls, warnings, failures, commentsByIssue };
+  return { github, core, context, calls, warnings, failures, commentsByIssue, commentStore };
 }
 
 const run = async (opts) => {
@@ -261,13 +310,18 @@ test("issue-close-sweep: a PR body with no closing keyword triggers nothing", as
   assert.ok(!m.calls.some((c) => c.startsWith("issues.get")), "a non-closing reference must never be looked up");
 });
 
-test("issue-close-sweep: a PR merged outside the ~24h window is excluded from consideration", async () => {
+// AC1 (hyperbolic-core#396): the window is no longer a fixed 24h. A PR merged
+// before the durable watermark is examined only by the periodic full repair,
+// never by the incremental pass. Here the repair is recent, so a PR merged
+// 48h ago that sits before the watermark is left alone.
+test("issue-close-sweep: an incremental run with a recent full repair does not re-examine a PR merged before the durable watermark", async () => {
   const m = await run({
     pulls: [{ number: 504, merged_at: recentIso(48 * 60), body: "closes #903", base: { ref: "main" } }],
     issuesByNumber: { 903: { state: "open" } },
+    cursor: { v: 1, watermark: recentIso(10), lastFullRepairAt: recentIso(60), failed: [], closed: {}, reverted: [], reopened: [] },
   });
 
-  assert.ok(!m.calls.some((c) => c.startsWith("issues.get")), "a PR merged ~48h ago must be excluded by the window filter");
+  assert.ok(!m.calls.some((c) => c.startsWith("issues.get")), "a PR before the watermark must not be examined between full repairs");
 });
 
 // Defect-sensitive: 130 closed PRs (more than one page at per_page: 100),
@@ -276,16 +330,26 @@ test("issue-close-sweep: a PR merged outside the ~24h window is excluded from co
 // (github.rest.pulls.list called directly, not paginated) would see 100
 // filler PRs, never see this one, and silently miss it.
 test("issue-close-sweep: a PR merged within the window is found even when it sits on the second page of closed PRs (pagination)", async () => {
-  const filler = Array.from({ length: 129 }, (_, i) => ({
+  // The real pulls API sorts by updated desc, so 99 recently-touched
+  // non-closing PRs fill page 1 and the closing PR is the first item on page 2.
+  // Trailing filler is 30 days old, so the incremental stop criterion
+  // (updated_at before the watermark) ends the walk after page 2.
+  const recent = Array.from({ length: 99 }, (_, i) => ({
+    number: 900 + i + 1, // 901..999, never a Closes target in this fixture
+    merged_at: recentIso(1),
+    body: "no closing keyword here",
+    base: { ref: "main" },
+  }));
+  const oldFiller = Array.from({ length: 30 }, (_, i) => ({
     number: 1000 + i,
-    merged_at: recentIso(60 * 24 * 30), // 30 days ago, well outside the window
+    merged_at: recentIso(60 * 24 * 30),
     body: "no closing keyword here",
     base: { ref: "main" },
   }));
   const pulls = [
-    ...filler.slice(0, 99),
+    ...recent,
     { number: 507, merged_at: recentIso(10), body: "closes #906", base: { ref: "main" } },
-    ...filler.slice(99),
+    ...oldFiller,
   ];
   assert.equal(pulls.length, 130, "fixture must exceed one page (per_page: 100)");
 
@@ -392,4 +456,154 @@ test("issue-close-sweep: an orchestration failure (pulls.list throwing) fails th
     /simulated API outage/,
     "the setFailed message must carry the underlying error, for a diagnosable failed-run log"
   );
+});
+
+// ---------------------------------------------------------------------------
+// hyperbolic-core#396 (Q11): durable cursor, periodic repair, exact-task
+// retry, reopen/revert relink, cross-repo scope, no privileged checkout.
+// ---------------------------------------------------------------------------
+
+const DAY_MIN = 24 * 60;
+const baseCursor = (over = {}) => ({
+  v: 1,
+  watermark: recentIso(10),
+  lastFullRepairAt: recentIso(60),
+  failed: [],
+  closed: {},
+  epoch: "2000-01-01T00:00:00.000Z",
+  reverted: [],
+  reopened: [],
+  ...over,
+});
+
+test("issue-close-sweep (AC1): catch-up is driven by the durable watermark, not a fixed 24h window -- a PR merged 2 days ago after a 3-day-old watermark closes its Issue", async () => {
+  const m = await run({
+    pulls: [{ number: 510, merged_at: recentIso(2 * DAY_MIN), body: "closes #910", base: { ref: "main" } }],
+    issuesByNumber: { 910: { state: "open" } },
+    cursor: baseCursor({ watermark: recentIso(3 * DAY_MIN) }),
+  });
+
+  assert.ok(
+    m.calls.includes("issues.update:910:closed:completed"),
+    "a PR newer than the durable watermark must be caught up even when it is older than 24h"
+  );
+});
+
+test("issue-close-sweep (AC2): the cursor advances to the newest processed merge and records the closure, so a repeat run neither re-closes nor re-comments", async () => {
+  const pr = { number: 511, merged_at: recentIso(2 * DAY_MIN), body: "closes #911", base: { ref: "main" } };
+  const first = await run({
+    pulls: [pr],
+    issuesByNumber: { 911: { state: "open" } },
+    cursor: baseCursor({ watermark: recentIso(3 * DAY_MIN) }),
+  });
+  const persisted = readCursor(first);
+  assert.equal(persisted.watermark, pr.merged_at, "watermark must advance to the newest processed merged_at");
+  assert.deepEqual(persisted.closed["911"], { pr: 511, sha: "abcdef511" }, "the closure must be recorded with its PR and merge SHA");
+
+  const second = await run({
+    pulls: [pr],
+    issuesByNumber: { 911: { state: "closed" } },
+    cursor: persisted,
+  });
+  assert.ok(!second.calls.some((c) => c.startsWith("issues.update:911")), "a repeat run must not re-close the Issue");
+  assert.ok(!second.calls.includes("comment:911"), "a repeat run must not duplicate the fallback comment");
+});
+
+test("issue-close-sweep (AC2 cursor gap): a stale full repair re-examines a PR before the watermark and closes its still-open Issue", async () => {
+  const m = await run({
+    pulls: [{ number: 512, merged_at: recentIso(5 * DAY_MIN), body: "closes #912", base: { ref: "main" } }],
+    issuesByNumber: { 912: { state: "open" } },
+    cursor: baseCursor({ watermark: recentIso(10), lastFullRepairAt: recentIso(2 * DAY_MIN) }),
+  });
+
+  assert.ok(m.calls.includes("issues.update:912:closed:completed"), "the periodic full repair must repair an event the incremental cursor missed");
+  assert.ok(readCursor(m).lastFullRepairAt >= new Date(NOW).toISOString(), "the full repair time must be recorded");
+});
+
+test("issue-close-sweep (AC4): a failed close is recorded in the ledger, retried exactly on the next run, and cleared on success without duplication", async () => {
+  const first = await run({
+    pulls: [{ number: 513, merged_at: recentIso(10), body: "closes #913", base: { ref: "main" } }],
+    issuesByNumber: { 913: { state: "open" } },
+    updateErrorFor: [913],
+  });
+  assert.deepEqual(readCursor(first).failed, [{ issue: 913, pr: 513, sha: "abcdef513" }], "the failed close must be persisted for an exact retry");
+  assert.deepEqual(first.failures, [], "a per-Issue write failure must stay tolerant, never failing the run");
+
+  const second = await run({
+    pulls: [],
+    issuesByNumber: { 913: { state: "open" } },
+    cursor: readCursor(first),
+  });
+  assert.equal(second.calls.filter((c) => c === "issues.update:913:closed:completed").length, 1, "the exact failed Issue must be retried once");
+  assert.equal(second.calls.filter((c) => c === "comment:913").length, 1, "the retry must post exactly one comment");
+  assert.deepEqual(readCursor(second).failed, [], "a successful retry must clear the ledger entry");
+});
+
+test("issue-close-sweep (AC3 reopen): an Issue the sweep closed and a human later reopened is never re-closed by repair", async () => {
+  const m = await run({
+    pulls: [{ number: 514, merged_at: recentIso(5 * DAY_MIN), body: "closes #914", base: { ref: "main" } }],
+    issuesByNumber: { 914: { state: "open" } },
+    cursor: baseCursor({
+      lastFullRepairAt: recentIso(2 * DAY_MIN),
+      closed: { 914: { pr: 514, sha: "abcdef514" } },
+    }),
+  });
+
+  assert.ok(!m.calls.some((c) => c.startsWith("issues.update:914")), "a human-reopened Issue must not be closed again");
+  assert.deepEqual(readCursor(m).reopened, [914], "the human reopen must be recorded so later runs keep respecting it");
+});
+
+test("issue-close-sweep (AC3 revert relink): a revert PR reopens the Issue the reverted PR closed, and repair never closes it again", async () => {
+  const m = await run({
+    pulls: [
+      { number: 516, merged_at: recentIso(60), body: "This reverts commit abcdef515.", base: { ref: "main" } },
+      { number: 515, merged_at: recentIso(2 * DAY_MIN), body: "closes #915", base: { ref: "main" } },
+    ],
+    issuesByNumber: { 915: { state: "closed" } },
+    cursor: baseCursor({
+      watermark: recentIso(3 * DAY_MIN),
+      lastFullRepairAt: recentIso(2 * DAY_MIN),
+      closed: { 915: { pr: 515, sha: "abcdef515" } },
+    }),
+  });
+
+  assert.ok(m.calls.includes("issues.update:915:open:reopened"), "the reverted PR's Issue must be relinked to open");
+  assert.ok(!m.calls.includes("issues.update:915:closed:completed"), "the reverted PR must never close the Issue again");
+  assert.deepEqual(readCursor(m).reverted, [915], "the reverted Issue must be recorded so repair skips it");
+  assert.deepEqual(readCursor(m).reopened, [], "a revert relink is not a human reopen and must never be recorded as one");
+});
+
+// Cross-repo scope (AC5): a closing reference to another repository must
+// never be read or written, since this workflow's token is scoped to this
+// repository. A reference that names this repository explicitly is treated as
+// same-repo, not as cross-repo.
+test("issue-close-sweep (AC5 scope): a closing reference to another repository is never read or written; the same repository named explicitly is handled", async () => {
+  const m = await run({
+    pulls: [
+      {
+        number: 517,
+        merged_at: recentIso(10),
+        body: "Closes other-org/other-repo#920 and closes kgsmith19/hyperbolic-core#921",
+        base: { ref: "main" },
+      },
+    ],
+    issuesByNumber: { 921: { state: "open" } },
+  });
+
+  assert.ok(!m.calls.includes("issues.get:920"), "a cross-repo target must never be read as if it were local");
+  assert.ok(!m.calls.some((c) => c === "issues.update:920:closed:completed"), "a cross-repo target must never be closed");
+  assert.ok(m.warnings.some((w) => w.includes("other-org/other-repo#920")), "the skipped cross-repo target must be logged");
+  assert.ok(m.calls.includes("issues.update:921:closed:completed"), "the explicitly named same repository must be handled");
+});
+
+test("issue-close-sweep (bootstrap): with no cursor yet, the first run creates the durable cursor comment", async () => {
+  const m = await run({ pulls: [] });
+
+  assert.ok(m.calls.includes("cursor:create"), "the first run must create the cursor comment on the cursor Issue");
+  assert.equal(readCursor(m).v, 1, "the created cursor must carry the schema version");
+});
+
+test("issue-close-sweep (AC6): the workflow never checks out repository code, so no PR code is ever present while it holds write credentials", () => {
+  assert.doesNotMatch(workflow, /actions\/checkout/, "must not check out any code");
+  assert.doesNotMatch(workflow, /contents:\s*write/, "must never hold contents write");
 });
