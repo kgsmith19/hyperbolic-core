@@ -41,6 +41,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 
 // The extracted scripts use CommonJS `require("node:fs")` / `require("node:path")`
 // (that is what actions/github-script's own sandbox provides), so this ESM
@@ -699,6 +700,27 @@ test("llm-review-dialogue.yml mints the reviewer's own App identity from Infisic
   const postingStart = dialogueYaml.indexOf("Dialogue · Post findings");
   const githubTokenLine = dialogueYaml.slice(postingStart, dialogueYaml.indexOf("script: |", postingStart));
   assert.match(githubTokenLine, /github-token:\s*\$\{\{\s*steps\.review-app-token\.outputs\.token\s*\|\|\s*github\.token\s*\}\}/);
+});
+
+// Issue #440: the reviewer App's installation grants Contents read-only. A mint
+// that asks for more is refused outright (HTTP 422, "The level of access for
+// permissions requested are not granted to this installation"); the step is
+// continue-on-error, so the run still looks green while every finding posts as
+// github-actions[bot]. The mint must request exactly what the posting step
+// uses: Contents read, Pull requests write, Issues write. Defect caught: a
+// re-widening to contents: write, or any extra permission the installation
+// does not grant.
+test("llm-review-dialogue.yml mints the reviewer App token with Contents read only (Issue #440)", () => {
+  const tokenStart = dialogueYaml.indexOf("Dialogue · Mint the reviewer App's installation token");
+  assert.ok(tokenStart >= 0, "no reviewer App mint step found");
+  const step = parseYaml(dialogueYaml).jobs.dialogue.steps.find((entry) => entry.id === "review-app-token");
+  assert.ok(step, "the mint step keeps id review-app-token (the posting step reads its outputs)");
+  const permissions = Object.fromEntries(Object.entries(step.with).filter(([key]) => key.startsWith("permission-")));
+  assert.deepEqual(permissions, {
+    "permission-contents": "read",
+    "permission-pull-requests": "write",
+    "permission-issues": "write",
+  });
 });
 
 // The dev agent's own Anthropic credential (model key, distinct from the App
