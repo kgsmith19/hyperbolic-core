@@ -12,13 +12,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ADOPTION, FROZEN, GAP_SLICES, buildRepoMap, gapsOf, planeFor, validateMapEdit,
 } from "./stage63-adoption-lib.mjs";
-import { MAP_ARTIFACT, MAP_SOURCE, renderRepoMap } from "./stage63-repo-map.mjs";
+import { MAP_ARTIFACT, MAP_SOURCE, renderRepoMap, staleness } from "./stage63-repo-map.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const read = (rel) => readFileSync(path.join(root, rel), "utf8");
@@ -115,9 +116,30 @@ test("map · docs/repo-map.json is byte-identical to the upstream-built map and 
   assert.equal(artifact, renderRepoMap(source), "the generator renders the committed artifact");
 });
 
-test("map · the generator's --check passes on the committed artifact", () => {
-  const run = spawnSync(process.execPath, ["docs/ops/stage63-repo-map.mjs", "--check"], { cwd: root, encoding: "utf8" });
-  assert.equal(run.status, 0, run.stdout + run.stderr);
+test("map · the generator's --check passes on the committed artifact and fails a hand edit", () => {
+  const check = (...extra) => spawnSync(process.execPath, ["docs/ops/stage63-repo-map.mjs", "--check", ...extra],
+    { cwd: root, encoding: "utf8" });
+  const current = check();
+  assert.equal(current.status, 0, current.stdout + current.stderr);
+  const dir = mkdtempSync(path.join(tmpdir(), "repo-map-"));
+  try {
+    const edited = path.join(dir, "repo-map.json");
+    writeFileSync(edited, read(MAP_ARTIFACT).replace('"plane": "generated"', '"plane": "source"'));
+    const stale = check(edited);
+    assert.equal(stale.status, 1, "a hand-edited map fails --check");
+    assert.match(stale.stderr, /is stale; run node docs\/ops\/stage63-repo-map\.mjs --write/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("map · a stale or hand-edited artifact is caught", () => {
+  const artifact = read(MAP_ARTIFACT);
+  assert.equal(staleness(source, artifact), null);
+  assert.match(staleness(source, artifact.replace('"plane": "generated"', '"plane": "source"')), /is stale/);
+  assert.match(staleness(source, ""), /is stale/);
+  const added = { ...source, entries: [...source.entries, { path: "README.md", reason: "repository overview for humans" }] };
+  assert.match(staleness(added, artifact), /is stale/, "a source edit without --write is stale");
 });
 
 test("map · the map stays bounded, reasoned and grounded on disk", () => {

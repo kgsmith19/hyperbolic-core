@@ -1,0 +1,165 @@
+{
+  "version": "5.0.0",
+  "entries": [
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "reason": "PR body contract the PR description lane enforces",
+      "plane": "source"
+    },
+    {
+      "path": ".github/actions",
+      "reason": "composite actions holding each lane's real logic, reused by the standalone workflows",
+      "plane": "source"
+    },
+    {
+      "path": ".github/workflows/deploy.yml",
+      "reason": "deployment entry point; per-app deploy lanes sit beside it",
+      "plane": "source"
+    },
+    {
+      "path": ".github/workflows/issue-close-sweep.yml",
+      "reason": "closes linked Issues on remote merge truth (merged_at), idempotently",
+      "plane": "source"
+    },
+    {
+      "path": ".github/workflows/llm-review.yml",
+      "reason": "standalone AI Review trigger; dialogue and recheck live beside it",
+      "plane": "source"
+    },
+    {
+      "path": ".github/workflows/pr-verify.yml",
+      "reason": "the only pull_request workflow: native lanes plus PR Gate, the required check and merge orchestrator",
+      "plane": "protected"
+    },
+    {
+      "path": "AGENTS.md",
+      "reason": "root router: owner authority, sources of truth, risk tiers, PR Gate behaviour, agent boundaries",
+      "plane": "source"
+    },
+    {
+      "path": "apps/agentic-command-center",
+      "reason": "Agentic Command Center app: kernel, runner and Windows lane",
+      "plane": "source"
+    },
+    {
+      "path": "apps/lifeos",
+      "reason": "LifeOS app: backend, read-only stdio MCP server, deploy and backup lanes",
+      "plane": "source"
+    },
+    {
+      "path": "apps/shell",
+      "reason": "composed Shell app (front door for every zone); own AGENTS.md and project.yaml",
+      "plane": "source"
+    },
+    {
+      "path": "apps/toolbelt",
+      "reason": "Toolbelt monorepo of small tools (nested apps; hyp#450 lifts them to apps/<name>)",
+      "plane": "source"
+    },
+    {
+      "path": "apps/toolbelt/guards",
+      "reason": "guards: policy documents the guards broker enforces",
+      "plane": "source"
+    },
+    {
+      "path": "docs/ops",
+      "reason": "operator tooling and contract oracles: workflow tests, Stage 59-63 adoption bindings",
+      "plane": "source"
+    },
+    {
+      "path": "docs/ops/runbook.md",
+      "reason": "operator runbook: identities, deploys, restores, incident steps",
+      "plane": "source"
+    },
+    {
+      "path": "docs/ops/stage63-adoption-lib.mjs",
+      "reason": "Stage 63 v5 ports with Python semantics; ADOPTION map of every adopted element",
+      "plane": "source"
+    },
+    {
+      "path": "docs/ops/stage63-repo-map.mjs",
+      "reason": "owning tool of this map: renders and checks docs/repo-map.json",
+      "plane": "source"
+    },
+    {
+      "path": "docs/ops/vendors.md",
+      "reason": "vendor inventory: what each external service is for and how it authenticates",
+      "plane": "source"
+    },
+    {
+      "path": "docs/planning",
+      "reason": "planning record: canonical names, inventory, per-app definitions, risk register",
+      "plane": "source"
+    },
+    {
+      "path": "docs/repo-map.json",
+      "reason": "this bounded map, generated: regenerate with the owning tool, never edit",
+      "plane": "generated"
+    },
+    {
+      "path": "inventories/secrets",
+      "reason": "secret inventory by name and path only, never values",
+      "plane": "source"
+    },
+    {
+      "path": "packages/broker-contract",
+      "reason": "guards broker request/policy contract: shape validation only",
+      "plane": "source"
+    },
+    {
+      "path": "packages/llm",
+      "reason": "provider-agnostic LLM abstraction: request, streaming, tool use, error taxonomy",
+      "plane": "source"
+    },
+    {
+      "path": "packages/platform-client",
+      "reason": "shared platform session client: Supabase Auth sign-in and authed fetch",
+      "plane": "source"
+    },
+    {
+      "path": "packages/review",
+      "reason": "adversarial LLM PR review: cross-provider verdict behind the AI Review lane",
+      "plane": "source"
+    },
+    {
+      "path": "packages/toolbelt-cli",
+      "reason": "scaffold CLI for the Toolbelt new-tool lifecycle",
+      "plane": "source"
+    },
+    {
+      "path": "packages/ui",
+      "reason": "shared design tokens, primitives and state components",
+      "plane": "source"
+    },
+    {
+      "path": "project.yaml",
+      "reason": "repository facts and exact commands: apps, services, CI lanes, vendors, Standard pin",
+      "plane": "source"
+    },
+    {
+      "path": "runbooks",
+      "reason": "cross-cutting runbooks: secret rotation, outage, restore",
+      "plane": "source"
+    },
+    {
+      "path": "services/brain",
+      "reason": "Brain daemon: long-lived autonomous-coding orchestrator and its evals",
+      "plane": "source"
+    },
+    {
+      "path": "services/broker",
+      "reason": "guards broker: egress forward proxy (log-only phase)",
+      "plane": "source"
+    },
+    {
+      "path": "services/llm-handler",
+      "reason": "Handler A: the general-purpose deployed LLM service",
+      "plane": "source"
+    },
+    {
+      "path": "standard.lock",
+      "reason": "adopted agent-engineering-standard commit; bumped last in an adoption series",
+      "plane": "artifact"
+    }
+  ]
+}

@@ -66,6 +66,7 @@ BUILD_CASES = (
     ("one", [entry("a.py")]),
     ("sorted-by-code-point", [entry("b"), entry("B"), entry("a"), entry("é"), entry("e"),
                               entry("Z")]),
+    ("astral-after-high-bmp", [entry("\U0001F600"), entry("\uff21"), entry("\ue000"), entry("~")]),
     ("planes-assigned", [entry("Canonical/generated/x"), entry("Canonical/schemas/s"),
                          entry(".worktrees/w"), entry(".evidence/e"),
                          entry(".github/workflows/pr-gate.yml"), entry("tools/t.py")]),

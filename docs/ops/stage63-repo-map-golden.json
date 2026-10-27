@@ -102,6 +102,54 @@
     }
    },
    {
+    "id": "astral-after-high-bmp",
+    "input": [
+     {
+      "path": "\ud83d\ude00",
+      "reason": "r"
+     },
+     {
+      "path": "\uff21",
+      "reason": "r"
+     },
+     {
+      "path": "\ue000",
+      "reason": "r"
+     },
+     {
+      "path": "~",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "value": {
+      "entries": [
+       {
+        "path": "~",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "\ue000",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "\uff21",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "\ud83d\ude00",
+        "plane": "source",
+        "reason": "r"
+       }
+      ],
+      "version": "5.0.0"
+     }
+    }
+   },
+   {
     "id": "planes-assigned",
     "input": [
      {

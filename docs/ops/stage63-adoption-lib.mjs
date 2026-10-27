@@ -37,6 +37,81 @@ const REPO_MAP_EVIDENCE = [".evidence/"];
 const REPO_MAP_PROTECTED = [
   ".github/workflows/pr-gate.yml", ".github/workflows/merge-policy.yml", "main",
 ];
+const REPO_MAP_FROZEN_PATTERNS = Object.freeze({
+  generated: REPO_MAP_GENERATED, artifact: REPO_MAP_ARTIFACT, cache: REPO_MAP_CACHE,
+  evidence: REPO_MAP_EVIDENCE, protected: REPO_MAP_PROTECTED,
+});
+
+// Mirrors repo_map.plane_for. `patterns` binds the five non-source planes to a
+// repository's own paths (default: the frozen upstream patterns). Every plane
+// matches by prefix except cache, which matches anywhere in the path; a non-str
+// path raises only where Python's str method would.
+export function planeFor(path, patterns = REPO_MAP_FROZEN_PATTERNS) {
+  const method = (name, call) => {
+    if (typeof path !== "string") {
+      const error = new Error(`'${pyTypeName(path)}' object has no attribute '${name}'`);
+      error.name = "AttributeError";
+      throw error;
+    }
+    return call();
+  };
+  const starts = (pattern) => method("startswith", () => path.startsWith(pattern));
+  if (patterns.protected.some((pattern) => path === pattern || starts(pattern))) return "protected";
+  if (patterns.evidence.some(starts)) return "evidence";
+  if (patterns.cache.some((pattern) => {
+    if (typeof path !== "string") throw pyTypeError(`argument of type '${pyTypeName(path)}' is not iterable`);
+    return path.includes(pattern);
+  })) return "cache";
+  if (patterns.artifact.some(starts)) return "artifact";
+  if (patterns.generated.some(starts)) return "generated";
+  return "source";
+}
+
+// Mirrors repo_map.build: a bounded map, every path with a reason, each listed
+// once, each in the plane it declares (if it declares one), sorted by path in
+// code point order. Refusals raise ValueError with upstream's message. Unlike
+// upstream, the caller's entries are copied, never mutated.
+export function buildRepoMap(entries, patterns = REPO_MAP_FROZEN_PATTERNS) {
+  const refuse = (message) => {
+    const error = new Error(message);
+    error.name = "ValueError";
+    return error;
+  };
+  if (entries.length > REPO_MAP_BUDGET) {
+    throw refuse(`map holds ${entries.length} entries, over the ${REPO_MAP_BUDGET}-entry budget: narrow the focus envelope instead`);
+  }
+  const seen = new Set();
+  const built = entries.map((entry) => {
+    if (!isMapping(entry)) {
+      const error = new Error(`'${pyTypeName(entry)}' object has no attribute 'get'`);
+      error.name = "AttributeError";
+      throw error;
+    }
+    const path = pyGet(entry, "path", "");
+    if (!pyBool(path)) throw refuse("map entry without a path");
+    if (!pyStrip(pyOrStrAny(entry, "reason"))) throw refuse(`map entry ${pyRepr(path)} has no reason: every path needs one`);
+    if (path !== null && typeof path === "object") throw pyTypeError(`unhashable type: '${pyTypeName(path)}'`);
+    // str and int keys never collide in Python; a bool equals its int.
+    const key = typeof path === "string" ? `s:${path}` : `n:${Number(path)}`;
+    if (seen.has(key)) throw refuse(`cyclic map: ${pyRepr(path)} listed twice`);
+    seen.add(key);
+    const declared = pyGet(entry, "plane", "");
+    const actual = planeFor(path, patterns);
+    if (pyBool(declared) && declared !== actual) {
+      throw refuse(`wrong plane for ${pyRepr(path)}: declared ${pyRepr(declared)}, actual ${pyRepr(actual)}`);
+    }
+    return { ...entry, plane: actual };
+  });
+  return { version: "5.0.0", entries: built.sort((a, b) => pyCompareCodePoints(a.path, b.path)) };
+}
+
+// Mirrors repo_map.validate_edit: null means the edit may proceed.
+export function validateMapEdit(path, plane) {
+  if (plane === "generated") {
+    return `direct generated edit of ${pyRepr(path)} refused: regenerate via the owning tool instead`;
+  }
+  return null;
+}
 
 // --- Frozen contract: tools/ownership_map.py ---
 const OWNERSHIP_INVARIANTS = [
@@ -2291,8 +2366,9 @@ export function provenance() {
 }
 
 // Slices S2–S10 extend ADOPTION with their own rows; S1 owns context-rules.
-// S10 (#428) closed slices 421–428. 420 (S2) still tracks docs:bounded-map-artifact.
-export const GAP_SLICES = [420];
+// Every Stage 63 gap is closed: S10 (#428) grounded the last two rows
+// (molds:proof-invalidation, docs:bounded-map-artifact).
+export const GAP_SLICES = [];
 
 // Each ADOPTION row: exactly one of `mechanism` (real on-disk path, relative
 // to repo root) or `gap` (tracking Stage 63 slice number) must be set.
@@ -2304,7 +2380,7 @@ export const ADOPTION = {
   // Docs plane: contract/proof artifacts that ARE the map.
   "docs:proofbed-family": { mechanism: "docs/ops/stage61b-release-proofbed.test.mjs", gap: null },
   "docs:gate-oracles": { mechanism: "docs/ops/pr-verify-workflow.test.mjs", gap: null },
-  "docs:bounded-map-artifact": { mechanism: null, gap: 420 },
+  "docs:bounded-map-artifact": { mechanism: "docs/repo-map.json", gap: null },
   // Maps plane: live topology and relevance.
   "maps:lane-relevance": { mechanism: ".github/workflows/pr-verify.yml", gap: null },
   "maps:repo-topology": { mechanism: "project.yaml", gap: null },
