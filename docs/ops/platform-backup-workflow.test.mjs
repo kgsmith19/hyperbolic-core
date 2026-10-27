@@ -27,12 +27,12 @@ test("the restic credentials and backup steps are gated behind RESTIC_BACKUP_ENA
   const credentials = stepBlock("- name: Storage Box restic credentials", [
     "- name: Back up the platform dump",
   ]);
-  assert.match(credentials, /if: vars\.RESTIC_BACKUP_ENABLED == 'true'/);
+  assert.match(credentials, /if: needs\.flags\.outputs\.restic_backup_enabled == 'true'/);
 
   const backup = stepBlock("- name: Back up the platform dump to the Hetzner Storage Box (restic)", [
     "- name: Record the run id",
   ]);
-  assert.match(backup, /if: vars\.RESTIC_BACKUP_ENABLED == 'true'/);
+  assert.match(backup, /if: needs\.flags\.outputs\.restic_backup_enabled == 'true'/);
 });
 
 test("the existing age->artifact path carries no RESTIC_BACKUP_ENABLED gate of its own", () => {
@@ -47,7 +47,18 @@ test("the existing age->artifact path carries no RESTIC_BACKUP_ENABLED gate of i
   const oldPath = stepBlock("- name: Validate backup configuration", [
     "- name: Storage Box restic credentials",
   ]);
-  assert.doesNotMatch(oldPath, /if:\s*(\$\{\{\s*)?vars\.RESTIC_BACKUP_ENABLED/);
+  assert.doesNotMatch(oldPath, /if:\s*(\$\{\{\s*)?needs\.flags\.outputs\.restic_backup_enabled/);
+});
+
+test("SUPABASE_DB_URL is read from /platform/, where Infisical holds it -- never the absent /toolbelt/ folder (#455)", () => {
+  // Infisical has no /toolbelt folder; reading it returned nothing, so the
+  // bundle could never get the DB URL even with a valid OIDC subject.
+  assert.match(workflow, /secret-path: "\/platform\/"\n/);
+  assert.doesNotMatch(workflow, /secret-path: "\/toolbelt\/"/);
+});
+
+test("the bundle job is gated on the platform flag from read-flags.yml (#455)", () => {
+  assert.match(workflow, /\n {4}needs: flags\n {4}if: needs\.flags\.outputs\.platform_backup_enabled == 'true'\n/);
 });
 
 test("restic reads a distinct Infisical identity and path from the SUPABASE_DB_URL step", () => {
@@ -151,7 +162,7 @@ test("a final gate step fails the job on a restic failure, positioned after the 
   assert.ok(runIdIndex < gateIndex, "the gate step must come after the run-id step, not before it");
 
   const gate = stepBlock("- name: Fail the job if the restic backup did not succeed", []);
-  assert.match(gate, /if: vars\.RESTIC_BACKUP_ENABLED == 'true' && \(steps\.restic-credentials\.outcome != 'success' \|\| steps\.restic-backup\.outcome != 'success'\)/);
+  assert.match(gate, /if: needs\.flags\.outputs\.restic_backup_enabled == 'true' && \(steps\.restic-credentials\.outcome != 'success' \|\| steps\.restic-backup\.outcome != 'success'\)/);
   assert.match(gate, /exit 1/);
 });
 

@@ -14,7 +14,7 @@ const workflow = readFileSync(path.join(root, ".github/workflows/lifeos-backup.y
 test("the bundle job is gated dark behind LIFEOS_BACKUP_ENABLED", () => {
   // Until the ordered cutover flips this var, the standalone pipeline owns
   // the nightly. Losing the gate double-backs-up and splits ownership.
-  assert.match(workflow, /if: vars\.LIFEOS_BACKUP_ENABLED == 'true'/);
+  assert.match(workflow, /\n {4}needs: flags\n {4}if: needs\.flags\.outputs\.lifeos_backup_enabled == 'true'\n/);
 });
 
 test("the cron slot collides with no existing scheduled workflow", () => {
@@ -102,19 +102,19 @@ test("the restic credentials and backup steps are gated behind RESTIC_BACKUP_ENA
   const credentials = stepBlock("- name: Restic · Pull Storage Box credentials from Infisical", [
     "- name: Restic · Back up the dump",
   ]);
-  assert.match(credentials, /if: vars\.RESTIC_BACKUP_ENABLED == 'true'/);
+  assert.match(credentials, /if: needs\.flags\.outputs\.restic_backup_enabled == 'true'/);
 
   const backup = stepBlock("- name: Restic · Back up the dump and live blobs volume on the box", [
     "- name: Restic · Fail the job",
   ]);
-  assert.match(backup, /if: vars\.RESTIC_BACKUP_ENABLED == 'true'/);
+  assert.match(backup, /if: needs\.flags\.outputs\.restic_backup_enabled == 'true'/);
 });
 
 test("the existing age->artifact path (bundle through publish) carries no RESTIC_BACKUP_ENABLED gate of its own", () => {
   const oldPath = stepBlock("- name: Bundle · Create, verify, and encrypt the recovery bundle", [
     "- name: Restic · Pull Storage Box credentials",
   ]);
-  assert.doesNotMatch(oldPath, /if:\s*(\$\{\{\s*)?vars\.RESTIC_BACKUP_ENABLED/);
+  assert.doesNotMatch(oldPath, /if:\s*(\$\{\{\s*)?needs\.flags\.outputs\.restic_backup_enabled/);
 });
 
 test("restic reads the same Infisical identity/path as the platform pipeline's restic step", () => {
@@ -150,7 +150,7 @@ test("both restic steps carry continue-on-error, and a final gate step re-fails 
   assert.ok(publishIndex < gateIndex, "the gate step must come after the age path's own upload step");
 
   const gate = stepBlock("- name: Restic · Fail the job if the Storage Box backup did not succeed", []);
-  assert.match(gate, /if: vars\.RESTIC_BACKUP_ENABLED == 'true' && \(steps\.restic-credentials\.outcome != 'success' \|\| steps\.restic-backup\.outcome != 'success'\)/);
+  assert.match(gate, /if: needs\.flags\.outputs\.restic_backup_enabled == 'true' && \(steps\.restic-credentials\.outcome != 'success' \|\| steps\.restic-backup\.outcome != 'success'\)/);
   assert.match(gate, /exit 1/);
 });
 
