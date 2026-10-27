@@ -117,6 +117,13 @@ def release_cases(rm, corpus_doc):
     return cases
 
 
+def first_id_suffixed(corpus_doc, suffix):
+    """The corpus with its first entry id suffixed (id-shape pins)."""
+    entries = [dict(entry) for entry in corpus_doc["entries"]]
+    entries[0]["id"] = entries[0]["id"] + suffix
+    return dict(corpus_doc, entries=entries)
+
+
 def release_validators(rm, corpus_doc):
     cases = []
     good = {"id": "x", "rule": "clean-promote", "finding": "m", "severity": "minor", "excerpt": "e"}
@@ -138,6 +145,8 @@ def release_validators(rm, corpus_doc):
         ("no-entries", {"_frozen": True, "_provenance": "Stage 61a #152"}),
         ("text", "x"),
         ("short", dict(corpus_doc, entries=corpus_doc["entries"][:3])),
+        ("id-trailing-newline", first_id_suffixed(corpus_doc, "\n")),
+        ("id-extra-char", first_id_suffixed(corpus_doc, "x")),
     )
     for label, doc in corpus_variants:
         findings, entries = rm.validate_release_corpus(doc)
@@ -267,7 +276,9 @@ def invalidation_validators(pi, corpus_doc):
                        ("not-frozen", dict(corpus_doc, _frozen=False)),
                        ("bad-provenance", dict(corpus_doc, _provenance="Stage 99")),
                        ("bare-array", corpus_doc["entries"]),
-                       ("text", "x")):
+                       ("text", "x"),
+                       ("id-trailing-newline", first_id_suffixed(corpus_doc, "\n")),
+                       ("id-extra-char", first_id_suffixed(corpus_doc, "x"))):
         findings, entries = pi.validate_invalidation_corpus(doc)
         cases.append({"id": "corpus:" + label, "input": doc,
                       "output": {"findings": findings, "entries": len(entries)}})

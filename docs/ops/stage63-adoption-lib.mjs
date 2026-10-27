@@ -1042,6 +1042,9 @@ const scalarExcerpt = (item, keys, fallback) => {
 export const pythonSemantics = Object.freeze({
   strip: pyStrip, foldAscii: pyFoldAscii, compareCodePoints: pyCompareCodePoints, repr: pyRepr,
   jsonDumps: pyJsonDumps, lower: pyLower, isWordChar: pyIsWordChar, isDigit: pyIsDigit,
+  // S10 (#428): the str/bool/dict helpers the release-lib ports share.
+  str: pyStr, strAny: pyStrAny, truthy: pyBool, get: pyGet, slice: pySlice, isScalar: isPyScalar,
+  scalarStrs: pyScalarStrs, orStrAny: pyOrStrAny, typeName: pyTypeName, iterate: pyIterate,
 });
 
 // --- Frozen contract: tools/standards_route.py (Stage 52) ---

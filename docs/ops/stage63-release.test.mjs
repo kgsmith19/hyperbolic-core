@@ -22,6 +22,9 @@ const read = (rel) => readFileSync(path.join(root, rel), "utf8");
 const golden = JSON.parse(read("docs/ops/stage63-release-golden.json"));
 const SHA = "516fdb25d091f2f3f467fb48eaee01cb7f805c88";
 
+// The golden records a corpus validator's entry count, not the entries.
+const corpusCounts = ({ findings, entries }) => ({ findings, entries: entries.length });
+
 // Run one port call; a thrown error becomes {error: <Python exception name>}.
 const replay = (call) => {
   try {
@@ -88,7 +91,7 @@ test("S10 · release_mold finding validation and corpus validation replay identi
     if (entry.id.startsWith("finding:")) {
       assert.deepEqual(replay(() => lib.releaseFindingRepairs(entry.input)), entry.output, entry.id);
     } else {
-      assert.deepEqual(replay(() => lib.validateReleaseCorpus(entry.input)), entry.output, entry.id);
+      assert.deepEqual(replay(() => corpusCounts(lib.validateReleaseCorpus(entry.input))), entry.output, entry.id);
     }
   }
 });
@@ -101,12 +104,19 @@ test("S10 · the embedded release corpus is a valid frozen oracle that covers al
   assert.deepEqual(new Set(entries.map((e) => e.expected_rule)), new Set(lib.RELEASE_RULES));
 });
 
-test("S10 · the clean release package promotes through clean-promote", async () => {
+test("S10 · the clean release package promotes through the proven restore (restore-rpo)", async () => {
   const lib = await import("./stage63-release-lib.mjs");
   const decision = lib.evaluateRelease(lib.cleanReleasePackage());
   assert.equal(decision.verdict, "PROMOTE");
-  assert.equal(decision.rule, "clean-promote");
+  assert.equal(decision.rule, "restore-rpo", "restore-rpo is checked before clean-promote");
   assert.equal(decision.findings[0].severity, "minor");
+});
+
+test("S10 · without a proven restore, a complete package promotes through clean-promote", async () => {
+  const lib = await import("./stage63-release-lib.mjs");
+  const decision = lib.evaluateRelease({ ...lib.cleanReleasePackage(), restore_rpo_ok: false });
+  assert.equal(decision.verdict, "PROMOTE");
+  assert.equal(decision.rule, "clean-promote");
 });
 
 // --- proof_invalidation: freeze, classify and check ----------------------------
@@ -153,7 +163,8 @@ test("S10 · proof_invalidation finding and corpus validation replay identically
     if (entry.id.startsWith("finding:")) {
       assert.deepEqual(replay(() => lib.invalidationFindingRepairs(entry.input)), entry.output, entry.id);
     } else {
-      assert.deepEqual(replay(() => lib.validateInvalidationCorpus(entry.input)), entry.output, entry.id);
+      assert.deepEqual(replay(() => corpusCounts(lib.validateInvalidationCorpus(entry.input))),
+        entry.output, entry.id);
     }
   }
 });
