@@ -808,22 +808,53 @@ test("an installation with Pull requests write mints contents read + pull-reques
   assert.ok(run.logs.some((line) => /installation 155589128 grants: contents: read, metadata: read, pull_requests: write/.test(line)));
 });
 
-// Issue #440 AC2 sensitivity: the reviewer App token must never carry Contents
-// write, even when the installation grants it. The grants step caps contents at
-// read; a pass-through of the granted level would fail here.
-test("the mint never requests contents write, even when the installation grants it (Issue #440 AC2)", async () => {
-  const run = await runGrants({ grants: { contents: "write", pull_requests: "admin", issues: "write" } });
-  assert.equal(run.outputs.contents, "read", "contents is capped at read whatever the installation grants");
-  assert.equal(run.outputs.pull_requests, "write", "admin is requested as write, never above what posting needs");
-  assert.equal(run.outputs.issues, "write");
-  for (const value of Object.values(run.outputs)) {
-    assert.ok(["read", "write", "true", "false", ""].includes(value), `unexpected requested level ${value}`);
+// Issue #461 (owner decision 2026-10-27): the dev and review agents work with
+// contents read AND write, and the dialogue wakes the dev agent with
+// repository_dispatch, which needs contents write. Contents therefore follows
+// the installation's grant (read or write); admin is capped at write, and
+// nothing is ever requested that the installation does not grant.
+test("contents follows the installation's grant, and every level is capped at write (Issue #461)", async () => {
+  const write = await runGrants({ grants: { contents: "write", pull_requests: "admin", issues: "write" } });
+  assert.equal(write.outputs.contents, "write", "contents write is requested when granted");
+  assert.equal(write.outputs.pull_requests, "write", "admin is requested as write");
+  assert.equal(write.outputs.issues, "write");
+
+  const read = await runGrants({ grants: { contents: "read", pull_requests: "write" } });
+  assert.equal(read.outputs.contents, "read", "contents read stays read");
+
+  const admin = await runGrants({ grants: { contents: "admin", pull_requests: "write" } });
+  assert.equal(admin.outputs.contents, "write", "contents admin is capped at write");
+
+  for (const run of [write, read, admin]) {
+    for (const value of Object.values(run.outputs)) {
+      assert.ok(["read", "write", "true", "false", ""].includes(value), `unexpected requested level ${value}`);
+    }
   }
 });
 
-test("an installation with only Issues write still posts, requesting issues write alone", async () => {
+// Issue #461: GitHub refuses a PR comment from a token with issues write but
+// only pull_requests read (run 40458671044: 403, x-accepted-github-permissions
+// "issues=write; pull_requests=write"). Issues write alone cannot post.
+test("an installation with Issues write but no Pull requests write cannot post, and names the missing grant", async () => {
   const run = await runGrants({ grants: { issues: "write", metadata: "read" } });
-  assert.deepEqual(run.outputs, { contents: "", pull_requests: "", issues: "write", can_post: "true" });
+  assert.equal(run.outputs.can_post, "false");
+  assert.ok(run.logs.some((line) => /Pull requests: Read and write/.test(line)));
+});
+
+test("the exact grant set behind PR #460's failed post never mints a token that cannot post (Issue #461)", async () => {
+  const grants = {
+    actions: "read", administration: "read", checks: "read", contents: "write", discussions: "write",
+    issues: "write", metadata: "read", pull_requests: "read", repository_projects: "write", statuses: "read",
+    workflows: "write",
+  };
+  const run = await runGrants({ grants });
+  assert.equal(run.outputs.can_post, "false", "pull_requests read cannot post a PR comment");
+  assert.ok(run.logs.some((line) => /155589128 cannot post/.test(line) && /Pull requests: Read and write/.test(line)));
+});
+
+test("Pull requests write with Issues write requests both, so every comment and label the dialogue writes is covered", async () => {
+  const run = await runGrants({ grants: { contents: "write", issues: "write", pull_requests: "write" } });
+  assert.deepEqual(run.outputs, { contents: "write", pull_requests: "write", issues: "write", can_post: "true" });
 });
 
 test("an installation that cannot post names the exact grant to add and skips the mint, keeping the visible fallback", async () => {
