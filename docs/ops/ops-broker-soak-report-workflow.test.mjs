@@ -6,8 +6,10 @@
 // defect it exists to catch.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -214,3 +216,73 @@ test("the workflow's only ssh-reaching step is the read step, and it runs before
 function escape(text) {
   return text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 }
+
+// --- behavioral: run the real read step with a stub ssh, record what it sends ---
+
+/** The read step's `run:` script, dedented, pulled from the workflow text itself. */
+function readStepScript() {
+  const start = workflow.indexOf("      - name: Read the broker's start time");
+  assert.ok(start > -1, "read step not found");
+  const runAt = workflow.indexOf("        run: |\n", start) + "        run: |\n".length;
+  const end = workflow.indexOf("\n      - name:", runAt);
+  const body = workflow.slice(runAt, end > -1 ? end : undefined);
+  return body
+    .split("\n")
+    .map((line) => line.replace(/^ {10}/, ""))
+    .join("\n");
+}
+
+/** Runs the read step under a stub ssh; returns the remote command each ssh call was asked to run. */
+function runReadStep(since) {
+  const dir = mkdtempSync(path.join(tmpdir(), "soak-wrapper-"));
+  try {
+    const stubDir = path.join(dir, "bin");
+    const runnerTemp = path.join(dir, "runner");
+    mkdirSync(stubDir);
+    mkdirSync(runnerTemp);
+    const callLog = path.join(dir, "ssh-calls.log");
+    // The stub records each ssh argument on its own line, one call per block.
+    writeFileSync(
+      path.join(stubDir, "ssh"),
+      `#!/usr/bin/env bash\nprintf '%s\\n' "$@" >> "${callLog}"\nprintf -- '--END--\\n' >> "${callLog}"\nprintf '2026-10-01T00:00:00.000000000Z\\n'\n`,
+      { mode: 0o755 },
+    );
+    const scriptPath = path.join(dir, "read-step.sh");
+    writeFileSync(scriptPath, readStepScript());
+    const result = spawnSync("bash", [scriptPath], {
+      encoding: "utf8",
+      env: { PATH: `${stubDir}:${process.env.PATH}`, RUNNER_TEMP: runnerTemp, DEPLOY_HOST: "broker-host.example", SINCE: since },
+    });
+    const calls = existsSync(callLog)
+      ? readFileSync(callLog, "utf8")
+          .split("--END--\n")
+          .filter((block) => block.trim() !== "")
+          .map((block) => block.trim().split("\n"))
+      : [];
+    return { status: result.status, stderr: result.stderr, calls };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("behavior: with no since, the wrapper sends exactly the inspect and the plain logs command, and nothing else (c)", () => {
+  const { status, calls, stderr } = runReadStep("");
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(calls, [
+    ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new", "deploy@broker-host.example", "docker inspect --format '{{.State.StartedAt}}' broker-broker-1"],
+    ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new", "deploy@broker-host.example", "docker logs --timestamps broker-broker-1"],
+  ]);
+});
+
+test("behavior: a valid since is passed as --since to docker logs, and only there", () => {
+  const { status, calls, stderr } = runReadStep("2026-10-01T00:00:00Z");
+  assert.equal(status, 0, stderr);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].at(-1), "docker logs --timestamps --since 2026-10-01T00:00:00Z broker-broker-1");
+});
+
+test("behavior: an injected since is refused before any ssh runs (no remote command is ever built from it)", () => {
+  const { status, calls } = runReadStep("2026-10-01T00:00:00Z; docker rm -f broker-broker-1");
+  assert.notEqual(status, 0);
+  assert.deepEqual(calls, []);
+});
