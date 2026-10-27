@@ -1,7 +1,7 @@
 // node --test docs/ops/stage63-review.test.mjs (run from the repo root)
 //
 // S8 RED characterization (Issue #426): v5 review semantics from
-// agent-engineering-standard @ 9e50c9c3518e5bed2ba93e194cb157a78ee0278d —
+// agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88 —
 // tools/independent_review.py (Stage 59a: the frozen 15-rule review and
 // remediation contract) and tools/spec_critic.py (Stage 28: the fresh Spec
 // critic and its ready gate).
@@ -76,7 +76,7 @@ test("S8 · provenance names both review modules at the pinned SHA", () => {
     assert.match(provenance(), new RegExp(`tools/${module}\\.py`));
     assert.match(golden._provenance, new RegExp(`tools/${module}\\.py`));
   }
-  assert.match(golden._provenance, /9e50c9c3518e5bed2ba93e194cb157a78ee0278d/);
+  assert.match(golden._provenance, /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
 });
 
 test("S8 · cleanReviewRequest matches upstream clean_request and is a fresh copy", () => {
@@ -247,24 +247,23 @@ test("S8 · every frozen spec-critic corpus entry critiques as upstream adjudica
     "the corpus covers all 8 critic classes");
 });
 
-// --- Characterized upstream defects (tracked upstream in std#293) ------------
+// --- Upstream defects fixed in std#293 (their pins flipped at the S10 lock bump)
 
-test("S8 · upstream defect std#293 is pinned: findings of one rule share one id", () => {
+test("S8 · std#293 fixed: findings of one rule get unique ids", () => {
   const two = golden.review.review.find((c) => c.label === "two-blockers-share-an-id");
   const ids = reviewDecision(two.request).findings.map((f) => f.id);
-  assert.deepEqual(ids, ["p1-block-1", "p1-block-1"],
-    "colliding ids characterized; this pin flips with the lock bump that picks up std#293");
+  assert.deepEqual(ids, ["p1-block-1", "p1-block-2"], "one id per finding, numbered in order");
   const ambiguous = critiqueSpec({ ...golden.critic.critique[0].spec,
     statements: ["Tenant rows are isolated.", "The account sees data."] });
   assert.deepEqual(ambiguous.findings.map((f) => f.id), ["ambiguous_owner-1", "ambiguous_owner-2"],
     "the sibling spec_critic numbers its findings");
 });
 
-test("S8 · upstream defect std#293 is pinned: migration order words match inside other words", () => {
+test("S8 · std#293 fixed: migration order words match whole words only", () => {
   const spec = { ...golden.critic.critique[0].spec, migration_steps: ["add column", "backfill"] };
   for (const text of ["The border is red.", "Runs in the afternoon.", "Both emphases hold."]) {
-    assert.deepEqual(critiqueSpec({ ...spec, criteria: [text] }).findings, [],
-      `${JSON.stringify(text)}: the blocker is suppressed fail-open; flips with the lock bump that picks up std#293`);
+    assert.deepEqual(critiqueSpec({ ...spec, criteria: [text] }).findings.map((f) => f.rule),
+      ["hidden_migration_order"], `${JSON.stringify(text)}: no whole-word ordering wording, so the blocker fires`);
   }
   assert.deepEqual(critiqueSpec({ ...spec, criteria: ["A replay returns the receipt."] }).findings.map((f) => f.rule),
     ["hidden_migration_order"], "without a substring hit the blocker fires");

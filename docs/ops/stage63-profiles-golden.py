@@ -18,6 +18,7 @@ import json
 import pathlib
 import sys
 
+sys.dont_write_bytecode = True  # loading the S5 generator must not litter docs/ops/__pycache__
 _SPEC = importlib.util.spec_from_file_location(
     "stage63_continuity_golden",
     pathlib.Path(__file__).with_name("stage63-continuity-golden.py"))

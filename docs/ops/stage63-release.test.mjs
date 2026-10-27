@@ -10,6 +10,10 @@
 // The 61b release proofbed already pins the 14 release rule names
 // (stage61b-release-proofbed-lib.mjs); this file ports the evaluation logic
 // that binding did not carry, and pins both sides to the same table.
+//
+// Not ported, by design: tools/standardctl.py's edition UX (--edition,
+// --set harness.*, doctor --live). hyperbolic-core has no edition or harness
+// surface for it to drive, so it would be dead code with no ADOPTION row.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
