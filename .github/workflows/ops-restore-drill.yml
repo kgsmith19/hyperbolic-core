@@ -12,7 +12,7 @@ name: Ops Restore Drill
 # repositories are reachable directly; nothing this workflow does touches
 # production, only the encrypted backups already sitting in the Storage Box.
 #
-# Gated on the same RESTIC_BACKUP_ENABLED var as the two backup pipelines:
+# Gated on the same restic flag (ops/flags.json, #455) as the two backup pipelines:
 # there is nothing to drill until they are live.
 
 on:
@@ -28,10 +28,20 @@ permissions:
   contents: read
 
 jobs:
+  # Flags-as-code (#455): ops/flags.json decides, repo variables are only the
+  # fallback for a key the file does not set. See .github/workflows/read-flags.yml.
+  flags:
+    uses: ./.github/workflows/read-flags.yml
+
   drill:
-    if: vars.RESTIC_BACKUP_ENABLED == 'true'
+    needs: flags
+    if: needs.flags.outputs.restic_backup_enabled == 'true'
     name: Monthly restic check + real restore proof
     runs-on: ubuntu-latest
+    # Its own environment, so the OIDC subject is this narrow environment and
+    # not ref:refs/heads/main: the platform-restic identity trusts exactly the
+    # backup and drill environments, never every job on main (#455).
+    environment: ops-restore-drill-production
     timeout-minutes: 30
     permissions:
       contents: read

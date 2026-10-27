@@ -50,11 +50,13 @@ test("the existing age->artifact path carries no RESTIC_BACKUP_ENABLED gate of i
   assert.doesNotMatch(oldPath, /if:\s*(\$\{\{\s*)?needs\.flags\.outputs\.restic_backup_enabled/);
 });
 
-test("SUPABASE_DB_URL is read from /platform/, where Infisical holds it -- never the absent /toolbelt/ folder (#455)", () => {
-  // Infisical has no /toolbelt folder; reading it returned nothing, so the
-  // bundle could never get the DB URL even with a valid OIDC subject.
-  assert.match(workflow, /secret-path: "\/platform\/"\n/);
+test("SUPABASE_DB_URL is read from its own /platform/db-backup/ path -- never the absent /toolbelt/ folder, never all of /platform/ (#455)", () => {
+  // Infisical has no /toolbelt folder, so the bundle could never get the DB
+  // URL. Reading all of /platform/ would also hand this job the Supabase
+  // management token, breaking ADR-05's disjoint-grant rule.
+  assert.match(workflow, /secret-path: "\/platform\/db-backup\/"\n/);
   assert.doesNotMatch(workflow, /secret-path: "\/toolbelt\/"/);
+  assert.doesNotMatch(workflow, /secret-path: "\/platform\/"\n/);
 });
 
 test("the bundle job is gated on the platform flag from read-flags.yml (#455)", () => {

@@ -88,7 +88,7 @@ identity's blast radius is that pipeline's secrets alone. Live paths:
 | `/platform/llm-handler/` | Handler A deploy |
 | `/brain/` | Brain deploy (deliberately never `/platform/…` — see `runbook.md`) |
 | `/platform/` | Platform migrations (`SUPABASE_DB_URL`, table-owner privileged) |
-| `/toolbelt/` | Platform backup |
+| `/platform/db-backup/` | Platform backup (`SUPABASE_DB_URL` reference only, #455) |
 | `/platform/lifeos-deploy/` | LifeOS deploy, LifeOS backup, LifeOS ops |
 | `/review/` | LLM Review gate, LLM Review Dialogue |
 | `/dev/` | Dev Agent Dispatch |
