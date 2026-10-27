@@ -1,0 +1,1817 @@
+{
+ "_generator": "docs/ops/stage63-repo-map-golden.py",
+ "_provenance": "agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88: tools/repo_map.py",
+ "_python": "3.12",
+ "frozen": {
+  "build": [
+   {
+    "id": "empty",
+    "input": [],
+    "output": {
+     "value": {
+      "entries": [],
+      "version": "5.0.0"
+     }
+    }
+   },
+   {
+    "id": "one",
+    "input": [
+     {
+      "path": "a.py",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "value": {
+      "entries": [
+       {
+        "path": "a.py",
+        "plane": "source",
+        "reason": "r"
+       }
+      ],
+      "version": "5.0.0"
+     }
+    }
+   },
+   {
+    "id": "sorted-by-code-point",
+    "input": [
+     {
+      "path": "b",
+      "reason": "r"
+     },
+     {
+      "path": "B",
+      "reason": "r"
+     },
+     {
+      "path": "a",
+      "reason": "r"
+     },
+     {
+      "path": "\u00e9",
+      "reason": "r"
+     },
+     {
+      "path": "e",
+      "reason": "r"
+     },
+     {
+      "path": "Z",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "value": {
+      "entries": [
+       {
+        "path": "B",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "Z",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "a",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "b",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "e",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "\u00e9",
+        "plane": "source",
+        "reason": "r"
+       }
+      ],
+      "version": "5.0.0"
+     }
+    }
+   },
+   {
+    "id": "planes-assigned",
+    "input": [
+     {
+      "path": "Canonical/generated/x",
+      "reason": "r"
+     },
+     {
+      "path": "Canonical/schemas/s",
+      "reason": "r"
+     },
+     {
+      "path": ".worktrees/w",
+      "reason": "r"
+     },
+     {
+      "path": ".evidence/e",
+      "reason": "r"
+     },
+     {
+      "path": ".github/workflows/pr-gate.yml",
+      "reason": "r"
+     },
+     {
+      "path": "tools/t.py",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "value": {
+      "entries": [
+       {
+        "path": ".evidence/e",
+        "plane": "evidence",
+        "reason": "r"
+       },
+       {
+        "path": ".github/workflows/pr-gate.yml",
+        "plane": "protected",
+        "reason": "r"
+       },
+       {
+        "path": ".worktrees/w",
+        "plane": "cache",
+        "reason": "r"
+       },
+       {
+        "path": "Canonical/generated/x",
+        "plane": "generated",
+        "reason": "r"
+       },
+       {
+        "path": "Canonical/schemas/s",
+        "plane": "artifact",
+        "reason": "r"
+       },
+       {
+        "path": "tools/t.py",
+        "plane": "source",
+        "reason": "r"
+       }
+      ],
+      "version": "5.0.0"
+     }
+    }
+   },
+   {
+    "id": "declared-right",
+    "input": [
+     {
+      "path": "Canonical/generated/x",
+      "plane": "generated",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "value": {
+      "entries": [
+       {
+        "path": "Canonical/generated/x",
+        "plane": "generated",
+        "reason": "r"
+       }
+      ],
+      "version": "5.0.0"
+     }
+    }
+   },
+   {
+    "id": "declared-wrong",
+    "input": [
+     {
+      "path": "Canonical/generated/x",
+      "plane": "source",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "wrong plane for 'Canonical/generated/x': declared 'source', actual 'generated'"
+    }
+   },
+   {
+    "id": "declared-empty",
+    "input": [
+     {
+      "path": "tools/t.py",
+      "plane": "",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "value": {
+      "entries": [
+       {
+        "path": "tools/t.py",
+        "plane": "source",
+        "reason": "r"
+       }
+      ],
+      "version": "5.0.0"
+     }
+    }
+   },
+   {
+    "id": "declared-unknown",
+    "input": [
+     {
+      "path": "tools/t.py",
+      "plane": "other",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "wrong plane for 'tools/t.py': declared 'other', actual 'source'"
+    }
+   },
+   {
+    "id": "missing-path",
+    "input": [
+     {
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "map entry without a path"
+    }
+   },
+   {
+    "id": "empty-path",
+    "input": [
+     {
+      "path": "",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "map entry without a path"
+    }
+   },
+   {
+    "id": "missing-reason",
+    "input": [
+     {
+      "path": "a"
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "map entry 'a' has no reason: every path needs one"
+    }
+   },
+   {
+    "id": "empty-reason",
+    "input": [
+     {
+      "path": "a",
+      "reason": ""
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "map entry 'a' has no reason: every path needs one"
+    }
+   },
+   {
+    "id": "blank-reason",
+    "input": [
+     {
+      "path": "a",
+      "reason": "   "
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "map entry 'a' has no reason: every path needs one"
+    }
+   },
+   {
+    "id": "unicode-blank-reason",
+    "input": [
+     {
+      "path": "a",
+      "reason": "\u3000\u00a0"
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "map entry 'a' has no reason: every path needs one"
+    }
+   },
+   {
+    "id": "none-reason",
+    "input": [
+     {
+      "path": "a",
+      "reason": null
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "map entry 'a' has no reason: every path needs one"
+    }
+   },
+   {
+    "id": "zero-reason",
+    "input": [
+     {
+      "path": "a",
+      "reason": 0
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "map entry 'a' has no reason: every path needs one"
+    }
+   },
+   {
+    "id": "int-reason",
+    "input": [
+     {
+      "path": "a",
+      "reason": 7
+     }
+    ],
+    "output": {
+     "value": {
+      "entries": [
+       {
+        "path": "a",
+        "plane": "source",
+        "reason": 7
+       }
+      ],
+      "version": "5.0.0"
+     }
+    }
+   },
+   {
+    "id": "duplicate",
+    "input": [
+     {
+      "path": "a",
+      "reason": "r"
+     },
+     {
+      "path": "b",
+      "reason": "r"
+     },
+     {
+      "path": "a",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "cyclic map: 'a' listed twice"
+    }
+   },
+   {
+    "id": "duplicate-after-bad-reason",
+    "input": [
+     {
+      "path": "a",
+      "reason": "r"
+     },
+     {
+      "path": "a",
+      "reason": ""
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "map entry 'a' has no reason: every path needs one"
+    }
+   },
+   {
+    "id": "budget-exact",
+    "input": [
+     {
+      "path": "p00",
+      "reason": "r"
+     },
+     {
+      "path": "p01",
+      "reason": "r"
+     },
+     {
+      "path": "p02",
+      "reason": "r"
+     },
+     {
+      "path": "p03",
+      "reason": "r"
+     },
+     {
+      "path": "p04",
+      "reason": "r"
+     },
+     {
+      "path": "p05",
+      "reason": "r"
+     },
+     {
+      "path": "p06",
+      "reason": "r"
+     },
+     {
+      "path": "p07",
+      "reason": "r"
+     },
+     {
+      "path": "p08",
+      "reason": "r"
+     },
+     {
+      "path": "p09",
+      "reason": "r"
+     },
+     {
+      "path": "p10",
+      "reason": "r"
+     },
+     {
+      "path": "p11",
+      "reason": "r"
+     },
+     {
+      "path": "p12",
+      "reason": "r"
+     },
+     {
+      "path": "p13",
+      "reason": "r"
+     },
+     {
+      "path": "p14",
+      "reason": "r"
+     },
+     {
+      "path": "p15",
+      "reason": "r"
+     },
+     {
+      "path": "p16",
+      "reason": "r"
+     },
+     {
+      "path": "p17",
+      "reason": "r"
+     },
+     {
+      "path": "p18",
+      "reason": "r"
+     },
+     {
+      "path": "p19",
+      "reason": "r"
+     },
+     {
+      "path": "p20",
+      "reason": "r"
+     },
+     {
+      "path": "p21",
+      "reason": "r"
+     },
+     {
+      "path": "p22",
+      "reason": "r"
+     },
+     {
+      "path": "p23",
+      "reason": "r"
+     },
+     {
+      "path": "p24",
+      "reason": "r"
+     },
+     {
+      "path": "p25",
+      "reason": "r"
+     },
+     {
+      "path": "p26",
+      "reason": "r"
+     },
+     {
+      "path": "p27",
+      "reason": "r"
+     },
+     {
+      "path": "p28",
+      "reason": "r"
+     },
+     {
+      "path": "p29",
+      "reason": "r"
+     },
+     {
+      "path": "p30",
+      "reason": "r"
+     },
+     {
+      "path": "p31",
+      "reason": "r"
+     },
+     {
+      "path": "p32",
+      "reason": "r"
+     },
+     {
+      "path": "p33",
+      "reason": "r"
+     },
+     {
+      "path": "p34",
+      "reason": "r"
+     },
+     {
+      "path": "p35",
+      "reason": "r"
+     },
+     {
+      "path": "p36",
+      "reason": "r"
+     },
+     {
+      "path": "p37",
+      "reason": "r"
+     },
+     {
+      "path": "p38",
+      "reason": "r"
+     },
+     {
+      "path": "p39",
+      "reason": "r"
+     },
+     {
+      "path": "p40",
+      "reason": "r"
+     },
+     {
+      "path": "p41",
+      "reason": "r"
+     },
+     {
+      "path": "p42",
+      "reason": "r"
+     },
+     {
+      "path": "p43",
+      "reason": "r"
+     },
+     {
+      "path": "p44",
+      "reason": "r"
+     },
+     {
+      "path": "p45",
+      "reason": "r"
+     },
+     {
+      "path": "p46",
+      "reason": "r"
+     },
+     {
+      "path": "p47",
+      "reason": "r"
+     },
+     {
+      "path": "p48",
+      "reason": "r"
+     },
+     {
+      "path": "p49",
+      "reason": "r"
+     },
+     {
+      "path": "p50",
+      "reason": "r"
+     },
+     {
+      "path": "p51",
+      "reason": "r"
+     },
+     {
+      "path": "p52",
+      "reason": "r"
+     },
+     {
+      "path": "p53",
+      "reason": "r"
+     },
+     {
+      "path": "p54",
+      "reason": "r"
+     },
+     {
+      "path": "p55",
+      "reason": "r"
+     },
+     {
+      "path": "p56",
+      "reason": "r"
+     },
+     {
+      "path": "p57",
+      "reason": "r"
+     },
+     {
+      "path": "p58",
+      "reason": "r"
+     },
+     {
+      "path": "p59",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "value": {
+      "entries": [
+       {
+        "path": "p00",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p01",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p02",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p03",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p04",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p05",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p06",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p07",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p08",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p09",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p10",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p11",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p12",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p13",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p14",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p15",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p16",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p17",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p18",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p19",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p20",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p21",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p22",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p23",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p24",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p25",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p26",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p27",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p28",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p29",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p30",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p31",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p32",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p33",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p34",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p35",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p36",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p37",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p38",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p39",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p40",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p41",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p42",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p43",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p44",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p45",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p46",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p47",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p48",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p49",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p50",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p51",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p52",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p53",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p54",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p55",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p56",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p57",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p58",
+        "plane": "source",
+        "reason": "r"
+       },
+       {
+        "path": "p59",
+        "plane": "source",
+        "reason": "r"
+       }
+      ],
+      "version": "5.0.0"
+     }
+    }
+   },
+   {
+    "id": "budget-over",
+    "input": [
+     {
+      "path": "p00",
+      "reason": "r"
+     },
+     {
+      "path": "p01",
+      "reason": "r"
+     },
+     {
+      "path": "p02",
+      "reason": "r"
+     },
+     {
+      "path": "p03",
+      "reason": "r"
+     },
+     {
+      "path": "p04",
+      "reason": "r"
+     },
+     {
+      "path": "p05",
+      "reason": "r"
+     },
+     {
+      "path": "p06",
+      "reason": "r"
+     },
+     {
+      "path": "p07",
+      "reason": "r"
+     },
+     {
+      "path": "p08",
+      "reason": "r"
+     },
+     {
+      "path": "p09",
+      "reason": "r"
+     },
+     {
+      "path": "p10",
+      "reason": "r"
+     },
+     {
+      "path": "p11",
+      "reason": "r"
+     },
+     {
+      "path": "p12",
+      "reason": "r"
+     },
+     {
+      "path": "p13",
+      "reason": "r"
+     },
+     {
+      "path": "p14",
+      "reason": "r"
+     },
+     {
+      "path": "p15",
+      "reason": "r"
+     },
+     {
+      "path": "p16",
+      "reason": "r"
+     },
+     {
+      "path": "p17",
+      "reason": "r"
+     },
+     {
+      "path": "p18",
+      "reason": "r"
+     },
+     {
+      "path": "p19",
+      "reason": "r"
+     },
+     {
+      "path": "p20",
+      "reason": "r"
+     },
+     {
+      "path": "p21",
+      "reason": "r"
+     },
+     {
+      "path": "p22",
+      "reason": "r"
+     },
+     {
+      "path": "p23",
+      "reason": "r"
+     },
+     {
+      "path": "p24",
+      "reason": "r"
+     },
+     {
+      "path": "p25",
+      "reason": "r"
+     },
+     {
+      "path": "p26",
+      "reason": "r"
+     },
+     {
+      "path": "p27",
+      "reason": "r"
+     },
+     {
+      "path": "p28",
+      "reason": "r"
+     },
+     {
+      "path": "p29",
+      "reason": "r"
+     },
+     {
+      "path": "p30",
+      "reason": "r"
+     },
+     {
+      "path": "p31",
+      "reason": "r"
+     },
+     {
+      "path": "p32",
+      "reason": "r"
+     },
+     {
+      "path": "p33",
+      "reason": "r"
+     },
+     {
+      "path": "p34",
+      "reason": "r"
+     },
+     {
+      "path": "p35",
+      "reason": "r"
+     },
+     {
+      "path": "p36",
+      "reason": "r"
+     },
+     {
+      "path": "p37",
+      "reason": "r"
+     },
+     {
+      "path": "p38",
+      "reason": "r"
+     },
+     {
+      "path": "p39",
+      "reason": "r"
+     },
+     {
+      "path": "p40",
+      "reason": "r"
+     },
+     {
+      "path": "p41",
+      "reason": "r"
+     },
+     {
+      "path": "p42",
+      "reason": "r"
+     },
+     {
+      "path": "p43",
+      "reason": "r"
+     },
+     {
+      "path": "p44",
+      "reason": "r"
+     },
+     {
+      "path": "p45",
+      "reason": "r"
+     },
+     {
+      "path": "p46",
+      "reason": "r"
+     },
+     {
+      "path": "p47",
+      "reason": "r"
+     },
+     {
+      "path": "p48",
+      "reason": "r"
+     },
+     {
+      "path": "p49",
+      "reason": "r"
+     },
+     {
+      "path": "p50",
+      "reason": "r"
+     },
+     {
+      "path": "p51",
+      "reason": "r"
+     },
+     {
+      "path": "p52",
+      "reason": "r"
+     },
+     {
+      "path": "p53",
+      "reason": "r"
+     },
+     {
+      "path": "p54",
+      "reason": "r"
+     },
+     {
+      "path": "p55",
+      "reason": "r"
+     },
+     {
+      "path": "p56",
+      "reason": "r"
+     },
+     {
+      "path": "p57",
+      "reason": "r"
+     },
+     {
+      "path": "p58",
+      "reason": "r"
+     },
+     {
+      "path": "p59",
+      "reason": "r"
+     },
+     {
+      "path": "p60",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "map holds 61 entries, over the 60-entry budget: narrow the focus envelope instead"
+    }
+   },
+   {
+    "id": "path-int",
+    "input": [
+     {
+      "path": 5,
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "error": "AttributeError",
+     "message": "'int' object has no attribute 'startswith'"
+    }
+   },
+   {
+    "id": "path-list",
+    "input": [
+     {
+      "path": [
+       "x"
+      ],
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "error": "TypeError",
+     "message": "unhashable type: 'list'"
+    }
+   },
+   {
+    "id": "path-empty-list",
+    "input": [
+     {
+      "path": [],
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "error": "ValueError",
+     "message": "map entry without a path"
+    }
+   },
+   {
+    "id": "entry-not-mapping",
+    "input": [
+     "a.py"
+    ],
+    "output": {
+     "error": "AttributeError",
+     "message": "'str' object has no attribute 'get'"
+    }
+   },
+   {
+    "id": "extra-keys-kept",
+    "input": [
+     {
+      "owner": "x",
+      "path": "a",
+      "reason": "r"
+     }
+    ],
+    "output": {
+     "value": {
+      "entries": [
+       {
+        "owner": "x",
+        "path": "a",
+        "plane": "source",
+        "reason": "r"
+       }
+      ],
+      "version": "5.0.0"
+     }
+    }
+   }
+  ],
+  "constants": {
+   "ARTIFACT_PATTERNS": [
+    "Canonical/schemas/",
+    "Canonical/capabilities.json",
+    "Canonical/v4.2-preservation.csv"
+   ],
+   "CACHE_PATTERNS": [
+    ".worktrees/",
+    "__pycache__/",
+    ".evidence/cache"
+   ],
+   "EVIDENCE_PATTERNS": [
+    ".evidence/"
+   ],
+   "GENERATED_PATTERNS": [
+    "Canonical/generated/"
+   ],
+   "MAP_BUDGET_ENTRIES": 60,
+   "PLANES": [
+    "source",
+    "generated",
+    "artifact",
+    "cache",
+    "evidence",
+    "protected"
+   ],
+   "PROTECTED_PATTERNS": [
+    ".github/workflows/pr-gate.yml",
+    ".github/workflows/merge-policy.yml",
+    "main"
+   ]
+  },
+  "plane_for": [
+   {
+    "path": "",
+    "plane": "source"
+   },
+   {
+    "path": "README.md",
+    "plane": "source"
+   },
+   {
+    "path": "tools/x.py",
+    "plane": "source"
+   },
+   {
+    "path": "main",
+    "plane": "protected"
+   },
+   {
+    "path": "main.py",
+    "plane": "protected"
+   },
+   {
+    "path": "maintenance.md",
+    "plane": "protected"
+   },
+   {
+    "path": "domain/main.py",
+    "plane": "source"
+   },
+   {
+    "path": ".github/workflows/pr-gate.yml",
+    "plane": "protected"
+   },
+   {
+    "path": ".github/workflows/pr-gate.yml.bak",
+    "plane": "protected"
+   },
+   {
+    "path": ".github/workflows/merge-policy.yml",
+    "plane": "protected"
+   },
+   {
+    "path": ".github/workflows/other.yml",
+    "plane": "source"
+   },
+   {
+    "path": ".evidence/",
+    "plane": "evidence"
+   },
+   {
+    "path": ".evidence/cache/x",
+    "plane": "evidence"
+   },
+   {
+    "path": ".evidence/run.json",
+    "plane": "evidence"
+   },
+   {
+    "path": "a/.evidence/x",
+    "plane": "source"
+   },
+   {
+    "path": ".worktrees/x",
+    "plane": "cache"
+   },
+   {
+    "path": "src/.worktrees/x",
+    "plane": "cache"
+   },
+   {
+    "path": "pkg/__pycache__/m.pyc",
+    "plane": "cache"
+   },
+   {
+    "path": "__pycache__/m.pyc",
+    "plane": "cache"
+   },
+   {
+    "path": "Canonical/schemas/a.json",
+    "plane": "artifact"
+   },
+   {
+    "path": "Canonical/capabilities.json",
+    "plane": "artifact"
+   },
+   {
+    "path": "Canonical/capabilities.json.bak",
+    "plane": "artifact"
+   },
+   {
+    "path": "Canonical/v4.2-preservation.csv",
+    "plane": "artifact"
+   },
+   {
+    "path": "Canonical/generated/x.md",
+    "plane": "generated"
+   },
+   {
+    "path": "Canonical/generated",
+    "plane": "source"
+   },
+   {
+    "path": "canonical/generated/x.md",
+    "plane": "source"
+   },
+   {
+    "path": "Canonical/corpus/x.json",
+    "plane": "source"
+   },
+   {
+    "path": "\u00e9/main",
+    "plane": "source"
+   },
+   {
+    "path": "main/\u00e9",
+    "plane": "protected"
+   }
+  ],
+  "validate_edit": [
+   {
+    "output": "direct generated edit of 'x' refused: regenerate via the owning tool instead",
+    "path": "x",
+    "plane": "generated"
+   },
+   {
+    "output": null,
+    "path": "x",
+    "plane": "source"
+   },
+   {
+    "output": null,
+    "path": "x",
+    "plane": "artifact"
+   },
+   {
+    "output": null,
+    "path": "x",
+    "plane": "protected"
+   },
+   {
+    "output": null,
+    "path": "x",
+    "plane": ""
+   },
+   {
+    "output": "direct generated edit of 'Canonical/generated/a.md' refused: regenerate via the owning tool instead",
+    "path": "Canonical/generated/a.md",
+    "plane": "generated"
+   }
+  ]
+ },
+ "hyp": {
+  "artifact_text": "{\n  \"version\": \"5.0.0\",\n  \"entries\": [\n    {\n      \"path\": \".github/PULL_REQUEST_TEMPLATE.md\",\n      \"reason\": \"PR body contract the PR description lane enforces\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \".github/actions\",\n      \"reason\": \"composite actions holding each lane's real logic, reused by the standalone workflows\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \".github/workflows/deploy.yml\",\n      \"reason\": \"deployment entry point; per-app deploy lanes sit beside it\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \".github/workflows/issue-close-sweep.yml\",\n      \"reason\": \"closes linked Issues on remote merge truth (merged_at), idempotently\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \".github/workflows/llm-review.yml\",\n      \"reason\": \"standalone AI Review trigger; dialogue and recheck live beside it\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \".github/workflows/pr-verify.yml\",\n      \"reason\": \"the only pull_request workflow: native lanes plus PR Gate, the required check and merge orchestrator\",\n      \"plane\": \"protected\"\n    },\n    {\n      \"path\": \"AGENTS.md\",\n      \"reason\": \"root router: owner authority, sources of truth, risk tiers, PR Gate behaviour, agent boundaries\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"apps/agentic-command-center\",\n      \"reason\": \"Agentic Command Center app: kernel, runner and Windows lane\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"apps/lifeos\",\n      \"reason\": \"LifeOS app: backend, read-only stdio MCP server, deploy and backup lanes\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"apps/shell\",\n      \"reason\": \"composed Shell app (front door for every zone); own AGENTS.md and project.yaml\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"apps/toolbelt\",\n      \"reason\": \"Toolbelt monorepo of small tools (nested apps; hyp#450 lifts them to apps/<name>)\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"apps/toolbelt/guards\",\n      \"reason\": \"guards: policy documents the guards broker enforces\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"docs/ops\",\n      \"reason\": \"operator tooling and contract oracles: workflow tests, Stage 59-63 adoption bindings\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"docs/ops/runbook.md\",\n      \"reason\": \"operator runbook: identities, deploys, restores, incident steps\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"docs/ops/stage63-adoption-lib.mjs\",\n      \"reason\": \"Stage 63 v5 ports with Python semantics; ADOPTION map of every adopted element\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"docs/ops/stage63-repo-map.mjs\",\n      \"reason\": \"owning tool of this map: renders and checks docs/repo-map.json\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"docs/ops/vendors.md\",\n      \"reason\": \"vendor inventory: what each external service is for and how it authenticates\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"docs/planning\",\n      \"reason\": \"planning record: canonical names, inventory, per-app definitions, risk register\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"docs/repo-map.json\",\n      \"reason\": \"this bounded map, generated: regenerate with the owning tool, never edit\",\n      \"plane\": \"generated\"\n    },\n    {\n      \"path\": \"inventories/secrets\",\n      \"reason\": \"secret inventory by name and path only, never values\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"packages/broker-contract\",\n      \"reason\": \"guards broker request/policy contract: shape validation only\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"packages/llm\",\n      \"reason\": \"provider-agnostic LLM abstraction: request, streaming, tool use, error taxonomy\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"packages/platform-client\",\n      \"reason\": \"shared platform session client: Supabase Auth sign-in and authed fetch\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"packages/review\",\n      \"reason\": \"adversarial LLM PR review: cross-provider verdict behind the AI Review lane\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"packages/toolbelt-cli\",\n      \"reason\": \"scaffold CLI for the Toolbelt new-tool lifecycle\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"packages/ui\",\n      \"reason\": \"shared design tokens, primitives and state components\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"project.yaml\",\n      \"reason\": \"repository facts and exact commands: apps, services, CI lanes, vendors, Standard pin\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"runbooks\",\n      \"reason\": \"cross-cutting runbooks: secret rotation, outage, restore\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"services/brain\",\n      \"reason\": \"Brain daemon: long-lived autonomous-coding orchestrator and its evals\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"services/broker\",\n      \"reason\": \"guards broker: egress forward proxy (log-only phase)\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"services/llm-handler\",\n      \"reason\": \"Handler A: the general-purpose deployed LLM service\",\n      \"plane\": \"source\"\n    },\n    {\n      \"path\": \"standard.lock\",\n      \"reason\": \"adopted agent-engineering-standard commit; bumped last in an adoption series\",\n      \"plane\": \"artifact\"\n    }\n  ]\n}\n",
+  "map": {
+   "entries": [
+    {
+     "path": ".github/PULL_REQUEST_TEMPLATE.md",
+     "plane": "source",
+     "reason": "PR body contract the PR description lane enforces"
+    },
+    {
+     "path": ".github/actions",
+     "plane": "source",
+     "reason": "composite actions holding each lane's real logic, reused by the standalone workflows"
+    },
+    {
+     "path": ".github/workflows/deploy.yml",
+     "plane": "source",
+     "reason": "deployment entry point; per-app deploy lanes sit beside it"
+    },
+    {
+     "path": ".github/workflows/issue-close-sweep.yml",
+     "plane": "source",
+     "reason": "closes linked Issues on remote merge truth (merged_at), idempotently"
+    },
+    {
+     "path": ".github/workflows/llm-review.yml",
+     "plane": "source",
+     "reason": "standalone AI Review trigger; dialogue and recheck live beside it"
+    },
+    {
+     "path": ".github/workflows/pr-verify.yml",
+     "plane": "protected",
+     "reason": "the only pull_request workflow: native lanes plus PR Gate, the required check and merge orchestrator"
+    },
+    {
+     "path": "AGENTS.md",
+     "plane": "source",
+     "reason": "root router: owner authority, sources of truth, risk tiers, PR Gate behaviour, agent boundaries"
+    },
+    {
+     "path": "apps/agentic-command-center",
+     "plane": "source",
+     "reason": "Agentic Command Center app: kernel, runner and Windows lane"
+    },
+    {
+     "path": "apps/lifeos",
+     "plane": "source",
+     "reason": "LifeOS app: backend, read-only stdio MCP server, deploy and backup lanes"
+    },
+    {
+     "path": "apps/shell",
+     "plane": "source",
+     "reason": "composed Shell app (front door for every zone); own AGENTS.md and project.yaml"
+    },
+    {
+     "path": "apps/toolbelt",
+     "plane": "source",
+     "reason": "Toolbelt monorepo of small tools (nested apps; hyp#450 lifts them to apps/<name>)"
+    },
+    {
+     "path": "apps/toolbelt/guards",
+     "plane": "source",
+     "reason": "guards: policy documents the guards broker enforces"
+    },
+    {
+     "path": "docs/ops",
+     "plane": "source",
+     "reason": "operator tooling and contract oracles: workflow tests, Stage 59-63 adoption bindings"
+    },
+    {
+     "path": "docs/ops/runbook.md",
+     "plane": "source",
+     "reason": "operator runbook: identities, deploys, restores, incident steps"
+    },
+    {
+     "path": "docs/ops/stage63-adoption-lib.mjs",
+     "plane": "source",
+     "reason": "Stage 63 v5 ports with Python semantics; ADOPTION map of every adopted element"
+    },
+    {
+     "path": "docs/ops/stage63-repo-map.mjs",
+     "plane": "source",
+     "reason": "owning tool of this map: renders and checks docs/repo-map.json"
+    },
+    {
+     "path": "docs/ops/vendors.md",
+     "plane": "source",
+     "reason": "vendor inventory: what each external service is for and how it authenticates"
+    },
+    {
+     "path": "docs/planning",
+     "plane": "source",
+     "reason": "planning record: canonical names, inventory, per-app definitions, risk register"
+    },
+    {
+     "path": "docs/repo-map.json",
+     "plane": "generated",
+     "reason": "this bounded map, generated: regenerate with the owning tool, never edit"
+    },
+    {
+     "path": "inventories/secrets",
+     "plane": "source",
+     "reason": "secret inventory by name and path only, never values"
+    },
+    {
+     "path": "packages/broker-contract",
+     "plane": "source",
+     "reason": "guards broker request/policy contract: shape validation only"
+    },
+    {
+     "path": "packages/llm",
+     "plane": "source",
+     "reason": "provider-agnostic LLM abstraction: request, streaming, tool use, error taxonomy"
+    },
+    {
+     "path": "packages/platform-client",
+     "plane": "source",
+     "reason": "shared platform session client: Supabase Auth sign-in and authed fetch"
+    },
+    {
+     "path": "packages/review",
+     "plane": "source",
+     "reason": "adversarial LLM PR review: cross-provider verdict behind the AI Review lane"
+    },
+    {
+     "path": "packages/toolbelt-cli",
+     "plane": "source",
+     "reason": "scaffold CLI for the Toolbelt new-tool lifecycle"
+    },
+    {
+     "path": "packages/ui",
+     "plane": "source",
+     "reason": "shared design tokens, primitives and state components"
+    },
+    {
+     "path": "project.yaml",
+     "plane": "source",
+     "reason": "repository facts and exact commands: apps, services, CI lanes, vendors, Standard pin"
+    },
+    {
+     "path": "runbooks",
+     "plane": "source",
+     "reason": "cross-cutting runbooks: secret rotation, outage, restore"
+    },
+    {
+     "path": "services/brain",
+     "plane": "source",
+     "reason": "Brain daemon: long-lived autonomous-coding orchestrator and its evals"
+    },
+    {
+     "path": "services/broker",
+     "plane": "source",
+     "reason": "guards broker: egress forward proxy (log-only phase)"
+    },
+    {
+     "path": "services/llm-handler",
+     "plane": "source",
+     "reason": "Handler A: the general-purpose deployed LLM service"
+    },
+    {
+     "path": "standard.lock",
+     "plane": "artifact",
+     "reason": "adopted agent-engineering-standard commit; bumped last in an adoption series"
+    }
+   ],
+   "version": "5.0.0"
+  },
+  "patterns": {
+   "artifact": [
+    "standard.lock"
+   ],
+   "cache": [
+    ".worktrees/",
+    "__pycache__/",
+    "node_modules/",
+    ".claude/worktrees/"
+   ],
+   "evidence": [
+    ".evidence/"
+   ],
+   "generated": [
+    "docs/repo-map.json",
+    "package-lock.json"
+   ],
+   "protected": [
+    ".github/workflows/pr-verify.yml"
+   ]
+  },
+  "plane_for": [
+   {
+    "path": ".claude/worktrees/w/AGENTS.md",
+    "plane": "cache"
+   },
+   {
+    "path": ".evidence/run.json",
+    "plane": "evidence"
+   },
+   {
+    "path": ".github/PULL_REQUEST_TEMPLATE.md",
+    "plane": "source"
+   },
+   {
+    "path": ".github/actions",
+    "plane": "source"
+   },
+   {
+    "path": ".github/workflows/ci.yml",
+    "plane": "source"
+   },
+   {
+    "path": ".github/workflows/deploy.yml",
+    "plane": "source"
+   },
+   {
+    "path": ".github/workflows/issue-close-sweep.yml",
+    "plane": "source"
+   },
+   {
+    "path": ".github/workflows/llm-review.yml",
+    "plane": "source"
+   },
+   {
+    "path": ".github/workflows/pr-verify.yml",
+    "plane": "protected"
+   },
+   {
+    "path": "AGENTS.md",
+    "plane": "source"
+   },
+   {
+    "path": "apps/agentic-command-center",
+    "plane": "source"
+   },
+   {
+    "path": "apps/lifeos",
+    "plane": "source"
+   },
+   {
+    "path": "apps/shell",
+    "plane": "source"
+   },
+   {
+    "path": "apps/shell/node_modules/x/index.js",
+    "plane": "cache"
+   },
+   {
+    "path": "apps/toolbelt",
+    "plane": "source"
+   },
+   {
+    "path": "apps/toolbelt/guards",
+    "plane": "source"
+   },
+   {
+    "path": "docs/ops",
+    "plane": "source"
+   },
+   {
+    "path": "docs/ops/runbook.md",
+    "plane": "source"
+   },
+   {
+    "path": "docs/ops/stage63-adoption-lib.mjs",
+    "plane": "source"
+   },
+   {
+    "path": "docs/ops/stage63-repo-map.mjs",
+    "plane": "source"
+   },
+   {
+    "path": "docs/ops/vendors.md",
+    "plane": "source"
+   },
+   {
+    "path": "docs/planning",
+    "plane": "source"
+   },
+   {
+    "path": "docs/repo-map.json",
+    "plane": "generated"
+   },
+   {
+    "path": "inventories/secrets",
+    "plane": "source"
+   },
+   {
+    "path": "main.py",
+    "plane": "source"
+   },
+   {
+    "path": "maintenance.md",
+    "plane": "source"
+   },
+   {
+    "path": "package-lock.json",
+    "plane": "generated"
+   },
+   {
+    "path": "packages/broker-contract",
+    "plane": "source"
+   },
+   {
+    "path": "packages/llm",
+    "plane": "source"
+   },
+   {
+    "path": "packages/platform-client",
+    "plane": "source"
+   },
+   {
+    "path": "packages/review",
+    "plane": "source"
+   },
+   {
+    "path": "packages/toolbelt-cli",
+    "plane": "source"
+   },
+   {
+    "path": "packages/ui",
+    "plane": "source"
+   },
+   {
+    "path": "project.yaml",
+    "plane": "source"
+   },
+   {
+    "path": "runbooks",
+    "plane": "source"
+   },
+   {
+    "path": "services/brain",
+    "plane": "source"
+   },
+   {
+    "path": "services/brain/__pycache__/m.pyc",
+    "plane": "cache"
+   },
+   {
+    "path": "services/broker",
+    "plane": "source"
+   },
+   {
+    "path": "services/llm-handler",
+    "plane": "source"
+   },
+   {
+    "path": "standard.lock",
+    "plane": "artifact"
+   }
+  ]
+ }
+}
