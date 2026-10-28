@@ -1,8 +1,8 @@
-// Restic repositories on the Hetzner Storage Box use relative paths (hyperbolic-core#481).
-// Hetzner: "Only the directory /home/ is writable on the Storage Box" and "we therefore
-// recommend that you use relative paths" (docs.hetzner.com, Access with SSH/rsync/BorgBackup).
-// An absolute repository such as sftp:hetzner-storagebox:/platform makes restic init fail with
-// `MkdirAll /platform/snapshots: sftp: "Failure" (SSH_FX_FAILURE)` (runs 40656590619, 40656594741).
+// Restic repositories on the Hetzner Storage Box live under /home/ (hyperbolic-core#481, #483).
+// Hetzner: "Only the directory /home/ is writable on the Storage Box" (docs.hetzner.com, Access
+// with SSH/rsync/BorgBackup). /platform failed restic init with `MkdirAll /platform/snapshots:
+// sftp: "Failure" (SSH_FX_FAILURE)` (runs 40656590619, 40656594741). A relative "platform" did too:
+// the SFTP session starts at /, so it resolved to /platform (runs 40660417960, 40660420934).
 
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -31,12 +31,9 @@ test("the backup and drill workflows reference Storage Box repositories", () => 
   }
 });
 
-test("every Storage Box repository path is relative (only /home/ is writable)", () => {
+test("every Storage Box repository is /home/<name> (only /home/ is writable)", () => {
   for (const [file, repo] of storageBoxRepos()) {
-    assert.ok(repo !== "", `${file}: empty repository path`);
-    assert.ok(!repo.startsWith("/"), `${file}: repository ${repo} is absolute; use a relative path`);
-    // A plain name only: no ./ or ../ prefix and no ${{ }} or $VAR that could resolve to an absolute path.
-    assert.match(repo, /^[a-z][a-z0-9-]*$/, `${file}: repository ${repo} must be a plain relative name`);
+    assert.match(repo, /^\/home\/[a-z][a-z0-9-]*$/, `${file}: repository ${repo} must be /home/<name>`);
   }
 });
 
@@ -46,7 +43,7 @@ test("each repo's backup and drill use the same repository name", () => {
     if (!byFile.has(file)) byFile.set(file, new Set());
     byFile.get(file).add(repo);
   }
-  assert.deepEqual([...byFile.get("platform-backup.yml")], ["platform"]);
-  assert.deepEqual([...byFile.get("lifeos-backup.yml")], ["lifeos"]);
-  assert.deepEqual([...byFile.get("ops-restore-drill.yml")].sort(), ["lifeos", "platform"]);
+  assert.deepEqual([...byFile.get("platform-backup.yml")], ["/home/platform"]);
+  assert.deepEqual([...byFile.get("lifeos-backup.yml")], ["/home/lifeos"]);
+  assert.deepEqual([...byFile.get("ops-restore-drill.yml")].sort(), ["/home/lifeos", "/home/platform"]);
 });
