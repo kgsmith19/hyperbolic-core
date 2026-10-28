@@ -111,12 +111,14 @@ jobs:
 
           # 4. Find the box. Exactly one match, or refuse.
           box_ids=()
+          box_access=""
           page=1
           while :; do
             resp="$(api_get "/storage_boxes?page=$page&per_page=50")"
             while IFS= read -r id; do
               box_ids+=("$id")
             done < <(jq -r --arg user "$STORAGEBOX_USER" '.storage_boxes[] | select(.username == $user) | .id' <<< "$resp")
+            box_access+="$(jq -c --arg user "$STORAGEBOX_USER" '.storage_boxes[] | select(.username == $user) | .access_settings' <<< "$resp")"
             next="$(jq -r '.meta.pagination.next_page // empty' <<< "$resp")"
             [[ -n "$next" ]] || break
             page="$next"
@@ -126,6 +128,17 @@ jobs:
             exit 1
           fi
           box_id="${box_ids[0]}"
+
+          # 4b. GitHub runners sit outside Hetzner's network, and a box that is
+          #     not reachable externally refuses every login from them, by key or
+          #     by password (runs 40597091186, 40625385188, 40626356955). Stop
+          #     before any change. The count check above leaves exactly one
+          #     access_settings object in box_access.
+          reachable="$(jq -r '.reachable_externally' <<< "$box_access")"
+          if [[ "$reachable" != "true" ]]; then
+            echo "::error::Storage Box $box_id is not reachable from outside Hetzner (reachable_externally=$reachable), so GitHub runners cannot log in by key or password. Enable External Reachability on the box, then re-run." >&2
+            exit 1
+          fi
 
           # 5. Enable SSH on the box, and wait for Hetzner to apply it.
           action_id="$(jq -cn '{ssh_enabled: true}' \
