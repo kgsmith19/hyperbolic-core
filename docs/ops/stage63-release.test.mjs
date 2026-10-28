@@ -292,3 +292,25 @@ test("S10 · the release/runtime mechanisms exist on disk", () => {
     assert.ok(existsSync(path.join(root, rel)), `${rel} is missing`);
   }
 });
+
+// --- int() digits: Node's \p{Nd} is wider than Python 3.12's decimal set ---------
+// Node 22 ships Unicode 16, so \p{Nd} matches about 80 code points that CPython 3.12
+// (Unicode 15.0.0) has no decimal value for. int() rejects those, so the port must too.
+// The skew is a version difference, not a port bug, and the port therefore uses the
+// explicit table PY_INT_DIGIT_ZEROS rather than \p{Nd}. This test fails if anyone
+// swaps the table back to \p{Nd}, and the count guard keeps it from passing vacuously.
+test("S10 · int() rejects every \\p{Nd} code point outside the Python 3.12 digit table", async () => {
+  const lib = await import("./stage63-release-lib.mjs");
+  const table = new Set(lib.PY_INT_DIGIT_ZEROS.flatMap((zero) => Array.from({ length: 10 }, (_, k) => zero + k)));
+  const nd = /\p{Nd}/u;
+  const extra = [];
+  for (let cp = 0; cp <= 0x10ffff; cp += 1) {
+    if (nd.test(String.fromCodePoint(cp)) && !table.has(cp)) extra.push(cp);
+  }
+  assert.ok(extra.length > 0, "the \\p{Nd} skew is non-empty on this Node, so the test is not vacuous");
+  const accepted = extra.flatMap((cp) => {
+    const result = replay(() => lib.evaluateRelease({ ...lib.cleanReleasePackage(), open_blockers: `1${String.fromCodePoint(cp)}` }));
+    return isDeepStrictEqual(result, { error: "ValueError" }) ? [] : [{ cp: cp.toString(16), result }];
+  });
+  assert.deepEqual(accepted, [], `${accepted.length} of ${extra.length} extra \\p{Nd} code points are not rejected`);
+});
