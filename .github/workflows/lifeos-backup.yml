@@ -51,6 +51,12 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # The restic leg copies docs/ops/restic-setup.sh out of the workspace, so
+      # the repository must be on disk before any step reads a repo path.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Secrets · Pull backup configuration from Infisical
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
