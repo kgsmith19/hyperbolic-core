@@ -5,7 +5,8 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -69,10 +70,53 @@ test("restic-setup.sh is reused for install/config, against both repositories", 
   assert.match(workflow, /--repos=platform,lifeos/);
 });
 
-test("a real, pinned Postgres 17 service backs the restore -- matching the dump-producing pipelines' own pin", () => {
+test("a Supabase-compatible Postgres 17, pinned by digest, backs the restore (#486)", () => {
+  // Both dumps reference Supabase objects (auth.uid(), extensions.vector) that plain
+  // postgres:17 lacks: run 40663902127 ignored 75 + 6 restore errors there.
   assert.match(workflow, /services:/);
-  assert.match(workflow, /postgres:\s*\n\s*image: postgres:17/);
+  assert.match(workflow, /postgres:\s*\n\s*image: supabase\/postgres:17\.[0-9.]+@sha256:[0-9a-f]{64}\n/);
   assert.match(workflow, /--health-cmd pg_isready/);
+});
+
+test("every Postgres client container uses the service's own pinned image (#486)", () => {
+  // An unpinned postgres:17 client is a second Docker Hub pull (rate-limited, 429
+  // seen while proving this change) and an unpinned supply-chain input.
+  const service = workflow.match(/postgres:\s*\n\s*image: (supabase\/postgres:\S+)\n/);
+  assert.ok(service, "service image not found");
+  const env = workflow.match(/\n\s+PG_IMAGE: (\S+)\n/);
+  assert.ok(env, "PG_IMAGE env not set on the drill step");
+  assert.equal(env[1], service[1], "PG_IMAGE must equal the service image");
+  assert.doesNotMatch(workflow, /docker run[^\n]* postgres:17 /);
+  assert.doesNotMatch(workflow, /\bpg [^\n]*postgres:17\b/);
+  assert.equal((workflow.match(/"\$PG_IMAGE" pg_restore --list/g) ?? []).length, 2);
+});
+
+test("both dumps restore strictly into the image's own postgres database, as the superuser, with vector enabled first (#486)", () => {
+  // A database created from template1 has no auth schema, so the restore targets
+  // `postgres` itself; platform uses its own schemas and lifeos uses public.
+  assert.doesNotMatch(workflow, /createdb/);
+  for (const label of ["platform", "lifeos"]) {
+    const fn = drillFunction(label);
+    const vector = fn.indexOf("create extension if not exists vector with schema extensions");
+    const restore = fn.indexOf("pg_restore -h 127.0.0.1 -U supabase_admin --no-owner --no-privileges --exit-on-error");
+    assert.ok(vector > -1 && restore > -1, `${label}: vector extension or strict pg_restore missing`);
+    assert.ok(vector < restore, `${label}: vector must exist before the restore`);
+    assert.match(fn, /--dbname postgres /);
+  }
+  // pg_dump --schema=public emits CREATE SCHEMA public, which already exists; only
+  // that TOC entry is skipped, so --exit-on-error stays meaningful.
+  const lifeos = drillFunction("lifeos");
+  assert.match(lifeos, /grep -v ' SCHEMA - public '/);
+  assert.match(lifeos, /-L \/tmp\/lifeos\.list/);
+  assert.doesNotMatch(drillFunction("platform"), / -L /);
+});
+
+test("every verified table must answer an integer count (#486)", () => {
+  for (const label of ["platform", "lifeos"]) {
+    const fn = drillFunction(label);
+    assert.match(fn, /psql -h 127\.0\.0\.1 -U supabase_admin postgres -X -At -v ON_ERROR_STOP=1 -c "select count\(\*\) from \$t"/);
+    assert.match(fn, /\[\[ "\$n" =~ \^\[0-9\]\+\$ \]\]/);
+  }
 });
 
 /** Text of one `drill_<label>() { ... }` shell function, brace to brace. */
@@ -113,7 +157,8 @@ test("the lifeos drill's table loop uses the real kernel tables, not a guessed s
   // documents/whatever table that does not exist (there is no per-domain
   // table; documents are entity rows, per ADR 015).
   const fn = drillFunction("lifeos");
-  assert.match(fn, /for t in entity type_definition event entity_type; do/);
+  // embedding (pgvector) failed to restore in run 40663902127 and went unnoticed (#486).
+  assert.match(fn, /for t in entity type_definition event entity_type embedding; do/);
 });
 
 test("the lifeos drill asserts the restored blob directory is non-empty, not just present", () => {
@@ -122,21 +167,64 @@ test("the lifeos drill asserts the restored blob directory is non-empty, not jus
 });
 
 test("both dump archives are verified with pg_restore --list before any restore is attempted", () => {
-  const listCalls = (workflow.match(/pg_restore --list < "\$dump_file" > \/dev\/null/g) ?? []).length;
-  assert.equal(listCalls, 2, "expected one pg_restore --list check per repository");
+  // platform discards the listing; lifeos keeps it (minus CREATE SCHEMA public) as the
+  // restore's TOC, so that single call is also its archive check (#486).
+  const platform = drillFunction("platform");
+  assert.equal((platform.match(/pg_restore --list < "\$dump_file" > \/dev\/null/g) ?? []).length, 1);
+  assert.ok(platform.indexOf("pg_restore --list") < platform.indexOf("pg_restore -h "), "platform: list before restore");
+  const lifeos = drillFunction("lifeos");
+  assert.equal((lifeos.match(/pg_restore --list/g) ?? []).length, 1, "lifeos lists its archive exactly once");
+  assert.match(lifeos, /pg_restore --list < "\$dump_file" \\\n\s*\| grep -v ' SCHEMA - public ' > "\$tmp\/lifeos\.list"/);
+  assert.ok(lifeos.indexOf("pg_restore --list") < lifeos.indexOf("pg_restore -h "), "lifeos: list before restore");
 });
 
 test("a failure in one repository's drill does not prevent the other's from running or from being reported", () => {
-  // set -euo pipefail is active for the whole step; `drill_platform || { ... }`
-  // is what stops a failing platform drill from aborting the script before
-  // drill_lifeos ever runs -- and from silently vanishing instead of
-  // landing in the summary as a FAIL row.
-  const platformCall = workflow.indexOf("drill_platform || {");
-  const lifeosCall = workflow.indexOf("drill_lifeos || {");
-  assert.ok(platformCall > -1 && lifeosCall > -1);
-  assert.ok(platformCall < lifeosCall);
-  assert.match(workflow, /overall_status=1/);
+  const first = workflow.indexOf("run_drill platform\n");
+  const second = workflow.indexOf("run_drill lifeos\n");
+  assert.ok(first > -1 && second > -1 && first < second);
   assert.match(workflow, /exit "\$overall_status"/);
+  // The fail-open shape (#486): bash ignores set -e inside a function called from ||.
+  assert.doesNotMatch(workflow, /drill_(platform|lifeos) \|\|/);
+});
+
+/** Text of the run_drill() helper, brace to brace. */
+function runDrillHelper() {
+  const start = workflow.indexOf("run_drill() {");
+  const end = workflow.indexOf("\n          }", start);
+  assert.ok(start > -1 && end > -1, "run_drill helper not found");
+  return workflow.slice(start, end + "\n          }".length);
+}
+
+function runDrillWith(body) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "drill-"));
+  const summary = path.join(dir, "summary.md");
+  const marker = path.join(dir, "marker");
+  writeFileSync(summary, "");
+  const script = [
+    "set -euo pipefail",
+    `summary=${JSON.stringify(summary)}`,
+    "overall_status=0",
+    `drill_platform() {\n${body.replaceAll("MARKER", JSON.stringify(marker))}\n}`,
+    runDrillHelper(),
+    "run_drill platform",
+    'echo "status=$overall_status"',
+  ].join("\n");
+  const out = execFileSync("bash", ["-c", script], { encoding: "utf8" });
+  let reached = false;
+  try { readFileSync(marker); reached = true; } catch { reached = false; }
+  return { out, summary: readFileSync(summary, "utf8"), reached };
+}
+
+test("run_drill: a failing command inside a drill stops that drill and records FAIL (#486)", () => {
+  const failing = runDrillWith("  false\n  echo reached > MARKER");
+  assert.equal(failing.reached, false, "a command after a failure ran: set -e is not effective inside the drill");
+  assert.match(failing.summary, /\| `platform` \| \*\*FAIL\*\*/);
+  assert.match(failing.out, /status=1/);
+
+  const passing = runDrillWith("  echo reached > MARKER");
+  assert.equal(passing.reached, true);
+  assert.equal(passing.summary, "");
+  assert.match(passing.out, /status=0/);
 });
 
 test("the summary is written to GITHUB_STEP_SUMMARY regardless of pass or fail, and links to runbook.md", () => {
