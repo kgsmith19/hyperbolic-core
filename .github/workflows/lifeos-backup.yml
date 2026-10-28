@@ -269,7 +269,7 @@ jobs:
           mkdir -p "$blobs_copy"
           docker run --rm -v "$volume_name":/src:ro -v "$blobs_copy":/dst alpine:3.21 cp -a /src/. /dst/
 
-          repository="sftp:hetzner-storagebox:lifeos"
+          repository="sftp:hetzner-storagebox:/home/lifeos"
           restic -r "$repository" backup \
             "$HOME/restic-backup-tmp/lifeos.dump" "$blobs_copy" \
             --host lifeos-backup --tag "run-${RUN_ID}"
