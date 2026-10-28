@@ -7,10 +7,12 @@ name: Ops Restore Drill
 # from the Hetzner Storage Box monthly, against both restic repositories
 # platform-backup.yml (#166) and lifeos-backup.yml (#167) write to.
 #
-# Runs entirely in the GitHub Actions runner, over SFTP straight to the
-# Storage Box -- no Tailscale join, no SSH to the VPS. Both restic
-# repositories are reachable directly; nothing this workflow does touches
-# production, only the encrypted backups already sitting in the Storage Box.
+# Runs in the GitHub Actions runner, over SFTP to the Storage Box. The box is
+# reachable only from Hetzner's network (reachable_externally=false, #411), so
+# the runner joins the tailnet and restic-setup.sh --via relays ssh through the
+# VPS with nc. The VPS only relays bytes: authentication runs from the runner,
+# and nothing this workflow does touches production, only the encrypted
+# backups already sitting in the Storage Box.
 #
 # Gated on the same restic flag (ops/flags.json, #455) as the two backup pipelines:
 # there is nothing to drill until they are live.
@@ -81,7 +83,32 @@ jobs:
           secret-path: "/platform/backup/"
           domain: https://app.infisical.com
 
+      - name: Tailnet client for the VPS relay (restic identity, /platform/lifeos-deploy/)
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PLATFORM_RESTIC_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/lifeos-deploy/"
+          domain: https://app.infisical.com
+
+      # The Storage Box is reachable only from Hetzner's network
+      # (reachable_externally=false, run 40628312552), so restic reaches it
+      # through the VPS: join the tailnet exactly as lifeos-backup.yml does.
+      # The tailnet client is the one lifeos-backup.yml uses, read from
+      # /platform/lifeos-deploy/ by the restic identity in the step above.
+      - name: Join the tailnet (restic reaches the Storage Box through the VPS)
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
+
       - name: Check both repositories, restore the latest snapshot of each, and verify
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
         run: |
           set -euo pipefail
           if [ -z "${RESTIC_PASSWORD:-}" ] || [ -z "${STORAGEBOX_SSH_KEY:-}" ]; then
@@ -103,6 +130,7 @@ jobs:
             --storagebox-host="${{ vars.STORAGEBOX_HOST }}" \
             --storagebox-user="${{ vars.STORAGEBOX_USER }}" \
             --ssh-key-file="$key_file" \
+            --via="deploy@$DEPLOY_HOST" \
             --repos=platform,lifeos
 
           pg() {
