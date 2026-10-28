@@ -233,7 +233,7 @@ jobs:
             --via="deploy@$DEPLOY_HOST" \
             --repos=platform
 
-          repository="sftp:hetzner-storagebox:/platform"
+          repository="sftp:hetzner-storagebox:platform"
           restic -r "$repository" backup "$RUNNER_TEMP/platform.dump" \
             --host platform-backup --tag "run-${GITHUB_RUN_ID}"
           restic -r "$repository" forget \
