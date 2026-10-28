@@ -198,7 +198,8 @@ run write_ssh_config
 # --- Step 3: idempotent restic init per repository ---
 IFS=',' read -ra repo_list <<< "$repos"
 for repo in "${repo_list[@]}"; do
-  repository="sftp:${alias_name}:/${repo}"
+  # Only /home/ is writable on the Storage Box (Hetzner docs; #483).
+  repository="sftp:${alias_name}:/home/${repo}"
   init_one() {
     if [[ -z "${RESTIC_PASSWORD:-}" ]]; then
       echo "error: RESTIC_PASSWORD must be set before --apply" >&2
