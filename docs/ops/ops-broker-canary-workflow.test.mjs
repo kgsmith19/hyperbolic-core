@@ -318,3 +318,14 @@ test("behavior: a 200 with zero new audit lines fails the canary", () => {
   assert.match(run.stderr, /0 audit lines/);
   assertNoSecretLeak(run);
 });
+
+test("behavior: the audit window starts on the box's own clock, read over ssh before the call, so runner/box clock skew cannot hide or add lines", () => {
+  const run = runMainStep({ httpCode: 200, response: OK_MESSAGE, auditLines: 1 });
+  assert.equal(run.status, 0, run.stderr);
+  const lines = run.argv.split("\n").filter(Boolean);
+  const dateCall = lines.findIndex((l) => /^ssh .*deploy@\S+ date -u \+%Y-%m-%dT%H:%M:%SZ$/.test(l));
+  const curlCall = lines.findIndex((l) => l.startsWith("curl "));
+  const logsCall = lines.findIndex((l) => l.startsWith("docker logs"));
+  assert.ok(dateCall > -1, `no ssh call reads the box clock:\n${run.argv}`);
+  assert.ok(dateCall < curlCall && curlCall < logsCall, "order must be: box clock, then the call, then the audit count");
+});

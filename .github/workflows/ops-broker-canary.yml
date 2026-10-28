@@ -95,7 +95,9 @@ jobs:
             }));
           ')"
 
-          started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # The audit window starts on the box's own clock, so runner/box skew
+          # can neither hide the call's audit line nor admit an older one.
+          started="$(ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" "date -u +%Y-%m-%dT%H:%M:%SZ")"
           # The envelope arrives on the box's stdin. The status is the last line
           # of the output and the reply is everything above it; neither is echoed.
           out="$(printf '%s' "$body" | ssh "${ssh_options[@]}" "deploy@$DEPLOY_HOST" \
