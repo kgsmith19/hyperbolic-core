@@ -226,7 +226,7 @@ test("backup and forget run before the snapshot is asserted present, on the life
   assert.ok(backupCall > -1 && forgetCall > -1 && snapshotsCall > -1);
   assert.ok(backupCall < forgetCall);
   assert.ok(forgetCall < snapshotsCall);
-  assert.match(workflow, /repository="sftp:hetzner-storagebox:\/lifeos"/);
+  assert.match(workflow, /repository="sftp:hetzner-storagebox:lifeos"/);
   assert.match(workflow, /--keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune/);
   assert.match(workflow, /snapshots --tag "run-\$\{RUN_ID\}" --json/);
 });
