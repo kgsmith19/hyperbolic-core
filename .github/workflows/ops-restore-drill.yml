@@ -55,8 +55,10 @@ jobs:
     # major-version gap is exactly the failure this drill exists to catch
     # for real, not paper over with a mismatched client.
     services:
+      # Supabase's own image: both dumps reference auth.uid() and the
+      # extensions.vector type, which plain postgres:17 lacks (#486).
       postgres:
-        image: postgres:17
+        image: supabase/postgres:17.11.0.003@sha256:7374d196da7e301512cc5329e18040e0f7bb856287b323777cdadecccbc6c7e4
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -196,15 +198,19 @@ jobs:
 
             docker run --rm -i postgres:17 pg_restore --list < "$dump_file" > /dev/null
 
-            pg postgres:17 createdb -h 127.0.0.1 -U postgres platform_restore_drill
+            # Into the image's own postgres database: one made from template1
+            # has no auth schema (#486). Strict: any restore error fails.
+            pg postgres:17 psql -h 127.0.0.1 -U supabase_admin postgres -X -q -v ON_ERROR_STOP=1 \
+              -c "create extension if not exists vector with schema extensions"
             pg -v "$dump_file:/tmp/platform.dump:ro" postgres:17 \
-              pg_restore -h 127.0.0.1 -U postgres --no-owner --no-privileges \
-                --dbname platform_restore_drill /tmp/platform.dump
+              pg_restore -h 127.0.0.1 -U supabase_admin --no-owner --no-privileges --exit-on-error \
+                --dbname postgres /tmp/platform.dump
 
             local counts=""
             for t in platform.config core.app core.run core.cost prompt.prompt idea.idea intake.idea; do
               local n
-              n="$(pg postgres:17 psql -h 127.0.0.1 -U postgres platform_restore_drill -X -At -c "select count(*) from $t")"
+              n="$(pg postgres:17 psql -h 127.0.0.1 -U supabase_admin postgres -X -At -v ON_ERROR_STOP=1 -c "select count(*) from $t")"
+              [[ "$n" =~ ^[0-9]+$ ]]
               counts="$counts $t=$n"
             done
             restore_end="$(date +%s)"
@@ -248,15 +254,21 @@ jobs:
             blob_file_count="$(find "$blobs_dir" -type f | wc -l)"
             test "$blob_file_count" -gt 0
 
-            pg postgres:17 createdb -h 127.0.0.1 -U postgres lifeos_restore_drill
-            pg -v "$dump_file:/tmp/lifeos.dump:ro" postgres:17 \
-              pg_restore -h 127.0.0.1 -U postgres --no-owner --no-privileges \
-                --dbname lifeos_restore_drill /tmp/lifeos.dump
+            # pg_dump --schema=public emits CREATE SCHEMA public, which already
+            # exists; skip only that TOC entry so --exit-on-error stays strict.
+            docker run --rm -i postgres:17 pg_restore --list < "$dump_file" \
+              | grep -v ' SCHEMA - public ' > "$tmp/lifeos.list"
+            pg postgres:17 psql -h 127.0.0.1 -U supabase_admin postgres -X -q -v ON_ERROR_STOP=1 \
+              -c "create extension if not exists vector with schema extensions"
+            pg -v "$dump_file:/tmp/lifeos.dump:ro" -v "$tmp/lifeos.list:/tmp/lifeos.list:ro" postgres:17 \
+              pg_restore -h 127.0.0.1 -U supabase_admin --no-owner --no-privileges --exit-on-error \
+                -L /tmp/lifeos.list --dbname postgres /tmp/lifeos.dump
 
             local counts=""
-            for t in entity type_definition event entity_type; do
+            for t in entity type_definition event entity_type embedding; do
               local n
-              n="$(pg postgres:17 psql -h 127.0.0.1 -U postgres lifeos_restore_drill -X -At -c "select count(*) from $t")"
+              n="$(pg postgres:17 psql -h 127.0.0.1 -U supabase_admin postgres -X -At -v ON_ERROR_STOP=1 -c "select count(*) from $t")"
+              [[ "$n" =~ ^[0-9]+$ ]]
               counts="$counts $t=$n"
             done
             restore_end="$(date +%s)"
@@ -264,8 +276,22 @@ jobs:
             echo "| \`lifeos\` | pass | \`$snapshot_id\` | $rpo_seconds | $rto_seconds |$counts, blob_files=$blob_file_count |" >> "$summary"
           }
 
-          drill_platform || { echo "| \`platform\` | **FAIL** | | | | see job log |" >> "$summary"; overall_status=1; }
-          drill_lifeos || { echo "| \`lifeos\` | **FAIL** | | | | see job log |" >> "$summary"; overall_status=1; }
+          # bash ignores set -e inside a function called from ||, && or if, which
+          # let every failed restore step pass (#486). Each drill runs in a
+          # subshell with its own effective set -e; its status is read after.
+          run_drill() {
+            local label="$1" rc
+            set +e
+            ( set -e; "drill_$label" )
+            rc=$?
+            set -e
+            if [ "$rc" -ne 0 ]; then
+              echo "| \`$label\` | **FAIL** | | | | see job log |" >> "$summary"
+              overall_status=1
+            fi
+          }
+          run_drill platform
+          run_drill lifeos
 
           cat "$summary" >> "$GITHUB_STEP_SUMMARY"
           echo "See docs/ops/runbook.md's restore-drill section for how to read this table." >> "$GITHUB_STEP_SUMMARY"
