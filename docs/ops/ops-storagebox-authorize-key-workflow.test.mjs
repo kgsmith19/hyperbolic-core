@@ -259,11 +259,11 @@ function stubScript(jsPath, name) {
 }
 
 /** Storage Box list pages. Page 1 holds `other` boxes; page 2 holds the given matches. */
-function pages(page2Matches, page1 = [{ id: 900, username: "someone-else" }]) {
+function pages(page2Matches, page1 = [{ id: 900, username: "someone-else" }], access = { reachable_externally: true, ssh_enabled: false }) {
   return {
     STUB_PAGE1: JSON.stringify({ storage_boxes: page1, meta: { pagination: { next_page: 2 } } }),
     STUB_PAGE2: JSON.stringify({
-      storage_boxes: page2Matches.map((id) => ({ id, username: USER })),
+      storage_boxes: page2Matches.map((id) => ({ id, username: USER, access_settings: access })),
       meta: { pagination: { next_page: null } },
     }),
   };
@@ -510,4 +510,22 @@ test("behavior: any other install failure (not exit 5) fails at once, without a 
   assert.equal(run.sshpassCalls.length, 1);
   assert.ok(!run.sleeps.includes("20"), "no retry wait for a non-refusal failure");
   assert.equal(run.summaryText, "");
+});
+
+// --- a box not reachable from outside Hetzner refuses every runner login (run 40626356955) ---
+
+test("behavior: a box with reachable_externally false fails closed before any change, and says why", () => {
+  const run = runAuthorize({ page: pages([111], undefined, { reachable_externally: false, ssh_enabled: true }) });
+  assert.notEqual(run.status, 0);
+  assert.deepEqual(run.curl.filter((c) => c.method === "POST"), [], "no setting or password may change");
+  assert.equal(run.sshpassCalls.length, 0);
+  assert.match(run.stderr, /reachable_externally=false/);
+  assert.match(run.stderr, /External Reachability/);
+  assert.equal(run.summaryText, "");
+});
+
+test("behavior: the box's access settings (booleans only) are logged before any change", () => {
+  const run = runAuthorize({ page: pages([111]) });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /Storage Box 111 access settings: reachable_externally=true ssh_enabled=false/);
 });
