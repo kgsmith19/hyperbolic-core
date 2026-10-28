@@ -121,6 +121,48 @@ def release_cases(rm, corpus_doc):
     return cases
 
 
+# --- int() of open_blockers (family E) ---------------------------------------
+
+# Upstream does int(package.get("open_blockers") or 0). Explicit probes name the
+# divergent shapes; the enumerations below cover every whitespace code point
+# int() may strip (str.isspace() minus U+001C-U+001F) at both ends, and every
+# decimal digit Python 3.12 accepts.
+INT_PROBES = (
+    ("ascii-3", "3"), ("arabic-indic-3", "\u0663"), ("fullwidth-3", "\uff13"),
+    ("ideographic-leading-3", "\u30003"), ("nbsp-leading-3", "\u00a03"),
+    ("nbsp-trailing-3", "3\u00a0"), ("ideographic-trailing-3", "3\u3000"),
+    ("nbsp-only", "\u00a0"), ("space-only", " "), ("ideographic-only", "\u3000"),
+    ("arabic-indic-multi", "\u0661\u0662\u0663"), ("mixed-width-digits", "\u0663\uff13"),
+    ("underscore-thousand", "1_000"), ("underscore-million", "1_000_000"),
+    ("double-underscore", "1__0"), ("leading-underscore", "_1"), ("trailing-underscore", "1_"),
+    ("underscore-arabic-indic", "1_\u0663"), ("underscore-fullwidth", "\uff11_\uff10"),
+    ("plus-sign", "+3"), ("minus-sign", "-3"), ("sign-with-space", " +3 "),
+    ("fs-leading", "\x1c3"), ("fs-trailing", "3\x1c"), ("us-leading", "\x1f3"),
+    ("us-only", "\x1f"), ("empty", ""),
+)
+
+
+def int_of_cases(rm):
+    base = rm.clean_package()
+    cases = []
+
+    def add(label, value):
+        cases.append({"id": label, "input": value,
+                      "output": guarded(lambda: release_result(rm, variant(base, {"open_blockers": value})))})
+
+    for label, value in INT_PROBES:
+        add("explicit:" + label, value)
+    for cp in sorted(c for c in range(0x110000) if not 0xD800 <= c <= 0xDFFF):
+        char = chr(cp)
+        if char.isspace() and not 0x1C <= cp <= 0x1F:
+            add("lead:U+%04X" % cp, char + "3")
+            add("trail:U+%04X" % cp, "3" + char)
+    for cp in sorted(c for c in range(0x110000) if not 0xD800 <= c <= 0xDFFF):
+        if chr(cp).isdecimal():
+            add("digit:U+%04X" % cp, chr(cp))
+    return cases
+
+
 def first_id_suffixed(corpus_doc, suffix):
     """The corpus with its first entry id suffixed (id-shape pins)."""
     entries = [dict(entry) for entry in corpus_doc["entries"]]
@@ -417,6 +459,8 @@ def main():
         "_generator": "docs/ops/stage63-release-golden.py",
         "_python": "%d.%d" % sys.version_info[:2],
         "release": release_cases(rm, release_doc),
+        "open_blockers_int": int_of_cases(rm),
+        "open_blockers_int_base": rm.clean_package(),
         "release_validators": release_validators(rm, release_doc),
         "invalidation": invalidation_cases(pi, invalidation_doc) + freeze_cases(pi),
         "invalidation_validators": invalidation_validators(pi, invalidation_doc),

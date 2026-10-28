@@ -121,6 +121,14 @@ def registry_cases(reg):
         ("lock-not-dict", {"catalog": [], "profile": [], "lock": []}),
         ("not-a-mapping", ["catalog"]),
         ("int-selection", {"catalog": [{"id": "5"}], "profile": [5], "lock": {"5": "x"}}),
+        ("astral-unknown-keys", {"catalog": [], "profile": [], "lock": {},
+                                 "\U0001f600": 1, "\uffff": 2, "\u00e9": 3}),
+        ("astral-lock-unselected", {"catalog": [{"id": "\U0001f600"}, {"id": "\uffff"},
+                                                 {"id": "b"}],
+                                    "profile": ["b"],
+                                    "lock": {"\U0001f600": "1", "\uffff": "2", "b": "3"}}),
+        ("astral-missing-from-lock", {"catalog": [{"id": "\U0001f600"}, {"id": "\uffff"}],
+                                      "profile": ["\U0001f600", "\uffff"], "lock": {}}),
     ]
     capabilities = [
         ("all-declared", {"edition": ["skills", "mcp"]}, ["skills", "mcp", "hooks"]),
@@ -128,6 +136,8 @@ def registry_cases(reg):
         ("dict-registry", {"edition": "skills"}, {"skills": {}, "mcp": {}}),
         ("int-capability", {"edition": [7]}, ["7"]),
         ("not-a-mapping", ["skills"], ["skills"]),
+        ("astral-flag-keys", {"\U0001f600": ["cap"], "\uffff": ["cap"], "skills": ["skills"]},
+         ["skills"]),
     ]
     reserved = [
         ("clean", {"project": {}, "commands": {}}),
@@ -178,6 +188,10 @@ def compiler_cases(pc):
         ("deps-not-list", dict(catalog[1], dependencies="tdd")),
         ("bad-semantic-id", dict(catalog[1], semantic_id="skill.tdd")),
     ]
+    for name, pad in _S5.PADS:
+        descriptors.append(("pad-name-" + name, dict(catalog[1], name=pad)))
+        descriptors.append(("pad-description-" + name, dict(catalog[1], description=pad)))
+        descriptors.append(("pad-name-text-" + name, dict(catalog[1], name=pad + "x" + pad)))
     selections = [
         ("semantic-id", ["capability.git-worktrees"], None, "claude"),
         ("slug-with-dependencies", ["tdd"], None, "claude"),
@@ -200,13 +214,25 @@ def compiler_cases(pc):
         except ValueError as error:
             return {"label": label, "requests": requests, "budget": budget, "provider": provider,
                     "descriptors": entries, "error": str(error)}
-        return {"label": label, "requests": requests, "budget": budget, "provider": provider,
-                "selected": result.selected, "findings": result.findings,
-                "discovery_tokens": result.discovery_tokens, "body_tokens_est": result.body_tokens_est,
-                "ok": result.ok}
+        out = {"label": label, "requests": requests, "budget": budget, "provider": provider,
+               "selected": result.selected, "findings": result.findings,
+               "discovery_tokens": result.discovery_tokens, "body_tokens_est": result.body_tokens_est,
+               "ok": result.ok}
+        if entries is not catalog:
+            out["descriptors"] = entries
+        return out
 
     compiled = [compile_case(*case) for case in selections]
     compiled.append(compile_case("duplicate-index", ["tdd"], None, "claude", catalog + [catalog[0]]))
+    # Ambiguous keyword over ids that mix BMP, U+FFFF and astral characters: Python sorts by
+    # code point, so the candidate list is bmp, U+FFFF, U+1F600.
+    astral = [
+        descriptor("bmp", "shared bmp", "shared keyword", 10),
+        descriptor("\uffff", "shared fffd", "shared keyword", 10),
+        descriptor("\U0001f600", "shared astral", "shared keyword", 10),
+    ]
+    compiled.append(compile_case("astral-ambiguous", ["shared"], None, "claude", astral))
+    compiled.append(compile_case("astral-unique-slug", ["\uffff"], None, "claude", astral))
     return {
         "catalog": catalog,
         "descriptors": [{"label": l, "record": r, "repairs": pc.validate_descriptor(r)}
