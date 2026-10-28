@@ -200,8 +200,7 @@ test("the private key is written to a file by a here-string, never by printf or 
 
 test("the step summary is written exactly once, and only the key fingerprint and the box id go into it", () => {
   assert.equal((code.match(/GITHUB_STEP_SUMMARY/g) ?? []).length, 1, "GITHUB_STEP_SUMMARY must be written exactly once");
-  const line = stepRun(MAIN_STEP).split("\n").find((l) => l.includes("GITHUB_STEP_SUMMARY"));
-  assert.match(line, /printf .*\$box_id.*\$fingerprint.*>> "\$GITHUB_STEP_SUMMARY"/);
+  assert.match(stepRun(MAIN_STEP), /printf 'Storage Box id %s: key fingerprint %s[^']*'\s*\\\n\s*"\$box_id" "\$fingerprint" >> "\$GITHUB_STEP_SUMMARY"/);
   assert.match(stepRun(MAIN_STEP), /fingerprint="\$\(ssh-keygen -lf "\$pub_file" \| awk '\{print \$2\}'\)"/);
 });
 
@@ -227,7 +226,7 @@ const before = existsSync(log) ? readFileSync(log, "utf8").split("\\n").filter(B
 const stdin = readFileSync(0, "utf8");
 const record = { name, args, stdin };
 if (name === "sshpass") record.sshpass = process.env.SSHPASS ?? null;
-if (name === "ssh-keygen") record.mode = (statSync(args[args.indexOf("-f") + 1]).mode & 0o777).toString(8);
+if (name === "ssh-keygen" && args.includes("-y")) record.mode = (statSync(args[args.indexOf("-f") + 1]).mode & 0o777).toString(8);
 appendFileSync(log, JSON.stringify(record) + "\\n");
 const out = (text) => process.stdout.write(text);
 if (name === "curl") {
