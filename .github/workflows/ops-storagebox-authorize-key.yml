@@ -9,6 +9,13 @@ name: Ops Storage Box Authorize Key
 # Dispatch-only, so a person decides when the box's password rotates. The
 # Hetzner Console API token (HETZNER_API_TOKEN) and the private key come from
 # Infisical /platform/backup/, never from GitHub secrets.
+#
+# The box is not reachable from outside Hetzner (run 40628312552:
+# reachable_externally=false), and the owner keeps it that way (#469,
+# 2026-10-28). So every box login runs on the VPS, reached over keyless
+# Tailscale SSH with the same identities, environment, and file-handoff
+# shape as lifeos-backup.yml's restic leg. The Hetzner API calls stay on the
+# runner: the API is public.
 
 on:
   workflow_dispatch:
@@ -24,7 +31,7 @@ jobs:
   authorize-key:
     name: Authorize the restic key on the Storage Box
     runs-on: ubuntu-latest
-    environment: platform-backup-production
+    environment: lifeos-backup-production
     timeout-minutes: 15
     permissions:
       contents: read
@@ -46,15 +53,30 @@ jobs:
           secret-path: "/platform/backup/"
           domain: https://app.infisical.com
 
-      - name: Install sshpass
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y sshpass
+      # The tailnet OAuth client lives with the LifeOS deploy identity, read
+      # exactly as lifeos-backup.yml reads it.
+      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/lifeos-deploy/"
+          domain: https://app.infisical.com
+
+      - name: Join the tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
 
       - name: Authorize the restic key on the Storage Box
         env:
           STORAGEBOX_HOST: ${{ vars.STORAGEBOX_HOST }}
           STORAGEBOX_USER: ${{ vars.STORAGEBOX_USER }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           STORAGEBOX_SSH_KEY: ${{ env.STORAGEBOX_SSH_KEY }}
           HETZNER_API_TOKEN: ${{ env.HETZNER_API_TOKEN }}
         shell: bash
@@ -111,14 +133,12 @@ jobs:
 
           # 4. Find the box. Exactly one match, or refuse.
           box_ids=()
-          box_access=""
           page=1
           while :; do
             resp="$(api_get "/storage_boxes?page=$page&per_page=50")"
             while IFS= read -r id; do
               box_ids+=("$id")
             done < <(jq -r --arg user "$STORAGEBOX_USER" '.storage_boxes[] | select(.username == $user) | .id' <<< "$resp")
-            box_access+="$(jq -c --arg user "$STORAGEBOX_USER" '.storage_boxes[] | select(.username == $user) | .access_settings' <<< "$resp")"
             next="$(jq -r '.meta.pagination.next_page // empty' <<< "$resp")"
             [[ -n "$next" ]] || break
             page="$next"
@@ -128,17 +148,6 @@ jobs:
             exit 1
           fi
           box_id="${box_ids[0]}"
-
-          # 4b. GitHub runners sit outside Hetzner's network, and a box that is
-          #     not reachable externally refuses every login from them, by key or
-          #     by password (runs 40597091186, 40625385188, 40626356955). Stop
-          #     before any change. The count check above leaves exactly one
-          #     access_settings object in box_access.
-          reachable="$(jq -r '.reachable_externally' <<< "$box_access")"
-          if [[ "$reachable" != "true" ]]; then
-            echo "::error::Storage Box $box_id is not reachable from outside Hetzner (reachable_externally=$reachable), so GitHub runners cannot log in by key or password. Enable External Reachability on the box, then re-run." >&2
-            exit 1
-          fi
 
           # 5. Enable SSH on the box, and wait for Hetzner to apply it.
           action_id="$(jq -cn '{ssh_enabled: true}' \
@@ -155,30 +164,59 @@ jobs:
             | api_post "/storage_boxes/$box_id/actions/reset_password" \
             | jq -r '.action.id')"
           wait_for_action "$action_id"
-          export SSHPASS="$pw"
 
-          # 7. Install the public key. install-ssh-key appends and never overwrites.
-          #    The box's SSH frontend takes a while to see the new password after
-          #    reset_password succeeds (run 40625385188: refused 16s later), so
-          #    only that refusal (sshpass exit 5) is retried, for up to 6 minutes.
-          pub="$(cat "$pub_file")"
-          attempts=18
+          # 7. Hand the files to the VPS: the public key, the private key (for
+          #    the proof), and the password, each as a 0600 file in a 0700
+          #    directory, the same handoff lifeos-backup.yml uses. Two cleanups,
+          #    as there: the remote script's own trap, and this fallback.
+          remote_dir="storagebox-authorize-tmp"
+          vps() {
+            ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new \
+              "deploy@$DEPLOY_HOST" "$@"
+          }
+          handoff="$RUNNER_TEMP/storagebox-authorize-handoff"
+          cleanup_remote() {
+            vps "rm -rf \"$remote_dir\"" 2>/dev/null || true
+            rm -rf "$handoff"
+          }
+          trap cleanup_remote EXIT
+          mkdir -m 700 "$handoff"
+          cp "$pub_file" "$handoff/pub"
+          cp "$key_file" "$handoff/key"
+          cat > "$handoff/pw" <<<"$pw"
+          vps "mkdir -p -m 700 \"$remote_dir\""
+          scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            "$handoff/pub" "$handoff/key" "$handoff/pw" "deploy@$DEPLOY_HOST:$remote_dir/"
+
+          # 8. On the VPS: install the public key (install-ssh-key appends and
+          #    never overwrites), then prove a key-only login. ssh reads the
+          #    password from an SSH_ASKPASS file, never argv or the
+          #    environment. A fresh password can take a moment to apply, so a
+          #    failed install is retried every 20s, at most 6 times.
+          vps "STORAGEBOX_HOST='$STORAGEBOX_HOST' STORAGEBOX_USER='$STORAGEBOX_USER' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$HOME/storagebox-authorize-tmp"
+          trap 'rm -rf "$HOME/storagebox-authorize-tmp"' EXIT
+          chmod 600 pub key pw
+          printf '#!/bin/sh\ncat "%s/pw"\n' "$PWD" > askpass
+          chmod 700 askpass
+          attempts=6
           for ((attempt = 1; ; attempt++)); do
             rc=0
-            printf '%s\n' "$pub" | sshpass -e ssh -p23 -o StrictHostKeyChecking=accept-new \
-              -o PubkeyAuthentication=no "$STORAGEBOX_USER@$STORAGEBOX_HOST" install-ssh-key || rc=$?
-            (( rc == 5 && attempt < attempts )) || break
-            echo "The box refused the new password (attempt $attempt of $attempts); retrying in 20s." >&2
+            SSH_ASKPASS="$PWD/askpass" SSH_ASKPASS_REQUIRE=force \
+              ssh -p23 -o StrictHostKeyChecking=accept-new -o PubkeyAuthentication=no \
+              -o NumberOfPasswordPrompts=1 "$STORAGEBOX_USER@$STORAGEBOX_HOST" install-ssh-key < pub || rc=$?
+            (( rc != 0 && attempt < attempts )) || break
+            echo "install-ssh-key attempt $attempt of $attempts failed (ssh exit $rc); retrying in 20s." >&2
             sleep 20
           done
           if (( rc != 0 )); then
-            echo "install-ssh-key failed after $attempt attempt(s) (sshpass exit $rc)" >&2
+            echo "install-ssh-key failed after $attempt attempt(s) (ssh exit $rc)" >&2
             exit 1
           fi
-
-          # 8. Prove a key-only login. BatchMode refuses any password prompt.
-          ssh -p23 -i "$key_file" -o BatchMode=yes -o PasswordAuthentication=no \
-            -o IdentitiesOnly=yes "$STORAGEBOX_USER@$STORAGEBOX_HOST" ls >/dev/null
+          ssh -p23 -i ./key -o BatchMode=yes -o PasswordAuthentication=no \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "$STORAGEBOX_USER@$STORAGEBOX_HOST" ls >/dev/null
+          REMOTE
 
           # 9. The only summary output: the box id and the key fingerprint.
           fingerprint="$(ssh-keygen -lf "$pub_file" | awk '{print $2}')"

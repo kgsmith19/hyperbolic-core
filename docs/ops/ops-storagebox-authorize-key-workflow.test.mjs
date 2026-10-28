@@ -3,11 +3,17 @@
 // installs the restic public key, so its safety is its SHAPE: dispatch-only, one job in the
 // production environment, the same pins platform-backup.yml uses, secrets only through env:,
 // the password masked before first use, and nothing but the fingerprint written to the summary.
-// The behavioral half runs the real run: script with stub curl, ssh, sshpass, ssh-keygen and
-// sleep on PATH. Nothing touches the network, Hetzner, or Infisical.
+// The behavioral half runs the real run: script with stub curl, ssh, scp, ssh-keygen and
+// sleep on PATH; the stub ssh runs the VPS-side script locally under a scratch HOME, so
+// the Storage Box calls it makes are recorded too. Nothing touches the network, Hetzner,
+// Tailscale, or Infisical.
+//
+// The box is not reachable from outside Hetzner (run 40628312552: reachable_externally=false),
+// so every box login runs on the VPS, reached over Tailscale SSH exactly as lifeos-backup.yml's
+// restic leg already does (owner decision on #469, 2026-10-28: keep the box closed).
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -18,6 +24,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const workflowPath = path.join(root, ".github/workflows/ops-storagebox-authorize-key.yml");
 const workflow = existsSync(workflowPath) ? readFileSync(workflowPath, "utf8") : "";
 const platformBackup = readFileSync(path.join(root, ".github/workflows/platform-backup.yml"), "utf8");
+const lifeosBackup = readFileSync(path.join(root, ".github/workflows/lifeos-backup.yml"), "utf8");
 
 /** Non-comment lines only, so a comment that mentions a verb cannot trip a rule. */
 const code = workflow
@@ -31,6 +38,7 @@ const USER = "u657401";
 const PUBLIC_LINE = "ssh-ed25519 AAAAC3FAKEPUBLIC storagebox-restic";
 const PRIVATE_KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nFAKEPRIVATEKEYMATERIAL\n-----END OPENSSH PRIVATE KEY-----\n";
 const HETZNER_TOKEN = "hetzner-token-FAKE-0123";
+const DEPLOY_HOST = "vps.tailnet.example";
 
 /** The top-level `on:` block's own keys, read from the first line under `on:`. */
 function triggerKeys() {
@@ -72,11 +80,11 @@ test("dispatch-only: the sole trigger is workflow_dispatch, with no inputs and n
   assert.doesNotMatch(workflow, /\n {2}workflow_dispatch:\n {4}inputs:/);
 });
 
-test("exactly one job, in the platform-backup-production environment that the restic backup already uses", () => {
+test("exactly one job, in the lifeos-backup-production environment whose identities already reach the box over the VPS", () => {
   const jobIds = [...workflow.slice(workflow.indexOf("\njobs:\n")).matchAll(/^ {2}([a-z][a-z0-9-]*):\s*$/gm)].map((m) => m[1]);
   assert.deepEqual(jobIds, ["authorize-key"]);
   const environments = workflow.match(/^\s*environment:.*$/gm) ?? [];
-  assert.deepEqual(environments.map((line) => line.trim()), ["environment: platform-backup-production"]);
+  assert.deepEqual(environments.map((line) => line.trim()), ["environment: lifeos-backup-production"]);
 });
 
 test("permissions are exactly contents read at the top level, and contents read plus id-token write on the job", () => {
@@ -96,22 +104,29 @@ test("concurrency: one run at a time under a single group, and a running authori
   assert.match(workflow, /\nconcurrency:\n {2}group: ops-storagebox-authorize-key\n {2}cancel-in-progress: false\n/);
 });
 
-test("the only repository variables consumed are the Storage Box host and user and the restic identity and project", () => {
+test("the only repository variables consumed are the Storage Box host and user, the VPS host, and the two identities and project", () => {
   const vars = new Set([...code.matchAll(/vars\.([A-Z0-9_]+)/g)].map((m) => m[1]));
-  assert.deepEqual([...vars].sort(), ["INFISICAL_PLATFORM_RESTIC_IDENTITY_ID", "INFISICAL_PROJECT_SLUG", "STORAGEBOX_HOST", "STORAGEBOX_USER"]);
+  assert.deepEqual([...vars].sort(), [
+    "DEPLOY_HOST",
+    "INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID",
+    "INFISICAL_PLATFORM_RESTIC_IDENTITY_ID",
+    "INFISICAL_PROJECT_SLUG",
+    "STORAGEBOX_HOST",
+    "STORAGEBOX_USER",
+  ]);
 });
 
 // --- pinned actions and the Infisical read ---
 
-test("every uses: is a full 40-hex SHA, and each is the same pin platform-backup.yml already uses", () => {
+test("every uses: is a full 40-hex SHA, and each is the same pin lifeos-backup.yml already uses", () => {
   const refs = [...workflow.matchAll(/uses: ([^\s#]+)/g)].map((m) => m[1]);
   assert.deepEqual(
     [...new Set(refs.map((ref) => ref.split("@")[0]))].sort(),
-    ["Infisical/secrets-action", "actions/checkout"],
+    ["Infisical/secrets-action", "actions/checkout", "tailscale/github-action"],
   );
   for (const ref of refs) {
     assert.match(ref, /@[0-9a-f]{40}$/, `${ref} is not pinned to a full SHA`);
-    assert.ok(platformBackup.includes(`uses: ${ref}`), `${ref} is not the pin platform-backup.yml uses`);
+    assert.ok(lifeosBackup.includes(`uses: ${ref}`), `${ref} is not the pin lifeos-backup.yml uses`);
   }
 });
 
@@ -134,11 +149,25 @@ test("secrets reach run: scripts only through env:, never inline as ${{ secrets 
   assert.deepEqual(inlineExpressions, [], "an expression outside a plain env:/with: mapping");
 });
 
-test("sshpass is installed with sudo apt-get install -y sshpass, after an apt-get update so a stale index cannot fail the run", () => {
-  assert.match(code, /sudo apt-get install -y sshpass/);
-  const update = code.indexOf("sudo apt-get update");
-  assert.ok(update >= 0, "apt-get update must run before installing sshpass");
-  assert.ok(update < code.indexOf("sudo apt-get install -y sshpass"), "apt-get update must precede the install");
+test("the tailnet credentials come from /platform/lifeos-deploy/ through the LifeOS deploy identity, as lifeos-backup.yml reads them", () => {
+  assert.match(workflow, /identity-id: \$\{\{ vars\.INFISICAL_LIFEOS_DEPLOY_IDENTITY_ID \}\}/);
+  assert.match(workflow, /secret-path: "\/platform\/lifeos-deploy\/"/);
+  assert.equal((workflow.match(/uses: Infisical\/secrets-action@/g) ?? []).length, 2);
+});
+
+test("the runner joins the tailnet as tag:ci and pings the VPS, exactly as lifeos-backup.yml's join step does", () => {
+  const join = /uses: tailscale\/github-action@[0-9a-f]{40} # v[\d.]+\n {8}with:\n {10}oauth-client-id: \$\{\{ env\.TS_OAUTH_CLIENT_ID \}\}\n {10}oauth-secret: \$\{\{ env\.TS_OAUTH_SECRET \}\}\n {10}tags: tag:ci\n {10}ping: \$\{\{ vars\.DEPLOY_HOST \}\}\n/;
+  assert.match(workflow, join);
+  assert.match(lifeosBackup, join);
+  assert.ok(workflow.search(join) < workflow.indexOf(`      - name: ${MAIN_STEP}\n`), "the join must precede the main step");
+});
+
+test("no sshpass anywhere: on the VPS, ssh reads the password from an SSH_ASKPASS file, never from argv or the environment", () => {
+  assert.doesNotMatch(code, /sshpass/);
+  const script = stepRun(MAIN_STEP);
+  assert.match(script, /SSH_ASKPASS_REQUIRE=force/);
+  assert.match(script, /PubkeyAuthentication=no/);
+  assert.match(script, /NumberOfPasswordPrompts=1/);
 });
 
 // --- ordering: the steps run in the order AC2 lists ---
@@ -152,8 +181,9 @@ test("the steps run in the order AC2 lists: key file, public key, find box, enab
     "update_access_settings", // 5: SSH enabled
     "openssl rand", // 6: password generated
     "reset_password", // 6: password reset
+    "scp ", // 7: the files reach the VPS
     "install-ssh-key", // 7: key installed
-    "BatchMode=yes", // 8: key-only login proven
+    "PasswordAuthentication=no", // 8: key-only login proven
     "GITHUB_STEP_SUMMARY", // 9: summary written
   ];
   const positions = markers.map((marker) => {
@@ -181,12 +211,12 @@ test("no set -x, xtrace, or bash -x anywhere: a trace would print the token and 
   assert.doesNotMatch(code, /\bset\s+-[a-zA-Z]*x\b|xtrace|\bbash\s+-x\b/);
 });
 
-test("no echo or printf of a secret variable, except the add-mask line and a pipe into sshpass's ssh stdin", () => {
-  const secret = /\$\{?(pw|SSHPASS|STORAGEBOX_SSH_KEY|HETZNER_API_TOKEN)\b/;
+test("no echo or printf of a secret variable, except the add-mask line", () => {
+  const secret = /\$\{?(pw|STORAGEBOX_SSH_KEY|HETZNER_API_TOKEN)\b/;
   for (const script of [stepRun(MAIN_STEP), stepRun(CLEANUP_STEP)]) {
     for (const line of script.split("\n")) {
       if (!/\b(echo|printf)\b/.test(line) || !secret.test(line)) continue;
-      const allowed = /::add-mask::/.test(line) || /\|\s*sshpass\b/.test(line);
+      const allowed = /::add-mask::/.test(line);
       assert.ok(allowed, `secret echoed or printed: ${line.trim()}`);
     }
   }
@@ -222,13 +252,19 @@ test("the cleanup step is last, runs always, and shreds both temporary files und
 
 /** Node stub shared by every fake binary. It records argv, stdin and a few facts per call. */
 const STUB_JS = `
-import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import path from "node:path";
 const [name, ...args] = process.argv.slice(2);
 const log = process.env.STUB_LOG;
 const before = existsSync(log) ? readFileSync(log, "utf8").split("\\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
 const stdin = readFileSync(0, "utf8");
 const record = { name, args, stdin };
-if (name === "sshpass") record.sshpass = process.env.SSHPASS ?? null;
+const boxCall = name === "ssh" && args.includes("-p23");
+if (boxCall && process.env.SSH_ASKPASS) {
+  record.askpass = execFileSync(process.env.SSH_ASKPASS, { encoding: "utf8" });
+  record.askpassRequire = process.env.SSH_ASKPASS_REQUIRE ?? null;
+}
 if (name === "ssh-keygen" && args.includes("-y")) record.mode = (statSync(args[args.indexOf("-f") + 1]).mode & 0o777).toString(8);
 appendFileSync(log, JSON.stringify(record) + "\\n");
 const out = (text) => process.stdout.write(text);
@@ -245,12 +281,28 @@ if (name === "curl") {
     out(JSON.stringify({ action: { id: 77, status: "running" } }) + "\\n");
   }
 }
-if (name === "sshpass") {
-  const tries = before.filter((c) => c.name === "sshpass").length;
-  const seq = (process.env.STUB_SSHPASS_SEQ || "0").split(",");
+const remoteHome = process.env.STUB_REMOTE_HOME;
+if (name === "scp") {
+  const [dest, ...sources] = [args.at(-1), ...args.slice(0, -1).filter((a) => !a.startsWith("-") && !a.includes("="))];
+  const dir = path.join(remoteHome, dest.split(":")[1]);
+  mkdirSync(dir, { recursive: true });
+  for (const src of sources) copyFileSync(src, path.join(dir, path.basename(src)));
+  // A transfer that dies after landing the files: only the outer cleanup can remove them.
+  if (process.env.STUB_SCP_FAIL === "1") process.exit(1);
+}
+if (boxCall) {
+  if (args.includes("BatchMode=yes")) process.exit(process.env.STUB_LOGIN_FAIL === "1" ? 255 : 0);
+  const tries = before.filter((c) => c.name === "ssh" && c.args.includes("-p23") && !c.args.includes("BatchMode=yes")).length;
+  const seq = (process.env.STUB_INSTALL_SEQ || "0").split(",");
   process.exit(Number(seq[Math.min(tries, seq.length - 1)]));
 }
-if (name === "ssh") process.exit(args.includes("BatchMode=yes") && process.env.STUB_LOGIN_FAIL === "1" ? 255 : 0);
+if (name === "ssh") {
+  // A VPS call: run its remote command locally, under the scratch remote HOME.
+  const run = spawnSync("bash", ["-c", args.at(-1)], {
+    input: stdin, cwd: remoteHome, env: { ...process.env, HOME: remoteHome }, stdio: ["pipe", "inherit", "inherit"],
+  });
+  process.exit(run.status ?? 1);
+}
 if (name === "ssh-keygen") out(args.includes("-y") ? PUBLIC_LINE + "\\n" : "256 SHA256:FAKEFINGERPRINT storagebox-restic (ED25519)\\n");
 `;
 
@@ -270,16 +322,18 @@ function pages(page2Matches, page1 = [{ id: 900, username: "someone-else" }], ac
 }
 
 /** Runs the real main-step script under stubs; returns what each stub was asked to do. */
-function runAuthorize({ page, actionSeq = "running,success,running,success", loginFail = false, token = HETZNER_TOKEN, sshpassSeq = "0" }) {
+function runAuthorize({ page, actionSeq = "running,success,running,success", loginFail = false, token = HETZNER_TOKEN, installSeq = "0", scpFail = false }) {
   const dir = mkdtempSync(path.join(tmpdir(), "storagebox-authorize-"));
   try {
     const stubDir = path.join(dir, "bin");
     const runnerTemp = path.join(dir, "runner");
+    const remoteHome = path.join(dir, "vps-home");
     mkdirSync(stubDir);
     mkdirSync(runnerTemp);
+    mkdirSync(remoteHome);
     const stubJs = path.join(dir, "stub.mjs");
     writeFileSync(stubJs, STUB_JS.replace("PUBLIC_LINE", JSON.stringify(PUBLIC_LINE)));
-    for (const name of ["curl", "ssh", "sshpass", "ssh-keygen"]) {
+    for (const name of ["curl", "ssh", "scp", "ssh-keygen"]) {
       writeFileSync(path.join(stubDir, name), stubScript(stubJs, name), { mode: 0o755 });
     }
     const sleepLog = path.join(dir, "sleep.log");
@@ -310,12 +364,17 @@ function runAuthorize({ page, actionSeq = "running,success,running,success", log
         STUB_LOG: callLog,
         STUB_ACTION_SEQ: actionSeq,
         STUB_LOGIN_FAIL: loginFail ? "1" : "0",
-        STUB_SSHPASS_SEQ: sshpassSeq,
+        STUB_INSTALL_SEQ: installSeq,
+        STUB_SCP_FAIL: scpFail ? "1" : "0",
+        STUB_REMOTE_HOME: remoteHome,
+        DEPLOY_HOST,
         ...page,
       },
     });
     const raw = existsSync(callLog) ? readFileSync(callLog, "utf8") : "";
     const calls = raw.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    const remoteLeft = readdirSync(remoteHome, { recursive: true });
+    const runnerLeft = readdirSync(runnerTemp, { recursive: true });
     return {
       sleeps: existsSync(sleepLog) ? readFileSync(sleepLog, "utf8").split("\n").filter(Boolean) : [],
       jqArgv: existsSync(jqArgvLog) ? readFileSync(jqArgvLog, "utf8") : "",
@@ -331,7 +390,12 @@ function runAuthorize({ page, actionSeq = "running,success,running,success", log
         body: c.stdin,
       })),
       sshCalls: calls.filter((c) => c.name === "ssh"),
-      sshpassCalls: calls.filter((c) => c.name === "sshpass"),
+      installCalls: calls.filter((c) => c.name === "ssh" && c.args.includes("-p23") && !c.args.includes("BatchMode=yes")),
+      vpsCalls: calls.filter((c) => c.name === "ssh" && !c.args.includes("-p23")),
+      scpCalls: calls.filter((c) => c.name === "scp"),
+      remoteLeft,
+      runnerLeft,
+      remoteHome,
       keygenCalls: calls.filter((c) => c.name === "ssh-keygen"),
       runnerTemp,
     };
@@ -360,15 +424,37 @@ test("behavior: a single match on page 2 drives the exact Hetzner calls, in orde
   assert.deepEqual(Object.keys(JSON.parse(run.curl[5].body)), ["password"]);
 });
 
-test("behavior: install-ssh-key receives the PUBLIC key on stdin, and the private key appears in no call at all", () => {
+test("behavior: on the VPS, install-ssh-key receives the PUBLIC key on stdin, and the private key appears in no call's argv or stdin", () => {
   const run = runAuthorize({ page: pages([111]) });
   assert.equal(run.status, 0, run.stderr);
-  assert.equal(run.sshpassCalls.length, 1);
-  const install = run.sshpassCalls[0];
-  assert.equal(install.args[0], "-e");
+  assert.equal(run.installCalls.length, 1);
+  const install = run.installCalls[0];
   assert.ok(install.args.includes("install-ssh-key"));
+  assert.equal(install.args.at(-2), `${USER}@${HOST}`);
   assert.equal(install.stdin, `${PUBLIC_LINE}\n`);
   assert.doesNotMatch(run.raw, /FAKEPRIVATEKEYMATERIAL/, "the private key reached a command or its stdin");
+});
+
+test("behavior: every VPS call goes to deploy@DEPLOY_HOST over BatchMode, and the files travel by one scp into a 0700 directory", () => {
+  const run = runAuthorize({ page: pages([111]) });
+  assert.equal(run.status, 0, run.stderr);
+  assert.ok(run.vpsCalls.length >= 2, "expected a mkdir call and the remote script");
+  for (const call of run.vpsCalls) {
+    assert.ok(call.args.includes(`deploy@${DEPLOY_HOST}`), `VPS call to the wrong target: ${call.args.join(" ")}`);
+    assert.ok(call.args.includes("BatchMode=yes"));
+  }
+  assert.match(run.vpsCalls[0].args.at(-1), /mkdir -p -m 700/);
+  assert.equal(run.scpCalls.length, 1);
+  assert.match(run.scpCalls[0].args.at(-1), new RegExp(`^deploy@${DEPLOY_HOST.replace(/\./g, "\\.")}:`));
+});
+
+test("behavior: no credential file outlives the run on the VPS or in the runner handoff, on success or on any failure", () => {
+  for (const options of [{}, { loginFail: true }, { installSeq: "255" }, { scpFail: true }]) {
+    const run = runAuthorize({ page: pages([111]), ...options });
+    assert.deepEqual(run.remoteLeft, [], `files left on the VPS (${JSON.stringify(options)}): ${run.remoteLeft}`);
+    // The key and public-key files stay for the always() shred step; the handoff copies do not.
+    assert.deepEqual(run.runnerLeft.sort(), ["storagebox-authorize.key", "storagebox-authorize.pub"], `runner leftovers (${JSON.stringify(options)})`);
+  }
 });
 
 test("behavior: the private key file is 0600 when ssh-keygen derives the public key from it", () => {
@@ -380,19 +466,20 @@ test("behavior: the private key file is 0600 when ssh-keygen derives the public 
   assert.equal(derive.mode, "600");
 });
 
-test("behavior: the BatchMode proof logs in with the key only, and never by password", () => {
+test("behavior: the BatchMode proof runs on the VPS, logs in with the key only, and never by password", () => {
   const run = runAuthorize({ page: pages([111]) });
   assert.equal(run.status, 0, run.stderr);
-  const proof = run.sshCalls.find((c) => c.args.includes("BatchMode=yes"));
+  const proof = run.sshCalls.find((c) => c.args.includes("-p23") && c.args.includes("BatchMode=yes"));
   assert.ok(proof, "no BatchMode login was attempted");
   assert.deepEqual(
-    proof.args.map((a) => (a.startsWith(run.runnerTemp) ? "<key>" : a)),
-    ["-p23", "-i", "<key>", "-o", "BatchMode=yes", "-o", "PasswordAuthentication=no", "-o", "IdentitiesOnly=yes", `${USER}@${HOST}`, "ls"],
+    proof.args.map((a) => (a.startsWith(run.remoteHome) || a.startsWith("./") ? "<key>" : a)),
+    ["-p23", "-i", "<key>", "-o", "BatchMode=yes", "-o", "PasswordAuthentication=no", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=accept-new", `${USER}@${HOST}`, "ls"],
   );
-  assert.equal(run.sshpassCalls.length, 1, "only the install step may use a password");
+  assert.equal(proof.askpass, undefined, "the proof must not have a password available");
+  assert.equal(run.installCalls.length, 1, "only the install step may use a password");
 });
 
-test("behavior: the generated password is 32 characters with all four classes, and sshpass installs with that same password", () => {
+test("behavior: the generated password is 32 characters with all four classes, and the VPS askpass hands ssh that same password", () => {
   const run = runAuthorize({ page: pages([111]) });
   assert.equal(run.status, 0, run.stderr);
   const reset = JSON.parse(run.curl[5].body).password;
@@ -401,7 +488,8 @@ test("behavior: the generated password is 32 characters with all four classes, a
   assert.match(reset, /[a-z]/);
   assert.match(reset, /[0-9]/);
   assert.match(reset, /[^A-Za-z0-9]/);
-  assert.equal(run.sshpassCalls[0].sshpass, reset);
+  assert.equal(run.installCalls[0].askpass.trimEnd(), reset);
+  assert.equal(run.installCalls[0].askpassRequire, "force");
 });
 
 test("behavior: the generated password never appears on stdout or in the summary (the add-mask line is the runner's, not a log line)", () => {
@@ -448,7 +536,7 @@ test("behavior: an action that ends in error fails the run, and the password is 
     run.curl.filter((c) => c.method === "POST").map((c) => c.path),
     ["/storage_boxes/111/actions/update_access_settings"],
   );
-  assert.equal(run.sshpassCalls.length, 0);
+  assert.equal(run.installCalls.length, 0);
 });
 
 test("behavior: a failed key-only login proof fails the run, and the summary is not written", () => {
@@ -461,8 +549,7 @@ test("behavior: a failed key-only login proof fails the run, and the summary is 
 test("behavior: the generated password never appears on any command line (jq reads it from the environment)", () => {
   const run = runAuthorize({ page: pages([111]) });
   assert.equal(run.status, 0, run.stderr);
-  const pw = run.sshpassCalls[0].sshpass;
-  assert.ok(pw && pw.length >= 12, "sshpass received the generated password");
+  const pw = JSON.parse(run.curl[5].body).password;
   assert.ok(run.jqArgv.length > 0, "the jq wrapper recorded calls");
   assert.ok(!run.jqArgv.includes(pw), "the password must not be passed to jq as an argument");
   assert.ok(!run.raw.split("\n").some((l) => l && JSON.parse(l).args.join(" ").includes(pw)), "the password must not be in any stub's argv");
@@ -477,54 +564,43 @@ test("behavior: a missing HETZNER_API_TOKEN fails fast, before any API call, and
   assert.equal(run.summaryText, "");
 });
 
-// --- the fresh password reaches the box's SSH frontend with a lag (CI run 40625385188) ---
+// --- the fresh password can take a moment to apply, so a failed install is retried, boundedly ---
 
-/** sshpass exit 5: the box refused the password. Other codes are real failures. */
-const REFUSED = 5;
-const INSTALL_ATTEMPTS = 18;
+const INSTALL_ATTEMPTS = 6;
 
-test("behavior: a password the box still refuses (sshpass exit 5) is retried with a 20s wait, and the run then succeeds", () => {
-  const run = runAuthorize({ page: pages([111]), sshpassSeq: `${REFUSED},${REFUSED},0` });
+test("behavior: a failed install-ssh-key (ssh exit 255) is retried with a 20s wait, and the run then succeeds", () => {
+  const run = runAuthorize({ page: pages([111]), installSeq: "255,255,0" });
   assert.equal(run.status, 0, run.stderr);
-  assert.equal(run.sshpassCalls.length, 3);
-  for (const call of run.sshpassCalls) assert.equal(call.stdin, `${PUBLIC_LINE}\n`, "each attempt sends the public key");
+  assert.equal(run.installCalls.length, 3);
   const pw = JSON.parse(run.curl[5].body).password;
-  assert.ok(run.sshpassCalls.every((c) => c.sshpass === pw), "every attempt uses the one reset password");
+  for (const call of run.installCalls) {
+    assert.equal(call.stdin, `${PUBLIC_LINE}\n`, "each attempt sends the public key");
+    assert.equal(call.askpass.trimEnd(), pw, "every attempt uses the one reset password");
+  }
   assert.deepEqual(run.sleeps.filter((s) => s === "20"), ["20", "20"]);
   assert.match(run.summaryText, /key-only login verified/);
   assert.ok(!run.stderr.includes(pw), "password on stderr");
 });
 
-test("behavior: a refusal that never clears fails after a bounded number of attempts, and nothing is proven or summarized", () => {
-  const run = runAuthorize({ page: pages([111]), sshpassSeq: String(REFUSED) });
+test("behavior: an install that never succeeds fails after a bounded number of attempts, and nothing is proven or summarized", () => {
+  const run = runAuthorize({ page: pages([111]), installSeq: "255" });
   assert.notEqual(run.status, 0);
-  assert.equal(run.sshpassCalls.length, INSTALL_ATTEMPTS);
-  assert.ok(!run.sshCalls.some((c) => c.args.includes("BatchMode=yes")), "no proof after a failed install");
+  assert.equal(run.installCalls.length, INSTALL_ATTEMPTS);
+  assert.ok(!run.sshCalls.some((c) => c.args.includes("-p23") && c.args.includes("BatchMode=yes")), "no proof after a failed install");
   assert.equal(run.summaryText, "");
-  assert.match(run.stderr, /sshpass exit 5/);
+  assert.match(run.stderr, /install-ssh-key failed after 6 attempt\(s\) \(ssh exit 255\)/);
 });
 
-test("behavior: any other install failure (not exit 5) fails at once, without a retry", () => {
-  const run = runAuthorize({ page: pages([111]), sshpassSeq: "255,0" });
-  assert.notEqual(run.status, 0);
-  assert.equal(run.sshpassCalls.length, 1);
-  assert.ok(!run.sleeps.includes("20"), "no retry wait for a non-refusal failure");
-  assert.equal(run.summaryText, "");
+// --- the box stays closed to the internet; the run reaches it from the VPS (run 40628312552) ---
+
+test("behavior: a box with reachable_externally false is authorized through the VPS, and its access setting is never widened", () => {
+  const run = runAuthorize({ page: pages([111], undefined, { reachable_externally: false, ssh_enabled: false }) });
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.curl[2].body), { ssh_enabled: true });
+  assert.equal(run.installCalls.length, 1);
 });
 
-// --- a box not reachable from outside Hetzner refuses every runner login (run 40626356955) ---
-
-test("behavior: a box with reachable_externally false fails closed before any change, and says why", () => {
-  const run = runAuthorize({ page: pages([111], undefined, { reachable_externally: false, ssh_enabled: true }) });
-  assert.notEqual(run.status, 0);
-  assert.deepEqual(run.curl.filter((c) => c.method === "POST"), [], "no setting or password may change");
-  assert.equal(run.sshpassCalls.length, 0);
-  assert.match(run.stderr, /reachable_externally=false/);
-  assert.match(run.stderr, /External Reachability/);
-  assert.equal(run.summaryText, "");
-});
-
-test("behavior: a reachable box adds nothing to stdout but the add-mask line (AC2: only the fingerprint, in the summary)", () => {
+test("behavior: a successful run adds nothing to stdout but the add-mask line (AC2: only the fingerprint, in the summary)", () => {
   const run = runAuthorize({ page: pages([111]) });
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual(run.stdout.split("\n").filter(Boolean).filter((l) => !l.startsWith("::add-mask::")), []);
