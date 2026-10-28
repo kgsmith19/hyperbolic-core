@@ -12,7 +12,11 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-/** [mode, path] for every tracked *.sh, read from the index. */
+/**
+ * [mode, path] for every tracked *.sh, read from the index. In a git pathspec, `*` also
+ * matches `/`, so "*.sh" lists scripts in every directory (docs/ops/stamp-canary.sh
+ * included); the test below pins that.
+ */
 function trackedScripts() {
   const out = execFileSync("git", ["ls-files", "-s", "--", "*.sh"], { cwd: root, encoding: "utf8" });
   return out
@@ -26,6 +30,13 @@ function trackedScripts() {
 
 test("the repository tracks shell scripts, so an empty listing cannot pass vacuously", () => {
   assert.ok(trackedScripts().length > 0);
+});
+
+test("the listing reaches subdirectories: both canary scripts the deploy workflows run are listed, and executable", () => {
+  const modes = new Map(trackedScripts().map(([mode, file]) => [file, mode]));
+  for (const file of ["docs/ops/stamp-canary.sh", "docs/ops/canary-observe.sh"]) {
+    assert.equal(modes.get(file), "100755", `${file} is ${modes.get(file) ?? "not listed"}`);
+  }
 });
 
 test("every tracked *.sh is mode 100755 in the git index", () => {
