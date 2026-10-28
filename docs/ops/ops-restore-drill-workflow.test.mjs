@@ -88,7 +88,7 @@ test("every Postgres client container uses the service's own pinned image (#486)
   assert.equal(env[1], service[1], "PG_IMAGE must equal the service image");
   assert.doesNotMatch(workflow, /docker run[^\n]* postgres:17 /);
   assert.doesNotMatch(workflow, /\bpg [^\n]*postgres:17\b/);
-  assert.equal((workflow.match(/"\$PG_IMAGE" pg_restore --list/g) ?? []).length, 3);
+  assert.equal((workflow.match(/"\$PG_IMAGE" pg_restore --list/g) ?? []).length, 2);
 });
 
 test("both dumps restore strictly into the image's own postgres database, as the superuser, with vector enabled first (#486)", () => {
@@ -167,8 +167,15 @@ test("the lifeos drill asserts the restored blob directory is non-empty, not jus
 });
 
 test("both dump archives are verified with pg_restore --list before any restore is attempted", () => {
-  const listCalls = (workflow.match(/pg_restore --list < "\$dump_file" > \/dev\/null/g) ?? []).length;
-  assert.equal(listCalls, 2, "expected one pg_restore --list check per repository");
+  // platform discards the listing; lifeos keeps it (minus CREATE SCHEMA public) as the
+  // restore's TOC, so that single call is also its archive check (#486).
+  const platform = drillFunction("platform");
+  assert.equal((platform.match(/pg_restore --list < "\$dump_file" > \/dev\/null/g) ?? []).length, 1);
+  assert.ok(platform.indexOf("pg_restore --list") < platform.indexOf("pg_restore -h "), "platform: list before restore");
+  const lifeos = drillFunction("lifeos");
+  assert.equal((lifeos.match(/pg_restore --list/g) ?? []).length, 1, "lifeos lists its archive exactly once");
+  assert.match(lifeos, /pg_restore --list < "\$dump_file" \\\n\s*\| grep -v ' SCHEMA - public ' > "\$tmp\/lifeos\.list"/);
+  assert.ok(lifeos.indexOf("pg_restore --list") < lifeos.indexOf("pg_restore -h "), "lifeos: list before restore");
 });
 
 test("a failure in one repository's drill does not prevent the other's from running or from being reported", () => {

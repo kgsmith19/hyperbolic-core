@@ -251,12 +251,11 @@ jobs:
             test -n "$dump_file"
             test -n "$blobs_dir"
 
-            docker run --rm -i "$PG_IMAGE" pg_restore --list < "$dump_file" > /dev/null
-
             local blob_file_count
             blob_file_count="$(find "$blobs_dir" -type f | wc -l)"
             test "$blob_file_count" -gt 0
 
+            # Also the archive check (pipefail fails an unreadable dump).
             # pg_dump --schema=public emits CREATE SCHEMA public, which already
             # exists; skip only that TOC entry so --exit-on-error stays strict.
             docker run --rm -i "$PG_IMAGE" pg_restore --list < "$dump_file" \
