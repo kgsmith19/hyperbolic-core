@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const read = (rel) => readFileSync(path.join(root, rel), "utf8");
@@ -245,6 +246,41 @@ test("S10 · a freeze over this slice's own files invalidates when a protected f
   assert.ok(touched.findings.some((f) => f.rule === "protected-path-touched"));
   assert.ok(touched.findings.some((f) => f.rule === "stale-proof-reuse"));
 });
+
+// --- open_blockers int() parity (family E): int(value or 0) over Python's own rule ---
+// Upstream int() accepts Unicode decimal digits (Nd), underscores between digits,
+// and leading/trailing whitespace from str.isspace() minus U+001C-U+001F. The
+// enumerations below cover every such code point at both ends of the value.
+
+const intBase = golden.open_blockers_int_base;
+const intCases = golden.open_blockers_int;
+test("S10 · the int() probe base is the upstream clean release package", async () => {
+  const lib = await import("./stage63-release-lib.mjs");
+  assert.deepEqual(lib.cleanReleasePackage(), intBase);
+});
+
+for (const c of intCases.filter((entry) => entry.id.startsWith("explicit:"))) {
+  test(`S10 · open_blockers int() matches upstream: ${c.id}`, async () => {
+    const lib = await import("./stage63-release-lib.mjs");
+    assert.deepEqual(replay(() => lib.evaluateRelease({ ...intBase, open_blockers: c.input })), c.output);
+  });
+}
+
+// Family-wide enumerations report every mismatch in one assertion: each entry is the
+// JS result (js) beside the Python oracle (python) for the same open_blockers input.
+for (const [prefix, label] of [["lead:", "leading whitespace"], ["trail:", "trailing whitespace"],
+  ["digit:", "decimal digits (Nd)"]]) {
+  test(`S10 · open_blockers int() matches upstream over every ${label} code point`, async () => {
+    const lib = await import("./stage63-release-lib.mjs");
+    const family = intCases.filter((entry) => entry.id.startsWith(prefix));
+    assert.ok(family.length > 0, `${prefix} enumeration is non-empty`);
+    const mismatches = family.flatMap((c) => {
+      const js = replay(() => lib.evaluateRelease({ ...intBase, open_blockers: c.input }));
+      return isDeepStrictEqual(js, c.output) ? [] : [{ id: c.id, js, python: c.output }];
+    });
+    assert.deepEqual(mismatches, [], `${mismatches.length} of ${family.length} ${label} cases diverge`);
+  });
+}
 
 // --- honesty: the three ports are reachable from the ADOPTION map --------------
 

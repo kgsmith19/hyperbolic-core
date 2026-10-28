@@ -134,7 +134,7 @@ for (const c of golden.compiler.selections) {
       assert.throws(() => selectCandidates(c.descriptors, c.requests, options), (e) => e.message === c.error);
       return;
     }
-    const result = selectCandidates(golden.compiler.catalog, c.requests, options);
+    const result = selectCandidates(c.descriptors ?? golden.compiler.catalog, c.requests, options);
     assert.deepEqual(
       { selected: result.selected, findings: result.findings, discovery_tokens: result.discovery_tokens,
         body_tokens_est: result.body_tokens_est, ok: result.ok },

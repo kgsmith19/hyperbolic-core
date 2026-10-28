@@ -8,11 +8,14 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { rankQuality } from "./stage63-adoption-lib.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, "../..");
+const golden = JSON.parse(readFileSync(path.join(here, "stage63-quality-golden.json"), "utf8"));
 
 test("S4 · dimensions, severities, and finding fields are frozen", async () => {
   const { FROZEN, provenance } = await import("./stage63-adoption-lib.mjs");
@@ -105,3 +108,19 @@ test("S4 · implementation-quality rows are grounded or honestly gapped", async 
     }
   }
 });
+
+// --- Differential characterization against quality_eval.rank (family D) -----------
+// rank() breaks ties on the id by code point. A locale or UTF-16 comparison orders
+// "a"/"B", "é"/"f" and U+1F600/U+FFFF differently, so each set pins one ordering.
+
+test("S4 · quality golden is pinned to the Standard SHA and names quality_eval.py", () => {
+  assert.match(golden._provenance, /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
+  assert.match(golden._provenance, /tools\/quality_eval\.py/);
+  assert.equal(golden._python, "3.12");
+});
+
+for (const c of golden.rank) {
+  test(`S4 · rankQuality matches upstream: ${c.label}`, () => {
+    assert.deepEqual(rankQuality(c.solutions), c.output);
+  });
+}
