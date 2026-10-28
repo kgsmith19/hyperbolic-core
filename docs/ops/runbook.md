@@ -1017,6 +1017,11 @@ dispatch-only and does nothing on any other event.
 - **Prerequisite.** `HETZNER_API_TOKEN` must exist at Infisical `/platform/backup/`. Create it in
   Hetzner Console → Security → API tokens, as a **Read & Write** token, in the project that owns the
   Storage Box. A Read-only token fails at the first write.
+- **Route.** The box is not reachable from outside Hetzner (`reachable_externally=false`), and it
+  stays that way. Every login to the box runs on the VPS: the run joins the tailnet as `tag:ci` and
+  reaches `deploy@$DEPLOY_HOST` over Tailscale SSH, as `lifeos-backup.yml`'s restic leg does. Only
+  the Hetzner API calls run on the runner. The job runs in the `lifeos-backup-production` environment,
+  because its identities read both `/platform/backup/` and the tailnet client in `/platform/lifeos-deploy/`.
 - **Side effects.** The workflow turns SSH on for the box and sets a new box password. The password
   is generated per run, masked in logs, and never stored, so nothing can read it back. restic and
   `platform-backup.yml` authenticate by key only and do not depend on it. The public key is appended
