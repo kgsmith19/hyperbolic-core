@@ -210,6 +210,20 @@ test("an already-initialized repository is skipped, not re-initialized", () => {
   assert.match(result.stdout, /initialized restic repository 'lifeos'/);
 });
 
+test("repositories are initialized under /home/ -- the only writable path on the Storage Box (#483)", () => {
+  // Hetzner: "Only the directory /home/ is writable on the Storage Box". /platform and a
+  // relative "platform" (which the box resolves from /) both failed init with SSH_FX_FAILURE.
+  const env = fakeEnv();
+  const result = runApply(env);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const log = readFileSync(env.log, "utf8");
+  for (const repo of ["platform", "lifeos"]) {
+    assert.match(log, new RegExp(`restic init -r sftp:hetzner-storagebox:/home/${repo}\\n`));
+    assert.match(log, new RegExp(`restic cat config -r sftp:hetzner-storagebox:/home/${repo}\\n`));
+  }
+  assert.doesNotMatch(log, /sftp:hetzner-storagebox:\/(platform|lifeos)\b/);
+});
+
 test("RESTIC_PASSWORD is required before any repository init runs", () => {
   const env = fakeEnv();
   const result = runApply(env, [], { RESTIC_PASSWORD: "" });
