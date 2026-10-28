@@ -176,3 +176,40 @@ test("restic-setup.sh (called by the backup step above) trusts the Storage Box o
   const resticSetup = readFileSync(path.join(root, "docs/ops/restic-setup.sh"), "utf8");
   assert.match(resticSetup, /StrictHostKeyChecking accept-new/);
 });
+
+// --- the Storage Box is reachable only from Hetzner; restic reaches it through the VPS (#411, #469) ---
+
+const lifeosBackup = readFileSync(path.join(root, ".github/workflows/lifeos-backup.yml"), "utf8");
+const TAILNET_JOIN =
+  /uses: tailscale\/github-action@([0-9a-f]{40}) # v[\d.]+\n {8}with:\n {10}oauth-client-id: \$\{\{ env\.TS_OAUTH_CLIENT_ID \}\}\n {10}oauth-secret: \$\{\{ env\.TS_OAUTH_SECRET \}\}\n {10}tags: tag:ci\n {10}ping: \$\{\{ vars\.DEPLOY_HOST \}\}\n/;
+
+test("the restic leg joins the tailnet as tag:ci, pinned exactly as lifeos-backup.yml joins it", () => {
+  const ours = workflow.match(TAILNET_JOIN);
+  assert.ok(ours, "no tailnet join step in the lifeos-backup.yml shape");
+  assert.equal(ours[1], lifeosBackup.match(TAILNET_JOIN)[1], "a different tailscale/github-action pin");
+});
+
+test("the tailnet join is gated on the restic flag, continues on error, and sits between the restic credentials and the backup", () => {
+  const join = workflow.search(TAILNET_JOIN);
+  const header = workflow.lastIndexOf("\n      - name:", join);
+  const block = workflow.slice(header, join);
+  assert.match(block, /if: needs\.flags\.outputs\.restic_backup_enabled == 'true'/);
+  assert.match(block, /continue-on-error: true/);
+  assert.ok(workflow.indexOf("id: restic-credentials") < join, "join must follow the restic credentials (they carry the tailnet client)");
+  assert.ok(join < workflow.indexOf("id: restic-backup"), "join must precede the backup");
+});
+
+test("restic-setup.sh is called with --via=deploy@$DEPLOY_HOST, and DEPLOY_HOST comes from vars", () => {
+  const block = stepBlock("- name: Back up the platform dump to the Hetzner Storage Box (restic)", ["\n      - name:", "\n      - uses:"]);
+  assert.match(block, /--via="deploy@\$DEPLOY_HOST"/);
+  assert.match(block, /DEPLOY_HOST: \$\{\{ vars\.DEPLOY_HOST \}\}/);
+});
+
+test("the tailnet client is read by the restic identity from /platform/lifeos-deploy/, gated and continue-on-error, before the join", () => {
+  const block = stepBlock("- name: Tailnet client for the VPS relay", ["\n      - name:", "\n      # The Storage Box"]);
+  assert.match(block, /if: needs\.flags\.outputs\.restic_backup_enabled == 'true'/);
+  assert.match(block, /continue-on-error: true/);
+  assert.match(block, /identity-id: \$\{\{ vars\.INFISICAL_PLATFORM_RESTIC_IDENTITY_ID \}\}/);
+  assert.match(block, /secret-path: "\/platform\/lifeos-deploy\/"/);
+  assert.ok(workflow.indexOf("- name: Tailnet client for the VPS relay") < workflow.search(TAILNET_JOIN));
+});

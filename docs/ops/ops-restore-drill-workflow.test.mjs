@@ -32,11 +32,22 @@ test("the cron is monthly, distinct from every nightly cron already scheduled", 
   }
 });
 
-test("no Tailscale join and no SSH to the VPS -- this drill only talks to the Storage Box", () => {
-  // Both restic repositories are reachable directly over SFTP; nothing
-  // this workflow does needs to reach the production box at all.
-  assert.doesNotMatch(workflow, /tailscale\/github-action@/);
-  assert.doesNotMatch(workflow, /\bssh\b.*deploy@/);
+test("restic reaches the box through the VPS (reachable only from Hetzner), and the VPS only relays: no scp, no remote command", () => {
+  // Oracle change (#411): run 40628312552 proved the Storage Box has reachable_externally=false,
+  // so the drill can no longer reach it directly from a runner. It joins the tailnet exactly as
+  // lifeos-backup.yml does, and restic-setup.sh --via relays ssh through the VPS with nc.
+  // Authentication still runs from the runner, and the drill still never touches production data.
+  const lifeosBackup = readFileSync(path.join(root, ".github/workflows/lifeos-backup.yml"), "utf8");
+  const join =
+    /uses: tailscale\/github-action@([0-9a-f]{40}) # v[\d.]+\n {8}with:\n {10}oauth-client-id: \$\{\{ env\.TS_OAUTH_CLIENT_ID \}\}\n {10}oauth-secret: \$\{\{ env\.TS_OAUTH_SECRET \}\}\n {10}tags: tag:ci\n {10}ping: \$\{\{ vars\.DEPLOY_HOST \}\}\n/;
+  const ours = workflow.match(join);
+  assert.ok(ours, "no tailnet join step in the lifeos-backup.yml shape");
+  assert.equal(ours[1], lifeosBackup.match(join)[1]);
+  assert.match(workflow, /secret-path: "\/platform\/lifeos-deploy\/"/);
+  assert.ok(workflow.indexOf('secret-path: "/platform/lifeos-deploy/"') < workflow.search(join), "tailnet client must be read before the join");
+  assert.match(workflow, /--via="deploy@\$DEPLOY_HOST"/);
+  assert.match(workflow, /DEPLOY_HOST: \$\{\{ vars\.DEPLOY_HOST \}\}/);
+  assert.doesNotMatch(workflow, /\bssh\b[^\n]*deploy@/);
   assert.doesNotMatch(workflow, /\bscp\b/);
 });
 

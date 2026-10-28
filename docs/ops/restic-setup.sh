@@ -34,7 +34,7 @@ usage() {
   cat >&2 <<'EOF'
 usage: restic-setup.sh [--dry-run|--apply] --storagebox-host=HOST
                         --storagebox-user=USER --ssh-key-file=PATH
-                        [--repos=platform,lifeos]
+                        [--repos=platform,lifeos] [--via=USER@HOST]
 
   --dry-run              Print every command this script would run. Default.
   --apply                Run for real.
@@ -45,6 +45,11 @@ usage: restic-setup.sh [--dry-run|--apply] --storagebox-host=HOST
                           permissions; this script never writes it.
   --repos=a,b             Comma-separated restic repository names to
                           idempotently initialize. Default: platform,lifeos.
+  --via=USER@HOST         Reach the Storage Box through this host (the VPS,
+                          over Tailscale SSH) with `nc`. The box is not
+                          reachable from outside Hetzner (#411, #469).
+                          Authentication still runs end to end from here,
+                          so the key never leaves this machine.
 
 RESTIC_PASSWORD must be set in the environment before --apply; the same
 password is used for every repository listed in --repos (each repository is
@@ -59,6 +64,7 @@ storagebox_host=""
 storagebox_user=""
 ssh_key_file=""
 repos="platform,lifeos"
+via=""
 for arg in "$@"; do
   case "$arg" in
     --dry-run | --apply) mode="$arg" ;;
@@ -66,6 +72,7 @@ for arg in "$@"; do
     --storagebox-user=*) storagebox_user="${arg#--storagebox-user=}" ;;
     --ssh-key-file=*) ssh_key_file="${arg#--ssh-key-file=}" ;;
     --repos=*) repos="${arg#--repos=}" ;;
+    --via=*) via="${arg#--via=}" ;;
     -h | --help)
       usage
       exit 0
@@ -80,6 +87,13 @@ done
 if [[ -z "$storagebox_host" || -z "$storagebox_user" || -z "$ssh_key_file" ]]; then
   echo "error: --storagebox-host, --storagebox-user, and --ssh-key-file are all required" >&2
   usage
+  exit 2
+fi
+
+# --via lands verbatim in an ssh_config ProxyCommand, so accept only a plain
+# user@host: nothing that could add a second option or a shell metacharacter.
+if [[ -n "$via" && ! "$via" =~ ^[a-z_][a-z0-9_-]*@[A-Za-z0-9.-]+$ ]]; then
+  echo "error: --via must be user@host (got: $via)" >&2
   exit 2
 fi
 
@@ -157,6 +171,9 @@ Host ${alias_name}
   StrictHostKeyChecking accept-new
 EOF
 )
+if [[ -n "$via" ]]; then
+  config_block+=$'\n'"  ProxyCommand ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new ${via} nc %h %p"
+fi
 
 write_ssh_config() {
   mkdir -p "$ssh_config_dir"

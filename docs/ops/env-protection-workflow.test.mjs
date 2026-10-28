@@ -166,11 +166,26 @@ test("ops-restore-drill.yml never touches the deployed box, and its only environ
   // environment exists only so its OIDC subject is
   // environment:ops-restore-drill-production rather than ref:refs/heads/main,
   // which the platform-restic identity rightly refuses.
+  //
+  // Oracle change (#411): the Storage Box is reachable only from Hetzner's network,
+  // so the drill joins the tailnet and restic-setup.sh --via relays its ssh through
+  // the VPS with nc. The VPS is a byte relay and nothing more. DEPLOY_HOST may appear
+  // only in its env mapping, the tailnet ping, and the --via argument, with no ssh
+  // command, scp, or remote execution against the deployed box.
   const opsRestoreDrill = readWorkflow("ops-restore-drill.yml");
   const environments = opsRestoreDrill.match(/environment:.*$/gm) ?? [];
   assert.deepEqual(environments, ["environment: ops-restore-drill-production"]);
-  assert.doesNotMatch(opsRestoreDrill, /tailscale\/github-action@/);
-  assert.doesNotMatch(opsRestoreDrill, /DEPLOY_HOST/);
+  const uses = opsRestoreDrill
+    .split("\n")
+    .filter((line) => line.includes("DEPLOY_HOST") && !/^\s*#/.test(line))
+    .map((line) => line.trim());
+  assert.deepEqual(uses, [
+    "ping: ${{ vars.DEPLOY_HOST }}",
+    "DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}",
+    '--via="deploy@$DEPLOY_HOST" \\',
+  ]);
+  assert.doesNotMatch(opsRestoreDrill, /\bssh\b[^\n]*deploy@/);
+  assert.doesNotMatch(opsRestoreDrill, /\bscp\b/);
 });
 
 // --- existing dark-gate discipline unchanged ---
