@@ -167,7 +167,7 @@ jobs:
           overall_status=0
 
           drill_platform() {
-            local repository="sftp:hetzner-storagebox:platform"
+            local repository="sftp:hetzner-storagebox:/home/platform"
             restic -r "$repository" check --read-data-subset=10%
 
             local snapshot_id
@@ -213,7 +213,7 @@ jobs:
           }
 
           drill_lifeos() {
-            local repository="sftp:hetzner-storagebox:lifeos"
+            local repository="sftp:hetzner-storagebox:/home/lifeos"
             restic -r "$repository" check --read-data-subset=10%
 
             local snapshot_id
