@@ -134,8 +134,11 @@ test("secrets reach run: scripts only through env:, never inline as ${{ secrets 
   assert.deepEqual(inlineExpressions, [], "an expression outside a plain env:/with: mapping");
 });
 
-test("sshpass is installed with sudo apt-get install -y sshpass", () => {
-  assert.match(code, /run: sudo apt-get install -y sshpass/);
+test("sshpass is installed with sudo apt-get install -y sshpass, after an apt-get update so a stale index cannot fail the run", () => {
+  assert.match(code, /sudo apt-get install -y sshpass/);
+  const update = code.indexOf("sudo apt-get update");
+  assert.ok(update >= 0, "apt-get update must run before installing sshpass");
+  assert.ok(update < code.indexOf("sudo apt-get install -y sshpass"), "apt-get update must precede the install");
 });
 
 // --- ordering: the steps run in the order AC2 lists ---
@@ -262,7 +265,7 @@ function pages(page2Matches, page1 = [{ id: 900, username: "someone-else" }]) {
 }
 
 /** Runs the real main-step script under stubs; returns what each stub was asked to do. */
-function runAuthorize({ page, actionSeq = "running,success,running,success", loginFail = false }) {
+function runAuthorize({ page, actionSeq = "running,success,running,success", loginFail = false, token = HETZNER_TOKEN }) {
   const dir = mkdtempSync(path.join(tmpdir(), "storagebox-authorize-"));
   try {
     const stubDir = path.join(dir, "bin");
@@ -275,6 +278,11 @@ function runAuthorize({ page, actionSeq = "running,success,running,success", log
       writeFileSync(path.join(stubDir, name), stubScript(stubJs, name), { mode: 0o755 });
     }
     writeFileSync(path.join(stubDir, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    // jq is real; this pass-through wrapper only records its argv, so a test can
+    // prove no secret ever rides on a command line (visible in /proc to the runner).
+    const realJq = spawnSync("sh", ["-c", "command -v jq"], { encoding: "utf8" }).stdout.trim();
+    const jqArgvLog = path.join(dir, "jq-argv.log");
+    writeFileSync(path.join(stubDir, "jq"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${jqArgvLog}'\nexec '${realJq}' "$@"\n`, { mode: 0o755 });
 
     const callLog = path.join(dir, "calls.jsonl");
     const summary = path.join(dir, "summary.md");
@@ -292,7 +300,7 @@ function runAuthorize({ page, actionSeq = "running,success,running,success", log
         STORAGEBOX_HOST: HOST,
         STORAGEBOX_USER: USER,
         STORAGEBOX_SSH_KEY: PRIVATE_KEY,
-        HETZNER_API_TOKEN: HETZNER_TOKEN,
+        HETZNER_API_TOKEN: token,
         STUB_LOG: callLog,
         STUB_ACTION_SEQ: actionSeq,
         STUB_LOGIN_FAIL: loginFail ? "1" : "0",
@@ -302,6 +310,7 @@ function runAuthorize({ page, actionSeq = "running,success,running,success", log
     const raw = existsSync(callLog) ? readFileSync(callLog, "utf8") : "";
     const calls = raw.split("\n").filter(Boolean).map((line) => JSON.parse(line));
     return {
+      jqArgv: existsSync(jqArgvLog) ? readFileSync(jqArgvLog, "utf8") : "",
       status: result.status,
       stdout: result.stdout,
       stderr: result.stderr,
@@ -438,5 +447,24 @@ test("behavior: a failed key-only login proof fails the run, and the summary is 
   const run = runAuthorize({ page: pages([111]), loginFail: true });
   assert.notEqual(run.status, 0);
   assert.ok(run.sshCalls.some((c) => c.args.includes("BatchMode=yes")), "the proof was attempted");
+  assert.equal(run.summaryText, "");
+});
+
+test("behavior: the generated password never appears on any command line (jq reads it from the environment)", () => {
+  const run = runAuthorize({ page: pages([111]) });
+  assert.equal(run.status, 0, run.stderr);
+  const pw = run.sshpassCalls[0].sshpass;
+  assert.ok(pw && pw.length >= 12, "sshpass received the generated password");
+  assert.ok(run.jqArgv.length > 0, "the jq wrapper recorded calls");
+  assert.ok(!run.jqArgv.includes(pw), "the password must not be passed to jq as an argument");
+  assert.ok(!run.raw.split("\n").some((l) => l && JSON.parse(l).args.join(" ").includes(pw)), "the password must not be in any stub's argv");
+});
+
+test("behavior: a missing HETZNER_API_TOKEN fails fast, before any API call, and names the runbook prerequisite", () => {
+  const run = runAuthorize({ page: pages([111]), token: "" });
+  assert.notEqual(run.status, 0);
+  assert.deepEqual(run.curl, [], "no Hetzner call may be attempted without a token");
+  assert.match(run.stderr, /HETZNER_API_TOKEN/);
+  assert.match(run.stderr, /runbook/i);
   assert.equal(run.summaryText, "");
 });
