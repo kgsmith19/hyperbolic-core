@@ -247,3 +247,38 @@ test("the restic remote script runs under its own strict mode, distinct heredoc 
   const heredoc = workflow.slice(start, end);
   assert.match(heredoc, /set -euo pipefail/);
 });
+
+/** Text chunks of the bundle job's steps, in workflow order. Each step starts at the `      - ` (six-space) indent; bundle is the file's last job, so the slice runs to EOF. */
+function bundleSteps() {
+  const jobStart = workflow.indexOf("\n  bundle:\n");
+  assert.ok(jobStart > -1, "bundle job not found");
+  return workflow.slice(jobStart + 1).split(/\n(?= {6}- )/).filter((chunk) => /^ {6}- /.test(chunk));
+}
+
+test("the bundle job checks out the repository, pinned to a full commit SHA", () => {
+  // Without a checkout the runner has no docs/ops/restic-setup.sh: the restic
+  // step's `cp` fails with "cannot stat" (CI run 40597094983, #469).
+  const checkout = bundleSteps().find((step) => /uses: actions\/checkout@/.test(step));
+  assert.ok(checkout, "bundle job has no actions/checkout step, so docs/ops/ does not exist on the runner");
+  assert.match(checkout, /uses: actions\/checkout@[0-9a-f]{40}\b/, "checkout must be pinned to a full 40-hex SHA, not a tag");
+});
+
+test("the bundle job's checkout does not persist the GitHub token into the workspace", () => {
+  const checkout = bundleSteps().find((step) => /uses: actions\/checkout@/.test(step));
+  assert.ok(checkout, "bundle job has no actions/checkout step");
+  assert.match(checkout, /persist-credentials: false/);
+});
+
+test("the checkout runs before every bundle step whose run block reads a docs/ops/ path", () => {
+  const steps = bundleSteps();
+  const checkoutIndex = steps.findIndex((step) => /uses: actions\/checkout@/.test(step));
+  assert.ok(checkoutIndex > -1, "bundle job has no actions/checkout step to order against");
+  const readers = steps
+    .map((step, index) => ({ step, index }))
+    .filter(({ step }) => /\n {8}run: \|/.test(step) && /docs\/ops\//.test(step))
+    .map(({ index }) => index);
+  assert.ok(readers.length > 0, "no bundle step reads docs/ops/ -- this ordering check would be vacuous");
+  for (const index of readers) {
+    assert.ok(checkoutIndex < index, `bundle step ${index} reads docs/ops/ but the checkout is step ${checkoutIndex}; it must run first`);
+  }
+});
