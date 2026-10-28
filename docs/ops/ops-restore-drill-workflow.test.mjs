@@ -78,6 +78,19 @@ test("a Supabase-compatible Postgres 17, pinned by digest, backs the restore (#4
   assert.match(workflow, /--health-cmd pg_isready/);
 });
 
+test("every Postgres client container uses the service's own pinned image (#486)", () => {
+  // An unpinned postgres:17 client is a second Docker Hub pull (rate-limited, 429
+  // seen while proving this change) and an unpinned supply-chain input.
+  const service = workflow.match(/postgres:\s*\n\s*image: (supabase\/postgres:\S+)\n/);
+  assert.ok(service, "service image not found");
+  const env = workflow.match(/\n\s+PG_IMAGE: (\S+)\n/);
+  assert.ok(env, "PG_IMAGE env not set on the drill step");
+  assert.equal(env[1], service[1], "PG_IMAGE must equal the service image");
+  assert.doesNotMatch(workflow, /docker run[^\n]* postgres:17 /);
+  assert.doesNotMatch(workflow, /\bpg [^\n]*postgres:17\b/);
+  assert.equal((workflow.match(/"\$PG_IMAGE" pg_restore --list/g) ?? []).length, 3);
+});
+
 test("both dumps restore strictly into the image's own postgres database, as the superuser, with vector enabled first (#486)", () => {
   // A database created from template1 has no auth schema, so the restore targets
   // `postgres` itself; platform uses its own schemas and lifeos uses public.
