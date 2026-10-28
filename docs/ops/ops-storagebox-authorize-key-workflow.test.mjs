@@ -245,6 +245,11 @@ if (name === "curl") {
     out(JSON.stringify({ action: { id: 77, status: "running" } }) + "\\n");
   }
 }
+if (name === "sshpass") {
+  const tries = before.filter((c) => c.name === "sshpass").length;
+  const seq = (process.env.STUB_SSHPASS_SEQ || "0").split(",");
+  process.exit(Number(seq[Math.min(tries, seq.length - 1)]));
+}
 if (name === "ssh") process.exit(args.includes("BatchMode=yes") && process.env.STUB_LOGIN_FAIL === "1" ? 255 : 0);
 if (name === "ssh-keygen") out(args.includes("-y") ? PUBLIC_LINE + "\\n" : "256 SHA256:FAKEFINGERPRINT storagebox-restic (ED25519)\\n");
 `;
@@ -265,7 +270,7 @@ function pages(page2Matches, page1 = [{ id: 900, username: "someone-else" }]) {
 }
 
 /** Runs the real main-step script under stubs; returns what each stub was asked to do. */
-function runAuthorize({ page, actionSeq = "running,success,running,success", loginFail = false, token = HETZNER_TOKEN }) {
+function runAuthorize({ page, actionSeq = "running,success,running,success", loginFail = false, token = HETZNER_TOKEN, sshpassSeq = "0" }) {
   const dir = mkdtempSync(path.join(tmpdir(), "storagebox-authorize-"));
   try {
     const stubDir = path.join(dir, "bin");
@@ -277,7 +282,8 @@ function runAuthorize({ page, actionSeq = "running,success,running,success", log
     for (const name of ["curl", "ssh", "sshpass", "ssh-keygen"]) {
       writeFileSync(path.join(stubDir, name), stubScript(stubJs, name), { mode: 0o755 });
     }
-    writeFileSync(path.join(stubDir, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const sleepLog = path.join(dir, "sleep.log");
+    writeFileSync(path.join(stubDir, "sleep"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${sleepLog}'\nexit 0\n`, { mode: 0o755 });
     // jq is real; this pass-through wrapper only records its argv, so a test can
     // prove no secret ever rides on a command line (visible in /proc to the runner).
     const realJq = spawnSync("sh", ["-c", "command -v jq"], { encoding: "utf8" }).stdout.trim();
@@ -304,12 +310,14 @@ function runAuthorize({ page, actionSeq = "running,success,running,success", log
         STUB_LOG: callLog,
         STUB_ACTION_SEQ: actionSeq,
         STUB_LOGIN_FAIL: loginFail ? "1" : "0",
+        STUB_SSHPASS_SEQ: sshpassSeq,
         ...page,
       },
     });
     const raw = existsSync(callLog) ? readFileSync(callLog, "utf8") : "";
     const calls = raw.split("\n").filter(Boolean).map((line) => JSON.parse(line));
     return {
+      sleeps: existsSync(sleepLog) ? readFileSync(sleepLog, "utf8").split("\n").filter(Boolean) : [],
       jqArgv: existsSync(jqArgvLog) ? readFileSync(jqArgvLog, "utf8") : "",
       status: result.status,
       stdout: result.stdout,
@@ -466,5 +474,40 @@ test("behavior: a missing HETZNER_API_TOKEN fails fast, before any API call, and
   assert.deepEqual(run.curl, [], "no Hetzner call may be attempted without a token");
   assert.match(run.stderr, /HETZNER_API_TOKEN/);
   assert.match(run.stderr, /runbook/i);
+  assert.equal(run.summaryText, "");
+});
+
+// --- the fresh password reaches the box's SSH frontend with a lag (CI run 40625385188) ---
+
+/** sshpass exit 5: the box refused the password. Other codes are real failures. */
+const REFUSED = 5;
+const INSTALL_ATTEMPTS = 18;
+
+test("behavior: a password the box still refuses (sshpass exit 5) is retried with a 20s wait, and the run then succeeds", () => {
+  const run = runAuthorize({ page: pages([111]), sshpassSeq: `${REFUSED},${REFUSED},0` });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.sshpassCalls.length, 3);
+  for (const call of run.sshpassCalls) assert.equal(call.stdin, `${PUBLIC_LINE}\n`, "each attempt sends the public key");
+  const pw = JSON.parse(run.curl[5].body).password;
+  assert.ok(run.sshpassCalls.every((c) => c.sshpass === pw), "every attempt uses the one reset password");
+  assert.deepEqual(run.sleeps.filter((s) => s === "20"), ["20", "20"]);
+  assert.match(run.summaryText, /key-only login verified/);
+  assert.ok(!run.stderr.includes(pw), "password on stderr");
+});
+
+test("behavior: a refusal that never clears fails after a bounded number of attempts, and nothing is proven or summarized", () => {
+  const run = runAuthorize({ page: pages([111]), sshpassSeq: String(REFUSED) });
+  assert.notEqual(run.status, 0);
+  assert.equal(run.sshpassCalls.length, INSTALL_ATTEMPTS);
+  assert.ok(!run.sshCalls.some((c) => c.args.includes("BatchMode=yes")), "no proof after a failed install");
+  assert.equal(run.summaryText, "");
+  assert.match(run.stderr, /sshpass exit 5/);
+});
+
+test("behavior: any other install failure (not exit 5) fails at once, without a retry", () => {
+  const run = runAuthorize({ page: pages([111]), sshpassSeq: "255,0" });
+  assert.notEqual(run.status, 0);
+  assert.equal(run.sshpassCalls.length, 1);
+  assert.ok(!run.sleeps.includes("20"), "no retry wait for a non-refusal failure");
   assert.equal(run.summaryText, "");
 });

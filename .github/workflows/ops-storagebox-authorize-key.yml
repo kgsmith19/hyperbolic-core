@@ -145,9 +145,23 @@ jobs:
           export SSHPASS="$pw"
 
           # 7. Install the public key. install-ssh-key appends and never overwrites.
+          #    The box's SSH frontend takes a while to see the new password after
+          #    reset_password succeeds (run 40625385188: refused 16s later), so
+          #    only that refusal (sshpass exit 5) is retried, for up to 6 minutes.
           pub="$(cat "$pub_file")"
-          printf '%s\n' "$pub" | sshpass -e ssh -p23 -o StrictHostKeyChecking=accept-new \
-            -o PubkeyAuthentication=no "$STORAGEBOX_USER@$STORAGEBOX_HOST" install-ssh-key
+          attempts=18
+          for ((attempt = 1; ; attempt++)); do
+            rc=0
+            printf '%s\n' "$pub" | sshpass -e ssh -p23 -o StrictHostKeyChecking=accept-new \
+              -o PubkeyAuthentication=no "$STORAGEBOX_USER@$STORAGEBOX_HOST" install-ssh-key || rc=$?
+            (( rc == 5 && attempt < attempts )) || break
+            echo "The box refused the new password (attempt $attempt of $attempts); retrying in 20s." >&2
+            sleep 20
+          done
+          if (( rc != 0 )); then
+            echo "install-ssh-key failed after $attempt attempt(s) (sshpass exit $rc)" >&2
+            exit 1
+          fi
 
           # 8. Prove a key-only login. BatchMode refuses any password prompt.
           ssh -p23 -i "$key_file" -o BatchMode=yes -o PasswordAuthentication=no \
