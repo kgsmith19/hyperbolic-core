@@ -255,3 +255,39 @@ test("a custom --repos list is honored instead of the platform,lifeos default", 
   const state = readFileSync(env.resticState, "utf8").trim().split("\n").filter(Boolean);
   assert.deepEqual(state, ["solo"]);
 });
+
+// --- --via: reach a box that is not reachable from outside Hetzner (hyperbolic-core#411, #469) ---
+// The Storage Box has reachable_externally=false, so a CI runner cannot log in to it directly.
+// --via routes the ssh connection through the VPS (Tailscale SSH) with `nc`. Authentication
+// still runs end to end from the caller, so the key never leaves the caller.
+
+const VIA_LINE =
+  "  ProxyCommand ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new deploy@vps.tailnet.example nc %h %p";
+
+test("--via adds a ProxyCommand that relays through the VPS with nc, keeping IdentityFile local", () => {
+  const env = fakeEnv();
+  const result = runApply(env, ["--via=deploy@vps.tailnet.example"]);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const config = readFileSync(path.join(env.root, "ssh", "config"), "utf8");
+  assert.ok(config.split("\n").includes(VIA_LINE), config);
+  assert.match(config, new RegExp(`IdentityFile ${env.keyFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+});
+
+test("without --via the alias has no ProxyCommand, and a later run without --via removes an earlier one", () => {
+  const env = fakeEnv();
+  runApply(env, ["--via=deploy@vps.tailnet.example"]);
+  runApply(env);
+  const config = readFileSync(path.join(env.root, "ssh", "config"), "utf8");
+  assert.doesNotMatch(config, /ProxyCommand/);
+  assert.equal((config.match(/Host hetzner-storagebox/g) ?? []).length, 1);
+});
+
+test("--via accepts only user@host, so nothing can be smuggled into the ssh config", () => {
+  for (const bad of ["deploy@vps;touch x", "vps.tailnet.example", "deploy@vps host", "deploy@vps\nProxyCommand evil", "@vps", "deploy@"]) {
+    const env = fakeEnv();
+    const result = runApply(env, [`--via=${bad}`]);
+    assert.equal(result.status, 2, `accepted --via=${JSON.stringify(bad)}`);
+    assert.match(result.stderr, /--via must be user@host/);
+    assert.ok(!existsSync(path.join(env.root, "ssh", "config")), "no config may be written for a rejected --via");
+  }
+});

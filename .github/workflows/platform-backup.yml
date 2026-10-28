@@ -174,10 +174,39 @@ jobs:
           secret-path: "/platform/backup/"
           domain: https://app.infisical.com
 
+      - name: Tailnet client for the VPS relay (restic identity, /platform/lifeos-deploy/)
+        if: needs.flags.outputs.restic_backup_enabled == 'true'
+        continue-on-error: true
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PLATFORM_RESTIC_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/lifeos-deploy/"
+          domain: https://app.infisical.com
+
+      # The Storage Box is reachable only from Hetzner's network
+      # (reachable_externally=false, run 40628312552), so restic reaches it
+      # through the VPS: join the tailnet exactly as lifeos-backup.yml does.
+      # The tailnet client is the one lifeos-backup.yml uses, read from
+      # /platform/lifeos-deploy/ by the restic identity in the step above.
+      - name: Join the tailnet (restic reaches the Storage Box through the VPS)
+        if: needs.flags.outputs.restic_backup_enabled == 'true'
+        continue-on-error: true
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ vars.DEPLOY_HOST }}
+
       - name: Back up the platform dump to the Hetzner Storage Box (restic)
         if: needs.flags.outputs.restic_backup_enabled == 'true'
         id: restic-backup
         continue-on-error: true
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
         run: |
           set -euo pipefail
           if [ ! -s "$RUNNER_TEMP/platform.dump" ]; then
@@ -201,6 +230,7 @@ jobs:
             --storagebox-host="${{ vars.STORAGEBOX_HOST }}" \
             --storagebox-user="${{ vars.STORAGEBOX_USER }}" \
             --ssh-key-file="$key_file" \
+            --via="deploy@$DEPLOY_HOST" \
             --repos=platform
 
           repository="sftp:hetzner-storagebox:/platform"
