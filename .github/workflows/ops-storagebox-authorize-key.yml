@@ -47,7 +47,9 @@ jobs:
           domain: https://app.infisical.com
 
       - name: Install sshpass
-        run: sudo apt-get install -y sshpass
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y sshpass
 
       - name: Authorize the restic key on the Storage Box
         env:
@@ -58,6 +60,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # Fail fast with the one prerequisite the owner provides (runbook,
+          # "Authorize the restic key on the Storage Box").
+          if [[ -z "${HETZNER_API_TOKEN:-}" ]]; then
+            echo "::error::HETZNER_API_TOKEN is not set in Infisical /platform/backup/; see docs/ops/runbook.md, "Authorize the restic key on the Storage Box"" >&2
+            exit 1
+          fi
 
           api="https://api.hetzner.com/v1"
           key_file="$RUNNER_TEMP/storagebox-authorize.key"
@@ -128,7 +137,8 @@ jobs:
           #    fixed suffix guarantees an upper, a lower, a digit, and a special.
           pw="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 28)Aa1!"
           echo "::add-mask::$pw"
-          action_id="$(jq -cn --arg password "$pw" '{password: $password}' \
+          # jq reads the password from its environment, never from argv.
+          action_id="$(PW="$pw" jq -cn '{password: env.PW}' \
             | api_post "/storage_boxes/$box_id/actions/reset_password" \
             | jq -r '.action.id')"
           wait_for_action "$action_id"
