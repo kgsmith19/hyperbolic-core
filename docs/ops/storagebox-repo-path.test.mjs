@@ -35,6 +35,8 @@ test("every Storage Box repository path is relative (only /home/ is writable)", 
   for (const [file, repo] of storageBoxRepos()) {
     assert.ok(repo !== "", `${file}: empty repository path`);
     assert.ok(!repo.startsWith("/"), `${file}: repository ${repo} is absolute; use a relative path`);
+    // A plain name only: no ./ or ../ prefix and no ${{ }} or $VAR that could resolve to an absolute path.
+    assert.match(repo, /^[a-z][a-z0-9-]*$/, `${file}: repository ${repo} must be a plain relative name`);
   }
 });
 
