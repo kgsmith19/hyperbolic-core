@@ -1,0 +1,171 @@
+name: Ops Storage Box Authorize Key
+
+# hyperbolic-core#469 (AC2): the Storage Box rejects the restic key that
+# platform-backup.yml presents (CI run 40597091186: Permission denied on port
+# 23). This run installs the key's public half on the box, then proves a
+# key-only login. It is the one place the box's SSH password is ever set, and
+# that password is generated here, masked, used once, and never stored.
+#
+# Dispatch-only, so a person decides when the box's password rotates. The
+# Hetzner Console API token (HETZNER_API_TOKEN) and the private key come from
+# Infisical /platform/backup/, never from GitHub secrets.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-storagebox-authorize-key
+  cancel-in-progress: false
+
+jobs:
+  authorize-key:
+    name: Authorize the restic key on the Storage Box
+    runs-on: ubuntu-latest
+    environment: platform-backup-production
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same identity, project, and path as platform-backup.yml's restic step.
+      # It exports STORAGEBOX_SSH_KEY and HETZNER_API_TOKEN to GITHUB_ENV; the
+      # main step below picks them up through env: and never by ${{ }} in run.
+      - uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_PLATFORM_RESTIC_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: prod
+          secret-path: "/platform/backup/"
+          domain: https://app.infisical.com
+
+      - name: Install sshpass
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y sshpass
+
+      - name: Authorize the restic key on the Storage Box
+        env:
+          STORAGEBOX_HOST: ${{ vars.STORAGEBOX_HOST }}
+          STORAGEBOX_USER: ${{ vars.STORAGEBOX_USER }}
+          STORAGEBOX_SSH_KEY: ${{ env.STORAGEBOX_SSH_KEY }}
+          HETZNER_API_TOKEN: ${{ env.HETZNER_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Fail fast with the one prerequisite the owner provides (runbook,
+          # "Authorize the restic key on the Storage Box").
+          if [[ -z "${HETZNER_API_TOKEN:-}" ]]; then
+            echo "::error::HETZNER_API_TOKEN is not set in Infisical /platform/backup/; see docs/ops/runbook.md, "Authorize the restic key on the Storage Box"" >&2
+            exit 1
+          fi
+
+          api="https://api.hetzner.com/v1"
+          key_file="$RUNNER_TEMP/storagebox-authorize.key"
+          pub_file="$RUNNER_TEMP/storagebox-authorize.pub"
+
+          # 1-2. The private key goes to a 0600 file. A here-string, not printf,
+          #      so no secret is ever printed or echoed.
+          umask 077
+          cat > "$key_file" <<<"$STORAGEBOX_SSH_KEY"
+          chmod 0600 "$key_file"
+
+          # 3. The public key is derived from the private key.
+          ssh-keygen -y -f "$key_file" > "$pub_file"
+
+          api_get() {
+            curl -fsS -H "Authorization: Bearer $HETZNER_API_TOKEN" "$api$1"
+          }
+          # The request body arrives on stdin, so it never reaches argv.
+          api_post() {
+            curl -fsS -X POST -H "Authorization: Bearer $HETZNER_API_TOKEN" \
+              -H "Content-Type: application/json" --data-binary @- "$api$1"
+          }
+          wait_for_action() {
+            local action_id="$1" deadline status
+            deadline=$((SECONDS + 120))
+            while :; do
+              status="$(api_get "/storage_boxes/actions/$action_id" | jq -r '.action.status')"
+              case "$status" in
+                success) return 0 ;;
+                error)
+                  echo "Hetzner action $action_id ended in error" >&2
+                  return 1
+                  ;;
+              esac
+              if (( SECONDS >= deadline )); then
+                echo "Hetzner action $action_id did not finish within 120s" >&2
+                return 1
+              fi
+              sleep 5
+            done
+          }
+
+          # 4. Find the box. Exactly one match, or refuse.
+          box_ids=()
+          page=1
+          while :; do
+            resp="$(api_get "/storage_boxes?page=$page&per_page=50")"
+            while IFS= read -r id; do
+              box_ids+=("$id")
+            done < <(jq -r --arg user "$STORAGEBOX_USER" '.storage_boxes[] | select(.username == $user) | .id' <<< "$resp")
+            next="$(jq -r '.meta.pagination.next_page // empty' <<< "$resp")"
+            [[ -n "$next" ]] || break
+            page="$next"
+          done
+          if (( ${#box_ids[@]} != 1 )); then
+            echo "expected exactly one Storage Box for user $STORAGEBOX_USER, found ${#box_ids[@]}; refusing to continue" >&2
+            exit 1
+          fi
+          box_id="${box_ids[0]}"
+
+          # 5. Enable SSH on the box, and wait for Hetzner to apply it.
+          action_id="$(jq -cn '{ssh_enabled: true}' \
+            | api_post "/storage_boxes/$box_id/actions/update_access_settings" \
+            | jq -r '.action.id')"
+          wait_for_action "$action_id"
+
+          # 6. Generate the password and mask it before any other use. The
+          #    fixed suffix guarantees an upper, a lower, a digit, and a special.
+          pw="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 28)Aa1!"
+          echo "::add-mask::$pw"
+          # jq reads the password from its environment, never from argv.
+          action_id="$(PW="$pw" jq -cn '{password: env.PW}' \
+            | api_post "/storage_boxes/$box_id/actions/reset_password" \
+            | jq -r '.action.id')"
+          wait_for_action "$action_id"
+          export SSHPASS="$pw"
+
+          # 7. Install the public key. install-ssh-key appends and never overwrites.
+          pub="$(cat "$pub_file")"
+          printf '%s\n' "$pub" | sshpass -e ssh -p23 -o StrictHostKeyChecking=accept-new \
+            -o PubkeyAuthentication=no "$STORAGEBOX_USER@$STORAGEBOX_HOST" install-ssh-key
+
+          # 8. Prove a key-only login. BatchMode refuses any password prompt.
+          ssh -p23 -i "$key_file" -o BatchMode=yes -o PasswordAuthentication=no \
+            -o IdentitiesOnly=yes "$STORAGEBOX_USER@$STORAGEBOX_HOST" ls >/dev/null
+
+          # 9. The only summary output: the box id and the key fingerprint.
+          fingerprint="$(ssh-keygen -lf "$pub_file" | awk '{print $2}')"
+          printf 'Storage Box id %s: key fingerprint %s authorized; key-only login verified.\n' \
+            "$box_id" "$fingerprint" >> "$GITHUB_STEP_SUMMARY"
+
+      # 10. Runs even when the main step failed, so the key never outlives the run.
+      - name: Shred the temporary key files
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in "$RUNNER_TEMP/storagebox-authorize.key" "$RUNNER_TEMP/storagebox-authorize.pub"; do
+            if [ -e "$f" ]; then
+              shred -u "$f"
+            fi
+          done

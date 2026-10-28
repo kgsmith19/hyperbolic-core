@@ -1008,6 +1008,24 @@ key file the caller already placed -- both are read from the environment/an exis
 echoed or logged. The script has not been run against a real Storage Box yet: no box exists, so no
 credentials exist for it to use. This is expected until the owner completes steps 1-3 above.
 
+### Authorize the restic key on the Storage Box (`ops-storagebox-authorize-key.yml`)
+
+Run it from Actions → "Ops Storage Box Authorize Key" → Run workflow when `platform-backup.yml`'s
+restic step fails with `Permission denied` over SSH, or after the box or its key is replaced. It is
+dispatch-only and does nothing on any other event.
+
+- **Prerequisite.** `HETZNER_API_TOKEN` must exist at Infisical `/platform/backup/`. Create it in
+  Hetzner Console → Security → API tokens, as a **Read & Write** token, in the project that owns the
+  Storage Box. A Read-only token fails at the first write.
+- **Side effects.** The workflow turns SSH on for the box and sets a new box password. The password
+  is generated per run, masked in logs, and never stored, so nothing can read it back. restic and
+  `platform-backup.yml` authenticate by key only and do not depend on it. The public key is appended
+  to the box's authorized keys; `install-ssh-key` never overwrites existing keys.
+- **Rollback.** Turn SSH off again with `POST /storage_boxes/{id}/actions/update_access_settings`
+  and `{"ssh_enabled": false}`, or in Hetzner Console. This blocks every SSH login, the restic key
+  included. The appended public key stays in the box's authorized keys until someone removes it by
+  hand. The rotated password cannot be restored and is not needed.
+
 ## Cloudflare edge origin (nginx + cloudflared)
 
 `docs/ops/edge-origin/` now runs the shared loopback nginx process: its 8080 server is the private
