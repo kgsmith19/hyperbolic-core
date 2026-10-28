@@ -524,8 +524,8 @@ test("behavior: a box with reachable_externally false fails closed before any ch
   assert.equal(run.summaryText, "");
 });
 
-test("behavior: the box's access settings (booleans only) are logged before any change", () => {
+test("behavior: a reachable box adds nothing to stdout but the add-mask line (AC2: only the fingerprint, in the summary)", () => {
   const run = runAuthorize({ page: pages([111]) });
   assert.equal(run.status, 0, run.stderr);
-  assert.match(run.stdout, /Storage Box 111 access settings: reachable_externally=true ssh_enabled=false/);
+  assert.deepEqual(run.stdout.split("\n").filter(Boolean).filter((l) => !l.startsWith("::add-mask::")), []);
 });

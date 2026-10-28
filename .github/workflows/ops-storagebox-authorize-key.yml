@@ -131,10 +131,10 @@ jobs:
 
           # 4b. GitHub runners sit outside Hetzner's network, and a box that is
           #     not reachable externally refuses every login from them, by key or
-          #     by password (runs 40597091186, 40625385188, 40626356955). Log the
-          #     access settings (booleans only), and stop before any change.
+          #     by password (runs 40597091186, 40625385188, 40626356955). Stop
+          #     before any change. The count check above leaves exactly one
+          #     access_settings object in box_access.
           reachable="$(jq -r '.reachable_externally' <<< "$box_access")"
-          echo "Storage Box $box_id access settings: reachable_externally=$reachable ssh_enabled=$(jq -r '.ssh_enabled' <<< "$box_access")"
           if [[ "$reachable" != "true" ]]; then
             echo "::error::Storage Box $box_id is not reachable from outside Hetzner (reachable_externally=$reachable), so GitHub runners cannot log in by key or password. Enable External Reachability on the box, then re-run." >&2
             exit 1
