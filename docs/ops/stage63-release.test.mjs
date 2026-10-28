@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const read = (rel) => readFileSync(path.join(root, rel), "utf8");
@@ -246,6 +247,41 @@ test("S10 · a freeze over this slice's own files invalidates when a protected f
   assert.ok(touched.findings.some((f) => f.rule === "stale-proof-reuse"));
 });
 
+// --- open_blockers int() parity (family E): int(value or 0) over Python's own rule ---
+// Upstream int() accepts Unicode decimal digits (Nd), underscores between digits,
+// and leading/trailing whitespace from str.isspace() minus U+001C-U+001F. The
+// enumerations below cover every such code point at both ends of the value.
+
+const intBase = golden.open_blockers_int_base;
+const intCases = golden.open_blockers_int;
+test("S10 · the int() probe base is the upstream clean release package", async () => {
+  const lib = await import("./stage63-release-lib.mjs");
+  assert.deepEqual(lib.cleanReleasePackage(), intBase);
+});
+
+for (const c of intCases.filter((entry) => entry.id.startsWith("explicit:"))) {
+  test(`S10 · open_blockers int() matches upstream: ${c.id}`, async () => {
+    const lib = await import("./stage63-release-lib.mjs");
+    assert.deepEqual(replay(() => lib.evaluateRelease({ ...intBase, open_blockers: c.input })), c.output);
+  });
+}
+
+// Family-wide enumerations report every mismatch in one assertion: each entry is the
+// JS result (js) beside the Python oracle (python) for the same open_blockers input.
+for (const [prefix, label] of [["lead:", "leading whitespace"], ["trail:", "trailing whitespace"],
+  ["digit:", "decimal digits (Nd)"]]) {
+  test(`S10 · open_blockers int() matches upstream over every ${label} code point`, async () => {
+    const lib = await import("./stage63-release-lib.mjs");
+    const family = intCases.filter((entry) => entry.id.startsWith(prefix));
+    assert.ok(family.length > 0, `${prefix} enumeration is non-empty`);
+    const mismatches = family.flatMap((c) => {
+      const js = replay(() => lib.evaluateRelease({ ...intBase, open_blockers: c.input }));
+      return isDeepStrictEqual(js, c.output) ? [] : [{ id: c.id, js, python: c.output }];
+    });
+    assert.deepEqual(mismatches, [], `${mismatches.length} of ${family.length} ${label} cases diverge`);
+  });
+}
+
 // --- honesty: the three ports are reachable from the ADOPTION map --------------
 
 test("S10 · the release/runtime mechanisms exist on disk", () => {
@@ -255,4 +291,26 @@ test("S10 · the release/runtime mechanisms exist on disk", () => {
   ]) {
     assert.ok(existsSync(path.join(root, rel)), `${rel} is missing`);
   }
+});
+
+// --- int() digits: Node's \p{Nd} is wider than Python 3.12's decimal set ---------
+// Node 22 ships Unicode 16, so \p{Nd} matches about 80 code points that CPython 3.12
+// (Unicode 15.0.0) has no decimal value for. int() rejects those, so the port must too.
+// The skew is a version difference, not a port bug, and the port therefore uses the
+// explicit table PY_INT_DIGIT_ZEROS rather than \p{Nd}. This test fails if anyone
+// swaps the table back to \p{Nd}, and the count guard keeps it from passing vacuously.
+test("S10 · int() rejects every \\p{Nd} code point outside the Python 3.12 digit table", async () => {
+  const lib = await import("./stage63-release-lib.mjs");
+  const table = new Set(lib.PY_INT_DIGIT_ZEROS.flatMap((zero) => Array.from({ length: 10 }, (_, k) => zero + k)));
+  const nd = /\p{Nd}/u;
+  const extra = [];
+  for (let cp = 0; cp <= 0x10ffff; cp += 1) {
+    if (nd.test(String.fromCodePoint(cp)) && !table.has(cp)) extra.push(cp);
+  }
+  assert.ok(extra.length > 0, "the \\p{Nd} skew is non-empty on this Node, so the test is not vacuous");
+  const accepted = extra.flatMap((cp) => {
+    const result = replay(() => lib.evaluateRelease({ ...lib.cleanReleasePackage(), open_blockers: `1${String.fromCodePoint(cp)}` }));
+    return isDeepStrictEqual(result, { error: "ValueError" }) ? [] : [{ cp: cp.toString(16), result }];
+  });
+  assert.deepEqual(accepted, [], `${accepted.length} of ${extra.length} extra \\p{Nd} code points are not rejected`);
 });

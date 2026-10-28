@@ -337,7 +337,7 @@ const compareQualityRank = (left, right) => {
   if (pointDelta !== 0) return pointDelta;
   const ownershipDelta = left.owned_loc - right.owned_loc;
   if (ownershipDelta !== 0) return ownershipDelta;
-  return left.id.localeCompare(right.id);
+  return pyCompareCodePoints(left.id, right.id);
 };
 
 // Mirrors quality_eval.rank. The final ID tie-breaker makes the proof
@@ -471,7 +471,7 @@ const pyJsonDumps = (value, {
 const continuityFinding = (rule, finding, excerpt, severity = "major") => ({
   id: `${rule}-1`, rule, finding, severity, excerpt: pySlice(excerpt, 200),
 });
-const leadingExcerpt = (text, fallback) => (text.trim() ? pySlice(text, 200) : fallback);
+const leadingExcerpt = (text, fallback) => (pyStrip(text) ? pySlice(text, 200) : fallback);
 
 // Mirrors context_rotation.decide: the first matching frozen rule decides.
 export function decideRotation(signal) {
@@ -559,7 +559,8 @@ export function governBudget(footprint, options = {}) {
   return { status: "HEALTHY", total_bytes: total, reasons: [], action: "continue" };
 }
 
-const INJECTION_RE = /(ignore (previous|all) instructions|disregard .*instructions|override .*rules?|bypass .*gate|reveal .*prompt|system prompt)/i;
+// Lower-case and `.` written as [^\n], matched against pyFoldAscii(prompt_text).
+const INJECTION_RE = /(ignore (previous|all) instructions|disregard [^\n]*instructions|override [^\n]*rules?|bypass [^\n]*gate|reveal [^\n]*prompt|system prompt)/u;
 
 // Mirrors handoff_acceptance.accept: the first frozen rule hit refuses.
 export function acceptHandoff(attempt) {
@@ -596,7 +597,7 @@ export function acceptHandoff(attempt) {
   if (!item.provider_guardrails) {
     return refuse("guardrail-gap", "provider lacks required guard rails: only guard-railed providers write");
   }
-  if (INJECTION_RE.test(item.prompt_text)) {
+  if (INJECTION_RE.test(pyFoldAscii(item.prompt_text))) {
     return refuse("prompt-injection", "prompt content overrides task, state, rules, or action: reject injected instructions");
   }
   const known = item.sat_triggers.filter((trigger) => HAT_SAT_TRIGGERS.includes(trigger));
@@ -822,7 +823,7 @@ const REGISTRY_MISMATCH = "catalog/profile/lock mismatch";
 // Mirrors extensions_registry.check_registry_set: catalog, profile and lock agree as a set.
 export function checkRegistrySet(registry) {
   if (!isMapping(registry)) return ["registry record must be a mapping"];
-  const violations = Object.keys(registry).sort().filter((key) => !REGISTRY_REQUIRED.includes(key))
+  const violations = pySorted(Object.keys(registry)).filter((key) => !REGISTRY_REQUIRED.includes(key))
     .map((key) => `unknown registry key ${pyRepr(key)}: catalog/profile/lock only`);
   const { catalog, profile, lock } = registry;
   if (!Array.isArray(catalog)) return [...violations, "catalog must be a list of entries"];
@@ -835,7 +836,7 @@ export function checkRegistrySet(registry) {
     if (!hasKey(lock, name)) violations.push(`profile selects ${pyRepr(name)} missing from the lock: ${REGISTRY_MISMATCH}`);
   }
   const selected = new Set(profile.map(pyStr));
-  for (const pinned of Object.keys(lock).sort()) {
+  for (const pinned of pySorted(Object.keys(lock))) {
     if (!selected.has(pinned)) violations.push(`lock pins ${pyRepr(pinned)} with no profile selection: ${REGISTRY_MISMATCH}`);
   }
   return violations;
@@ -846,7 +847,7 @@ export function checkCapabilityExists(selection, registry) {
   if (!isMapping(selection)) return ["capability selection must be a mapping"];
   const declared = new Set((Array.isArray(registry) ? registry : isMapping(registry) ? Object.keys(registry) : []).map(pyStr));
   const violations = [];
-  for (const key of Object.keys(selection).sort()) {
+  for (const key of pySorted(Object.keys(selection))) {
     for (const capability of Array.isArray(selection[key]) ? selection[key] : [selection[key]]) {
       if (!declared.has(pyStr(capability))) {
         violations.push(`edition/flag ${pyRepr(key)} references unknown capability ${pyRepr(capability)}: it must exist in the capability registry`);
@@ -881,7 +882,7 @@ export function validateDescriptor(record) {
   const repairs = DESCRIPTOR_FIELDS.filter((field) => !hasKey(record, field))
     .map((field) => `descriptor missing ${pyRepr(field)}: Stage 20a descriptors need it`);
   for (const field of DESCRIPTOR_STRING_FIELDS) {
-    if (hasKey(record, field) && !pyOrStr(record, field).trim()) {
+    if (hasKey(record, field) && !pyStrip(pyOrStr(record, field))) {
       repairs.push(`descriptor field ${pyRepr(field)} must be a non-empty string`);
     }
   }
@@ -914,8 +915,8 @@ export function selectCandidates(descriptors, capabilities, { budgetTokens = nul
     if (table.has(request)) return [request];
     if (table.has(`capability.${request}`)) return [`capability.${request}`];
     const term = request.toLowerCase();
-    return [...table].filter(([, d]) => pyGetStr(d, "name").toLowerCase().includes(term)
-      || pyGetStr(d, "description").toLowerCase().includes(term)).map(([id]) => id).sort();
+    return pySorted([...table].filter(([, d]) => pyGetStr(d, "name").toLowerCase().includes(term)
+      || pyGetStr(d, "description").toLowerCase().includes(term)).map(([id]) => id));
   };
   for (const request of capabilities) {
     const candidates = resolve(pyStr(request));

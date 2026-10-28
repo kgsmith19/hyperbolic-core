@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ADOPTION, FROZEN, GAP_SLICES, acceptHandoff, buildCapsule, decideRotation,
-  governBudget, provenance, renderCapsule, scanCapsule,
+  governBudget, provenance, pythonSemantics, renderCapsule, scanCapsule,
 } from "./stage63-adoption-lib.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -112,6 +112,18 @@ for (const c of golden.capsule.scans) {
     assert.deepEqual(scanCapsule(c.capsule), c.repairs);
   });
 }
+
+// The capsule regexes (CAPSULE_SECRET_RE, CAPSULE_ABSPATH_RE, CAPSULE_SESSION_RE) only run over
+// json.dumps(..., ensure_ascii=True) output. Pin that shield: the scanned blob is ASCII-only and
+// byte-equal to Python, so /i, \s and \w never see U+0131, U+017F, U+00A0 or U+3000 raw.
+test("S5 · capsule regexes see only ASCII: ensure_ascii shields the case-fold, whitespace and word gaps", () => {
+  assert.ok(golden.capsule.ascii.length >= 5, "the pin covers the non-ASCII capsule probes");
+  for (const c of golden.capsule.ascii) {
+    const blob = pythonSemantics.jsonDumps(c.value, { sortKeys: true });
+    assert.match(blob, /^[\x00-\x7f]*$/u, `${c.label}: the scanned blob must be ASCII-only`);
+    assert.equal(blob, c.blob, `${c.label}: the blob must match json.dumps(sort_keys=True)`);
+  }
+});
 
 for (const c of golden.capsule.builds) {
   test(`S5 · buildCapsule/renderCapsule match upstream: ${c.label}`, () => {
