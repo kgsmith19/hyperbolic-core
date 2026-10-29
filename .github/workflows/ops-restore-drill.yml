@@ -146,11 +146,12 @@ jobs:
           # "<short_id> <epoch seconds>", from one listing. Not restic --latest: that
           # is the newest per host and path group, so a backup that adds a file
           # starts a new group and the first entry can be an older snapshot
-          # (#495). Chosen by parsed time, offsets and fractions included. RPO
-          # is then (now - that time): a measured fact, never assumed (#408).
+          # (#495). Chosen by parsed time, offsets included; restic's "Z" and
+          # 7-9 fractional digits are normalized first, so any python3 >= 3.7
+          # parses them. RPO is then (now - that time), never assumed (#408).
           newest_snapshot() {
             restic -r "$1" snapshots --json \
-              | python3 -c 'import datetime, json, sys; at = lambda s: datetime.datetime.fromisoformat(s["time"]).timestamp(); snaps = json.load(sys.stdin); newest = max(snaps, key=at, default=None); print("%s %d" % (newest["short_id"], at(newest)) if newest else "")'
+              | python3 -c 'import datetime, json, re, sys; at = lambda s: datetime.datetime.fromisoformat(re.sub(r"\.(\d+)", lambda m: "." + (m.group(1) + "000000")[:6], s["time"]).replace("Z", "+00:00")).timestamp(); snaps = json.load(sys.stdin); newest = max(snaps, key=at, default=None); print("%s %d" % (newest["short_id"], at(newest)) if newest else "")'
           }
 
           summary="$tmp/summary.md"

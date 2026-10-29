@@ -412,6 +412,12 @@ test("newest_snapshot: picks the newest snapshot across path groups, by parsed t
   const offset = { short_id: "aaaa1111", time: "2026-10-28T23:30:00-07:00", paths: ["/x"] };
   assert.equal(newestOf([newer, offset]).split(" ")[0], "aaaa1111");
   assert.equal(newestOf([]), "", "an empty repository yields nothing, and the drill fails on it");
+  const short = { short_id: "cccc2222", time: "2026-10-29T04:26:13.5Z", paths: ["/y"] };
+  assert.equal(newestOf([newer, short]), `cccc2222 ${Math.floor(Date.UTC(2026, 9, 29, 4, 26, 13) / 1000)}`);
+  // fromisoformat before 3.11 takes neither "Z" nor 7-9 fractional digits: the
+  // helper normalizes both instead of depending on the runner's python3.
+  assert.match(newestHelper(), /\(m\.group\(1\) \+ "000000"\)\[:6\]/);
+  assert.match(newestHelper(), /\.replace\("Z", "\+00:00"\)/);
 });
 
 test("each drill takes its snapshot id and RPO time from one newest_snapshot call (#495)", () => {
