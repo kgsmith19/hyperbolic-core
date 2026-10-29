@@ -89,6 +89,42 @@ test("S5 · the shared golden loader regenerates at standard.lock's commit, neve
   }
 });
 
+test("S5 · CI regenerates every upstream golden at standard.lock's commit and requires byte equality", () => {
+  // The independent oracle for every *-golden.json (#492): the Platform lane checks
+  // out the Standard at the pinned commit, reruns each generator under the Python
+  // the goldens record, and fails on any byte of drift, so a hand-edited or stale
+  // golden cannot pass on repository files alone.
+  const action = readFileSync(path.join(root, ".github/actions/verify-tests-shell/action.yml"), "utf8");
+  const at = (marker) => {
+    const index = action.indexOf(marker);
+    assert.ok(index > -1, `missing: ${marker}`);
+    return index;
+  };
+  const lock = at("- name: Goldens · Read the Standard commit standard.lock pins");
+  const checkout = at("- name: Goldens · Check out the Standard at that commit");
+  const python = at("- name: Goldens · Set up the Python the goldens record");
+  const regen = at("- name: Goldens · Regenerate every upstream golden and require byte equality");
+  assert.ok(at("- name: Test · deployment operator tooling") < lock && lock < checkout && checkout < python
+    && python < regen, "lock, checkout, python, regenerate: in that order, after the docs/ops tests");
+  const block = (start, end) => action.slice(start, end);
+  assert.match(block(checkout, python), /repository: kgsmith19\/agent-engineering-standard\n\s+ref: \$\{\{ steps\.lock\.outputs\.commit \}\}\n/);
+  assert.match(block(checkout, python), /persist-credentials: false/);
+  assert.match(block(python, regen), /python-version: "3\.12"/);
+  const run = block(regen, action.indexOf("\n    - name:", regen + 1));
+  assert.match(run, /set -euo pipefail/);
+  assert.match(run, /for generator in docs\/ops\/\*-golden\.py; do/);
+  assert.match(run, /diff -u "\$golden" /);
+  assert.match(run, /test "\$count" -gt 0/);
+
+  // A lock-only change must still run the lane that carries the oracle.
+  const detect = readFileSync(path.join(root, ".github/actions/detect-changes/action.yml"), "utf8");
+  const pattern = new RegExp(detect.match(/relevant shell +'([^']+)'/)[1]);
+  for (const changed of ["standard.lock", "docs/ops/stage63-gate-golden.json", "docs/ops/role-contract-golden.py"]) {
+    assert.ok(pattern.test(changed), `${changed} must run the Platform lane`);
+  }
+  assert.ok(!pattern.test("standard.lock.bak"), "the lock is matched exactly");
+});
+
 // --- Differential characterization against the upstream Python ----------------
 
 test("S5 · golden corpus covers every rule, status, and acceptance kind", () => {
