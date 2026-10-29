@@ -25,7 +25,7 @@ import { isDeepStrictEqual } from "node:util";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const read = (rel) => readFileSync(path.join(root, rel), "utf8");
 const golden = JSON.parse(read("docs/ops/stage63-release-golden.json"));
-const SHA = "516fdb25d091f2f3f467fb48eaee01cb7f805c88";
+const SHA = "1686e3b490380194cff78767b88c4e0288410e96";
 
 // The golden records a corpus validator's entry count, not the entries.
 const corpusCounts = ({ findings, entries }) => ({ findings, entries: entries.length });

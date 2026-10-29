@@ -9,7 +9,7 @@
 // access happens here.
 //
 // The contract constants below are transcribed byte-stable from
-// agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88
+// agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96
 // (four modules: tools/repo_map.py, tools/ownership_map.py,
 // tools/context_budget.py, tools/handoff_acceptance.py). The Standard is not
 // vendored into this repo, so — exactly as stage61b-release-proofbed-lib.mjs
@@ -35,7 +35,7 @@ const REPO_MAP_ARTIFACT = [
 const REPO_MAP_CACHE = [".worktrees/", "__pycache__/", ".evidence/cache"];
 const REPO_MAP_EVIDENCE = [".evidence/"];
 const REPO_MAP_PROTECTED = [
-  ".github/workflows/pr-gate.yml", ".github/workflows/merge-policy.yml", "main",
+  ".github/workflows/pr-gate.yml", ".github/workflows/merge-policy.yml",
 ];
 const REPO_MAP_FROZEN_PATTERNS = Object.freeze({
   generated: REPO_MAP_GENERATED, artifact: REPO_MAP_ARTIFACT, cache: REPO_MAP_CACHE,
@@ -2363,7 +2363,7 @@ export const FROZEN = {
 };
 
 export function provenance() {
-  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py + tools/standards_route.py + tools/standards_receipt.py + tools/capability_compiler.py + tools/independent_review.py + tools/spec_critic.py + tools/gate_compliance.py + tools/tracker_pipeline_gate.py + tools/completion_receipts.py + tools/standardctl.py + tools/release_mold.py + tools/proof_invalidation.py + tools/edition_packaging.py @516fdb25d091f2f3f467fb48eaee01cb7f805c88";
+  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py + tools/standards_route.py + tools/standards_receipt.py + tools/capability_compiler.py + tools/independent_review.py + tools/spec_critic.py + tools/gate_compliance.py + tools/tracker_pipeline_gate.py + tools/completion_receipts.py + tools/standardctl.py + tools/release_mold.py + tools/proof_invalidation.py + tools/edition_packaging.py @1686e3b490380194cff78767b88c4e0288410e96";
 }
 
 // Slices S2–S10 extend ADOPTION with their own rows; S1 owns context-rules.
