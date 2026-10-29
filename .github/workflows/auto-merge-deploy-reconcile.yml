@@ -24,7 +24,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Cloud-ops freeze (#499): ops/flags.json's cloud_ops_enabled holds every job
+  # here off while the platform moves to local-only.
+  flags:
+    uses: ./.github/workflows/read-flags.yml
+
   reconcile:
+    needs: flags
+    if: needs.flags.outputs.cloud_ops_enabled == 'true'
     name: Reconcile auto-merged deployment
     runs-on: ubuntu-latest
     timeout-minutes: 10

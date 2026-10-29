@@ -21,7 +21,14 @@ permissions:
   contents: read
 
 jobs:
+  # Cloud-ops freeze (#499): ops/flags.json's cloud_ops_enabled holds every job
+  # here off while the platform moves to local-only.
+  flags:
+    uses: ./.github/workflows/read-flags.yml
+
   broker-canary:
+    needs: flags
+    if: needs.flags.outputs.cloud_ops_enabled == 'true'
     name: Broker canary (one synthetic call)
     runs-on: ubuntu-latest
     environment: broker-deploy-production

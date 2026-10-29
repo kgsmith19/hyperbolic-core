@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-export const KNOWN_FLAGS = ["lifeos_backup_enabled", "platform_backup_enabled", "restic_backup_enabled"];
+export const KNOWN_FLAGS = ["cloud_ops_enabled", "lifeos_backup_enabled", "platform_backup_enabled", "restic_backup_enabled"];
 
 export function resolveFlags(fileText, env) {
   let parsed;

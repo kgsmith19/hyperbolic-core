@@ -63,7 +63,14 @@ permissions:
   contents: read
 
 jobs:
+  # Cloud-ops freeze (#499): ops/flags.json's cloud_ops_enabled holds every job
+  # here off while the platform moves to local-only.
+  flags:
+    uses: ./.github/workflows/read-flags.yml
+
   changes:
+    needs: flags
+    if: needs.flags.outputs.cloud_ops_enabled == 'true'
     name: Classify changed paths
     runs-on: ubuntu-latest
     timeout-minutes: 5

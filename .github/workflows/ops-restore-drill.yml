@@ -37,7 +37,7 @@ jobs:
 
   drill:
     needs: flags
-    if: needs.flags.outputs.restic_backup_enabled == 'true'
+    if: needs.flags.outputs.cloud_ops_enabled == 'true' && needs.flags.outputs.restic_backup_enabled == 'true'
     name: Monthly restic check + real restore proof
     runs-on: ubuntu-latest
     # Its own environment, so the OIDC subject is this narrow environment and

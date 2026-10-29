@@ -431,7 +431,7 @@ curl() {
 }
 
 test("the private origin deploy is production-gated while Cloudflare remains independently optional", () => {
-  assert.match(workflow, /deploy:\s*\n\s*if: vars\.DEPLOY_ENABLED == 'true' && vars\.PRIVATE_ORIGIN_GATEWAY_ENABLED == 'true'/);
+  assert.match(workflow, /deploy:\s*\n\s*needs: flags\n\s*if: needs\.flags\.outputs\.cloud_ops_enabled == 'true' && vars\.DEPLOY_ENABLED == 'true' && vars\.PRIVATE_ORIGIN_GATEWAY_ENABLED == 'true'/);
   assert.match(workflow, /if: vars\.CLOUDFLARE_EDGE_ENABLED == 'true'/);
 });
 

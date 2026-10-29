@@ -37,6 +37,7 @@ test("a key absent from the file falls back to its repo variable, and only liter
 test("every known flag is always output, so a caller's `needs.flags.outputs.X` is never empty", async () => {
   const resolveFlags = await loadResolver();
   assert.deepEqual(Object.keys(resolveFlags("{}", {})).sort(), [
+    "cloud_ops_enabled",
     "lifeos_backup_enabled",
     "platform_backup_enabled",
     "restic_backup_enabled",
@@ -51,13 +52,13 @@ test("a malformed flags file fails loudly instead of silently turning a backup o
   assert.throws(() => resolveFlags('{"restic_backup_enabld": true}', {}), /unknown flag/);
 });
 
-test("ops/flags.json is committed, valid, and turns restic on now that the Infisical fixes landed", async () => {
+test("ops/flags.json is committed, valid, and holds every cloud workflow off (#499)", async () => {
   const resolveFlags = await loadResolver();
-  const text = read("ops/flags.json");
-  const flags = resolveFlags(text, {});
-  // #455 AC4 kept restic off until the OIDC subject and secret fixes landed
-  // (applied 2026-10-27); #464 is the separate reviewed PR that turns it on.
-  assert.equal(flags.restic_backup_enabled, "true", "restic is enabled by #464; turning it off again is a reviewed flag PR");
+  const flags = resolveFlags(read("ops/flags.json"), {});
+  // Oracle change (#499): #464 turned restic on; the owner's 2026-10-29 decision
+  // (local-only platform) supersedes it, so both keys are off by reviewed PR.
+  assert.equal(flags.cloud_ops_enabled, "false", "cloud ops are frozen by owner decision (#499)");
+  assert.equal(flags.restic_backup_enabled, "false", "restic is off with the rest of the cloud (#499)");
 });
 
 const readReusable = () => read(".github/workflows/read-flags.yml");

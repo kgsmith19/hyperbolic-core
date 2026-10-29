@@ -1,3 +1,4 @@
 {
-  "restic_backup_enabled": true
+  "cloud_ops_enabled": false,
+  "restic_backup_enabled": false
 }

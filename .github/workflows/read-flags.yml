@@ -12,6 +12,9 @@ name: "Read Flags"
 on:
   workflow_call:
     outputs:
+      cloud_ops_enabled:
+        description: "Every workflow that reaches Hetzner, Tailscale or Supabase (#499)"
+        value: ${{ jobs.read.outputs.cloud_ops_enabled }}
       restic_backup_enabled:
         description: "Restic Storage Box backups and the restore drill"
         value: ${{ jobs.read.outputs.restic_backup_enabled }}
@@ -31,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      cloud_ops_enabled: ${{ steps.flags.outputs.cloud_ops_enabled }}
       restic_backup_enabled: ${{ steps.flags.outputs.restic_backup_enabled }}
       platform_backup_enabled: ${{ steps.flags.outputs.platform_backup_enabled }}
       lifeos_backup_enabled: ${{ steps.flags.outputs.lifeos_backup_enabled }}
@@ -46,6 +50,7 @@ jobs:
       - name: Resolve each flag from ops/flags.json, falling back to its repo variable
         id: flags
         env:
+          FALLBACK_CLOUD_OPS_ENABLED: ${{ vars.CLOUD_OPS_ENABLED }}
           FALLBACK_RESTIC_BACKUP_ENABLED: ${{ vars.RESTIC_BACKUP_ENABLED }}
           FALLBACK_PLATFORM_BACKUP_ENABLED: ${{ vars.PLATFORM_BACKUP_ENABLED }}
           FALLBACK_LIFEOS_BACKUP_ENABLED: ${{ vars.LIFEOS_BACKUP_ENABLED }}

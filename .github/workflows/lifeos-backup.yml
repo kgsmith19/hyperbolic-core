@@ -43,7 +43,7 @@ jobs:
   bundle:
     name: Create encrypted recovery bundle
     needs: flags
-    if: needs.flags.outputs.lifeos_backup_enabled == 'true'
+    if: needs.flags.outputs.cloud_ops_enabled == 'true' && needs.flags.outputs.lifeos_backup_enabled == 'true'
     runs-on: ubuntu-latest
     environment: lifeos-backup-production
     timeout-minutes: 30

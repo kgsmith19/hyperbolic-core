@@ -29,8 +29,14 @@ permissions:
   contents: read
 
 jobs:
+  # Cloud-ops freeze (#499): ops/flags.json's cloud_ops_enabled holds every job
+  # here off while the platform moves to local-only.
+  flags:
+    uses: ./.github/workflows/read-flags.yml
+
   deploy:
-    if: vars.DEPLOY_ENABLED == 'true' && vars.PRIVATE_ORIGIN_GATEWAY_ENABLED == 'true'
+    needs: flags
+    if: needs.flags.outputs.cloud_ops_enabled == 'true' && vars.DEPLOY_ENABLED == 'true' && vars.PRIVATE_ORIGIN_GATEWAY_ENABLED == 'true'
     name: Deploy private origin and optional public tunnel
     runs-on: ubuntu-latest
     environment: ops-edge-production

@@ -823,6 +823,13 @@ The platform project predates the Supabase CLI ledger. Run the explicit `baselin
 
 Next, follow `apps/toolbelt/docs/notes/2026-08-12-platform-idp-owner-setup.md`: create the owner, insert the single `platform.config` row, and configure the owner CI credential (S2/S3). A normal migration dispatch then refuses to continue unless exactly one owner is present, applies the remaining forward migrations once, and runs the live platform contract. Never use baseline mode to repair a divergent or post-S1 ledger; investigate any attached schema diff instead of repairing around it.
 
+> [!IMPORTANT]
+> **Cloud ops are frozen (#499).** By owner decision on 2026-10-29, the platform is moving to local-only:
+> SQLite, with Docker or localhost. `ops/flags.json` sets `cloud_ops_enabled: false`. That holds off every
+> workflow that reaches Hetzner, Tailscale or Supabase: deploys, the post-merge deploy reconcile, the
+> backups, the restore drill and the broker canary. It holds them off on push, schedule and dispatch alike.
+> The sections below describe that cloud setup as it stood before the freeze.
+
 ## Platform project backup and restore
 
 `platform-backup.yml` (m6-03, `docs/planning/10-cicd-deployment.md` sections 8.4/9) produces an age-encrypted recovery bundle of the platform Supabase project's (woltgcggxaehtuypkxqk) own schemas -- `platform`, `core`, `idea`, `prompt`, `intake`, every schema that carries real operator data -- daily on a schedule and on demand via `workflow_dispatch`. It extends the pattern already proven in the LifeOS standalone pipeline (`apps/lifeos/.github/workflows/backup.yml` -- inert here, that pipeline runs only from the standalone kgsmith19/lifeos repo) to a second target. `test` (a CI-only fence schema, `06-supabase-schema.md`) and the Supabase-managed schemas (`auth`, `storage`, `realtime`) are deliberately excluded: the platform restores those itself, and a restore must not replay them.

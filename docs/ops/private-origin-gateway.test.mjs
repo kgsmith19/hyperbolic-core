@@ -249,7 +249,7 @@ test("Serve preflights nginx and converges to one root without a zero-route rese
 });
 
 test("the origin workflow starts nginx independently of the optional Cloudflare tunnel", () => {
-  assert.match(edgeWorkflow, /if: vars\.DEPLOY_ENABLED == 'true' && vars\.PRIVATE_ORIGIN_GATEWAY_ENABLED == 'true'/);
+  assert.match(edgeWorkflow, /if: needs\.flags\.outputs\.cloud_ops_enabled == 'true' && vars\.DEPLOY_ENABLED == 'true' && vars\.PRIVATE_ORIGIN_GATEWAY_ENABLED == 'true'/);
   assert.match(edgeWorkflow, /docker compose pull edge-origin/);
   assert.match(edgeWorkflow, /docker compose up -d --wait edge-origin/);
   assert.match(edgeWorkflow, /DEPLOY_HOST must be a non-empty DNS name or IPv4 address/);

@@ -33,7 +33,7 @@ jobs:
 
   bundle:
     needs: flags
-    if: needs.flags.outputs.platform_backup_enabled == 'true'
+    if: needs.flags.outputs.cloud_ops_enabled == 'true' && needs.flags.outputs.platform_backup_enabled == 'true'
     name: Encrypted platform schema backup
     runs-on: ubuntu-latest
     environment: platform-backup-production

@@ -14,7 +14,7 @@ const workflow = readFileSync(path.join(root, ".github/workflows/lifeos-backup.y
 test("the bundle job is gated dark behind LIFEOS_BACKUP_ENABLED", () => {
   // Until the ordered cutover flips this var, the standalone pipeline owns
   // the nightly. Losing the gate double-backs-up and splits ownership.
-  assert.match(workflow, /\n {4}needs: flags\n {4}if: needs\.flags\.outputs\.lifeos_backup_enabled == 'true'\n/);
+  assert.match(workflow, /\n {4}needs: flags\n {4}if: needs\.flags\.outputs\.cloud_ops_enabled == 'true' && needs\.flags\.outputs\.lifeos_backup_enabled == 'true'\n/);
 });
 
 test("the cron slot collides with no existing scheduled workflow", () => {

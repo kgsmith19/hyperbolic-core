@@ -16,7 +16,7 @@ const workflow = readFileSync(path.join(root, ".github/workflows/ops-restore-dri
 
 test("the drill job is gated behind the same restic flag as the two backup pipelines", () => {
   // There is nothing to drill until restic backups are actually live.
-  assert.match(workflow, /\n {4}needs: flags\n {4}if: needs\.flags\.outputs\.restic_backup_enabled == 'true'\n/);
+  assert.match(workflow, /\n {4}needs: flags\n {4}if: needs\.flags\.outputs\.cloud_ops_enabled == 'true' && needs\.flags\.outputs\.restic_backup_enabled == 'true'\n/);
 });
 
 test("the drill job runs in its own environment, so its OIDC subject is a narrow environment, not ref:refs/heads/main (#455)", () => {

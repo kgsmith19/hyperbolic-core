@@ -89,7 +89,8 @@ test("the cron is distinct from every other cron in .github/workflows", () => {
 
 test("exactly one job, in the broker-deploy-production environment that the soak report already uses", () => {
   const jobIds = [...workflow.slice(workflow.indexOf("\njobs:\n")).matchAll(/^ {2}([a-z][a-z0-9-]*):\s*$/gm)].map((m) => m[1]);
-  assert.deepEqual(jobIds, ["broker-canary"]);
+  // The cloud-ops freeze (#499) adds the read-flags.yml call ahead of it.
+  assert.deepEqual(jobIds, ["flags", "broker-canary"]);
   const environments = workflow.match(/^\s*environment:.*$/gm) ?? [];
   assert.deepEqual(environments.map((line) => line.trim()), ["environment: broker-deploy-production"]);
 });
@@ -120,7 +121,7 @@ test("the only repository variables consumed are the broker deploy identity, the
 // --- pinned actions and the Infisical read, identical to the soak report ---
 
 test("every uses: is a full SHA and is the exact pin ops-broker-soak-report.yml already uses", () => {
-  const refs = [...workflow.matchAll(/uses: ([^\s#]+)/g)].map((m) => m[1]);
+  const refs = [...workflow.matchAll(/uses: ([^\s#]+)/g)].map((m) => m[1]).filter((ref) => !ref.startsWith("./"));
   assert.deepEqual(
     [...new Set(refs.map((ref) => ref.split("@")[0]))].sort(),
     ["Infisical/secrets-action", "actions/checkout", "tailscale/github-action"],

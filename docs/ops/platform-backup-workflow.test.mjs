@@ -60,7 +60,7 @@ test("SUPABASE_DB_URL is read from its own /platform/db-backup/ path -- never th
 });
 
 test("the bundle job is gated on the platform flag from read-flags.yml (#455)", () => {
-  assert.match(workflow, /\n {4}needs: flags\n {4}if: needs\.flags\.outputs\.platform_backup_enabled == 'true'\n/);
+  assert.match(workflow, /\n {4}needs: flags\n {4}if: needs\.flags\.outputs\.cloud_ops_enabled == 'true' && needs\.flags\.outputs\.platform_backup_enabled == 'true'\n/);
 });
 
 test("restic reads a distinct Infisical identity and path from the SUPABASE_DB_URL step", () => {
