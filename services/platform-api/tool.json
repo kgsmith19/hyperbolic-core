@@ -1,0 +1,32 @@
+{
+  "id": "platform-api",
+  "name": "Platform API",
+  "kind": "headless",
+  "version": "0.1.0",
+  "description": "The local platform service (#508): the core, idea, platform, prompt and intake data in one SQLite file, served on 127.0.0.1:8400 behind the /auth/v1 and /rest/v1 subset the Shell, Brain, broker, llm-handler and tools already call, with single-owner ES256 auth. Replaces the Supabase platform project (owner decision 2026-10-29: local-only).",
+  "ownership": {
+    "owner": "kylegsmith19@gmail.com",
+    "path": "services/platform-api"
+  },
+  "entry": {
+    "headless": {
+      "command": "node src/index.ts"
+    }
+  },
+  "schemas": [],
+  "permissions": {
+    "db": {
+      "read": [],
+      "write": []
+    },
+    "networkEgress": [],
+    "llmHandler": {
+      "access": false
+    }
+  },
+  "lifecycle": {
+    "migrate": "none",
+    "health": "node --test \"tests/*.test.ts\"",
+    "register": "pending"
+  }
+}

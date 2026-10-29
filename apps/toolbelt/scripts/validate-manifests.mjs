@@ -79,6 +79,10 @@ function findServiceManifestPaths(servicesRoot) {
   return paths;
 }
 
+// The local platform service hosts the registry (#508) instead of registering
+// in the Supabase one, so it alone carries no registration migration.
+export const UNREGISTERED_TOOL_IDS = new Set(["platform-api"]);
+
 export function findManifestPaths(root = TOOLBELT_ROOT, { servicesRoot = root === TOOLBELT_ROOT ? SERVICES_ROOT : undefined } = {}) {
   const paths = [];
   const rootManifest = join(root, "tool.json");
@@ -395,6 +399,10 @@ export function checkRegistryParity(paths, { root = TOOLBELT_ROOT } = {}) {
 
     const register = manifest?.lifecycle?.register;
     if (typeof register !== "string") continue;
+    if (UNREGISTERED_TOOL_IDS.has(manifest.id)) {
+      if (register !== "pending") failures.push(`${manifestPath}: ${manifest.id} hosts the local registry and must stay register "pending"`);
+      continue;
+    }
 
     const migrationPath = resolve(migrationsDir, register);
     if (!migrationPath.startsWith(`${migrationsDir}${sep}`)) {
@@ -490,8 +498,9 @@ function main() {
 
   if (args.registry) {
     console.log("");
-    console.log(`Registry parity passed for ${paths.length} manifest${paths.length === 1 ? "" : "s"}.`);
-    for (const path of paths) {
+    const registered = paths.filter((path) => !UNREGISTERED_TOOL_IDS.has(loadJSON(path).id));
+    console.log(`Registry parity passed for ${registered.length} manifest${registered.length === 1 ? "" : "s"}.`);
+    for (const path of registered) {
       const manifest = loadJSON(path);
       console.log(`  ${String(manifest.id).padEnd(24)} sha256=${manifestHash(manifest)}  ${relative(process.cwd(), path)}`);
     }
