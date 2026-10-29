@@ -388,15 +388,6 @@ test("every doc that names a lane agrees with pr-verify.yml's actual job names",
     "exactly one gate may be required, and it must be the rollup"
   );
 
-  // bootstrap-github.sh writes the ruleset; it must ask for that same one.
-  const bootstrap = readFileSync(path.join(root, "docs/ops/bootstrap-github.sh"), "utf8");
-  const contexts = [...bootstrap.matchAll(/"context":\s*"([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(
-    contexts,
-    ["PR Gate"],
-    "bootstrap-github.sh's required-status-checks list disagrees with project.yaml"
-  );
-
   // Prose docs must at least name every lane, so a renamed job cannot leave
   // a doc silently describing a check that no longer exists.
   for (const file of ["AGENTS.md", "README.md"]) {

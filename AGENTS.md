@@ -24,16 +24,14 @@ imports) and have no separate upstream docs.
 ## ⚠️ Workflow Safety Invariant
 
 The repo-root `.github/workflows/` contains only workflows deliberately activated for
-`hyperbolic-core` itself. Files under any `apps/*/.github/workflows/` are inert by design —
-GitHub only executes workflows from a repository's root `.github/workflows/`, never from a
-nested path — and they must never be copied or moved to the root.
+`hyperbolic-core` itself. No app carries a nested `.github/` directory: GitHub never runs one, so
+any found is dead config to delete, never to move to the root (#503 removed the last three).
 
-> [!WARNING]
-> This matters concretely, not just abstractly. `apps/lifeos/.github/workflows/ci.yml` contains
-> a `build-backend` job that, unlike its sibling deploy jobs, has no repository-variable gate on
-> it. If that workflow were ever relocated to the root, `build-backend` would run for real on
-> every push to `main` and publish a Docker image to `ghcr.io/kgsmith19/hyperbolic-core`. That is
-> the kind of accident this rule exists to prevent.
+## Local-only platform
+
+By owner decision (2026-10-29) the platform is local-only: every sub-app, LifeOS included, is an
+equal sub-app that runs on localhost or in Docker with SQLite. Supabase, Tailscale and Hetzner are
+superseded, and no workflow here deploys anywhere (#503). Local operations land with #504.
 
 ## ⚠️ The platform publishable key has six hardcoded copies
 

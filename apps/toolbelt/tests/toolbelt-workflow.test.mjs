@@ -14,10 +14,6 @@ const PR_VERIFY_WORKFLOW = new URL(
   "../../../.github/workflows/pr-verify.yml",
   import.meta.url,
 );
-const DEPLOYED_CONTRACT_WORKFLOW = new URL(
-  "../../../.github/workflows/platform-contract.yml",
-  import.meta.url,
-);
 const CRITICAL_BROWSER_FLOW = new URL(
   "../apps/prompt-organizer/frontend/e2e/critical-flow.test.mjs",
   import.meta.url,
@@ -50,7 +46,6 @@ test("required Toolbelt browser verification is hermetic and has no hosted crede
   const action = readFileSync(TOOLBELT_ACTION, "utf8");
   const standalone = readFileSync(TOOLBELT_WORKFLOW, "utf8");
   const prVerify = readFileSync(PR_VERIFY_WORKFLOW, "utf8");
-  const deployedContract = readFileSync(DEPLOYED_CONTRACT_WORKFLOW, "utf8");
   const browserFlow = readFileSync(CRITICAL_BROWSER_FLOW, "utf8");
 
   // The executable Toolbelt suite and its standalone caller consume no owner
@@ -69,9 +64,8 @@ test("required Toolbelt browser verification is hermetic and has no hosted crede
   assert.match(prVerify, /uses: \.\/\.github\/actions\/verify-tests-toolbelt/);
   assert.doesNotMatch(prVerify, /export-owner-session\.mjs/);
 
-  // The real hosted environment proof remains explicitly separate/manual.
-  assert.match(deployedContract, /workflow_dispatch/);
-  assert.match(deployedContract, /Verify live Supabase contract/);
+  // Oracle change (#503): the manual hosted-contract workflow was removed with
+  // the cloud ops surface (local-only platform); no hosted proof remains.
 
   // The critical journey still runs as a browser E2E, but every Supabase REST
   // request is intercepted locally rather than mutating the hosted owner

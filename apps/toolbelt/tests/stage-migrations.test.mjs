@@ -475,7 +475,8 @@ test("collectStagedFiles runs against the repository's real migration directorie
   assert.deepEqual(versions, sorted, "real migration set must come out version-sorted");
 });
 
-const PLATFORM_WORKFLOW = new URL("../../../.github/workflows/platform-migrations.yml", import.meta.url);
+// Oracle change (#503): the tests that pinned platform-migrations.yml were removed with
+// that workflow (cloud ops surface removed, local-only platform).
 
 test("canonical owner split preserves the reviewed 18-version legacy and 20-version S1 prefixes", () => {
   const files = collectStagedFiles();
@@ -488,48 +489,3 @@ test("canonical owner split preserves the reviewed 18-version legacy and 20-vers
   ]);
 });
 
-test("the migration workflow installs validator dependencies and stages one down-free global ledger", () => {
-  const workflow = readFileSync(PLATFORM_WORKFLOW, "utf8");
-  assert.match(workflow, /cache-dependency-path: apps\/toolbelt\/package-lock\.json/);
-  assert.match(workflow, /npm ci --prefix apps\/toolbelt/);
-  assert.match(workflow, /scripts\/stage-migrations\.mjs/);
-  assert.doesNotMatch(workflow, /working-directory: apps\/toolbelt\/apps\//);
-});
-
-test("the workflow probes ledger existence, accepts only an exact prefix, and bounds PostgreSQL connects", () => {
-  const workflow = readFileSync(PLATFORM_WORKFLOW, "utf8");
-  const existenceProbe = workflow.indexOf("select to_regclass('supabase_migrations.schema_migrations') is not null");
-  const versionQuery = workflow.indexOf("select version::text from supabase_migrations.schema_migrations");
-  assert.ok(existenceProbe >= 0 && existenceProbe < versionQuery);
-  assert.doesNotMatch(workflow, /case when to_regclass\([^)]+\).*schema_migrations/s);
-  assert.match(workflow, /Remote ledger is not a local prefix at position/);
-  assert.match(workflow, /timeout-minutes: 20\n\s+env:\n\s+PGCONNECT_TIMEOUT: "15"/);
-});
-
-test("baseline adoption is restartable and proves legacy non-schema effects before repair", () => {
-  const workflow = readFileSync(PLATFORM_WORKFLOW, "utf8");
-  for (const invariant of [
-    "Remote ledger diverges at position",
-    "33 reviewed idea seeds",
-    "legacy idea seed payloads differ",
-    "legacy prompt-organizer registry row",
-    "legacy idea_effectiveness metric",
-    "legacy constraint-finder dependency",
-    "legacy prompt version history is incomplete",
-    "legacy API schema usage grants are missing",
-    "legacy Prompt Organizer table grants are missing",
-    "legacy API function grants are missing",
-    "legacy PostgREST exposed-schema configuration is missing or stale",
-    "core-purge-old-events",
-  ]) assert.match(workflow, new RegExp(invariant));
-  assert.match(workflow, /repair_from="\$\{#remote_versions\[@\]\}"/);
-});
-
-test("every deployment mutation is main-SHA pinned and normal apply rejects schema drift", () => {
-  const workflow = readFileSync(PLATFORM_WORKFLOW, "utf8");
-  assert.match(workflow, /gh api "repos\/\$\{GITHUB_REPOSITORY\}\/git\/ref\/heads\/main"/);
-  assert.match(workflow, /main moved during baseline verification; refusing ledger repair/);
-  assert.match(workflow, /main moved after migration preview; refusing database mutation/);
-  assert.match(workflow, /Prove the ledger-applied schema has not drifted/);
-  assert.match(workflow, /The live schema has drifted from its applied migration ledger/);
-});

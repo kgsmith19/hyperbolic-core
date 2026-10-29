@@ -12,11 +12,6 @@
       "plane": "source"
     },
     {
-      "path": ".github/workflows/deploy.yml",
-      "reason": "deployment entry point; per-app deploy lanes sit beside it",
-      "plane": "source"
-    },
-    {
       "path": ".github/workflows/issue-close-sweep.yml",
       "reason": "closes linked Issues on remote merge truth (merged_at), idempotently",
       "plane": "source"
@@ -68,7 +63,7 @@
     },
     {
       "path": "docs/ops/runbook.md",
-      "reason": "operator runbook: identities, deploys, restores, incident steps",
+      "reason": "operator runbook: local-only platform operations (cloud ops removed, #503)",
       "plane": "source"
     },
     {

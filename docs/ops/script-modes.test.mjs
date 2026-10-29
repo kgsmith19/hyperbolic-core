@@ -1,6 +1,5 @@
 // Every tracked shell script is executable in the git index (hyperbolic-core#475).
-// Workflows run scripts by path (deploy.yml, lifeos-deploy.yml: docs/ops/stamp-canary.sh;
-// canary-observe.yml: docs/ops/canary-observe.sh). A 100644 script makes the step exit 126,
+// Workflows and hooks run scripts by path. A 100644 script makes the step exit 126,
 // which kept Platform Deploy red from 2026-09-28. The index, not the working tree, is what
 // a fresh CI checkout gets, so that is what this test reads.
 
@@ -32,11 +31,11 @@ test("the repository tracks shell scripts, so an empty listing cannot pass vacuo
   assert.ok(trackedScripts().length > 0);
 });
 
-test("the listing reaches subdirectories: both canary scripts the deploy workflows run are listed, and executable", () => {
+test("the listing reaches subdirectories: a nested script is listed, and executable", () => {
+  // Oracle change (#503): the canary scripts this pinned were removed with the
+  // cloud pipeline; the Claude session-start hook is the nested script now.
   const modes = new Map(trackedScripts().map(([mode, file]) => [file, mode]));
-  for (const file of ["docs/ops/stamp-canary.sh", "docs/ops/canary-observe.sh"]) {
-    assert.equal(modes.get(file), "100755", `${file} is ${modes.get(file) ?? "not listed"}`);
-  }
+  assert.equal(modes.get(".claude/hooks/session-start.sh"), "100755");
 });
 
 test("every tracked *.sh is mode 100755 in the git index", () => {
