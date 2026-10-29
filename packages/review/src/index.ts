@@ -16,6 +16,7 @@ export type { Finding, Provider, ReviewConfig, ReviewVerdict, Severity } from ".
 
 export {
   DEFAULT_MAX_TOKENS,
+  OPENAI_MAX_TOKENS,
   DEFAULT_TIMEOUT_MS,
   resolveConfig,
   VALID_PROVIDERS,
