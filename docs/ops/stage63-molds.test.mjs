@@ -7,7 +7,7 @@
 // molds-plane rows. This header block documents the S3 delta; the S1
 // header above remains authoritative for the file's basis.
 //
-// Frozen sources (std @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88):
+// Frozen sources (std @ 1686e3b490380194cff78767b88c4e0288410e96):
 //   tools/verification_mold.py (Stage 29: RULES x6, TECHNIQUES x5,
 //     TECHNIQUE_MAP, FAILURE_SHAPES x8, IMPLEMENTATION_MARKERS x12,
 //     POSITIVE_CLASSES x8, NEGATIVE_CLASSES x6)
@@ -178,7 +178,7 @@ test("S3 · provenance names the mold modules at the exact Standard SHA", async 
   assert.match(text, /tools\/verification_mold\.py/);
   assert.match(text, /tools\/mold_qualification\.py/);
   assert.match(text, /tools\/verification_portfolio\.py/);
-  assert.match(text, /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
+  assert.match(text, /1686e3b490380194cff78767b88c4e0288410e96/);
 });
 
 // --- S3: molds-plane rows grounded or honestly gapped ---

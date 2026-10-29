@@ -25,7 +25,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const read = (rel) => readFileSync(path.join(root, rel), "utf8");
 const golden = JSON.parse(read("docs/ops/stage63-repo-map-golden.json"));
 const source = JSON.parse(read(MAP_SOURCE));
-const SHA = "516fdb25d091f2f3f467fb48eaee01cb7f805c88";
+const SHA = "1686e3b490380194cff78767b88c4e0288410e96";
 
 // A thrown error becomes {error, message}, the shape the golden records.
 const outcome = (call) => {
@@ -84,12 +84,12 @@ test("map · validateMapEdit reproduces upstream validate_edit", () => {
   }
 });
 
-test("map · upstream defect std#299 is pinned: a path starting with \"main\" is protected", () => {
-  for (const probe of ["main.py", "maintenance.md"]) {
-    assert.equal(planeFor(probe), "protected",
-      `${probe}: the branch name is matched as a path prefix; flips with the lock bump that picks up std#299`);
+test("map · upstream fix std#299 is picked up: a path starting with \"main\" is source again", () => {
+  // Flipped by the lock bump to 1686e3b (#467 S2a): upstream dropped the branch
+  // name from PROTECTED_PATTERNS, so a leading "main" is no longer a path prefix.
+  for (const probe of ["main.py", "maintenance.md", "domain/main.py"]) {
+    assert.equal(planeFor(probe), "source", probe);
   }
-  assert.equal(planeFor("domain/main.py"), "source", "only a leading \"main\" is caught");
 });
 
 // --- hyperbolic-core's binding and the committed artifact ----------------------

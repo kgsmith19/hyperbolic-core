@@ -1,6 +1,6 @@
 {
  "_generator": "docs/ops/stage63-repo-map-golden.py",
- "_provenance": "agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88: tools/repo_map.py",
+ "_provenance": "agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96: tools/repo_map.py",
  "_python": "3.12",
  "frozen": {
   "build": [
@@ -1356,8 +1356,7 @@
    ],
    "PROTECTED_PATTERNS": [
     ".github/workflows/pr-gate.yml",
-    ".github/workflows/merge-policy.yml",
-    "main"
+    ".github/workflows/merge-policy.yml"
    ]
   },
   "plane_for": [
@@ -1375,15 +1374,15 @@
    },
    {
     "path": "main",
-    "plane": "protected"
+    "plane": "source"
    },
    {
     "path": "main.py",
-    "plane": "protected"
+    "plane": "source"
    },
    {
     "path": "maintenance.md",
-    "plane": "protected"
+    "plane": "source"
    },
    {
     "path": "domain/main.py",
@@ -1475,7 +1474,7 @@
    },
    {
     "path": "main/\u00e9",
-    "plane": "protected"
+    "plane": "source"
    }
   ],
   "validate_edit": [

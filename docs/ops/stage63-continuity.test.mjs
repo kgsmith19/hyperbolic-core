@@ -2,7 +2,7 @@
 //
 // S5 RED characterization (Issue #423): v5 continuity and context-rotation
 // semantics from agent-engineering-standard @
-// 516fdb25d091f2f3f467fb48eaee01cb7f805c88 — tools/context_rotation.py
+// 1686e3b490380194cff78767b88c4e0288410e96 — tools/context_rotation.py
 // (Stage 48), tools/context_budget.py (zero-compaction governor),
 // tools/handoff_acceptance.py (Stage 45 HAT/SAT) and tools/capsule.py (the
 // provider-neutral goal/scratch recovery packet).
@@ -67,8 +67,17 @@ test("S5 · provenance names all four continuity modules at the pinned SHA", () 
   for (const module of ["context_rotation", "context_budget", "handoff_acceptance", "capsule"]) {
     assert.match(provenance(), new RegExp(`tools/${module}\\.py`));
   }
-  assert.match(provenance(), /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
-  assert.match(golden._provenance, /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
+  assert.match(provenance(), /1686e3b490380194cff78767b88c4e0288410e96/);
+  assert.match(golden._provenance, /1686e3b490380194cff78767b88c4e0288410e96/);
+});
+
+test("S5 · the shared golden loader regenerates at standard.lock's commit, never a stale SHA", () => {
+  // Every stage-63 generator loads upstream through this file's SHA (#492): a
+  // stale constant would regenerate every golden at the old Standard commit.
+  const lock = readFileSync(path.join(root, "standard.lock"), "utf8").match(/^commit: ([0-9a-f]{40})$/m);
+  const generator = readFileSync(path.join(here, "stage63-continuity-golden.py"), "utf8").match(/^SHA = "([0-9a-f]{40})"$/m);
+  assert.ok(lock && generator, "standard.lock commit or generator SHA not found");
+  assert.equal(generator[1], lock[1]);
 });
 
 // --- Differential characterization against the upstream Python ----------------

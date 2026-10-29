@@ -1,6 +1,6 @@
 {
  "_generator":"docs/ops/stage63-quality-golden.py",
- "_provenance":"agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88: tools/quality_eval.py",
+ "_provenance":"agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96: tools/quality_eval.py",
  "_python":"3.12",
  "rank":[
   {"label":"ascii-control","output":[{"id":"alpha","points":98,"wins":true},{"id":"zeta","points":98,"wins":true}],"solutions":[{"charter_clean":true,"correct":true,"dependency_ok":true,"id":"alpha","owned_loc":100,"plane_clean":true,"quality_ok":true,"reviewers_agree":true},{"charter_clean":true,"correct":true,"dependency_ok":true,"id":"zeta","owned_loc":100,"plane_clean":true,"quality_ok":true,"reviewers_agree":true}]},

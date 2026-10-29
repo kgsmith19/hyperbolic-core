@@ -1,7 +1,7 @@
 // node --test docs/ops/stage63-profiles.test.mjs (run from the repo root)
 //
 // S6 RED characterization (Issue #424): v5 extension-profile semantics from
-// agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88 —
+// agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96 —
 // tools/mcp_profile.py (Stage 21b MCP/connector profile + activation gate),
 // tools/extensions_registry.py (catalog/profile/lock consistency, reserved
 // keys, supply boundary) and tools/profile_compiler.py (Stage 20b
@@ -64,7 +64,7 @@ test("S6 · provenance names all three profile modules at the pinned SHA", () =>
     assert.match(provenance(), new RegExp(`tools/${module}\\.py`));
     assert.match(golden._provenance, new RegExp(`tools/${module}\\.py`));
   }
-  assert.match(golden._provenance, /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
+  assert.match(golden._provenance, /1686e3b490380194cff78767b88c4e0288410e96/);
 });
 
 // --- Differential characterization against the upstream Python ----------------

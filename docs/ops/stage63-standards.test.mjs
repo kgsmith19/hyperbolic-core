@@ -1,7 +1,7 @@
 // node --test docs/ops/stage63-standards.test.mjs (run from the repo root)
 //
 // S7 RED characterization (Issue #425): v5 standards/capability-boundary
-// semantics from agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88 —
+// semantics from agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96 —
 // tools/standards_route.py (Stage 52 canonical index + JIT route compiler),
 // tools/standards_receipt.py (Stage 53 selective receipts, SAT triggers, hash
 // binding) and tools/capability_compiler.py (Stage 54a capability bounds:
@@ -78,7 +78,7 @@ test("S7 · provenance names all three boundary modules at the pinned SHA", () =
     assert.match(provenance(), new RegExp(`tools/${module}\\.py`));
     assert.match(golden._provenance, new RegExp(`tools/${module}\\.py`));
   }
-  assert.match(golden._provenance, /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
+  assert.match(golden._provenance, /1686e3b490380194cff78767b88c4e0288410e96/);
 });
 
 // --- Python Unicode semantics, proven over every code point -------------------

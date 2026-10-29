@@ -1,6 +1,6 @@
 {
  "_generator":"docs/ops/stage63-release-golden.py",
- "_provenance":"agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88: tools/release_mold.py + tools/proof_invalidation.py + tools/edition_packaging.py + Canonical/corpus/edition-packaging/edition.json + Canonical/corpus/proof-invalidation/invalidation.json + Canonical/corpus/release-mold/mold.json",
+ "_provenance":"agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96: tools/release_mold.py + tools/proof_invalidation.py + tools/edition_packaging.py + Canonical/corpus/edition-packaging/edition.json + Canonical/corpus/proof-invalidation/invalidation.json + Canonical/corpus/release-mold/mold.json",
  "_python":"3.12",
  "edition":[
   {"id":"corpus:ed.full.01","input":{"expected_violation_fragment":"","id":"ed.full.01","known":["check_template_pairs","check_harness_edition","check_gate_aggregator","check_gate_noop_stages","check_review_always_comments","check_capability_registry"],"note":"Full runs everything.","record":["check_template_pairs","check_harness_edition","check_gate_aggregator","check_gate_noop_stages","check_review_always_comments","check_capability_registry"],"target":"full"},"output":[]},

@@ -6,7 +6,7 @@
 // the thinness/DoR/disposition rows. This header block documents the S2
 // delta; the S1 header above remains authoritative for the file's basis.
 //
-// Frozen sources (std @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88):
+// Frozen sources (std @ 1686e3b490380194cff78767b88c4e0288410e96):
 //   tools/thinness.py (AXES ×6, HARD_CONDITIONS ×10, bands micro/preferred/medium/large)
 //   tools/ready.py (FULL_FIELDS ×17, COMPACT_FIELDS ×3)
 //   tools/disposition.py (DISPOSITIONS ×4, OBSERVATION_FIELDS ×6)

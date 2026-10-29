@@ -1,6 +1,6 @@
 {
  "_generator":"docs/ops/stage63-profiles-golden.py",
- "_provenance":"agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88: tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py",
+ "_provenance":"agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96: tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py",
  "mcp":{
   "activations":[
    {"label":"lifeos-task","profile":{"phase":"task","provider":"claude"},"result":{"findings":[],"warnings":[]},"server":{"activated_at":null,"capabilities":["list_types","find","get_entity","history"],"endpoint":"stdio:python -m mcp_server","idempotent":true,"kind":"read","name":"lifeos","schema_bytes":2048,"transport":"stdio","ttl_seconds":null}},
