@@ -1,3 +1,4 @@
 /.github/CODEOWNERS @kgsmith19
 /.github/workflows/ @kgsmith19
 /project.yaml @kgsmith19
+/agent-roles.yaml @kgsmith19
