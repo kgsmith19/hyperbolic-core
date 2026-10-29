@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/index.ts",
     "init": "node src/cli.ts init",
+    "sync-registry": "node --env-file-if-exists=.env src/cli.ts sync-registry",
     "test": "node --test tests/*.test.ts",
     "typecheck": "tsc -b . && tsc -p tsconfig.test.json"
   },
