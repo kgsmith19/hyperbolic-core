@@ -171,6 +171,14 @@ jobs:
           } > "$summary"
           overall_status=0
 
+          # pg_restore's DETAIL/CONTEXT lines and quoted values can carry
+          # auth.users rows (emails, password hashes), and this repository's
+          # job logs are public: keep only the error lines, values redacted (#488).
+          redact_restore_errors() {
+            { grep -E '^pg_restore: error:' || true; } \
+              | sed -E "s/\"[^\"]*\"/\"<redacted>\"/g; s/'[^']*'/'<redacted>'/g"
+          }
+
           drill_platform() {
             local repository="sftp:hetzner-storagebox:/home/platform"
             restic -r "$repository" check --read-data-subset=10%
@@ -198,6 +206,11 @@ jobs:
             local dump_file
             dump_file="$(find "$restore_dir" -name 'platform.dump' -type f | head -1)"
             test -n "$dump_file"
+            # core.run.user_id references auth.users, so platform.dump cannot
+            # restore without the auth.users dump from the same snapshot (#488).
+            local auth_file
+            auth_file="$(find "$restore_dir" -name 'auth_users.dump' -type f | head -1)"
+            test -n "$auth_file"
 
             docker run --rm -i "$PG_IMAGE" pg_restore --list < "$dump_file" > /dev/null
 
@@ -205,11 +218,33 @@ jobs:
             # has no auth schema (#486). Strict: any restore error fails.
             pg "$PG_IMAGE" psql -h 127.0.0.1 -U supabase_admin postgres -X -q -v ON_ERROR_STOP=1 \
               -c "create extension if not exists vector with schema extensions"
+
+            # auth.users first. The image's own auth.users is a bootstrap stub
+            # without the columns production's auth service adds, so this
+            # throwaway database's stub is replaced by the dumped table. Only
+            # the table, its data, constraints and indexes: its triggers,
+            # policies and grants call functions no backup here carries.
+            docker run --rm -i "$PG_IMAGE" pg_restore --list < "$auth_file" \
+              | grep -E '^[0-9]+; [0-9]+ [0-9]+ (TABLE|TABLE DATA|CONSTRAINT|INDEX) auth ' > "$tmp/auth.list"
+            grep -q ' TABLE DATA auth users ' "$tmp/auth.list"
+            pg "$PG_IMAGE" psql -h 127.0.0.1 -U supabase_admin postgres -X -q -v ON_ERROR_STOP=1 \
+              -c "drop table auth.users cascade"
+            if ! pg -v "$auth_file:/tmp/auth_users.dump:ro" -v "$tmp/auth.list:/tmp/auth.list:ro" "$PG_IMAGE" \
+                pg_restore -h 127.0.0.1 -U supabase_admin --no-owner --no-privileges --exit-on-error \
+                  -L /tmp/auth.list --dbname postgres /tmp/auth_users.dump 2> "$tmp/auth-restore.err"; then
+              echo "auth.users restore failed; row values withheld from this public log (#488):" >&2
+              redact_restore_errors < "$tmp/auth-restore.err" >&2
+              return 1
+            fi
+            local auth_users_n
+            auth_users_n="$(pg "$PG_IMAGE" psql -h 127.0.0.1 -U supabase_admin postgres -X -At -v ON_ERROR_STOP=1 -c "select count(*) from auth.users")"
+            [[ "$auth_users_n" =~ ^[0-9]+$ ]]
+
             pg -v "$dump_file:/tmp/platform.dump:ro" "$PG_IMAGE" \
               pg_restore -h 127.0.0.1 -U supabase_admin --no-owner --no-privileges --exit-on-error \
                 --dbname postgres /tmp/platform.dump
 
-            local counts=""
+            local counts=" auth.users=$auth_users_n"
             for t in platform.config core.app core.run core.cost prompt.prompt idea.idea intake.idea; do
               local n
               n="$(pg "$PG_IMAGE" psql -h 127.0.0.1 -U supabase_admin postgres -X -At -v ON_ERROR_STOP=1 -c "select count(*) from $t")"

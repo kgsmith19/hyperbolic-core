@@ -877,7 +877,7 @@ procedure against a scratch database, never the platform project. Record the dat
 # 1. Download the artifact from the backup run, then decrypt with the offline identity.
 age -d -i /path/to/offline-identity.txt \
   -o platform-backup.tar platform-backup-<run_id>.tar.age
-tar -xf platform-backup.tar          # platform.dump, MIGRATION_LEDGER.txt, SHA256SUMS
+tar -xf platform-backup.tar          # platform.dump, auth_users.dump, MIGRATION_LEDGER.txt, SHA256SUMS
 sha256sum -c SHA256SUMS
 
 # 2. Restore into a scratch database.
@@ -954,7 +954,13 @@ For each repository (`platform`, `lifeos`), in order:
 3. `pg_restore --list` verifies the restored dump archive is well-formed, then it is loaded into a
    throwaway Postgres 17 service container (the same job-level `services:` container both
    repositories share, torn down with the runner).
-4. Row counts are asserted non-zero on a small set of real tables -- `platform.config`, `core.app`,
+   For `platform`, `auth_users.dump` (the `auth.users` table, #488) restores first: `core.run.user_id`
+   references it, so the platform schemas cannot restore without it, and a snapshot that lacks it fails
+   the drill. The image's own bootstrap `auth.users` lacks the columns production's auth service adds,
+   so the throwaway database's stub is replaced by the dumped table (table, data, constraints and
+   indexes only). The file holds emails and password hashes: the drill prints only its row count, and on
+   a restore failure only `pg_restore`'s error lines with quoted values redacted (job logs are public).
+4. Row counts are asserted non-zero on a small set of real tables -- `auth.users`, `platform.config`, `core.app`,
    `core.run`, `core.cost`, `prompt.prompt`, `idea.idea`, `intake.idea` for `platform` (the same set
    the manual drill above checks); `entity`, `type_definition`, `event`, `entity_type` for `lifeos`
    (the actual kernel tables from `apps/lifeos/backend/supabase/migrations/`, every domain record and
