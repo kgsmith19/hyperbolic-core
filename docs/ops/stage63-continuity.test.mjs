@@ -15,7 +15,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -78,6 +78,15 @@ test("S5 · the shared golden loader regenerates at standard.lock's commit, neve
   const generator = readFileSync(path.join(here, "stage63-continuity-golden.py"), "utf8").match(/^SHA = "([0-9a-f]{40})"$/m);
   assert.ok(lock && generator, "standard.lock commit or generator SHA not found");
   assert.equal(generator[1], lock[1]);
+  // The goldens are the upstream Python's own output: each records the commit it
+  // actually loaded, so a golden left at another SHA fails here too.
+  const goldens = readdirSync(here).filter((name) => /^stage63-[a-z-]+-golden\.json$/.test(name));
+  assert.equal(goldens.length, 8, "every stage-63 golden is checked");
+  for (const name of goldens) {
+    const recorded = JSON.parse(readFileSync(path.join(here, name), "utf8"))._provenance;
+    assert.ok(typeof recorded === "string" && recorded.startsWith(`agent-engineering-standard @ ${lock[1]}: `),
+      `${name} was not generated at standard.lock's commit`);
+  }
 });
 
 // --- Differential characterization against the upstream Python ----------------
