@@ -12,10 +12,10 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from psycopg.types.json import Jsonb
 
 from domains.documents.types import DOCUMENT_SCHEMA
 from kernel import db
+from kernel.db import Jsonb
 from scripts.migrate_document_ref_anchor import migrate
 
 _REF = DOCUMENT_SCHEMA["properties"]["storage_ref"]["pattern"]

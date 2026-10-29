@@ -12,3 +12,6 @@ node_modules/
 .claude/settings.local.json
 .codex/*.local.*
 .gemini/*.local.*
+
+# Local-only platform data: var/<app>/ (SQLite files, blobs, backups). Never committed.
+/var/

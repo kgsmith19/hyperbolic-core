@@ -41,7 +41,7 @@ def relate(
         load_entity(conn, from_id)
         load_entity(conn, to_id)
         _require_write_on_endpoints(ctx, conn, from_id, to_id)
-        conn.execute("set constraints all deferred")
+        conn.defer_constraints()
         now = tx_now(conn)
         edge_id = uuid4()
         edge_row = {
@@ -91,7 +91,7 @@ def supersede_edge(
         if row["superseded_at"] is not None:
             raise ValueError(f"edge already superseded: {edge_id}")
         _require_write_on_endpoints(ctx, conn, row["from_entity"], row["to_entity"])
-        conn.execute("set constraints all deferred")
+        conn.defer_constraints()
         now = tx_now(conn)
         edge_row = {
             "id": str(row["id"]),

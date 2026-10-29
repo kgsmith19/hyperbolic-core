@@ -11,11 +11,11 @@ from copy import deepcopy
 from typing import Any
 from uuid import UUID
 
-from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
 from kernel import db
 from kernel.access import AccessContext, require
+from kernel.db import Jsonb
 from kernel.events import DEFAULT_ACTOR, append_event, tx_now
 from kernel.services.common import entity_domains, entity_type_names, load_entity, load_type
 from kernel.services.queries import history
@@ -121,13 +121,13 @@ def forget(
         rows = conn.execute(
             """
             select id, payload from event
-            where entity_id = %s or payload::text like %s
+            where entity_id = %s or payload like %s
             order by recorded_at, id
             """,
             (entity_id, f"%{entity_id}%"),
         ).fetchall()
 
-        conn.execute("select set_config('lifeos.redacting', 'on', true)")
+        conn.redacting = True
         redacted = 0
         for row in rows:
             scrubbed = _redact_payload(row["payload"], targets)
@@ -136,16 +136,17 @@ def forget(
                     "update event set payload = %s where id = %s", (Jsonb(scrubbed), row["id"])
                 )
                 redacted += 1
-        conn.execute("select set_config('lifeos.redacting', 'off', true)")
+        conn.redacting = False
 
         # Projections must match what replaying the redacted log would produce.
         conn.execute(
-            "update entity set attributes = attributes - %s::text[], name = %s where id = %s",
+            "update entity set attributes = json_remove_keys(attributes, %s), name = %s "
+            "where id = %s",
             (sorted(targets), None if "name" in targets else entity.name, entity_id),
         )
         conn.execute(
             """
-            update edge set attributes = attributes - %s::text[]
+            update edge set attributes = json_remove_keys(attributes, %s)
             where from_entity = %s or to_entity = %s
             """,
             (sorted(targets), entity_id, entity_id),

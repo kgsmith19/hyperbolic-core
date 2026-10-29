@@ -8,17 +8,14 @@ from kernel.access import AccessContext
 from kernel.services import find
 
 ROOT = Path(__file__).resolve().parents[2]
-MIGRATIONS = ROOT / "supabase" / "migrations"
+MIGRATIONS = ROOT / "db" / "migrations"
 SRC = ROOT / "src"
 
 # Every migration is kernel-owned and listed here by hand. A life domain must
 # never need an entry (invariant 1); a new kernel migration must be reviewed
 # against invariant 1 before this list grows.
 KERNEL_MIGRATIONS = [
-    "20260724000000_kernel.sql",
-    "20260725000000_pii_redaction.sql",
-    "20260726004147_security_lockdown.sql",
-    "20260726200000_fk_indexes.sql",
+    "0001_init.sql",
 ]
 
 
