@@ -488,4 +488,3 @@ test("canonical owner split preserves the reviewed 18-version legacy and 20-vers
     "20260812150000_test_create_fence.sql",
   ]);
 });
-
