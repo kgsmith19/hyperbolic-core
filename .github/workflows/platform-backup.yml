@@ -89,6 +89,9 @@ jobs:
       - name: Create, verify, and encrypt the platform schema bundle
         env:
           AGE_PUBLIC_KEY: ${{ vars.PLATFORM_AGE_PUBLIC_KEY }}
+          # The restore drill's own pinned Supabase Postgres 17 (#486): one
+          # client, pinned by digest, dumps what the drill restores (#488).
+          PG_IMAGE: supabase/postgres:17.11.0.003@sha256:7374d196da7e301512cc5329e18040e0f7bb856287b323777cdadecccbc6c7e4
         run: |
           set -euo pipefail
           umask 077
@@ -100,19 +103,17 @@ jobs:
           # Every schema that carries real operator data (platform.config's
           # owner row; core/idea/prompt/intake's own tables). "test" is a
           # CI-only fence schema (06-supabase-schema.md) with nothing worth
-          # restoring, deliberately excluded. Pin the client major to the
-          # target project's Postgres major -- 17, matching the LifeOS
-          # pipeline's own pin; adjust this tag if the platform project's
-          # actual server version ever differs (pg_dump's own version-skew
-          # error names the fix directly).
-          docker run --rm -e SUPABASE_DB_URL postgres:17 \
+          # restoring, deliberately excluded. The client is Postgres 17, the
+          # target project's major (PG_IMAGE above); pg_dump's own version-skew
+          # error names the fix if the server's major ever moves.
+          docker run --rm -e SUPABASE_DB_URL "$PG_IMAGE" \
             sh -ec 'pg_dump --format=custom --no-owner \
               --schema=platform --schema=core --schema=idea --schema=prompt --schema=intake \
               "$SUPABASE_DB_URL"' \
             > "$payload/platform.dump"
 
           test -s "$payload/platform.dump"
-          docker run --rm -i postgres:17 pg_restore --list \
+          docker run --rm -i "$PG_IMAGE" pg_restore --list \
             < "$payload/platform.dump" > /dev/null
 
           # Handed off to the restic step below (RUNNER_TEMP survives across
@@ -128,18 +129,18 @@ jobs:
           # cannot restore. It holds emails and password hashes: it leaves
           # this job only encrypted (age below; restic's own encryption),
           # and nothing here prints its rows.
-          docker run --rm -e SUPABASE_DB_URL postgres:17 \
+          docker run --rm -e SUPABASE_DB_URL "$PG_IMAGE" \
             sh -ec 'pg_dump --format=custom --no-owner --table=auth.users "$SUPABASE_DB_URL"' \
             > "$payload/auth_users.dump"
           test -s "$payload/auth_users.dump"
-          docker run --rm -i postgres:17 pg_restore --list \
+          docker run --rm -i "$PG_IMAGE" pg_restore --list \
             < "$payload/auth_users.dump" > "$work/auth_users.list"
           grep -q ' TABLE DATA auth users ' "$work/auth_users.list"
           cp "$payload/auth_users.dump" "$RUNNER_TEMP/auth_users.dump"
 
           # Record the migration ledger state alongside the dump: a restore
           # has to know which migrations the snapshot already contains.
-          docker run --rm -e SUPABASE_DB_URL postgres:17 \
+          docker run --rm -e SUPABASE_DB_URL "$PG_IMAGE" \
             sh -ec 'psql "$SUPABASE_DB_URL" -X --no-psqlrc -At \
               -c "select version from supabase_migrations.schema_migrations order by version"' \
             > "$payload/MIGRATION_LEDGER.txt"

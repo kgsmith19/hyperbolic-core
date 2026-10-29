@@ -220,12 +220,12 @@ test("the tailnet client is read by the restic identity from /platform/lifeos-de
 
 const bundle = stepBlock("- name: Create, verify, and encrypt the platform schema bundle", ["\n      - uses:", "\n      - name:"]);
 
-test("auth.users is dumped with its table definition, not data-only, by the same pg17 client (#488)", () => {
+test("auth.users is dumped with its table definition, not data-only, by the same pinned client (#488)", () => {
   // Production's auth service adds columns (phone, is_anonymous, ...) the pinned
   // Supabase image's bootstrap auth.users lacks, so a data-only COPY cannot restore.
   assert.match(
     bundle,
-    /docker run --rm -e SUPABASE_DB_URL postgres:17 \\\n\s*sh -ec 'pg_dump --format=custom --no-owner --table=auth\.users "\$SUPABASE_DB_URL"' \\\n\s*> "\$payload\/auth_users\.dump"/,
+    /docker run --rm -e SUPABASE_DB_URL "\$PG_IMAGE" \\\n\s*sh -ec 'pg_dump --format=custom --no-owner --table=auth\.users "\$SUPABASE_DB_URL"' \\\n\s*> "\$payload\/auth_users\.dump"/,
   );
   assert.doesNotMatch(workflow, /--data-only/);
 });
@@ -248,4 +248,19 @@ test("the auth.users dump is handed off and lands in the same restic snapshot as
   const backup = stepBlock("- name: Back up the platform dump to the Hetzner Storage Box (restic)", ["- name: Record the run id"]);
   assert.match(backup, /if \[ ! -s "\$RUNNER_TEMP\/auth_users\.dump" \]/);
   assert.match(backup, /restic -r "\$repository" backup "\$RUNNER_TEMP\/platform\.dump" "\$RUNNER_TEMP\/auth_users\.dump" \\\n/);
+});
+
+test("every Postgres client in the bundle is the restore drill's pinned Supabase image, never an unpinned postgres:17 (#488)", () => {
+  // One client, pinned by digest, dumps what the drill restores with: no second,
+  // unpinned Docker Hub pull, and pg_dump never drifts past the restoring server.
+  const drill = readFileSync(path.join(root, ".github/workflows/ops-restore-drill.yml"), "utf8");
+  const service = drill.match(/postgres:\s*\n\s*image: (supabase\/postgres:\S+@sha256:[0-9a-f]{64})\n/);
+  assert.ok(service, "drill service image not found");
+  const env = bundle.match(/\n\s+PG_IMAGE: (\S+)\n/);
+  assert.ok(env, "PG_IMAGE env not set on the bundle step");
+  assert.equal(env[1], service[1], "the bundle's PG_IMAGE must equal the drill's service image");
+  assert.doesNotMatch(workflow, /postgres:17\b(?!\.)/);
+  const clients = bundle.match(/docker run [^\n]*?(\S+) (?:\\|pg_restore|sh -ec)/g) ?? [];
+  assert.equal(clients.length, 5, "pg_dump x2, pg_restore --list x2, psql ledger");
+  for (const call of clients) assert.match(call, /"\$PG_IMAGE"/, call);
 });
