@@ -241,8 +241,8 @@ test("RPO is measured as the latest snapshot's age (now minus snapshot time), pe
   // RPO = how much data a restore-from-latest would lose = the age of the
   // most recent backup, derived from the snapshot's own timestamp, never
   // assumed. #408.
-  assert.match(workflow, /snapshot_epoch\(\) \{/);
-  assert.match(workflow, /date -u -d "\$iso" \+%s/);
+  // The id and the time come from one snapshot listing (#495).
+  assert.doesNotMatch(workflow, /snapshot_epoch\(\) \{|latest_snapshot\(\) \{|--latest 1/);
   assert.match(workflow, /rpo_seconds="\$\(\( now_epoch - snapshot_epoch_value \)\)"/);
   assert.equal(
     (workflow.match(/rpo_seconds="\$\(\( now_epoch - snapshot_epoch_value \)\)"/g) ?? []).length,
@@ -304,7 +304,7 @@ test("the ops-restore-drill.yml script parses as valid bash", () => {
 test("the platform drill fails closed when the snapshot carries no auth.users dump (#488)", () => {
   const fn = drillFunction("platform");
   assert.match(fn, /auth_file="\$\(find "\$restore_dir" -name 'auth_users\.dump' -type f \| head -1\)"/);
-  assert.match(fn, /\n\s*test -n "\$auth_file"\n/);
+  assert.match(fn, /\n\s*test -n "\$auth_file" \|\| \{ [^\n]*return 1; \}\n/);
   // Never fabricated: no INSERT INTO auth.users stands in for a missing backup.
   assert.doesNotMatch(workflow, /insert into auth\.users/i);
 });
@@ -379,4 +379,60 @@ test("an auth.users restore failure prints no row values to the public job log (
   assert.equal(out.trim().split("\n").length, 3, "only the three pg_restore: error: lines survive");
   // No error lines at all must not fail the caller under pipefail.
   assert.equal(execFileSync("bash", ["-c", `set -euo pipefail\n${redactHelper()}\nredact_restore_errors; echo ok`], { input: "DETAIL: x\n", encoding: "utf8" }).trim(), "ok");
+});
+
+// --- the newest snapshot across every path group (#495, run 40817917701) ---
+
+/** Text of the newest_snapshot() helper, brace to brace. */
+function newestHelper() {
+  const start = workflow.indexOf("newest_snapshot() {");
+  const end = workflow.indexOf("\n          }", start);
+  assert.ok(start > -1 && end > -1, "newest_snapshot helper not found");
+  return workflow.slice(start, end + "\n          }".length);
+}
+
+function newestOf(snapshots) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "snaps-"));
+  const json = path.join(dir, "snapshots.json");
+  writeFileSync(json, JSON.stringify(snapshots));
+  const stub = `restic() { [ "$1 $3 $4" = "-r snapshots --json" ] || return 9; cat ${JSON.stringify(json)}; }`;
+  return execFileSync("bash", ["-c", `set -euo pipefail\n${stub}\n${newestHelper()}\nnewest_snapshot repo`],
+    { encoding: "utf8" }).trim();
+}
+
+test("newest_snapshot: picks the newest snapshot across path groups, by parsed time, as '<id> <epoch>' (#495)", () => {
+  // restic's --latest is per host and path group: adding auth_users.dump to the
+  // platform backup started a new group, and the drill restored the older one.
+  const older = { short_id: "0c0336f6", time: "2026-10-28T09:57:24.3832825Z", paths: ["/t/platform.dump"] };
+  const newer = { short_id: "bf661cd7", time: "2026-10-29T04:26:12.123456789+00:00",
+    paths: ["/t/auth_users.dump", "/t/platform.dump"] };
+  assert.equal(newestOf([older, newer]), `bf661cd7 ${Math.floor(Date.UTC(2026, 9, 29, 4, 26, 12) / 1000)}`);
+  assert.equal(newestOf([newer, older]).split(" ")[0], "bf661cd7", "list order never decides");
+  // An offset decides, not string order: 23:30-07:00 is 06:30 UTC the next day.
+  const offset = { short_id: "aaaa1111", time: "2026-10-28T23:30:00-07:00", paths: ["/x"] };
+  assert.equal(newestOf([newer, offset]).split(" ")[0], "aaaa1111");
+  assert.equal(newestOf([]), "", "an empty repository yields nothing, and the drill fails on it");
+  const short = { short_id: "cccc2222", time: "2026-10-29T04:26:13.5Z", paths: ["/y"] };
+  assert.equal(newestOf([newer, short]), `cccc2222 ${Math.floor(Date.UTC(2026, 9, 29, 4, 26, 13) / 1000)}`);
+  // fromisoformat before 3.11 takes neither "Z" nor 7-9 fractional digits: the
+  // helper normalizes both instead of depending on the runner's python3.
+  assert.match(newestHelper(), /\(m\.group\(1\) \+ "000000"\)\[:6\]/);
+  assert.match(newestHelper(), /\.replace\("Z", "\+00:00"\)/);
+});
+
+test("each drill takes its snapshot id and RPO time from one newest_snapshot call (#495)", () => {
+  for (const label of ["platform", "lifeos"]) {
+    const fn = drillFunction(label);
+    assert.match(fn, /newest="\$\(newest_snapshot "\$repository"\)"\n\s*test -n "\$newest"\n\s*read -r snapshot_id snapshot_epoch_value <<< "\$newest"/);
+    assert.ok(fn.indexOf("newest_snapshot") < fn.indexOf('restic -r "$repository" restore "$snapshot_id"'));
+  }
+});
+
+test("the results table and every drill failure reach the job log, not only the step summary (#495)", () => {
+  // The Actions API serves job logs but not step summaries.
+  const helper = runDrillHelper();
+  assert.match(helper, /echo "::error::\$label drill failed \(exit \$rc\)/);
+  assert.match(workflow, /cat "\$summary"\n\s*cat "\$summary" >> "\$GITHUB_STEP_SUMMARY"/);
+  assert.match(drillFunction("platform"),
+    /test -n "\$auth_file" \|\| \{ echo "::error::snapshot \$snapshot_id has no auth_users\.dump[^"]*"; return 1; \}/);
 });

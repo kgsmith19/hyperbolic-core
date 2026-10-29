@@ -142,24 +142,16 @@ jobs:
             docker run --rm --network host -e PGPASSWORD=postgres "$@"
           }
 
-          latest_snapshot() {
-            local repository="$1"
-            restic -r "$repository" snapshots --latest 1 --json \
-              | python3 -c 'import json, sys; snaps = json.load(sys.stdin); print(snaps[0]["short_id"] if snaps else "")'
-          }
-
-          # The latest snapshot's own creation time, as epoch seconds. RPO is
-          # then (now - this): how much data a restore-from-latest would lose
-          # -- a measured fact from the backup itself, never assumed (#408).
-          # python3 only extracts the JSON field (as latest_snapshot does);
-          # GNU date converts the ISO8601 timestamp (fractional seconds and Z
-          # included) to epoch.
-          snapshot_epoch() {
-            local repository="$1" iso
-            iso="$(restic -r "$repository" snapshots --latest 1 --json \
-              | python3 -c 'import json, sys; snaps = json.load(sys.stdin); print(snaps[0]["time"] if snaps else "")')"
-            test -n "$iso" || { echo ""; return 0; }
-            date -u -d "$iso" +%s
+          # The newest snapshot in the repository and its own creation time, as
+          # "<short_id> <epoch seconds>", from one listing. Not restic --latest: that
+          # is the newest per host and path group, so a backup that adds a file
+          # starts a new group and the first entry can be an older snapshot
+          # (#495). Chosen by parsed time, offsets included; restic's "Z" and
+          # 7-9 fractional digits are normalized first, so any python3 >= 3.7
+          # parses them. RPO is then (now - that time), never assumed (#408).
+          newest_snapshot() {
+            restic -r "$1" snapshots --json \
+              | python3 -c 'import datetime, json, re, sys; at = lambda s: datetime.datetime.fromisoformat(re.sub(r"\.(\d+)", lambda m: "." + (m.group(1) + "000000")[:6], s["time"]).replace("Z", "+00:00")).timestamp(); snaps = json.load(sys.stdin); newest = max(snaps, key=at, default=None); print("%s %d" % (newest["short_id"], at(newest)) if newest else "")'
           }
 
           summary="$tmp/summary.md"
@@ -183,14 +175,13 @@ jobs:
             local repository="sftp:hetzner-storagebox:/home/platform"
             restic -r "$repository" check --read-data-subset=10%
 
-            local snapshot_id
-            snapshot_id="$(latest_snapshot "$repository")"
-            test -n "$snapshot_id"
+            local newest snapshot_id snapshot_epoch_value
+            newest="$(newest_snapshot "$repository")"
+            test -n "$newest"
+            read -r snapshot_id snapshot_epoch_value <<< "$newest"
 
-            # RPO: age of the latest snapshot at the moment we drill it.
-            local snapshot_epoch_value now_epoch rpo_seconds
-            snapshot_epoch_value="$(snapshot_epoch "$repository")"
-            test -n "$snapshot_epoch_value"
+            # RPO: age of the newest snapshot at the moment we drill it.
+            local now_epoch rpo_seconds
             now_epoch="$(date +%s)"
             rpo_seconds="$(( now_epoch - snapshot_epoch_value ))"
 
@@ -210,7 +201,7 @@ jobs:
             # restore without the auth.users dump from the same snapshot (#488).
             local auth_file
             auth_file="$(find "$restore_dir" -name 'auth_users.dump' -type f | head -1)"
-            test -n "$auth_file"
+            test -n "$auth_file" || { echo "::error::snapshot $snapshot_id has no auth_users.dump: platform.dump cannot restore without it (#488)"; return 1; }
 
             docker run --rm -i "$PG_IMAGE" pg_restore --list < "$dump_file" > /dev/null
 
@@ -260,14 +251,13 @@ jobs:
             local repository="sftp:hetzner-storagebox:/home/lifeos"
             restic -r "$repository" check --read-data-subset=10%
 
-            local snapshot_id
-            snapshot_id="$(latest_snapshot "$repository")"
-            test -n "$snapshot_id"
+            local newest snapshot_id snapshot_epoch_value
+            newest="$(newest_snapshot "$repository")"
+            test -n "$newest"
+            read -r snapshot_id snapshot_epoch_value <<< "$newest"
 
-            # RPO: age of the latest snapshot at the moment we drill it.
-            local snapshot_epoch_value now_epoch rpo_seconds
-            snapshot_epoch_value="$(snapshot_epoch "$repository")"
-            test -n "$snapshot_epoch_value"
+            # RPO: age of the newest snapshot at the moment we drill it.
+            local now_epoch rpo_seconds
             now_epoch="$(date +%s)"
             rpo_seconds="$(( now_epoch - snapshot_epoch_value ))"
 
@@ -323,6 +313,7 @@ jobs:
             rc=$?
             set -e
             if [ "$rc" -ne 0 ]; then
+              echo "::error::$label drill failed (exit $rc); the log lines above name the step"
               echo "| \`$label\` | **FAIL** | | | | see job log |" >> "$summary"
               overall_status=1
             fi
@@ -330,6 +321,7 @@ jobs:
           run_drill platform
           run_drill lifeos
 
+          cat "$summary"
           cat "$summary" >> "$GITHUB_STEP_SUMMARY"
           echo "See docs/ops/runbook.md's restore-drill section for how to read this table." >> "$GITHUB_STEP_SUMMARY"
           exit "$overall_status"
