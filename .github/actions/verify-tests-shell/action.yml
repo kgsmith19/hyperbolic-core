@@ -93,6 +93,11 @@ runs:
       shell: bash
       run: npm test --workspace=@hyperbolic/review
 
+    - name: Test · packages/sqlite-kit (node --test)
+      # The one SQLite open + migration runner every Node sub-app uses (#506).
+      shell: bash
+      run: npm test --workspace=@hyperbolic/sqlite-kit
+
     - name: Test · services/llm-handler (node --test)
       shell: bash
       run: npm test --workspace=@hyperbolic/llm-handler
