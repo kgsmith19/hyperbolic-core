@@ -3,10 +3,9 @@
 from typing import Any
 from uuid import UUID
 
-from psycopg.types.json import Jsonb
-
 from kernel import db
 from kernel.access import AccessContext, has, require
+from kernel.db import Jsonb
 from kernel.models import Edge, Entity, EntityView, Event
 from kernel.services.common import entity_domains, entity_type_names, load_entity, load_type
 
@@ -64,11 +63,17 @@ def find(
             clauses.append("e.id in (select entity_id from entity_type where type_id = %s)")
             params.append(type_def.id)
         if filters:
-            clauses.append("e.attributes @> %s")
+            clauses.append("json_contains(e.attributes, %s)")
             params.append(Jsonb(filters))
         if text is not None:
-            clauses.append("e.search @@ plainto_tsquery('simple', %s)")
-            params.append(text)
+            match = db.fts_query(text)
+            if match is None:
+                clauses.append("0")  # plainto_tsquery of no words matches nothing
+            else:
+                clauses.append(
+                    "e.id in (select entity_id from entity_fts where entity_fts match %s)"
+                )
+                params.append(match)
         where = f" where {' and '.join(clauses)}" if clauses else ""
         rows = conn.execute(
             "select e.id, e.name, e.attributes, e.created_at, e.updated_at "

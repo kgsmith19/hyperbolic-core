@@ -17,10 +17,9 @@ path and adding one would be a kernel change.
 
 from typing import Any
 
-from psycopg.types.json import Jsonb
-
 from kernel import db
 from kernel.access import AccessContext, require
+from kernel.db import Jsonb
 from kernel.events import append_event, tx_now
 from kernel.services import define_type
 

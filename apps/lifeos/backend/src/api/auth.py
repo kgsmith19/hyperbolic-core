@@ -33,7 +33,7 @@ from kernel.env import read_env
 from mcp_server.tokens import AgentTokenError, decode_key
 from mcp_server.tokens import verify as verify_agent_token
 
-MODE_SUPABASE = "supabase"
+MODE_PLATFORM = "platform"
 MODE_DISABLED = "disabled"
 
 _ALGORITHMS = ["ES256"]
@@ -65,18 +65,18 @@ class AuthSettings:
 def settings() -> AuthSettings:
     """Read auth settings from the environment. Fails closed: auth is on
     unless LIFEOS_AUTH_MODE=disabled is set explicitly (local dev only)."""
-    mode = read_env("LIFEOS_AUTH_MODE") or MODE_SUPABASE
+    mode = read_env("LIFEOS_AUTH_MODE") or MODE_PLATFORM
     if mode == MODE_DISABLED:
         return AuthSettings(mode=mode, issuer="", jwks_url="", audience="", owner_user_id="")
-    if mode != MODE_SUPABASE:
+    if mode != MODE_PLATFORM:
         raise RuntimeError(
-            f"LIFEOS_AUTH_MODE must be {MODE_SUPABASE!r} or {MODE_DISABLED!r}, got {mode!r}"
+            f"LIFEOS_AUTH_MODE must be {MODE_PLATFORM!r} or {MODE_DISABLED!r}, got {mode!r}"
         )
-    base = (read_env("LIFEOS_SUPABASE_URL") or "").rstrip("/")
+    base = (read_env("LIFEOS_PLATFORM_URL") or "").rstrip("/")
     owner = read_env("LIFEOS_OWNER_USER_ID")
     if not base or not owner:
         raise RuntimeError(
-            "auth is enabled but LIFEOS_SUPABASE_URL or LIFEOS_OWNER_USER_ID is unset; "
+            "auth is enabled but LIFEOS_PLATFORM_URL or LIFEOS_OWNER_USER_ID is unset; "
             f"set both, or LIFEOS_AUTH_MODE={MODE_DISABLED} for local development"
         )
     return AuthSettings(
@@ -99,7 +99,7 @@ def _looks_like_agent_token(token: str) -> bool:
     This decides ROUTING only, never TRUST: whichever branch `authenticate`
     takes still fully verifies signature, expiry, audience and issuer itself
     against the real key for that credential kind. An owner JWT's issuer is
-    always a Supabase project URL (`settings().issuer`, never the literal
+    always the local platform URL (`settings().issuer`, never the literal
     string below), so a forged `iss: "lifeos"` claim on a token signed by
     neither key is rejected the normal way: agent-token verification runs
     and fails the signature check.

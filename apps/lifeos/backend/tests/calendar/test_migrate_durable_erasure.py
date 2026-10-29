@@ -10,11 +10,11 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from psycopg.types.json import Jsonb
 
 from domains.calendar.types import ATTENDEE_SCHEMA, define_calendar_types, email_hash
 from kernel import db
 from kernel.access import AccessContext
+from kernel.db import Jsonb
 from kernel.services import capture, find, forget, get_entity, history
 from scripts.migrate_calendar_durable_erasure import ACTOR, migrate
 

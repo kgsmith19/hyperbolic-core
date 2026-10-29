@@ -6,9 +6,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from psycopg.types.json import Jsonb
-
-from kernel.db import Connection
+from kernel.db import Connection, Jsonb
 
 PROJECTION_EVENTS = {"entity.created", "entity.updated", "edge.created", "edge.superseded"}
 
@@ -87,7 +85,7 @@ def rebuild(conn: Connection) -> int:
     entities may be deleted and re-created before commit. embedding rows are
     derived (invariant 6) and wiped with the projections.
     """
-    conn.execute("set constraints all deferred")
+    conn.defer_constraints()
     conn.execute("delete from embedding")
     conn.execute("delete from edge")
     conn.execute("delete from entity_type")

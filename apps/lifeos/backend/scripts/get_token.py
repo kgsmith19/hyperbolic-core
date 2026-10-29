@@ -1,8 +1,8 @@
-"""Sign in to Supabase Auth and print an access token for lifeos API calls.
+"""Sign in to the local platform and print an access token for lifeos API calls.
 
-Usage: `python scripts/get_token.py`. Reads LIFEOS_SUPABASE_URL and
-LIFEOS_SUPABASE_PUBLISHABLE_KEY from the environment or the repo .env,
-prompts for the owner's email and password, prints the bearer token.
+Usage: `python scripts/get_token.py`. Reads LIFEOS_PLATFORM_URL (default
+http://127.0.0.1:8400, services/platform-api) from the environment or the repo
+.env, prompts for the owner's email and password, prints the bearer token.
 """
 
 import getpass
@@ -15,17 +15,13 @@ from kernel.env import read_env
 
 
 def main() -> int:
-    base = (read_env("LIFEOS_SUPABASE_URL") or "").rstrip("/")
-    key = read_env("LIFEOS_SUPABASE_PUBLISHABLE_KEY")
-    if not base or not key:
-        print("set LIFEOS_SUPABASE_URL and LIFEOS_SUPABASE_PUBLISHABLE_KEY", file=sys.stderr)
-        return 2
+    base = (read_env("LIFEOS_PLATFORM_URL") or "http://127.0.0.1:8400").rstrip("/")
     email = input("email: ").strip()
     password = getpass.getpass("password: ")
     request = urllib.request.Request(
         f"{base}/auth/v1/token?grant_type=password",
         data=json.dumps({"email": email, "password": password}).encode(),
-        headers={"apikey": key, "Content-Type": "application/json"},
+        headers={"Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(request) as response:

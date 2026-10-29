@@ -25,8 +25,8 @@ from api.main import app
 from kernel.access import ALL_SCOPES, has
 from mcp_server.tokens import ACTION_PROPOSALS_DRAFT_SCOPE, mint
 
-SUPABASE_URL = "https://project.supabase.co"
-ISSUER = f"{SUPABASE_URL}/auth/v1"
+PLATFORM_URL = "http://127.0.0.1:8400"
+ISSUER = f"{PLATFORM_URL}/auth/v1"
 OWNER = "11111111-1111-1111-1111-111111111111"
 
 _PRIVATE_KEY = ec.generate_private_key(ec.SECP256R1())
@@ -35,9 +35,9 @@ _OTHER_KEY = ec.generate_private_key(ec.SECP256R1())
 
 
 @pytest.fixture(autouse=True)
-def supabase_mode(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.setenv("LIFEOS_AUTH_MODE", "supabase")
-    monkeypatch.setenv("LIFEOS_SUPABASE_URL", SUPABASE_URL)
+def platform_mode(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("LIFEOS_AUTH_MODE", "platform")
+    monkeypatch.setenv("LIFEOS_PLATFORM_URL", PLATFORM_URL)
     monkeypatch.setenv("LIFEOS_OWNER_USER_ID", OWNER)
     # Env vars only — a developer's repo .env must not leak into these tests.
     monkeypatch.setattr(auth, "read_env", lambda name: os.environ.get(name))
@@ -142,7 +142,7 @@ def test_disabled_mode_allows_all(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_enabled_without_config_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("LIFEOS_SUPABASE_URL")
+    monkeypatch.delenv("LIFEOS_PLATFORM_URL")
     with pytest.raises(RuntimeError, match="auth is enabled"):
         auth.settings()
 
@@ -191,8 +191,8 @@ def test_principal_rejects_an_unbounded_subject(subject: Any) -> None:
 # docs/planning/05-e-lifeos.md section 4 / ADR-03: the auth migration this
 # issue performs is an ENV RE-POINT, not a code change -- `settings()` above
 # already builds the issuer/JWKS URL and owner check from
-# LIFEOS_SUPABASE_URL/LIFEOS_OWNER_USER_ID, whichever project those name.
-# `supabase_mode` (this file's own autouse fixture) already configures those
+# LIFEOS_PLATFORM_URL/LIFEOS_OWNER_USER_ID, whichever project those name.
+# `platform_mode` (this file's own autouse fixture) already configures those
 # two vars to a stand-in "platform project" for every test in this module,
 # which is exactly what a real re-point does in production.
 #
@@ -211,13 +211,13 @@ _OLD_PROJECT_URL = "https://vhbzblllaohuljtareza.supabase.co"  # pre-migration L
 _OLD_ISSUER = f"{_OLD_PROJECT_URL}/auth/v1"
 _OLD_PRIVATE_KEY = ec.generate_private_key(ec.SECP256R1())
 
-_PLATFORM_OWNER = OWNER  # this module's `supabase_mode` fixture re-points to this owner
+_PLATFORM_OWNER = OWNER  # this module's `platform_mode` fixture re-points to this owner
 
 
 def _old_project_token(**overrides: Any) -> str:
     """A token that would have verified fine against the pre-migration
     LifeOS project: correct-shaped claims, signed with a DIFFERENT key under
-    a DIFFERENT issuer than the platform project `supabase_mode` re-points
+    a DIFFERENT issuer than the platform project `platform_mode` re-points
     `settings()` at."""
     now = int(time.time())
     claims: dict[str, Any] = {
@@ -234,8 +234,8 @@ def _old_project_token(**overrides: Any) -> str:
 
 
 def test_lo2c_stale_issuer_token_from_the_old_project_is_rejected() -> None:
-    """LO-2c. `supabase_mode` has already re-pointed `settings()` at the
-    platform project (SUPABASE_URL/ISSUER at the top of this file); this
+    """LO-2c. `platform_mode` has already re-pointed `settings()` at the
+    platform project (PLATFORM_URL/ISSUER at the top of this file); this
     token is signed by a project that migration retired. The JWKS client
     stub always hands back the PLATFORM project's public key (`_PUBLIC_KEY`)
     regardless of the token it's asked about, so this failure is the

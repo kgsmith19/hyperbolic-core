@@ -2,7 +2,7 @@
 
 ## 🎯 Purpose
 
-LifeOS is one product with two applications: `backend/` (FastAPI, the typed entity graph, Postgres migrations, jobs, and tests) and `frontend/` (React, strict TypeScript, browser tests, and the production UI). This tree is a `git subtree` copy of `kgsmith19/lifeos` inside `hyperbolic-core`. Read the nearest `AGENTS.md` before changing either application.
+LifeOS is one product with two applications: `backend/` (FastAPI, the typed entity graph on local SQLite, migrations, jobs, and tests) and `frontend/` (React, strict TypeScript, browser tests, and the production UI). This tree is a `git subtree` copy of `kgsmith19/lifeos` inside `hyperbolic-core`. Read the nearest `AGENTS.md` before changing either application.
 
 ## 📋 Product Boundaries
 
@@ -25,7 +25,7 @@ cd frontend && npm ci
 cd frontend && npm run lint && npx tsc -b && npm run test && npm run e2e && npm run build
 ```
 
-Tests use the configured database and may erase its contents. Use only an isolated LifeOS test database, never production.
+Tests use a scratch SQLite file per session (#512) and never touch the real database.
 
 ## ✅ Completion Criteria
 
