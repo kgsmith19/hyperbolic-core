@@ -95,9 +95,11 @@ test("the dump is handed off through RUNNER_TEMP, not re-dumped a second time", 
   // A second pg_dump would risk a different snapshot than the one the age
   // path just encrypted, and doubles the load on the platform database for
   // no reason. Match the actual invocation, not the pre-existing comment
-  // that mentions pg_dump's version-skew error message in prose.
-  const dumpCount = (workflow.match(/pg_dump --format=custom/g) ?? []).length;
-  assert.equal(dumpCount, 1);
+  // that mentions pg_dump's version-skew error message in prose. Exactly two
+  // dumps: the platform schemas and auth.users (#488), each once.
+  assert.equal((workflow.match(/pg_dump --format=custom/g) ?? []).length, 2);
+  assert.equal((workflow.match(/pg_dump --format=custom --no-owner \\\n\s*--schema=platform /g) ?? []).length, 1);
+  assert.equal((workflow.match(/pg_dump --format=custom --no-owner --table=auth\.users /g) ?? []).length, 1);
   assert.match(workflow, /cp "\$payload\/platform\.dump" "\$RUNNER_TEMP\/platform\.dump"/);
   assert.match(workflow, /if \[ ! -s "\$RUNNER_TEMP\/platform\.dump" \]/);
 });
@@ -212,4 +214,38 @@ test("the tailnet client is read by the restic identity from /platform/lifeos-de
   assert.match(block, /identity-id: \$\{\{ vars\.INFISICAL_PLATFORM_RESTIC_IDENTITY_ID \}\}/);
   assert.match(block, /secret-path: "\/platform\/lifeos-deploy\/"/);
   assert.ok(workflow.indexOf("- name: Tailnet client for the VPS relay") < workflow.search(TAILNET_JOIN));
+});
+
+// --- auth.users: core.run.user_id references it, so the platform schemas cannot restore without it (#488) ---
+
+const bundle = stepBlock("- name: Create, verify, and encrypt the platform schema bundle", ["\n      - uses:", "\n      - name:"]);
+
+test("auth.users is dumped with its table definition, not data-only, by the same pg17 client (#488)", () => {
+  // Production's auth service adds columns (phone, is_anonymous, ...) the pinned
+  // Supabase image's bootstrap auth.users lacks, so a data-only COPY cannot restore.
+  assert.match(
+    bundle,
+    /docker run --rm -e SUPABASE_DB_URL postgres:17 \\\n\s*sh -ec 'pg_dump --format=custom --no-owner --table=auth\.users "\$SUPABASE_DB_URL"' \\\n\s*> "\$payload\/auth_users\.dump"/,
+  );
+  assert.doesNotMatch(workflow, /--data-only/);
+});
+
+test("the auth.users dump is verified non-empty and to carry the table's data before encryption (#488)", () => {
+  assert.match(bundle, /test -s "\$payload\/auth_users\.dump"/);
+  assert.match(bundle, /pg_restore --list \\\n\s*< "\$payload\/auth_users\.dump" > "\$work\/auth_users\.list"/);
+  assert.match(bundle, /grep -q ' TABLE DATA auth users ' "\$work\/auth_users\.list"/);
+  assert.ok(bundle.indexOf("auth_users.list") < bundle.indexOf("age -r"), "verify before encrypting");
+});
+
+test("the auth.users dump rides the age bundle: checksummed and tarred (#488)", () => {
+  assert.match(bundle, /sha256sum platform\.dump auth_users\.dump MIGRATION_LEDGER\.txt > SHA256SUMS/);
+  assert.match(bundle, /\n\s*platform\.dump auth_users\.dump MIGRATION_LEDGER\.txt SHA256SUMS\n/);
+});
+
+test("the auth.users dump is handed off and lands in the same restic snapshot as platform.dump (#488)", () => {
+  const copy = bundle.indexOf('cp "$payload/auth_users.dump" "$RUNNER_TEMP/auth_users.dump"');
+  assert.ok(copy > -1 && copy < bundle.indexOf("age -r"), "handoff before the age trap");
+  const backup = stepBlock("- name: Back up the platform dump to the Hetzner Storage Box (restic)", ["- name: Record the run id"]);
+  assert.match(backup, /if \[ ! -s "\$RUNNER_TEMP\/auth_users\.dump" \]/);
+  assert.match(backup, /restic -r "\$repository" backup "\$RUNNER_TEMP\/platform\.dump" "\$RUNNER_TEMP\/auth_users\.dump" \\\n/);
 });
