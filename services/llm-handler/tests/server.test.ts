@@ -29,8 +29,8 @@ async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Prom
 
 const CONFIG: HandlerConfig = {
   port: 0,
-  supabaseUrl: "https://proj.supabase.co",
-  supabasePublishableKey: "anon-key",
+  platformUrl: "http://platform.test",
+  platformAnonKey: "anon-key",
   githubIntakePat: "ghp_fixture",
   // Both required by HandlerConfig and both were missing: this fixture was a
   // shape loadConfig() can never produce, which nothing caught while the tests

@@ -184,7 +184,7 @@ test("expired latest entries send their cached version as p_if_version and accep
   ]);
 });
 
-test("a trailing slash on supabaseUrl is normalized (no double slash in the request path)", async (t) => {
+test("a trailing slash on platformUrl is normalized (no double slash in the request path)", async (t) => {
   const spy = t.mock.fn(
     onlyRpc(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));

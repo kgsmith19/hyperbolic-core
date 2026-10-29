@@ -48,15 +48,15 @@ export interface BrainConfig {
    * break that whole surface for no reason. The API server's own job is
    * refusing every /api/brain/* route with 401 when these aren't
    * configured, not crashing the process. */
-  readonly supabaseUrl?: string;
-  readonly supabasePublishableKey?: string;
+  readonly platformUrl?: string;
+  readonly platformAnonKey?: string;
   /** m4-17's core.log_run mirror (core-mirror.ts) -- optional for the same
-   * reason supabaseUrl/supabasePublishableKey are: the CLI/state-store
+   * reason platformUrl/platformAnonKey are: the CLI/state-store
    * surface has never needed Supabase, and a deploy that hasn't
    * provisioned this yet should mirror nothing rather than fail to
    * start. mirrorRunToCore's own job is skipping the write (not
    * throwing) when this is undefined. */
-  readonly supabaseServiceRoleKey?: string;
+  readonly platformServiceKey?: string;
   /** Scoped agent token verification (ADR-03's "scoped agent token"
    * option) -- also optional; a deploy that hasn't provisioned agent
    * tokens yet (true for V1 until m4-20 mints one from LifeOS) simply
@@ -147,9 +147,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrainConfig {
     approvalTtlMs,
     repoRoot,
     evalsCasesDir,
-    supabaseUrl: env.SUPABASE_URL,
-    supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY,
-    supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+    platformUrl: env.PLATFORM_URL,
+    platformAnonKey: env.PLATFORM_ANON_KEY,
+    platformServiceKey: env.PLATFORM_SERVICE_KEY,
     agentTokenPublicKeyPem,
     agentTokenIssuer,
     agentTokenAudience,

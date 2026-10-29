@@ -73,8 +73,8 @@ function sseResponse(events: Array<{ event: string; data: unknown }>): Response 
 
 const CONFIG: HandlerConfig = {
   port: 0,
-  supabaseUrl: "https://proj.supabase.co",
-  supabasePublishableKey: "anon-key",
+  platformUrl: "http://platform.test",
+  platformAnonKey: "anon-key",
   githubIntakePat: "ghp_fixture",
   llmCredentials: { anthropic: { apiKey: "fixture-anthropic-key" } },
   llmMaxConcurrencyPerCaller: 2,

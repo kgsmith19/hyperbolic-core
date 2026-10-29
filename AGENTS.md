@@ -35,29 +35,19 @@ nested path — and they must never be copied or moved to the root.
 > every push to `main` and publish a Docker image to `ghcr.io/kgsmith19/hyperbolic-core`. That is
 > the kind of accident this rule exists to prevent.
 
-## ⚠️ The platform publishable key has six hardcoded copies
+## ⚠️ Two legacy copies of the old Supabase publishable key remain
 
-The same Supabase publishable (anon) key literal is hardcoded in six files across five trees:
+The local platform (`services/platform-api`, #508) checks no apikey header, so the Shell, LifeOS,
+`packages/platform-client` and `packages/llm` default to `http://127.0.0.1:8400` with a placeholder
+key (#510). The old Supabase publishable (anon) key literal survives only in the prompt-organizer
+and toolbelt test trees, which move to the local platform in their own Phase 2 Issue:
 
 ```
-apps/lifeos/frontend/src/lib/session.ts
-apps/shell/frontend/src/lib/session.ts
 apps/toolbelt/apps/prompt-organizer/frontend/index.html
 apps/toolbelt/tests/helpers.mjs
-packages/llm/src/prompt-client.ts
-packages/platform-client/src/registry.ts
 ```
 
-This is **not** a leaked secret — a publishable key is public by design, ships in browser
-bundles, and RLS is the authorization boundary (`registry.ts` says so at its declaration). It is
-an *operational* hazard: rotating that key means locating and editing six files in five trees,
-and nothing fails loudly if one is missed — the stale copy just starts 401ing at runtime for
-whichever surface owns it.
-
-`packages/platform-client` is the shared platform access layer and is the natural single owner.
-Consolidating is not free: `prompt-organizer`'s copy sits in a plain `index.html` that cannot
-import a TS package, and not every consumer currently depends on `platform-client`. Treat this
-as a known hazard to fix deliberately, and if you rotate the key before then, change all six.
+It is public by design, not a leaked secret; it simply stops mattering once those two move.
 
 ## Owner authority
 

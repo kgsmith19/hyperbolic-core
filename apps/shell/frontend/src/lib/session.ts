@@ -19,26 +19,24 @@ import {
   type BrainClient,
 } from "@hyperbolic/platform-client";
 
-// ADR-03: the toolbelt Supabase project (woltgcggxaehtuypkxqk) is the
-// platform IdP. URL + publishable key are public by design (apps/toolbelt/config.mjs's
-// own comment says exactly this: "the anon key is designed for client-side
-// exposure, RLS is the actual boundary"), so hardcoding them as the default
-// here is deliberate, not a leak -- VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY
-// override for a different project (.env.example).
-const DEFAULT_SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
-const DEFAULT_SUPABASE_PUBLISHABLE_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
+// The local platform service (services/platform-api, #508) is the IdP and data
+// API for every zone: the owner decided on 2026-10-29 that the platform is
+// local-only. It needs no apikey header, so the anon key is only a
+// placeholder unless VITE_PLATFORM_ANON_KEY supplies the one `cli.ts init`
+// wrote. VITE_PLATFORM_URL overrides the default address.
+const DEFAULT_PLATFORM_URL = "http://127.0.0.1:8400";
+const DEFAULT_PLATFORM_ANON_KEY = "local";
 
 // Exported (m3-07) so other same-project PostgREST clients (src/lib/intake.ts,
 // alongside src/lib/registry.ts's own local pattern) reuse this exact
 // URL/key pair instead of re-declaring the default anon key a third time.
-export const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-export const SUPABASE_PUBLISHABLE_KEY =
-  import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY || DEFAULT_SUPABASE_PUBLISHABLE_KEY;
+export const PLATFORM_URL = import.meta.env?.VITE_PLATFORM_URL || DEFAULT_PLATFORM_URL;
+export const PLATFORM_ANON_KEY =
+  import.meta.env?.VITE_PLATFORM_ANON_KEY || DEFAULT_PLATFORM_ANON_KEY;
 
 export const platformClient: PlatformClient = createPlatformClient({
-  supabaseUrl: SUPABASE_URL,
-  publishableKey: SUPABASE_PUBLISHABLE_KEY,
+  platformUrl: PLATFORM_URL,
+  anonKey: PLATFORM_ANON_KEY,
 });
 
 // m3-04: the registry client rides the SAME session URL/token as
@@ -49,7 +47,7 @@ export const platformClient: PlatformClient = createPlatformClient({
 // with zero network calls when there is no session, matching AuthedFetch's
 // own fail-closed contract in packages/platform-client/src/index.ts.
 export const registryClient: RegistryClient = createRegistryClient(
-  SUPABASE_URL,
+  PLATFORM_URL,
   async () => {
     const session = await platformClient.auth.getSession();
     if (!session) {
@@ -57,11 +55,11 @@ export const registryClient: RegistryClient = createRegistryClient(
     }
     return session.accessToken;
   },
-  SUPABASE_PUBLISHABLE_KEY,
+  PLATFORM_ANON_KEY,
 );
 
 // m4-16: the Brain's HTTP+SSE origin (m4-14, services/brain, no VITE_
-// prefix collision with SUPABASE_URL above -- a genuinely different
+// prefix collision with PLATFORM_URL above -- a genuinely different
 // backend, not PostgREST). Same fail-closed getAccessToken shape as
 // registryClient above: defers to the one session source of truth, zero
 // network calls when there is no session.

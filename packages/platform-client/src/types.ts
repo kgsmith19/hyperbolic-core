@@ -13,13 +13,13 @@ export type Unsubscribe = () => void;
 
 export interface PlatformClientConfig {
   /** Platform IdP project URL (ADR-03): the toolbelt Supabase project. */
-  supabaseUrl: string;
+  platformUrl: string;
   /** Supabase publishable key; public by design, safe in a browser bundle. */
-  publishableKey: string;
+  anonKey: string;
   /**
    * Extra absolute origins `authedFetch` (src/index.ts) is willing to attach
    * the live bearer token to, beyond same-origin-with-the-page (always
-   * allowed) and `supabaseUrl`'s own origin (always allowed). Optional and
+   * allowed) and `platformUrl`'s own origin (always allowed). Optional and
    * empty by default: this is the fix for the authedFetch token-exfiltration
    * finding closed in src/index.ts, and every real call site in this repo
    * today (apps/shell) only ever needs those two origins, so nothing in the

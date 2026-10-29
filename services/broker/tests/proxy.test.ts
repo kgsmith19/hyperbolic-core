@@ -994,7 +994,7 @@ test("proxyRequest: a request naming no estimatedCostUsd at all is completely un
       const result = await proxyRequest(
         { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http" },
         KNOWN_CALLER_POLICY,
-        { log: (entry) => logged.push(entry), budget: { supabaseUrl: "http://127.0.0.1:1", serviceRoleKey: "k" } },
+        { log: (entry) => logged.push(entry), budget: { platformUrl: "http://127.0.0.1:1", serviceRoleKey: "k" } },
       );
       assert.equal(result.status, 200);
       assert.equal(logged[0]!.estimatedCostUsd, undefined);
@@ -1020,7 +1020,7 @@ test("proxyRequest: estimatedCostUsd with a provisioned budget config runs the s
         const result = await proxyRequest(
           { caller: "llm-handler", token: "t", targetHost: `127.0.0.1:${port}`, protocol: "http", estimatedCostUsd: 5 }, // 18 + 5 = 23 > 20
           budgetedPolicy,
-          { log: (entry) => logged.push(entry), budget: { supabaseUrl: "http://127.0.0.1:9999", serviceRoleKey: "k" } },
+          { log: (entry) => logged.push(entry), budget: { platformUrl: "http://127.0.0.1:9999", serviceRoleKey: "k" } },
         );
         assert.equal(result.status, 200, "log-only: exceeding budget never blocks the actual proxied request");
         assert.equal(bodyText(result), "reached the target despite exceeding budget");
@@ -1064,7 +1064,7 @@ test("proxyRequest: a credential-refused request never triggers a spend-check ne
         estimatedCostUsd: 5,
       },
       CREDENTIAL_POLICY,
-      { credentials: PROVISIONED_CREDENTIALS, callerTokens: REAL_CALLER_TOKENS, budget: { supabaseUrl: "http://127.0.0.1:9999", serviceRoleKey: "k" } },
+      { credentials: PROVISIONED_CREDENTIALS, callerTokens: REAL_CALLER_TOKENS, budget: { platformUrl: "http://127.0.0.1:9999", serviceRoleKey: "k" } },
     );
     assert.equal(result.status, 403);
   } finally {
@@ -1092,7 +1092,7 @@ test("proxyRequest: after a successful forward, the estimated cost is recorded t
         const result = await proxyRequest(
           { caller: "llm-handler", token: "t", targetHost: expectedTargetHost, protocol: "http", estimatedCostUsd: 0.0042 },
           KNOWN_CALLER_POLICY,
-          { budget: { supabaseUrl: "http://127.0.0.1:9999", serviceRoleKey: "k" } },
+          { budget: { platformUrl: "http://127.0.0.1:9999", serviceRoleKey: "k" } },
         );
         assert.equal(result.status, 200);
         // logBrokerCall is fire-and-forget (never awaited by proxyRequest

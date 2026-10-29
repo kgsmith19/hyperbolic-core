@@ -44,8 +44,8 @@ function readJsonBodySafe(req: http.IncomingMessage): Promise<Record<string, unk
  * RPC or agent-token signature check. */
 async function requireAuth(req: http.IncomingMessage, res: http.ServerResponse, config: BrainConfig) {
   const principal = await authenticate(req.headers.authorization, {
-    supabaseUrl: config.supabaseUrl,
-    supabasePublishableKey: config.supabasePublishableKey,
+    platformUrl: config.platformUrl,
+    platformAnonKey: config.platformAnonKey,
     agentTokenPublicKeyPem: config.agentTokenPublicKeyPem,
     agentTokenIssuer: config.agentTokenIssuer,
     agentTokenAudience: config.agentTokenAudience,

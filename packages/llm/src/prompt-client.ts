@@ -18,9 +18,9 @@
  * no way to supply a Supabase URL or an access token would have to break
  * that rule (reading an env var) or hide a lazily-initialized singleton
  * behind the first call (hidden global state, worse). Instead this file
- * exports a factory, `createPromptClient(supabaseUrl, getAccessToken,
+ * exports a factory, `createPromptClient(platformUrl, getAccessToken,
  * options?)`, mirroring packages/platform-client/src/registry.ts's
- * `createRegistryClient(supabaseUrl, getAccessToken)` -- the one other
+ * `createRegistryClient(platformUrl, getAccessToken)` -- the one other
  * PostgREST client already in this monorepo -- exactly: two required
  * parameters in the same order, `getAccessToken` re-invoked on every network
  * operation (so token refresh works without reconstructing the client), and
@@ -107,14 +107,12 @@ export class MissingVariablesError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// The anon key. Byte-identical to packages/platform-client/src/registry.ts's
-// DEFAULT_ANON_KEY -- same Supabase project, same "public by design, RLS is
-// the real boundary" posture (apps/toolbelt/apps/prompt-organizer/config.mjs
-// carries the same comment).
+// The anon key. The local platform (services/platform-api, #508) checks no
+// apikey header, so this is a placeholder, matching platform-client's
+// registry DEFAULT_ANON_KEY.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
+const DEFAULT_ANON_KEY = "local";
 
 const DEFAULT_MAX_PINNED_ENTRIES = 128;
 const DEFAULT_LATEST_TTL_MS = 60_000;
@@ -309,8 +307,8 @@ async function readRpcResponse<T>(res: Response, rpcName: string): Promise<T> {
 // createPromptClient
 // ---------------------------------------------------------------------------
 
-export function createPromptClient(supabaseUrl: string, getAccessToken: () => Promise<string>, options: PromptClientOptions = {}): PromptClient {
-  const base = supabaseUrl.replace(/\/+$/, "");
+export function createPromptClient(platformUrl: string, getAccessToken: () => Promise<string>, options: PromptClientOptions = {}): PromptClient {
+  const base = platformUrl.replace(/\/+$/, "");
   const apiKey = options.anonKey ?? DEFAULT_ANON_KEY;
   const maxPinnedEntries = options.maxPinnedEntries ?? DEFAULT_MAX_PINNED_ENTRIES;
   const latestTtlMs = options.latestTtlMs ?? DEFAULT_LATEST_TTL_MS;

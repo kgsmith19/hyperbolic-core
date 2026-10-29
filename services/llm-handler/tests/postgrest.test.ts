@@ -33,7 +33,7 @@ test("fetchIdeaForSubmit: an invalid ideaId resolves null without any network ca
       return new Response("[]", { status: 200 });
     },
     async () => {
-      const result = await fetchIdeaForSubmit("https://proj.supabase.co", "anon", "token", "not-a-uuid");
+      const result = await fetchIdeaForSubmit("http://platform.test", "anon", "token", "not-a-uuid");
       assert.equal(result, null);
     }
   );
@@ -44,7 +44,7 @@ test("fetchIdeaForSubmit: builds the exact request shape (Accept-Profile: intake
   await withPatchedFetch(
     async (input, init) => {
       const url = new URL(String(input));
-      assert.equal(url.origin, "https://proj.supabase.co");
+      assert.equal(url.origin, "http://platform.test");
       assert.equal(url.pathname, "/rest/v1/idea");
       assert.equal(url.searchParams.get("id"), `eq.${VALID_ID}`);
       assert.match(url.searchParams.get("select") ?? "", /parent:parent_idea_id\(github_issue_url\)/);
@@ -73,7 +73,7 @@ test("fetchIdeaForSubmit: builds the exact request shape (Accept-Profile: intake
       );
     },
     async () => {
-      const idea = await fetchIdeaForSubmit("https://proj.supabase.co", "anon-key", "caller-jwt", VALID_ID);
+      const idea = await fetchIdeaForSubmit("http://platform.test", "anon-key", "caller-jwt", VALID_ID);
       assert.ok(idea);
       assert.equal(idea?.status, "idea");
       assert.equal(idea?.parentGithubIssueUrl, "https://github.com/o/r/issues/1");
@@ -105,7 +105,7 @@ test("fetchIdeaForSubmit: no parent set maps to parentGithubIssueUrl null", asyn
         { status: 200 }
       ),
     async () => {
-      const idea = await fetchIdeaForSubmit("https://proj.supabase.co", "anon", "token", VALID_ID);
+      const idea = await fetchIdeaForSubmit("http://platform.test", "anon", "token", VALID_ID);
       assert.equal(idea?.parentGithubIssueUrl, null);
     }
   );
@@ -115,7 +115,7 @@ test("fetchIdeaForSubmit: an empty result set (RLS-hidden or nonexistent row) re
   await withPatchedFetch(
     async () => new Response("[]", { status: 200 }),
     async () => {
-      const result = await fetchIdeaForSubmit("https://proj.supabase.co", "anon", "token", VALID_ID);
+      const result = await fetchIdeaForSubmit("http://platform.test", "anon", "token", VALID_ID);
       assert.equal(result, null);
     }
   );
@@ -125,7 +125,7 @@ test("fetchIdeaForSubmit: a non-2xx response resolves null, never throws", async
   await withPatchedFetch(
     async () => new Response("error", { status: 500 }),
     async () => {
-      const result = await fetchIdeaForSubmit("https://proj.supabase.co", "anon", "token", VALID_ID);
+      const result = await fetchIdeaForSubmit("http://platform.test", "anon", "token", VALID_ID);
       assert.equal(result, null);
     }
   );
@@ -139,7 +139,7 @@ test("writeBackSubmitted: an invalid ideaId resolves false without any network c
       return new Response("{}", { status: 200 });
     },
     async () => {
-      const result = await writeBackSubmitted("https://proj.supabase.co", "service-role-key", "not-a-uuid", {
+      const result = await writeBackSubmitted("http://platform.test", "service-role-key", "not-a-uuid", {
         number: 1,
         htmlUrl: "https://github.com/o/r/issues/1",
       });
@@ -152,7 +152,7 @@ test("writeBackSubmitted: an invalid ideaId resolves false without any network c
 test("writeBackSubmitted: calls the mark_submitted_to_github RPC with the service-role key, not any caller token", async () => {
   await withPatchedFetch(
     async (input, init) => {
-      assert.equal(String(input), "https://proj.supabase.co/rest/v1/rpc/mark_submitted_to_github");
+      assert.equal(String(input), "http://platform.test/rest/v1/rpc/mark_submitted_to_github");
       assert.equal(init?.method, "POST");
       const headers = init?.headers as Record<string, string>;
       assert.equal(headers.apikey, "service-role-key");
@@ -167,7 +167,7 @@ test("writeBackSubmitted: calls the mark_submitted_to_github RPC with the servic
       return new Response(JSON.stringify({ id: VALID_ID, status: "submitted_to_github" }), { status: 200 });
     },
     async () => {
-      const result = await writeBackSubmitted("https://proj.supabase.co", "service-role-key", VALID_ID, {
+      const result = await writeBackSubmitted("http://platform.test", "service-role-key", VALID_ID, {
         number: 7,
         htmlUrl: "https://github.com/o/r/issues/7",
       });
@@ -180,7 +180,7 @@ test("writeBackSubmitted: a non-ok RPC response (e.g. the guard trigger raising)
   await withPatchedFetch(
     async () => new Response(JSON.stringify({ message: "II-1: illegal transition draft -> submitted_to_github" }), { status: 400 }),
     async () => {
-      const result = await writeBackSubmitted("https://proj.supabase.co", "service-role-key", VALID_ID, {
+      const result = await writeBackSubmitted("http://platform.test", "service-role-key", VALID_ID, {
         number: 1,
         htmlUrl: "https://github.com/o/r/issues/1",
       });

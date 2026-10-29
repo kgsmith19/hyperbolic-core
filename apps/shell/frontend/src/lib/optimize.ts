@@ -18,7 +18,7 @@
 //
 // II-4: this file never touches a provider API key or the Brain key -- it
 // only ever calls Handler A's HTTP surface with the operator's own session.
-import { platformClient, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "./session";
+import { platformClient, PLATFORM_URL, PLATFORM_ANON_KEY } from "./session";
 import { accessToken } from "./postgrest";
 import type { Confidence, Idea } from "./intake";
 
@@ -51,10 +51,10 @@ const TIMEOUT_MS = 30_000;
 
 async function getOptimizePrompt(variables: Record<string, string>): Promise<string> {
   const token = await accessToken("optimize-client");
-  const res = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/rpc/get_prompt`, {
+  const res = await fetch(`${PLATFORM_URL.replace(/\/+$/, "")}/rest/v1/rpc/get_prompt`, {
     method: "POST",
     headers: {
-      apikey: SUPABASE_PUBLISHABLE_KEY,
+      apikey: PLATFORM_ANON_KEY,
       Authorization: `Bearer ${token}`,
       "Content-Profile": "prompt",
       "Content-Type": "application/json",
@@ -135,10 +135,10 @@ async function completeOptimizePrompt(promptText: string, runRef: string): Promi
  * happened and must be attributed even if the user discards the draft. */
 async function logOptimization(inputIdeaId: string, model: string, handlerRunId: string): Promise<void> {
   const token = await accessToken("optimize-client");
-  const res = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/optimization`, {
+  const res = await fetch(`${PLATFORM_URL.replace(/\/+$/, "")}/rest/v1/optimization`, {
     method: "POST",
     headers: {
-      apikey: SUPABASE_PUBLISHABLE_KEY,
+      apikey: PLATFORM_ANON_KEY,
       Authorization: `Bearer ${token}`,
       "Content-Profile": "intake",
       "Content-Type": "application/json",

@@ -20,7 +20,7 @@ const credentials = loadCredentials(process.env, policy);
 const callerTokens = loadCallerTokens(process.env, Object.keys(policy));
 // Same dark-until-provisioned convention (issue #200): a request naming
 // estimatedCostUsd simply skips the spend-check entirely until the owner
-// provisions SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY.
+// provisions PLATFORM_URL/PLATFORM_SERVICE_KEY.
 const budget = loadBudgetConfig(process.env);
 const server = await startServer(config.port, policy, { credentials, callerTokens, budget });
 const address = server.address();

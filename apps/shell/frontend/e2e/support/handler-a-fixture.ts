@@ -2,7 +2,7 @@
 // code (src/server.ts's createHandler, unmodified) as a real local
 // node:http server, wired at its two real dependency boundaries:
 //
-//   1. Postgres/PostgREST -- points HandlerConfig.supabaseUrl at
+//   1. Postgres/PostgREST -- points HandlerConfig.platformUrl at
 //      ./intake-fixture.ts's real Postgres-backed shim, so
 //      src/postgrest.ts's fetchIdeaForSubmit/writeBackSubmitted and
 //      src/auth.ts's verifyOwnerSession all run their real request logic
@@ -42,9 +42,9 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 export async function setupHandlerAFixture(opts: {
-  supabaseUrl: string;
+  platformUrl: string;
   serviceRoleKey: string;
-  supabasePublishableKey?: string;
+  platformAnonKey?: string;
 }): Promise<HandlerAFixture> {
   const createdIssues: FixtureCreatedIssue[] = [];
   let nextIssueNumber = 5001;
@@ -76,8 +76,8 @@ export async function setupHandlerAFixture(opts: {
 
   const config: HandlerConfig = {
     port: 0,
-    supabaseUrl: opts.supabaseUrl,
-    supabasePublishableKey: opts.supabasePublishableKey ?? "fixture-publishable-key",
+    platformUrl: opts.platformUrl,
+    platformAnonKey: opts.platformAnonKey ?? "fixture-publishable-key",
     githubIntakePat: "fixture-github-intake-pat",
   };
 

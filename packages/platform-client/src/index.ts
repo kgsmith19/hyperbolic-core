@@ -106,11 +106,11 @@ async function isOwnerSession(
 ): Promise<boolean> {
   try {
     const res = await globalThis.fetch(
-      `${config.supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/is_platform_owner`,
+      `${config.platformUrl.replace(/\/+$/, "")}/rest/v1/rpc/is_platform_owner`,
       {
         method: "POST",
         headers: {
-          apikey: config.publishableKey,
+          apikey: config.anonKey,
           Authorization: `Bearer ${session.accessToken}`,
           "Content-Profile": "core",
           "Content-Type": "application/json",
@@ -173,7 +173,7 @@ async function enforceOwner(
  * is what lets every zone share the one login session.
  */
 export function createPlatformClient(config: PlatformClientConfig): PlatformClient {
-  const supabase = createClient(config.supabaseUrl, config.publishableKey, {
+  const supabase = createClient(config.platformUrl, config.anonKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
@@ -319,12 +319,12 @@ export function createPlatformClient(config: PlatformClientConfig): PlatformClie
  * checked separately in `isOriginAllowed` since it depends on
  * `globalThis.location` at CALL time, not at client-construction time).
  *
- * `config.supabaseUrl`'s origin is included unconditionally: it is the one
+ * `config.platformUrl`'s origin is included unconditionally: it is the one
  * absolute origin ADR-03's "one IdP" posture makes legitimate for every zone
  * (registry.ts's own PostgREST calls sit beside authedFetch, not through it,
  * today -- but a future direct-to-Supabase caller going through
  * `client.fetch` is exactly the case this exists for). It is derived from
- * the caller's own config, never hardcoded, so it tracks VITE_SUPABASE_URL /
+ * the caller's own config, never hardcoded, so it tracks VITE_PLATFORM_URL /
  * whatever project the client was actually constructed against.
  *
  * `config.additionalAllowedOrigins` is the escape hatch for any other origin
@@ -338,7 +338,7 @@ export function createPlatformClient(config: PlatformClientConfig): PlatformClie
  */
 function buildAllowedOrigins(config: PlatformClientConfig): ReadonlySet<string> {
   const origins = new Set<string>();
-  origins.add(new URL(config.supabaseUrl).origin);
+  origins.add(new URL(config.platformUrl).origin);
   for (const extra of config.additionalAllowedOrigins ?? []) {
     origins.add(new URL(extra).origin);
   }

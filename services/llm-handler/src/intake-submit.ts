@@ -8,8 +8,8 @@ import { fetchIdeaForSubmit, writeBackSubmitted, type IdeaForSubmit } from "./po
 import { GithubSubmitError, type SubmitOutcome } from "./types.ts";
 
 export interface SubmitDeps {
-  readonly supabaseUrl: string;
-  readonly supabasePublishableKey: string;
+  readonly platformUrl: string;
+  readonly platformAnonKey: string;
   readonly serviceRoleKey: string;
   readonly githubIntakePat: string;
 }
@@ -51,7 +51,7 @@ function buildLabels(idea: IdeaForSubmit): string[] {
 }
 
 async function doSubmit(deps: SubmitDeps, bearerToken: string, ideaId: string): Promise<SubmitOutcome> {
-  const idea = await fetchIdeaForSubmit(deps.supabaseUrl, deps.supabasePublishableKey, bearerToken, ideaId);
+  const idea = await fetchIdeaForSubmit(deps.platformUrl, deps.platformAnonKey, bearerToken, ideaId);
   if (!idea) {
     return { kind: "error", errorClass: "validation", message: "idea not found or not visible to this session" };
   }
@@ -89,7 +89,7 @@ async function doSubmit(deps: SubmitDeps, bearerToken: string, ideaId: string): 
       });
     }
 
-    const wroteBack = await writeBackSubmitted(deps.supabaseUrl, deps.serviceRoleKey, ideaId, {
+    const wroteBack = await writeBackSubmitted(deps.platformUrl, deps.serviceRoleKey, ideaId, {
       number: issue.number,
       htmlUrl: issue.htmlUrl,
     });

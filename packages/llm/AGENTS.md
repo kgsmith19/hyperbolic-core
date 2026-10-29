@@ -8,7 +8,7 @@
 
 - Zero key handling. Callers pass credentials in per call; this package never reads them from the environment and never stores them.
 - Drivers normalize to the shared contract. Provider-specific behavior must not leak into the public surface.
-- `src/prompt-client.ts` holds one of the six hardcoded copies of the platform publishable key. See the repo-root `AGENTS.md`: rotating that key means editing all six.
+- `src/prompt-client.ts` defaults to the local platform's placeholder anon key (#510); no Supabase key is hardcoded here any more.
 - Importing this package into a browser bundle pulls in three provider SDKs. `apps/shell` deliberately ports two modules rather than importing it, to stay inside its size budget — see `apps/shell/TEST_LEDGER.md`.
 - Make the smallest clear change that completely resolves its linked GitHub Issue.
 - Preserve behavior-focused tests; never weaken assertions to make a gate pass.

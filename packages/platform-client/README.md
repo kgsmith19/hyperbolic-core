@@ -58,7 +58,5 @@ src/brain.ts         createBrainClient — runs/tasks/SSE events/cost summaries
   security findings fixed here: Finding #47 (a merely-authenticated Supabase
   subject is not sufficient — the subject must be the platform owner) and a
   token-exfiltration fix (the origin allowlist on `authedFetch`).
-- The root `AGENTS.md`'s "platform publishable key has six hardcoded copies"
-  section names `packages/platform-client/src/registry.ts` as one of the six
-  hardcoded copies and this package as the natural consolidation owner for
-  that hazard.
+- `src/registry.ts` defaults to the local platform (`services/platform-api`,
+  #508) with a placeholder anon key (#510); no Supabase key is hardcoded here.

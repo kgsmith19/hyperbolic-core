@@ -81,14 +81,11 @@ const SELECT_COLUMNS =
   "id,name,schema_name,status,kind,route,version,description,manifest_hash,registered_at";
 
 /**
- * Default project publishable key. RLS remains the authorization boundary,
- * but Supabase's gateway still requires this public `apikey` header. The
- * optional third factory argument lets a documented URL/key override remain
- * one coherent project configuration while preserving the original two-arg
- * API for default-project callers.
+ * Default anon key. The local platform (services/platform-api, #508) checks
+ * no apikey header, so this is a placeholder; an explicit third argument still
+ * keeps a URL/key override one coherent configuration.
  */
-const DEFAULT_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
+const DEFAULT_ANON_KEY = "local";
 
 /**
  * Builds the `?select=...&status=in.(...)&kind=in.(...)` querystring for
@@ -119,12 +116,12 @@ export function buildListToolsParams(filter?: RegistryFilter): URLSearchParams {
 }
 
 export function createRegistryClient(
-  supabaseUrl: string,
+  platformUrl: string,
   getAccessToken: () => Promise<string>,
-  publishableKey: string = DEFAULT_ANON_KEY,
+  anonKey: string = DEFAULT_ANON_KEY,
 ): RegistryClient {
-  const base = supabaseUrl.replace(/\/+$/, "");
-  if (!publishableKey.trim()) throw new Error("registry-client: publishable key is required");
+  const base = platformUrl.replace(/\/+$/, "");
+  if (!anonKey.trim()) throw new Error("registry-client: anon key is required");
 
   async function request(params: URLSearchParams): Promise<RegisteredTool[]> {
     // Fail closed before issuing any network request, matching
@@ -135,7 +132,7 @@ export function createRegistryClient(
     const token = await getAccessToken();
     const res = await fetch(`${base}/rest/v1/app?${params.toString()}`, {
       headers: {
-        apikey: publishableKey,
+        apikey: anonKey,
         Authorization: `Bearer ${token}`,
         // Verified live against the platform project: `pgrst.db_schemas` is
         // `public, core, idea, prompt, ...` with `public` first, so a GET

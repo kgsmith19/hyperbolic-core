@@ -1,6 +1,6 @@
 // core.llm_call writes (08-llm-handlers.md section 6) via core.log_llm_call
 // -- the caller's own bearer token, never the service-role key (see
-// config.ts's comment on why /v1/* never touches SUPABASE_SERVICE_ROLE_KEY).
+// config.ts's comment on why /v1/* never touches PLATFORM_SERVICE_KEY).
 // Same "ride the caller's JWT through PostgREST" posture as postgrest.ts's
 // fetchIdeaForSubmit, and the same FR-007 RPC-not-raw-insert convention
 // core.log_run's callers already follow.
@@ -27,16 +27,16 @@ export interface LlmCallLogEntry {
  * handlers still return the real LlmResponse/stream to the caller either
  * way. */
 export async function logLlmCall(
-  supabaseUrl: string,
-  supabasePublishableKey: string,
+  platformUrl: string,
+  platformAnonKey: string,
   bearerToken: string,
   entry: LlmCallLogEntry
 ): Promise<boolean> {
   try {
-    const res = await fetch(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/log_llm_call`, {
+    const res = await fetch(`${platformUrl.replace(/\/+$/, "")}/rest/v1/rpc/log_llm_call`, {
       method: "POST",
       headers: {
-        apikey: supabasePublishableKey,
+        apikey: platformAnonKey,
         Authorization: `Bearer ${bearerToken}`,
         "Content-Profile": "core",
         "Content-Type": "application/json",

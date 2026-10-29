@@ -27,17 +27,17 @@
 import { createPromptClient } from "../src/prompt-client.ts";
 
 async function main(): Promise<void> {
-  const supabaseUrl = process.env.PROMPT_ORGANIZER_URL;
+  const platformUrl = process.env.PROMPT_ORGANIZER_URL;
   const name = process.env.PROMPT_NAME ?? "m4-04/example-fixture";
 
   const getAccessToken = async (): Promise<string> => {
-    if (!supabaseUrl) return "fixture-token"; // fake-transport mode, see below
+    if (!platformUrl) return "fixture-token"; // fake-transport mode, see below
     const token = process.env.PROMPT_ACCESS_TOKEN;
     if (!token) throw new Error("PROMPT_ACCESS_TOKEN is not set");
     return token;
   };
 
-  if (!supabaseUrl) {
+  if (!platformUrl) {
     // No real project configured -- fall back to an in-process fake so this
     // script still demonstrates and exercises the real getPrompt contract
     // end to end without live credentials. See this file's own header
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
     installFakeTransport(name);
   }
 
-  const client = createPromptClient(supabaseUrl ?? "https://example.supabase.invalid", getAccessToken);
+  const client = createPromptClient(platformUrl ?? "http://platform.invalid", getAccessToken);
 
   const rendered = await client.getPrompt(name, { variables: { EXAMPLE: "hyperbolic-core" } });
 

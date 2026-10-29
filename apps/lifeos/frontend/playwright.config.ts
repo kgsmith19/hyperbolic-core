@@ -30,8 +30,8 @@ export default defineConfig({
     // ("/life/api", same-origin relative) is real behavior this suite
     // exercises, not a value to paper over with an absolute mock origin.
     env: {
-      VITE_SUPABASE_URL: "https://test.supabase.co",
-      VITE_SUPABASE_PUBLISHABLE_KEY: "test-public-anon-key",
+      VITE_PLATFORM_URL: "https://test.supabase.co",
+      VITE_PLATFORM_ANON_KEY: "test-public-anon-key",
     },
   },
 });

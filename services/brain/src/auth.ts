@@ -40,12 +40,12 @@ export function extractBearerToken(authorizationHeader: string | undefined | nul
 /** Answers "is `bearerToken` a live session for the platform owner". Fails
  * closed on every inconclusive outcome: a network error, a non-2xx
  * response, or any body other than the literal boolean `true`. */
-export async function verifyOwnerSession(supabaseUrl: string, supabasePublishableKey: string, bearerToken: string): Promise<boolean> {
+export async function verifyOwnerSession(platformUrl: string, platformAnonKey: string, bearerToken: string): Promise<boolean> {
   try {
-    const res = await fetch(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/is_platform_owner`, {
+    const res = await fetch(`${platformUrl.replace(/\/+$/, "")}/rest/v1/rpc/is_platform_owner`, {
       method: "POST",
       headers: {
-        apikey: supabasePublishableKey,
+        apikey: platformAnonKey,
         Authorization: `Bearer ${bearerToken}`,
         "Content-Profile": "core",
         "Content-Type": "application/json",
@@ -156,8 +156,8 @@ export function hasScope(claims: AgentTokenClaims, scope: string): boolean {
 export type Principal = { kind: "owner" } | { kind: "agent"; claims: AgentTokenClaims };
 
 export interface AuthenticateOptions {
-  supabaseUrl?: string;
-  supabasePublishableKey?: string;
+  platformUrl?: string;
+  platformAnonKey?: string;
   agentTokenPublicKeyPem?: string;
   agentTokenIssuer?: string;
   agentTokenAudience?: string;
@@ -182,8 +182,8 @@ export async function authenticate(authorizationHeader: string | undefined | nul
     if (claims) return { kind: "agent", claims };
   }
 
-  if (options.supabaseUrl && options.supabasePublishableKey) {
-    const isOwner = await verifyOwnerSession(options.supabaseUrl, options.supabasePublishableKey, token);
+  if (options.platformUrl && options.platformAnonKey) {
+    const isOwner = await verifyOwnerSession(options.platformUrl, options.platformAnonKey, token);
     if (isOwner) return { kind: "owner" };
   }
 

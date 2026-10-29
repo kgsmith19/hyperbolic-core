@@ -110,8 +110,8 @@ test("brokerMergedCredentials: does not mutate the input credentials object (the
 });
 
 const BASE_REQUIRED_ENV = {
-  SUPABASE_URL: "https://proj.supabase.co",
-  SUPABASE_PUBLISHABLE_KEY: "anon-key",
+  PLATFORM_URL: "http://platform.test",
+  PLATFORM_ANON_KEY: "anon-key",
   TOOLBELT_GITHUB_INTAKE_PAT: "ghp_fixture",
 };
 
