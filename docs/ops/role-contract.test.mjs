@@ -70,7 +70,7 @@ test("role contract · decide() and record() never mutate their inputs", () => {
   for (const row of [...golden.decide, ...golden.record]) {
     const before = JSON.stringify(row);
     decide(row.grant, row.action, row.kwargs);
-    record(row.grant, row.action, { task: null, ...row.kwargs });
+    record(row.grant, row.action, row.kwargs); // the row's own options object, so a write to it shows
     assert.equal(JSON.stringify(row), before, row.id);
   }
 });
