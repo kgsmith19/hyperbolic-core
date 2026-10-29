@@ -126,7 +126,7 @@ ci:
       action: .github/actions/{detect-changes,verify-tests-shell}
       gate: "Platform"
       covers: apps/shell, every packages/* workspace, services/llm-handler,
-        services/broker, and the docs/ops operator tooling (including this
+        services/broker, services/platform-api, and the docs/ops operator tooling (including this
         workflow's own topology contract test) — type-checks, unit tests,
         e2e, production build, size budgets.
       required: false # rolled into "PR Gate" below, not typed here individually

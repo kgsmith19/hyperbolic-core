@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveConfig, VALID_PROVIDERS } from "../src/config.ts";
+import { DEFAULT_MAX_TOKENS, OPENAI_MAX_TOKENS, resolveConfig, VALID_PROVIDERS } from "../src/config.ts";
 
 // Behavior protected: resolveConfig fails closed on a missing model id.
 // Defect caught: a future "sensible default" for REVIEW_MODEL. A defaulted
@@ -343,4 +343,17 @@ test("resolveConfig: an invalid REVIEW_BUILDER_PROVIDER is rejected, not ignored
       }),
     /REVIEW_BUILDER_PROVIDER="claude" is not a supported provider/
   );
+});
+
+// Behavior protected (#501): an OpenAI reasoning reviewer spends reasoning
+// tokens out of max_completion_tokens, so it gets a larger cap; every other
+// family keeps the Anthropic-bounded default. Defect caught: PR #500's review
+// failing closed at stopReason "max_tokens" with one cap for all providers.
+test("resolveConfig: the output cap follows the reviewer family (#501)", () => {
+  const base = { REVIEW_MODEL: "m", DEV_MODEL: "d" };
+  assert.equal(OPENAI_MAX_TOKENS, 32_000);
+  assert.equal(DEFAULT_MAX_TOKENS, 8_000);
+  assert.equal(resolveConfig({ ...base, REVIEW_PROVIDER: "openai", REVIEW_BUILDER_PROVIDER: "anthropic" }).maxTokens, 32_000);
+  assert.equal(resolveConfig({ ...base, REVIEW_PROVIDER: "anthropic", REVIEW_BUILDER_PROVIDER: "openai" }).maxTokens, 8_000);
+  assert.equal(resolveConfig({ ...base, REVIEW_PROVIDER: "google", REVIEW_BUILDER_PROVIDER: "openai" }).maxTokens, 8_000);
 });

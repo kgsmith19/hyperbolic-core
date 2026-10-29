@@ -25,19 +25,30 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { findManifestPaths, manifestHash } from "../scripts/validate-manifests.mjs";
+import { UNREGISTERED_TOOL_IDS, findManifestPaths, manifestHash } from "../scripts/validate-manifests.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOLBELT_ROOT = join(__dirname, "..");
 const MIGRATIONS_DIR = join(TOOLBELT_ROOT, "supabase", "migrations");
 
-const REGISTRATIONS = findManifestPaths(TOOLBELT_ROOT).map((manifestPath) => {
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  return {
-    toolId: manifest.id,
-    manifestPath,
-    migrationPath: join(MIGRATIONS_DIR, manifest.lifecycle.register),
-  };
+// The local platform service hosts the registry rather than registering in the
+// Supabase one (#508): it is the only manifest allowed to stay "pending".
+const UNREGISTERED = UNREGISTERED_TOOL_IDS;
+
+const MANIFESTS = findManifestPaths(TOOLBELT_ROOT).map((manifestPath) => ({
+  manifestPath,
+  manifest: JSON.parse(readFileSync(manifestPath, "utf8")),
+}));
+
+const REGISTRATIONS = MANIFESTS.filter(({ manifest }) => !UNREGISTERED.has(manifest.id)).map(({ manifestPath, manifest }) => ({
+  toolId: manifest.id,
+  manifestPath,
+  migrationPath: join(MIGRATIONS_DIR, manifest.lifecycle.register),
+}));
+
+test("only the allowlisted registry host is unregistered, and it is exactly 'pending' (#508)", () => {
+  const pending = MANIFESTS.filter(({ manifest }) => manifest.lifecycle.register === "pending").map(({ manifest }) => manifest.id);
+  assert.deepEqual(pending.sort(), [...UNREGISTERED].sort());
 });
 
 // The hash is written on its own line as a bare single-quoted 64-hex-char

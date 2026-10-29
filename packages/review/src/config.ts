@@ -26,6 +26,15 @@ const VALID_BUILDER_PROVIDERS: readonly BuilderProvider[] = ["anthropic", "opena
  */
 export const DEFAULT_MAX_TOKENS = 8_000;
 
+/**
+ * OpenAI's reasoning models (the o-series and gpt-5) spend their reasoning
+ * tokens out of `max_completion_tokens`, so 8,000 can run out before the
+ * forced submit_review call is written (PR #500, run 40964257574:
+ * stopReason "max_tokens"). The Anthropic long-request ceiling that bounds
+ * DEFAULT_MAX_TOKENS does not apply to OpenAI (#501).
+ */
+export const OPENAI_MAX_TOKENS = 32_000;
+
 /** Hard wall per attempt. A review that hangs must fail, not stall CI. */
 export const DEFAULT_TIMEOUT_MS = 180_000;
 
@@ -167,7 +176,7 @@ export function resolveConfig(env: ReviewEnv): ReviewConfig {
     reviewerModel,
     builderProvider,
     builderModel,
-    maxTokens: DEFAULT_MAX_TOKENS,
+    maxTokens: reviewerFamily === "openai" ? OPENAI_MAX_TOKENS : DEFAULT_MAX_TOKENS,
     timeoutMs: DEFAULT_TIMEOUT_MS,
   };
 }
