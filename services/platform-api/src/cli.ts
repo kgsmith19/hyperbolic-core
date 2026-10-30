@@ -6,7 +6,11 @@ import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { migrate, openDatabase } from "@hyperbolic/sqlite-kit";
+
 import { hashPassword } from "./auth.ts";
+import { loadConfig } from "./config.ts";
+import { syncRegistry } from "./registry.ts";
 import { Signer } from "./jwt.ts";
 
 const TEN_YEARS = 10 * 365 * 24 * 3600;
@@ -39,8 +43,17 @@ if (process.argv[1] && import.meta.filename === path.resolve(process.argv[1])) {
     const i = rest.indexOf(name);
     return i >= 0 ? rest[i + 1] : undefined;
   };
+  if (command === "sync-registry") {
+    const config = loadConfig();
+    const db = openDatabase(config.dbPath);
+    migrate(db, config.migrationsDir);
+    const result = syncRegistry(db, config.registryRoot);
+    console.log(`registered ${result.registered.join(", ")}${result.retired.length ? `; retired ${result.retired.join(", ")}` : ""}`);
+    db.close();
+    process.exit(0);
+  }
   if (command !== "init") {
-    console.error("usage: node src/cli.ts init [--env <path>] [--email <owner email>] [--public-url <url>]");
+    console.error("usage: node src/cli.ts init [--env <path>] [--email <owner email>] [--public-url <url>] | sync-registry");
     process.exit(2);
   }
   const target = path.resolve(flag("--env") ?? ".env");
