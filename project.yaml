@@ -7,9 +7,6 @@ project:
 apps:
   - apps/toolbelt
   - apps/toolbelt/guards
-  - apps/idea-intake
-  - apps/network-checker
-  - apps/prompt-organizer
   - apps/lifeos
   - apps/agentic-command-center
   - apps/shell
