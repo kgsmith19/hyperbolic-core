@@ -14,7 +14,7 @@
 // Same harness/skip mechanics as
 // apps/idea-intake/backend/tests/intake-guards.test.mjs (m3-05).
 import { test } from "node:test";
-import { createPostgresHarness } from "../../../toolbelt/tests/postgres-harness.mjs";
+import { createPostgresHarness } from "../../../../tests/support/postgres-harness.mjs";
 import {
   asAuthenticatedOwner,
   intakeMigration,

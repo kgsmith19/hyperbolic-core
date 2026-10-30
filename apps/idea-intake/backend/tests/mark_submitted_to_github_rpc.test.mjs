@@ -26,7 +26,7 @@
 // avoid that trap; row contents are asserted afterward with a separate,
 // plain `select ... from intake.idea where id = ...` query instead.
 import { test } from "node:test";
-import { asRole, createPostgresHarness } from "../../../toolbelt/tests/postgres-harness.mjs";
+import { asRole, createPostgresHarness } from "../../../../tests/support/postgres-harness.mjs";
 import {
   asAuthenticatedOwner,
   intakeMigration,

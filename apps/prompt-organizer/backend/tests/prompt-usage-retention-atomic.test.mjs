@@ -26,7 +26,7 @@ import {
   psqlSpawnSpec,
   supabaseHarnessSql,
   waitFor,
-} from "../../../toolbelt/tests/postgres-harness.mjs";
+} from "../../../../tests/support/postgres-harness.mjs";
 import { applyRetentionSchema, makeWithRetentionDb, poMigration } from "./prompt-db.mjs";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";

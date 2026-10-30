@@ -21,7 +21,7 @@
 // applying the actual committed migration files from disk verbatim (never
 // a reimplementation of their logic).
 import { test } from "node:test";
-import { createPostgresHarness } from "./postgres-harness.mjs";
+import { createPostgresHarness } from "../../../tests/support/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";

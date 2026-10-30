@@ -19,7 +19,7 @@
 // need and exercises the CLI exactly as an operator would run it against a
 // real project (service/superuser connection bypassing PostgREST grants).
 import { after, test } from "node:test";
-import { createPostgresHarness, runnerUsesSudo } from "../../../toolbelt/tests/postgres-harness.mjs";
+import { createPostgresHarness, runnerUsesSudo } from "../../../../tests/support/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, statSync, readdirSync } from "node:fs";

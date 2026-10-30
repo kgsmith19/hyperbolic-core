@@ -14,7 +14,7 @@
 // managed auth schema/roles, so HARNESS_SQL stubs auth.uid()/auth.role(),
 // and the real, committed migration files are applied from disk verbatim.
 import { test } from "node:test";
-import { asRole, createPostgresHarness, supabaseHarnessSql } from "./postgres-harness.mjs";
+import { asRole, createPostgresHarness, supabaseHarnessSql } from "../../../tests/support/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";

@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { asRole, supabaseHarnessSql } from "../../../toolbelt/tests/postgres-harness.mjs";
+import { asRole, supabaseHarnessSql } from "../../../../tests/support/postgres-harness.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BACKEND_DIR = join(HERE, "..");

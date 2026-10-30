@@ -7,7 +7,7 @@
 // detection/skip mechanics: skips cleanly, reported SKIPPED via node:test's
 // own mechanism, when no local Postgres is reachable.
 import { test } from "node:test";
-import { createPostgresHarness } from "../../../toolbelt/tests/postgres-harness.mjs";
+import { createPostgresHarness } from "../../../../tests/support/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
