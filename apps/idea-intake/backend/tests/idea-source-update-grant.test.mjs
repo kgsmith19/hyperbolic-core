@@ -11,7 +11,7 @@
 // (m3-05 lineage): stubs GoTrue's auth schema/roles a bare local Postgres
 // lacks, applies the real, committed migration files from disk verbatim.
 import { test } from "node:test";
-import { createPostgresHarness } from "../../../toolbelt/tests/postgres-harness.mjs";
+import { createPostgresHarness } from "../../../../tests/support/postgres-harness.mjs";
 import {
   asAuthenticatedOwner,
   intakeMigration,

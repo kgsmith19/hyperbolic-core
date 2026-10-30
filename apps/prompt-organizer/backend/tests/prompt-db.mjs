@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { migrationBeforeMarker } from "../../../toolbelt/tests/postgres-harness.mjs";
+import { migrationBeforeMarker } from "../../../../tests/support/postgres-harness.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BACKEND_DIR = join(__dirname, "..");

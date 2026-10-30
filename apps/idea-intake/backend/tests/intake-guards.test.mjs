@@ -23,7 +23,7 @@ import {
   createPostgresHarness,
   psqlSpawnSpec,
   supabaseHarnessSql,
-} from "../../../toolbelt/tests/postgres-harness.mjs";
+} from "../../../../tests/support/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";

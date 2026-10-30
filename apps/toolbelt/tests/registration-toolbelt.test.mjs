@@ -13,7 +13,7 @@
 // touching an existing, out-of-scope shared fixture list" posture
 // idea-intake's own registration tests already established for this repo.
 import { test } from "node:test";
-import { createPostgresHarness } from "./postgres-harness.mjs";
+import { createPostgresHarness } from "../../../tests/support/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";

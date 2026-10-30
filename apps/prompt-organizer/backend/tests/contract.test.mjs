@@ -10,7 +10,7 @@
 // Applies the real, committed migration files from disk verbatim, using
 // the exact real-Postgres harness pattern already established in this same
 // tests/ directory by get-prompt.test.mjs and seed.test.mjs:
-// tests/postgres-harness.mjs's `createPostgresHarness`, `supabaseHarnessSql`,
+// tests/support/postgres-harness.mjs's `createPostgresHarness`, `supabaseHarnessSql`,
 // and `asAuthenticated` helpers; skips cleanly via node:test's own skip
 // mechanism (reported as SKIPPED, never silently omitted and never falsely
 // green) when no local Postgres is reachable; uses `applyMigrationWithRetry`
@@ -41,7 +41,7 @@ import {
   asAuthenticated,
   createPostgresHarness,
   supabaseHarnessSql,
-} from "../../../toolbelt/tests/postgres-harness.mjs";
+} from "../../../../tests/support/postgres-harness.mjs";
 import { makeWithMigratedDb } from "./prompt-db.mjs";
 
 const OWNER_UUID = "9a50a35a-8a1e-4f0c-8495-7f26777982d8";

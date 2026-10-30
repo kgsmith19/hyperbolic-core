@@ -43,7 +43,7 @@ import {
   asJwtRole,
   createPostgresHarness,
   supabaseHarnessSql,
-} from "../../../toolbelt/tests/postgres-harness.mjs";
+} from "../../../../tests/support/postgres-harness.mjs";
 import { makeWithMigratedDb, poMigration } from "./prompt-db.mjs";
 
 const GET_PROMPT_DOWN = poMigration("20260813120000_prompt_create_get_prompt_function_down.sql");

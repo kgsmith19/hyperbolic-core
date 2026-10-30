@@ -7,7 +7,7 @@ import {
   asAuthenticated,
   createPostgresHarness,
   supabaseHarnessSql,
-} from "../../../toolbelt/tests/postgres-harness.mjs";
+} from "../../../../tests/support/postgres-harness.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const rootMigrations = join(here, "..", "..", "..", "toolbelt", "supabase", "migrations");

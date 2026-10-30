@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { createPostgresHarness } from "../../../toolbelt/tests/postgres-harness.mjs";
+import { createPostgresHarness } from "../../../../tests/support/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";

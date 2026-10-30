@@ -30,7 +30,7 @@ import {
   createPostgresHarness,
   migrationBeforeMarker,
   supabaseHarnessSql,
-} from "./postgres-harness.mjs";
+} from "../../../tests/support/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";

@@ -33,7 +33,7 @@ import { test } from "node:test";
 import {
   createPostgresHarness,
   supabaseHarnessSql,
-} from "../../../toolbelt/tests/postgres-harness.mjs";
+} from "../../../../tests/support/postgres-harness.mjs";
 import { makeWithRetentionDb, poMigration } from "./prompt-db.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
