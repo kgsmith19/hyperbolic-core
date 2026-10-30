@@ -28,12 +28,12 @@ const ui = { id: "notes", name: "Notes", kind: "ui", version: "1.0.0", descripti
 test("discovery finds apps, nested toolbelt apps and services, in a stable order", () => {
   const s = scratch();
   s.write("apps/zeta", { ...ui, id: "zeta" });
-  s.write("apps/toolbelt/apps/alpha", { ...ui, id: "alpha" });
+  s.write("apps/alpha", { ...ui, id: "alpha" });
   s.write("services/svc", { ...ui, id: "svc", kind: "headless", entry: {} });
   s.write("apps/no-manifest/src", {});
   rmSync(path.join(s.root, "apps/no-manifest/src/tool.json"));
   assert.deepEqual(discoverManifests(s.root).map((f) => path.relative(s.root, f)), [
-    "apps/toolbelt/apps/alpha/tool.json",
+    "apps/alpha/tool.json",
     "apps/zeta/tool.json",
     "services/svc/tool.json",
   ]);
@@ -86,7 +86,7 @@ test("a malformed or duplicate manifest fails the sync loudly and changes nothin
 });
 
 test("the hash is byte-for-byte the toolbelt validator's, over every real manifest in the repo", async () => {
-  const toolbelt = (await import(path.join(repoRoot, "apps/toolbelt/scripts/validate-manifests.mjs"))) as { manifestHash: (m: unknown) => string };
+  const toolbelt = (await import(path.join(repoRoot, "packages/manifest-tools/validate-manifests.mjs"))) as { manifestHash: (m: unknown) => string };
   const real = discoverManifests(repoRoot);
   assert.ok(real.length >= 8, `expected the repo's manifests, found ${real.length}`);
   const { readFileSync } = await import("node:fs");

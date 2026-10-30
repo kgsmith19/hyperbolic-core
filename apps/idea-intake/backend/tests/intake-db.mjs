@@ -12,7 +12,7 @@ import { asRole, supabaseHarnessSql } from "../../../../tests/support/postgres-h
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BACKEND_DIR = join(HERE, "..");
-const ROOT_MIGRATIONS_DIR = join(BACKEND_DIR, "..", "..", "toolbelt", "supabase", "migrations");
+const ROOT_MIGRATIONS_DIR = join(BACKEND_DIR, "..", "..", "..", "supabase", "migrations");
 
 export const INTAKE_MIGRATIONS_DIR = join(BACKEND_DIR, "supabase", "migrations");
 

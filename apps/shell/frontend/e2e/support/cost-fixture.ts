@@ -4,7 +4,7 @@
 // "small local HTTP server answers PostgREST-shaped requests by running
 // real SQL, as the postgres superuser" approach ./prompt-fixture.ts and
 // ./intake-fixture.ts already established -- RLS/grant enforcement itself
-// is proven separately (apps/toolbelt/tests/log_run_service_role_gate.test.mjs,
+// is proven separately (tests/spine/log_run_service_role_gate.test.mjs,
 // owner-repin.test.mjs); this fixture exists to prove the Shell's OWN code
 // (src/lib/cost.ts, src/pages/acc/cost.tsx) against real data and a real
 // schema, not to re-prove RLS.
@@ -18,7 +18,7 @@
 // (core.run/core.cost/core.app), core_llm_call with its trailing
 // `select cron.schedule(...)` call stripped -- this sandbox's local
 // Postgres has no pg_cron control file installed, the same constraint
-// apps/toolbelt/tests/log_run_owner_null_guard.test.mjs's own header
+// tests/spine/log_run_owner_null_guard.test.mjs's own header
 // comment documents for a different migration file.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
@@ -33,7 +33,7 @@ import {
   uniqueDbName,
 } from "./psql.js";
 
-const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/supabase/migrations");
+const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "supabase/migrations");
 
 const PLATFORM_BOOTSTRAP_UP = path.join(PLATFORM_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
 const CORE_CREATE_SCHEMA_UP = path.join(PLATFORM_MIGRATIONS_DIR, "20260806190000_core_create_schema.sql");

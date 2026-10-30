@@ -60,7 +60,7 @@ function toPlatformSession(session: Session | null): PlatformSession | null {
  * session, though types.ts's own PlatformSession doc comment has always
  * said the subject "Must equal the owner UUID; any other subject is a bug
  * (ADR-03, fail closed)". `core.is_platform_owner()`
- * (apps/toolbelt/supabase/migrations/20260814060000_core_is_platform_owner_rpc.sql)
+ * (supabase/migrations/20260814060000_core_is_platform_owner_rpc.sql)
  * is the narrow, PostgREST-exposed, SECURITY DEFINER RPC that closes the
  * gap: it answers `auth.uid() = platform.owner()` for the CALLING request's
  * bearer token without ever exposing the owner UUID itself.

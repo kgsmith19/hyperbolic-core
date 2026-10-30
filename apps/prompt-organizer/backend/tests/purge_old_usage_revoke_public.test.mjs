@@ -8,9 +8,9 @@
 // revoked.
 //
 // Same harness/skip mechanics as
-// apps/toolbelt/tests/registry-migrations-idempotency.test.mjs and
+// packages/manifest-tools/tests/registry-migrations-idempotency.test.mjs and
 // apps/idea-intake/backend/tests/intake-guards.test.mjs. Same pg_cron
-// caveat as apps/toolbelt/tests/purge_old_events_revoke_public.test.mjs, for
+// caveat as tests/spine/purge_old_events_revoke_public.test.mjs, for
 // the identical reason: this sandbox's local Postgres has no pg_cron
 // control file installed, so 20260812210000_prompt_usage_retention.sql's
 // trailing `select cron.schedule(...)` calls (two of them: the usage purge

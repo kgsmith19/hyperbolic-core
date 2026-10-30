@@ -30,7 +30,7 @@ frontend/                     the app's own page shell; the real UI is the
 node --test "backend/tests/*.test.mjs"
 ```
 
-Run `npm run manifests:check -- --registry` from `apps/toolbelt/` after any
+Run `npm run manifests:check -- --registry` from the repo root after any
 `tool.json` edit. The platform migration workflow discovers and stages this
 app's forward migrations into the shared global ledger; never invoke a second
 app-local `supabase db push` against that ledger.

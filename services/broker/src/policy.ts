@@ -1,4 +1,4 @@
-// Loads and validates broker-policy.json (apps/toolbelt/scripts/
+// Loads and validates broker-policy.json (packages/manifest-tools/
 // generate-broker-policy.mjs's output, issue #184) at process startup.
 // Fails fast on any problem -- an unreadable file, invalid JSON, or a
 // document that fails @hyperbolic/broker-contract's own shape check -- since

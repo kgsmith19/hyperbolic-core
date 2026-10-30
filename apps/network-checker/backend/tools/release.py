@@ -29,7 +29,7 @@ BACKEND_ROOT = Path(__file__).resolve().parent.parent
 APP_ROOT = BACKEND_ROOT.parent
 INIT_PY = BACKEND_ROOT / "network_checker" / "__init__.py"
 MANIFEST = APP_ROOT / "tool.json"
-REGISTRY = (APP_ROOT.parent / "toolbelt" / "supabase" / "migrations"
+REGISTRY = (APP_ROOT.parent.parent / "supabase" / "migrations"
             / json.loads(MANIFEST.read_text())["lifecycle"]["register"])
 VERSION_RE = re.compile(r'^__version__ = "(\d+)\.(\d+)\.(\d+)"$', re.MULTILINE)
 REGISTRY_VERSION_RE = re.compile(

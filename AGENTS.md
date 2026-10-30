@@ -42,7 +42,7 @@ and toolbelt test trees, which move to the local platform in their own Phase 2 I
 
 ```
 apps/prompt-organizer/frontend/index.html
-apps/toolbelt/tests/helpers.mjs
+tests/spine/helpers.mjs
 ```
 
 It is public by design, not a leaked secret; it simply stops mattering once those two move.
@@ -314,7 +314,7 @@ required: `PR Gate`.
 | Order | Gate | Covers | Required |
 | --- | --- | --- | --- |
 | 1 | `Repository Standards` | whole repo — leaked-credential scan, repo structure, PR description, exact-head consistency. Repository integrity only; no app-specific check belongs here | No — rolled into `PR Gate` |
-| 1 | `Toolbelt` | `apps/toolbelt/**`, `packages/hyp-cli/**` | No — rolled into `PR Gate` |
+| 1 | `Toolbelt` | `tool.json`, `supabase/**`, `tests/spine/**`, `packages/manifest-tools/**`, `packages/hyp-cli/**` | No — rolled into `PR Gate` |
 | 1 | `ACC Linux` | `apps/agentic-command-center/**`, `packages/guards/**` — Linux-native suites and covgate | No — rolled into `PR Gate` |
 | 1 | `ACC Windows` | the same ACC paths — PowerShell/native suites that need `windows-latest` | No — rolled into `PR Gate` |
 | 1 | `Brain` | `services/brain/**` | No — rolled into `PR Gate` |

@@ -6,7 +6,7 @@
 
 ## 📋 Product Boundaries
 
-- Scaffolding output must stay in step with what `apps/toolbelt` actually expects. A change to the tool layout there is a change here.
+- Scaffolding output must stay in step with what the repo layout actually expects. A change to the tool layout there is a change here.
 - Generated scaffolds are a starting point, not a managed artifact; this CLI does not own files after it writes them.
 - Make the smallest clear change that completely resolves its linked GitHub Issue.
 - Preserve behavior-focused tests; never weaken assertions to make a gate pass.

@@ -5,7 +5,7 @@
 // captured output instead of spawning a subprocess every time.
 import { join, relative, sep } from "node:path";
 import { ArgError, parseArgs, validateOptions, USAGE } from "./args.mjs";
-import { DEFAULT_TOOLBELT_ROOT } from "./paths.mjs";
+import { REPO_ROOT } from "./paths.mjs";
 import { runScaffold } from "./scaffold.mjs";
 
 // fsImpl is an internal, undocumented passthrough to runScaffold/writePlan
@@ -26,7 +26,7 @@ export function main(argv, { stdout = console.log, stderr = console.error, fsImp
     throw err;
   }
 
-  const toolbeltRoot = options.toolbeltRootOverride || DEFAULT_TOOLBELT_ROOT;
+  const repoRoot = options.repoRootOverride || REPO_ROOT;
 
   const validationErrors = validateOptions(options);
   if (validationErrors.length > 0) {
@@ -38,7 +38,7 @@ export function main(argv, { stdout = console.log, stderr = console.error, fsImp
 
   let result;
   try {
-    result = runScaffold(options, { toolbeltRoot, dryRun: options.dryRun, fsImpl });
+    result = runScaffold(options, { repoRoot, dryRun: options.dryRun, fsImpl });
   } catch (err) {
     // Only an unexpected I/O failure during the write phase reaches here
     // (ordinary collisions return a result object, they never throw).
@@ -57,7 +57,7 @@ export function main(argv, { stdout = console.log, stderr = console.error, fsImp
   if (result.dryRun) {
     stdout(`tool:new --dry-run: plan for apps/${options.id}/ (nothing written)`);
     for (const file of result.plan.files) {
-      stdout(`  would create  ${toRepoRelative(toolbeltRoot, file.path)}`);
+      stdout(`  would create  ${toRepoRelative(repoRoot, file.path)}`);
     }
     stdout("");
     printLiveRegistryCaveat(stdout);
@@ -66,12 +66,12 @@ export function main(argv, { stdout = console.log, stderr = console.error, fsImp
 
   stdout(`tool:new: generated apps/${options.id}/`);
   for (const path of result.written) {
-    stdout(`  created  ${toRepoRelative(toolbeltRoot, path)}`);
+    stdout(`  created  ${toRepoRelative(repoRoot, path)}`);
   }
   stdout("");
   printLiveRegistryCaveat(stdout);
   stdout("");
-  stdout("Next: npm run migrations:check --prefix apps/toolbelt");
+  stdout("Next: npm run migrations:check ");
   stdout("      then apply the unified forward-only ledger through platform-migrations.yml");
   return 0;
 }
@@ -92,7 +92,7 @@ export function main(argv, { stdout = console.log, stderr = console.error, fsImp
 // afterward. Wiring a live Supabase connection into a local scaffolding CLI
 // would be a substantial, out-of-proportion architectural change for this
 // finding, and cuts against this repo's established local-first,
-// credentials-stay-local posture (apps/toolbelt/AGENTS.md: "Never commit a
+// credentials-stay-local posture (docs/archived/2026-10-30-toolbelt/AGENTS.md: "Never commit a
 // service-role key"). Per the review's own explicit alternative --
 // "narrow the acceptance contract explicitly" -- this prints the same
 // honesty level the source comment already has, on every success path
@@ -110,12 +110,11 @@ function printLiveRegistryCaveat(stdout) {
   );
 }
 
-// toolbeltRoot is conventionally two directories under the repo root
-// (<repo>/apps/toolbelt, ADR-01's target tree); this holds for both the real
+// repoRoot is conventionally two directories under the repo root
+// (<repo>, ADR-01's target tree); this holds for both the real
 // tree and every fixture tree this package's own tests construct. Printing
 // repo-relative paths matches how every other toolbelt script in this repo
 // reports paths (e.g. scripts/validate-manifests.mjs's own console output).
-function toRepoRelative(toolbeltRoot, path) {
-  const repoRoot = join(toolbeltRoot, "..", "..");
+function toRepoRelative(repoRoot, path) {
   return relative(repoRoot, path).split(sep).join("/");
 }

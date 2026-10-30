@@ -4,11 +4,15 @@
   "workspaces": [
     "packages/*",
     "apps/shell",
-    "apps/toolbelt",
     "services/*"
   ],
   "scripts": {
-    "tool:new": "node packages/hyp-cli/bin/tool.mjs"
+    "tool:new": "node packages/hyp-cli/bin/tool.mjs",
+    "manifests:check": "node packages/manifest-tools/validate-manifests.mjs",
+    "migrations:check": "node packages/manifest-tools/validate-migrations.mjs",
+    "migrations:stage": "node packages/manifest-tools/stage-migrations.mjs",
+    "broker-policy:generate": "node packages/manifest-tools/generate-broker-policy.mjs",
+    "test:spine": "node --test --test-concurrency=1 \"tests/spine/*.test.mjs\""
   },
   "devDependencies": {
     "yaml": "^2.8.2"

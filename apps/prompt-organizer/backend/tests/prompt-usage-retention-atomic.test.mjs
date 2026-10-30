@@ -2,7 +2,7 @@
 // HEAD), part B: real-Postgres proof that prompt.purge_old_usage() no
 // longer double-counts prompt.usage_monthly_agg under concurrent
 // invocation, mirroring
-// apps/toolbelt/tests/core-event-retention-atomic.test.mjs's two proof
+// tests/spine/core-event-retention-atomic.test.mjs's two proof
 // styles exactly (see that file's header comment for the full rationale):
 //
 //   1. RED: a deterministic reproduction of the OLD two-statement shape,

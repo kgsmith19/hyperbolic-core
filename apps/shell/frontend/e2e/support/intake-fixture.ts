@@ -32,7 +32,7 @@ import {
 import { sqlErrorToShimError, type ShimError } from "./shim.js";
 
 const INTAKE_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/idea-intake/backend/supabase/migrations");
-const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/supabase/migrations");
+const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "supabase/migrations");
 
 // Chronological order, exactly as committed -- see this file's header for
 // why platform_owner_bootstrap is included (intake_create_schema.sql's own

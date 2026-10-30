@@ -16,8 +16,8 @@
 // `--toolbelt-root <dir>` is an additional, UNDOCUMENTED flag not part of the
 // public 5.1 usage spec above -- it exists purely so this package's own tests
 // can exercise the real CLI binary end-to-end against a disposable fixture
-// tree instead of the real apps/toolbelt/ (mirrors
-// apps/toolbelt/scripts/validate-manifests.mjs's own `--root` flag and its
+// tree instead of the real repo (mirrors
+// packages/manifest-tools/validate-manifests.mjs's own `--root` flag and its
 // stated reason). Never advertised in --help output or the usage string.
 export const USAGE = `Usage: npm run tool:new -- --id <tool-id> --name <display-name> --kind ui|cli|headless|hybrid
                            [--schema <schema-name>]   default: <tool-id> with - replaced by _
@@ -93,7 +93,7 @@ export function parseArgs(argv) {
     noSchema: raw["--no-schema"] === true,
     llm: raw["--llm"] === true,
     dryRun: raw["--dry-run"] === true,
-    toolbeltRootOverride: raw["--toolbelt-root"],
+    repoRootOverride: raw["--toolbelt-root"],
   };
 }
 

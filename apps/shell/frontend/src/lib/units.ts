@@ -15,8 +15,8 @@
 //     section 5; LifeOS per apps/lifeos/backend/src/api/main.py's
 //     `GET /healthz`, reachable in production at /life/api/healthz per the
 //     05-a section 4 route map's `/life/api/*` prefix).
-//   - "command": every apps/toolbelt/**/tool.json manifest's own
-//     `lifecycle.health` field (apps/toolbelt/tool.schema.json: "Command or
+//   - "command": every packages/manifest-tools/**/tool.json manifest's own
+//     `lifecycle.health` field (packages/manifest-tools/tool.schema.json: "Command or
 //     URL path that exits 0 / returns 200 when the tool is healthy") is
 //     documented today as a CLI command (e.g. `node --test "tests/*.test.mjs"`),
 //     not a URL -- toolbelt's root spine, Prompt Organizer, and Network
@@ -86,7 +86,7 @@ export const DEPLOYABLE_UNITS: readonly DeployableUnit[] = [
     health: {
       kind: "command",
       command: 'node --test "tests/*.test.mjs"',
-      note: "apps/toolbelt/tool.json lifecycle.health",
+      note: "tool.json lifecycle.health",
     },
   },
   {

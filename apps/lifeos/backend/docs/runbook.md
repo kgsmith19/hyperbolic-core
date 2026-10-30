@@ -337,7 +337,7 @@ all, since its session was reading the OLD project's Auth):
 
 1. **Create the owner user in the platform project's Auth**
    (`hyperbolic-core`'s toolbelt Supabase project, `woltgcggxaehtuypkxqk` —
-   see `apps/toolbelt/docs/notes/2026-08-12-platform-idp-owner-setup.md` for
+   see `docs/archived/2026-10-30-toolbelt/notes/2026-08-12-platform-idp-owner-setup.md` for
    the sibling procedure that already did this for the toolbelt's own
    owner-pinned RLS), sign-ups disabled, mirroring "One-time setup" step 1
    above. Record the new owner UUID — it is a **different** UUID from
@@ -392,7 +392,7 @@ No coding session here holds a real Supabase project-admin credential for
 either the retiring `vhbzblllaohuljtareza` project or the platform
 `woltgcggxaehtuypkxqk` project, and none of the four env vars above can be
 set to a real value without one — the same category of limitation
-`apps/toolbelt/docs/notes/2026-08-12-platform-idp-owner-setup.md` (m1-07)
+`docs/archived/2026-10-30-toolbelt/notes/2026-08-12-platform-idp-owner-setup.md` (m1-07)
 documented for the platform project's own owner setup. Steps 1, 2, 3 and 6
 above are recorded here as exact operator actions, not performed. What
 **was** verified for real, in this sandbox, without needing those

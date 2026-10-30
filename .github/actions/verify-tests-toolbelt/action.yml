@@ -32,12 +32,10 @@ runs:
 
     - name: Toolbelt · Check manifests
       shell: bash
-      working-directory: apps/toolbelt
       run: npm run manifests:check -- --registry
 
     - name: Migrations · Validate and stage the unified migration ledger
       shell: bash
-      working-directory: apps/toolbelt
       run: |
         npm run migrations:check
         stage_dir="${RUNNER_TEMP}/platform-migration-stage"
@@ -50,22 +48,21 @@ runs:
 
     - name: Test · Run hermetic Toolbelt tests
       shell: bash
-      working-directory: apps/toolbelt
       env:
         TOOLBELT_REQUIRE_POSTGRES: "1"
       run: |
-        node --test \
-          tests/core-rpc-migration.test.mjs \
-          tests/core-event-retention-atomic.test.mjs \
-          tests/generate-broker-policy.test.mjs \
-          tests/registration-toolbelt.test.mjs \
-          tests/registry-manifest-hash.test.mjs \
-          tests/registry-migrations-idempotency.test.mjs \
-          tests/stage-migrations.test.mjs \
-          tests/toolbelt-workflow.test.mjs \
-          tests/validate-manifests.test.mjs \
-          tests/validate-migrations.property.test.mjs \
-          tests/validate-migrations.test.mjs
+        node --test --test-concurrency=1 \
+          tests/spine/core-rpc-migration.test.mjs \
+          tests/spine/core-event-retention-atomic.test.mjs \
+          tests/spine/toolbelt-workflow.test.mjs \
+          packages/manifest-tools/tests/generate-broker-policy.test.mjs \
+          packages/manifest-tools/tests/registration-toolbelt.test.mjs \
+          packages/manifest-tools/tests/registry-manifest-hash.test.mjs \
+          packages/manifest-tools/tests/registry-migrations-idempotency.test.mjs \
+          packages/manifest-tools/tests/stage-migrations.test.mjs \
+          packages/manifest-tools/tests/validate-manifests.test.mjs \
+          packages/manifest-tools/tests/validate-migrations.property.test.mjs \
+          packages/manifest-tools/tests/validate-migrations.test.mjs
 
     - name: Test · Run Guards tests
       shell: bash

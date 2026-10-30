@@ -16,10 +16,10 @@ Standard](https://github.com/kgsmith19/agent-engineering-standard).
 | [`apps/agentic-command-center`](apps/agentic-command-center) | Local coding-agent guard rail, control panel, and bounded task runner | `ACC Linux` + `ACC Windows` |
 | [`apps/lifeos`](apps/lifeos) | Personal life-management system — typed entity graph, append-only event log | `LifeOS` (its lint runs as a step there too) |
 | [`apps/shell`](apps/shell) | Unified React/Vite front end composing every zone behind one owner login | `Platform` |
-| [`apps/toolbelt`](apps/toolbelt) | Small portfolio tools — a prompt-library client, local-first network diagnostics | `Toolbelt` |
+| [`tool.json`, `supabase/`, `tests/spine/`](supabase) | Root spine — the shared `core` schema and the manifest and registration contract every app registers through | `Toolbelt` |
 | [`services/brain`](services/brain) | Long-lived autonomous-coding orchestrator — daemon, DAG scheduler, task/result contracts | `Brain` |
 | [`services/llm-handler`](services/llm-handler) | Deployed general-purpose LLM service behind the Shell | covered by `Platform` |
-| [`packages/*`](packages) | Shared TypeScript packages — `platform-client`, `ui`, `llm`, `review`, `hyp-cli` | covered by `Platform` (and `Toolbelt` for `hyp-cli`) |
+| [`packages/*`](packages) | Shared packages — `platform-client`, `ui`, `llm`, `review`, `hyp-cli`, `manifest-tools` | covered by `Platform` (and `Toolbelt` for `hyp-cli` and `manifest-tools`) |
 
 Every `apps/<name>/` was imported via `git subtree` and still carries its own upstream
 `README.md`/`AGENTS.md` — read those before working inside an app. `services/` and `packages/`

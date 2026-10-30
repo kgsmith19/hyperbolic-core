@@ -2,7 +2,7 @@
 // plausible": every manifest this generator can produce is checked against
 // the REAL tool.schema.json validator (imported, never reimplemented), and
 // every registration migration's invariants are checked the same way
-// apps/toolbelt/tests/registry-manifest-hash.test.mjs checks the real
+// packages/manifest-tools/tests/registry-manifest-hash.test.mjs checks the real
 // committed ones.
 import { test } from "node:test";
 import assert from "node:assert/strict";

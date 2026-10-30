@@ -1,7 +1,7 @@
 // Shared fixture helpers for this package's own tests. Mirrors
-// apps/toolbelt/tests/validate-manifests.test.mjs's withFixtureRoot pattern
+// packages/manifest-tools/tests/validate-manifests.test.mjs's withFixtureRoot pattern
 // deliberately: every automated test in this package operates on a
-// disposable temp directory, NEVER the real apps/toolbelt/ tree, so the test
+// disposable temp directory, NEVER the real repo tree, so the test
 // suite can run repeatedly (including concurrently with other work in this
 // shared repo) without ever mutating or racing against real, committed
 // files. The one real-tree invocation this issue requires is run
@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
 // A minimal, schema-valid root spine manifest (mirrors the real
-// apps/toolbelt/tool.json). Every fixture toolbelt root includes one, since
+// tool.json). Every fixture toolbelt root includes one, since
 // findManifestPaths always looks for <root>/tool.json.
 export function rootManifest(overrides = {}) {
   return {
@@ -20,7 +20,7 @@ export function rootManifest(overrides = {}) {
     name: "Toolbelt Root Spine",
     kind: "headless",
     version: "0.1.0",
-    ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt" },
+    ownership: { owner: "kylegsmith19@gmail.com", path: "." },
     entry: { headless: { command: "select 1;", schedule: "0 3 * * *" } },
     schemas: ["core", "idea"],
     permissions: {

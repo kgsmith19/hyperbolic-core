@@ -12,21 +12,21 @@ import { appsDirOf } from "./paths.mjs";
 import { findManifestPaths, checkManifestShape, checkSchemaOwnershipUniqueness } from "./manifests-shared.mjs";
 
 // Check 1 (on-disk directory): does apps/<id>/ already exist?
-export function toolDirExists(toolbeltRoot, id) {
-  return existsSync(join(appsDirOf(toolbeltRoot), id));
+export function toolDirExists(repoRoot, id) {
+  return existsSync(join(appsDirOf(repoRoot), id));
 }
 
 // Check 2 (manifest id scan): does any discovered tool.json -- including the
-// root spine's own apps/toolbelt/tool.json, which is NOT under apps/<id>/ and
+// root spine's own tool.json, which is NOT under apps/<id>/ and
 // so would be missed by toolDirExists alone -- already declare this id? This
 // is the closest on-disk proxy for "id taken in core.app": every real
 // registration has a manifest with a matching id (the schema requires
 // id === the directory name, but the root spine is the one manifest with no
 // apps/<id>/ directory at all, which is exactly why this second check exists
 // as a distinct pass rather than being redundant with the first).
-export function findManifestIds(toolbeltRoot) {
+export function findManifestIds(repoRoot) {
   const ids = new Map(); // id -> manifest path
-  for (const path of findManifestPaths(toolbeltRoot)) {
+  for (const path of findManifestPaths(repoRoot)) {
     let manifest;
     try {
       manifest = JSON.parse(readFileSync(path, "utf8"));
@@ -38,7 +38,7 @@ export function findManifestIds(toolbeltRoot) {
   return ids;
 }
 
-// Check 3 (registration migration scan): does apps/toolbelt/supabase/migrations/
+// Check 3 (registration migration scan): does supabase/migrations/
 // already contain an up migration for this id? Catches the edge case where a
 // tool's manifest was removed from disk (or never restored) but its
 // registration migration -- and therefore, presumably, its real core.app row
@@ -71,14 +71,14 @@ export function findRegisteredIdsOnDisk(migrationsDir) {
 // "array of manifest file paths on disk", so this is the actual reuse path,
 // not a lookalike reimplementation. The temp file is always removed before
 // this function returns, success or failure.
-export function findSchemaCollisions(toolbeltRoot, candidateManifest) {
+export function findSchemaCollisions(repoRoot, candidateManifest) {
   if (!Array.isArray(candidateManifest.schemas) || candidateManifest.schemas.length === 0) return [];
 
   const tmpDir = mkdtempSync(join(tmpdir(), "toolbelt-cli-schema-check-"));
   try {
     const candidatePath = join(tmpDir, "tool.json");
     writeFileSync(candidatePath, JSON.stringify(candidateManifest));
-    const existingPaths = findManifestPaths(toolbeltRoot);
+    const existingPaths = findManifestPaths(repoRoot);
     const failures = checkSchemaOwnershipUniqueness([...existingPaths, candidatePath]);
     // Scope to failures actually attributable to the candidate's own schema
     // names, so a hypothetical pre-existing collision between two OTHER
@@ -116,28 +116,28 @@ function relativeUnderRoot(root, path) {
 // outside its own short-lived temp files, which are always cleaned up before
 // returning -- so a non-empty result here is exactly the exit-2 case with
 // zero partial writes, by construction (the real write phase never starts).
-export function detectCollisions({ toolbeltRoot, id, candidateManifest }) {
+export function detectCollisions({ repoRoot, id, candidateManifest }) {
   const reasons = [];
 
-  if (toolDirExists(toolbeltRoot, id)) {
+  if (toolDirExists(repoRoot, id)) {
     reasons.push(`apps/${id}/ already exists on disk`);
   }
 
-  const manifestIds = findManifestIds(toolbeltRoot);
+  const manifestIds = findManifestIds(repoRoot);
   if (manifestIds.has(id)) {
-    reasons.push(`id "${id}" is already claimed by ${relativeUnderRoot(toolbeltRoot, manifestIds.get(id))}`);
+    reasons.push(`id "${id}" is already claimed by ${relativeUnderRoot(repoRoot, manifestIds.get(id))}`);
   }
 
-  const registeredIds = findRegisteredIdsOnDisk(join(toolbeltRoot, "supabase", "migrations"));
+  const registeredIds = findRegisteredIdsOnDisk(join(repoRoot, "supabase", "migrations"));
   if (registeredIds.has(id)) {
     reasons.push(
-      `id "${id}" already has a registration migration under apps/toolbelt/supabase/migrations/ ` +
+      `id "${id}" already has a registration migration under supabase/migrations/ ` +
         "(a matching core.app row may already exist; this cannot be checked directly against a live " +
         "database in this environment, so a matching on-disk registration migration is treated as a collision)",
     );
   }
 
-  reasons.push(...findSchemaCollisions(toolbeltRoot, candidateManifest));
+  reasons.push(...findSchemaCollisions(repoRoot, candidateManifest));
   reasons.push(...findShapeFailures(candidateManifest));
 
   return reasons;

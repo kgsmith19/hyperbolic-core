@@ -20,7 +20,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages packages
 COPY apps/shell/package.json apps/shell/package.json
-COPY apps/toolbelt/package.json apps/toolbelt/package.json
 COPY services/llm-handler/package.json services/llm-handler/package.json
 RUN npm ci --omit=dev --workspace=@hyperbolic/llm-handler
 
