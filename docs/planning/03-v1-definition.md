@@ -43,7 +43,7 @@ V1 cut line detail lives in `07-brain-architecture.md` section 7.13. Definition-
 
 | # | Criterion | Verification |
 | --- | --- | --- |
-| TB-1 | Every tool shall carry a manifest conforming to the schema in `05-c`; the registry shall list all manifests. | the validation command from `05-c` over `apps/toolbelt/apps/*/tool.json` exits 0; registry query count equals manifest count |
+| TB-1 | Every tool shall carry a manifest conforming to the schema in `05-c`; the registry shall list all manifests. | the validation command from `05-c` over `apps/*/tool.json` exits 0; registry query count equals manifest count |
 | TB-2 | The Shell shall render tool discovery from the registry, not from hardcoded lists. | delete no manifests; add a fixture manifest in a temp branch; Shell list shows it without a Shell code change |
 | TB-3 | Adding a new tool shall require at most 3 steps (scaffold, migrate, register) with no file edits outside the new tool's directory except generated registration. | follow the documented steps for a scratch tool; `git status` shows changes only under the new tool dir plus generated files |
 | TB-4 | Idea Intake shall be live per section 9 below. | see II rows |

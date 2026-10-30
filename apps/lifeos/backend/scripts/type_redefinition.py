@@ -20,9 +20,7 @@ docs/runbook.md and each script's header say so.
 from datetime import datetime
 from typing import Any
 
-from psycopg.types.json import Jsonb
-
-from kernel.db import Connection
+from kernel.db import Connection, Jsonb
 from kernel.events import append_event
 
 

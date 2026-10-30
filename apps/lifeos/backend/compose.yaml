@@ -14,7 +14,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      # Document bytes and extracted text (ADR 015) live outside Postgres.
+      # Document bytes and extracted text (ADR 015) live outside the database.
       # backup.yml captures this volume beside the database dump.
       - lifeos-blobs:/app/var/blobs
     healthcheck:

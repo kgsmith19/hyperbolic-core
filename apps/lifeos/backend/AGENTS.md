@@ -21,7 +21,7 @@ python -m uvicorn api.main:app --reload  # API
 python -m mcp_server                     # read-only MCP server
 ```
 
-Tests can erase the database configured in `.env`. Use only an isolated test database.
+Tests run against a scratch SQLite file per session (#512); they never open `LIFEOS_DB_PATH` or any shared database.
 
 ## 📚 Documentation
 

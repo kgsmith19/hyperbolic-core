@@ -1,6 +1,6 @@
 # 05-c. Toolbelt as a Real Platform
 
-Component plan for Toolbelt, realizing TB-1 through TB-4 of `03-v1-definition.md`. Names per `00-canonical-names.md`. Decisions here stay inside the ADR-04 complexity budget and the ADR-01 topology (`apps/toolbelt/apps/` for sub-apps, `packages/` for shared clients, `services/llm-handler` reserved for Handler A). Evidence labels per the engagement charter.
+Component plan for Toolbelt, realizing TB-1 through TB-4 of `03-v1-definition.md`. Names per `00-canonical-names.md`. Decisions here stay inside the ADR-04 complexity budget and the ADR-01 topology (`apps/` for sub-apps, `packages/` for shared clients, `services/llm-handler` reserved for Handler A). Evidence labels per the engagement charter.
 
 ## 1. Current state summary
 
@@ -37,7 +37,7 @@ ROI ranking (value per unit cost, highest first): F6, F2, F1, F4, F3, F5. F5 ran
 
 ### 3.1 Placement and rule
 
-Every directory under `apps/toolbelt/apps/<id>/` carries a `tool.json` at its root, plus one at `apps/toolbelt/tool.json` for the root spine itself [VERIFIED: ADR-01 target tree shows per-tool `tool.json` manifests]. A tool without a valid manifest fails the Toolbelt PR Gate (TB-1).
+Every directory under `apps/<id>/` carries a `tool.json` at its root, plus one at `apps/toolbelt/tool.json` for the root spine itself [VERIFIED: ADR-01 target tree shows per-tool `tool.json` manifests]. A tool without a valid manifest fails the Toolbelt PR Gate (TB-1).
 
 ### 3.2 JSON Schema (full, normative)
 
@@ -55,7 +55,7 @@ Stored at `apps/toolbelt/tool.schema.json`. Draft 2020-12.
     "id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$",
-      "description": "Registry key; equals core.app.id and the directory name under apps/toolbelt/apps/."
+      "description": "Registry key; equals core.app.id and the directory name under apps/."
     },
     "name": { "type": "string", "minLength": 1, "maxLength": 100 },
     "kind": {
@@ -271,7 +271,7 @@ schema collision across manifests, bad flag combination); no partial writes on f
 Generated layout (kind `ui` shown; `cli`/`headless` omit `web/`):
 
 ```
-apps/toolbelt/apps/<id>/
+apps/<id>/
   tool.json                                   (passes tool.schema.json)
   AGENTS.md                                   (boundary stub: schema ownership, commands)
   web/                                        (empty page shell consuming packages/ui)
@@ -333,7 +333,7 @@ Deletion timing: the root client deletes in the same PR that lands the Shell's r
 
 | Path | Budget | Measurement |
 | --- | --- | --- |
-| Registry list query (`RegistryClient.listTools`, warm client) | p95 <= 200 ms | performance test over 50 calls, same harness pattern as Prompt Organizer's 100 ms-class read budgets [VERIFIED: apps/toolbelt/apps/prompt-organizer tests, performance suite] |
+| Registry list query (`RegistryClient.listTools`, warm client) | p95 <= 200 ms | performance test over 50 calls, same harness pattern as Prompt Organizer's 100 ms-class read budgets [VERIFIED: apps/prompt-organizer tests, performance suite] |
 | Shell nav render from registry (session ready to nav painted) | p95 <= 300 ms | Playwright trace timing in the Shell e2e suite |
 | Manifest validation in CI (all manifests) | <= 5 s total | CI step duration |
 | Scaffold CLI end-to-end (`tool:new` on a scratch id) | <= 10 s | timed invocation in the CLI's own test |
@@ -342,10 +342,10 @@ Deletion timing: the root client deletes in the same PR that lands the Shell's r
 
 | # | Criterion (EARS) | Verification command |
 | --- | --- | --- |
-| TB-1a | Every tool directory shall carry a `tool.json` conforming to `apps/toolbelt/tool.schema.json`. | `npm run manifests:check` (validator over `apps/toolbelt/tool.json apps/toolbelt/apps/*/tool.json`) exits 0 |
+| TB-1a | Every tool directory shall carry a `tool.json` conforming to `apps/toolbelt/tool.schema.json`. | `npm run manifests:check` (validator over `apps/toolbelt/tool.json apps/*/tool.json`) exits 0 |
 | TB-1b | The registry shall list every registered manifest with a matching hash. | `select count(*) from core.app where status <> 'idea'` equals the manifest count with a generated registration migration; `npm run manifests:check -- --registry` recomputes each sha256 against `core.app.manifest_hash` and exits 0 |
 | TB-2 | When a fixture manifest and its generated registration migration are added on a temp branch, the Shell shall list the fixture tool without any Shell code change. | scripted check: add fixture, `supabase db push`, Playwright asserts the nav/status entry, `git diff --stat apps/shell/` is empty |
-| TB-3 | Adding a new tool shall require at most 3 steps with no file edits outside the new tool's directory except generated registration files. | run the Section 5 steps for a scratch tool; `git status --porcelain` shows paths only under `apps/toolbelt/apps/<id>/` and `apps/toolbelt/supabase/migrations/*register_<id>*` |
+| TB-3 | Adding a new tool shall require at most 3 steps with no file edits outside the new tool's directory except generated registration files. | run the Section 5 steps for a scratch tool; `git status --porcelain` shows paths only under `apps/<id>/` and `apps/toolbelt/supabase/migrations/*register_<id>*` |
 | TB-4 | Idea Intake shall be live per the II rows. | see `05-h-idea-intake.md` Section 12 |
 | TB-5 | If a manifest declares a `permissions.db.write` schema owned by another manifest, then the validator shall fail. | `npm run manifests:check` against a deliberately colliding fixture exits non-zero |
 | TB-6 | While a tool row has `status = 'retired'`, the Shell shall not render it in navigation. | SQL: set fixture row retired; Playwright asserts absence; SQL down-migration restores |

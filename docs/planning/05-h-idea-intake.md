@@ -1,6 +1,6 @@
 # 05-h. Idea Intake
 
-Component plan for Idea Intake, the new Toolbelt sub-app at `apps/toolbelt/apps/idea-intake/` (ADR-01 topology) and the flagship consumer of the 05-c platform layer. Idea Intake supersedes ACC's Forgepad [VERIFIED: 00-canonical-names.md Idea Intake row]. It realizes II-1 through II-4 of `03-v1-definition.md`. Names per `00-canonical-names.md`.
+Component plan for Idea Intake, the new Toolbelt sub-app at `apps/idea-intake/` (ADR-01 topology) and the flagship consumer of the 05-c platform layer. Idea Intake supersedes ACC's Forgepad [VERIFIED: 00-canonical-names.md Idea Intake row]. It realizes II-1 through II-4 of `03-v1-definition.md`. Names per `00-canonical-names.md`.
 
 Product in one sentence: capture rough ideas as drafts, optionally optimize them with LLM help, promote the good ones, and convert each promoted idea into exactly one GitHub Issue that the app can never touch again.
 
@@ -407,7 +407,7 @@ Field mapping (forgepad -> intake):
 | `created` / `updated` | `created_at` / `updated_at` | preserved; the migration runs in a service context, bypassing the PostgREST column grants that hide these from API callers |
 | `githubIssue` | migration blocker when non-null | null is the expected legacy shape; a non-null value is printed and rejected for operator review so GitHub provenance can never be silently discarded |
 
-Migration mechanics (CLI spec, one-shot): `node apps/toolbelt/apps/idea-intake/tools/migrate-forgepad.mjs --acc-root <path> [--dry-run]`; requires the ACC root and ideas directory to exist, verifies filename/id parity and canonical ISO timestamps, rejects duplicate ids and non-null `githubIssue`, and sends one encoded JSON recordset to PostgreSQL. Apply takes a transaction-scoped advisory lock, requires a superuser/BYPASSRLS deployment role and configured platform owner, preserves both timestamps, and inserts with a database-enforced idempotency key. A rerun compares every mapped field and fails on divergence rather than certifying stale or duplicate data. Only after the operator records dry-run counts, a successful apply receipt, the ACC-4b query, and a zero-insert second run may the ACC-side deletion execute per `05-b`.
+Migration mechanics (CLI spec, one-shot): `node apps/idea-intake/tools/migrate-forgepad.mjs --acc-root <path> [--dry-run]`; requires the ACC root and ideas directory to exist, verifies filename/id parity and canonical ISO timestamps, rejects duplicate ids and non-null `githubIssue`, and sends one encoded JSON recordset to PostgreSQL. Apply takes a transaction-scoped advisory lock, requires a superuser/BYPASSRLS deployment role and configured platform owner, preserves both timestamps, and inserts with a database-enforced idempotency key. A rerun compares every mapped field and fails on divergence rather than certifying stale or duplicate data. Only after the operator records dry-run counts, a successful apply receipt, the ACC-4b query, and a zero-insert second run may the ACC-side deletion execute per `05-b`.
 
 ## 11. Latency budgets (new paths)
 
@@ -429,7 +429,7 @@ Migration mechanics (CLI spec, one-shot): `node apps/toolbelt/apps/idea-intake/t
 | II-3a | Once submitted, no UPDATE shall succeed against that row at any layer. | psql: `update intake.idea set title='x' where id='<submitted-fixture>';` raises; API: PATCH the same row returns 409; `delete from intake.idea where id='<submitted-fixture>';` raises |
 | II-3b | Optimization of a submitted idea shall create a new derivative row only. | e2e: optimize a submitted fixture; `select count(*) from intake.idea where parent_idea_id='<submitted-fixture>';` returns 1 and the parent row is byte-identical (`select xmin` unchanged is sufficient evidence of no write) |
 | II-3c | Derivatives shall fork submitted parents only. | service-context `insert ... (parent_idea_id) values ('<draft-fixture>')` raises via insert guard rule 2 |
-| II-4 | Idea Intake shall use the general-purpose LLM handler and shall be unable to read the Brain key. | ADR-05 isolation check run in the Idea Intake process context exits non-zero on `/brain/` access; `grep -rn "BRAIN" apps/toolbelt/apps/idea-intake packages/llm --include='*.ts' --include='*.mjs'` returns zero key-name hits |
+| II-4 | Idea Intake shall use the general-purpose LLM handler and shall be unable to read the Brain key. | ADR-05 isolation check run in the Idea Intake process context exits non-zero on `/brain/` access; `grep -rn "BRAIN" apps/idea-intake packages/llm --include='*.ts' --include='*.mjs'` returns zero key-name hits |
 | II-5 | When submit fails per any Section 6.4 class, the row shall remain at status idea with null github fields. | fault-injection test per class; `select status, github_issue_number from intake.idea where id='<fixture>';` returns `idea, null` |
 
 ## 13. LOC delta

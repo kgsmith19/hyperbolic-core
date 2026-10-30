@@ -8,11 +8,12 @@
 import { existsSync, readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, isAbsolute } from "node:path";
+import { appsDirOf } from "./paths.mjs";
 import { findManifestPaths, checkManifestShape, checkSchemaOwnershipUniqueness } from "./manifests-shared.mjs";
 
-// Check 1 (on-disk directory): does apps/toolbelt/apps/<id>/ already exist?
+// Check 1 (on-disk directory): does apps/<id>/ already exist?
 export function toolDirExists(toolbeltRoot, id) {
-  return existsSync(join(toolbeltRoot, "apps", id));
+  return existsSync(join(appsDirOf(toolbeltRoot), id));
 }
 
 // Check 2 (manifest id scan): does any discovered tool.json -- including the
@@ -119,7 +120,7 @@ export function detectCollisions({ toolbeltRoot, id, candidateManifest }) {
   const reasons = [];
 
   if (toolDirExists(toolbeltRoot, id)) {
-    reasons.push(`apps/toolbelt/apps/${id}/ already exists on disk`);
+    reasons.push(`apps/${id}/ already exists on disk`);
   }
 
   const manifestIds = findManifestIds(toolbeltRoot);

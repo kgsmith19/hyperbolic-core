@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync, renameSync, openSync, closeSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join, relative, isAbsolute, basename } from "node:path";
+import { appsDirOf } from "./paths.mjs";
 import { resolveSchema } from "./args.mjs";
 import { nextTimestamp } from "./timestamp.mjs";
 import { detectCollisions } from "./collisions.mjs";
@@ -50,7 +51,7 @@ export function buildPlan(options, { toolbeltRoot, now = new Date() }) {
   const { id, name, kind, route } = options;
   const { hasSchema, schema } = resolveSchema(options);
 
-  const toolDir = join(toolbeltRoot, "apps", id);
+  const toolDir = join(appsDirOf(toolbeltRoot), id);
   const registrationDir = join(toolbeltRoot, "supabase", "migrations");
   // Under backend/, matching every existing tool: a tool's backend work all
   // lives there, so validate-migrations.mjs discovers it at exactly this path.
@@ -179,7 +180,7 @@ function isInside(parent, child) {
 // validate-manifests.mjs and this CLI's own collisions.mjs) explicitly
 // skips any apps/* entry that fails `statSync(...).isDirectory()`.
 export function lockPathFor(toolbeltRoot, id) {
-  return join(toolbeltRoot, "apps", `${id}.lock`);
+  return join(appsDirOf(toolbeltRoot), `${id}.lock`);
 }
 
 // Returns { ok: true, release } on success, or { ok: false } if another

@@ -22,8 +22,8 @@ The repository shall contain no synthesis module or test.
 The suite and scanners shall stay green after the deletions.
 
 ## Verification
-grep -rn "kgsmith19/network-checker\|kgsmith19/toolbelt" apps/toolbelt/apps/network-checker/ returns zero hits
-test ! -f apps/toolbelt/apps/network-checker/netcheck/synthesis.py && test ! -f apps/toolbelt/apps/network-checker/tests/test_synthesis.py
+grep -rn "kgsmith19/network-checker\|kgsmith19/toolbelt" apps/network-checker/ returns zero hits
+test ! -f apps/network-checker/netcheck/synthesis.py && test ! -f apps/network-checker/tests/test_synthesis.py
 bash tools/check.sh exits 0
 
 ## Estimated LOC delta

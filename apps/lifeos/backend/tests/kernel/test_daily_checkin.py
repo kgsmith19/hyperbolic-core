@@ -6,10 +6,10 @@ from typing import Any
 
 import jsonschema
 import pytest
-from psycopg.types.json import Jsonb
 
 from kernel import db
 from kernel.access import AccessContext
+from kernel.db import Jsonb
 from kernel.services import capture, forget, get_entity, list_types
 from scripts.define_daily_checkin import ACTOR, DAILY_CHECKIN_SCHEMA, define_daily_checkin
 
