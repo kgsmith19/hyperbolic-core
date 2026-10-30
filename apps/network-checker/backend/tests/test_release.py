@@ -78,7 +78,7 @@ class VersionSourceOfTruthTest(TestCase):
         self.assertIn(
             '"networkegress":["1.1.1.1","192.168.50.1","192.168.100.1","239.255.255.250",'
             '"api.anthropic.com","api.ipify.org","ipapi.co","status.anthropic.com"]', text)
-        self.assertIn("c91d77d5817cf77e535bccc17f34033ac942387555af669be2120b46eda3f21a", text)
+        self.assertIn("289de94aee010a9d542373526cef52751363dfc5eb93f42b0e67cc91ba8b1e29", text)
 
     def test_bump_fails_closed_without_rewriting_applied_migration(self):
         stderr = io.StringIO()
