@@ -24,8 +24,8 @@ const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const buildEnvironment = {
   ...process.env,
   VITE_E2E_HOOKS: "1",
-  VITE_SUPABASE_URL: "https://test.supabase.co",
-  VITE_SUPABASE_PUBLISHABLE_KEY: "test-public-anon-key",
+  VITE_PLATFORM_URL: "https://test.supabase.co",
+  VITE_PLATFORM_ANON_KEY: "test-public-anon-key",
 };
 
 function run(command, args, options = {}) {
