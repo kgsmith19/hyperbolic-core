@@ -1,0 +1,46 @@
+# Local stack (#504, AC1): the services that run as servers on this machine.
+# No cloud credentials are needed; every secret is a local, generated value.
+# Not in compose yet: shell, idea-intake, prompt-organizer, agentic-command-
+# center, brain, lifeos, broker and llm-handler. Each is tracked in its own
+# Issue; see the Makefile and ops/stores.json for what backup already covers.
+name: hyperbolic-core
+
+services:
+  platform-api:
+    build:
+      context: .
+      dockerfile: services/platform-api/Dockerfile
+    env_file:
+      # Written locally by `make init` (node src/cli.ts init). Never committed.
+      - path: services/platform-api/.env
+        required: false
+    ports:
+      - "127.0.0.1:8400:8400"
+    volumes:
+      - platform-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(8400,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  network-checker:
+    build:
+      context: apps/network-checker
+      dockerfile: backend/Dockerfile
+    command: ["serve", "--no-open"]
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - network-checker-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;urllib.request.urlopen('http://127.0.0.1:8787/',timeout=3);sys.exit(0)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  platform-data:
+  network-checker-data:

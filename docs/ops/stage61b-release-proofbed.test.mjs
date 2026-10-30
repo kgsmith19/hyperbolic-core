@@ -179,10 +179,16 @@ test("the cloud pipeline's rules are honest gaps tracked by #504 after its remov
   // Oracle change (#503): #405-#408 had mapped these rules to the cloud deploy
   // pipeline. The owner's local-only decision removed that pipeline, so each
   // is a declared gap again, never a silent claim, until #504 lands.
+  // #504 (local release proof) moved five of these onto real paths:
+  // ops/release.py (stale-artifact, broken-integration, failed-rollback) and
+  // ops/store_ops.py (unusable-backup, restore-rpo). The four left are
+  // honest gaps: no signed build manifest, invariant, telemetry or canary.
   assert.deepEqual(gapsOf(ADOPTION), Object.fromEntries([
-    "stale-artifact", "broken-integration", "failed-rollback", "unusable-backup",
-    "missing-attestation", "invariant-breach", "missing-telemetry", "restore-rpo", "canary-missing",
+    "missing-attestation", "invariant-breach", "missing-telemetry", "canary-missing",
   ].map((rule) => [rule, "#504"])));
+  for (const rule of ["stale-artifact", "broken-integration", "failed-rollback", "unusable-backup", "restore-rpo"]) {
+    assert.ok(ADOPTION[rule].path?.startsWith("ops/"), `${rule} must name a real local mechanism`);
+  }
   assert.deepEqual(GAP_ISSUES, ["#504"]);
   for (const file of [
     ".github/workflows/deploy.yml",
@@ -196,6 +202,6 @@ test("the cloud pipeline's rules are honest gaps tracked by #504 after its remov
 
 test("the aggregate posture is honest: the first gap REFUSEs, so clean-promote is unreachable today", () => {
   const first = earliestGap(ADOPTION, FROZEN_RULES);
-  assert.equal(first, "stale-artifact");
+  assert.equal(first, "missing-attestation");
   assert.equal(RULE_VERDICTS[first], "REFUSE");
 });
