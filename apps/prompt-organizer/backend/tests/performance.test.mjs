@@ -171,7 +171,7 @@ test("searches_1000_prompts_within_budget__T_U_029", () => {
 // (this same issue): skip cleanly, via node:test's own mechanism, when no
 // local Postgres is reachable, rather than fabricate a number.
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "..", "supabase", "migrations");
+const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "toolbelt", "supabase", "migrations");
 const PO_MIGRATIONS_DIR = join(__dirname, "..", "supabase", "migrations");
 const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
 const PO_MIGRATIONS_IN_ORDER = [

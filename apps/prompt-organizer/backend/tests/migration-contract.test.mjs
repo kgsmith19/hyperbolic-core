@@ -97,7 +97,7 @@ test("starter rollback identifies rows by stable migration-owned ids, never by a
 });
 
 test("the real-Postgres harness has an explicit CI fail-on-unavailable contract", () => {
-  const harness = readFileSync(join(here, "..", "..", "..", "..", "tests", "postgres-harness.mjs"), "utf8");
+  const harness = readFileSync(join(here, "..", "..", "..", "toolbelt", "tests", "postgres-harness.mjs"), "utf8");
   // Both prefixes stay honoured: the Toolbelt CI gate sets TOOLBELT_* for the
   // root and Idea Intake steps and PROMPT_* for this one, and the shared
   // harness must fail closed for either rather than silently skipping.

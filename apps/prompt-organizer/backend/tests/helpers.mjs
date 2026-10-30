@@ -6,7 +6,7 @@ import {
   SUPABASE_URL,
   TEST_USER_A,
   TEST_USER_B,
-} from "../../../../tests/helpers.mjs";
+} from "../../../toolbelt/tests/helpers.mjs";
 
 export { login, primaryToken, SUPABASE_URL };
 export const ANON_KEY = SUPABASE_ANON_KEY;

@@ -18,7 +18,7 @@ import { migrationBeforeMarker } from "../../../toolbelt/tests/postgres-harness.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BACKEND_DIR = join(__dirname, "..");
 
-export const ROOT_MIGRATIONS_DIR = join(BACKEND_DIR, "..", "..", "..", "supabase", "migrations");
+export const ROOT_MIGRATIONS_DIR = join(BACKEND_DIR, "..", "..", "toolbelt", "supabase", "migrations");
 export const PO_MIGRATIONS_DIR = join(BACKEND_DIR, "supabase", "migrations");
 
 // prompt.usage_monthly_agg's owner_rw policy calls platform.owner(), so the

@@ -10,7 +10,7 @@ import {
 } from "../../../toolbelt/tests/postgres-harness.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const rootMigrations = join(here, "..", "..", "..", "..", "supabase", "migrations");
+const rootMigrations = join(here, "..", "..", "..", "toolbelt", "supabase", "migrations");
 const migrations = join(here, "..", "supabase", "migrations");
 const platformBootstrap = join(rootMigrations, "20260812140000_platform_owner_bootstrap.sql");
 const retentionUp = join(migrations, "20260812210000_prompt_usage_retention.sql");

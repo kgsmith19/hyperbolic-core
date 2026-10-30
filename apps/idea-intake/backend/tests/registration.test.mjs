@@ -20,7 +20,7 @@ const MIGRATION_PATH = join(
   BACKEND_DIR,
   "..",
   "..",
-  "..",
+  "toolbelt",
   "supabase",
   "migrations",
   "20260814130200_register_idea-intake-v0.1.1.sql",

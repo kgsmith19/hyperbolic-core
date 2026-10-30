@@ -14,7 +14,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "..", "supabase", "migrations");
+const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "toolbelt", "supabase", "migrations");
 
 const EXTENSION_UP = join(ROOT_MIGRATIONS_DIR, "20260812230000_core_app_registry_extension.sql");
 const REGISTER_UP = join(ROOT_MIGRATIONS_DIR, "20260813003000_register_idea-intake.sql");
