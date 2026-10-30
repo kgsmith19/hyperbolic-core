@@ -140,32 +140,6 @@ test("every gap names a real tracking Issue in the declared gap set", () => {
 
 // --- Half 2: the mapped REAL mechanisms, pinned against the live topology ---
 
-test("failed-rollback: deploy.yml auto-rolls-back and a rolled-back unit is not tagged", () => {
-  const deploy = read(".github/workflows/deploy.yml");
-  // Shell activation rolls the symlink back; the service deploys guard health.
-  assert.match(deploy, /current\.rollback/);
-  assert.match(deploy, /ROLLBACK FAILED/);
-  // tag-release only fires on the run's overall smoke success (a rolled-back
-  // job reports failure, so it is skipped) — not on a unit's own deploy.
-  assert.match(deploy, /needs\.smoke\.result == 'success'/);
-});
-
-test("broken-integration: post-deploy smoke is the live, read-only verdict that withholds the tag", () => {
-  const smoke = read(".github/workflows/platform-smoke.yml");
-  assert.match(smoke, /contents: read/);
-  // deploy.yml's tag-release needs smoke; a red smoke keeps the run red.
-  assert.match(read(".github/workflows/deploy.yml"), /needs: \[deploy-shell, deploy-llm-handler, deploy-brain, deploy-broker, smoke\]/);
-});
-
-test("unusable-backup: the restore drill proves a real restore, check before restore before count", () => {
-  const drill = read(".github/workflows/ops-restore-drill.yml");
-  const check = drill.indexOf('restic -r "$repository" check --read-data-subset=10%');
-  const restore = drill.indexOf('restic -r "$repository" restore');
-  const count = drill.indexOf("select count(*) from $t");
-  assert.ok(check > -1 && restore > -1 && count > -1, "drill missing check/restore/count");
-  assert.ok(check < restore && restore < count, "drill order must be check -> restore -> count");
-});
-
 test("partial-green: PR Gate's verdict is its own needs.*.result, so a non-success lane cannot pass", () => {
   const verify = read(".github/workflows/pr-verify.yml");
   assert.match(
@@ -201,100 +175,27 @@ test("mold-unqualified: this proofbed IS hyperbolic-core's built/attacked/qualif
 
 // --- Half 3: the disclosed gaps are real gaps, and the posture is honest ---
 
-test("no gaps remain: every rule maps to a real mechanism (G1-G4 all landed)", () => {
-  // #408 (restore RPO/RTO), #405 (build provenance/SBOM), #406 (canary
-  // declaration), and #407 (canary observation) have all landed.
-  const gaps = gapsOf(ADOPTION);
-  assert.deepEqual(gaps, {}, "a gap remains after G1-G4 all landed");
-  assert.deepEqual(GAP_ISSUES, [], "the declared gap set must be empty");
-});
-
-test("invariant observation is now wired: breach halts and missing series fails closed (#407)", () => {
-  // The bidirectional coupling working forward: #407 added the observer
-  // workflow + evaluation script, so these pins flipped from "gap" to
-  // "mechanism present", and the ADOPTION entries had to move off `gap`
-  // onto real on-disk paths in the same change. Dual-file shape asserted
-  // exactly for both rules.
-  for (const rule of ["invariant-breach", "missing-telemetry"]) {
-    const entry = ADOPTION[rule];
-    assert.deepEqual(entry.paths, [
-      ".github/workflows/canary-observe.yml",
-      "docs/ops/canary-observe.sh",
-    ], `${rule}: dual-file mechanism`);
-    assert.ok(!entry.gap, `${rule} is no longer a gap`);
-  }
-  const observe = read(".github/workflows/canary-observe.yml");
-  assert.match(observe, /canary-observe\.sh/);
-  const script = read("docs/ops/canary-observe.sh");
-  assert.match(script, /invariant-breach/);
-  assert.match(script, /missing-telemetry/);
-  assert.match(script, /promotion HALTED/);
-  assert.match(script, /FAIL CLOSED/);
-});
-
-test("attestation is now produced: provenance+SBOM in both deploy pipelines, and missing-attestation maps to a real mechanism (#405)", () => {
-  // The bidirectional coupling working forward: #405 added provenance and
-  // SBOM records to both deploy pipelines, so this pin flipped from "gap,
-  // no attestation" to "mechanism present", and the ADOPTION entry had
-  // to move off `gap` onto real on-disk paths in the same change. The
-  // dual-file shape is asserted exactly (round-2 review): `paths` names
-  // both mechanism files, legacy `path` stays consistent.
-  const deploy = read(".github/workflows/deploy.yml");
-  const lifeos = read(".github/workflows/lifeos-deploy.yml");
-  assert.match(deploy, /attest-build-provenance/);
-  assert.match(deploy, /sbom: true/);
-  assert.match(deploy, /spdx-json/);
-  assert.match(deploy, /shell-dist\.sha256/);
-  assert.match(deploy, /shell-dist-sbom\.spdx\.json/);
-  assert.match(lifeos, /lifeos-backend-build\.sha256/);
-  assert.match(lifeos, /lifeos-backend-sbom\.spdx\.json/);
-  assert.match(lifeos, /lifeos-ui-dist\.sha256/);
-  assert.match(lifeos, /lifeos-ui-sbom\.spdx\.json/);
-  assert.deepEqual(ADOPTION["missing-attestation"].paths, [
+test("the cloud pipeline's rules are honest gaps tracked by #504 after its removal (#503)", () => {
+  // Oracle change (#503): #405-#408 had mapped these rules to the cloud deploy
+  // pipeline. The owner's local-only decision removed that pipeline, so each
+  // is a declared gap again, never a silent claim, until #504 lands.
+  assert.deepEqual(gapsOf(ADOPTION), Object.fromEntries([
+    "stale-artifact", "broken-integration", "failed-rollback", "unusable-backup",
+    "missing-attestation", "invariant-breach", "missing-telemetry", "restore-rpo", "canary-missing",
+  ].map((rule) => [rule, "#504"])));
+  assert.deepEqual(GAP_ISSUES, ["#504"]);
+  for (const file of [
     ".github/workflows/deploy.yml",
     ".github/workflows/lifeos-deploy.yml",
-  ]);
-  assert.equal(ADOPTION["missing-attestation"].path, ".github/workflows/deploy.yml");
-  assert.ok(!ADOPTION["missing-attestation"].gap, "missing-attestation is no longer a gap");
+    ".github/workflows/ops-restore-drill.yml",
+    ".github/workflows/canary-observe.yml",
+  ]) {
+    assert.ok(!existsSync(path.join(root, file)), `${file} is back: move its rule off the gap`);
+  }
 });
 
-test("a canary is now declared per unit and stamped per release, and canary-missing maps to the real mechanism (#406)", () => {
-  // The bidirectional coupling working forward: #406 added per-unit
-  // descriptors plus the per-release stamp, so this pin flipped from
-  // "gap, no declaration" to "mechanism present", and the ADOPTION entry
-  // had to move off `gap` onto real on-disk paths in the same change.
-  // The dual-file shape is asserted exactly: `paths` names the descriptor
-  // plus the stamp script, legacy `path` stays consistent.
-  assert.deepEqual(ADOPTION["canary-missing"].paths, [
-    "docs/ops/canary/shell.canary.yml",
-    "docs/ops/stamp-canary.sh",
-  ]);
-  assert.equal(ADOPTION["canary-missing"].path, "docs/ops/stamp-canary.sh");
-  assert.ok(!ADOPTION["canary-missing"].gap, "canary-missing is no longer a gap");
-  const deploy = read(path.join(".github/workflows", "deploy.yml"));
-  assert.match(deploy, /stamp-canary\.sh shell /);
-});
-
-test("restore RPO/RTO is now measured: the drill records both, and restore-rpo maps to a real mechanism (#408)", () => {
-  // The bidirectional coupling working forward: #408 added RPO/RTO to the
-  // drill, so this pin flipped from "gap, no timing" to "measured", and the
-  // ADOPTION entry had to move off `gap` onto a real on-disk path in the
-  // same change.
-  const drill = read(".github/workflows/ops-restore-drill.yml");
-  assert.match(drill, /rpo_seconds="\$\(\( now_epoch - snapshot_epoch_value \)\)"/);
-  assert.match(drill, /rto_seconds="\$\(\( restore_end - restore_start \)\)"/);
-  assert.match(drill, /RPO \(s\)/);
-  assert.match(drill, /RTO \(s\)/);
-  assert.equal(ADOPTION["restore-rpo"].path, ".github/workflows/ops-restore-drill.yml");
-  assert.ok(!ADOPTION["restore-rpo"].gap, "restore-rpo is no longer a gap");
-});
-
-test("the aggregate posture is honest: no gap remains, so clean-promote is reachable and nothing REFUSEs by default", () => {
-  // G1-G4 all landed: earliestGap finds no gap, so a real hyperbolic
-  // release evaluated against today's mechanism set reaches clean-promote
-  // — earned per release by live green mechanisms, never assumed. The
-  // Mold still REFUSEs/HOLDs on a live breach or missing series; that
-  // behavior is pinned by the canary-observe oracles, not by a gap entry.
+test("the aggregate posture is honest: the first gap REFUSEs, so clean-promote is unreachable today", () => {
   const first = earliestGap(ADOPTION, FROZEN_RULES);
-  assert.equal(first, null);
+  assert.equal(first, "stale-artifact");
+  assert.equal(RULE_VERDICTS[first], "REFUSE");
 });

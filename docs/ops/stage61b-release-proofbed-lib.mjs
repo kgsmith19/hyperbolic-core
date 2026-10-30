@@ -65,12 +65,12 @@ export const RULE_VERDICTS = {
   "clean-promote": "PROMOTE",
 };
 
-// The Stage 61b gap Issues still open for mechanisms hyperbolic-core does not
-// have yet. Any `gap` in ADOPTION must be one of these. #408 (restore
-// RPO/RTO), #405 (build provenance/SBOM), #406 (canary declaration), and
-// #407 (canary observation) have all landed — no gaps remain. The Mold's
-// rules now all evaluate against real mechanisms.
-export const GAP_ISSUES = [];
+// The gap Issues for mechanisms hyperbolic-core does not have. Any `gap` in
+// ADOPTION must be one of these. #405-#408 had closed every gap against the
+// cloud deploy pipeline; the owner's local-only decision (2026-10-29) removed
+// that pipeline (#503), so its rules are gaps again until the local release
+// proof lands (#504, Phase 1d).
+export const GAP_ISSUES = ["#504"];
 
 // One hyperbolic-core mechanism per frozen 61a rule. Each entry names EXACTLY
 // ONE of:
@@ -87,49 +87,32 @@ export const ADOPTION = {
     note: "PR Gate fails closed when an Issue the PR closes is still open with an unchecked checklist item (parseLinkedIssues/checklistBlocked, Issue #274): incomplete work cannot merge, let alone release.",
   },
   "stale-artifact": {
-    path: ".github/workflows/deploy.yml",
-    note: "each deploy builds from the pushed main commit and tag-release records the exact deployed SHA (docs/ops/tag-release.sh: deploy/<unit>/<date>-<shortsha>); a stale prebuilt artifact is never promoted.",
+    gap: "#504",
+    note: "no local release yet binds a promoted artifact to the exact built SHA; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
   },
   "broken-integration": {
-    path: ".github/workflows/platform-smoke.yml",
-    note: "post-deploy smoke through the real tailnet origin is the live verdict; a red smoke keeps the run red and withholds the release tag (deploy.yml tag-release needs smoke).",
+    gap: "#504",
+    note: "no local post-start smoke verdict exists yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
   },
   "failed-rollback": {
-    path: ".github/workflows/deploy.yml",
-    note: "a failed activation/health check auto-rolls-back (Shell current.rollback symlink swap; the service deploys guard with a ROLLBACK FAILED escalation); a rolled-back job reports failure so tag-release skips it.",
+    gap: "#504",
+    note: "no local release rollback exists yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
   },
   "unusable-backup": {
-    path: ".github/workflows/ops-restore-drill.yml",
-    note: "the monthly drill proves a real restore (check -> restore -> row-count) against both restic repositories from the Storage Box, now with measured RPO/RTO per repository (#408); live execution still needs the owner-side Infisical OIDC subject + RESTIC_BACKUP_ENABLED.",
+    gap: "#504",
+    note: "no local restore drill exists yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
   },
   "missing-attestation": {
-    // Dual-file mechanism (round-2 review): deploy.yml owns platform units,
-    // lifeos-deploy.yml owns LifeOS units. The disk-existence oracle below
-    // checks every entry of `paths`.
-    paths: [
-      ".github/workflows/deploy.yml",
-      ".github/workflows/lifeos-deploy.yml",
-    ],
-    path: ".github/workflows/deploy.yml",
-    note: "every production deploy unit now produces a SIGNED provenance attestation at deploy time (#405 landed): registry images (llm-handler, brain, broker) build with SLSA provenance + SBOM subjects and a signed attest-build-provenance statement; the Shell bundle, LifeOS backend, and LifeOS UI each sign their sha256/image-identity build manifest with attest-build-provenance (subject-path form) — plus SBOM/SPDX artifacts for registry images and retained manifests for the rest, the Shell manifest re-verified before staging. The Mold evaluates the rule against these signed statements. Live read-back (attestations on the releases surface) is recorded when the next production deploy runs.",
+    gap: "#504",
+    note: "no local build manifest is attested yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
   },
   "invariant-breach": {
-    // Dual-file mechanism: the observer workflow + its evaluation script.
-    // The disk-existence oracle checks every `paths` entry.
-    paths: [
-      ".github/workflows/canary-observe.yml",
-      "docs/ops/canary-observe.sh",
-    ],
-    path: ".github/workflows/canary-observe.yml",
-    note: "the canary-observe job evaluates every shipped unit's smoke-anchored invariants from real telemetry (the run's own smoke verdict + the stamped canary Release) and FAILS the run on breach (#407 landed): breach->halt is wired (observe runs after smoke+tag-release; a red observe keeps the run red). Latency/error-rate signals are disclosed UNOBSERVED — never green-claimed — until a telemetry pipeline exists.",
+    gap: "#504",
+    note: "no local invariant observation exists yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
   },
   "missing-telemetry": {
-    paths: [
-      ".github/workflows/canary-observe.yml",
-      "docs/ops/canary-observe.sh",
-    ],
-    path: "docs/ops/canary-observe.sh",
-    note: "a missing series fails CLOSED (#407 landed): absent declaration, absent canary Release, or an unreadable release check each exit non-zero with an explicit ::error::, so a canary that cannot be observed can never read as green.",
+    gap: "#504",
+    note: "no local telemetry series exists to fail closed on; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
   },
   "partial-green": {
     path: ".github/workflows/pr-verify.yml",
@@ -140,26 +123,20 @@ export const ADOPTION = {
     note: "verification evidence binds to the exact head (expectedHeadOid arming, Stage 60b #389; llm-review-recheck re-runs a moved head); a stale verdict is never trusted. Canary-window freshness specifically arrives with #406/#407.",
   },
   "restore-rpo": {
-    path: ".github/workflows/ops-restore-drill.yml",
-    note: "the monthly drill now MEASURES and records restore RPO (latest-snapshot age) and RTO (restore-to-usable wall-clock) per repository (#408 landed); the PROMOTE-on-measured-RPO/RTO path rests on recorded facts. Live execution still needs the owner-side Infisical OIDC subject + RESTIC_BACKUP_ENABLED.",
+    gap: "#504",
+    note: "no local drill measures RPO/RTO yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
   },
   "mold-unqualified": {
     path: "docs/ops/stage61b-release-proofbed.test.mjs",
     note: "hyperbolic-core's Release Mold is built/attacked/qualified by this proofbed itself: the frozen 61a contract transcribed with provenance, behavioral pins against the real topology, and targeted-mutation RED sensitivity recorded in the PR.",
   },
   "canary-missing": {
-    // Dual-file mechanism (round-1 review): per-unit descriptors +
-    // per-release stamp. The disk-existence oracle checks every `paths` entry.
-    paths: [
-      "docs/ops/canary/shell.canary.yml",
-      "docs/ops/stamp-canary.sh",
-    ],
-    path: "docs/ops/stamp-canary.sh",
-    note: "every production unit declares a canary (exposure, baseline, 24h window, 2-5 invariants with halt thresholds; docs/ops/canary/*.canary.yml) and every release tag carries its declaration via a stamped canary Release (#406 landed). Observing the invariants from real telemetry is G3 (#407); declaration alone does not promote.",
+    gap: "#504",
+    note: "no local release declares a canary yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
   },
   "clean-promote": {
     path: "docs/ops/stage61b-release-proofbed-lib.mjs",
-    note: "reachable now that G1-G4 (#405-#408) have all landed: every rule evaluates against a real mechanism and no gap remains. The Mold still REFUSEs/HOLDs on a live breach, a missing series, or an unmet proof — clean-promote is earned per release, never assumed.",
+    note: "unreachable while the #504 gaps are open: the first gap in check order (stale-artifact) REFUSEs, so no release can claim clean-promote until the local release proof lands.",
   },
 };
 

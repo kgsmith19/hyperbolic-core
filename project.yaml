@@ -175,11 +175,9 @@ ci:
       required: true
   orchestrator: .github/workflows/pr-verify.yml
   note: >-
-    apps/lifeos's own nested workflows (apps/lifeos/.github/workflows/) are
-    intentionally inert here (see AGENTS.md's Workflow Safety Invariant) —
-    its authoritative CI runs from the standalone lifeos repo; the
-    verify-tests-lifeos composite action above is written fresh for this
-    monorepo and is the real gate here. "Repository Standards" and the six
+    No app carries a nested .github directory (AGENTS.md's Workflow Safety
+    Invariant); the verify-tests-lifeos composite action above is LifeOS's
+    real gate here, like every other app's lane. "Repository Standards" and the six
     app lanes are real, required-in-substance checks -- "PR Gate" cannot go
     green without them -- but only that one rollup name is typed into the
     branch ruleset, to keep the required-check list from drifting out of
