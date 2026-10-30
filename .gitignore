@@ -15,3 +15,7 @@ node_modules/
 
 # Local-only platform data: var/<app>/ (SQLite files, blobs, backups). Never committed.
 /var/
+
+# Python bytecode (generated; never committed)
+__pycache__/
+*.pyc

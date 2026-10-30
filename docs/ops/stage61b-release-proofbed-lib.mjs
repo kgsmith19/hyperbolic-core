@@ -87,24 +87,24 @@ export const ADOPTION = {
     note: "PR Gate fails closed when an Issue the PR closes is still open with an unchecked checklist item (parseLinkedIssues/checklistBlocked, Issue #274): incomplete work cannot merge, let alone release.",
   },
   "stale-artifact": {
-    gap: "#504",
-    note: "no local release yet binds a promoted artifact to the exact built SHA; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
+    path: "ops/release.py",
+    note: "release.py tag tags only a clean HEAD, at its exact SHA, after the health gate passes (ops/test_release.py pins it).",
   },
   "broken-integration": {
-    gap: "#504",
-    note: "no local post-start smoke verdict exists yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
+    path: "ops/release.py",
+    note: "the health command is a hard gate on tag and on rollback: a failed check tags nothing and exits non-zero (ops/test_release.py).",
   },
   "failed-rollback": {
-    gap: "#504",
-    note: "no local release rollback exists yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
+    path: "ops/release.py",
+    note: "rollback redeploys the previous tagged SHA, health-checks it, and records a failed attempt as failed-rollback with exit 3 (ops/test_release.py).",
   },
   "unusable-backup": {
-    gap: "#504",
-    note: "no local restore drill exists yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
+    path: "ops/store_ops.py",
+    note: "restore-drill restores every snapshot and proves its hash, integrity_check and row counts against the manifest (ops/test_store_ops.py).",
   },
   "missing-attestation": {
     gap: "#504",
-    note: "no local build manifest is attested yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
+    note: "no signed local build manifest exists yet: the SHA binding in ops/release.py is a tag, not an attestation; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
   },
   "invariant-breach": {
     gap: "#504",
@@ -123,8 +123,8 @@ export const ADOPTION = {
     note: "verification evidence binds to the exact head (expectedHeadOid arming, Stage 60b #389; llm-review-recheck re-runs a moved head); a stale verdict is never trusted. Canary-window freshness specifically arrives with #406/#407.",
   },
   "restore-rpo": {
-    gap: "#504",
-    note: "no local drill measures RPO/RTO yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
+    path: "ops/store_ops.py",
+    note: "restore-drill reports rpo_seconds (age of the newest snapshot) and rto_seconds (restore plus verify), written to var/restore-drill.json.",
   },
   "mold-unqualified": {
     path: "docs/ops/stage61b-release-proofbed.test.mjs",
@@ -136,7 +136,7 @@ export const ADOPTION = {
   },
   "clean-promote": {
     path: "docs/ops/stage61b-release-proofbed-lib.mjs",
-    note: "unreachable while the #504 gaps are open: the first gap in check order (stale-artifact) REFUSEs, so no release can claim clean-promote until the local release proof lands.",
+    note: "unreachable while the #504 gaps are open: the first gap in check order (missing-attestation) REFUSEs, so no release can claim clean-promote until a signed build manifest, invariant, telemetry and canary exist.",
   },
 };
 

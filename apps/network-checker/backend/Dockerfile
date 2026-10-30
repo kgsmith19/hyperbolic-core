@@ -14,7 +14,7 @@ LABEL org.opencontainers.image.source="https://github.com/kgsmith19/hyperbolic-c
 LABEL org.opencontainers.image.description="network-checker: which-layer network diagnostic for LLM API connections"
 
 WORKDIR /app
-COPY network_checker ./network_checker
+COPY backend/network_checker ./network_checker
 COPY frontend ./frontend
 COPY AGENTS.md README.md ./
 
