@@ -1,7 +1,7 @@
 # Monorepo audit (Phase 0 of #450, queue Q35)
 
 Status: audit only. No code, path, workflow or production change is made by this document.
-Snapshot: `origin/main` at `30891aa`, 2026-10-30. Commands are reproducible from the repo root.
+Snapshot: `origin/main` at `b6720f1` (after #513), 2026-10-30. Counts re-run on this tree. Commands are reproducible from the repo root.
 
 ## 1. Apps and components
 
@@ -16,7 +16,7 @@ Snapshot: `origin/main` at `30891aa`, 2026-10-30. Commands are reproducible from
 | `apps/toolbelt/apps/idea-intake` | no | yes | no | App to lift to `apps/idea-intake` (has `tool.json`) |
 | `apps/toolbelt/apps/network-checker` | no | yes | no | App to lift to `apps/network-checker` (has `tool.json`) |
 | `apps/toolbelt/apps/prompt-organizer` | no | yes | no | App to lift to `apps/prompt-organizer` (has `tool.json`) |
-| `services/brain`, `services/llm-handler`, `services/broker` | n/a | n/a | n/a | Category `services/`, per the issue. Each has `tool.json` |
+| `services/brain`, `services/llm-handler`, `services/broker`, `services/platform-api` | n/a | n/a | n/a | Category `services/`, per the issue. Each has `tool.json` (`platform-api` added since 30891aa) |
 
 Rule applied: a directory with its own `project.yaml` or `AGENTS.md` is an app. `backend/` and `frontend/` inside `lifeos` are components because the issue says `lifeos` is an equal app and its halves share one manifest, but the audit leaves the final call to Phase 1 (decision D1).
 
@@ -24,7 +24,7 @@ Rule applied: a directory with its own `project.yaml` or `AGENTS.md` is an app. 
 
 - `apps/toolbelt/apps/` holds the three nested apps above. The lift is a `git mv` to `apps/<name>/`.
 - Shared root pieces to relocate: `guards/`, `scripts/`, `supabase/`, `tests/`, `tool.schema.json`, `project.yaml`.
-- Stale references to `apps/toolbelt` or `toolbelt/apps`: **188 files** (`grep -rIl -E 'apps/toolbelt|toolbelt/apps'`, excluding `node_modules` and `.git`). Largest groups:
+- Stale references to `apps/toolbelt` or `toolbelt/apps`: **189 files** (`grep -rIl -E 'apps/toolbelt|toolbelt/apps'`, excluding `node_modules` and `.git`). Largest groups:
   - `apps/toolbelt/supabase/migrations` (20), `docs/planning` and `docs/planning/issues` (28), `apps/toolbelt/tests` (13), `packages/toolbelt-cli` (14), `apps/shell/frontend` (16), `services/broker` (6), `docs/ops` (5), `.github/workflows` (5).
 - Archived history (`docs/archived/**`) stays and is listed as an allowed hit (AC4).
 
@@ -55,7 +55,7 @@ Root workflows: 36 files in `.github/workflows/`. Those with cloud or VPS scope 
 find apps -mindepth 2 \( -name project.yaml -o -name AGENTS.md -o -name CLAUDE.md \)
 find . -path ./node_modules -prune -o -type d -name .github -print
 grep -rIl --exclude-dir=node_modules --exclude-dir=.git -E 'apps/toolbelt|toolbelt/apps' . | wc -l
-find apps packages services -name tool.json -not -path '*/node_modules/*'
+find apps packages services -name tool.json -not -path '*/node_modules/*'   # 8 on this tree
 grep -lE 'apps/toolbelt|toolbelt/apps' .github/workflows/*.yml
 ```
 
