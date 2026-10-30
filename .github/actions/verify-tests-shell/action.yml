@@ -93,6 +93,20 @@ runs:
       shell: bash
       run: npm test --workspace=@hyperbolic/review
 
+    - name: Test · packages/sqlite-kit (node --test)
+      # The one SQLite open + migration runner every Node sub-app uses (#506).
+      shell: bash
+      run: npm test --workspace=@hyperbolic/sqlite-kit
+
+    - name: Type-check · services/platform-api
+      shell: bash
+      run: npm run typecheck --workspace=@hyperbolic/platform-api
+
+    - name: Test · services/platform-api (node --test)
+      # The local platform service that replaces Supabase (#508).
+      shell: bash
+      run: npm test --workspace=@hyperbolic/platform-api
+
     - name: Test · services/llm-handler (node --test)
       shell: bash
       run: npm test --workspace=@hyperbolic/llm-handler
@@ -156,6 +170,49 @@ runs:
     - name: Size · Enforce Shell size budget
       shell: bash
       run: npm run size-check --workspace=apps/shell
+
+    # The independent oracle for every docs/ops/*-golden.json (#492): rerun each
+    # generator against the Standard at the commit standard.lock pins, under the
+    # Python the goldens record, and require byte equality. Last, so setup-python
+    # cannot change what the suite above ran with.
+    - name: Goldens · Read the Standard commit standard.lock pins
+      id: lock
+      shell: bash
+      run: |
+        set -euo pipefail
+        commit="$(sed -n 's/^commit: \([0-9a-f]\{40\}\)$/\1/p' standard.lock)"
+        test -n "$commit"
+        echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+    - name: Goldens · Check out the Standard at that commit
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: kgsmith19/agent-engineering-standard
+        ref: ${{ steps.lock.outputs.commit }}
+        path: .standard-checkout
+        persist-credentials: false
+
+    - name: Goldens · Set up the Python the goldens record
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: "3.12"
+
+    - name: Goldens · Regenerate every upstream golden and require byte equality
+      shell: bash
+      env:
+        COMMIT: ${{ steps.lock.outputs.commit }}
+      run: |
+        set -euo pipefail
+        out="$(mktemp -d)"
+        count=0
+        for generator in docs/ops/*-golden.py; do
+          golden="${generator%.py}.json"
+          python3 -B "$generator" .standard-checkout > "$out/$(basename "$golden")"
+          diff -u "$golden" "$out/$(basename "$golden")"
+          count=$((count + 1))
+        done
+        test "$count" -gt 0
+        echo "Regenerated $count goldens from agent-engineering-standard@$COMMIT with $(python3 --version): byte-identical."
 
     - name: E2E · Upload Playwright failure evidence
       if: failure()

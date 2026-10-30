@@ -8,7 +8,7 @@
 //
 // Stage 63 slice S1 (#419): hyperbolic-core's context/docs/maps adoption
 // slice. It binds the frozen v5 context/docs/maps contract (four modules in
-// agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88)
+// agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96)
 // to the hyperbolic-core runtime mechanisms that satisfy each element — and
 // HONESTLY discloses the elements that do not exist yet as gaps tracked in
 // their own slice Issues (#420–#428), rather than claiming a proof that is
@@ -59,7 +59,7 @@ test("S1 · repo_map budgets and patterns frozen", () => {
   ]);
   assert.deepEqual([...FROZEN.repo_map.EVIDENCE_PATTERNS], [".evidence/"]);
   assert.deepEqual([...FROZEN.repo_map.PROTECTED_PATTERNS], [
-    ".github/workflows/pr-gate.yml", ".github/workflows/merge-policy.yml", "main",
+    ".github/workflows/pr-gate.yml", ".github/workflows/merge-policy.yml",
   ]);
 });
 
@@ -98,7 +98,7 @@ test("S1 · handoff_acceptance frozen rules and triggers", () => {
 });
 
 test("S1 · provenance names the exact Standard SHA", () => {
-  assert.match(provenance(), /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
+  assert.match(provenance(), /1686e3b490380194cff78767b88c4e0288410e96/);
 });
 
 // --- Half 2: grounded mapping (every mapped element → one real on-disk path) ---

@@ -26,7 +26,7 @@ outputs:
     description: "true when services/brain/** is relevant"
     value: ${{ steps.detect.outputs.brain }}
   shell:
-    description: "true when apps/shell/**, packages/**, services/llm-handler/**, services/broker/** or docs/ops/** is relevant"
+    description: "true when apps/shell/**, packages/**, services/llm-handler/**, services/broker/**, services/platform-api/**, docs/ops/** or standard.lock is relevant"
     value: ${{ steps.detect.outputs.shell }}
   lifeos:
     description: "true when apps/lifeos/** is relevant"
@@ -83,5 +83,5 @@ runs:
         relevant toolbelt '^(apps/toolbelt/|packages/toolbelt-cli/|package\.json$|package-lock\.json$)'
         relevant acc      '^(apps/agentic-command-center/|apps/toolbelt/guards/)'
         relevant brain    '^(services/brain/|package\.json$|package-lock\.json$)'
-        relevant shell    '^(apps/shell/|packages/|services/llm-handler/|services/broker/|docs/ops/)'
+        relevant shell    '^(apps/shell/|packages/|services/llm-handler/|services/broker/|services/platform-api/|docs/ops/|standard\.lock$)'
         relevant lifeos   '^apps/lifeos/'

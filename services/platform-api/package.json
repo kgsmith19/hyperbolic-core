@@ -1,0 +1,21 @@
+{
+  "name": "@hyperbolic/platform-api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The local platform service (#508): the core, idea, platform, prompt and intake schemas in one SQLite file, served behind the /auth/v1 and /rest/v1 subset the clients already call, with single-owner ES256 auth. Replaces the Supabase platform project (owner decision 2026-10-29: local-only).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/index.ts",
+    "init": "node src/cli.ts init",
+    "test": "node --test tests/*.test.ts",
+    "typecheck": "tsc -b . && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@hyperbolic/sqlite-kit": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.9.3"
+  }
+}

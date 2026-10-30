@@ -1,0 +1,12 @@
+# Which provider company holds each agent role in this repository (#490, #467 S1).
+#
+# Repository variables drive every live call and win over this file; this is
+# the declared, CODEOWNERS-gated record of the same assignment, read from the
+# default branch only. The review entry must equal vars.REVIEW_PROVIDER, or
+# verify-repo-policy fails the PR Gate. The two roles must be different
+# companies (AGENTS.md > Active agent roles). Version ids live only in the
+# repository variables, never here.
+dev:
+  provider: anthropic
+review:
+  provider: openai

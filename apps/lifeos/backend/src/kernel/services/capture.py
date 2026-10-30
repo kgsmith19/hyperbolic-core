@@ -37,7 +37,7 @@ def capture(
         validate(instance=attributes, schema=type_def.json_schema)
 
         result = resolver.resolve(conn, type_def, attributes)
-        conn.execute("set constraints all deferred")
+        conn.defer_constraints()
         now = tx_now(conn)
         when = valid_time or now
 

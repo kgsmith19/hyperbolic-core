@@ -5,11 +5,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from jsonschema.validators import validator_for
-from psycopg.errors import UniqueViolation
-from psycopg.types.json import Jsonb
 
 from kernel import db
 from kernel.access import AccessContext, has, require
+from kernel.db import Jsonb, UniqueViolation
 from kernel.events import DEFAULT_ACTOR, append_event, iso, tx_now
 from kernel.models import TypeDefinition
 

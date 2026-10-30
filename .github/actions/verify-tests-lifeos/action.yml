@@ -1,7 +1,7 @@
 name: Verify Tests LifeOS
 description: >-
-  LifeOS's full suite, backend then frontend: ruff and pytest against a
-  pgvector Postgres with migrations applied, then the frontend's lint,
+  LifeOS's full suite, backend then frontend: ruff, mypy and pytest (each
+  pytest session migrates its own scratch SQLite file, #512), then the frontend's lint,
   type-check, unit tests, Playwright e2e, and production build. Shared by
   pr-verify.yml's native "LifeOS" job and lifeos-ci.yml's own
   merge_group/push/workflow_dispatch triggers, so the suite has exactly one
@@ -13,32 +13,12 @@ description: >-
   dependencies install -- so a lint break fails fast without waiting on
   mypy/pytest or the type-check/e2e/build steps that follow it.
 
-  This content is AUTHORED FRESH for the monorepo, never relocated: the
-  nested apps/lifeos/.github/workflows/ci.yml also carries build-backend and
-  deploy-backend jobs, and build-backend has no repository-variable gate --
-  running that file from the root would publish a Docker image on every push
-  to main (see AGENTS.md's Workflow Safety Invariant). Only TEST steps here.
+  Only TEST steps here.
 
 runs:
   using: composite
   steps:
     # ---------------- backend ----------------
-    - name: Setup · Start Postgres
-      shell: bash
-      run: |
-        docker run --detach --name lifeos-ci-postgres \
-          -e POSTGRES_PASSWORD=postgres \
-          -p 5432:5432 \
-          pgvector/pgvector:pg17
-        for attempt in $(seq 1 30); do
-          if docker exec lifeos-ci-postgres pg_isready -U postgres >/dev/null 2>&1; then
-            exit 0
-          fi
-          sleep 1
-        done
-        docker logs lifeos-ci-postgres
-        exit 1
-
     - name: Setup · Install Python
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
       with:
@@ -59,32 +39,12 @@ runs:
     - name: Type-check · mypy
       shell: bash
       working-directory: apps/lifeos/backend
-      env:
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
       run: mypy
-
-    - name: Setup · Apply migrations
-      shell: bash
-      working-directory: apps/lifeos/backend
-      env:
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
-      run: |
-        psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'create schema if not exists extensions'
-        for migration in supabase/migrations/*.sql; do
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
-        done
 
     - name: Test · pytest
       shell: bash
       working-directory: apps/lifeos/backend
-      env:
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
       run: pytest
-
-    - name: Cleanup · Stop Postgres
-      if: always()
-      shell: bash
-      run: docker rm --force lifeos-ci-postgres >/dev/null 2>&1 || true
 
     # ---------------- frontend ----------------
     - name: Setup · Install Node.js

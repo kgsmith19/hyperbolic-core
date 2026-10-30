@@ -2,7 +2,7 @@
 //
 // S5 RED characterization (Issue #423): v5 continuity and context-rotation
 // semantics from agent-engineering-standard @
-// 516fdb25d091f2f3f467fb48eaee01cb7f805c88 — tools/context_rotation.py
+// 1686e3b490380194cff78767b88c4e0288410e96 — tools/context_rotation.py
 // (Stage 48), tools/context_budget.py (zero-compaction governor),
 // tools/handoff_acceptance.py (Stage 45 HAT/SAT) and tools/capsule.py (the
 // provider-neutral goal/scratch recovery packet).
@@ -15,7 +15,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -67,8 +67,62 @@ test("S5 · provenance names all four continuity modules at the pinned SHA", () 
   for (const module of ["context_rotation", "context_budget", "handoff_acceptance", "capsule"]) {
     assert.match(provenance(), new RegExp(`tools/${module}\\.py`));
   }
-  assert.match(provenance(), /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
-  assert.match(golden._provenance, /516fdb25d091f2f3f467fb48eaee01cb7f805c88/);
+  assert.match(provenance(), /1686e3b490380194cff78767b88c4e0288410e96/);
+  assert.match(golden._provenance, /1686e3b490380194cff78767b88c4e0288410e96/);
+});
+
+test("S5 · the shared golden loader regenerates at standard.lock's commit, never a stale SHA", () => {
+  // Every stage-63 generator loads upstream through this file's SHA (#492): a
+  // stale constant would regenerate every golden at the old Standard commit.
+  const lock = readFileSync(path.join(root, "standard.lock"), "utf8").match(/^commit: ([0-9a-f]{40})$/m);
+  const generator = readFileSync(path.join(here, "stage63-continuity-golden.py"), "utf8").match(/^SHA = "([0-9a-f]{40})"$/m);
+  assert.ok(lock && generator, "standard.lock commit or generator SHA not found");
+  assert.equal(generator[1], lock[1]);
+  // The goldens are the upstream Python's own output: each records the commit it
+  // actually loaded, so a golden left at another SHA fails here too.
+  const goldens = readdirSync(here).filter((name) => /^stage63-[a-z-]+-golden\.json$/.test(name));
+  assert.equal(goldens.length, 8, "every stage-63 golden is checked");
+  for (const name of goldens) {
+    const recorded = JSON.parse(readFileSync(path.join(here, name), "utf8"))._provenance;
+    assert.ok(typeof recorded === "string" && recorded.startsWith(`agent-engineering-standard @ ${lock[1]}: `),
+      `${name} was not generated at standard.lock's commit`);
+  }
+});
+
+test("S5 · CI regenerates every upstream golden at standard.lock's commit and requires byte equality", () => {
+  // The independent oracle for every *-golden.json (#492): the Platform lane checks
+  // out the Standard at the pinned commit, reruns each generator under the Python
+  // the goldens record, and fails on any byte of drift, so a hand-edited or stale
+  // golden cannot pass on repository files alone.
+  const action = readFileSync(path.join(root, ".github/actions/verify-tests-shell/action.yml"), "utf8");
+  const at = (marker) => {
+    const index = action.indexOf(marker);
+    assert.ok(index > -1, `missing: ${marker}`);
+    return index;
+  };
+  const lock = at("- name: Goldens · Read the Standard commit standard.lock pins");
+  const checkout = at("- name: Goldens · Check out the Standard at that commit");
+  const python = at("- name: Goldens · Set up the Python the goldens record");
+  const regen = at("- name: Goldens · Regenerate every upstream golden and require byte equality");
+  assert.ok(at("- name: Test · deployment operator tooling") < lock && lock < checkout && checkout < python
+    && python < regen, "lock, checkout, python, regenerate: in that order, after the docs/ops tests");
+  const block = (start, end) => action.slice(start, end);
+  assert.match(block(checkout, python), /repository: kgsmith19\/agent-engineering-standard\n\s+ref: \$\{\{ steps\.lock\.outputs\.commit \}\}\n/);
+  assert.match(block(checkout, python), /persist-credentials: false/);
+  assert.match(block(python, regen), /python-version: "3\.12"/);
+  const run = block(regen, action.indexOf("\n    - name:", regen + 1));
+  assert.match(run, /set -euo pipefail/);
+  assert.match(run, /for generator in docs\/ops\/\*-golden\.py; do/);
+  assert.match(run, /diff -u "\$golden" /);
+  assert.match(run, /test "\$count" -gt 0/);
+
+  // A lock-only change must still run the lane that carries the oracle.
+  const detect = readFileSync(path.join(root, ".github/actions/detect-changes/action.yml"), "utf8");
+  const pattern = new RegExp(detect.match(/relevant shell +'([^']+)'/)[1]);
+  for (const changed of ["standard.lock", "docs/ops/stage63-gate-golden.json", "docs/ops/role-contract-golden.py"]) {
+    assert.ok(pattern.test(changed), `${changed} must run the Platform lane`);
+  }
+  assert.ok(!pattern.test("standard.lock.bak"), "the lock is matched exactly");
 });
 
 // --- Differential characterization against the upstream Python ----------------

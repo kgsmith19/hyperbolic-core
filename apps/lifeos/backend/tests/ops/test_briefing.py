@@ -11,7 +11,6 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from psycopg.types.json import Jsonb
 
 from domains.calendar.types import define_calendar_types, email_hash
 from domains.cpap.types import define_cpap_types
@@ -29,6 +28,7 @@ from domains.ops.common import optional_find
 from domains.ops.types import define_ops_types
 from kernel import db
 from kernel.access import AccessContext, ScopeError
+from kernel.db import Jsonb
 from kernel.services import capture, find, history
 from scripts.define_daily_checkin import define_daily_checkin
 from scripts.migrate_briefing_composition import migrate

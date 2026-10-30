@@ -1,6 +1,6 @@
 {
  "_generator":"docs/ops/stage63-gate-golden.py",
- "_provenance":"agent-engineering-standard @ 516fdb25d091f2f3f467fb48eaee01cb7f805c88: tools/gate_compliance.py + tools/tracker_pipeline_gate.py + tools/completion_receipts.py + tools/standardctl.py (owner_label_authorized) + Canonical/corpus/completion-receipts/receipts.json + Canonical/corpus/gate-compliance/lane.json + Canonical/corpus/tracker-pipeline-gate/rendering.json",
+ "_provenance":"agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96: tools/gate_compliance.py + tools/tracker_pipeline_gate.py + tools/completion_receipts.py + tools/standardctl.py (owner_label_authorized) + Canonical/corpus/completion-receipts/receipts.json + Canonical/corpus/gate-compliance/lane.json + Canonical/corpus/tracker-pipeline-gate/rendering.json",
  "_python":"3.12",
  "owner_label":[
    {"events":[],"label":"empty-timeline","label_name":"owner:queue-exempt","owner":"kgsmith19","result":false,"shape":"github"},

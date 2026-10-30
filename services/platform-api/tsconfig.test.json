@@ -1,0 +1,26 @@
+// Type-checks the TESTS, which tsconfig.json deliberately excludes: that one is
+// the build program (composite, emits declarations from src/ only). Without this
+// file the suites were never type-checked at all -- a test could hand a
+// wrong-shaped object to the code under test and nothing would say so.
+//
+// rootDir is widened to the package root rather than dropped, because `extends`
+// would otherwise re-inherit src/ from the base and reject every tests/ file.
+// `types` adds node: the build program keeps it empty so the shipped surface
+// cannot depend on Node globals, but the suites import node:test itself.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "composite": false,
+    "rootDir": ".",
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src",
+    "tests"
+  ]
+}

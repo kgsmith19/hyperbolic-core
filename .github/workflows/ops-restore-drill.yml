@@ -142,24 +142,16 @@ jobs:
             docker run --rm --network host -e PGPASSWORD=postgres "$@"
           }
 
-          latest_snapshot() {
-            local repository="$1"
-            restic -r "$repository" snapshots --latest 1 --json \
-              | python3 -c 'import json, sys; snaps = json.load(sys.stdin); print(snaps[0]["short_id"] if snaps else "")'
-          }
-
-          # The latest snapshot's own creation time, as epoch seconds. RPO is
-          # then (now - this): how much data a restore-from-latest would lose
-          # -- a measured fact from the backup itself, never assumed (#408).
-          # python3 only extracts the JSON field (as latest_snapshot does);
-          # GNU date converts the ISO8601 timestamp (fractional seconds and Z
-          # included) to epoch.
-          snapshot_epoch() {
-            local repository="$1" iso
-            iso="$(restic -r "$repository" snapshots --latest 1 --json \
-              | python3 -c 'import json, sys; snaps = json.load(sys.stdin); print(snaps[0]["time"] if snaps else "")')"
-            test -n "$iso" || { echo ""; return 0; }
-            date -u -d "$iso" +%s
+          # The newest snapshot in the repository and its own creation time, as
+          # "<short_id> <epoch seconds>", from one listing. Not restic --latest: that
+          # is the newest per host and path group, so a backup that adds a file
+          # starts a new group and the first entry can be an older snapshot
+          # (#495). Chosen by parsed time, offsets included; restic's "Z" and
+          # 7-9 fractional digits are normalized first, so any python3 >= 3.7
+          # parses them. RPO is then (now - that time), never assumed (#408).
+          newest_snapshot() {
+            restic -r "$1" snapshots --json \
+              | python3 -c 'import datetime, json, re, sys; at = lambda s: datetime.datetime.fromisoformat(re.sub(r"\.(\d+)", lambda m: "." + (m.group(1) + "000000")[:6], s["time"]).replace("Z", "+00:00")).timestamp(); snaps = json.load(sys.stdin); newest = max(snaps, key=at, default=None); print("%s %d" % (newest["short_id"], at(newest)) if newest else "")'
           }
 
           summary="$tmp/summary.md"
@@ -171,18 +163,25 @@ jobs:
           } > "$summary"
           overall_status=0
 
+          # pg_restore's DETAIL/CONTEXT lines and quoted values can carry
+          # auth.users rows (emails, password hashes), and this repository's
+          # job logs are public: keep only the error lines, values redacted (#488).
+          redact_restore_errors() {
+            { grep -E '^pg_restore: error:' || true; } \
+              | sed -E "s/\"[^\"]*\"/\"<redacted>\"/g; s/'[^']*'/'<redacted>'/g"
+          }
+
           drill_platform() {
             local repository="sftp:hetzner-storagebox:/home/platform"
             restic -r "$repository" check --read-data-subset=10%
 
-            local snapshot_id
-            snapshot_id="$(latest_snapshot "$repository")"
-            test -n "$snapshot_id"
+            local newest snapshot_id snapshot_epoch_value
+            newest="$(newest_snapshot "$repository")"
+            test -n "$newest"
+            read -r snapshot_id snapshot_epoch_value <<< "$newest"
 
-            # RPO: age of the latest snapshot at the moment we drill it.
-            local snapshot_epoch_value now_epoch rpo_seconds
-            snapshot_epoch_value="$(snapshot_epoch "$repository")"
-            test -n "$snapshot_epoch_value"
+            # RPO: age of the newest snapshot at the moment we drill it.
+            local now_epoch rpo_seconds
             now_epoch="$(date +%s)"
             rpo_seconds="$(( now_epoch - snapshot_epoch_value ))"
 
@@ -198,6 +197,11 @@ jobs:
             local dump_file
             dump_file="$(find "$restore_dir" -name 'platform.dump' -type f | head -1)"
             test -n "$dump_file"
+            # core.run.user_id references auth.users, so platform.dump cannot
+            # restore without the auth.users dump from the same snapshot (#488).
+            local auth_file
+            auth_file="$(find "$restore_dir" -name 'auth_users.dump' -type f | head -1)"
+            test -n "$auth_file" || { echo "::error::snapshot $snapshot_id has no auth_users.dump: platform.dump cannot restore without it (#488)"; return 1; }
 
             docker run --rm -i "$PG_IMAGE" pg_restore --list < "$dump_file" > /dev/null
 
@@ -205,11 +209,33 @@ jobs:
             # has no auth schema (#486). Strict: any restore error fails.
             pg "$PG_IMAGE" psql -h 127.0.0.1 -U supabase_admin postgres -X -q -v ON_ERROR_STOP=1 \
               -c "create extension if not exists vector with schema extensions"
+
+            # auth.users first. The image's own auth.users is a bootstrap stub
+            # without the columns production's auth service adds, so this
+            # throwaway database's stub is replaced by the dumped table. Only
+            # the table, its data, constraints and indexes: its triggers,
+            # policies and grants call functions no backup here carries.
+            docker run --rm -i "$PG_IMAGE" pg_restore --list < "$auth_file" \
+              | grep -E '^[0-9]+; [0-9]+ [0-9]+ (TABLE|TABLE DATA|CONSTRAINT|INDEX) auth ' > "$tmp/auth.list"
+            grep -q ' TABLE DATA auth users ' "$tmp/auth.list"
+            pg "$PG_IMAGE" psql -h 127.0.0.1 -U supabase_admin postgres -X -q -v ON_ERROR_STOP=1 \
+              -c "drop table auth.users cascade"
+            if ! pg -v "$auth_file:/tmp/auth_users.dump:ro" -v "$tmp/auth.list:/tmp/auth.list:ro" "$PG_IMAGE" \
+                pg_restore -h 127.0.0.1 -U supabase_admin --no-owner --no-privileges --exit-on-error \
+                  -L /tmp/auth.list --dbname postgres /tmp/auth_users.dump 2> "$tmp/auth-restore.err"; then
+              echo "auth.users restore failed; row values withheld from this public log (#488):" >&2
+              redact_restore_errors < "$tmp/auth-restore.err" >&2
+              return 1
+            fi
+            local auth_users_n
+            auth_users_n="$(pg "$PG_IMAGE" psql -h 127.0.0.1 -U supabase_admin postgres -X -At -v ON_ERROR_STOP=1 -c "select count(*) from auth.users")"
+            [[ "$auth_users_n" =~ ^[0-9]+$ ]]
+
             pg -v "$dump_file:/tmp/platform.dump:ro" "$PG_IMAGE" \
               pg_restore -h 127.0.0.1 -U supabase_admin --no-owner --no-privileges --exit-on-error \
                 --dbname postgres /tmp/platform.dump
 
-            local counts=""
+            local counts=" auth.users=$auth_users_n"
             for t in platform.config core.app core.run core.cost prompt.prompt idea.idea intake.idea; do
               local n
               n="$(pg "$PG_IMAGE" psql -h 127.0.0.1 -U supabase_admin postgres -X -At -v ON_ERROR_STOP=1 -c "select count(*) from $t")"
@@ -225,14 +251,13 @@ jobs:
             local repository="sftp:hetzner-storagebox:/home/lifeos"
             restic -r "$repository" check --read-data-subset=10%
 
-            local snapshot_id
-            snapshot_id="$(latest_snapshot "$repository")"
-            test -n "$snapshot_id"
+            local newest snapshot_id snapshot_epoch_value
+            newest="$(newest_snapshot "$repository")"
+            test -n "$newest"
+            read -r snapshot_id snapshot_epoch_value <<< "$newest"
 
-            # RPO: age of the latest snapshot at the moment we drill it.
-            local snapshot_epoch_value now_epoch rpo_seconds
-            snapshot_epoch_value="$(snapshot_epoch "$repository")"
-            test -n "$snapshot_epoch_value"
+            # RPO: age of the newest snapshot at the moment we drill it.
+            local now_epoch rpo_seconds
             now_epoch="$(date +%s)"
             rpo_seconds="$(( now_epoch - snapshot_epoch_value ))"
 
@@ -288,6 +313,7 @@ jobs:
             rc=$?
             set -e
             if [ "$rc" -ne 0 ]; then
+              echo "::error::$label drill failed (exit $rc); the log lines above name the step"
               echo "| \`$label\` | **FAIL** | | | | see job log |" >> "$summary"
               overall_status=1
             fi
@@ -295,6 +321,7 @@ jobs:
           run_drill platform
           run_drill lifeos
 
+          cat "$summary"
           cat "$summary" >> "$GITHUB_STEP_SUMMARY"
           echo "See docs/ops/runbook.md's restore-drill section for how to read this table." >> "$GITHUB_STEP_SUMMARY"
           exit "$overall_status"

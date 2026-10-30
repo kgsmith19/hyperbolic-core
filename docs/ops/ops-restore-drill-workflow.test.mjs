@@ -88,7 +88,8 @@ test("every Postgres client container uses the service's own pinned image (#486)
   assert.equal(env[1], service[1], "PG_IMAGE must equal the service image");
   assert.doesNotMatch(workflow, /docker run[^\n]* postgres:17 /);
   assert.doesNotMatch(workflow, /\bpg [^\n]*postgres:17\b/);
-  assert.equal((workflow.match(/"\$PG_IMAGE" pg_restore --list/g) ?? []).length, 2);
+  // platform, its auth.users companion (#488) and lifeos: each listed by the pinned image.
+  assert.equal((workflow.match(/"\$PG_IMAGE" pg_restore --list/g) ?? []).length, 3);
 });
 
 test("both dumps restore strictly into the image's own postgres database, as the superuser, with vector enabled first (#486)", () => {
@@ -108,7 +109,8 @@ test("both dumps restore strictly into the image's own postgres database, as the
   const lifeos = drillFunction("lifeos");
   assert.match(lifeos, /grep -v ' SCHEMA - public '/);
   assert.match(lifeos, /-L \/tmp\/lifeos\.list/);
-  assert.doesNotMatch(drillFunction("platform"), / -L /);
+  // platform's own dump restores whole; only its auth.users companion is filtered (#488).
+  assert.doesNotMatch(drillFunction("platform"), / -L \/tmp\/platform/);
 });
 
 test("every verified table must answer an integer count (#486)", () => {
@@ -239,8 +241,8 @@ test("RPO is measured as the latest snapshot's age (now minus snapshot time), pe
   // RPO = how much data a restore-from-latest would lose = the age of the
   // most recent backup, derived from the snapshot's own timestamp, never
   // assumed. #408.
-  assert.match(workflow, /snapshot_epoch\(\) \{/);
-  assert.match(workflow, /date -u -d "\$iso" \+%s/);
+  // The id and the time come from one snapshot listing (#495).
+  assert.doesNotMatch(workflow, /snapshot_epoch\(\) \{|latest_snapshot\(\) \{|--latest 1/);
   assert.match(workflow, /rpo_seconds="\$\(\( now_epoch - snapshot_epoch_value \)\)"/);
   assert.equal(
     (workflow.match(/rpo_seconds="\$\(\( now_epoch - snapshot_epoch_value \)\)"/g) ?? []).length,
@@ -295,4 +297,142 @@ test("the ops-restore-drill.yml script parses as valid bash", () => {
     .replace(/\$\{\{ vars\.STORAGEBOX_HOST \}\}/g, "u123456.your-storagebox.de")
     .replace(/\$\{\{ vars\.STORAGEBOX_USER \}\}/g, "u123456-sub1");
   assert.doesNotThrow(() => execFileSync("bash", ["-n"], { input: `#!/usr/bin/env bash\n${script}` }));
+});
+
+// --- auth.users restores first: core.run.user_id references it (#488, run 40797513017) ---
+
+test("the platform drill fails closed when the snapshot carries no auth.users dump (#488)", () => {
+  const fn = drillFunction("platform");
+  assert.match(fn, /auth_file="\$\(find "\$restore_dir" -name 'auth_users\.dump' -type f \| head -1\)"/);
+  assert.match(fn, /\n\s*test -n "\$auth_file" \|\| \{ [^\n]*return 1; \}\n/);
+  // Never fabricated: no INSERT INTO auth.users stands in for a missing backup.
+  assert.doesNotMatch(workflow, /insert into auth\.users/i);
+});
+
+test("auth.users replaces the image's stub table and restores strictly, before the platform schemas (#488)", () => {
+  const fn = drillFunction("platform");
+  const list = fn.indexOf('pg_restore --list < "$auth_file"');
+  const drop = fn.indexOf('-c "drop table auth.users cascade"');
+  const auth = fn.indexOf("--exit-on-error \\\n                  -L /tmp/auth.list --dbname postgres /tmp/auth_users.dump");
+  const platform = fn.indexOf("--dbname postgres /tmp/platform.dump");
+  assert.ok(list > -1 && drop > -1 && auth > -1 && platform > -1, "auth list, drop, strict restore or platform restore missing");
+  assert.ok(list < drop && drop < auth && auth < platform, "auth.users must be listed, replaced, then restored before platform");
+  assert.match(fn, /pg_restore -h 127\.0\.0\.1 -U supabase_admin --no-owner --no-privileges --exit-on-error \\\n\s*-L \/tmp\/auth\.list/);
+});
+
+test("only the table, its data, constraints and indexes restore; triggers, policies and grants never do (#488)", () => {
+  const fn = drillFunction("platform");
+  const filter = fn.match(/\| (grep -E '[^']+') > "\$tmp\/auth\.list"/);
+  assert.ok(filter, "auth TOC filter not found");
+  assert.match(fn, /grep -q ' TABLE DATA auth users ' "\$tmp\/auth\.list"/);
+  // The TOC pg_dump --table=auth.users writes (local proof, owner names elided). An
+  // INDEX entry is tagged with the index's own name, not the table's.
+  const toc = [
+    "234; 1259 16458 TABLE auth users OWNER",
+    "3586; 0 0 COMMENT auth TABLE users OWNER",
+    "3587; 0 0 ACL auth TABLE users OWNER",
+    "3577; 0 16458 TABLE DATA auth users OWNER",
+    "3418; 2606 16466 CONSTRAINT auth users users_email_key OWNER",
+    "3424; 2606 16464 CONSTRAINT auth users users_pkey OWNER",
+    "3419; 1259 16467 INDEX auth users_instance_id_email_idx OWNER",
+    "3425; 2620 16679 TRIGGER auth users on_auth_user_created OWNER",
+    "3575; 3256 16680 POLICY auth users self_read OWNER",
+    "3574; 0 16458 ROW SECURITY auth users OWNER",
+  ].join("\n");
+  const kept = execFileSync("bash", ["-c", filter[1]], { input: `;\n; Archive header\n${toc}\n`, encoding: "utf8" });
+  assert.deepEqual(
+    kept.trim().split("\n").map((line) => line.split(" ").slice(3, 5).join(" ")),
+    ["TABLE auth", "TABLE DATA", "CONSTRAINT auth", "CONSTRAINT auth", "INDEX auth"],
+  );
+});
+
+test("auth.users is verified with an integer count, before the platform tables (#488)", () => {
+  const fn = drillFunction("platform");
+  assert.match(fn, /auth_users_n="\$\(pg "\$PG_IMAGE" psql -h 127\.0\.0\.1 -U supabase_admin postgres -X -At -v ON_ERROR_STOP=1 -c "select count\(\*\) from auth\.users"\)"/);
+  assert.match(fn, /\[\[ "\$auth_users_n" =~ \^\[0-9\]\+\$ \]\]/);
+  assert.match(fn, /local counts=" auth\.users=\$auth_users_n"/);
+});
+
+/** Text of the redact_restore_errors() helper, brace to brace. */
+function redactHelper() {
+  const start = workflow.indexOf("redact_restore_errors() {");
+  const end = workflow.indexOf("\n          }", start);
+  assert.ok(start > -1 && end > -1, "redact_restore_errors helper not found");
+  return workflow.slice(start, end + "\n          }".length);
+}
+
+test("an auth.users restore failure prints no row values to the public job log (#488)", () => {
+  const fn = drillFunction("platform");
+  assert.match(fn, /\/tmp\/auth_users\.dump 2> "\$tmp\/auth-restore\.err"; then/);
+  assert.match(fn, /redact_restore_errors < "\$tmp\/auth-restore\.err" >&2\n\s*return 1/);
+  const stderr = [
+    'pg_restore: error: could not execute query: ERROR:  invalid input syntax for type uuid: "owner@example.com"',
+    'pg_restore: error: COPY failed for table "users": ERROR:  duplicate key value violates unique constraint "users_pkey"',
+    "DETAIL:  Key (email)=(owner@example.com) already exists.",
+    "CONTEXT:  COPY users, line 1: \"00000000-0000-0000-0000-000000000000\towner@example.com\t$2a$10$hash\"",
+    "Command was: COPY auth.users (id, email) FROM stdin;",
+    "pg_restore: error: value 'secret-token' rejected",
+  ].join("\n");
+  const out = execFileSync("bash", ["-c", `set -euo pipefail\n${redactHelper()}\nredact_restore_errors`], { input: stderr, encoding: "utf8" });
+  assert.doesNotMatch(out, /owner@example\.com|\$2a\$|secret-token|00000000-/);
+  assert.match(out, /invalid input syntax for type uuid/, "the error class must still be visible");
+  assert.equal(out.trim().split("\n").length, 3, "only the three pg_restore: error: lines survive");
+  // No error lines at all must not fail the caller under pipefail.
+  assert.equal(execFileSync("bash", ["-c", `set -euo pipefail\n${redactHelper()}\nredact_restore_errors; echo ok`], { input: "DETAIL: x\n", encoding: "utf8" }).trim(), "ok");
+});
+
+// --- the newest snapshot across every path group (#495, run 40817917701) ---
+
+/** Text of the newest_snapshot() helper, brace to brace. */
+function newestHelper() {
+  const start = workflow.indexOf("newest_snapshot() {");
+  const end = workflow.indexOf("\n          }", start);
+  assert.ok(start > -1 && end > -1, "newest_snapshot helper not found");
+  return workflow.slice(start, end + "\n          }".length);
+}
+
+function newestOf(snapshots) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "snaps-"));
+  const json = path.join(dir, "snapshots.json");
+  writeFileSync(json, JSON.stringify(snapshots));
+  const stub = `restic() { [ "$1 $3 $4" = "-r snapshots --json" ] || return 9; cat ${JSON.stringify(json)}; }`;
+  return execFileSync("bash", ["-c", `set -euo pipefail\n${stub}\n${newestHelper()}\nnewest_snapshot repo`],
+    { encoding: "utf8" }).trim();
+}
+
+test("newest_snapshot: picks the newest snapshot across path groups, by parsed time, as '<id> <epoch>' (#495)", () => {
+  // restic's --latest is per host and path group: adding auth_users.dump to the
+  // platform backup started a new group, and the drill restored the older one.
+  const older = { short_id: "0c0336f6", time: "2026-10-28T09:57:24.3832825Z", paths: ["/t/platform.dump"] };
+  const newer = { short_id: "bf661cd7", time: "2026-10-29T04:26:12.123456789+00:00",
+    paths: ["/t/auth_users.dump", "/t/platform.dump"] };
+  assert.equal(newestOf([older, newer]), `bf661cd7 ${Math.floor(Date.UTC(2026, 9, 29, 4, 26, 12) / 1000)}`);
+  assert.equal(newestOf([newer, older]).split(" ")[0], "bf661cd7", "list order never decides");
+  // An offset decides, not string order: 23:30-07:00 is 06:30 UTC the next day.
+  const offset = { short_id: "aaaa1111", time: "2026-10-28T23:30:00-07:00", paths: ["/x"] };
+  assert.equal(newestOf([newer, offset]).split(" ")[0], "aaaa1111");
+  assert.equal(newestOf([]), "", "an empty repository yields nothing, and the drill fails on it");
+  const short = { short_id: "cccc2222", time: "2026-10-29T04:26:13.5Z", paths: ["/y"] };
+  assert.equal(newestOf([newer, short]), `cccc2222 ${Math.floor(Date.UTC(2026, 9, 29, 4, 26, 13) / 1000)}`);
+  // fromisoformat before 3.11 takes neither "Z" nor 7-9 fractional digits: the
+  // helper normalizes both instead of depending on the runner's python3.
+  assert.match(newestHelper(), /\(m\.group\(1\) \+ "000000"\)\[:6\]/);
+  assert.match(newestHelper(), /\.replace\("Z", "\+00:00"\)/);
+});
+
+test("each drill takes its snapshot id and RPO time from one newest_snapshot call (#495)", () => {
+  for (const label of ["platform", "lifeos"]) {
+    const fn = drillFunction(label);
+    assert.match(fn, /newest="\$\(newest_snapshot "\$repository"\)"\n\s*test -n "\$newest"\n\s*read -r snapshot_id snapshot_epoch_value <<< "\$newest"/);
+    assert.ok(fn.indexOf("newest_snapshot") < fn.indexOf('restic -r "$repository" restore "$snapshot_id"'));
+  }
+});
+
+test("the results table and every drill failure reach the job log, not only the step summary (#495)", () => {
+  // The Actions API serves job logs but not step summaries.
+  const helper = runDrillHelper();
+  assert.match(helper, /echo "::error::\$label drill failed \(exit \$rc\)/);
+  assert.match(workflow, /cat "\$summary"\n\s*cat "\$summary" >> "\$GITHUB_STEP_SUMMARY"/);
+  assert.match(drillFunction("platform"),
+    /test -n "\$auth_file" \|\| \{ echo "::error::snapshot \$snapshot_id has no auth_users\.dump[^"]*"; return 1; \}/);
 });

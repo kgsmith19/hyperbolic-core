@@ -10,7 +10,6 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "pydantic>=2.7",
-    "psycopg[binary]>=3.2",
     "jsonschema>=4.23",
     "uvicorn>=0.30",
     "pyjwt[crypto]>=2.9",

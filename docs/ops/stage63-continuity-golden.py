@@ -21,7 +21,7 @@ import types
 
 sys.dont_write_bytecode = True  # importing this generator must not litter docs/ops/__pycache__
 
-SHA = "516fdb25d091f2f3f467fb48eaee01cb7f805c88"
+SHA = "1686e3b490380194cff78767b88c4e0288410e96"
 MODULES = ("context_rotation", "context_budget", "handoff_acceptance", "capsule")
 # Characters Python strip() removes but str.trim() keeps (U+001C-U+001F, U+0085), and
 # the reverse (U+FEFF). Pad-only values expose the blank-check divergence.
