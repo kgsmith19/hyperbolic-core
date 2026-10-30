@@ -228,35 +228,29 @@ vendors:
   # Full detail (auth, secret paths, cost, rotation) lives in
   # docs/ops/vendors.md; this block is the machine-declared summary.
   - name: Hetzner
-    purpose: VPS hosting every deployed unit; a Storage Box (planned) for
-      restic backups
-    cost_eur_month: 5.50
-    auth: SSH via Tailscale (no Hetzner API automation in this repo)
+    purpose: "RETIRED (owner decision 2026-10-29, local-only; cloud workflows removed by #503). The VPS keeps whatever it last ran; nothing here deploys to it."
+    cost_eur_month: 0
+    auth: none (retired; no SSH or API path remains in this repo)
     docs: docs/ops/vendors.md#hetzner
   - name: Tailscale
-    purpose: private network fabric — deploy transport, TLS termination,
-      authorization boundary, CI identity
+    purpose: "RETIRED (owner decision 2026-10-29, local-only; removed with the cloud workflows by #503). No deploy transport or CI identity uses it now."
     cost_eur_month: 0
-    auth: OAuth client (auth_keys scope), injected per pipeline via Infisical
+    auth: none (retired)
     docs: docs/ops/vendors.md#tailscale
   - name: Infisical
-    purpose: sole secret store for every pipeline; one machine identity per
-      pipeline, each scoped to exactly one secret path
+    purpose: "sole secret store for the former cloud pipelines. Not needed for local work; secret revocation for retired vendors is not yet done."
     cost_eur_month: 0
     auth: OIDC (GitHub Actions identity token exchange) — no static API key
     docs: docs/ops/vendors.md#infisical
   - name: Cloudflare
-    purpose: public-internet edge (Tunnel + Access) for selected paths;
-      additive to the tailnet-only private path
+    purpose: "RETIRED (planned edge never built; superseded 2026-10-29, local-only; cloud plumbing removed by #503)."
     cost_eur_month: 0
-    auth: tunnel token (Infisical); Access policies configured in dashboard
+    auth: none (retired)
     docs: docs/ops/vendors.md#cloudflare-planned--168170
   - name: Supabase
-    purpose: hosted Postgres + PostgREST + Auth across three projects
-      (toolbelt/platform, lifeos prod, lifeos test)
+    purpose: "SUPERSEDED (owner decision 2026-10-29, local-only; removed with the cloud workflows by #503). Each sub-app runs on SQLite on localhost; the hosted registry rows are retired in Phase 4 (D5, #450), which still needs owner-approved production steps."
     cost_eur_month: 0
-    auth: publishable key (public) + service-role/table-owner secrets
-      (Infisical, pipeline-scoped)
+    auth: none for the local platform (SQLite on localhost; owner key via platform-api)
     docs: docs/ops/vendors.md#supabase
   - name: GitHub
     purpose: source of truth, CI/CD, container registry (ghcr.io) for the
