@@ -48,7 +48,7 @@ Recommendations below are the working decisions. Each is reversible in its phase
 - **D1. `lifeos` backend and frontend: component, not app.** One `lifeos/project.yaml` owns both halves, so there is one manifest and one lane. Splitting them adds a second lane for no gain.
 - **D2. Nested `lifeos/.github/workflows/*`: delete in Phase 3.** The root already has `lifeos-ci.yml`, `lifeos-backup.yml` and `lifeos-ops.yml`. GitHub never runs the nested copies, so they are dead config. Delete them in the Phase 3 PR, after a diff confirms no logic is missing from the root copies.
 - **D3. Nested `.github` templates: delete, keep the root copies.** The root already has `PULL_REQUEST_TEMPLATE.md` and `ISSUE_TEMPLATE/`. The nested ones are duplicates. Delete them in Phase 3.
-- **D4. `packages/hyp-cli`: rename to `packages/hyp-cli` in Phase 2.** The category it is named after is dissolved. Keep the `tool:new` root script name, so callers do not change. The rename is a Phase 2 change, not part of the lift.
+- **D4. `packages/toolbelt-cli`: rename to `packages/hyp-cli` in Phase 2.** The category it is named after is dissolved. Keep the `tool:new` root script name, so callers do not change. The rename is a Phase 2 change, not part of the lift.
 - **D5. Supabase registry rows: retire, do not repoint.** Q22 and Q60 move each sub-app to SQLite on localhost. Repointing Supabase rows would build on a backend being removed. Phase 4 removes the rows, but only after owner approval, because that step touches production data.
 
 ## 6. Verification commands used

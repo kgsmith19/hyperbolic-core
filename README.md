@@ -19,7 +19,7 @@ Standard](https://github.com/kgsmith19/agent-engineering-standard).
 | [`apps/toolbelt`](apps/toolbelt) | Small portfolio tools — a prompt-library client, local-first network diagnostics | `Toolbelt` |
 | [`services/brain`](services/brain) | Long-lived autonomous-coding orchestrator — daemon, DAG scheduler, task/result contracts | `Brain` |
 | [`services/llm-handler`](services/llm-handler) | Deployed general-purpose LLM service behind the Shell | covered by `Platform` |
-| [`packages/*`](packages) | Shared TypeScript packages — `platform-client`, `ui`, `llm`, `review`, `hyp-cli` | covered by `Platform` (and `Toolbelt` for `toolbelt-cli`) |
+| [`packages/*`](packages) | Shared TypeScript packages — `platform-client`, `ui`, `llm`, `review`, `hyp-cli` | covered by `Platform` (and `Toolbelt` for `hyp-cli`) |
 
 Every `apps/<name>/` was imported via `git subtree` and still carries its own upstream
 `README.md`/`AGENTS.md` — read those before working inside an app. `services/` and `packages/`
