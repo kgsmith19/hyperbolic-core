@@ -29,9 +29,9 @@
 // endpoint over live Supabase in render-endpoint.test.mjs's own PT404/PT422
 // assertions, which is the same mapping this shim reproduces here).
 //
-// apps/toolbelt/** itself is untouched by this file: it only reads real
+// packages/manifest-tools/** itself is untouched by this file: it only reads real
 // migration files from disk, the same read-only relationship
-// registry-fixture.ts already has with apps/toolbelt's migrations.
+// registry-fixture.ts already has with the repo root's migrations.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

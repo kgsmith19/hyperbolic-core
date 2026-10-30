@@ -6,7 +6,7 @@
   "description": "Captures rough ideas as drafts, optionally optimizes them with LLM help, promotes the good ones, and converts each promoted idea into exactly one GitHub Issue that the app can never touch again. Owns the intake schema in the shared toolbelt Supabase project. Supersedes ACC's Forgepad.",
   "ownership": {
     "owner": "kylegsmith19@gmail.com",
-    "path": "apps/toolbelt/apps/idea-intake"
+    "path": "apps/idea-intake"
   },
   "entry": {
     "ui": {
@@ -35,6 +35,6 @@
   "lifecycle": {
     "migrate": "gh workflow run platform-migrations.yml",
     "health": "node --test \"tests/*.test.mjs\"",
-    "register": "20260814130200_register_idea-intake-v0.1.1.sql"
+    "register": "20261030120200_register_idea-intake-ownership.sql"
   }
 }

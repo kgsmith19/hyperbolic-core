@@ -44,7 +44,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages packages
 COPY apps/shell/package.json apps/shell/package.json
-COPY apps/toolbelt/package.json apps/toolbelt/package.json
 COPY services/llm-handler/package.json services/llm-handler/package.json
 COPY services/brain/package.json services/brain/package.json
 COPY services/brain/tsconfig.json services/brain/tsconfig.json

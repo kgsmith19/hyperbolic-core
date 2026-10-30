@@ -2,7 +2,7 @@
  * brain.task.v1 / brain.result.v1 validation (07-brain-architecture.md
  * section 7.5, m4-09): ajv-compiled validators over the schema files in
  * ./schemas, the same Ajv2020 + ajv-formats setup
- * apps/toolbelt/scripts/validate-manifests.mjs already established for
+ * packages/manifest-tools/validate-manifests.mjs already established for
  * tool.schema.json. The TS interfaces below mirror the schemas' shape for
  * planner/service code to author against; the schema files, not these
  * interfaces, are the source of truth enforced at plan and dispatch time.

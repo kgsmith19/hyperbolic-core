@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { withFixtureToolbeltRoot, rootManifest, snapshotTree } from "./helpers.mjs";
-import { checkRegistryParity, findManifestPaths } from "../../../apps/toolbelt/scripts/validate-manifests.mjs";
+import { checkRegistryParity, findManifestPaths } from "../../manifest-tools/validate-manifests.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BIN = join(__dirname, "..", "bin", "tool.mjs");
@@ -83,7 +83,7 @@ test("bin/tool.mjs generates a real tool end-to-end against a fixture root", () 
 // Real-world regression: 156 unit tests in this package all passed while
 // buildRegistrationUpSql generated a migration shape (`do $tool_new$ ...
 // on conflict (id) do nothing ... raise exception` in a PL/pgSQL block)
-// that apps/toolbelt/scripts/validate-manifests.mjs's own checkRegistryParity
+// that packages/manifest-tools/validate-manifests.mjs's own checkRegistryParity
 // rejects outright ("registration is not an idempotent ON CONFLICT (id)
 // upsert") -- because no test in this package had ever actually run that
 // validator against the CLI's own generated output. This closes exactly

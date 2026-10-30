@@ -1,6 +1,6 @@
 // The app registry (#514): core_app rows built from the tool.json manifests in
 // the repo, replacing the Supabase registration migrations. Field mapping and
-// the hash match apps/toolbelt/scripts/validate-manifests.mjs; a new app starts
+// the hash match packages/manifest-tools/validate-manifests.mjs; a new app starts
 // "building", a sync never overwrites a status already set, and an app whose
 // manifest is gone is retired, never deleted.
 
@@ -24,13 +24,14 @@ export const manifestHash = (manifest: unknown) => createHash("sha256").update(J
 const isDir = (p: string) => existsSync(p) && statSync(p).isDirectory();
 const children = (dir: string) => (isDir(dir) ? readdirSync(dir).filter((name) => !name.startsWith(".")).sort() : []);
 
-/** Every tool.json under apps/*, apps/*\/apps/* and services/*, in a stable order. */
+/** The root spine's tool.json, then every tool.json under apps/*, apps/*\/apps/* and services/*, in a stable order. */
 export function discoverManifests(root: string): string[] {
   const found: string[] = [];
   const add = (dir: string) => {
     const file = path.join(dir, "tool.json");
     if (existsSync(file) && statSync(file).isFile()) found.push(file);
   };
+  add(root);
   for (const app of children(path.join(root, "apps"))) {
     add(path.join(root, "apps", app));
     for (const nested of children(path.join(root, "apps", app, "apps"))) add(path.join(root, "apps", app, "apps", nested));

@@ -43,7 +43,7 @@ src/scaffold.mjs             runScaffold/writePlan — generates files, rolls ba
 src/collisions.mjs           id/schema collision checks against core.app and on-disk manifests
 src/manifests-shared.mjs     manifest fields shared across generated tool kinds
 src/templates.mjs            file templates for each generated tool
-src/paths.mjs                 DEFAULT_TOOLBELT_ROOT and path helpers
+src/paths.mjs                 REPO_ROOT and path helpers
 src/timestamp.mjs            migration-filename timestamp generation
 ```
 
@@ -52,5 +52,5 @@ src/timestamp.mjs            migration-filename timestamp generation
 `docs/planning/05-c-toolbelt.md` section 5.1 specifies the 3-step lifecycle
 this CLI implements. A successful non-dry-run generates a manifest but does
 not itself register the tool live: the CLI prints a reminder to run
-`npm run migrations:check --prefix apps/toolbelt` and apply the ledger
+`npm run migrations:check ` and apply the ledger
 through `platform-migrations.yml`.

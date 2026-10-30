@@ -62,11 +62,6 @@
       "plane": "source"
     },
     {
-      "path": "apps/toolbelt",
-      "reason": "Toolbelt spine: shared tool manifest, schema, manifest and migration validators, and the core ledger",
-      "plane": "source"
-    },
-    {
       "path": "docs/ops",
       "reason": "operator tooling and contract oracles: workflow tests, Stage 59-63 adoption bindings",
       "plane": "source"
@@ -127,6 +122,11 @@
       "plane": "source"
     },
     {
+      "path": "packages/manifest-tools",
+      "reason": "manifest, schema, migration, staging and broker-policy validators shared by every app",
+      "plane": "source"
+    },
+    {
       "path": "packages/platform-client",
       "reason": "shared platform session client: Supabase Auth sign-in and authed fetch",
       "plane": "source"
@@ -170,6 +170,11 @@
       "path": "standard.lock",
       "reason": "adopted agent-engineering-standard commit; bumped last in an adoption series",
       "plane": "artifact"
+    },
+    {
+      "path": "tool.json",
+      "reason": "Toolbelt spine: root tool manifest, the core migration ledger (supabase/) and its tests (tests/spine)",
+      "plane": "source"
     }
   ]
 }

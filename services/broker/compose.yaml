@@ -26,7 +26,7 @@ services:
     ports:
       - "127.0.0.1:8300:8300"
     volumes:
-      # broker-policy.json (apps/toolbelt/scripts/generate-broker-policy.mjs's
+      # broker-policy.json (packages/manifest-tools/generate-broker-policy.mjs's
       # output, issue #184) is generated fresh on the CI runner and scp'd
       # alongside this file on every deploy -- never baked into the image,
       # the same reasoning .env is rendered at deploy time rather than

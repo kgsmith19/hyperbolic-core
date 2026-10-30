@@ -193,7 +193,7 @@ const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-
 
 function schemaHeaders(apiKey: string, token: string): Record<string, string> {
   // Both Accept-Profile and Content-Profile are sent on every RPC call --
-  // the same convention apps/toolbelt/tests/
+  // the same convention tests/spine/
   // helpers.mjs's shared rest() helper already uses for every non-public
   // schema request in this monorepo.
   return {

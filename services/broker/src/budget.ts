@@ -11,7 +11,7 @@
 // so every PostgREST call here uses the broker's own service-role key,
 // following services/llm-handler/src/postgrest.ts's writeBackSubmitted()
 // shape, against core.log_broker_call / core.broker_call_spend_today (both
-// service_role-only RPCs, apps/toolbelt/supabase/migrations/
+// service_role-only RPCs, supabase/migrations/
 // 20260817170000_core_broker_call.sql).
 //
 // Never throws (matching proxy.ts's own "never throws" contract, since

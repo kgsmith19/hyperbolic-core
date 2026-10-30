@@ -4,7 +4,7 @@
 // not app discipline -- run against an actual PostgreSQL engine, applying
 // the real, committed migration files from disk verbatim, never a
 // reimplementation of their logic. Mirrors the detection/skip mechanics
-// apps/toolbelt/tests/registry-migrations-idempotency.test.mjs (m3-02)
+// packages/manifest-tools/tests/registry-migrations-idempotency.test.mjs (m3-02)
 // already established: this suite detects a usable local `psql` and skips
 // itself cleanly -- via node:test's own skip mechanism, reported as
 // SKIPPED, never silently omitted and never falsely green -- when no local

@@ -17,7 +17,7 @@ inputs:
 
 outputs:
   toolbelt:
-    description: "true when apps/toolbelt/** or packages/hyp-cli/** is relevant"
+    description: "true when packages/manifest-tools/** or packages/hyp-cli/** is relevant"
     value: ${{ steps.detect.outputs.toolbelt }}
   acc:
     description: "true when apps/agentic-command-center/** or packages/guards/** is relevant"
@@ -80,7 +80,7 @@ runs:
         }
 
         echo "Relevance:"
-        relevant toolbelt '^(apps/toolbelt/|apps/(idea-intake|network-checker|prompt-organizer)/|packages/hyp-cli/|package\.json$|package-lock\.json$)'
+        relevant toolbelt '^(tool\.json|supabase/|tests/spine/|packages/manifest-tools/|packages/hyp-cli/|apps/(idea-intake|network-checker|prompt-organizer)/|package\.json$|package-lock\.json$)'
         relevant acc      '^(apps/agentic-command-center/|packages/guards/)'
         relevant brain    '^(services/brain/|package\.json$|package-lock\.json$)'
         relevant shell    '^(apps/shell/|packages/|services/llm-handler/|services/broker/|services/platform-api/|docs/ops/|standard\.lock$)'

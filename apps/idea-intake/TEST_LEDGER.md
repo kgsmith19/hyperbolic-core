@@ -14,6 +14,6 @@ A running record of this app's test suites: what exists, what it covers, and the
 
 Real-Postgres suites detect a usable local `psql` (direct connection, then `sudo -n -u postgres psql`) and self-skip cleanly via node:test's own skip mechanism when neither is reachable -- reported as SKIPPED, never silently omitted and never falsely green. `Toolbelt`'s Idea Intake step now fails outright if any suite reports a skip, since a real `postgres:` service container is present there.
 
-See `apps/toolbelt/TEST_LEDGER.md` for the root spine's own suites, `apps/prompt-organizer/TEST_LEDGER.md` and `apps/network-checker/TEST_LEDGER.md` for those apps'.
+See `docs/archived/2026-10-30-toolbelt/TEST_LEDGER.md` for the root spine's own suites, `apps/prompt-organizer/TEST_LEDGER.md` and `apps/network-checker/TEST_LEDGER.md` for those apps'.
 
 Add a row when a new suite is introduced. Update a row's "Last run"/"Result" when it materially changes — this is not meant to be updated on every CI run.

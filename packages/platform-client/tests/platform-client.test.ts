@@ -7,7 +7,7 @@ import { jsonResponse } from "./support.ts";
 const FIXTURE_OWNER_UUID = "00000000-0000-4000-8000-000000000001";
 // Finding #47 (PR #8 security review): any OTHER authenticated Supabase
 // subject is exactly the case `core.is_platform_owner()`
-// (apps/toolbelt/supabase/migrations/20260814060000_core_is_platform_owner_rpc.sql)
+// (supabase/migrations/20260814060000_core_is_platform_owner_rpc.sql)
 // and src/index.ts's `enforceOwner` must reject and sign out. Deliberately a
 // different, equally well-formed UUID -- not null/empty/malformed -- so
 // these tests prove real, successfully-authenticated-but-wrong-subject

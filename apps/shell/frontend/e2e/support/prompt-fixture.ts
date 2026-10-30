@@ -36,7 +36,7 @@ import {
 import { sqlErrorToShimError, type ShimError } from "./shim.js";
 
 const PO_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/prompt-organizer/backend/supabase/migrations");
-const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "apps/toolbelt/supabase/migrations");
+const PLATFORM_MIGRATIONS_DIR = path.join(REPO_ROOT, "supabase/migrations");
 
 const REAL_MIGRATIONS = [
   { dir: PLATFORM_MIGRATIONS_DIR, file: "20260812140000_platform_owner_bootstrap.sql" },

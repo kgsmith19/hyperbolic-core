@@ -2,7 +2,7 @@
 // (14-digit YYYYMMDDHHmmss prefix, e.g. 20260812250000). nextTimestamp
 // guarantees a value that does not collide with any existing migration
 // filename's version prefix in the given directory, which is what
-// apps/toolbelt/scripts/validate-migrations.mjs's checkVersionCollisions
+// packages/manifest-tools/validate-migrations.mjs's checkVersionCollisions
 // requires (no two migration files across the checked directories may share
 // a version key).
 function pad(n, width = 2) {

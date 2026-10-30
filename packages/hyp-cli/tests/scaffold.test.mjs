@@ -1,5 +1,5 @@
 // The core acceptance-criteria proofs for m3-03, run against disposable
-// fixture toolbelt roots (never the real apps/toolbelt/ tree -- see
+// fixture roots (never the real repo tree -- see
 // tests/helpers.mjs). The one real-tree run this issue also requires is
 // documented separately in the implementation report.
 import { test } from "node:test";
@@ -40,7 +40,7 @@ function safeReaddirForTest(dir) {
 
 test("buildPlan for a ui tool includes tool.json, AGENTS.md, frontend/index.html, schema migration pair, test, and registration pair", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    const plan = buildPlan(opts(), { toolbeltRoot: root });
+    const plan = buildPlan(opts(), { repoRoot: root });
     const relPaths = plan.files.map((f) => f.path.slice(root.length + 1));
     assert.ok(relPaths.includes("apps/scratch-tool/tool.json"));
     assert.ok(relPaths.includes("apps/scratch-tool/AGENTS.md"));
@@ -56,7 +56,7 @@ test("buildPlan for a ui tool includes tool.json, AGENTS.md, frontend/index.html
 
 test("buildPlan for a cli tool omits frontend/index.html", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    const plan = buildPlan(opts({ kind: "cli", route: undefined }), { toolbeltRoot: root });
+    const plan = buildPlan(opts({ kind: "cli", route: undefined }), { repoRoot: root });
     const relPaths = plan.files.map((f) => f.path.slice(root.length + 1));
     assert.ok(!relPaths.some((p) => p.includes("frontend/")));
   });
@@ -64,7 +64,7 @@ test("buildPlan for a cli tool omits frontend/index.html", () => {
 
 test("buildPlan for --no-schema omits both schema migration files", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    const plan = buildPlan(opts({ kind: "cli", route: undefined, noSchema: true }), { toolbeltRoot: root });
+    const plan = buildPlan(opts({ kind: "cli", route: undefined, noSchema: true }), { repoRoot: root });
     const relPaths = plan.files.map((f) => f.path.slice(root.length + 1));
     assert.ok(!relPaths.some((p) => p.includes("create_schema")));
     assert.equal(plan.manifest.schemas.length, 0);
@@ -74,7 +74,7 @@ test("buildPlan for --no-schema omits both schema migration files", () => {
 test("buildPlan never touches the filesystem (dry-run-safe by construction)", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const before = snapshotTree(root);
-    buildPlan(opts(), { toolbeltRoot: root });
+    buildPlan(opts(), { repoRoot: root });
     assert.deepEqual(snapshotTree(root), before);
   });
 });
@@ -86,7 +86,7 @@ test("buildPlan's registration timestamp avoids colliding with an existing migra
       // Pre-seed a migration at "now" so buildPlan is forced to bump past it.
       const now = formatTimestamp(new Date());
       writeFileSync(join(root, "supabase", "migrations", `${now}_register_someone-else.sql`), "-- up\n");
-      const plan = buildPlan(opts(), { toolbeltRoot: root });
+      const plan = buildPlan(opts(), { repoRoot: root });
       const registerFile = plan.files.find((f) => /register_scratch-tool\.sql$/.test(f.path));
       const usedTs = registerFile.path.split("/").pop().split("_")[0];
       assert.notEqual(usedTs, now, "expected the generator to pick a different timestamp than the pre-existing one");
@@ -130,7 +130,7 @@ test("RED: allocating registration and schema timestamps independently, each che
 test("GREEN: buildPlan allocates a registration timestamp and a schema timestamp that never collide with each other, even when minted in the identical wall-clock second (Finding 27 fix)", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const now = new Date(Date.UTC(2026, 7, 13, 12, 0, 0));
-    const plan = buildPlan(opts(), { toolbeltRoot: root, now });
+    const plan = buildPlan(opts(), { repoRoot: root, now });
     const registerFile = plan.files.find((f) => /register_scratch-tool\.sql$/.test(f.path));
     const schemaFile = plan.files.find((f) => /create_schema\.sql$/.test(f.path));
     assert.ok(registerFile && schemaFile, "test assumes the default ui+schema opts() layout");
@@ -164,7 +164,7 @@ test("buildPlan's timestamp allocation avoids colliding with a pre-existing migr
       [`apps/other-tool/backend/supabase/migrations/${nowTs}_other_tool_create_schema.sql`]: "create schema other_tool;",
     },
     (root) => {
-      const plan = buildPlan(opts(), { toolbeltRoot: root, now });
+      const plan = buildPlan(opts(), { repoRoot: root, now });
       const registerFile = plan.files.find((f) => /register_scratch-tool\.sql$/.test(f.path));
       const schemaFile = plan.files.find((f) => /create_schema\.sql$/.test(f.path));
       const registerTs = basename(registerFile.path).split("_")[0];
@@ -180,7 +180,7 @@ test("buildPlan's timestamp allocation avoids colliding with a pre-existing migr
 
 test("writePlan writes every planned file with its exact content", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    const plan = buildPlan(opts(), { toolbeltRoot: root });
+    const plan = buildPlan(opts(), { repoRoot: root });
     const written = writePlan(plan);
     assert.equal(written.length, plan.files.length);
     for (const file of plan.files) {
@@ -191,7 +191,7 @@ test("writePlan writes every planned file with its exact content", () => {
 
 test("writePlan's output manifest is schema-valid on disk (end-to-end, not just in-memory)", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    const plan = buildPlan(opts(), { toolbeltRoot: root });
+    const plan = buildPlan(opts(), { repoRoot: root });
     writePlan(plan);
     const manifestPath = join(root, "apps", "scratch-tool", "tool.json");
     assert.deepEqual(checkManifestShape([manifestPath]), []);
@@ -205,7 +205,7 @@ test("runScaffold returns exitCode 2 and writes nothing when the id already exis
     { "tool.json": rootManifest(), "apps/scratch-tool/tool.json": { placeholder: true } },
     (root) => {
       const before = snapshotTree(root);
-      const result = runScaffold(opts(), { toolbeltRoot: root });
+      const result = runScaffold(opts(), { repoRoot: root });
       assert.equal(result.ok, false);
       assert.equal(result.exitCode, 2);
       assert.ok(result.reasons.length > 0);
@@ -217,7 +217,7 @@ test("runScaffold returns exitCode 2 and writes nothing when the id already exis
 test("runScaffold --dry-run writes nothing and reports the plan", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const before = snapshotTree(root);
-    const result = runScaffold(opts(), { toolbeltRoot: root, dryRun: true });
+    const result = runScaffold(opts(), { repoRoot: root, dryRun: true });
     assert.equal(result.ok, true);
     assert.equal(result.dryRun, true);
     assert.ok(result.plan.files.length > 0);
@@ -227,7 +227,7 @@ test("runScaffold --dry-run writes nothing and reports the plan", () => {
 
 test("runScaffold succeeds and writes exactly the planned files for a clean id", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    const result = runScaffold(opts(), { toolbeltRoot: root });
+    const result = runScaffold(opts(), { repoRoot: root });
     assert.equal(result.ok, true);
     assert.equal(result.exitCode, 0);
     assert.equal(result.written.length, result.plan.files.length);
@@ -255,7 +255,7 @@ function fsImplThatFailsOnWriteNumber(n) {
 test("writePlan rolls back fully when a failure is injected on the FIRST write (nothing at all lands)", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const before = snapshotTree(root);
-    const plan = buildPlan(opts(), { toolbeltRoot: root });
+    const plan = buildPlan(opts(), { repoRoot: root });
     assert.throws(() => writePlan(plan, { fsImpl: fsImplThatFailsOnWriteNumber(1) }), /injected failure on write #1/);
     assert.deepEqual(snapshotTree(root), before, "a first-write failure must leave the tree exactly as it was");
     assert.equal(existsSync(plan.toolDir), false);
@@ -265,7 +265,7 @@ test("writePlan rolls back fully when a failure is injected on the FIRST write (
 test("writePlan rolls back a partially-written new tool directory when a failure is injected mid-way (write #3 of 8)", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const before = snapshotTree(root);
-    const plan = buildPlan(opts(), { toolbeltRoot: root });
+    const plan = buildPlan(opts(), { repoRoot: root });
     assert.equal(plan.files.length, 8, "test assumes the 8-file ui+schema layout; update the failure index if this changes");
     assert.throws(() => writePlan(plan, { fsImpl: fsImplThatFailsOnWriteNumber(3) }), /injected failure on write #3/);
     assert.deepEqual(snapshotTree(root), before, "no file from the new tool directory may remain");
@@ -273,10 +273,10 @@ test("writePlan rolls back a partially-written new tool directory when a failure
   });
 });
 
-test("writePlan rolls back a stray file already written into the PRE-EXISTING apps/toolbelt/supabase/migrations/ directory (failure on the LAST write, #8 of 8) without deleting that directory itself", () => {
+test("writePlan rolls back a stray file already written into the PRE-EXISTING supabase/migrations/ directory (failure on the LAST write, #8 of 8) without deleting that directory itself", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const before = snapshotTree(root);
-    const plan = buildPlan(opts(), { toolbeltRoot: root });
+    const plan = buildPlan(opts(), { repoRoot: root });
     assert.equal(plan.files.length, 8);
     // Write #7 is the register-up file, write #8 is the register-down file --
     // both land in the pre-existing supabase/migrations/ directory, outside
@@ -295,7 +295,7 @@ test("writePlan rolls back on every possible single injected failure point (1..8
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const before = snapshotTree(root);
     for (let n = 1; n <= 8; n += 1) {
-      const plan = buildPlan(opts({ id: `scratch-tool-${n}` }), { toolbeltRoot: root });
+      const plan = buildPlan(opts({ id: `scratch-tool-${n}` }), { repoRoot: root });
       assert.throws(() => writePlan(plan, { fsImpl: fsImplThatFailsOnWriteNumber(n) }));
       assert.deepEqual(snapshotTree(root), before, `tree must be unchanged after a failure injected at write #${n}`);
     }
@@ -305,7 +305,7 @@ test("writePlan rolls back on every possible single injected failure point (1..8
 test("runScaffold surfaces the write-phase error (via exception) and the caller (cli.mjs) is expected to report it, not swallow it", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const failingFsImpl = fsImplThatFailsOnWriteNumber(2);
-    assert.throws(() => runScaffold(opts(), { toolbeltRoot: root, fsImpl: failingFsImpl }), /injected failure on write #2/);
+    assert.throws(() => runScaffold(opts(), { repoRoot: root, fsImpl: failingFsImpl }), /injected failure on write #2/);
     // The per-id lock must be released even on this exception path (finally
     // in runScaffold), or the id would be permanently stuck "locked" after
     // any single write failure -- a strictly worse outcome than the bug
@@ -363,7 +363,7 @@ test("runScaffold refuses immediately (locked, exitCode 2) when another invocati
     const lock = acquireLock(lockPathFor(root, "scratch-tool")); // simulates a concurrent in-flight invocation
     assert.equal(lock.ok, true);
     const before = snapshotTree(root); // baseline INCLUDES the held lock file
-    const result = runScaffold(opts(), { toolbeltRoot: root });
+    const result = runScaffold(opts(), { repoRoot: root });
     assert.equal(result.ok, false);
     assert.equal(result.exitCode, 2);
     assert.equal(result.locked, true);
@@ -378,7 +378,7 @@ test("runScaffold for a DIFFERENT id proceeds without contention while another i
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
     const lock = acquireLock(lockPathFor(root, "some-other-id"));
     assert.equal(lock.ok, true);
-    const result = runScaffold(opts(), { toolbeltRoot: root }); // id: "scratch-tool", unrelated to the locked id
+    const result = runScaffold(opts(), { repoRoot: root }); // id: "scratch-tool", unrelated to the locked id
     assert.equal(result.ok, true);
     assert.equal(result.exitCode, 0);
     lock.release();
@@ -387,7 +387,7 @@ test("runScaffold for a DIFFERENT id proceeds without contention while another i
 
 test("runScaffold releases its lock after a successful real write", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    const result = runScaffold(opts(), { toolbeltRoot: root });
+    const result = runScaffold(opts(), { repoRoot: root });
     assert.equal(result.ok, true);
     assert.equal(existsSync(lockPathFor(root, "scratch-tool")), false);
   });
@@ -397,7 +397,7 @@ test("runScaffold releases its lock after a collision (exitCode 2) result", () =
   withFixtureToolbeltRoot(
     { "tool.json": rootManifest(), "apps/scratch-tool/tool.json": { placeholder: true } },
     (root) => {
-      const result = runScaffold(opts(), { toolbeltRoot: root });
+      const result = runScaffold(opts(), { repoRoot: root });
       assert.equal(result.ok, false);
       assert.equal(existsSync(lockPathFor(root, "scratch-tool")), false);
     },
@@ -406,7 +406,7 @@ test("runScaffold releases its lock after a collision (exitCode 2) result", () =
 
 test("runScaffold releases its lock after a --dry-run", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    const result = runScaffold(opts(), { toolbeltRoot: root, dryRun: true });
+    const result = runScaffold(opts(), { repoRoot: root, dryRun: true });
     assert.equal(result.ok, true);
     assert.equal(existsSync(lockPathFor(root, "scratch-tool")), false);
   });
@@ -428,8 +428,8 @@ test("writePlan never deletes a different, already-completed same-id invocation'
     // clock, and NEITHER has written anything yet) -- this is precisely the
     // TOCTOU window Finding 28 describes: two same-id invocations that both
     // observe "nothing exists yet" before either one writes.
-    const planA = buildPlan(opts(), { toolbeltRoot: root, now });
-    const planB = buildPlan(opts(), { toolbeltRoot: root, now });
+    const planA = buildPlan(opts(), { repoRoot: root, now });
+    const planB = buildPlan(opts(), { repoRoot: root, now });
     assert.equal(planA.toolDir, planB.toolDir, "test assumes both plans target the identical final directory (same id)");
 
     const writtenA = writePlan(planA); // the "winner": completes for real
@@ -468,10 +468,10 @@ test("runScaffold's lock makes the Finding 28 race impossible end-to-end: a seco
     // THEN letting a concurrent B arrive while that lock is still held.
     const lockA = acquireLock(lockPathFor(root, "scratch-tool"));
     assert.equal(lockA.ok, true);
-    const writtenA = writePlan(buildPlan(opts(), { toolbeltRoot: root }));
+    const writtenA = writePlan(buildPlan(opts(), { repoRoot: root }));
     assert.ok(writtenA.every((p) => existsSync(p)));
 
-    const resultB = runScaffold(opts(), { toolbeltRoot: root }); // arrives while A's lock is still held
+    const resultB = runScaffold(opts(), { repoRoot: root }); // arrives while A's lock is still held
     assert.equal(resultB.ok, false);
     assert.equal(resultB.locked, true);
 
@@ -484,12 +484,12 @@ test("runScaffold's lock makes the Finding 28 race impossible end-to-end: a seco
 
 test("a write-phase failure for one id never touches a different, already-completed id's directory", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    const resultA = runScaffold(opts({ id: "tool-aaa" }), { toolbeltRoot: root });
+    const resultA = runScaffold(opts({ id: "tool-aaa" }), { repoRoot: root });
     assert.equal(resultA.ok, true);
     const snapshotAfterA = snapshotTree(root);
 
     const failingFsImpl = fsImplThatFailsOnWriteNumber(3);
-    assert.throws(() => runScaffold(opts({ id: "tool-bbb" }), { toolbeltRoot: root, fsImpl: failingFsImpl }));
+    assert.throws(() => runScaffold(opts({ id: "tool-bbb" }), { repoRoot: root, fsImpl: failingFsImpl }));
 
     assert.deepEqual(
       snapshotTree(root).filter((p) => p.startsWith("apps/tool-aaa/") || p === "apps/tool-aaa"),

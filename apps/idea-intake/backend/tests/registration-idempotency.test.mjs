@@ -1,5 +1,5 @@
 // m3-05: real-Postgres proof of the registration migration's idempotency,
-// scoped to Idea Intake specifically (apps/toolbelt/tests/registry-migrations-idempotency.test.mjs
+// scoped to Idea Intake specifically (packages/manifest-tools/tests/registry-migrations-idempotency.test.mjs
 // already proves this same property for m3-02's own two registrations --
 // prompt-organizer, network-checker -- via a hardcoded REGISTRATIONS list
 // that predates this tool; this file is the same proof for idea-intake,
@@ -14,7 +14,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "toolbelt", "supabase", "migrations");
+const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "..", "supabase", "migrations");
 
 const EXTENSION_UP = join(ROOT_MIGRATIONS_DIR, "20260812230000_core_app_registry_extension.sql");
 const REGISTER_UP = join(ROOT_MIGRATIONS_DIR, "20260813003000_register_idea-intake.sql");
@@ -23,7 +23,7 @@ const REGISTER_DOWN = join(ROOT_MIGRATIONS_DIR, "20260813003000_register_idea-in
 // Minimal, faithful reproduction of the pre-registration state this
 // migration assumes: core.app's shape copied verbatim from
 // 20260806190000_core_create_schema.sql lines 12-19, same posture
-// apps/toolbelt/tests/registry-migrations-idempotency.test.mjs's own
+// packages/manifest-tools/tests/registry-migrations-idempotency.test.mjs's own
 // PRE_STATE_SQL takes (core.run and its siblings reference auth.users, a
 // Supabase-only extension schema a vanilla local Postgres lacks; none of
 // these migrations touch core.run, so it is intentionally not reproduced).

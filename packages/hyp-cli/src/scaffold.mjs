@@ -47,12 +47,12 @@ const defaultFsImpl = { mkdirSync, writeFileSync, rmSync, renameSync };
 // should have to hope for). Defaults to `new Date()`, matching
 // nextTimestamp's own default, so every existing caller (production
 // included) is unaffected.
-export function buildPlan(options, { toolbeltRoot, now = new Date() }) {
+export function buildPlan(options, { repoRoot, now = new Date() }) {
   const { id, name, kind, route } = options;
   const { hasSchema, schema } = resolveSchema(options);
 
-  const toolDir = join(appsDirOf(toolbeltRoot), id);
-  const registrationDir = join(toolbeltRoot, "supabase", "migrations");
+  const toolDir = join(appsDirOf(repoRoot), id);
+  const registrationDir = join(repoRoot, "supabase", "migrations");
   // Under backend/, matching every existing tool: a tool's backend work all
   // lives there, so validate-migrations.mjs discovers it at exactly this path.
   const toolMigrationsDir = join(toolDir, "backend", "supabase", "migrations");
@@ -71,7 +71,7 @@ export function buildPlan(options, { toolbeltRoot, now = new Date() }) {
   // could see the OTHER call's about-to-be-allocated basename, so the two
   // could legitimately mint the exact same 14-digit version prefix. That is
   // a real collision the instant both files exist together in the shared
-  // global version-key namespace apps/toolbelt/scripts/
+  // global version-key namespace packages/manifest-tools/
   // validate-migrations.mjs's checkVersionCollisions enforces across every
   // discovered migration directory (this tool's own toolMigrationsDir
   // included, the moment its tool.json is written and discoverMigrationDirs
@@ -79,7 +79,7 @@ export function buildPlan(options, { toolbeltRoot, now = new Date() }) {
   //
   // The fix: maintain ONE running Set of every basename already known to
   // exist anywhere in that same global namespace, seeded from
-  // discoverMigrationDirs(toolbeltRoot) (the exact function
+  // discoverMigrationDirs(repoRoot) (the exact function
   // checkVersionCollisions' own default is built from, imported rather than
   // re-derived, so the two can never silently drift into checking two
   // different namespaces), PLUS toolMigrationsDir itself (which
@@ -93,7 +93,7 @@ export function buildPlan(options, { toolbeltRoot, now = new Date() }) {
   // hasSchema) can never collide with the FIRST (the registration
   // timestamp) even though neither has been written to disk yet.
   const globalBasenames = new Set();
-  for (const dir of discoverMigrationDirs(toolbeltRoot)) {
+  for (const dir of discoverMigrationDirs(repoRoot)) {
     for (const name of safeReaddir(dir)) globalBasenames.add(name);
   }
   for (const name of safeReaddir(toolMigrationsDir)) globalBasenames.add(name);
@@ -179,8 +179,8 @@ function isInside(parent, child) {
 // that matters: findManifestPaths (manifests-shared.mjs, reused by
 // validate-manifests.mjs and this CLI's own collisions.mjs) explicitly
 // skips any apps/* entry that fails `statSync(...).isDirectory()`.
-export function lockPathFor(toolbeltRoot, id) {
-  return join(appsDirOf(toolbeltRoot), `${id}.lock`);
+export function lockPathFor(repoRoot, id) {
+  return join(appsDirOf(repoRoot), `${id}.lock`);
 }
 
 // Returns { ok: true, release } on success, or { ok: false } if another
@@ -387,8 +387,8 @@ export function writePlan(plan, { fsImpl = defaultFsImpl } = {}) {
 // exception path alike), so a second same-id invocation that arrives while
 // this one is still checking OR still writing gets a clear, immediate
 // refusal instead of racing it.
-export function runScaffold(options, { toolbeltRoot, dryRun = false, fsImpl, now } = {}) {
-  const lockPath = lockPathFor(toolbeltRoot, options.id);
+export function runScaffold(options, { repoRoot, dryRun = false, fsImpl, now } = {}) {
+  const lockPath = lockPathFor(repoRoot, options.id);
   const lock = acquireLock(lockPath);
   if (!lock.ok) {
     return {
@@ -421,12 +421,12 @@ export function runScaffold(options, { toolbeltRoot, dryRun = false, fsImpl, now
       llm: options.llm,
       registerBasename: "pending_registration.sql",
     });
-    const collisions = detectCollisions({ toolbeltRoot, id: options.id, candidateManifest });
+    const collisions = detectCollisions({ repoRoot, id: options.id, candidateManifest });
     if (collisions.length > 0) {
       return { ok: false, exitCode: 2, reasons: collisions };
     }
 
-    const plan = buildPlan(options, { toolbeltRoot, now });
+    const plan = buildPlan(options, { repoRoot, now });
 
     if (dryRun) {
       return { ok: true, exitCode: 0, dryRun: true, plan };

@@ -172,7 +172,7 @@ test("findShapeFailures reports a problem for a deliberately malformed candidate
 
 test("detectCollisions is empty for a brand-new, non-colliding id", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    assert.deepEqual(detectCollisions({ toolbeltRoot: root, id: "candidate-tool", candidateManifest: candidate() }), []);
+    assert.deepEqual(detectCollisions({ repoRoot: root, id: "candidate-tool", candidateManifest: candidate() }), []);
   });
 });
 
@@ -180,7 +180,7 @@ test("detectCollisions reports the on-disk-directory collision", () => {
   withFixtureToolbeltRoot(
     { "tool.json": rootManifest(), "apps/candidate-tool/tool.json": candidate() },
     (root) => {
-      const reasons = detectCollisions({ toolbeltRoot: root, id: "candidate-tool", candidateManifest: candidate() });
+      const reasons = detectCollisions({ repoRoot: root, id: "candidate-tool", candidateManifest: candidate() });
       assert.ok(reasons.some((r) => r.includes("already exists on disk")));
     },
   );
@@ -188,7 +188,7 @@ test("detectCollisions reports the on-disk-directory collision", () => {
 
 test("detectCollisions reports the root-spine-manifest-id collision even with no apps/<id>/ directory", () => {
   withFixtureToolbeltRoot({ "tool.json": rootManifest() }, (root) => {
-    const reasons = detectCollisions({ toolbeltRoot: root, id: "toolbelt", candidateManifest: candidate({ id: "toolbelt" }) });
+    const reasons = detectCollisions({ repoRoot: root, id: "toolbelt", candidateManifest: candidate({ id: "toolbelt" }) });
     assert.ok(reasons.some((r) => r.includes('id "toolbelt" is already claimed')));
   });
 });
@@ -200,7 +200,7 @@ test("detectCollisions reports the registration-migration-on-disk collision", ()
       "supabase/migrations/20260101000000_register_candidate-tool.sql": "-- up\n",
     },
     (root) => {
-      const reasons = detectCollisions({ toolbeltRoot: root, id: "candidate-tool", candidateManifest: candidate() });
+      const reasons = detectCollisions({ repoRoot: root, id: "candidate-tool", candidateManifest: candidate() });
       assert.ok(reasons.some((r) => r.includes("already has a registration migration")));
     },
   );
@@ -210,7 +210,7 @@ test("detectCollisions reports the schema collision", () => {
   withFixtureToolbeltRoot(
     { "tool.json": rootManifest(), "apps/other-tool/tool.json": candidate({ id: "other-tool", schemas: ["candidate_tool"] }) },
     (root) => {
-      const reasons = detectCollisions({ toolbeltRoot: root, id: "candidate-tool", candidateManifest: candidate() });
+      const reasons = detectCollisions({ repoRoot: root, id: "candidate-tool", candidateManifest: candidate() });
       assert.ok(reasons.some((r) => r.includes('schema "candidate_tool" is claimed by 2 manifests')));
     },
   );
@@ -224,7 +224,7 @@ test("detectCollisions can report multiple simultaneous reasons (all checks run,
       "supabase/migrations/20260101000000_register_candidate-tool.sql": "-- up\n",
     },
     (root) => {
-      const reasons = detectCollisions({ toolbeltRoot: root, id: "candidate-tool", candidateManifest: candidate() });
+      const reasons = detectCollisions({ repoRoot: root, id: "candidate-tool", candidateManifest: candidate() });
       assert.ok(reasons.length >= 3, `expected at least 3 simultaneous reasons, got ${reasons.length}: ${JSON.stringify(reasons)}`);
     },
   );

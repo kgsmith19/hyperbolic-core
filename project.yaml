@@ -5,7 +5,6 @@ project:
     project.yaml/AGENTS.md for its facts.
 
 apps:
-  - apps/toolbelt
   - apps/idea-intake
   - apps/network-checker
   - apps/prompt-organizer
@@ -92,7 +91,7 @@ ci:
       standalone: .github/workflows/toolbelt-ci.yml
       action: .github/actions/{detect-changes,verify-tests-toolbelt}
       gate: "Toolbelt"
-      covers: apps/toolbelt and packages/hyp-cli — self-contained;
+      covers: the root spine (tool.json, supabase/, tests/spine/), packages/manifest-tools and packages/hyp-cli — self-contained;
         skips in seconds via detect-changes when untouched.
       required: false # rolled into "PR Gate" below, not typed here individually
     - order: 1

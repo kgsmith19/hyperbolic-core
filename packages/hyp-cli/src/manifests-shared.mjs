@@ -1,5 +1,5 @@
-// Single point of contact with apps/toolbelt/scripts/validate-manifests.mjs
-// (m3-01) and apps/toolbelt/scripts/validate-migrations.mjs (Finding 26's
+// Single point of contact with packages/manifest-tools/validate-manifests.mjs
+// (m3-01) and packages/manifest-tools/validate-migrations.mjs (Finding 26's
 // fix, independent security review of this repo, re-verified against
 // current HEAD). Every other module in this package imports these shared
 // utilities from HERE, never by repeating the relative path inline, so each
@@ -19,21 +19,21 @@
 // src/scaffold.mjs's buildPlan calls it to build the GLOBAL set of existing
 // migration basenames a new timestamp must avoid colliding with, so the
 // namespace this CLI defends against at generation time is provably the
-// exact same one apps/toolbelt/scripts/validate-migrations.mjs's
+// exact same one packages/manifest-tools/validate-migrations.mjs's
 // checkVersionCollisions enforces at CI/deploy time -- two independently
 // maintained notions of "the global migration-directory set" could drift
 // silently out of sync; importing the one real implementation cannot.
 //
-// These relative paths (packages/hyp-cli/src -> repo root -> apps/toolbelt)
+// These relative paths (packages/hyp-cli/src -> repo root)
 // only resolve correctly as long as both packages/hyp-cli and
-// apps/toolbelt keep their current positions two levels under the repo root
+// the repo root keep their current positions two levels under it
 // (ADR-01's target tree). src/paths.mjs's REPO_ROOT is computed independently
 // (via import.meta.url, not by importing this constant) and is asserted equal
-// to this module's own resolved TOOLBELT_ROOT in tests/paths.test.mjs, so a
+// to this module's own resolved REPO_ROOT in tests/paths.test.mjs, so a
 // future repo reshuffle that breaks one breaks the other loudly instead of
 // silently resolving to the wrong tree.
 export {
-  TOOLBELT_ROOT,
+  REPO_ROOT,
   SCHEMA_PATH,
   findManifestPaths,
   checkManifestShape,
@@ -41,6 +41,6 @@ export {
   canonicalize,
   canonicalJSON,
   manifestHash,
-} from "../../../apps/toolbelt/scripts/validate-manifests.mjs";
+} from "../../manifest-tools/validate-manifests.mjs";
 
-export { discoverMigrationDirs } from "../../../apps/toolbelt/scripts/validate-migrations.mjs";
+export { discoverMigrationDirs } from "../../manifest-tools/validate-migrations.mjs";

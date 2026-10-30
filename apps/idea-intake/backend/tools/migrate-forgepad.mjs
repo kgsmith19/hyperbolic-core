@@ -17,9 +17,9 @@
 // a process-list-visible argv value). This otherwise mirrors the
 // spawnSync(...,"psql",...) pattern
 // apps/idea-intake/backend/tests/intake-guards.test.mjs and
-// apps/toolbelt/tests/registry-migrations-idempotency.test.mjs already use:
+// packages/manifest-tools/tests/registry-migrations-idempotency.test.mjs already use:
 // no `pg` npm dependency exists anywhere in this monorepo, and
-// apps/toolbelt/AGENTS.md asks to keep the runtime dependency-free absent a
+// docs/archived/2026-10-30-toolbelt/AGENTS.md asks to keep the runtime dependency-free absent a
 // concrete need this issue does not establish.
 //
 // Why every migrated row is INSERTed as status='draft' first, even the ones

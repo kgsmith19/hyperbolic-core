@@ -4,7 +4,7 @@
 // order), run against an actual PostgreSQL engine, applying the real,
 // committed migration files from disk verbatim -- never a reimplementation
 // of get_prompt's logic. Mirrors the detection/skip mechanics
-// apps/toolbelt/tests/registry-migrations-idempotency.test.mjs (m3-02) and
+// packages/manifest-tools/tests/registry-migrations-idempotency.test.mjs (m3-02) and
 // apps/idea-intake/backend/tests/intake-guards.test.mjs (m3-05)
 // already established: this suite detects a usable local `psql` and skips
 // itself cleanly -- via node:test's own skip mechanism, reported as

@@ -218,7 +218,7 @@ export async function saveConfiguration(
 /** SPEC-0008 (FR-011): a usage row per copy, naming the prompt id and the
  * exact version copied. SPEC-0009 (NFR-010): also logs the render's wall-clock
  * time through toolbelt's core.log_run RPC (Content-Profile: core, not a
- * direct write against core.* -- apps/toolbelt/AGENTS.md forbids that from
+ * direct write against core.* -- docs/archived/2026-10-30-toolbelt/AGENTS.md forbids that from
  * outside the repository that owns core). Deliberately fire-and-forget,
  * called AFTER the copy confirmation already shown, never blocking it
  * (matching web/panel.mjs's own sequencing) -- callers should not await this

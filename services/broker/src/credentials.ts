@@ -7,7 +7,7 @@
 //
 // Deliberately NOT a raw process.env passthrough: loadCredentials only
 // extracts vault key names that some caller's manifest actually declares
-// in the loaded policy document (apps/toolbelt/scripts/
+// in the loaded policy document (packages/manifest-tools/
 // generate-broker-policy.mjs's output, issue #184). This is defense in
 // depth against the authorization check in proxy.ts ever having a bug --
 // even a broken check could only ever hand out a name that was already a

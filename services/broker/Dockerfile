@@ -18,7 +18,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages packages
 COPY apps/shell/package.json apps/shell/package.json
-COPY apps/toolbelt/package.json apps/toolbelt/package.json
 COPY services/broker/package.json services/broker/package.json
 RUN npm ci --omit=dev --workspace=@hyperbolic/broker
 

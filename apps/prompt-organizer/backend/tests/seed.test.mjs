@@ -24,7 +24,7 @@ import {
 } from "../../../../tests/support/postgres-harness.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "toolbelt", "supabase", "migrations");
+const ROOT_MIGRATIONS_DIR = join(__dirname, "..", "..", "..", "..", "supabase", "migrations");
 const PO_MIGRATIONS_DIR = join(__dirname, "..", "supabase", "migrations");
 
 const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
