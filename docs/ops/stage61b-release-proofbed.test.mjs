@@ -173,6 +173,16 @@ test("mold-unqualified: this proofbed IS hyperbolic-core's built/attacked/qualif
   assert.match(read("docs/ops/stage61b-release-proofbed-lib.mjs"), /release_mold\.py @ 8b7847d/);
 });
 
+test("unusable-backup: the local store manifest declares LifeOS document blobs explicitly", () => {
+  const stores = JSON.parse(read("ops/stores.json")).stores;
+  const lifeos = stores.find((store) => store.app === "lifeos");
+  assert.deepEqual(lifeos.attachments, [{
+    name: "blobs",
+    file: "var/lifeos/blobs",
+    env: "LIFEOS_BLOB_ROOT",
+  }]);
+});
+
 // --- Half 3: the disclosed gaps are real gaps, and the posture is honest ---
 
 test("the cloud pipeline's rules are honest gaps tracked by #504 after its removal (#503)", () => {

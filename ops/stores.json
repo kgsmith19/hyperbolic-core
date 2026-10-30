@@ -2,7 +2,14 @@
   "stores": [
     { "app": "platform-api", "file": "var/platform/platform.db", "env": "PLATFORM_DB_PATH" },
     { "app": "brain", "file": "var/brain/brain.db", "env": "BRAIN_DB_PATH" },
-    { "app": "lifeos", "file": "var/lifeos/lifeos.db", "env": "LIFEOS_DB_PATH" },
+    {
+      "app": "lifeos",
+      "file": "var/lifeos/lifeos.db",
+      "env": "LIFEOS_DB_PATH",
+      "attachments": [
+        { "name": "blobs", "file": "var/lifeos/blobs", "env": "LIFEOS_BLOB_ROOT" }
+      ]
+    },
     { "app": "network-checker", "file": "var/network-checker/network-checker.db", "env": "NETWORK_CHECKER_DB" }
   ]
 }

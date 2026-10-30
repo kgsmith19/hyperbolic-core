@@ -71,6 +71,73 @@ class StoreOpsTest(unittest.TestCase):
         manifest = store_ops.backup(out, self.stores, {"DEMO_DB": str(other)})
         self.assertEqual(manifest["stores"][0]["rows"], {"item": 1})
 
+    def test_backup_then_drill_preserves_nested_attachment_bytes(self):
+        blobs = self.tmp / "blobs"
+        nested = blobs / "sha256" / "ab"
+        nested.mkdir(parents=True)
+        payload = nested / "abcdef"
+        payload.write_bytes(b"document bytes")
+        stores = [{
+            **self.stores[0],
+            "attachments": [{"name": "blobs", "file": "unused-blobs", "env": "DEMO_BLOB_ROOT"}],
+        }]
+        out = self.tmp / "backup"
+        manifest = store_ops.backup(out, stores, {**self.env, "DEMO_BLOB_ROOT": str(blobs)})
+        self.assertEqual(manifest["attachments"], [{
+            "app": "demo",
+            "name": "blobs",
+            "root": "demo-blobs",
+            "files": [{
+                "path": "sha256/ab/abcdef",
+                "sha256": store_ops.sha256(payload),
+                "bytes": len(b"document bytes"),
+            }],
+        }])
+        self.assertTrue((out / "demo-blobs" / "sha256" / "ab" / "abcdef").is_file())
+        report = store_ops.restore_drill(out)
+        self.assertEqual(report["restored_attachments"], [{"app": "demo", "name": "blobs", "files": 1}])
+
+    def test_drill_refuses_an_attachment_changed_after_backup(self):
+        blobs = self.tmp / "blobs"
+        blobs.mkdir()
+        payload = blobs / "document"
+        payload.write_bytes(b"original")
+        stores = [{
+            **self.stores[0],
+            "attachments": [{"name": "blobs", "file": "unused-blobs", "env": "DEMO_BLOB_ROOT"}],
+        }]
+        out = self.tmp / "backup"
+        store_ops.backup(out, stores, {**self.env, "DEMO_BLOB_ROOT": str(blobs)})
+        (out / "demo-blobs" / "document").write_bytes(b"changed")
+        with self.assertRaisesRegex(RuntimeError, "attachment hash does not match"):
+            store_ops.restore_drill(out)
+
+    def test_missing_attachment_is_skipped_not_invented(self):
+        stores = [{
+            **self.stores[0],
+            "attachments": [{"name": "blobs", "file": "missing", "env": "DEMO_BLOB_ROOT"}],
+        }]
+        manifest = store_ops.backup(self.tmp / "backup", stores, self.env)
+        self.assertEqual(manifest["attachments"], [])
+        self.assertEqual(manifest["skipped_attachments"], ["demo:blobs"])
+
+    def test_drill_refuses_an_attachment_path_escaping_restore_root(self):
+        blobs = self.tmp / "blobs"
+        blobs.mkdir()
+        (blobs / "document").write_bytes(b"safe")
+        stores = [{
+            **self.stores[0],
+            "attachments": [{"name": "blobs", "file": "unused-blobs", "env": "DEMO_BLOB_ROOT"}],
+        }]
+        out = self.tmp / "backup"
+        store_ops.backup(out, stores, {**self.env, "DEMO_BLOB_ROOT": str(blobs)})
+        manifest_path = out / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["attachments"][0]["files"][0]["path"] = "../escape"
+        manifest_path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(RuntimeError, "escapes attachment root"):
+            store_ops.restore_drill(out)
+
 
 if __name__ == "__main__":
     unittest.main()
