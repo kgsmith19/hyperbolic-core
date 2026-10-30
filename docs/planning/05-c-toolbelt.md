@@ -254,7 +254,7 @@ Steps 2 and 3 are separate migrations applied by one globally staged push. They 
 
 ### 5.1 Scaffold CLI usage spec
 
-Lives at `packages/toolbelt-cli/` (workspace bin `tool`, wired as the root `tool:new` script; ADR-01 already budgets the ~30-line workspace config [VERIFIED: 04-adrs.md ADR-01 decision]).
+Lives at `packages/hyp-cli/` (workspace bin `tool`, wired as the root `tool:new` script; ADR-01 already budgets the ~30-line workspace config [VERIFIED: 04-adrs.md ADR-01 decision]).
 
 ```
 Usage: npm run tool:new -- --id <tool-id> --name <display-name> --kind ui|cli|headless|hybrid
@@ -359,7 +359,7 @@ Deletion timing: the root client deletes in the same PR that lands the Shell's r
 | `core.app` extension migration pair | ~60 | |
 | Generated registration migrations (4 tools: root spine, prompt-organizer, network-checker, idea-intake) | ~80 | |
 | `packages/platform-client` (registry client + auth session helper share) | ~250 | |
-| `packages/toolbelt-cli` scaffold | ~350 | |
+| `packages/hyp-cli` scaffold | ~350 | |
 | Root workspace config (ADR-01) | ~30 | |
 | Root idea client + doc lines (Section 9) | | ~171 |
 | Total (excluding Idea Intake, counted in 05-h) | ~1,150 | ~171 |

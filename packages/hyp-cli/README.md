@@ -1,4 +1,4 @@
-# @hyperbolic/toolbelt-cli
+# @hyperbolic/hyp-cli
 
 Scaffold CLI for the Toolbelt 3-step new-tool lifecycle (TB-3,
 `docs/planning/05-c-toolbelt.md` section 5.1): generates
@@ -11,7 +11,7 @@ validation.
 ## Usage
 
 Invoked through the root workspace script, or `npx tool` where
-`@hyperbolic/toolbelt-cli` is a dependency:
+`@hyperbolic/hyp-cli` is a dependency:
 
 ```bash
 npm run tool:new -- --id my-tool --name "My Tool" --kind ui --route /my-tool

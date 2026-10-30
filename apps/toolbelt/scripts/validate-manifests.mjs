@@ -44,7 +44,7 @@ export const SCHEMA_PATH = join(TOOLBELT_ROOT, "tool.schema.json");
 export const SERVICES_ROOT = join(TOOLBELT_ROOT, "..", "..", "services");
 
 // A scaffold in flight stages its tool at `<toolDir>.tmp-<token>` and only
-// renames it into place once every file is written (packages/toolbelt-cli's
+// renames it into place once every file is written (packages/hyp-cli's
 // scaffold.mjs `writePlan`). A concurrent validator must not treat that
 // half-built directory as a tool: its tool.json is written before
 // backend/supabase/migrations exists, so discovering it makes

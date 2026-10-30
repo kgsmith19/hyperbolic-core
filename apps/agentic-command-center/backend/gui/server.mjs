@@ -66,7 +66,7 @@ function serveDist(res, dist, route) {
 
 // --- guards API (SPEC-0002): thin shell over two binaries ------------------
 // Guard-config (enable/disable, secret/protected lists) lives in
-// apps/toolbelt/guards/cli.mjs; vault + runbox lifecycle stays in this
+// packages/guards/cli.mjs; vault + runbox lifecycle stays in this
 // repo's hooks/engine.mjs. Each stays the single owner of its own state
 // change — this server adds transport and, for routes the browser still
 // expects as one shape (status), composition — never logic of its own.
@@ -153,15 +153,15 @@ function nodeExec(script, args, stdin, extraEnv) {
     if (stdin !== undefined) { child.stdin.end(stdin); }
   });
 }
-// apps/toolbelt/guards is a sibling app in this monorepo — a non-breaking
+// packages/guards is a sibling app in this monorepo — a non-breaking
 // DEFAULT, not a hard dependency: ACC_GUARDS_CLI/ACC_GUARDS_CONFIG override
 // it (tests point these at fakes/fixtures; a deployment with a different
 // layout can point them anywhere).
-const guardsCliPath = () => process.env.ACC_GUARDS_CLI || path.join(HERE, "..", "..", "..", "toolbelt", "guards", "cli.mjs");
-const guardsConfigPath = () => process.env.ACC_GUARDS_CONFIG || path.join(HERE, "..", "..", "..", "toolbelt", "guards", "config.json");
+const guardsCliPath = () => process.env.ACC_GUARDS_CLI || path.join(HERE, "..", "..", "..", "..", "packages", "guards", "cli.mjs");
+const guardsConfigPath = () => process.env.ACC_GUARDS_CONFIG || path.join(HERE, "..", "..", "..", "..", "packages", "guards", "config.json");
 // engine.mjs still owns the "projects"/"runboxDir" fields inside the SAME
 // config.json guard.mjs/cli.mjs read — GUARDS_CONFIG is how it finds it now
-// that the file lives in apps/toolbelt/guards, not ACC's own root.
+// that the file lives in packages/guards, not ACC's own root.
 const engineExec = (args, stdin) => nodeExec(enginePath(), args, stdin, { GUARDS_CONFIG: guardsConfigPath() });
 const guardsExec = (args, stdin) => nodeExec(guardsCliPath(), args, stdin, { GUARDS_CONFIG: guardsConfigPath() });
 
@@ -198,7 +198,7 @@ const validVaultValue = (v) => typeof v === "string" && !/[\r\n]/.test(v) && v.l
 // shell). Verbs that consume secret values (apply, vault-import) are
 // deliberately absent — SPEC-0003 owns that surface with its own review.
 //
-// Split across two binaries: GUARDS_VERBS shells apps/toolbelt/guards'
+// Split across two binaries: GUARDS_VERBS shells packages/guards'
 // cli.mjs (guard-config: enable/disable, secret/protected lists);
 // ENGINE_VERBS shells this repo's own hooks/engine.mjs (runbox lifecycle).
 // The browser-facing route/request/response shape is unchanged either way —

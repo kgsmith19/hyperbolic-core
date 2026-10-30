@@ -349,8 +349,9 @@ test("S7 · project.yaml component roots bound builder writes, including nested 
       assert.deepEqual([foreign.verdict, foreign.rule], ["DENY", "foreign-write"], `${component} -> ${other}`);
     }
   }
-  const nested = checkCapability({ kind: "write", target: "apps/toolbelt/guards/x.ps1", write_roots: ["apps/toolbelt"] });
-  assert.equal(nested.verdict, "ALLOW", "apps/toolbelt/guards is its own component, yet inside the toolbelt root");
+  const nested = checkCapability({ kind: "write", target: "packages/guards/x.ps1", write_roots: ["apps/toolbelt"] });
+  // packages/guards is a shared package now, not a component of the toolbelt root, so the toolbelt may not write into it.
+  assert.deepEqual([nested.verdict, nested.rule], ["DENY", "foreign-write"], "packages/guards is outside the toolbelt root");
 });
 
 test("S7 · hyperbolic-core's own R2 slice routes every critical rule at ACK or stronger", () => {

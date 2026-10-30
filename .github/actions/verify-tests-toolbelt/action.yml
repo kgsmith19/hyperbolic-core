@@ -46,7 +46,7 @@ runs:
 
     - name: Test · Run Toolbelt CLI tests
       shell: bash
-      run: npm test --workspace=@hyperbolic/toolbelt-cli
+      run: npm test --workspace=@hyperbolic/hyp-cli
 
     - name: Test · Run hermetic Toolbelt tests
       shell: bash
@@ -69,7 +69,7 @@ runs:
 
     - name: Test · Run Guards tests
       shell: bash
-      working-directory: apps/toolbelt/guards
+      working-directory: packages/guards
       run: node --test *.test.mjs
 
     # Enumerated, not globbed: these are unit + disposable-Postgres suites.

@@ -1,4 +1,4 @@
-// node --test apps/toolbelt/guards/guard.test.mjs  (run from the repo root)
+// node --test packages/guards/guard.test.mjs  (run from the repo root)
 //
 // guard.mjs is the interactive PreToolUse security hook Claude Code calls on
 // every Edit/Write/NotebookEdit/Read (registered in ~/.claude/settings.json).

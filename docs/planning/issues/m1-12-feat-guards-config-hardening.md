@@ -26,9 +26,9 @@ If the audit append fails, then the decision outcome shall be unchanged (AUD-2).
 The hook shall add at most 50 ms p95 per intercepted tool call (LAT-1).
 
 ## Verification
-cd apps/toolbelt/guards && node --test "*.test.mjs"
+cd packages/guards && node --test "*.test.mjs"
 GUARDS_PROFILE=fixture node --test guard.test.mjs (overlay-merge cases)
-printf '{}' | GUARDS_CONFIG=/nonexistent/cfg.json node apps/toolbelt/guards/guard.mjs; test $? -eq 2
+printf '{}' | GUARDS_CONFIG=/nonexistent/cfg.json node packages/guards/guard.mjs; test $? -eq 2
 Run one denied fixture payload with GUARDS_LOG=$(mktemp); wc -l < "$GUARDS_LOG" prints 1 and the line parses as JSON
 Timed loop of 20 invocations; p95 wall clock below 50 ms
 

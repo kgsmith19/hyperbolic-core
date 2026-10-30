@@ -10,7 +10,7 @@ Adding a tool today is roughly 8 manual steps touching 3+ files outside the new 
 
 ## Scope
 In scope:
-- packages/toolbelt-cli implementing tool:new per the 05-c section 5.1 usage spec, generated layout, exit codes, and no-partial-writes rule
+- packages/hyp-cli implementing tool:new per the 05-c section 5.1 usage spec, generated layout, exit codes, and no-partial-writes rule
 - Root tool:new script wiring
 Out of scope:
 - Applying migrations (step 2/3 ride supabase db push via m1-05's workflow)
