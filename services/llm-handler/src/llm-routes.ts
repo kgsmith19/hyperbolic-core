@@ -89,7 +89,7 @@ async function handleComplete(req: IncomingMessage, res: ServerResponse, config:
     const response = config.broker
       ? await complete(request, brokerMergedCredentials(config.llmCredentials, config.broker), { drivers: brokerMergedDrivers() })
       : await complete(request, config.llmCredentials, {});
-    void logLlmCall(config.supabaseUrl, config.supabasePublishableKey, bearerTokenFrom(req), {
+    void logLlmCall(config.platformUrl, config.platformAnonKey, bearerTokenFrom(req), {
       callerApp,
       purpose: request.metadata.purpose,
       runRef: request.metadata.runRef,
@@ -104,7 +104,7 @@ async function handleComplete(req: IncomingMessage, res: ServerResponse, config:
     send(res, 200, response satisfies LlmResponse);
   } catch (err) {
     const mapped = errorResponseFor(err);
-    void logLlmCall(config.supabaseUrl, config.supabasePublishableKey, bearerTokenFrom(req), {
+    void logLlmCall(config.platformUrl, config.platformAnonKey, bearerTokenFrom(req), {
       callerApp,
       purpose: request.metadata.purpose,
       runRef: request.metadata.runRef,
@@ -152,7 +152,7 @@ async function handleStream(req: IncomingMessage, res: ServerResponse, config: H
   const startedAt = performance.now();
   const logOutcome = (delta: Extract<LlmDelta, { kind: "done" }> | null, err: unknown | null) => {
     if (delta) {
-      void logLlmCall(config.supabaseUrl, config.supabasePublishableKey, bearerToken, {
+      void logLlmCall(config.platformUrl, config.platformAnonKey, bearerToken, {
         callerApp,
         purpose: request.metadata.purpose,
         runRef: request.metadata.runRef,
@@ -166,7 +166,7 @@ async function handleStream(req: IncomingMessage, res: ServerResponse, config: H
       });
     } else {
       const mapped = errorResponseFor(err);
-      void logLlmCall(config.supabaseUrl, config.supabasePublishableKey, bearerToken, {
+      void logLlmCall(config.platformUrl, config.platformAnonKey, bearerToken, {
         callerApp,
         purpose: request.metadata.purpose,
         runRef: request.metadata.runRef,

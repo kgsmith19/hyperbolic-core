@@ -78,7 +78,7 @@ runs:
         ## Objective
         ## 🎯 Repository purpose
         ## ⚠️ Workflow Safety Invariant
-        ## ⚠️ The platform publishable key has six hardcoded copies
+        ## ⚠️ Two legacy copies of the old Supabase publishable key remain
         ## Owner authority
         ## Sources of truth
         ## Session bootstrap

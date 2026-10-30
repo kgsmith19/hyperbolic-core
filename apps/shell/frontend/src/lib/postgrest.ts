@@ -11,7 +11,7 @@
 // Refusing without a session is the security property worth keeping in ONE
 // place: no Shell client may ever reach PostgREST unauthenticated, and a fourth
 // client copying the pattern is how that slips.
-import { platformClient, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "./session";
+import { platformClient, PLATFORM_URL, PLATFORM_ANON_KEY } from "./session";
 
 export async function accessToken(client: string): Promise<string> {
   const session = await platformClient.auth.getSession();
@@ -32,7 +32,7 @@ export function postgrestFor(client: string, defaultProfile: string) {
   ): Promise<Response> {
     const token = await accessToken(client);
     const headers = new Headers(init.headers);
-    headers.set("apikey", SUPABASE_PUBLISHABLE_KEY);
+    headers.set("apikey", PLATFORM_ANON_KEY);
     headers.set("Authorization", `Bearer ${token}`);
     headers.set("Accept-Profile", profile);
     headers.set("Content-Profile", profile);
@@ -42,7 +42,7 @@ export function postgrestFor(client: string, defaultProfile: string) {
       headers.set("Content-Type", "application/json");
       if (!headers.has("Prefer")) headers.set("Prefer", "return=representation");
     }
-    const res = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1${path}`, { ...init, headers });
+    const res = await fetch(`${PLATFORM_URL.replace(/\/+$/, "")}/rest/v1${path}`, { ...init, headers });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw new Error(

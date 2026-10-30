@@ -59,8 +59,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HandlerConfig 
   }
   return {
     port,
-    supabaseUrl: required("SUPABASE_URL"),
-    supabasePublishableKey: required("SUPABASE_PUBLISHABLE_KEY"),
+    platformUrl: required("PLATFORM_URL"),
+    platformAnonKey: required("PLATFORM_ANON_KEY"),
     githubIntakePat: required("TOOLBELT_GITHUB_INTAKE_PAT"),
     llmCredentials: loadLlmCredentials(env),
     llmMaxConcurrencyPerCaller: maxConcurrencyPerCaller,
@@ -70,7 +70,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HandlerConfig 
     // BROKER_CALLER_TOKEN / BROKER_CALLER_TOKEN_LLM_HANDLER naming
     // asymmetry across the two Infisical paths.
     broker: loadBrokerDriverConfig(env),
-    // SUPABASE_SERVICE_ROLE_KEY is read separately by index.ts and passed
+    // PLATFORM_SERVICE_KEY is read separately by index.ts and passed
     // through SubmitDeps.serviceRoleKey (intake-submit.ts), never folded
     // into this shared HandlerConfig -- the /v1/* LLM routes added by
     // m4-05 log through core.log_llm_call() on the caller's own bearer
@@ -80,9 +80,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HandlerConfig 
 }
 
 export function requiredServiceRoleKey(env: NodeJS.ProcessEnv = process.env): string {
-  const value = env.SUPABASE_SERVICE_ROLE_KEY;
+  const value = env.PLATFORM_SERVICE_KEY;
   if (!value) {
-    throw new Error("services/llm-handler: missing required environment variable SUPABASE_SERVICE_ROLE_KEY");
+    throw new Error("services/llm-handler: missing required environment variable PLATFORM_SERVICE_KEY");
   }
   return value;
 }

@@ -56,8 +56,8 @@ const SELECT_COLUMNS =
  * oracle for a non-owner, though that path is already unreachable: the
  * route only calls this after verifyOwnerSession). */
 export async function fetchIdeaForSubmit(
-  supabaseUrl: string,
-  supabasePublishableKey: string,
+  platformUrl: string,
+  platformAnonKey: string,
   bearerToken: string,
   ideaId: string
 ): Promise<IdeaForSubmit | null> {
@@ -65,10 +65,10 @@ export async function fetchIdeaForSubmit(
     return null;
   }
   const res = await fetch(
-    `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/idea?id=eq.${encodeURIComponent(ideaId)}&select=${SELECT_COLUMNS}`,
+    `${platformUrl.replace(/\/+$/, "")}/rest/v1/idea?id=eq.${encodeURIComponent(ideaId)}&select=${SELECT_COLUMNS}`,
     {
       headers: {
-        apikey: supabasePublishableKey,
+        apikey: platformAnonKey,
         Authorization: `Bearer ${bearerToken}`,
         "Accept-Profile": "intake",
       },
@@ -120,7 +120,7 @@ export async function fetchIdeaForSubmit(
  * "write-back didn't provably happen" as a failure without parsing a
  * specific error shape. */
 export async function writeBackSubmitted(
-  supabaseUrl: string,
+  platformUrl: string,
   serviceRoleKey: string,
   ideaId: string,
   issue: { number: number; htmlUrl: string }
@@ -128,7 +128,7 @@ export async function writeBackSubmitted(
   if (!isValidUuid(ideaId)) {
     return false;
   }
-  const res = await fetch(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/mark_submitted_to_github`, {
+  const res = await fetch(`${platformUrl.replace(/\/+$/, "")}/rest/v1/rpc/mark_submitted_to_github`, {
     method: "POST",
     headers: {
       apikey: serviceRoleKey,

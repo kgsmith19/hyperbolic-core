@@ -15,8 +15,8 @@ async function withPatchedFetch<T>(impl: FetchImpl, run: () => Promise<T>): Prom
 }
 
 const DEPS: SubmitDeps = {
-  supabaseUrl: "https://proj.supabase.co",
-  supabasePublishableKey: "anon-key",
+  platformUrl: "http://platform.test",
+  platformAnonKey: "anon-key",
   serviceRoleKey: "service-role-key",
   githubIntakePat: "ghp_fixture",
 };

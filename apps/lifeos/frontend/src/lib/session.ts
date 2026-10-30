@@ -28,27 +28,21 @@ import {
   type PlatformSession,
 } from "@hyperbolic/platform-client";
 
-// ADR-03: the toolbelt Supabase project (woltgcggxaehtuypkxqk) is the
-// platform IdP that every zone -- Shell and LifeOS alike -- re-points to
-// (docs/planning/05-e-lifeos.md section 4 steps 1-3). These are the exact
-// same public defaults apps/shell/frontend/src/lib/session.ts hardcodes for the
-// identical reason (that file's own comment: "the anon key is designed for
-// client-side exposure, RLS is the actual boundary") -- VITE_SUPABASE_URL /
-// VITE_SUPABASE_PUBLISHABLE_KEY (frontend/.env.example) override for a
-// different project, exactly as they did before this issue, just re-pointed
-// per the runbook (backend/docs/runbook.md, "Auth re-point to the platform
-// IdP (m2-08)").
-const DEFAULT_SUPABASE_URL = "https://woltgcggxaehtuypkxqk.supabase.co";
-const DEFAULT_SUPABASE_PUBLISHABLE_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbHRnY2dneGFlaHR1eXBreHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwNTc1NTYsImV4cCI6MjEwMTYzMzU1Nn0.URuTQDA10GEiQUo82pyQPj3UgwvPKcg9Mjvz57v2Fv4";
+// The local platform service (services/platform-api, #508) is the IdP and data
+// API for every zone: the owner decided on 2026-10-29 that the platform is
+// local-only. It needs no apikey header, so the anon key is only a
+// placeholder unless VITE_PLATFORM_ANON_KEY supplies the one `cli.ts init`
+// wrote. VITE_PLATFORM_URL overrides the default address.
+const DEFAULT_PLATFORM_URL = "http://127.0.0.1:8400";
+const DEFAULT_PLATFORM_ANON_KEY = "local";
 
-const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY =
-  import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY || DEFAULT_SUPABASE_PUBLISHABLE_KEY;
+const PLATFORM_URL = import.meta.env?.VITE_PLATFORM_URL || DEFAULT_PLATFORM_URL;
+const PLATFORM_ANON_KEY =
+  import.meta.env?.VITE_PLATFORM_ANON_KEY || DEFAULT_PLATFORM_ANON_KEY;
 
 export const platformClient: PlatformClient = createPlatformClient({
-  supabaseUrl: SUPABASE_URL,
-  publishableKey: SUPABASE_PUBLISHABLE_KEY,
+  platformUrl: PLATFORM_URL,
+  anonKey: PLATFORM_ANON_KEY,
 });
 
 export type SessionStatus = "checking" | "signed-in" | "signed-out";

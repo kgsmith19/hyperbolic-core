@@ -26,8 +26,8 @@
 import type { Cost, Run } from "./types.ts";
 
 export interface CoreMirrorConfig {
-  supabaseUrl: string;
-  supabaseServiceRoleKey: string;
+  platformUrl: string;
+  platformServiceKey: string;
 }
 
 function sumCosts(costs: Cost[]): { inputTokens: number; outputTokens: number; cacheReadTokens: number; usd: number } {
@@ -51,11 +51,11 @@ export async function mirrorRunToCore(config: CoreMirrorConfig | undefined, run:
   if (!config) return false;
   const totals = sumCosts(costs);
   try {
-    const res = await fetch(`${config.supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/log_run`, {
+    const res = await fetch(`${config.platformUrl.replace(/\/+$/, "")}/rest/v1/rpc/log_run`, {
       method: "POST",
       headers: {
-        apikey: config.supabaseServiceRoleKey,
-        Authorization: `Bearer ${config.supabaseServiceRoleKey}`,
+        apikey: config.platformServiceKey,
+        Authorization: `Bearer ${config.platformServiceKey}`,
         "Content-Profile": "core",
         "Content-Type": "application/json",
       },

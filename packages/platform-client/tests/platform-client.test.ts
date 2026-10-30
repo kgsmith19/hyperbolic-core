@@ -17,8 +17,8 @@ const FIXTURE_EMAIL = "kylegsmith19@gmail.com";
 const FIXTURE_NON_OWNER_EMAIL = "not-the-owner@example.invalid";
 const FIXTURE_PASSWORD = "correct horse battery staple";
 const FIXTURE_CONFIG = {
-  supabaseUrl: "https://fixture-project.supabase.invalid",
-  publishableKey: "fixture-publishable-key",
+  platformUrl: "https://fixture-project.supabase.invalid",
+  anonKey: "fixture-publishable-key",
 };
 
 type FetchImpl = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -662,7 +662,7 @@ test("authedFetch: an absolute URL on the configured Supabase origin proceeds an
   await withPatchedFetch(spy, async () => {
     const client = createPlatformClient(FIXTURE_CONFIG);
     await client.auth.signInWithPassword(FIXTURE_EMAIL, FIXTURE_PASSWORD);
-    const res = await client.fetch(`${FIXTURE_CONFIG.supabaseUrl}/rest/v1/app?select=id`);
+    const res = await client.fetch(`${FIXTURE_CONFIG.platformUrl}/rest/v1/app?select=id`);
     assert.equal(res.status, 200);
   });
 
@@ -685,7 +685,7 @@ test("authedFetch: a Request input keeps its method, body, and headers and disab
     const client = createPlatformClient(FIXTURE_CONFIG);
     await client.auth.signInWithPassword(FIXTURE_EMAIL, FIXTURE_PASSWORD);
     await client.fetch(
-      new Request(`${FIXTURE_CONFIG.supabaseUrl}/rest/v1/app`, {
+      new Request(`${FIXTURE_CONFIG.platformUrl}/rest/v1/app`, {
         method: "POST",
         headers: { "X-From-Request": "preserved" },
         body: "request-body",
@@ -694,7 +694,7 @@ test("authedFetch: a Request input keeps its method, body, and headers and disab
   });
 
   assert.ok(received);
-  assert.equal(received.url, `${FIXTURE_CONFIG.supabaseUrl}/rest/v1/app`);
+  assert.equal(received.url, `${FIXTURE_CONFIG.platformUrl}/rest/v1/app`);
   assert.equal(received.method, "POST");
   assert.equal(await received.text(), "request-body");
   assert.equal(received.headers.get("x-from-request"), "preserved");
@@ -716,7 +716,7 @@ test("authedFetch: RequestInit overrides Request fields without dropping unaffec
   await withPatchedFetch(spy, async () => {
     const client = createPlatformClient(FIXTURE_CONFIG);
     await client.auth.signInWithPassword(FIXTURE_EMAIL, FIXTURE_PASSWORD);
-    const request = new Request(`${FIXTURE_CONFIG.supabaseUrl}/rest/v1/app`, {
+    const request = new Request(`${FIXTURE_CONFIG.platformUrl}/rest/v1/app`, {
       method: "POST",
       headers: {
         "X-From-Request": "preserved",

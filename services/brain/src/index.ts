@@ -17,11 +17,11 @@ const config = loadConfig();
 const logger = new BrainLogger(config.dataDir);
 // m4-17 (07 section 7.6): the core mirror is best-effort and optional --
 // undefined here means this deploy hasn't provisioned
-// SUPABASE_SERVICE_ROLE_KEY yet, and dispatch.ts's own finalizeRunIfComplete
+// PLATFORM_SERVICE_KEY yet, and dispatch.ts's own finalizeRunIfComplete
 // skips the write rather than failing the run.
 const coreMirror: CoreMirrorConfig | undefined =
-  config.supabaseUrl && config.supabaseServiceRoleKey
-    ? { supabaseUrl: config.supabaseUrl, supabaseServiceRoleKey: config.supabaseServiceRoleKey }
+  config.platformUrl && config.platformServiceKey
+    ? { platformUrl: config.platformUrl, platformServiceKey: config.platformServiceKey }
     : undefined;
 
 const adapters: AdapterRegistry = {

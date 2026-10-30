@@ -66,7 +66,7 @@ export async function mockAuth(page: Page, expiresInSeconds = 3600): Promise<voi
   // itself, which is platform-client's own unit-test responsibility
   // (packages/platform-client/tests/platform-client.test.ts). Without this
   // mock, that fetch targets the real Supabase host baked into
-  // src/lib/session.ts's DEFAULT_SUPABASE_URL fallback -- unreachable or
+  // src/lib/session.ts's DEFAULT_PLATFORM_URL fallback -- unreachable or
   // unauthenticated (the fixture access token above is not a real JWT)
   // from this sandboxed browser context either way -- and every login hangs
   // or silently fails the owner check, never completing the post-login

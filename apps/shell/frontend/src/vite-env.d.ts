@@ -6,8 +6,8 @@ declare const __BUILD_SHA__: string;
 declare const __BUILD_TIME__: string;
 
 interface ImportMetaEnv {
-  readonly VITE_SUPABASE_URL?: string;
-  readonly VITE_SUPABASE_PUBLISHABLE_KEY?: string;
+  readonly VITE_PLATFORM_URL?: string;
+  readonly VITE_PLATFORM_ANON_KEY?: string;
   readonly VITE_ACC_API?: string;
   readonly VITE_LIFEOS_API?: string;
   readonly VITE_BRAIN_API?: string;

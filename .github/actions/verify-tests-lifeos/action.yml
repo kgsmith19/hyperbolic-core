@@ -81,7 +81,7 @@ runs:
       working-directory: apps/lifeos/frontend
       run: npm run lint
 
-    # VITE_SUPABASE_* are public, non-production values that let the Supabase
+    # VITE_PLATFORM_* are public, non-production values that let the Supabase
     # client initialize without coupling PR validation to a deployed project;
     # unit and browser tests intercept every external request anyway.
     #
@@ -100,16 +100,16 @@ runs:
       shell: bash
       working-directory: apps/lifeos/frontend
       env:
-        VITE_SUPABASE_URL: https://test.supabase.co
-        VITE_SUPABASE_PUBLISHABLE_KEY: test-public-anon-key
+        VITE_PLATFORM_URL: https://test.supabase.co
+        VITE_PLATFORM_ANON_KEY: test-public-anon-key
       run: npx tsc -b
 
     - name: Test · npm run test
       shell: bash
       working-directory: apps/lifeos/frontend
       env:
-        VITE_SUPABASE_URL: https://test.supabase.co
-        VITE_SUPABASE_PUBLISHABLE_KEY: test-public-anon-key
+        VITE_PLATFORM_URL: https://test.supabase.co
+        VITE_PLATFORM_ANON_KEY: test-public-anon-key
       run: npm run test
 
     - name: Cache · Cache Playwright Chromium
@@ -127,8 +127,8 @@ runs:
       shell: bash
       working-directory: apps/lifeos/frontend
       env:
-        VITE_SUPABASE_URL: https://test.supabase.co
-        VITE_SUPABASE_PUBLISHABLE_KEY: test-public-anon-key
+        VITE_PLATFORM_URL: https://test.supabase.co
+        VITE_PLATFORM_ANON_KEY: test-public-anon-key
       run: npm run e2e
 
     - name: Evidence · Upload Playwright failure evidence
@@ -146,6 +146,6 @@ runs:
       shell: bash
       working-directory: apps/lifeos/frontend
       env:
-        VITE_SUPABASE_URL: https://test.supabase.co
-        VITE_SUPABASE_PUBLISHABLE_KEY: test-public-anon-key
+        VITE_PLATFORM_URL: https://test.supabase.co
+        VITE_PLATFORM_ANON_KEY: test-public-anon-key
       run: npm run build

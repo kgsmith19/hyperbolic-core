@@ -48,7 +48,7 @@ test("verifyOwnerSession: true only when the RPC returns the literal boolean tru
   const originalFetch = globalThis.fetch;
   try {
     globalThis.fetch = (async () => new Response(JSON.stringify(true), { status: 200 })) as typeof fetch;
-    assert.equal(await verifyOwnerSession("https://x.supabase.co", "anon-key", "tok"), true);
+    assert.equal(await verifyOwnerSession("http://platform.test", "anon-key", "tok"), true);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -58,7 +58,7 @@ test("verifyOwnerSession: false on a non-2xx response, fails closed", async () =
   const originalFetch = globalThis.fetch;
   try {
     globalThis.fetch = (async () => new Response(JSON.stringify(true), { status: 401 })) as typeof fetch;
-    assert.equal(await verifyOwnerSession("https://x.supabase.co", "anon-key", "tok"), false);
+    assert.equal(await verifyOwnerSession("http://platform.test", "anon-key", "tok"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -68,7 +68,7 @@ test("verifyOwnerSession: false when the RPC body isn't exactly `true`", async (
   const originalFetch = globalThis.fetch;
   try {
     globalThis.fetch = (async () => new Response(JSON.stringify(false), { status: 200 })) as typeof fetch;
-    assert.equal(await verifyOwnerSession("https://x.supabase.co", "anon-key", "tok"), false);
+    assert.equal(await verifyOwnerSession("http://platform.test", "anon-key", "tok"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -80,7 +80,7 @@ test("verifyOwnerSession: false on a network error, fails closed rather than thr
     globalThis.fetch = (async () => {
       throw new Error("network down");
     }) as typeof fetch;
-    assert.equal(await verifyOwnerSession("https://x.supabase.co", "anon-key", "tok"), false);
+    assert.equal(await verifyOwnerSession("http://platform.test", "anon-key", "tok"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -190,8 +190,8 @@ test("authenticate: falls back to owner-session verification when agent-token op
   try {
     globalThis.fetch = (async () => new Response(JSON.stringify(true), { status: 200 })) as typeof fetch;
     const result = await authenticate("Bearer some-supabase-jwt", {
-      supabaseUrl: "https://x.supabase.co",
-      supabasePublishableKey: "anon-key",
+      platformUrl: "http://platform.test",
+      platformAnonKey: "anon-key",
     });
     assert.equal(result?.kind, "owner");
   } finally {

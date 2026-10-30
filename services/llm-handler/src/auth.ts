@@ -46,15 +46,15 @@ export function extractBearerToken(authorizationHeader: string | undefined | nul
  * expired. Decide that trade deliberately, in both places at once, or not at
  * all. */
 export async function verifyOwnerSession(
-  supabaseUrl: string,
-  supabasePublishableKey: string,
+  platformUrl: string,
+  platformAnonKey: string,
   bearerToken: string
 ): Promise<boolean> {
   try {
-    const res = await fetch(`${supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/is_platform_owner`, {
+    const res = await fetch(`${platformUrl.replace(/\/+$/, "")}/rest/v1/rpc/is_platform_owner`, {
       method: "POST",
       headers: {
-        apikey: supabasePublishableKey,
+        apikey: platformAnonKey,
         Authorization: `Bearer ${bearerToken}`,
         "Content-Profile": "core",
         "Content-Type": "application/json",

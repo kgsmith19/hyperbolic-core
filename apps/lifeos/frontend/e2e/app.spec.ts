@@ -16,7 +16,7 @@
 //  3. Session source: there is no local login form anymore. `signIn()`
 //     below seeds the same-origin `localStorage` key `@supabase/supabase-js`
 //     itself would have written after a real sign-in against
-//     `VITE_SUPABASE_URL=https://test.supabase.co` (playwright.config.ts's
+//     `VITE_PLATFORM_URL=https://test.supabase.co` (playwright.config.ts's
 //     `webServer.env`) -- `src/lib/session.ts`'s `platformClient` reads
 //     that key on `getSession()`, the same mechanism
 //     apps/shell/frontend/e2e/support/auth.ts's `mockAuth()` exercises for the

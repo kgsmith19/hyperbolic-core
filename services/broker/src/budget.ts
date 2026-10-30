@@ -21,7 +21,7 @@
 // caller whose actual proxied request has nothing wrong with it.
 
 export interface BudgetConfig {
-  supabaseUrl: string;
+  platformUrl: string;
   serviceRoleKey: string;
 }
 
@@ -31,10 +31,10 @@ export interface BudgetConfig {
  * simply never runs until both are provisioned via Infisical
  * /platform/broker/. */
 export function loadBudgetConfig(env: NodeJS.ProcessEnv): BudgetConfig | undefined {
-  const supabaseUrl = env.SUPABASE_URL;
-  const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) return undefined;
-  return { supabaseUrl, serviceRoleKey };
+  const platformUrl = env.PLATFORM_URL;
+  const serviceRoleKey = env.PLATFORM_SERVICE_KEY;
+  if (!platformUrl || !serviceRoleKey) return undefined;
+  return { platformUrl, serviceRoleKey };
 }
 
 export interface SpendCheckResult {
@@ -48,13 +48,13 @@ export interface SpendCheckResult {
   wouldExceedBudget: boolean;
 }
 
-function postgrestRpcUrl(supabaseUrl: string, fn: string): string {
-  return `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/rpc/${fn}`;
+function postgrestRpcUrl(platformUrl: string, fn: string): string {
+  return `${platformUrl.replace(/\/+$/, "")}/rest/v1/rpc/${fn}`;
 }
 
 async function callRpc(config: BudgetConfig, fn: string, body: Record<string, unknown>): Promise<Response | null> {
   try {
-    return await fetch(postgrestRpcUrl(config.supabaseUrl, fn), {
+    return await fetch(postgrestRpcUrl(config.platformUrl, fn), {
       method: "POST",
       headers: {
         apikey: config.serviceRoleKey,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkSpend, loadBudgetConfig, logBrokerCall } from "../src/budget.ts";
 
-const CONFIG = { supabaseUrl: "http://127.0.0.1:9999", serviceRoleKey: "test-service-role-key" };
+const CONFIG = { platformUrl: "http://127.0.0.1:9999", serviceRoleKey: "test-service-role-key" };
 
 async function withPatchedFetch<T>(impl: typeof fetch, run: () => Promise<T>): Promise<T> {
   const original = globalThis.fetch;
@@ -16,16 +16,16 @@ async function withPatchedFetch<T>(impl: typeof fetch, run: () => Promise<T>): P
 
 test("loadBudgetConfig: undefined when either env var is missing -- never throws, the feature is simply not live yet", () => {
   assert.equal(loadBudgetConfig({}), undefined);
-  assert.equal(loadBudgetConfig({ SUPABASE_URL: "http://x" }), undefined);
-  assert.equal(loadBudgetConfig({ SUPABASE_SERVICE_ROLE_KEY: "k" }), undefined);
+  assert.equal(loadBudgetConfig({ PLATFORM_URL: "http://x" }), undefined);
+  assert.equal(loadBudgetConfig({ PLATFORM_SERVICE_KEY: "k" }), undefined);
 });
 
 test("loadBudgetConfig: both present yields a real config", () => {
-  const config = loadBudgetConfig({ SUPABASE_URL: "http://127.0.0.1:9999", SUPABASE_SERVICE_ROLE_KEY: "k" });
-  assert.deepEqual(config, { supabaseUrl: "http://127.0.0.1:9999", serviceRoleKey: "k" });
+  const config = loadBudgetConfig({ PLATFORM_URL: "http://127.0.0.1:9999", PLATFORM_SERVICE_KEY: "k" });
+  assert.deepEqual(config, { platformUrl: "http://127.0.0.1:9999", serviceRoleKey: "k" });
 });
 
-test("checkSpend: posts to <supabaseUrl>/rest/v1/rpc/broker_call_spend_today with the service-role key as both apikey and bearer, Content-Profile core, and p_caller", async () => {
+test("checkSpend: posts to <platformUrl>/rest/v1/rpc/broker_call_spend_today with the service-role key as both apikey and bearer, Content-Profile core, and p_caller", async () => {
   let capturedUrl: string | undefined;
   let capturedInit: RequestInit | undefined;
   await withPatchedFetch(
@@ -113,7 +113,7 @@ test("checkSpend: a non-JSON/malformed response body never throws -- degrades to
   );
 });
 
-test("logBrokerCall: posts to <supabaseUrl>/rest/v1/rpc/log_broker_call with p_caller/p_target_host/p_cost_usd, returns true on success", async () => {
+test("logBrokerCall: posts to <platformUrl>/rest/v1/rpc/log_broker_call with p_caller/p_target_host/p_cost_usd, returns true on success", async () => {
   let capturedBody: unknown;
   const ok = await withPatchedFetch(
     (async (_input: unknown, init?: RequestInit) => {

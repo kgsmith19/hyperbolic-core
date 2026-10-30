@@ -6,8 +6,8 @@ import type { BrokerDriverConfig } from "./broker-drivers.ts";
 
 export interface HandlerConfig {
   readonly port: number;
-  readonly supabaseUrl: string;
-  readonly supabasePublishableKey: string;
+  readonly platformUrl: string;
+  readonly platformAnonKey: string;
   readonly githubIntakePat: string;
   /** General-purpose provider keys only (08 section 7): Infisical
    * /platform/llm/, injected only into this process. This config object has

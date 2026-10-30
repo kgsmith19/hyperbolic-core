@@ -31,7 +31,7 @@ test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
   intake = await setupIntakeFixture();
-  handlerA = await setupHandlerAFixture({ supabaseUrl: intake.shimBaseUrl, serviceRoleKey: intake.serviceRoleKey });
+  handlerA = await setupHandlerAFixture({ platformUrl: intake.shimBaseUrl, serviceRoleKey: intake.serviceRoleKey });
 });
 
 test.afterAll(() => {

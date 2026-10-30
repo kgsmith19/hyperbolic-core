@@ -29,7 +29,7 @@ async function handleIntakeSubmit(
   // identity (auth.ts's own doc comment); every non-owner/invalid case
   // fails closed to 401 here, so a garbage or non-owner token never reaches
   // the submit orchestration at all.
-  const isOwner = await verifyOwnerSession(config.supabaseUrl, config.supabasePublishableKey, bearerToken);
+  const isOwner = await verifyOwnerSession(config.platformUrl, config.platformAnonKey, bearerToken);
   if (!isOwner) {
     send(res, 401, { error: "not an active platform owner session" });
     return;
@@ -49,8 +49,8 @@ async function handleIntakeSubmit(
   }
 
   const deps: SubmitDeps = {
-    supabaseUrl: config.supabaseUrl,
-    supabasePublishableKey: config.supabasePublishableKey,
+    platformUrl: config.platformUrl,
+    platformAnonKey: config.platformAnonKey,
     serviceRoleKey,
     githubIntakePat: config.githubIntakePat,
   };
@@ -81,7 +81,7 @@ async function requireOwnerSession(req: http.IncomingMessage, res: http.ServerRe
     send(res, 401, { error: "missing or malformed Authorization header" });
     return false;
   }
-  const isOwner = await verifyOwnerSession(config.supabaseUrl, config.supabasePublishableKey, bearerToken);
+  const isOwner = await verifyOwnerSession(config.platformUrl, config.platformAnonKey, bearerToken);
   if (!isOwner) {
     send(res, 401, { error: "not an active platform owner session" });
     return false;

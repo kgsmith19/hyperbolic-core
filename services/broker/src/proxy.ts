@@ -491,8 +491,8 @@ export async function proxyRequest(input: unknown, policy: PolicyDocument, conte
   // lookup is, so a credential-refused request above returns before ever
   // reaching this -- there is no spend to check for a call that never
   // happens. Dark whenever the caller names no estimatedCostUsd, or the
-  // owner has not yet provisioned `budget` (SUPABASE_URL/
-  // SUPABASE_SERVICE_ROLE_KEY), matching every other feature in this file's
+  // owner has not yet provisioned `budget` (PLATFORM_URL/
+  // PLATFORM_SERVICE_KEY), matching every other feature in this file's
   // own dark-until-provisioned convention.
   let spendCheck: Awaited<ReturnType<typeof checkSpend>> | undefined;
   if (request.estimatedCostUsd !== undefined && budget !== undefined) {

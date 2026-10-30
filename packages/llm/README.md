@@ -70,9 +70,8 @@ examples/get-prompt.ts   scratch script demonstrating the getPrompt contract end
   in three server-side-only SDKs that blow a browser bundle budget even when
   only `prompt-render.ts`'s pure functions are wanted. `apps/shell` carries
   its own parity-tested copy instead.
-- The root `AGENTS.md`'s "platform publishable key has six hardcoded copies"
-  section names `packages/llm/src/prompt-client.ts` as one of the six and
-  `packages/llm` as a natural consolidation owner for that hazard.
+- `src/prompt-client.ts` defaults to the local platform (`services/platform-api`,
+  #508) with a placeholder anon key (#510); no Supabase key is hardcoded here.
 - `docs/planning/08-llm-handlers.md` (completion contract, fallback rules)
   and `docs/planning/05-d-prompt-organizer.md` sections 4 and 6 (the
   `PromptClient` contract) are this package's specifying documents.

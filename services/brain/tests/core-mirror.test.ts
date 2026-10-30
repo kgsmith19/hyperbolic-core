@@ -36,7 +36,7 @@ test("mirrorRunToCore: calls core.log_run via PostgREST RPC with summed token/us
   });
 
   const costs = [cost({ id: "c1", inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, usdEstimate: 0.5 }), cost({ id: "c2", inputTokens: 20, outputTokens: 0, cacheReadTokens: 0, usdEstimate: 0.1 })];
-  const ok = await mirrorRunToCore({ supabaseUrl: "https://example.invalid", supabaseServiceRoleKey: "srk-test" }, RUN, costs, 300_000);
+  const ok = await mirrorRunToCore({ platformUrl: "https://example.invalid", platformServiceKey: "srk-test" }, RUN, costs, 300_000);
 
   assert.equal(ok, true);
   assert.equal(capturedUrl, "https://example.invalid/rest/v1/rpc/log_run");
@@ -57,7 +57,7 @@ test("mirrorRunToCore: calls core.log_run via PostgREST RPC with summed token/us
 
 test("mirrorRunToCore: a non-2xx RPC response is a failure, never thrown -- returns false", async (t) => {
   t.mock.method(globalThis, "fetch", async () => new Response("nope", { status: 500 }));
-  const ok = await mirrorRunToCore({ supabaseUrl: "https://example.invalid", supabaseServiceRoleKey: "srk-test" }, RUN, [], 0);
+  const ok = await mirrorRunToCore({ platformUrl: "https://example.invalid", platformServiceKey: "srk-test" }, RUN, [], 0);
   assert.equal(ok, false);
 });
 
@@ -65,6 +65,6 @@ test("mirrorRunToCore: a network error is a failure, never thrown -- returns fal
   t.mock.method(globalThis, "fetch", async () => {
     throw new Error("ECONNREFUSED");
   });
-  const ok = await mirrorRunToCore({ supabaseUrl: "https://example.invalid", supabaseServiceRoleKey: "srk-test" }, RUN, [], 0);
+  const ok = await mirrorRunToCore({ platformUrl: "https://example.invalid", platformServiceKey: "srk-test" }, RUN, [], 0);
   assert.equal(ok, false);
 });

@@ -128,10 +128,10 @@ test("a project override sends its matching publishable key instead of the defau
   assert.equal(spy.mock.callCount(), 1);
 });
 
-test("an empty explicit publishable key fails before any request", () => {
+test("an empty explicit anon key fails before any request", () => {
   assert.throws(
     () => createRegistryClient(FIXTURE_URL, async () => FIXTURE_TOKEN, "  "),
-    /publishable key is required/,
+    /anon key is required/,
   );
 });
 

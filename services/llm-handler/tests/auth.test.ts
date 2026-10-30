@@ -35,7 +35,7 @@ test("extractBearerToken: well-formed header extracts the token", () => {
 test("verifyOwnerSession: RPC returns literal true resolves true", async () => {
   await withPatchedFetch(
     async (input, init) => {
-      assert.equal(String(input), "https://proj.supabase.co/rest/v1/rpc/is_platform_owner");
+      assert.equal(String(input), "http://platform.test/rest/v1/rpc/is_platform_owner");
       assert.equal(init?.method, "POST");
       const headers = init?.headers as Record<string, string>;
       assert.equal(headers.apikey, "anon-key");
@@ -44,7 +44,7 @@ test("verifyOwnerSession: RPC returns literal true resolves true", async () => {
       return new Response("true", { status: 200, headers: { "content-type": "application/json" } });
     },
     async () => {
-      const result = await verifyOwnerSession("https://proj.supabase.co", "anon-key", "real-token");
+      const result = await verifyOwnerSession("http://platform.test", "anon-key", "real-token");
       assert.equal(result, true);
     }
   );
@@ -54,7 +54,7 @@ test("verifyOwnerSession: RPC returns literal false resolves false", async () =>
   await withPatchedFetch(
     async () => new Response("false", { status: 200 }),
     async () => {
-      const result = await verifyOwnerSession("https://proj.supabase.co", "anon-key", "non-owner-token");
+      const result = await verifyOwnerSession("http://platform.test", "anon-key", "non-owner-token");
       assert.equal(result, false);
     }
   );
@@ -64,7 +64,7 @@ test("verifyOwnerSession: non-2xx response fails closed to false", async () => {
   await withPatchedFetch(
     async () => new Response("expired", { status: 401 }),
     async () => {
-      const result = await verifyOwnerSession("https://proj.supabase.co", "anon-key", "expired-token");
+      const result = await verifyOwnerSession("http://platform.test", "anon-key", "expired-token");
       assert.equal(result, false);
     }
   );
@@ -76,7 +76,7 @@ test("verifyOwnerSession: a network error fails closed to false, never throws", 
       throw new Error("ECONNREFUSED");
     },
     async () => {
-      const result = await verifyOwnerSession("https://proj.supabase.co", "anon-key", "any-token");
+      const result = await verifyOwnerSession("http://platform.test", "anon-key", "any-token");
       assert.equal(result, false);
     }
   );
@@ -86,7 +86,7 @@ test("verifyOwnerSession: a truthy-but-not-literal-true body fails closed to fal
   await withPatchedFetch(
     async () => new Response('"true"', { status: 200 }),
     async () => {
-      const result = await verifyOwnerSession("https://proj.supabase.co", "anon-key", "any-token");
+      const result = await verifyOwnerSession("http://platform.test", "anon-key", "any-token");
       assert.equal(result, false, "the string \"true\" must not be treated the same as the JSON boolean true");
     }
   );
@@ -95,11 +95,11 @@ test("verifyOwnerSession: a truthy-but-not-literal-true body fails closed to fal
 test("verifyOwnerSession: strips trailing slashes from the Supabase URL before building the RPC path", async () => {
   await withPatchedFetch(
     async (input) => {
-      assert.equal(String(input), "https://proj.supabase.co/rest/v1/rpc/is_platform_owner");
+      assert.equal(String(input), "http://platform.test/rest/v1/rpc/is_platform_owner");
       return new Response("true", { status: 200 });
     },
     async () => {
-      const result = await verifyOwnerSession("https://proj.supabase.co///", "anon-key", "real-token");
+      const result = await verifyOwnerSession("http://platform.test///", "anon-key", "real-token");
       assert.equal(result, true);
     }
   );
