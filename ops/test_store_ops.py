@@ -1,11 +1,14 @@
 """Proves the backup and restore drill fails loudly when it should (#504, AC2)."""
 
 import json
+import sys
 import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import store_ops
 

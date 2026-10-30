@@ -1,9 +1,12 @@
 """Proves tagging and rollback behave as the release contract says (#504, AC3)."""
 
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import release
 
