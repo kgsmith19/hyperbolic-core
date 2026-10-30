@@ -22,6 +22,8 @@ export interface PlatformConfig {
   accessTtlSeconds: number;
   /** Browser origins allowed to call this service (local frontends). */
   allowedOrigins: string[];
+  /** Repo root whose tool.json manifests make up the app registry (#514). */
+  registryRoot: string;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -58,6 +60,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, serviceDir = pa
     ownerEmail: required(env, "PLATFORM_OWNER_EMAIL").toLowerCase(),
     ownerPasswordHash: required(env, "PLATFORM_OWNER_PASSWORD_HASH"),
     accessTtlSeconds: Number(env.PLATFORM_ACCESS_TTL_SECONDS ?? "3600"),
+    registryRoot: path.resolve(env.PLATFORM_REGISTRY_ROOT ?? path.join(serviceDir, "../..")),
     allowedOrigins: (env.PLATFORM_ALLOWED_ORIGINS ?? "http://127.0.0.1:5173,http://localhost:5173")
       .split(",")
       .map((origin) => origin.trim())

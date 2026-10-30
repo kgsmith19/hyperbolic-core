@@ -90,7 +90,7 @@ jobs:
                 startsWith(filename, "apps/agentic-command-center/backend/hooks/") ||
                 startsWith(filename, "apps/agentic-command-center/backend/runner/") ||
                 filename === "apps/agentic-command-center/backend/policy.json" ||
-                startsWith(filename, "apps/toolbelt/guards/") ||
+                startsWith(filename, "packages/guards/") ||
                 /^apps\/toolbelt\/(?:.*\/)?supabase\/migrations\//.test(filename) ||
                 startsWith(filename, "packages/") ||
                 startsWith(filename, "docs/ops/edge-origin/") ||
@@ -158,7 +158,7 @@ jobs:
                     "apps/agentic-command-center/backend/runner/",
                   ) ||
                   filename === "apps/agentic-command-center/backend/policy.json" ||
-                  startsWith(filename, "apps/toolbelt/guards/") ||
+                  startsWith(filename, "packages/guards/") ||
                   startsWith(filename, "packages/") ||
                   filename === "docs/ops/prune-docker-images.sh" ||
                   filename === ".github/workflows/deploy.yml"

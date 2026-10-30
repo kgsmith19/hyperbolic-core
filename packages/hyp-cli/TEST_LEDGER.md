@@ -1,6 +1,6 @@
 # Test Ledger
 
-The suites for `packages/toolbelt-cli`. All of them run in the `Toolbelt`
+The suites for `packages/hyp-cli`. All of them run in the `Toolbelt`
 (`.github/workflows/toolbelt-ci.yml`).
 
 | Suite | Covers | Command |

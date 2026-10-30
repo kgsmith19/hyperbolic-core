@@ -18,8 +18,8 @@
  * THAT PREMISE IS FALSE, and was already false when it was written. Four
  * imports cross that boundary today:
  *
- *   packages/toolbelt-cli/src/manifests-shared.mjs (x2)   production source
- *   packages/toolbelt-cli/tests/cli.integration.test.mjs
+ *   packages/hyp-cli/src/manifests-shared.mjs (x2)   production source
+ *   packages/hyp-cli/tests/cli.integration.test.mjs
  *   packages/llm/tests/prompt-render-parity.test.mjs      <- THIS package
  *
  * The last one is the awkward part: the parity test that exists to police

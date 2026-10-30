@@ -1,10 +1,10 @@
 # 05-g. Guards V1 Plan
 
-Component: Guards at `apps/toolbelt/guards/`. Names per `00-canonical-names.md` (canonical definition row for Guards). Evidence base: `01-inventory.md`, `02-health-audit.md` (SEC-05), `03-v1-definition.md` (GU-1..GU-3), direct source reads cited inline. Planning only.
+Component: Guards at `packages/guards/`. Names per `00-canonical-names.md` (canonical definition row for Guards). Evidence base: `01-inventory.md`, `02-health-audit.md` (SEC-05), `03-v1-definition.md` (GU-1..GU-3), direct source reads cited inline. Planning only.
 
 ## 1. Definition: what Guards is, enforces, and deliberately does not do
 
-Guards is a standalone runtime policy module: a Claude Code `PreToolUse` hook (`guard.mjs`) plus a config CLI (`cli.mjs`), extracted from the Agentic Command Center on 2026-08-12 with a strict no-import boundary; ACC shells the CLI as a subprocess [VERIFIED: 00-canonical-names.md Guards row; git show 5f67ec1 "Extract Guards to apps/toolbelt/guards, decoupled from ACC"].
+Guards is a standalone runtime policy module: a Claude Code `PreToolUse` hook (`guard.mjs`) plus a config CLI (`cli.mjs`), extracted from the Agentic Command Center on 2026-08-12 with a strict no-import boundary; ACC shells the CLI as a subprocess [VERIFIED: 00-canonical-names.md Guards row; git show 5f67ec1 "Extract Guards to packages/guards, decoupled from ACC"].
 
 What it enforces today, three checks in order inside the exported pure function `decide(payload, config)`:
 
@@ -85,7 +85,7 @@ A `PreToolUse` hook receives a JSON tool-call payload naming files and arguments
 
 ## 4. Overlap analysis: Guards vs the ACC kernel guard
 
-| Dimension | Guards (`apps/toolbelt/guards/`) | Kernel guard (`kernel/guard.mjs` + `kernel/guardhook.mjs`) |
+| Dimension | Guards (`packages/guards/`) | Kernel guard (`kernel/guard.mjs` + `kernel/guardhook.mjs`) |
 | --- | --- | --- |
 | Scope | Repo/file conventions shared across every harness session: secret globs, protected paths, cell ownership | Per-run task-contract enforcement: tool allowlist, tool-call ceilings, staging-dir confinement, autonomy factors |
 | State | One config file (+ profile overlay), no per-run state | Per-run contract, pin, decision ledger, atomic decision lock [VERIFIED: guardhook.mjs:118-142] |
@@ -110,7 +110,7 @@ Every Brain- and ACC-launched harness session receives a generated settings file
         "hooks": [
           {
             "type": "command",
-            "command": "node \"<abs repo root>/apps/toolbelt/guards/guard.mjs\"",
+            "command": "node \"<abs repo root>/packages/guards/guard.mjs\"",
             "timeout": 15
           }
         ]
@@ -132,16 +132,16 @@ Contract terms:
 
 | # | Criterion (EARS) | Verification command |
 | --- | --- | --- |
-| GU-1 | The existing suite shall stay green throughout V1 work. | `cd apps/toolbelt/guards && node --test "*.test.mjs"` exits 0 (35 tests today [VERIFIED: 01-inventory.md suite table]) |
+| GU-1 | The existing suite shall stay green throughout V1 work. | `cd packages/guards && node --test "*.test.mjs"` exits 0 (35 tests today [VERIFIED: 01-inventory.md suite table]) |
 | GU-2.1 | When the ACC kernel generates run settings, the `PreToolUse` chain shall include the Guards hook entry with a `GUARDS_CONFIG`/`GUARDS_PROFILE` resolution for the machine. | `cd apps/agentic-command-center && npm test` exits 0, including the new `kernel/settings.test.mjs` assertion that generated settings contain a command matching `guards/guard.mjs` |
 | GU-2.2 | When any Brain- or ACC-launched harness session attempts a write to a protected fixture path, the call shall be denied with exit 2 and the denial shall be recorded. | launch a kernel run against a fixture repo (kernel suite fixture path); assert exit 2 on the write and `grep -c '"allow":false' "$GUARDS_LOG"` is at least 1 |
 | GU-2.3 | While a launcher runs on a machine with a profile overlay, Guards shall enforce that machine's protected and repo rules without any edit to the tracked base config. | `GUARDS_PROFILE=fixture node --test guard.test.mjs` (overlay-merge cases) exits 0 |
-| GU-3.1 | If the config file cannot be read, then the hook shall deny with exit 2. | `printf '{}' \| GUARDS_CONFIG=/nonexistent/cfg.json node apps/toolbelt/guards/guard.mjs; test $? -eq 2` |
-| GU-3.2 | If no parsable payload arrives on stdin within the cap, then the hook shall deny with exit 2. | `printf '' \| GUARDS_STDIN_TIMEOUT_MS=50 GUARDS_CONFIG=apps/toolbelt/guards/config.json node apps/toolbelt/guards/guard.mjs; test $? -eq 2` (existing wrapper tests cover this in-suite [VERIFIED: guard.test.mjs subprocess cases per scratchpad report]) |
+| GU-3.1 | If the config file cannot be read, then the hook shall deny with exit 2. | `printf '{}' \| GUARDS_CONFIG=/nonexistent/cfg.json node packages/guards/guard.mjs; test $? -eq 2` |
+| GU-3.2 | If no parsable payload arrives on stdin within the cap, then the hook shall deny with exit 2. | `printf '' \| GUARDS_STDIN_TIMEOUT_MS=50 GUARDS_CONFIG=packages/guards/config.json node packages/guards/guard.mjs; test $? -eq 2` (existing wrapper tests cover this in-suite [VERIFIED: guard.test.mjs subprocess cases per scratchpad report]) |
 | AUD-1 | When a decision is made and `GUARDS_LOG` is set, the system shall append exactly one JSONL record carrying ts, tool, target, allow, rule. | run one denied fixture payload through the hook with `GUARDS_LOG=$(mktemp)`; `wc -l < "$GUARDS_LOG"` prints 1 and `node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$GUARDS_LOG"` exits 0 |
 | AUD-2 | If the audit append fails, then the decision outcome shall be unchanged. | unit case in `guard.test.mjs` with an unwritable `GUARDS_LOG` path: allow stays allow, deny stays deny |
 | ALN-1 | When `policy.json` names a `guardsConfigPath`, the kernel's deny-write roots shall include every Guards protected path; when the file is unreadable, the built-in roots shall be unchanged. | `cd apps/agentic-command-center && node --test kernel/policy.test.mjs` exits 0 with both cases |
-| LAT-1 | The hook shall add at most 50 ms p95 per intercepted tool call on the operator machine. | `for i in $(seq 1 20); do printf '{"tool_name":"Read","tool_input":{"file_path":"/tmp/x"}}' \| node apps/toolbelt/guards/guard.mjs; done` timed; p95 of wall-clock per invocation below 50 ms |
+| LAT-1 | The hook shall add at most 50 ms p95 per intercepted tool call on the operator machine. | `for i in $(seq 1 20); do printf '{"tool_name":"Read","tool_input":{"file_path":"/tmp/x"}}' \| node packages/guards/guard.mjs; done` timed; p95 of wall-clock per invocation below 50 ms |
 
 ## 7. LOC accounting, deletion list, latency
 

@@ -106,10 +106,10 @@ COPY apps/agentic-command-center/backend/hooks apps/agentic-command-center/backe
 COPY apps/agentic-command-center/backend/runner apps/agentic-command-center/backend/runner
 COPY apps/agentic-command-center/backend/policy.json apps/agentic-command-center/backend/policy.json
 # kernel/settings.mjs's guardMjsPath()/guardsCliPath() default to this
-# exact sibling path (../../../toolbelt/guards relative to backend/kernel/)
+# exact sibling path (../../../../packages/guards relative to backend/kernel/)
 # unless ACC_GUARDS_HOOK/ACC_GUARDS_CLI override it -- m4-07's automatic,
 # fail-closed guard registration depends on this being present.
-COPY apps/toolbelt/guards apps/toolbelt/guards
+COPY packages/guards packages/guards
 
 LABEL org.opencontainers.image.source="https://github.com/kgsmith19/hyperbolic-core"
 LABEL org.opencontainers.image.description="services/brain: the Brain daemon (07-brain-architecture.md), a long-lived autonomous-coding orchestrator."

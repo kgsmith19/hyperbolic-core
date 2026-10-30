@@ -1,4 +1,4 @@
-// Spawns the real bin/brain.mjs (matching packages/toolbelt-cli/tests/
+// Spawns the real bin/brain.mjs (matching packages/hyp-cli/tests/
 // cli.integration.test.mjs's own "spawn the real executable" convention) --
 // proves the process wiring (argv parsing, exit codes, real DB writes)
 // end to end, matching m4-09's own Verification section literally:
