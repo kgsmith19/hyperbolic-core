@@ -30,7 +30,7 @@ test("main() exits 0 and creates the full layout for a valid ui invocation", () 
     );
     assert.equal(code, 0);
     assert.ok(existsSync(join(root, "apps", "scratch-tool", "tool.json")));
-    assert.match(cap.outText(), /generated apps\/toolbelt\/apps\/scratch-tool\//);
+    assert.match(cap.outText(), /generated apps\/scratch-tool\//);
     assert.match(cap.outText(), /migrations:check/);
     assert.match(cap.outText(), /unified forward-only ledger/);
     assert.doesNotMatch(cap.outText(), /supabase db push/);
@@ -98,7 +98,7 @@ test("main() exits 2 for a schema collision, writing nothing", () => {
         name: "Other",
         kind: "cli",
         version: "0.1.0",
-        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt/apps/other-tool" },
+        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/other-tool" },
         entry: { cli: { command: "echo hi" } },
         schemas: ["scratch_tool"],
         permissions: { db: { read: [], write: [] }, networkEgress: [], llmHandler: { access: false } },
@@ -128,7 +128,7 @@ test("main() --dry-run exits 0, prints the plan, and writes nothing", () => {
       cap,
     );
     assert.equal(code, 0);
-    assert.match(cap.outText(), /--dry-run: plan for apps\/toolbelt\/apps\/scratch-tool\//);
+    assert.match(cap.outText(), /--dry-run: plan for apps\/scratch-tool\//);
     assert.match(cap.outText(), /would create.*tool\.json/);
     assert.deepEqual(snapshotTree(root), before);
   });

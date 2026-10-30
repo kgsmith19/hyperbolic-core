@@ -76,7 +76,7 @@ test("bin/tool.mjs generates a real tool end-to-end against a fixture root", () 
     const result = runCli(["--toolbelt-root", root, "--id", "spawn-tool", "--name", "Spawn Tool", "--kind", "cli"]);
     assert.equal(result.status, 0, result.stderr);
     assert.ok(existsSync(join(root, "apps", "spawn-tool", "tool.json")));
-    assert.match(result.stdout, /generated apps\/toolbelt\/apps\/spawn-tool\//);
+    assert.match(result.stdout, /generated apps\/spawn-tool\//);
   });
 });
 

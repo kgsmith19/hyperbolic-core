@@ -49,13 +49,13 @@ export function main(argv, { stdout = console.log, stderr = console.error, fsImp
   }
 
   if (!result.ok) {
-    stderr(`tool:new: cannot generate apps/toolbelt/apps/${options.id}/ (exit 2):`);
+    stderr(`tool:new: cannot generate apps/${options.id}/ (exit 2):`);
     for (const reason of result.reasons) stderr(`  - ${reason}`);
     return 2;
   }
 
   if (result.dryRun) {
-    stdout(`tool:new --dry-run: plan for apps/toolbelt/apps/${options.id}/ (nothing written)`);
+    stdout(`tool:new --dry-run: plan for apps/${options.id}/ (nothing written)`);
     for (const file of result.plan.files) {
       stdout(`  would create  ${toRepoRelative(toolbeltRoot, file.path)}`);
     }
@@ -64,7 +64,7 @@ export function main(argv, { stdout = console.log, stderr = console.error, fsImp
     return 0;
   }
 
-  stdout(`tool:new: generated apps/toolbelt/apps/${options.id}/`);
+  stdout(`tool:new: generated apps/${options.id}/`);
   for (const path of result.written) {
     stdout(`  created  ${toRepoRelative(toolbeltRoot, path)}`);
   }

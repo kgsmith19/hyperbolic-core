@@ -19,7 +19,7 @@ const DEPLOYED_CONTRACT_WORKFLOW = new URL(
   import.meta.url,
 );
 const CRITICAL_BROWSER_FLOW = new URL(
-  "../apps/prompt-organizer/frontend/e2e/critical-flow.test.mjs",
+  "../../prompt-organizer/frontend/e2e/critical-flow.test.mjs",
   import.meta.url,
 );
 
@@ -31,7 +31,7 @@ test("browser journeys use the single root Playwright runtime", () => {
     /\.\/node_modules\/\.bin\/playwright install --with-deps chromium/,
   );
   assert.equal(
-    action.match(/\.\/node_modules\/\.bin\/playwright test --config apps\/toolbelt\/apps\//g)?.length,
+    action.match(/\.\/node_modules\/\.bin\/playwright test --config apps\//g)?.length,
     2,
   );
   assert.match(action, /hashFiles\('package-lock\.json'\)/);

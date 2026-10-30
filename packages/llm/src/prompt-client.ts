@@ -109,7 +109,7 @@ export class MissingVariablesError extends Error {
 // ---------------------------------------------------------------------------
 // The anon key. Byte-identical to packages/platform-client/src/registry.ts's
 // DEFAULT_ANON_KEY -- same Supabase project, same "public by design, RLS is
-// the real boundary" posture (apps/toolbelt/apps/prompt-organizer/config.mjs
+// the real boundary" posture (apps/prompt-organizer/config.mjs
 // carries the same comment).
 // ---------------------------------------------------------------------------
 

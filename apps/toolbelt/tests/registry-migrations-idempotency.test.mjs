@@ -55,9 +55,9 @@ const IDEA_V1_DOWN = join(MIGRATIONS_DIR, "20260814130200_register_idea-intake-v
 const REGISTRATION_UPS = [PO_UP, NC_UP, IDEA_UP, NC_V1_UP, ROOT_BASE_UP, ROOT_UP, PO_V1_UP, IDEA_V1_UP, NC_V2_UP];
 const MANIFEST_PATHS = [
   join(__dirname, "..", "tool.json"),
-  join(__dirname, "..", "apps", "idea-intake", "tool.json"),
-  join(__dirname, "..", "apps", "network-checker", "tool.json"),
-  join(__dirname, "..", "apps", "prompt-organizer", "tool.json"),
+  join(__dirname, "..", "..", "idea-intake", "tool.json"),
+  join(__dirname, "..", "..", "network-checker", "tool.json"),
+  join(__dirname, "..", "..", "prompt-organizer", "tool.json"),
 ];
 
 const EXPECTED_HASHES = Object.fromEntries(

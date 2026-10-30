@@ -77,7 +77,7 @@ runs:
     # contract proofs because they authenticate to and mutate hosted state.
     - name: Test · Run Prompt Organizer tests
       shell: bash
-      working-directory: apps/toolbelt/apps/prompt-organizer
+      working-directory: apps/prompt-organizer
       env:
         PROMPT_REQUIRE_POSTGRES: "1"
       run: |
@@ -98,7 +98,7 @@ runs:
 
     - name: Test · Run Idea Intake tests
       shell: bash
-      working-directory: apps/toolbelt/apps/idea-intake
+      working-directory: apps/idea-intake
       env:
         TOOLBELT_REQUIRE_POSTGRES: "1"
       run: node --test --test-concurrency=1 "tests/*.test.mjs"
@@ -115,7 +115,7 @@ runs:
 
     - name: E2E · Start Prompt Organizer
       shell: bash
-      working-directory: apps/toolbelt/apps/prompt-organizer
+      working-directory: apps/prompt-organizer
       run: python3 -m http.server 8812 --directory frontend >/tmp/prompt-organizer.log 2>&1 &
 
     - name: E2E · Wait for Prompt Organizer
@@ -141,7 +141,7 @@ runs:
       shell: bash
       env:
         PLAYWRIGHT_BASE_URL: http://localhost:8812
-      run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/prompt-organizer/frontend/playwright.config.mjs
+      run: ./node_modules/.bin/playwright test --config apps/prompt-organizer/frontend/playwright.config.mjs
 
     - name: Evidence · Upload Prompt Organizer browser evidence
       if: failure()
@@ -149,26 +149,26 @@ runs:
       with:
         name: prompt-organizer-e2e-evidence
         path: |
-          apps/toolbelt/apps/prompt-organizer/frontend/playwright-report/
-          apps/toolbelt/apps/prompt-organizer/frontend/test-results/
+          apps/prompt-organizer/frontend/playwright-report/
+          apps/prompt-organizer/frontend/test-results/
         if-no-files-found: ignore
         retention-days: 14
 
     - name: Test · Run Network Checker tests and deterministic scanners
       shell: bash
-      working-directory: apps/toolbelt/apps/network-checker
+      working-directory: apps/network-checker
       run: bash backend/tools/check.sh
 
     - name: E2E · Prepare Network Checker dashboard fixture
       shell: bash
-      working-directory: apps/toolbelt/apps/network-checker
+      working-directory: apps/network-checker
       run: python3 backend/tests/e2e/seed_dashboard_fixture.py
 
     - name: E2E · Start Network Checker dashboard
       shell: bash
-      working-directory: apps/toolbelt/apps/network-checker/backend
+      working-directory: apps/network-checker/backend
       env:
-        NETWORK_CHECKER_DB: ${{ github.workspace }}/apps/toolbelt/apps/network-checker/backend/tests/e2e/dashboard-fixture.db
+        NETWORK_CHECKER_DB: ${{ github.workspace }}/apps/network-checker/backend/tests/e2e/dashboard-fixture.db
       run: python3 -m network_checker serve --no-open >network-checker.log 2>&1 &
 
     - name: E2E · Wait for Network Checker dashboard
@@ -180,7 +180,7 @@ runs:
           fi
           sleep 1
         done
-        cat apps/toolbelt/apps/network-checker/backend/network-checker.log
+        cat apps/network-checker/backend/network-checker.log
         echo "Network Checker did not become ready." >&2
         exit 1
 
@@ -188,7 +188,7 @@ runs:
       shell: bash
       env:
         PLAYWRIGHT_BASE_URL: http://127.0.0.1:8787
-      run: ./node_modules/.bin/playwright test --config apps/toolbelt/apps/network-checker/frontend/playwright.config.mjs
+      run: ./node_modules/.bin/playwright test --config apps/network-checker/frontend/playwright.config.mjs
 
     - name: Evidence · Upload Network Checker browser evidence
       if: failure()
@@ -196,8 +196,8 @@ runs:
       with:
         name: network-checker-e2e-evidence
         path: |
-          apps/toolbelt/apps/network-checker/frontend/playwright-report/
-          apps/toolbelt/apps/network-checker/frontend/test-results/
-          apps/toolbelt/apps/network-checker/backend/network-checker.log
+          apps/network-checker/frontend/playwright-report/
+          apps/network-checker/frontend/test-results/
+          apps/network-checker/backend/network-checker.log
         if-no-files-found: ignore
         retention-days: 14

@@ -24,7 +24,7 @@ Branch protection: the four PR Gate checks are the required checks on `main`. Li
 
 | New step | Description | Source of requirement |
 | --- | --- | --- |
-| Idea Intake tests | `node --test` over the new `apps/toolbelt/apps/idea-intake/tests/` suites (DB guard suites, idempotency e2e per II-1..II-5) | [VERIFIED: 05-h-idea-intake.md section 12 verification column] |
+| Idea Intake tests | `node --test` over the new `apps/idea-intake/tests/` suites (DB guard suites, idempotency e2e per II-1..II-5) | [VERIFIED: 05-h-idea-intake.md section 12 verification column] |
 | Secret scan | gitleaks-style content scan of the PR diff, roughly 12 workflow lines; covers the Guards blind spot where a Bash-written secret lands in a commit unseen by the tool-call hook | [VERIFIED: 05-g-guards.md section 2c DECIDE] |
 | Network Checker dashboard smoke | hermetic Playwright smoke serving the fixture DB on 127.0.0.1:8787 | [VERIFIED: 05-f-network-checker.md D-04, "per the CI step added to toolbelt-ci.yml"] |
 

@@ -16,7 +16,7 @@ function baseManifest(overrides = {}) {
     name: "Sample Tool",
     kind: "cli",
     version: "0.1.0",
-    ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt/apps/sample-tool" },
+    ownership: { owner: "kylegsmith19@gmail.com", path: "apps/sample-tool" },
     entry: { cli: { command: "python3 -m sample_tool" } },
     schemas: [],
     permissions: {
@@ -84,7 +84,7 @@ test("generateBrokerPolicy: aggregates multiple discovered manifests, keyed by i
       "tool.json": baseManifest({ id: "root-spine", kind: "headless", entry: { headless: { command: "noop" } } }),
       "apps/tool-a/tool.json": baseManifest({
         id: "tool-a",
-        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt/apps/tool-a" },
+        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/tool-a" },
         permissions: { db: { read: [], write: [] }, networkEgress: ["a.example.com"], llmHandler: { access: false } },
       }),
     },
@@ -120,7 +120,7 @@ test("generateBrokerPolicy: a manifest requesting an invalid host format is reje
       "tool.json": baseManifest({ id: "root-spine", kind: "headless", entry: { headless: { command: "noop" } } }),
       "apps/bad-host/tool.json": baseManifest({
         id: "bad-host-caller",
-        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt/apps/bad-host" },
+        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/bad-host" },
         permissions: { db: { read: [], write: [] }, networkEgress: ["not a valid host!!!"], llmHandler: { access: false } },
       }),
     },
@@ -136,7 +136,7 @@ test("generateBrokerPolicy: a manifest with a malformed vaultKeys entry (wrong p
       "tool.json": baseManifest({ id: "root-spine", kind: "headless", entry: { headless: { command: "noop" } } }),
       "apps/bad-key/tool.json": baseManifest({
         id: "bad-key-caller",
-        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt/apps/bad-key" },
+        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/bad-key" },
         permissions: { db: { read: [], write: [] }, networkEgress: [], vaultKeys: ["lowercase_not_allowed"], llmHandler: { access: false } },
       }),
     },
@@ -181,7 +181,7 @@ test("generateBrokerPolicy: regenerating from the same inputs is idempotent -- b
       "tool.json": baseManifest({ id: "root-spine", kind: "headless", entry: { headless: { command: "noop" } } }),
       "apps/tool-a/tool.json": baseManifest({
         id: "tool-a",
-        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt/apps/tool-a" },
+        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/tool-a" },
         permissions: { db: { read: [], write: [] }, networkEgress: ["b.example.com", "a.example.com"], llmHandler: { access: false } },
       }),
     },
@@ -206,7 +206,7 @@ test("generateBrokerPolicy: a schema-valid manifest with real values in every fi
       "tool.json": baseManifest({ id: "root-spine", kind: "headless", entry: { headless: { command: "noop" } } }),
       "apps/tool-a/tool.json": baseManifest({
         id: "tool-a",
-        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt/apps/tool-a" },
+        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/tool-a" },
         permissions: {
           db: { read: [], write: [] },
           networkEgress: ["a.example.com"],

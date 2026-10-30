@@ -42,7 +42,7 @@ The same Supabase publishable (anon) key literal is hardcoded in six files acros
 ```
 apps/lifeos/frontend/src/lib/session.ts
 apps/shell/frontend/src/lib/session.ts
-apps/toolbelt/apps/prompt-organizer/frontend/index.html
+apps/prompt-organizer/frontend/index.html
 apps/toolbelt/tests/helpers.mjs
 packages/llm/src/prompt-client.ts
 packages/platform-client/src/registry.ts
