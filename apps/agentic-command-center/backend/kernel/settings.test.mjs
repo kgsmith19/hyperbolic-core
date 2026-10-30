@@ -62,7 +62,7 @@ test("cleanupRun removes the staging directory", () => {
 });
 
 // GU-2.1: the generated PreToolUse chain includes the shared Guards hook
-// (apps/toolbelt/guards/guard.mjs) alongside the kernel's own guardhook,
+// (packages/guards/guard.mjs) alongside the kernel's own guardhook,
 // "so the rule surface never differs by launch path" (05-g section 5).
 test("generateSettings' PreToolUse chain has the kernel guardhook first, then the shared Guards hook with its own fixed matcher", () => {
   const s = S.generateSettings(contract, { guardhookPath: "C:/g/kernel/guardhook.mjs" });

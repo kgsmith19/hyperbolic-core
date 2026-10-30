@@ -76,7 +76,7 @@ In `~/.claude/settings.json`, point a `PreToolUse` hook (matcher
 ## Commands
 
 ```bash
-node --test guard.test.mjs cli.test.mjs   # or: node --test "apps/toolbelt/guards/*.test.mjs" from the repo root
+node --test guard.test.mjs cli.test.mjs   # or: node --test "packages/guards/*.test.mjs" from the repo root
 node cli.mjs status
 node cli.mjs toggle on|off
 node cli.mjs secret-add <glob>

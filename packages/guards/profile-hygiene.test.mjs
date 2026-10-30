@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(HERE, "../../..");
-const GUARDS_PATH = "apps/toolbelt/guards";
+const REPO_ROOT = path.resolve(HERE, "../..");
+const GUARDS_PATH = "packages/guards";
 
 function git(...args) {
   return spawnSync("git", ["-C", REPO_ROOT, ...args], { encoding: "utf8" });

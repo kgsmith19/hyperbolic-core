@@ -4,7 +4,7 @@
 // (vault-import/vault-rm/vault-keys/apply) and the runbox lifecycle
 // (projects-add/rm, list/run/trash/restore/flush). Guard-config state
 // (enable/disable, secrets/protected lists) moved to
-// apps/toolbelt/guards/cli.mjs — see that module's own test suite.
+// packages/guards/cli.mjs — see that module's own test suite.
 //
 // Every test below calls the exported `main({argv, io})` directly (mirrors
 // hooks/budget.mjs's own main()/io convention) against a fresh ACC_ROOT
@@ -63,7 +63,7 @@ async function run(root, argv, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// status (guard-config's own status moved to apps/toolbelt/guards/cli.mjs)
+// status (guard-config's own status moved to packages/guards/cli.mjs)
 // ---------------------------------------------------------------------------
 
 test("status: reports projects plus derived vault/runbox counts — no guard-config fields", async () => {

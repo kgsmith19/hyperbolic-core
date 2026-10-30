@@ -24,8 +24,8 @@
 // maintained notions of "the global migration-directory set" could drift
 // silently out of sync; importing the one real implementation cannot.
 //
-// These relative paths (packages/toolbelt-cli/src -> repo root -> apps/toolbelt)
-// only resolve correctly as long as both packages/toolbelt-cli and
+// These relative paths (packages/hyp-cli/src -> repo root -> apps/toolbelt)
+// only resolve correctly as long as both packages/hyp-cli and
 // apps/toolbelt keep their current positions two levels under the repo root
 // (ADR-01's target tree). src/paths.mjs's REPO_ROOT is computed independently
 // (via import.meta.url, not by importing this constant) and is asserted equal

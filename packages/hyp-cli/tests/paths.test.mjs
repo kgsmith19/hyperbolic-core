@@ -12,7 +12,7 @@ import { TOOLBELT_ROOT } from "../src/manifests-shared.mjs";
 // that breaks one breaks the other loudly instead of silently resolving to
 // the wrong tree." Finding 91 (P2, trivial, independent security review of
 // this repo, re-verified against current HEAD): that promised test file did
-// not exist (confirmed via `ls packages/toolbelt-cli/tests/`), and no such
+// not exist (confirmed via `ls packages/hyp-cli/tests/`), and no such
 // equality assertion existed anywhere in the package. This file is the fix:
 // it makes the comment's promise true, and actually guards the invariant it
 // describes rather than just correcting the prose.
@@ -20,12 +20,12 @@ import { TOOLBELT_ROOT } from "../src/manifests-shared.mjs";
 // The two sides are computed via completely independent relative-path
 // chains, each resolved from a different file's own import.meta.url:
 //   - src/paths.mjs's DEFAULT_TOOLBELT_ROOT: this file's own directory
-//     (packages/toolbelt-cli/src) -> up two levels -> REPO_ROOT -> down into
+//     (packages/hyp-cli/src) -> up two levels -> REPO_ROOT -> down into
 //     apps/toolbelt.
 //   - apps/toolbelt/scripts/validate-manifests.mjs's TOOLBELT_ROOT
 //     (re-exported here, unmodified, by manifests-shared.mjs): that file's
 //     own directory (apps/toolbelt/scripts) -> up one level.
-// Both must land on the exact same directory as long as packages/toolbelt-cli
+// Both must land on the exact same directory as long as packages/hyp-cli
 // and apps/toolbelt keep their current positions two levels under the repo
 // root (ADR-01's target tree) -- if a future repo reshuffle ever moves one
 // without the other, this test fails loudly instead of the two constants
@@ -46,6 +46,6 @@ test("the shared root actually resolves to the real apps/toolbelt directory, not
 });
 
 test("REPO_ROOT and CLI_PACKAGE_ROOT are internally consistent with DEFAULT_TOOLBELT_ROOT's own derivation", () => {
-  assert.equal(basename(CLI_PACKAGE_ROOT), "toolbelt-cli");
+  assert.equal(basename(CLI_PACKAGE_ROOT), "hyp-cli");
   assert.equal(DEFAULT_TOOLBELT_ROOT, join(REPO_ROOT, "apps", "toolbelt"));
 });

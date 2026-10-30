@@ -25,7 +25,7 @@ Rule applied: a directory with its own `project.yaml` or `AGENTS.md` is an app. 
 - `apps/toolbelt/apps/` holds the three nested apps above. The lift is a `git mv` to `apps/<name>/`.
 - Shared root pieces to relocate: `guards/`, `scripts/`, `supabase/`, `tests/`, `tool.schema.json`, `project.yaml`.
 - Stale references to `apps/toolbelt` or `toolbelt/apps`: **189 files** (`grep -rIl -E 'apps/toolbelt|toolbelt/apps'`, excluding `node_modules` and `.git`). Largest groups:
-  - `apps/toolbelt/supabase/migrations` (20), `docs/planning` and `docs/planning/issues` (28), `apps/toolbelt/tests` (13), `packages/toolbelt-cli` (14), `apps/shell/frontend` (16), `services/broker` (6), `docs/ops` (5), `.github/workflows` (5).
+  - `apps/toolbelt/supabase/migrations` (20), `docs/planning` and `docs/planning/issues` (28), `apps/toolbelt/tests` (13), `packages/hyp-cli` (14), `apps/shell/frontend` (16), `services/broker` (6), `docs/ops` (5), `.github/workflows` (5).
 - Archived history (`docs/archived/**`) stays and is listed as an allowed hit (AC4).
 
 ## 3. Nested `.github/` (dead config)
@@ -48,7 +48,7 @@ Recommendations below are the working decisions. Each is reversible in its phase
 - **D1. `lifeos` backend and frontend: component, not app.** One `lifeos/project.yaml` owns both halves, so there is one manifest and one lane. Splitting them adds a second lane for no gain.
 - **D2. Nested `lifeos/.github/workflows/*`: delete in Phase 3.** The root already has `lifeos-ci.yml`, `lifeos-backup.yml` and `lifeos-ops.yml`. GitHub never runs the nested copies, so they are dead config. Delete them in the Phase 3 PR, after a diff confirms no logic is missing from the root copies.
 - **D3. Nested `.github` templates: delete, keep the root copies.** The root already has `PULL_REQUEST_TEMPLATE.md` and `ISSUE_TEMPLATE/`. The nested ones are duplicates. Delete them in Phase 3.
-- **D4. `packages/toolbelt-cli`: rename to `packages/hyp-cli` in Phase 2.** The category it is named after is dissolved. Keep the `tool:new` root script name, so callers do not change. The rename is a Phase 2 change, not part of the lift.
+- **D4. `packages/hyp-cli`: rename to `packages/hyp-cli` in Phase 2.** The category it is named after is dissolved. Keep the `tool:new` root script name, so callers do not change. The rename is a Phase 2 change, not part of the lift.
 - **D5. Supabase registry rows: retire, do not repoint.** Q22 and Q60 move each sub-app to SQLite on localhost. Repointing Supabase rows would build on a backend being removed. Phase 4 removes the rows, but only after owner approval, because that step touches production data.
 
 ## 6. Verification commands used

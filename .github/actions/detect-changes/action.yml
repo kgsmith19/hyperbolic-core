@@ -17,10 +17,10 @@ inputs:
 
 outputs:
   toolbelt:
-    description: "true when apps/toolbelt/** or packages/toolbelt-cli/** is relevant"
+    description: "true when apps/toolbelt/** or packages/hyp-cli/** is relevant"
     value: ${{ steps.detect.outputs.toolbelt }}
   acc:
-    description: "true when apps/agentic-command-center/** or apps/toolbelt/guards/** is relevant"
+    description: "true when apps/agentic-command-center/** or packages/guards/** is relevant"
     value: ${{ steps.detect.outputs.acc }}
   brain:
     description: "true when services/brain/** is relevant"
@@ -80,8 +80,8 @@ runs:
         }
 
         echo "Relevance:"
-        relevant toolbelt '^(apps/toolbelt/|apps/(idea-intake|network-checker|prompt-organizer)/|packages/toolbelt-cli/|package\.json$|package-lock\.json$)'
-        relevant acc      '^(apps/agentic-command-center/|apps/toolbelt/guards/)'
+        relevant toolbelt '^(apps/toolbelt/|apps/(idea-intake|network-checker|prompt-organizer)/|packages/hyp-cli/|package\.json$|package-lock\.json$)'
+        relevant acc      '^(apps/agentic-command-center/|packages/guards/)'
         relevant brain    '^(services/brain/|package\.json$|package-lock\.json$)'
         relevant shell    '^(apps/shell/|packages/|services/llm-handler/|services/broker/|services/platform-api/|docs/ops/|standard\.lock$)'
         relevant lifeos   '^apps/lifeos/'
