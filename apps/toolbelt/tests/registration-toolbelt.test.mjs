@@ -2,9 +2,9 @@
 // HEAD): apps/toolbelt/tool.json's own `register` field still read
 // "pending-m3-02" and no core.app row existed for id 'toolbelt'. This
 // suite is the toolbelt root spine's own registration proof, mirroring
-// apps/toolbelt/apps/idea-intake/backend/tests/registration.test.mjs (the static
+// apps/idea-intake/backend/tests/registration.test.mjs (the static
 // TB-1a/TB-1b half) and
-// apps/toolbelt/apps/idea-intake/backend/tests/registration-idempotency.test.mjs
+// apps/idea-intake/backend/tests/registration-idempotency.test.mjs
 // (the real-Postgres upsert/down-migration half) exactly, scoped to the
 // root spine's own new registration migration. A new file, not a
 // modification of apps/toolbelt/tests/registry-manifest-hash.test.mjs or
@@ -13,7 +13,7 @@
 // touching an existing, out-of-scope shared fixture list" posture
 // idea-intake's own registration tests already established for this repo.
 import { test } from "node:test";
-import { createPostgresHarness } from "./postgres-harness.mjs";
+import { createPostgresHarness } from "../../../tests/support/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";

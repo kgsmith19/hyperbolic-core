@@ -31,7 +31,7 @@ def events_mentioning(needle: str) -> int:
     claim about the event log itself, not about any projection built from it."""
     with db.connect() as conn:
         row = conn.execute(
-            "select count(*) as n from event where payload::text like %s", (f"%{needle}%",)
+            "select count(*) as n from event where payload like %s", (f"%{needle}%",)
         ).fetchone()
         assert row is not None
         return int(row["n"])

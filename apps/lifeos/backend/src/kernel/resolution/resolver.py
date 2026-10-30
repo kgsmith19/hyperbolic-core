@@ -52,10 +52,10 @@ class ExactIdentityResolver:
             params: list[Any] = [field]
             for element in elements:
                 # stored as array: attributes->field contains [element]
-                conditions.append("e.attributes -> %s @> %s::jsonb")
+                conditions.append("json_contains(json_get(e.attributes, %s), %s)")
                 params.extend([field, json.dumps([element])])
                 # stored as scalar: attributes contains {field: element}
-                conditions.append("e.attributes @> %s::jsonb")
+                conditions.append("json_contains(e.attributes, %s)")
                 params.append(json.dumps({field: element}))
             if not conditions:
                 continue
@@ -65,7 +65,7 @@ class ExactIdentityResolver:
                 from entity e
                 join entity_type et on et.entity_id = e.id
                 join type_definition td on td.id = et.type_id
-                where td.json_schema -> 'x-identity' ? %s
+                where jsonb_exists(json_get(td.json_schema, 'x-identity'), %s)
                   and ({" or ".join(conditions)})
                 """,
                 params,

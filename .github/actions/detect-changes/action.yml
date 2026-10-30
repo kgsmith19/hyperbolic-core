@@ -80,7 +80,7 @@ runs:
         }
 
         echo "Relevance:"
-        relevant toolbelt '^(apps/toolbelt/|packages/toolbelt-cli/|package\.json$|package-lock\.json$)'
+        relevant toolbelt '^(apps/toolbelt/|apps/(idea-intake|network-checker|prompt-organizer)/|packages/toolbelt-cli/|package\.json$|package-lock\.json$)'
         relevant acc      '^(apps/agentic-command-center/|apps/toolbelt/guards/)'
         relevant brain    '^(services/brain/|package\.json$|package-lock\.json$)'
         relevant shell    '^(apps/shell/|packages/|services/llm-handler/|services/broker/|services/platform-api/|docs/ops/|standard\.lock$)'

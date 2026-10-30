@@ -22,7 +22,7 @@ jobs:
       release-sha: ${{ steps.validate-release.outputs.release-sha }}
     defaults:
       run:
-        working-directory: apps/toolbelt/apps/network-checker
+        working-directory: apps/network-checker
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -60,7 +60,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           version="${RELEASE_TAG#network-checker-v}"
-          docker build -t "network-checker:$version" apps/toolbelt/apps/network-checker
+          docker build -t "network-checker:$version" apps/network-checker
           [[ "$(docker run --rm "network-checker:$version" --version)" == "network-checker $version" ]]
           docker run --rm "network-checker:$version" --help >/dev/null
       - name: Save image

@@ -22,9 +22,9 @@ Starter prompts shall exist for every category in the 05-d section 3 taxonomy (P
 The injection read path shall return within 150 ms p95 from a warm client (PO-2).
 
 ## Verification
-node --test apps/toolbelt/apps/prompt-organizer/tests/get-prompt.test.mjs (contract, pin, and error-class cases)
-node --test apps/toolbelt/apps/prompt-organizer/tests/seed.test.mjs (grouped count per namespace prefix, each of 8 categories >= 1)
-node --test apps/toolbelt/apps/prompt-organizer/tests/performance.test.mjs (p95 over 50 rpc/get_prompt calls under 150 ms)
+node --test apps/prompt-organizer/tests/get-prompt.test.mjs (contract, pin, and error-class cases)
+node --test apps/prompt-organizer/tests/seed.test.mjs (grouped count per namespace prefix, each of 8 categories >= 1)
+node --test apps/prompt-organizer/tests/performance.test.mjs (p95 over 50 rpc/get_prompt calls under 150 ms)
 
 ## Estimated LOC delta
 Added: 270  Deleted: 0  Net: +270

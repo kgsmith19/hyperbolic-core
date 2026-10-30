@@ -18,3 +18,6 @@ export const REPO_ROOT = join(CLI_PACKAGE_ROOT, "..", "..");
 // documented reason: "so a fixture tree can be validated end-to-end ...
 // without touching real files."
 export const DEFAULT_TOOLBELT_ROOT = join(REPO_ROOT, "apps", "toolbelt");
+
+// Tools live beside the spine in the repo apps/ (Phase 1 lift). A fixture root keeps its apps beneath itself.
+export const appsDirOf = (toolbeltRoot) => (toolbeltRoot === DEFAULT_TOOLBELT_ROOT ? dirname(toolbeltRoot) : join(toolbeltRoot, "apps"));

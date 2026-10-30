@@ -4,9 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from psycopg.types.json import Jsonb
-
-from kernel.db import Connection
+from kernel.db import Connection, Jsonb
 
 DEFAULT_ACTOR = "kyle"
 
@@ -14,10 +12,7 @@ DEFAULT_ACTOR = "kyle"
 def tx_now(conn: Connection) -> datetime:
     """Transaction timestamp: stable within a transaction, so event recorded_at
     and projection timestamps written in the same transaction agree exactly."""
-    row = conn.execute("select now() as now").fetchone()
-    assert row is not None
-    now: datetime = row["now"]
-    return now
+    return conn.tx_now()
 
 
 def iso(dt: datetime) -> str:

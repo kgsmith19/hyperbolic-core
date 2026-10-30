@@ -44,7 +44,7 @@ import {
   psqlSpawnSpec,
   supabaseHarnessSql,
   waitFor,
-} from "./postgres-harness.mjs";
+} from "../../../tests/support/postgres-harness.mjs";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";

@@ -23,7 +23,7 @@ The list surface shall show a per-prompt usage count matching the usage table.
 The rendered preview shall show a token estimate visibly labeled as an estimate.
 
 ## Verification
-node --test apps/toolbelt/apps/prompt-organizer/tests/edit.test.mjs (version increment case)
+node --test apps/prompt-organizer/tests/edit.test.mjs (version increment case)
 E2E rename-refusal case for a namespaced fixture and an allowed legacy fixture
 Badge count asserted equal to a seeded usage count in the e2e suite
 Preview label assertion in the same suite

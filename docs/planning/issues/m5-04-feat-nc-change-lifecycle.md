@@ -28,7 +28,7 @@ python3 -m unittest tests.test_change (token, dry-run, binding, and rollback cas
 echo 1 | python -m netcheck change approve 1; test $? -ne 0
 Token-binding case in tests.test_change
 Rollback case with a fake executor whose verify fails
-python3 -m unittest tests.test_rank tests.test_change; grep -n "run_fixes.sh" apps/toolbelt/apps/network-checker/netcheck/rank.py returns zero hits
+python3 -m unittest tests.test_rank tests.test_change; grep -n "run_fixes.sh" apps/network-checker/netcheck/rank.py returns zero hits
 
 ## Estimated LOC delta
 Added: 740  Deleted: 91  Net: +649

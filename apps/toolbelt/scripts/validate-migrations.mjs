@@ -37,7 +37,8 @@ export function discoverMigrationDirs(toolbeltRoot = TOOLBELT_ROOT) {
   if (!existsSync(rootManifest) || !statSync(rootManifest).isFile()) {
     throw new Error(`${rootManifest}: required root tool manifest does not exist`);
   }
-  const realRoot = realpathSync(root);
+  // Phase 1 lift: the shared ledger spans the repo's apps/, so the default root's containment boundary is apps/.
+  const realRoot = realpathSync(root === TOOLBELT_ROOT ? dirname(root) : root);
   const manifestPaths = findManifestPaths(root);
   const directories = [];
 

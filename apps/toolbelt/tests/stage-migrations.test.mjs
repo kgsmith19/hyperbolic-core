@@ -70,7 +70,7 @@ function schemaOwningManifest(id) {
     name: id,
     kind: "cli",
     version: "0.1.0",
-    ownership: { owner: "kylegsmith19@gmail.com", path: `apps/toolbelt/apps/${id}` },
+    ownership: { owner: "kylegsmith19@gmail.com", path: `apps/${id}` },
     entry: { cli: { command: "true" } },
     schemas: [id.replaceAll("-", "_")],
     permissions: { db: { read: [], write: [] }, networkEgress: [], llmHandler: { access: false } },
