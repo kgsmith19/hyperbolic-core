@@ -246,14 +246,16 @@ vendors:
     auth: OIDC (GitHub Actions identity token exchange) — no static API key
     docs: docs/ops/vendors.md#infisical
   - name: Cloudflare
-    purpose: RETIRED (planned edge never built; superseded 2026-10-29, local-only).
+    purpose: RETIRED (planned edge never built; superseded 2026-10-29, local-only;
+      cloud plumbing removed by #503).
     cost_eur_month: 0
     auth: none (retired)
     docs: docs/ops/vendors.md#cloudflare-planned--168170
   - name: Supabase
-    purpose: SUPERSEDED (owner decision 2026-10-29, local-only). Each sub-app
-      runs on SQLite on localhost; the hosted registry rows are retired in
-      Phase 4 (D5), which still needs owner-approved production steps.
+    purpose: SUPERSEDED (owner decision 2026-10-29, local-only; removed with the
+      cloud workflows by #503). Each sub-app runs on SQLite on localhost; the hosted
+      registry rows are retired in Phase 4 (D5, #450), which still needs owner-approved
+      production steps.
     cost_eur_month: 0
     auth: none for the local platform (SQLite on localhost, owner key via platform-api)
     docs: docs/ops/vendors.md#supabase
