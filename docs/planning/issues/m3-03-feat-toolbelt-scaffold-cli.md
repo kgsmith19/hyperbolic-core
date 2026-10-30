@@ -22,7 +22,7 @@ When --dry-run is passed, the CLI shall print the plan and write nothing.
 A scaffold invocation shall complete within 10 seconds.
 
 ## Verification
-npm run tool:new -- --id scratch-tool --name "Scratch" --kind ui --route /scratch; git status --porcelain shows only apps/toolbelt/apps/scratch-tool/ and apps/toolbelt/supabase/migrations/*register_scratch-tool*
+npm run tool:new -- --id scratch-tool --name "Scratch" --kind ui --route /scratch; git status --porcelain shows only apps/scratch-tool/ and apps/toolbelt/supabase/migrations/*register_scratch-tool*
 Collision fixture case exits 2; git status clean
 npm run tool:new -- --dry-run ...; git status clean
 Timed invocation under 10 s in the CLI test

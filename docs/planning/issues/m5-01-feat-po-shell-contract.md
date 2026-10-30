@@ -24,11 +24,11 @@ When the e2e suite runs twice concurrently, both runs shall pass (D-12).
 The client shall contain no local sign-in call.
 
 ## Verification
-node --test apps/toolbelt/apps/prompt-organizer/tests/contract.test.mjs
+node --test apps/prompt-organizer/tests/contract.test.mjs
 Fixture-token case inside the same suite (empty select, 4xx insert)
-node --test apps/toolbelt/apps/prompt-organizer/tests/versions.test.mjs tests/restore.test.mjs (max version_no assertion)
+node --test apps/prompt-organizer/tests/versions.test.mjs tests/restore.test.mjs (max version_no assertion)
 Two parallel npx playwright test invocations with distinct run ids; both exit 0
-grep -rn signInWithPassword apps/toolbelt/apps/prompt-organizer/web returns zero hits
+grep -rn signInWithPassword apps/prompt-organizer/web returns zero hits
 
 ## Estimated LOC delta
 Added: 310  Deleted: 50  Net: +260

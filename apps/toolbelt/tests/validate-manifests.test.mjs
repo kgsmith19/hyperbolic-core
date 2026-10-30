@@ -26,7 +26,7 @@ function baseManifest(overrides = {}) {
     name: "Sample Tool",
     kind: "cli",
     version: "0.1.0",
-    ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt/apps/sample-tool" },
+    ownership: { owner: "kylegsmith19@gmail.com", path: "apps/sample-tool" },
     entry: { cli: { command: "python3 -m sample_tool" } },
     schemas: [],
     permissions: {
@@ -198,6 +198,7 @@ test("CLI rejects an app directory that has no tool.json", () => {
     {
       "tool.json": rootManifest(),
       "apps/no-manifest/README.md": "this app is missing its manifest",
+      "apps/no-manifest/supabase/migrations/.keep": "",
     },
     (dir) => {
       const result = runCli(["--root", dir]);

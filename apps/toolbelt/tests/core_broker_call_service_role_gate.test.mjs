@@ -8,7 +8,7 @@
 //
 // Same harness/detection/skip mechanics as
 // apps/toolbelt/tests/log_run_service_role_gate.test.mjs and
-// apps/toolbelt/apps/idea-intake/backend/tests/mark_submitted_to_github_rpc.test.mjs
+// apps/idea-intake/backend/tests/mark_submitted_to_github_rpc.test.mjs
 // (this file's closest precedent -- also a single-caller, no-owner-fallback
 // service_role-only RPC gate): a bare local Postgres has none of Supabase's
 // managed auth schema/roles, so HARNESS_SQL stubs auth.uid()/auth.role(),

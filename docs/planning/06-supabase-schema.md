@@ -1,6 +1,6 @@
 # 06. Supabase Schema Consolidation (Platform Project)
 
-Evidence date: 2026-08-12. Names per `00-canonical-names.md`. Labels: `[VERIFIED: <path>]`, `[INFERRED]`, `[UNKNOWN]`. SQL DDL in this artifact is the planning contract; the implementation engagement transcribes it into paired migrations per the toolbelt rule that every up migration ships with a `_down.sql` [VERIFIED: apps/toolbelt/supabase/migrations directory listing, 11 up/down pairs; apps/toolbelt/apps/prompt-organizer/supabase/migrations, 7 up/down pairs].
+Evidence date: 2026-08-12. Names per `00-canonical-names.md`. Labels: `[VERIFIED: <path>]`, `[INFERRED]`, `[UNKNOWN]`. SQL DDL in this artifact is the planning contract; the implementation engagement transcribes it into paired migrations per the toolbelt rule that every up migration ships with a `_down.sql` [VERIFIED: apps/toolbelt/supabase/migrations directory listing, 11 up/down pairs; apps/prompt-organizer/supabase/migrations, 7 up/down pairs].
 
 ## 1. Scope
 
@@ -34,7 +34,7 @@ Baseline is the 18 committed migration pairs, which are the authoritative record
 | `idea.idea` | text PK, name, category, one_liner, problem, status check (6 states), `app_id` FK core.app, project, schema_name, timestamps; 33 seeded rows | [VERIFIED: 20260806190100_idea_create_schema.sql:11-24; 20260806190300_seed_idea.sql] | RLS re-pin only |
 | `idea.dependency` | composite PK (idea_id, depends_on), both FK cascade, reason | [VERIFIED: 20260806190100:26-31] | RLS re-pin only |
 | `idea.score` | uuid PK, idea_id FK cascade, `metric_id` FK core.metric_def, value, scored_at/by; bounds trigger `score_bounds_check` | [VERIFIED: 20260806190100:33-40; 20260807050000:18-44] | RLS re-pin; new index (idea_id, scored_at desc) (Section 6) |
-| `prompt.prompt` | uuid PK, user_id FK auth.users default auth.uid(), title check 1-200 + unique `(user_id, lower(title))`, body check 1-100000, created_at, is_active | [VERIFIED: apps/toolbelt/apps/prompt-organizer/supabase/migrations/20260807020000_prompt_create_prompt.sql:7-13; 20260813151000; 20260808000000:3] | RLS re-pin per 05-d section 2; new index (user_id, created_at desc) |
+| `prompt.prompt` | uuid PK, user_id FK auth.users default auth.uid(), title check 1-200 + unique `(user_id, lower(title))`, body check 1-100000, created_at, is_active | [VERIFIED: apps/prompt-organizer/supabase/migrations/20260807020000_prompt_create_prompt.sql:7-13; 20260813151000; 20260808000000:3] | RLS re-pin per 05-d section 2; new index (user_id, created_at desc) |
 | `prompt.prompt_version` | composite PK (prompt_id, version_no), FK cascade, body, user_id, created_at; select+insert grants only (immutability by absent grants); `record_version` trigger | [VERIFIED: 20260807040000_prompt_versions_and_unique_title.sql:29-43,49-72] | RLS re-pin only; PK already covers the history query |
 | `prompt.tag` | composite PK (prompt_id, tag), tag check 1-100, add-and-filter grants; EXISTS-based ownership policies | [VERIFIED: 20260807050000_prompt_create_tag.sql] | RLS re-pin only |
 | `prompt.usage` | uuid PK, composite FK (prompt_id, version_no) to prompt_version cascade, config_name, user_id default auth.uid(), created_at; append-only grants | [VERIFIED: 20260807070000_prompt_create_usage.sql:29-50] | RLS re-pin; new index (prompt_id); new retention policy (Section 8) |
@@ -447,7 +447,7 @@ Observed query patterns and their coverage:
 
 | # | Query (observed) | Evidence | Covered today by | Gap action |
 | --- | --- | --- | --- | --- |
-| Q1 | Prompt list: `GET /rest/v1/prompt?select=...&order=created_at.desc` with embedded tag/version/configuration | [VERIFIED: apps/toolbelt/apps/prompt-organizer/web/index.html:171-173] | nothing (PK uuid, owner-scoped unique title only) | ADD `prompt_created_at` below |
+| Q1 | Prompt list: `GET /rest/v1/prompt?select=...&order=created_at.desc` with embedded tag/version/configuration | [VERIFIED: apps/prompt-organizer/web/index.html:171-173] | nothing (PK uuid, owner-scoped unique title only) | ADD `prompt_created_at` below |
 | Q2 | Version history: `prompt_version?prompt_id=eq.X&order=version_no.desc` | [VERIFIED: web/index.html:89] | PK `(prompt_id, version_no)` backward scan | none needed |
 | Q3 | Usage inserts on every copy, and the 05-d usage-count badge (count grouped by prompt) | [VERIFIED: web/panel.mjs usage POST per 05-d section 1.1 row 9; 05-d section 9 rank 1] | uuid PK only; composite FK has no child-side index | ADD `usage_prompt` below |
 | Q4 | Idea backlog: four full-table selects (`idea`, `score`, `metric_def` embed, `dependency`) joined client-side | [VERIFIED: apps/toolbelt/web/index.html:50,66,74,105] | PKs; `idea.score` has no idea_id index | ADD `score_idea` below (survives the root client's deletion: Golden Goose reads scores per idea [VERIFIED: docs/planning/05-c section 8 rank 1]) |

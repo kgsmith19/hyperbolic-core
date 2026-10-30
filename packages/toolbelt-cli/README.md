@@ -2,7 +2,7 @@
 
 Scaffold CLI for the Toolbelt 3-step new-tool lifecycle (TB-3,
 `docs/planning/05-c-toolbelt.md` section 5.1): generates
-`apps/toolbelt/apps/<id>/` from validated flags, or prints the plan with
+`apps/<id>/` from validated flags, or prints the plan with
 `--dry-run`.
 
 Node >= 22, ESM. Depends on `ajv` / `ajv-formats` for manifest schema

@@ -57,7 +57,7 @@ for (const { label, opts } of CASES) {
     assert.equal(manifest.name, opts.name);
     assert.equal(manifest.kind, opts.kind);
     assert.equal(manifest.ownership.owner, "kylegsmith19@gmail.com");
-    assert.equal(manifest.ownership.path, `apps/toolbelt/apps/${opts.id}`);
+    assert.equal(manifest.ownership.path, `apps/${opts.id}`);
     assert.deepEqual(manifest.schemas, opts.hasSchema ? [opts.schema] : []);
     assert.equal(manifest.permissions.llmHandler.access, opts.llm);
     assert.equal(manifest.lifecycle.register, opts.registerBasename);
@@ -228,7 +228,7 @@ test("buildAgentsMd's Next Steps omits the schema-discovery note entirely for a 
 test("buildWebIndexHtml includes the tool's name and id", () => {
   const html = buildWebIndexHtml({ id: "scratch-ui", name: "Scratch UI" });
   assert.match(html, /<title>Scratch UI<\/title>/);
-  assert.match(html, /apps\/toolbelt\/apps\/scratch-ui/);
+  assert.match(html, /apps\/scratch-ui/);
 });
 
 // --- Finding 90 (P2, security-severity, independent security review of this

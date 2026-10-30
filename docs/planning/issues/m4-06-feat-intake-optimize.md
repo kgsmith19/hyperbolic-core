@@ -23,7 +23,7 @@ Each optimize call shall append exactly one intake.optimization row.
 The optimize round trip shall complete within 10 s p95.
 
 ## Verification
-ADR-05 isolation check run in the Idea Intake process context exits non-zero on /brain/; grep -rn "BRAIN" apps/toolbelt/apps/idea-intake packages/llm --include='*.ts' --include='*.mjs' returns zero key-name hits
+ADR-05 isolation check run in the Idea Intake process context exits non-zero on /brain/; grep -rn "BRAIN" apps/idea-intake packages/llm --include='*.ts' --include='*.mjs' returns zero key-name hits
 E2E: optimize a submitted fixture; select count(*) from intake.idea where parent_idea_id='<fixture>'; returns 1 and the parent xmin is unchanged
 select count(*) from intake.optimization where input_idea_id='<fixture>'; returns 1
 Timed round trip in the e2e suite
