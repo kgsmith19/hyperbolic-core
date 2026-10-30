@@ -44,7 +44,7 @@ import { createPromptClient, MissingVariablesError, PromptNotFoundError } from "
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..", "..");
 const ROOT_MIGRATIONS_DIR = join(REPO_ROOT, "apps", "toolbelt", "supabase", "migrations");
-const PO_MIGRATIONS_DIR = join(REPO_ROOT, "apps", "toolbelt", "apps", "prompt-organizer", "backend", "supabase", "migrations");
+const PO_MIGRATIONS_DIR = join(REPO_ROOT, "apps", "prompt-organizer", "backend", "supabase", "migrations");
 const PLATFORM_BOOTSTRAP_UP = join(ROOT_MIGRATIONS_DIR, "20260812140000_platform_owner_bootstrap.sql");
 
 // Verbatim from get-prompt.test.mjs: the exact real migration files, in
