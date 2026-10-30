@@ -155,7 +155,7 @@ test("buildPlan's timestamp allocation avoids colliding with a pre-existing migr
         name: "Other",
         kind: "cli",
         version: "0.1.0",
-        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/toolbelt/apps/other-tool" },
+        ownership: { owner: "kylegsmith19@gmail.com", path: "apps/other-tool" },
         entry: { cli: { command: "true" } },
         schemas: ["other_tool"],
         permissions: { db: { read: [], write: [] }, networkEgress: [], llmHandler: { access: false } },

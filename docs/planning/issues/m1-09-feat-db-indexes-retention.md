@@ -23,7 +23,7 @@ Both cron jobs shall be scheduled.
 
 ## Verification
 psql: select indexname from pg_indexes where indexname in ('prompt_created_at','usage_prompt','score_idea','event_at'); returns 4 rows
-node --test apps/toolbelt/apps/prompt-organizer/tests/retention.test.mjs (seeded purge case)
+node --test apps/prompt-organizer/tests/retention.test.mjs (seeded purge case)
 psql: select has_function_privilege('authenticated','prompt.purge_old_usage()','execute'); returns f
 psql: select jobname from cron.job where jobname in ('prompt-purge-old-usage','test-purge-scratch'); returns 2 rows
 

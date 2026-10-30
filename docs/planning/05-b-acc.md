@@ -116,7 +116,7 @@ Source shape per `createIdea` [VERIFIED: forgepad/store.mjs:63-84]: `{id, title,
 Migration tool (one-shot CLI owned by Idea Intake, usage spec only):
 
 ```
-node apps/toolbelt/apps/idea-intake/tools/migrate-forgepad.mjs \
+node apps/idea-intake/tools/migrate-forgepad.mjs \
   --src <ACC_ROOT>/forgepad/ideas [--dry-run] [--archive <tarball-path>]
 ```
 

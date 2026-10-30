@@ -95,7 +95,7 @@ export const DEPLOYABLE_UNITS: readonly DeployableUnit[] = [
     health: {
       kind: "command",
       command: 'node --test "tests/*.test.mjs"',
-      note: "apps/toolbelt/apps/prompt-organizer/tool.json lifecycle.health",
+      note: "apps/prompt-organizer/tool.json lifecycle.health",
     },
   },
   {
@@ -104,7 +104,7 @@ export const DEPLOYABLE_UNITS: readonly DeployableUnit[] = [
     health: {
       kind: "command",
       command: "bash tools/check.sh",
-      note: "apps/toolbelt/apps/network-checker/tool.json lifecycle.health",
+      note: "apps/network-checker/tool.json lifecycle.health",
     },
   },
 ];

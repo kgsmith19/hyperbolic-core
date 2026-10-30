@@ -28,7 +28,7 @@ jobs:
         working-directory: apps/toolbelt
       - name: Exchange and verify the owner session
         run: node tests/export-test-sessions.mjs
-        working-directory: apps/toolbelt/apps/prompt-organizer
+        working-directory: apps/prompt-organizer
         env:
           TOOLBELT_OWNER_REFRESH_TOKEN: ${{ secrets.TOOLBELT_OWNER_REFRESH_TOKEN }}
           TOOLBELT_OWNER_TOKEN: ${{ secrets.TOOLBELT_OWNER_TOKEN }}
@@ -59,4 +59,4 @@ jobs:
             tests/tags.test.mjs \
             tests/usage.test.mjs \
             tests/versions.test.mjs
-        working-directory: apps/toolbelt/apps/prompt-organizer
+        working-directory: apps/prompt-organizer

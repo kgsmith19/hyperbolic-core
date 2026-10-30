@@ -43,7 +43,7 @@ key (#510). The old Supabase publishable (anon) key literal survives only in the
 and toolbelt test trees, which move to the local platform in their own Phase 2 Issue:
 
 ```
-apps/toolbelt/apps/prompt-organizer/frontend/index.html
+apps/prompt-organizer/frontend/index.html
 apps/toolbelt/tests/helpers.mjs
 ```
 
@@ -320,7 +320,7 @@ required: `PR Gate`.
 | 1 | `ACC Linux` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` — Linux-native suites and covgate | No — rolled into `PR Gate` |
 | 1 | `ACC Windows` | the same ACC paths — PowerShell/native suites that need `windows-latest` | No — rolled into `PR Gate` |
 | 1 | `Brain` | `services/brain/**` | No — rolled into `PR Gate` |
-| 1 | `Platform` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `services/broker/**`, `docs/ops/**` | No — rolled into `PR Gate` |
+| 1 | `Platform` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `services/broker/**`, `services/platform-api/**`, `docs/ops/**` | No — rolled into `PR Gate` |
 | 1 | `LifeOS` | `apps/lifeos/**` — including its own lint | No — rolled into `PR Gate` |
 | 2 | `AI Review` | whole repo — adversarial LLM review of the diff against the Issue and this file; `needs:` Repository Standards only | No — rolled into `PR Gate` |
 | 3 | `PR Gate` | rollup **and** merge orchestration: `needs:` every lane above, `if: always()` | **Yes** |

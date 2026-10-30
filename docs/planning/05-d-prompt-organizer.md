@@ -12,7 +12,7 @@ The brief says Prompt Organizer "must become functional". It is functional today
 
 ### 1.1 Current API surface (the 10 client calls)
 
-The client is PostgREST plus Supabase Auth; there is no bespoke server [VERIFIED: apps/toolbelt/apps/prompt-organizer/web/index.html:54-58]. Every call below is issued by the shipped web client:
+The client is PostgREST plus Supabase Auth; there is no bespoke server [VERIFIED: apps/prompt-organizer/web/index.html:54-58]. Every call below is issued by the shipped web client:
 
 | # | Method | Path (base `https://woltgcggxaehtuypkxqk.supabase.co`) | Purpose | Evidence |
 | --- | --- | --- | --- | --- |

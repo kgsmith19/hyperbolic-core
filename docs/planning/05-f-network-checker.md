@@ -1,10 +1,10 @@
 # 05-f. Network Checker V1 Plan
 
-Component: Network Checker (`network-checker`, CLI name `netcheck`) at `apps/toolbelt/apps/network-checker/`. Names per `00-canonical-names.md`. Evidence base: `01-inventory.md`, `02-health-audit.md` section 6, and direct source reads cited inline. Planning only: schemas, CLI usage specs, and test specs are contracts, not code.
+Component: Network Checker (`network-checker`, CLI name `netcheck`) at `apps/network-checker/`. Names per `00-canonical-names.md`. Evidence base: `01-inventory.md`, `02-health-audit.md` section 6, and direct source reads cited inline. Planning only: schemas, CLI usage specs, and test specs are contracts, not code.
 
 Governing philosophy this plan designs against, taken directly from the brief: troubleshoot holistically at any flow point across data, hardware, and software; know every property and configuration of the network; modify configuration only with concrete testing and explicit user sign-off.
 
-One product invariant must be amended to realize that philosophy. Today the app declares "Automated device configuration writes are outside the product's scope" [VERIFIED: apps/toolbelt/apps/network-checker/AGENTS.md, Product invariants]. The change lifecycle in section 4 keeps the spirit (no unattended configuration writes, ever) while replacing the blanket exclusion with a consent-gated lifecycle: every write requires a recorded dry run and an explicit interactive approval, and the only automatic write permitted is the pre-recorded rollback of a change that just failed verification. The AGENTS.md invariant text is updated in the same PR that ships the lifecycle.
+One product invariant must be amended to realize that philosophy. Today the app declares "Automated device configuration writes are outside the product's scope" [VERIFIED: apps/network-checker/AGENTS.md, Product invariants]. The change lifecycle in section 4 keeps the spirit (no unattended configuration writes, ever) while replacing the blanket exclusion with a consent-gated lifecycle: every write requires a recorded dry run and an explicit interactive approval, and the only automatic write permitted is the pre-recorded rollback of a change that just failed verification. The AGENTS.md invariant text is updated in the same PR that ships the lifecycle.
 
 ## 1. Current state summary
 
@@ -278,9 +278,9 @@ DECIDE: ship one minimal Playwright smoke spec; do not build a JS unit-test harn
 | File | Line | Edit |
 | --- | --- | --- |
 | `Dockerfile` | 13 | `org.opencontainers.image.source` points at defunct `github.com/kgsmith19/network-checker` [VERIFIED: Dockerfile:13]; repoint to `github.com/kgsmith19/hyperbolic-core` |
-| `README.md` | 11-12 | quick start clones defunct `github.com/kgsmith19/toolbelt` then `cd toolbelt/apps/network-checker` [VERIFIED: README.md:11-12]; replace with `git clone` of hyperbolic-core and `cd apps/toolbelt/apps/network-checker` |
+| `README.md` | 11-12 | quick start clones defunct `github.com/kgsmith19/toolbelt` then `cd toolbelt/apps/network-checker` [VERIFIED: README.md:11-12]; replace with `git clone` of hyperbolic-core and `cd apps/network-checker` |
 
-Net LOC: 0 (in-place edits). Verification: `grep -rn "kgsmith19/network-checker\|kgsmith19/toolbelt" apps/toolbelt/apps/network-checker/` returns zero hits.
+Net LOC: 0 (in-place edits). Verification: `grep -rn "kgsmith19/network-checker\|kgsmith19/toolbelt" apps/network-checker/` returns zero hits.
 
 ## 6. Consolidation opportunities
 
@@ -320,7 +320,7 @@ Forced decision 11: the V1 slice is (b) device/config inventory plus (a) change 
 
 ## 9. Acceptance criteria (EARS) realizing NC-1..NC-4
 
-All commands run from `apps/toolbelt/apps/network-checker/` unless stated.
+All commands run from `apps/network-checker/` unless stated.
 
 | # | Criterion (EARS) | Verification command |
 | --- | --- | --- |
@@ -335,7 +335,7 @@ All commands run from `apps/toolbelt/apps/network-checker/` unless stated.
 | NC-4.4 | A nonzero forward command shall record `apply_failed` without inverse; a failed inverse or restoration proof shall record `rollback_failed`, never `rolled_back`. | `python3 -m unittest tests.test_change_outcomes tests.test_change_execute` exits 0 |
 | NC-4.5 | DNS, Wi-Fi-mode, and adapter-power writers shall remain disabled; template mappings shall be empty and ranked findings shall retain manual remedies only. | `python3 -m unittest tests.test_fix_scripts tests.test_rank tests.test_change_host_scope` exits 0 |
 | D-04 | The dashboard shall render seeded data and one SSE update under a hermetic Playwright smoke. | `npx playwright test` per the CI step added to `toolbelt-ci.yml` (serve on 127.0.0.1:8787 against the fixture DB) exits 0 |
-| D-10 | No file in the app shall reference the defunct standalone repositories. | `grep -rn "kgsmith19/network-checker\|kgsmith19/toolbelt" apps/toolbelt/apps/network-checker/` (from repo root) returns zero hits |
+| D-10 | No file in the app shall reference the defunct standalone repositories. | `grep -rn "kgsmith19/network-checker\|kgsmith19/toolbelt" apps/network-checker/` (from repo root) returns zero hits |
 
 ## 10. LOC accounting and deletion list
 

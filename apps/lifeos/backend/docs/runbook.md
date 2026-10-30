@@ -1,25 +1,22 @@
-# lifeos runbook — hosting, deploys, auth, backups
+# lifeos runbook — local operation, auth, backups
 
-Companion to [ADR 008](adr/008-hosting-deploy-auth.md). Everything here is
-personal-scale on purpose: one VPS, one tailnet, one owner user.
-
-Project references:
-- prod: `vhbzblllaohuljtareza` — https://vhbzblllaohuljtareza.supabase.co
-- test: `yueddwuhxflzbjehqufw` (local dev + `pytest` target; wiped by tests)
-- publishable key (public by design, used only by `scripts/get_token.py`):
-  `sb_publishable_rF0kYJWAjj1w9uwD4fr7ug_khrchuXJ`
+> [!IMPORTANT]
+> **LifeOS is local-only (owner decision 2026-10-29).** Its kernel lives in one SQLite file
+> (`LIFEOS_DB_PATH`, default `var/lifeos/lifeos.db` at the repo root; #512), and owner tokens come
+> from the local platform service (`services/platform-api`, #508). The Supabase projects, the VPS
+> deploy and the restic backup described further down are superseded and no longer run; the local
+> backup and restore drill land with hyperbolic-core#504.
 
 ## Environment variables (API runtime)
 
 | Variable | Meaning |
 |---|---|
-| `DATABASE_URL` | Postgres URL (lifeos_app). Session pooler on port 5432, `sslmode=require`. |
-| `LIFEOS_AUTH_MODE` | `supabase` (default, deployed) or `disabled` (local dev/tests only). |
-| `LIFEOS_SUPABASE_URL` | `https://<ref>.supabase.co` — issuer/JWKS derive from it. |
-| `LIFEOS_OWNER_USER_ID` | UUID of the single allowed Supabase Auth user. |
+| `LIFEOS_DB_PATH` | SQLite file for the kernel. Defaults to `var/lifeos/lifeos.db` at the repo root; migrations in `db/migrations/` apply on first connect. |
+| `LIFEOS_AUTH_MODE` | `platform` (default) or `disabled` (local dev/tests only). |
+| `LIFEOS_PLATFORM_URL` | The local platform, e.g. `http://127.0.0.1:8400` — issuer/JWKS derive from it. |
+| `LIFEOS_OWNER_USER_ID` | The platform owner's id (`PLATFORM_OWNER_ID` in the platform's `.env`). |
 | `LIFEOS_AUTH_AUDIENCE` | Optional, defaults to `authenticated`. |
 | `LIFEOS_ROOT_PATH` | Optional (m2-08). Set to `/life/api` when this API is reached through nginx's private `/life/api/` location (`docs/ops/edge-origin/nginx.conf`), which forwards the full path rather than stripping it. Unset in the standalone-repo deploy shape, where the API is the origin's whole path space. See "Auth re-point to the platform IdP (m2-08)" below. |
-| `LIFEOS_SUPABASE_PUBLISHABLE_KEY` | Only for `scripts/get_token.py`. |
 | `LIFEOS_ICS_URLS` | Comma-separated ICS feed URLs for the ingestion job (ADR 012). |
 | `LIFEOS_BRIEFING_TZ` | Optional IANA zone deciding the briefing's "today"; defaults to UTC. |
 | `LIFEOS_BLOB_ROOT` | Optional document blob store root (ADR 015); defaults to `var/blobs` beside the process, which compose mounts as the `lifeos-blobs` volume. |
@@ -464,16 +461,13 @@ restored is a hope, not a backup.
 ## Local development
 `.env` in the repo root (never committed):
 ```
-DATABASE_URL=<lifeos-test session-pooler URL>   # tests WIPE this database
-LIFEOS_AUTH_MODE=disabled
-LIFEOS_SUPABASE_URL=https://vhbzblllaohuljtareza.supabase.co
-LIFEOS_SUPABASE_PUBLISHABLE_KEY=sb_publishable_rF0kYJWAjj1w9uwD4fr7ug_khrchuXJ
+LIFEOS_AUTH_MODE=disabled          # or platform, with the two lines below
+LIFEOS_PLATFORM_URL=http://127.0.0.1:8400
+LIFEOS_OWNER_USER_ID=<PLATFORM_OWNER_ID from services/platform-api/.env>
 ```
-Point `DATABASE_URL` at the **lifeos-test** project only. (Optional later:
-`infisical run --env=dev -- <cmd>` can replace the local file entirely.)
-Calling the deployed API: `python scripts/get_token.py` prints a bearer token
-(sign-in with the owner email/password); pass it as
-`Authorization: Bearer <token>`.
+`pytest` needs no database: each session migrates its own scratch SQLite file and can never open
+`LIFEOS_DB_PATH`. Calling the API with auth on: `python scripts/get_token.py` signs in to the local
+platform (owner email/password) and prints a bearer token; pass it as `Authorization: Bearer <token>`.
 
 ## Costs
 VPS ~$6/mo. Tailscale, GitHub (private repo, Actions, GHCR), Supabase free

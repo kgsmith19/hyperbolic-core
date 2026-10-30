@@ -15,7 +15,7 @@
 // match the manifest on disk.
 //
 // `--root <dir>` overrides which directory is treated as the toolbelt root
-// (apps/toolbelt/apps/*/tool.json are discovered beneath it). Defaults to
+// (apps/*/tool.json are discovered beneath it). Defaults to
 // the real apps/toolbelt/ this script lives in. Exists so a fixture tree
 // can be validated end-to-end (see tests/validate-manifests.test.mjs and
 // the m3-01 report's collision demonstration) without touching real files.
@@ -33,7 +33,7 @@ export const SCHEMA_PATH = join(TOOLBELT_ROOT, "tool.schema.json");
 // services/<id>/tool.json (tool.schema.json's own documented ownership.path
 // exception, 08-llm-handlers.md forced decision 7): a sibling of apps/, not
 // nested under apps/toolbelt, so it is discovered separately from
-// findManifestPaths's own apps/toolbelt/apps/* walk below. Derived from
+// findManifestPaths's own apps/* walk below. Derived from
 // TOOLBELT_ROOT rather than a `root`-relative computation so a fixture
 // tree's own unrelated `--root <tmpdir>` (validate-manifests.test.mjs; the
 // script's own header comment: "without touching real files") never
@@ -79,18 +79,26 @@ function findServiceManifestPaths(servicesRoot) {
   return paths;
 }
 
+// The local platform service hosts the registry (#508) instead of registering
+// in the Supabase one, so it alone carries no registration migration.
+export const UNREGISTERED_TOOL_IDS = new Set(["platform-api"]);
+
+// Apps are the repo's apps/<name> directories (Phase 1 lift). A fixture root
+// keeps its apps beneath its own apps/.
+const appsDirOf = (root) => (root === TOOLBELT_ROOT ? join(root, "..") : join(root, "apps"));
+
 export function findManifestPaths(root = TOOLBELT_ROOT, { servicesRoot = root === TOOLBELT_ROOT ? SERVICES_ROOT : undefined } = {}) {
   const paths = [];
   const rootManifest = join(root, "tool.json");
   if (existsSync(rootManifest) && statSync(rootManifest).isFile()) {
     paths.push(rootManifest);
   }
-  const appsDir = join(root, "apps");
+  const appsDir = appsDirOf(root);
   if (existsSync(appsDir)) {
     for (const name of readdirSync(appsDir).sort()) {
       if (isStagingDir(name)) continue;
       const dir = join(appsDir, name);
-      if (!statSync(dir).isDirectory()) continue;
+      if (dir === root || !statSync(dir).isDirectory()) continue;
       const candidate = join(dir, "tool.json");
       if (existsSync(candidate) && statSync(candidate).isFile()) {
         paths.push(candidate);
@@ -108,7 +116,7 @@ export function checkManifestCoverage(root = TOOLBELT_ROOT, { servicesRoot = roo
     failures.push(`${root}: root spine manifest ${rootManifest} is missing`);
   }
 
-  const appsDir = join(root, "apps");
+  const appsDir = appsDirOf(root);
   if (existsSync(appsDir)) {
     if (!statSync(appsDir).isDirectory()) {
       failures.push(`${appsDir}: expected the apps path to be a directory`);
@@ -116,7 +124,9 @@ export function checkManifestCoverage(root = TOOLBELT_ROOT, { servicesRoot = roo
       for (const name of readdirSync(appsDir).sort()) {
         if (isStagingDir(name)) continue;
         const appDir = join(appsDir, name);
-        if (!statSync(appDir).isDirectory()) continue;
+        if (appDir === root || !statSync(appDir).isDirectory()) continue;
+        // A schema owner is a Toolbelt tool and must carry a manifest; shell, lifeos and ACC are not tools.
+        if (!existsSync(join(appDir, "supabase"))) continue;
         const manifestPath = join(appDir, "tool.json");
         if (!existsSync(manifestPath) || !statSync(manifestPath).isFile()) {
           failures.push(`${appDir}: missing tool.json`);
@@ -395,6 +405,10 @@ export function checkRegistryParity(paths, { root = TOOLBELT_ROOT } = {}) {
 
     const register = manifest?.lifecycle?.register;
     if (typeof register !== "string") continue;
+    if (UNREGISTERED_TOOL_IDS.has(manifest.id)) {
+      if (register !== "pending") failures.push(`${manifestPath}: ${manifest.id} hosts the local registry and must stay register "pending"`);
+      continue;
+    }
 
     const migrationPath = resolve(migrationsDir, register);
     if (!migrationPath.startsWith(`${migrationsDir}${sep}`)) {
@@ -490,8 +504,9 @@ function main() {
 
   if (args.registry) {
     console.log("");
-    console.log(`Registry parity passed for ${paths.length} manifest${paths.length === 1 ? "" : "s"}.`);
-    for (const path of paths) {
+    const registered = paths.filter((path) => !UNREGISTERED_TOOL_IDS.has(loadJSON(path).id));
+    console.log(`Registry parity passed for ${registered.length} manifest${registered.length === 1 ? "" : "s"}.`);
+    for (const path of registered) {
       const manifest = loadJSON(path);
       console.log(`  ${String(manifest.id).padEnd(24)} sha256=${manifestHash(manifest)}  ${relative(process.cwd(), path)}`);
     }
