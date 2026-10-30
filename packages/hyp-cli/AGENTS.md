@@ -2,7 +2,7 @@
 
 ## 🎯 Purpose
 
-`@hyperbolic/toolbelt-cli` is the scaffold CLI for the Toolbelt three-step new-tool lifecycle (TB-3, `docs/planning/05-c-toolbelt.md` section 5.1). It is a private workspace package.
+`@hyperbolic/hyp-cli` is the scaffold CLI for the Toolbelt three-step new-tool lifecycle (TB-3, `docs/planning/05-c-toolbelt.md` section 5.1). It is a private workspace package.
 
 ## 📋 Product Boundaries
 
@@ -20,7 +20,7 @@ npm run tool:new  # scaffold a new tool
 
 ## ✅ Completion Criteria
 
-GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `Toolbelt` gate succeeds — it covers `packages/toolbelt-cli` specifically (see `.github/actions/verify-tests-toolbelt`).
+GitHub Issues are the durable work source. A change is ready when its linked Issue's acceptance criteria are satisfied, the commands above pass, and the root's `Toolbelt` gate succeeds — it covers `packages/hyp-cli` specifically (see `.github/actions/verify-tests-toolbelt`).
 
 ## 🔒 Collaboration Boundary
 

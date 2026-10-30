@@ -1,4 +1,4 @@
-// node --test apps/toolbelt/guards/cli.test.mjs  (run from the repo root)
+// node --test packages/guards/cli.test.mjs  (run from the repo root)
 //
 // cli.mjs owns the guard's own config mutations: enable/disable, secret
 // globs, protected paths. Every test calls the exported main({argv, io})

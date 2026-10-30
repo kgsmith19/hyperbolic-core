@@ -23,9 +23,9 @@ const runsRoot = () => path.join(kernelRoot(), "runner", "kernel-runs");
 export const runDir = (runId) => path.join(runsRoot(), runId);
 
 // GU-2.1/05-g-guards.md section 5: every generated PreToolUse chain includes
-// the shared Guards hook (apps/toolbelt/guards/guard.mjs) alongside the
+// the shared Guards hook (packages/guards/guard.mjs) alongside the
 // kernel's own guardhook, "so the rule surface never differs by launch
-// path." apps/toolbelt/guards is a sibling app this repo does not import
+// path." packages/guards is a sibling app this repo does not import
 // (AGENTS.md) -- resolved by filesystem path only, same non-breaking
 // DEFAULT + env-override shape gui/server.mjs's guardsCliPath already
 // established. ACC_GUARDS_CLI is already that file's own established name
@@ -34,8 +34,8 @@ export const runDir = (runId) => path.join(runsRoot(), runId);
 // its own name for the same script. guard.mjs (the hook script itself) has
 // no prior convention to collide with, so it gets its own new name.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-export const guardMjsPath = () => process.env.ACC_GUARDS_HOOK || path.join(HERE, "..", "..", "..", "toolbelt", "guards", "guard.mjs");
-const guardsCliPath = () => process.env.ACC_GUARDS_CLI || path.join(HERE, "..", "..", "..", "toolbelt", "guards", "cli.mjs");
+export const guardMjsPath = () => process.env.ACC_GUARDS_HOOK || path.join(HERE, "..", "..", "..", "..", "packages", "guards", "guard.mjs");
+const guardsCliPath = () => process.env.ACC_GUARDS_CLI || path.join(HERE, "..", "..", "..", "..", "packages", "guards", "cli.mjs");
 
 // No GUARDS_CONFIG/GUARDS_PROFILE override is injected into the hook's own
 // command here: guard.mjs's own config-loader already resolves the correct

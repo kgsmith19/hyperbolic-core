@@ -6,7 +6,7 @@
 // argv and never stdout.
 //
 // Guard-config mutations (enable/disable, secret globs, protected paths)
-// live in apps/toolbelt/guards/cli.mjs, a standalone module this file does
+// live in packages/guards/cli.mjs, a standalone module this file does
 // not import — gui/server.mjs shells both and composes their output where
 // the browser-facing API still expects one combined shape (e.g. status).
 //
@@ -39,7 +39,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // test's ACC_ROOT can never leak into the next.
 const ROOT = () => resolveRoot(HERE);
 // GUARDS_CONFIG points this file at the SAME config.json guard.mjs/cli.mjs
-// read (apps/toolbelt/guards/config.json in production; gui/server.mjs sets
+// read (packages/guards/config.json in production; gui/server.mjs sets
 // this env var when it shells this file, since it's the one place already
 // composing both modules). Falls back to ACC's own root for backward
 // compatibility with every existing sandboxed test, none of which set
@@ -434,7 +434,7 @@ export async function main({ argv = process.argv.slice(2), io = PROCESS_IO } = {
           "  status | projects-add/rm <folder>",
           "  list [--json] | run <ref> | trash <ref> | trash-list [--json] | restore <ref> | flush --really",
           "  vault-import | vault-rm <KEY> | vault-keys | apply <file> <KEY...>",
-          "guard-config commands (enable/disable, secret globs, protected paths) moved to apps/toolbelt/guards/cli.mjs",
+          "guard-config commands (enable/disable, secret globs, protected paths) moved to packages/guards/cli.mjs",
         ].join("\n"));
     }
   } catch (e) {

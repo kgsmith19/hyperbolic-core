@@ -2,7 +2,7 @@
 # reference is informational; this repository owns its workflow and settings.
 
 project:
-  name: "@hyperbolic/toolbelt-cli"
+  name: "@hyperbolic/hyp-cli"
   type: node-cli
 
 runtime:

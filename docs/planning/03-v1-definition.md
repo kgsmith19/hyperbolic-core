@@ -80,7 +80,7 @@ V1 cut line detail lives in `07-brain-architecture.md` section 7.13. Definition-
 
 | # | Criterion | Verification |
 | --- | --- | --- |
-| GU-1 | Existing suite stays green. | `cd apps/toolbelt/guards && node --test "*.test.mjs"` |
+| GU-1 | Existing suite stays green. | `cd packages/guards && node --test "*.test.mjs"` |
 | GU-2 | The V1 enforcement set defined in `05-g` shall be registered and active for every Brain- and ACC-launched harness session. | launch a kernel run against a fixture repo; a write to a protected fixture path is denied exit 2 and ledgered |
 | GU-3 | Guards shall keep failing closed on unreadable config or stdin. | existing wrapper tests within GU-1 |
 

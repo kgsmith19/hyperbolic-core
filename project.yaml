@@ -6,7 +6,9 @@ project:
 
 apps:
   - apps/toolbelt
-  - apps/toolbelt/guards
+  - apps/idea-intake
+  - apps/network-checker
+  - apps/prompt-organizer
   - apps/lifeos
   - apps/agentic-command-center
   - apps/shell
@@ -90,7 +92,7 @@ ci:
       standalone: .github/workflows/toolbelt-ci.yml
       action: .github/actions/{detect-changes,verify-tests-toolbelt}
       gate: "Toolbelt"
-      covers: apps/toolbelt and packages/toolbelt-cli — self-contained;
+      covers: apps/toolbelt and packages/hyp-cli — self-contained;
         skips in seconds via detect-changes when untouched.
       required: false # rolled into "PR Gate" below, not typed here individually
     - order: 1
@@ -98,7 +100,7 @@ ci:
       standalone: .github/workflows/acc-ci.yml
       action: .github/actions/{detect-changes,verify-tests-acc}
       gate: "ACC Linux"
-      covers: apps/agentic-command-center and apps/toolbelt/guards — the
+      covers: apps/agentic-command-center and packages/guards — the
         Linux-native suites and covgate. Runs its own change detection so
         it stays parallel with every other lane.
       required: false # rolled into "PR Gate" below, not typed here individually

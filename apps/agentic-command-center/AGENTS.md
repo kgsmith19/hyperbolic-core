@@ -9,11 +9,11 @@ harness integration; generic kernel code must remain harness-neutral.
 ## 📂 Product Map
 
 - The `PreToolUse` guard and its config mutations (enable/disable, secret
-  globs, protected paths) live in `apps/toolbelt/guards` — a standalone
+  globs, protected paths) live in `packages/guards` — a standalone
   module this repo does not import. The guard fails closed when its input or
   configuration cannot be read.
 - `backend/hooks/engine.mjs` owns the vault and runbox (watched-project) mutations.
-  `backend/gui/server.mjs` shells both it and `apps/toolbelt/guards/cli.mjs` for
+  `backend/gui/server.mjs` shells both it and `packages/guards/cli.mjs` for
   every guards-related route, composing them where the browser-facing API
   still expects one shape (`GET /api/guards/status`).
 - `backend/gui/server.mjs` serves the loopback web interface. `backend/gui/README.md` is its

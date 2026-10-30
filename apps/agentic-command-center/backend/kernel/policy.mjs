@@ -35,7 +35,7 @@ export const KERNEL_DEFAULTS = Object.freeze({
   // 05-g-guards.md section 3b (m5-09): unset by default, meaning today's
   // behavior (no Guards union) is unchanged for any policy.json that
   // doesn't opt in. When set, the ABSOLUTE PATH to Guards' tracked base
-  // config (apps/toolbelt/guards/config.json).
+  // config (packages/guards/config.json).
   guardsConfigPath: null,
 });
 
@@ -61,12 +61,12 @@ export function loadKernelPolicy() {
 }
 
 // 05-g-guards.md section 3b (m5-09): the kernel's own deny-write roots and
-// Guards' `protected` list (apps/toolbelt/guards/config.<profile>.json)
+// Guards' `protected` list (packages/guards/config.<profile>.json)
 // guard overlapping territory as two hand-maintained sets that will drift.
-// The no-import boundary between this app and apps/toolbelt/guards is
+// The no-import boundary between this app and packages/guards is
 // absolute in both directions (AGENTS.md product map) -- sharing CODE is
 // forbidden, so this deliberately duplicates the small profile-resolution
-// shape apps/toolbelt/guards/config-loader.mjs already implements, rather
+// shape packages/guards/config-loader.mjs already implements, rather
 // than importing it, and reads Guards' config files as plain DATA.
 function guardsProfile(env = process.env) {
   return env.GUARDS_PROFILE || os.hostname().toLowerCase();
@@ -84,7 +84,7 @@ function readGuardsProtected(guardsConfigPath, env = process.env) {
     const overlayPath = path.join(path.dirname(guardsConfigPath), `config.${guardsProfile(env)}.json`);
     const overlay = fs.existsSync(overlayPath) ? JSON.parse(stripBom(fs.readFileSync(overlayPath, "utf8"))) : {};
     // Shallow merge, overlay over base -- the exact same resolution
-    // apps/toolbelt/guards/config-loader.mjs's own loadConfig() performs,
+    // packages/guards/config-loader.mjs's own loadConfig() performs,
     // so this reads the SAME effective `protected` list a real Guards
     // invocation on this machine would.
     const merged = { ...base, ...overlay };

@@ -259,7 +259,7 @@ test("CLI: prints LISTENING <port> and serves on it", async () => {
 
 // ------------------------------------------------------------- guards API (SPEC-0002, SL-009)
 // The server shells two binaries, each the single owner of its own state:
-// hooks/engine.mjs (vault + runbox) and apps/toolbelt/guards/cli.mjs
+// hooks/engine.mjs (vault + runbox) and packages/guards/cli.mjs
 // (guard-config: toggle, secret/protected lists). Tests drive both against
 // FAKEs (runner.test.mjs's fake-claude discipline): canned outputs, argv
 // recorded, the real repo's config.json never touched. ACC_ENGINE/

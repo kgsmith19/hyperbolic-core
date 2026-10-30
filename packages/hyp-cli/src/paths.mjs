@@ -5,7 +5,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const __dirname = dirname(fileURLToPath(import.meta.url)); // packages/toolbelt-cli/src
+const __dirname = dirname(fileURLToPath(import.meta.url)); // packages/hyp-cli/src
 
 export const CLI_PACKAGE_ROOT = join(__dirname, "..");
 export const REPO_ROOT = join(CLI_PACKAGE_ROOT, "..", "..");

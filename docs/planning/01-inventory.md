@@ -11,7 +11,7 @@ One monorepo, three imported apps, zero application code at the repo root [VERIF
 | hyperbolic-core (root) | `/` | CI only | none | Umbrella monorepo: docs, templates, CI for Toolbelt and ACC [VERIFIED: README.md; project.yaml] |
 | ACC | `apps/agentic-command-center/` | Node >= 22, zero runtime npm deps at root [VERIFIED: package.json:5-7; lockfile root-only] | none (hand-rolled); UI: React 19 + Vite 8 + Tailwind 4 [VERIFIED: ui/package.json] | Local coding-agent guard rail, control panel, bounded task runner [VERIFIED: AGENTS.md] |
 | Toolbelt (root) | `apps/toolbelt/` | Node >= 22 for tests, Python http.server for UI; no package.json anywhere in the tree [VERIFIED: file scan] | none by design [VERIFIED: README.md "no package manifest"] | Shared `core`/`idea` Supabase schemas plus a read-only idea-backlog HTML client [VERIFIED: AGENTS.md; web/index.html] |
-| Guards | `apps/toolbelt/guards/` | Node (hook subprocess) | none | Claude Code PreToolUse hook: secret-glob blocks, protected paths, cell ownership; plus config CLI [VERIFIED: guard.mjs; cli.mjs] |
+| Guards | `packages/guards/` | Node (hook subprocess) | none | Claude Code PreToolUse hook: secret-glob blocks, protected paths, cell ownership; plus config CLI [VERIFIED: guard.mjs; cli.mjs] |
 | Prompt Organizer | `apps/prompt-organizer/` | Static HTML/ES modules + Supabase PostgREST | none (vanilla) | Prompt storage, variable rendering, versioning, copy [VERIFIED: web/index.html; migrations] |
 | Network Checker | `apps/network-checker/` | Python 3.12 stdlib only [VERIFIED: AGENTS.md; no requirements file] | none (unittest, hand-written frontend) | Local-first layered network diagnostics with SQLite store and loopback dashboard [VERIFIED: netcheck/ module map] |
 | LifeOS backend | `apps/lifeos/backend/` | Python >= 3.12 (deployed on 3.14-slim) [VERIFIED: pyproject.toml; Dockerfile] | FastAPI + psycopg3 + Pydantic 2 | Typed entity graph + append-only event log kernel with 9 life domains [VERIFIED: pyproject description; src/ layout] |
@@ -109,7 +109,7 @@ Key edges with evidence:
 | Supabase publishable key (lifeos) | runbook + repo vars; VITE_ values public by design | Vite build-time vars | Yes, labeled public [VERIFIED: runbook:362; frontend/AGENTS.md] |
 | Netcheck mirror service-role key | local gitignored `.env` only | `__main__.py` env loading | No [VERIFIED: configure.ps1:12-15; .gitignore] |
 | Test fixture passwords | `apps/toolbelt/tests/helpers.mjs:8-9` | fixture accounts, documented as such | Yes, fixtures only [VERIFIED] |
-| Committed non-secret operator data | `apps/toolbelt/guards/config.json`: real machine paths and lifeos cell map | tracked deliberately as live config | Yes, deliberate [VERIFIED: guards/README.md:22-24] |
+| Committed non-secret operator data | `packages/guards/config.json`: real machine paths and lifeos cell map | tracked deliberately as live config | Yes, deliberate [VERIFIED: guards/README.md:22-24] |
 
 Sweep results: no service-role keys, no `sk-`/`ghp_` tokens, no real JWTs committed anywhere [VERIFIED: repo-wide pattern sweeps by all three inventory passes; the single `eyJ` hit is a package-lock integrity hash].
 
@@ -134,7 +134,7 @@ Deployable units today: 1 (LifeOS VPS stack). Distinct runtimes: Node 22, Python
 | Workflow | Repo | Trigger | Gates | Passing? |
 | --- | --- | --- | --- | --- |
 | `.github/workflows/toolbelt-ci.yml` "Toolbelt PR Gate" | hyperbolic-core | PR paths `apps/toolbelt/**`, merge_group | root suite (live Supabase), guards suite, PO node suite (live), Playwright e2e (live), netcheck check.sh | Yes [VERIFIED: PR #4 run success 2026-08-12T15:58Z, 6m14s] |
-| `.github/workflows/acc-ci.yml` "ACC PR Gate" | hyperbolic-core | PR paths `apps/agentic-command-center/**` + `apps/toolbelt/guards/**`, merge_group | portable (npm test + covgate), windows-integration (+3 PowerShell suites), ui (build + contract e2e), pr-gate | Yes [VERIFIED: PR #3 merge 2026-08-12] |
+| `.github/workflows/acc-ci.yml` "ACC PR Gate" | hyperbolic-core | PR paths `apps/agentic-command-center/**` + `packages/guards/**`, merge_group | portable (npm test + covgate), windows-integration (+3 PowerShell suites), ui (build + contract e2e), pr-gate | Yes [VERIFIED: PR #3 merge 2026-08-12] |
 | `.github/workflows/toolbelt-network-checker-release.yml` | hyperbolic-core | manual dispatch | check.sh, image build + smoke, draft release with CHANGELOG extract | not exercised since migration [UNKNOWN: no dispatch runs observed] |
 | `apps/lifeos/.github/workflows/{ci,ops,backup,release-smoke}.yml` | inert here; live in standalone `kgsmith19/lifeos` | PR/push/schedule/dispatch (there) | PR Gate; deploys gated by `vars.DEPLOY_ENABLED`; `build-backend` ungated on push to main (the documented hazard) | [UNKNOWN from this repo; root AGENTS.md documents the inert rule] |
 | nested `apps/agentic-command-center/.github/workflows/` | none exists; only issue/PR templates | n/a | n/a | [VERIFIED: directory listing; project.yaml's `ci:` pointer is stale] |
@@ -164,7 +164,7 @@ Local suite results run in this sandbox 2026-08-12 [VERIFIED by execution]:
 
 ## 8. Canonical naming table
 
-Resolved in `00-canonical-names.md`. Summary: hyperbolic-core is the umbrella and the Shell does not exist yet; Prompt Organizer is the one prompt component ("prompt-layer" has zero occurrences); Agentic Command Center / ACC is canonical ("Agent Command Center" has zero occurrences); The Brain is defined as the ACC meta-harness and exists nowhere today; Guards is the standalone PreToolUse hook module at `apps/toolbelt/guards/` [VERIFIED: 00-canonical-names.md evidence trail].
+Resolved in `00-canonical-names.md`. Summary: hyperbolic-core is the umbrella and the Shell does not exist yet; Prompt Organizer is the one prompt component ("prompt-layer" has zero occurrences); Agentic Command Center / ACC is canonical ("Agent Command Center" has zero occurrences); The Brain is defined as the ACC meta-harness and exists nowhere today; Guards is the standalone PreToolUse hook module at `packages/guards/` [VERIFIED: 00-canonical-names.md evidence trail].
 
 ## Gate questions (batched, non-blocking)
 

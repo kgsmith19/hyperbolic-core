@@ -25,7 +25,7 @@ Rule applied: a directory with its own `project.yaml` or `AGENTS.md` is an app. 
 - `apps/toolbelt/apps/` holds the three nested apps above. The lift is a `git mv` to `apps/<name>/`.
 - Shared root pieces to relocate: `guards/`, `scripts/`, `supabase/`, `tests/`, `tool.schema.json`, `project.yaml`.
 - Stale references to `apps/toolbelt` or `toolbelt/apps`: **189 files** (`grep -rIl -E 'apps/toolbelt|toolbelt/apps'`, excluding `node_modules` and `.git`). Largest groups:
-  - `apps/toolbelt/supabase/migrations` (20), `docs/planning` and `docs/planning/issues` (28), `apps/toolbelt/tests` (13), `packages/toolbelt-cli` (14), `apps/shell/frontend` (16), `services/broker` (6), `docs/ops` (5), `.github/workflows` (5).
+  - `apps/toolbelt/supabase/migrations` (20), `docs/planning` and `docs/planning/issues` (28), `apps/toolbelt/tests` (13), `packages/hyp-cli` (14), `apps/shell/frontend` (16), `services/broker` (6), `docs/ops` (5), `.github/workflows` (5).
 - Archived history (`docs/archived/**`) stays and is listed as an allowed hit (AC4).
 
 ## 3. Nested `.github/` (dead config)

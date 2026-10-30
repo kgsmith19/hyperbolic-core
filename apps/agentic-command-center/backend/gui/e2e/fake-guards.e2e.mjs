@@ -1,4 +1,4 @@
-// Stateful fake apps/toolbelt/guards/cli.mjs for the guards-page e2e
+// Stateful fake packages/guards/cli.mjs for the guards-page e2e
 // (SPEC-0002 AC-010). Sandbox only — shares ACC_GUI_E2E_DIR/guards-state.json
 // with fake-engine.e2e.mjs (each owns a different slice of it: this file
 // owns enabled/secrets/protected, fake-engine.e2e.mjs owns

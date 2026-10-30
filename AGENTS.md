@@ -324,8 +324,8 @@ required: `PR Gate`.
 | Order | Gate | Covers | Required |
 | --- | --- | --- | --- |
 | 1 | `Repository Standards` | whole repo — leaked-credential scan, repo structure, PR description, exact-head consistency. Repository integrity only; no app-specific check belongs here | No — rolled into `PR Gate` |
-| 1 | `Toolbelt` | `apps/toolbelt/**`, `packages/toolbelt-cli/**` | No — rolled into `PR Gate` |
-| 1 | `ACC Linux` | `apps/agentic-command-center/**`, `apps/toolbelt/guards/**` — Linux-native suites and covgate | No — rolled into `PR Gate` |
+| 1 | `Toolbelt` | `apps/toolbelt/**`, `packages/hyp-cli/**` | No — rolled into `PR Gate` |
+| 1 | `ACC Linux` | `apps/agentic-command-center/**`, `packages/guards/**` — Linux-native suites and covgate | No — rolled into `PR Gate` |
 | 1 | `ACC Windows` | the same ACC paths — PowerShell/native suites that need `windows-latest` | No — rolled into `PR Gate` |
 | 1 | `Brain` | `services/brain/**` | No — rolled into `PR Gate` |
 | 1 | `Platform` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `services/broker/**`, `services/platform-api/**`, `docs/ops/**` | No — rolled into `PR Gate` |
