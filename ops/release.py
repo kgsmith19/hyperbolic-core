@@ -9,6 +9,11 @@ deploys that SHA, then health-checks it. If the rollback deploy or its health
 check fails, the attempt is recorded as `failed-rollback` and the command
 exits non-zero, so a broken rollback is never silent.
 
+When `tag` is given a `--deploy`, a health check that fails after that deploy
+is an automatic rollback (#504, AC3): the previous live release is redeployed
+and health-checked, the rejected build is recorded as `rejected`, and nothing
+is tagged. `{sha}` in the deploy command is replaced by the target SHA.
+
 The release history lives in var/releases.json, which is local state and not
 committed. Deploy and health are shell commands, so the same mechanism runs
 `make up` plus a curl in CI-less local use, and a stub in tests.
@@ -50,9 +55,11 @@ def tag(repo, log, name, health_cmd, deploy_cmd=None):
     if git(repo, "status", "--porcelain"):
         raise SystemExit("refusing to tag a dirty tree: commit or stash first")
     sha = git(repo, "rev-parse", "HEAD")
-    if deploy_cmd and not shell_ok(deploy_cmd, repo):
+    if deploy_cmd and not shell_ok(deploy_cmd.replace("{sha}", sha), repo):
         return 2, f"deploy failed for {sha[:12]}; nothing tagged"
     if not shell_ok(health_cmd, repo):
+        if deploy_cmd:
+            return _reject_and_roll_back(repo, log, name, sha, deploy_cmd, health_cmd)
         return 2, f"health check failed for {sha[:12]}; nothing tagged"
     tag_name = f"release-{name}"
     git(repo, "tag", tag_name, sha)
@@ -62,6 +69,27 @@ def tag(repo, log, name, health_cmd, deploy_cmd=None):
     state["current"] = name
     log.write(state)
     return 0, f"tagged {tag_name} at {sha}"
+
+
+def _reject_and_roll_back(repo, log, name, sha, deploy_cmd, health_cmd):
+    """The new build was deployed but failed its health check: put the previous live release back."""
+    state = log.read()
+    stamp = datetime.now(timezone.utc).isoformat()
+    live = [r for r in state["releases"] if r["status"] == "live"]
+    state["releases"].append({"name": name, "sha": sha, "status": "rejected", "at": stamp})
+    if not live:
+        log.write(state)
+        return 2, f"health check failed after deploy of {sha[:12]}; no previous release to roll back to; nothing tagged"
+    previous = live[-1]
+    if shell_ok(deploy_cmd.replace("{sha}", previous["sha"]), repo) and shell_ok(health_cmd, repo):
+        log.write(state)
+        return 2, (f"health check failed after deploy of {sha[:12]}; rolled back to "
+                   f"{previous['tag']}; nothing tagged")
+    state["releases"].append({"name": previous["name"], "tag": previous["tag"], "sha": previous["sha"],
+                              "status": "failed-rollback", "at": stamp})
+    log.write(state)
+    return 3, (f"health check failed after deploy of {sha[:12]} and rollback to {previous['tag']} "
+               "failed; investigate before retrying")
 
 
 def rollback(repo, log, deploy_cmd, health_cmd):
@@ -94,7 +122,9 @@ def main(argv=None):
     t = sub.add_parser("tag")
     t.add_argument("name")
     t.add_argument("--health", required=True)
-    t.add_argument("--deploy", default=None)
+    t.add_argument("--deploy", default=None,
+                   help="shell command; {sha} is replaced by the target SHA. A failed health check "
+                        "after it rolls back automatically")
     r = sub.add_parser("rollback")
     r.add_argument("--health", required=True)
     r.add_argument("--deploy", required=True, help="shell command; {sha} is replaced by the target SHA")

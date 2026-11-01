@@ -76,6 +76,40 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("failed", message)
         self.assertEqual(self.log.read()["releases"][-1]["status"], "failed-rollback")
 
+    def test_a_failed_health_check_after_deploy_rolls_back_and_tags_nothing(self):
+        deployed = Path(tempfile.mkdtemp()) / "deployed.txt"
+        deploy = f"echo {{sha}} > {deployed}"
+        release.tag(self.repo, self.log, "v1", "true", deploy)
+        first = self.sha()
+        commit(self.repo, "2")
+        bad = self.sha()
+        health = f'test "$(cat {deployed})" != "{bad}"'
+        code, message = release.tag(self.repo, self.log, "v2", health, deploy)
+        self.assertEqual(code, 2)
+        self.assertIn("rolled back to release-v1", message)
+        self.assertEqual(self.tags(), {"release-v1"})
+        self.assertEqual(deployed.read_text().strip(), first)
+        state = self.log.read()
+        self.assertEqual(state["current"], "v1")
+        self.assertEqual(state["releases"][-1], {"name": "v2", "sha": bad, "status": "rejected",
+                                                 "at": state["releases"][-1]["at"]})
+
+    def test_a_failed_health_check_after_deploy_with_a_failed_rollback_is_recorded(self):
+        release.tag(self.repo, self.log, "v1", "true", "true")
+        commit(self.repo, "2")
+        code, message = release.tag(self.repo, self.log, "v2", "false", "true")
+        self.assertEqual(code, 3)
+        self.assertIn("failed", message)
+        self.assertEqual(self.log.read()["releases"][-1]["status"], "failed-rollback")
+        self.assertEqual(self.tags(), {"release-v1"})
+
+    def test_a_failed_health_check_with_no_previous_release_is_rejected_not_tagged(self):
+        code, message = release.tag(self.repo, self.log, "v1", "false", "true")
+        self.assertEqual(code, 2)
+        self.assertIn("no previous release", message)
+        self.assertEqual(self.tags(), set())
+        self.assertEqual(self.log.read()["releases"][-1]["status"], "rejected")
+
     def test_rollback_needs_a_previous_release(self):
         release.tag(self.repo, self.log, "v1", "true")
         code, message = release.rollback(self.repo, self.log, "true", "true")
