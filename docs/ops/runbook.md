@@ -17,7 +17,8 @@ updated: 2026-10-29
 > - root `compose.yaml` plus `make up`, `make test`, `make backup` and `make restore-drill`, with a
 >   local release (`make release NAME=vN`: canary, deploy, health, invariant and telemetry gates,
 >   automatic rollback, a signed attestation and the tag; `make verify NAME=vN` re-checks it) and
->   `make rollback`: landed by #504, proven on a clean runner by `.github/workflows/local-stack.yml`;
+>   `make rollback`: landed by #504, proven at every PR head that touches the stack by the PR Gate Platform lane
+>   (`.github/actions/verify-local-stack`);
 > - per-app SQLite migrations: the std queue, Phase 2.
 >
 > Whatever the VPS last ran keeps running untouched; nothing in this repository deploys to it any more.

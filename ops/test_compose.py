@@ -27,9 +27,15 @@ EXCLUDED = {
 }
 
 
-def services():
+def service_blocks():
+    """Each top-level service name mapped to its own indented block of compose.yaml."""
     block = COMPOSE.split("\nservices:\n", 1)[1]
-    return set(re.findall(r"^  ([a-z][a-z0-9-]*):\n", block, re.M))
+    parts = re.split(r"^ {2}([a-z][a-z0-9-]*):[ \t]*\n", block, flags=re.M)
+    return dict(zip(parts[1::2], parts[2::2]))
+
+
+def services():
+    return set(service_blocks())
 
 
 def header():
@@ -56,7 +62,9 @@ class ComposeTest(unittest.TestCase):
 
     def test_every_service_has_a_healthcheck(self):
         """Catches a service `up --wait` and telemetry cannot judge."""
-        self.assertEqual(COMPOSE.count("    healthcheck:\n"), len(services()))
+        for name, body in service_blocks().items():
+            self.assertRegex(body, r"(?m)^\s+healthcheck:\s*$", f"{name} has no healthcheck")
+            self.assertRegex(body, r"(?m)^\s+test:", f"{name} healthcheck has no test")
 
     def test_stateful_services_write_where_backup_reads(self):
         """Catches state in a docker volume that `make backup` never sees."""
