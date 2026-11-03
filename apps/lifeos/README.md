@@ -27,7 +27,7 @@ The frontend environment contains only public `VITE_` configuration. Never place
 
 ## Layout
 
-- `backend/` — FastAPI, Postgres migrations, domain jobs, MCP read tools, and Python tests.
+- `backend/` — FastAPI, SQLite migrations (`db/migrations`), domain jobs, MCP read tools, and Python tests.
 - `frontend/` — React, TypeScript, Vitest, Playwright, and the static production bundle.
 
 ## Documentation
