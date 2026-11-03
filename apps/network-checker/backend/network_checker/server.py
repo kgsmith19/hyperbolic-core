@@ -6,6 +6,7 @@ anywhere else.
 """
 import json
 import mimetypes
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -158,7 +159,9 @@ class Server(ThreadingHTTPServer):
         super().shutdown()
 
 
-def serve(conn, port=8787):
+def serve(conn, port=8787, host=None):
+    # Loopback by default. NETWORK_CHECKER_HOST=0.0.0.0 is for the container
+    # image only, where compose publishes the port on the host's loopback.
     # A handler subclass binds state to this server instance. Reusing Handler
     # itself would let a later serve() replace the database and stop event for
     # every older server that still has an SSE request in flight.
@@ -167,4 +170,5 @@ def serve(conn, port=8787):
 
     BoundHandler.db = conn
     BoundHandler.stop_event = threading.Event()
-    return Server(("127.0.0.1", port), BoundHandler)
+    host = host or os.environ.get("NETWORK_CHECKER_HOST") or "127.0.0.1"
+    return Server((host, port), BoundHandler)

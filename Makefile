@@ -14,7 +14,7 @@ export HOST_GID ?= $(shell id -g)
 
 .PHONY: up down init policy test backup restore-drill canary telemetry release verify rollback status
 
-up: policy
+up: policy init
 	@mkdir -p var/platform var/network-checker var/lifeos/blobs var/brain/home var/brain-workspaces
 	docker compose up -d --build --wait
 
@@ -26,9 +26,22 @@ policy:
 down:
 	docker compose down
 
-# Writes services/platform-api/.env (the owner key and JWT key). Run once.
-init:
-	npm run init --workspace=@hyperbolic/platform-api
+# Local identities, generated once and never committed (#504). platform-api's
+# .env holds the owner and JWT keys; LifeOS's .env points its auth at that
+# platform. Both use http://platform.localhost:8400: browsers resolve
+# *.localhost to loopback, and inside compose it is platform-api's alias, so
+# the token issuer matches from either side.
+PLATFORM_URL := http://platform.localhost:8400
+init: services/platform-api/.env apps/lifeos/backend/.env
+
+services/platform-api/.env:
+	npm run --silent init --workspace=@hyperbolic/platform-api -- --public-url $(PLATFORM_URL)
+
+apps/lifeos/backend/.env: services/platform-api/.env
+	@owner=$$(sed -n 's/^PLATFORM_OWNER_ID=//p' services/platform-api/.env); \
+	test -n "$$owner" || { echo "PLATFORM_OWNER_ID missing from services/platform-api/.env"; exit 1; }; \
+	umask 077; printf 'LIFEOS_PLATFORM_URL=%s\nLIFEOS_OWNER_USER_ID=%s\n' "$(PLATFORM_URL)" "$$owner" > $@
+	@echo "wrote $@"
 
 # The fast local gate: every workspace suite that needs no Postgres and no
 # hosted service, plus the ops and docs oracles.
@@ -49,7 +62,7 @@ restore-drill:
 	python3 ops/store_ops.py restore-drill "$$dir" --report var/restore-drill.json
 
 # A canary stack on shifted ports, health-checked and torn down (#504).
-canary: policy
+canary: policy init
 	ops/canary.sh
 
 # One JSON health report for every running service; fails if any is unhealthy.

@@ -66,6 +66,14 @@ class ComposeTest(unittest.TestCase):
             self.assertRegex(body, r"(?m)^\s+healthcheck:\s*$", f"{name} has no healthcheck")
             self.assertRegex(body, r"(?m)^\s+test:", f"{name} healthcheck has no test")
 
+    def test_the_platform_url_resolves_inside_compose(self):
+        """LifeOS validates tokens against PLATFORM_URL from inside its container, and the
+        issuer must match what browsers use, so the host must be platform-api's alias."""
+        makefile = (ROOT / "Makefile").read_text()
+        host = re.search(r"^PLATFORM_URL := http://([^:/]+):8400$", makefile, re.M).group(1)
+        self.assertIn(f"aliases: [{host}]", service_blocks()["platform-api"])
+        self.assertTrue(host.endswith(".localhost"), "browsers must resolve it to loopback")
+
     def test_stateful_services_write_where_backup_reads(self):
         """Catches state in a docker volume that `make backup` never sees."""
         self.assertNotIn("\nvolumes:\n", COMPOSE)

@@ -34,6 +34,10 @@ services:
         required: false
     ports:
       - "127.0.0.1:${HOST_PLATFORM_API_PORT:-8400}:8400"
+    networks:
+      default:
+        # The platform URL every local client uses (see the Makefile `init`).
+        aliases: [platform.localhost]
     volumes:
       - ${HYP_VAR:-./var}/platform:/data
     restart: unless-stopped
