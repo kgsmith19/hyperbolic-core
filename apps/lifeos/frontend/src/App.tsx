@@ -26,6 +26,7 @@ const Capture = lazy(() => import("./pages/Capture"));
 const Chat = lazy(() => import("./pages/Chat"));
 const EntityDetail = lazy(() => import("./pages/EntityDetail"));
 const Review = lazy(() => import("./pages/Review"));
+const Today = lazy(() => import("./pages/Today"));
 const Tomorrow = lazy(() => import("./pages/Tomorrow"));
 
 const queryClient = new QueryClient({
@@ -78,6 +79,7 @@ function Gate() {
             <Route path="/" element={<Browse />} />
             <Route path="/capture" element={<Capture />} />
             <Route path="/chat" element={<Chat />} />
+            <Route path="/today" element={<Today />} />
             <Route path="/tomorrow" element={<Tomorrow />} />
             <Route path="/review" element={<Review />} />
             <Route path="/entities/:id" element={<EntityDetail />} />
