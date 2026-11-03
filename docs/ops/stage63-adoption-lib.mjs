@@ -9,7 +9,7 @@
 // access happens here.
 //
 // The contract constants below are transcribed byte-stable from
-// agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96
+// agent-engineering-standard @ 2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8
 // (four modules: tools/repo_map.py, tools/ownership_map.py,
 // tools/context_budget.py, tools/handoff_acceptance.py). The Standard is not
 // vendored into this repo, so — exactly as stage61b-release-proofbed-lib.mjs
@@ -2363,7 +2363,7 @@ export const FROZEN = {
 };
 
 export function provenance() {
-  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py + tools/standards_route.py + tools/standards_receipt.py + tools/capability_compiler.py + tools/independent_review.py + tools/spec_critic.py + tools/gate_compliance.py + tools/tracker_pipeline_gate.py + tools/completion_receipts.py + tools/standardctl.py + tools/release_mold.py + tools/proof_invalidation.py + tools/edition_packaging.py @1686e3b490380194cff78767b88c4e0288410e96";
+  return "tools/repo_map.py + tools/ownership_map.py + tools/context_budget.py + tools/handoff_acceptance.py + tools/thinness.py + tools/ready.py + tools/disposition.py + tools/verification_mold.py + tools/mold_qualification.py + tools/verification_portfolio.py + tools/quality_eval.py + tools/context_rotation.py + tools/capsule.py + tools/mcp_profile.py + tools/extensions_registry.py + tools/profile_compiler.py + tools/standards_route.py + tools/standards_receipt.py + tools/capability_compiler.py + tools/independent_review.py + tools/spec_critic.py + tools/gate_compliance.py + tools/tracker_pipeline_gate.py + tools/completion_receipts.py + tools/standardctl.py + tools/release_mold.py + tools/proof_invalidation.py + tools/edition_packaging.py @2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8";
 }
 
 // Slices S2–S10 extend ADOPTION with their own rows; S1 owns context-rules.

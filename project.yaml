@@ -1,8 +1,6 @@
 project:
   name: hyperbolic-core
-  type: monorepo — each apps/<name>/ and services/<name>/ is independently
-    built, tested, and gated by its own PR Gate; see that component's own
-    project.yaml/AGENTS.md for its facts.
+  type: monorepo — each apps/<name>/ and services/<name>/ is independently built, tested, and gated by its own PR Gate; see that component's own project.yaml/AGENTS.md for its facts.
 
 apps:
   - apps/idea-intake
@@ -79,151 +77,77 @@ ci:
       standalone: .github/workflows/{secret-scan,repo-policy,template-lint}.yml
       action: .github/actions/{verify-secrets,verify-repo-policy,verify-pr-description}
       gate: "Repository Standards"
-      covers: whole repo, every PR — no path filter; leaked-credential scan,
-        repo structure (no-root-CLAUDE.md/GEMINI.md-adapter/AGENTS.md/action pinning/YAML
-        validity/whitespace), PR body vs PULL_REQUEST_TEMPLATE.md's required
-        sections, and exact-head consistency. Repository-wide concerns only
-        — no app-specific engineering check (lint, typecheck, build,
-        coverage) belongs here; each app lane owns its own.
-      required: false # rolled into "PR Gate" below, not typed here individually
+      covers: whole repo, every PR — no path filter; leaked-credential scan, repo structure (no-root-CLAUDE.md/GEMINI.md-adapter/AGENTS.md/action pinning/YAML validity/whitespace), PR body vs PULL_REQUEST_TEMPLATE.md's required sections, and exact-head consistency. Repository-wide concerns only — no app-specific engineering check (lint, typecheck, build, coverage) belongs here; each app lane owns its own.
+      # rolled into "PR Gate" below, not typed here individually
+      required: false
     - order: 1
       path: .github/workflows/pr-verify.yml
       standalone: .github/workflows/toolbelt-ci.yml
       action: .github/actions/{detect-changes,verify-tests-toolbelt}
       gate: "Toolbelt"
-      covers: the root spine (tool.json, supabase/, tests/spine/), packages/manifest-tools and packages/hyp-cli — self-contained;
-        skips in seconds via detect-changes when untouched.
-      required: false # rolled into "PR Gate" below, not typed here individually
+      covers: the root spine (tool.json, supabase/, tests/spine/), packages/manifest-tools and packages/hyp-cli — self-contained; skips in seconds via detect-changes when untouched.
+      # rolled into "PR Gate" below, not typed here individually
+      required: false
     - order: 1
       path: .github/workflows/pr-verify.yml
       standalone: .github/workflows/acc-ci.yml
       action: .github/actions/{detect-changes,verify-tests-acc}
       gate: "ACC Linux"
-      covers: apps/agentic-command-center and packages/guards — the
-        Linux-native suites and covgate. Runs its own change detection so
-        it stays parallel with every other lane.
-      required: false # rolled into "PR Gate" below, not typed here individually
+      covers: apps/agentic-command-center and packages/guards — the Linux-native suites and covgate. Runs its own change detection so it stays parallel with every other lane.
+      # rolled into "PR Gate" below, not typed here individually
+      required: false
     - order: 1
       path: .github/workflows/pr-verify.yml
       standalone: .github/workflows/acc-ci.yml
       action: .github/actions/{detect-changes,verify-tests-acc-windows}
       gate: "ACC Windows"
-      covers: apps/agentic-command-center's PowerShell launch-shim,
-        cap-watcher and installer suites — needs a windows-latest runner. A
-        separate row because one job cannot span two runner images; that is
-        a platform constraint, not a choice.
-      required: false # rolled into "PR Gate" below, not typed here individually
+      covers: apps/agentic-command-center's PowerShell launch-shim, cap-watcher and installer suites — needs a windows-latest runner. A separate row because one job cannot span two runner images; that is a platform constraint, not a choice.
+      # rolled into "PR Gate" below, not typed here individually
+      required: false
     - order: 1
       path: .github/workflows/pr-verify.yml
       standalone: .github/workflows/brain-ci.yml
       action: .github/actions/{detect-changes,verify-tests-brain}
       gate: "Brain"
-      covers: services/brain — typecheck, tests, ADR-05 isolation check,
-        eval corpus gate, Docker build/smoke. Skips in seconds when untouched.
-      required: false # rolled into "PR Gate" below, not typed here individually
+      covers: services/brain — typecheck, tests, ADR-05 isolation check, eval corpus gate, Docker build/smoke. Skips in seconds when untouched.
+      # rolled into "PR Gate" below, not typed here individually
+      required: false
     - order: 1
       path: .github/workflows/pr-verify.yml
       standalone: .github/workflows/shell-ci.yml
       action: .github/actions/{detect-changes,verify-tests-shell}
       gate: "Platform"
-      covers: apps/shell, every packages/* workspace, services/llm-handler,
-        services/broker, services/platform-api, and the docs/ops operator tooling (including this
-        workflow's own topology contract test) — type-checks, unit tests,
-        e2e, production build, size budgets.
-      required: false # rolled into "PR Gate" below, not typed here individually
+      covers: apps/shell, every packages/* workspace, services/llm-handler, services/broker, services/platform-api, and the docs/ops operator tooling (including this workflow's own topology contract test) — type-checks, unit tests, e2e, production build, size budgets.
+      # rolled into "PR Gate" below, not typed here individually
+      required: false
     - order: 1
       path: .github/workflows/pr-verify.yml
       standalone: .github/workflows/lifeos-ci.yml
       action: .github/actions/{detect-changes,verify-tests-lifeos}
       gate: "LifeOS"
-      covers: apps/lifeos — lint (ruff, npm run lint; the only app with a
-        linter configured, run early inside verify-tests-lifeos itself)
-        ahead of its backend/frontend suites.
-      required: false # rolled into "PR Gate" below, not typed here individually
+      covers: apps/lifeos — lint (ruff, npm run lint; the only app with a linter configured, run early inside verify-tests-lifeos itself) ahead of its backend/frontend suites.
+      # rolled into "PR Gate" below, not typed here individually
+      required: false
     - order: 2
       path: .github/workflows/pr-verify.yml
       standalone: .github/workflows/llm-review.yml
       action: .github/actions/verify-llm-review
       gate: "AI Review"
-      covers: whole repo, every PR — no path filter; adversarial LLM review
-        of the diff against the Issue and AGENTS.md, provider-separated from
-        the builder. Needs Repository Standards ONLY, so the leaked-secret
-        scan finishes before diff content reaches an external provider.
-        Mandatory in substance via PR Gate's needs — not separately typed
-        into the branch ruleset. Stages its verdict as an artifact
-        (always(), so a blocking or failed run is captured, not just a
-        passing one) for .github/workflows/llm-review-dialogue.yml to post
-        — this job stays read-only and never writes to the pull request
-        itself.
-      required: false # mandatory through PR Gate's needs:, not separately required
+      covers: whole repo, every PR — no path filter; adversarial LLM review of the diff against the Issue and AGENTS.md, provider-separated from the builder. Needs Repository Standards ONLY, so the leaked-secret scan finishes before diff content reaches an external provider. Mandatory in substance via PR Gate's needs — not separately typed into the branch ruleset. Stages its verdict as an artifact (always(), so a blocking or failed run is captured, not just a passing one) for .github/workflows/llm-review-dialogue.yml to post — this job stays read-only and never writes to the pull request itself.
+      # mandatory through PR Gate's needs:, not separately required
+      required: false
     - order: 3
       path: .github/workflows/pr-verify.yml
       gate: "PR Gate"
-      covers: whole repo, every PR — no path filter. Two things at once.
-        (1) The rollup — needs every lane above, always reporting even when
-        one failed, and its verdict comes from this workflow's own
-        needs.*.result, so anything that is not exactly success (including
-        skipped or cancelled) fails it. This is the ONLY gate typed into the
-        branch ruleset's required-status-checks list.
-        (2) Merge orchestration — maintains the managed Work State comments,
-        enforces owner:hold-merge and owner:allow-draft, and arms native
-        squash auto-merge. Arming is a later step of the same job that
-        computes the verdict, so a merge cannot be enabled ahead of the
-        verification it depends on. It is the only job holding a write
-        token and performs no checkout and no shell over repository content.
+      covers: whole repo, every PR — no path filter. Two things at once. (1) The rollup — needs every lane above, always reporting even when one failed, and its verdict comes from this workflow's own needs.*.result, so anything that is not exactly success (including skipped or cancelled) fails it. This is the ONLY gate typed into the branch ruleset's required-status-checks list. (2) Merge orchestration — maintains the managed Work State comments, enforces owner:hold-merge and owner:allow-draft, and arms native squash auto-merge. Arming is a later step of the same job that computes the verdict, so a merge cannot be enabled ahead of the verification it depends on. It is the only job holding a write token and performs no checkout and no shell over repository content.
       required: true
   orchestrator: .github/workflows/pr-verify.yml
-  note: >-
-    No app carries a nested .github directory (AGENTS.md's Workflow Safety
-    Invariant); the verify-tests-lifeos composite action above is LifeOS's
-    real gate here, like every other app's lane. "Repository Standards" and the six
-    app lanes are real, required-in-substance checks -- "PR Gate" cannot go
-    green without them -- but only that one rollup name is typed into the
-    branch ruleset, to keep the required-check list from drifting out of
-    sync with this file. "AI Review" is likewise mandatory in substance
-    through PR Gate's needs: rather than as a second required-check name; it
-    fails closed on any infrastructure problem (missing credential, invalid
-    provider config, API error, timeout) and never substitutes a default
-    green verdict. There is no separate merge-policy workflow: merge
-    orchestration lives entirely in the "PR Gate" job.
-
-    Two further workflows implement Issue #128's deferred review-dialogue
-    design (Issue #231) and are deliberately NOT in the gates list above —
-    neither produces a pull-request check row, so neither can be typed into
-    a required-checks list.
-    .github/workflows/llm-review-dialogue.yml (on: workflow_run, keyed to
-    "PR Verification") reads AI Review's staged verdict artifact and posts
-    it into the pull request as exactly one managed comment (marker
-    "<!-- agent-engineering-standard:llm-review:v1 -->", updated in place
-    per head) carrying a round counter, and — same discipline as PR Gate —
-    holds pull-requests: write while performing no checkout and no shell
-    over repository content.
-    .github/workflows/dev-agent-dispatch.yml (on: repository_dispatch, fired
-    by the dialogue workflow only for a blocking verdict on a
-    same-repository PR) hands the findings to the developer agent resolved from
-    the PR's dev provider or vars.DEV_PROVIDER, which
-    fixes or rebuts them in place. Only provider "anthropic" is implemented
-    today; any other value fails the job's own preflight closed rather than
-    guessing at an unverified action/SDK shape. Owner-provisioned
-    prerequisites: vars.LLM_REVIEW_ESCALATE_AFTER (round threshold, default
-    3); one of secrets.CLAUDE_CODE_OAUTH_TOKEN / secrets.ANTHROPIC_API_KEY;
-    and, so the dispatched agent authenticates as the dev GitHub App rather
-    than borrowing the vendor action's own bundled identity,
-    vars.INFISICAL_DEV_IDENTITY_ID plus Infisical /dev/ (env prod):
-    DEV_GITHUB_APP_ID / DEV_GITHUB_APP_PRIVATE_KEY — until provisioned, the
-    dialogue workflow still posts findings and escalates to the owner
-    immediately rather than waiting on a fixer that can never start.
-    .github/workflows/llm-review-recheck.yml (on: repository_dispatch, fired
-    by dev-agent-dispatch.yml's own last step when its dispatched head is
-    still current at the end of its run — i.e. the agent replied without
-    pushing a commit, so pull_request:synchronize never fired on its own)
-    re-verifies the PR hasn't moved on again and, if not, re-runs the exact
-    same verify-llm-review composite action AI Review uses — one source of
-    review logic across every trigger path. Same trust shape as AI Review
-    regardless of path: contents: read, pull-requests: read, id-token: write,
-    never a write token. No owner-provisioned prerequisites beyond what AI
-    Review itself already needs — it authenticates identically.
-
+  # The AES final-gate contract: one workflow, one required check (#541).
+  workflow: .github/workflows/pr-verify.yml
+  required_check: PR Gate
+  # note:
+  #   No app carries a nested .github directory (AGENTS.md's Workflow Safety Invariant); the verify-tests-lifeos composite action above is LifeOS's real gate here, like every other app's lane. "Repository Standards" and the six app lanes are real, required-in-substance checks -- "PR Gate" cannot go green without them -- but only that one rollup name is typed into the branch ruleset, to keep the required-check list from drifting out of sync with this file. "AI Review" is likewise mandatory in substance through PR Gate's needs: rather than as a second required-check name; it fails closed on any infrastructure problem (missing credential, invalid provider config, API error, timeout) and never substitutes a default green verdict. There is no separate merge-policy workflow: merge orchestration lives entirely in the "PR Gate" job.
+  #   Two further workflows implement Issue #128's deferred review-dialogue design (Issue #231) and are deliberately NOT in the gates list above — neither produces a pull-request check row, so neither can be typed into a required-checks list. .github/workflows/llm-review-dialogue.yml (on: workflow_run, keyed to "PR Verification") reads AI Review's staged verdict artifact and posts it into the pull request as exactly one managed comment (marker "<!-- agent-engineering-standard:llm-review:v1 -->", updated in place per head) carrying a round counter, and — same discipline as PR Gate — holds pull-requests: write while performing no checkout and no shell over repository content. .github/workflows/dev-agent-dispatch.yml (on: repository_dispatch, fired by the dialogue workflow only for a blocking verdict on a same-repository PR) hands the findings to the developer agent resolved from the PR's dev provider or vars.DEV_PROVIDER, which fixes or rebuts them in place. Only provider "anthropic" is implemented today; any other value fails the job's own preflight closed rather than guessing at an unverified action/SDK shape. Owner-provisioned prerequisites: vars.LLM_REVIEW_ESCALATE_AFTER (round threshold, default 3); one of secrets.CLAUDE_CODE_OAUTH_TOKEN / secrets.ANTHROPIC_API_KEY; and, so the dispatched agent authenticates as the dev GitHub App rather than borrowing the vendor action's own bundled identity, vars.INFISICAL_DEV_IDENTITY_ID plus Infisical /dev/ (env prod): DEV_GITHUB_APP_ID / DEV_GITHUB_APP_PRIVATE_KEY — until provisioned, the dialogue workflow still posts findings and escalates to the owner immediately rather than waiting on a fixer that can never start. .github/workflows/llm-review-recheck.yml (on: repository_dispatch, fired by dev-agent-dispatch.yml's own last step when its dispatched head is still current at the end of its run — i.e. the agent replied without pushing a commit, so pull_request:synchronize never fired on its own) re-verifies the PR hasn't moved on again and, if not, re-runs the exact same verify-llm-review composite action AI Review uses — one source of review logic across every trigger path. Same trust shape as AI Review regardless of path: contents: read, pull-requests: read, id-token: write, never a write token. No owner-provisioned prerequisites beyond what AI Review itself already needs — it authenticates identically.
 vendors:
   # Full detail (auth, secret paths, cost, rotation) lives in
   # docs/ops/vendors.md; this block is the machine-declared summary.
@@ -231,39 +155,37 @@ vendors:
     purpose: "RETIRED (owner decision 2026-10-29, local-only; cloud workflows removed by #503). The VPS keeps whatever it last ran; nothing here deploys to it."
     cost_eur_month: 0
     auth: none (retired; no SSH or API path remains in this repo)
-    docs: docs/ops/vendors.md#hetzner
+    docs: "docs/ops/vendors.md#hetzner"
   - name: Tailscale
     purpose: "RETIRED (owner decision 2026-10-29, local-only; removed with the cloud workflows by #503). No deploy transport or CI identity uses it now."
     cost_eur_month: 0
     auth: none (retired)
-    docs: docs/ops/vendors.md#tailscale
+    docs: "docs/ops/vendors.md#tailscale"
   - name: Infisical
     purpose: "sole secret store for the former cloud pipelines. Not needed for local work; secret revocation for retired vendors is not yet done."
     cost_eur_month: 0
     auth: OIDC (GitHub Actions identity token exchange) — no static API key
-    docs: docs/ops/vendors.md#infisical
+    docs: "docs/ops/vendors.md#infisical"
   - name: Cloudflare
     purpose: "RETIRED (planned edge never built; superseded 2026-10-29, local-only; cloud plumbing removed by #503)."
     cost_eur_month: 0
     auth: none (retired)
-    docs: docs/ops/vendors.md#cloudflare-planned--168170
+    docs: "docs/ops/vendors.md#cloudflare-planned--168170"
   - name: Supabase
     purpose: "SUPERSEDED (owner decision 2026-10-29, local-only; removed with the cloud workflows by #503). Each sub-app runs on SQLite on localhost; the hosted registry rows are retired in Phase 4 (D5, #450), which still needs owner-approved production steps."
     cost_eur_month: 0
     auth: none for the local platform (SQLite on localhost; owner key via platform-api)
-    docs: docs/ops/vendors.md#supabase
+    docs: "docs/ops/vendors.md#supabase"
   - name: GitHub
-    purpose: source of truth, CI/CD, container registry (ghcr.io) for the
-      Brain and Handler A images
+    purpose: source of truth, CI/CD, container registry (ghcr.io) for the Brain and Handler A images
     cost_eur_month: 0
     auth: built-in GITHUB_TOKEN, minted per-run
-    docs: docs/ops/vendors.md#github
+    docs: "docs/ops/vendors.md#github"
   - name: age
-    purpose: asymmetric encryption for every backup bundle before it
-      leaves CI
+    purpose: asymmetric encryption for every backup bundle before it leaves CI
     cost_eur_month: 0
     auth: public-key encryption; CI holds only the public recipient key
-    docs: docs/ops/vendors.md#age
+    docs: "docs/ops/vendors.md#age"
 
 work_tracking:
   system: github-issues

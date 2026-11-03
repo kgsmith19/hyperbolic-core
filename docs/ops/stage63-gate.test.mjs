@@ -1,7 +1,7 @@
 // node --test docs/ops/stage63-gate.test.mjs (run from the repo root)
 //
 // S9 RED characterization (Issue #427): v5 Gate/evidence semantics from
-// agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96 —
+// agent-engineering-standard @ 2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8 —
 // tools/gate_compliance.py (Stage 57: the read-only Standards Compliance lane
 // feeding the single final aggregator), tools/tracker_pipeline_gate.py (T05:
 // tracker, pipeline and gate contracts with GitHub YAML as the authoritative
@@ -74,7 +74,7 @@ test("S9 · provenance names every Gate/evidence module at the pinned SHA", () =
     assert.match(provenance(), new RegExp(`tools/${module}\\.py`));
     assert.match(golden._provenance, new RegExp(`tools/${module}\\.py`));
   }
-  assert.match(golden._provenance, /1686e3b490380194cff78767b88c4e0288410e96/);
+  assert.match(golden._provenance, /2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8/);
 });
 
 test("S9 · clean builders match upstream and hand out fresh copies", () => {
