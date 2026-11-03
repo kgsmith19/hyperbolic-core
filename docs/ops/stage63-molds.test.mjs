@@ -224,10 +224,9 @@ test("S3 · review-mold substrate is total: 59b binds all 15 frozen rules", asyn
 test("S3 · release-mold substrate is total: 61b binds all 14 frozen rules", async () => {
   const frozen = await import("./stage61b-release-proofbed-lib.mjs");
   assert.equal(frozen.FROZEN_RULES.length, 14);
-  // Oracle change (#503): the cloud pipeline's rules are declared gaps tracked
-  // by #504 (local release proof), so "total" means every rule has either a
-  // real on-disk mechanism or a declared gap Issue, never neither.
-  assert.deepEqual(frozen.GAP_ISSUES, ["#504"]);
+  // Oracle change (#504): the local release proof closed every gap #503
+  // reopened, so "total" now means every rule has a real on-disk mechanism.
+  assert.deepEqual(frozen.GAP_ISSUES, []);
   for (const rule of frozen.FROZEN_RULES) {
     const entry = frozen.ADOPTION[rule];
     assert.ok(entry, `61b rule ${rule} has no ADOPTION entry`);

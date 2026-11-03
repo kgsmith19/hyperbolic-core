@@ -1,5 +1,6 @@
 """Proves tagging and rollback behave as the release contract says (#504, AC3)."""
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -109,6 +110,70 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("no previous release", message)
         self.assertEqual(self.tags(), set())
         self.assertEqual(self.log.read()["releases"][-1]["status"], "rejected")
+
+    def test_a_failed_canary_deploys_nothing_and_tags_nothing(self):
+        """canary-missing: the candidate must prove itself before the live stack changes."""
+        deployed = Path(tempfile.mkdtemp()) / "deployed.txt"
+        code, message = release.tag(self.repo, self.log, "v1", "true", f"echo {{sha}} > {deployed}",
+                                    canary_cmd="false")
+        self.assertEqual(code, 2)
+        self.assertIn("canary failed", message)
+        self.assertFalse(deployed.exists())
+        self.assertEqual(self.tags(), set())
+
+    def test_a_failed_invariant_rolls_back_and_tags_nothing(self):
+        """invariant-breach: a healthy but corrupt release is rejected and rolled back."""
+        release.tag(self.repo, self.log, "v1", "true", "true")
+        commit(self.repo, "2")
+        code, message = release.tag(self.repo, self.log, "v2", "true", "true", invariant_cmd="false")
+        self.assertEqual(code, 2)
+        self.assertIn("invariant check failed", message)
+        self.assertIn("rolled back to release-v1", message)
+        self.assertEqual(self.tags(), {"release-v1"})
+
+    def test_missing_or_empty_telemetry_tags_nothing(self):
+        """missing-telemetry: a release nobody observed is never tagged."""
+        for cmd in ("false", "true", "echo '{}'", "echo not-json"):
+            with self.subTest(cmd=cmd):
+                code, message = release.tag(self.repo, self.log, "v1", "true", telemetry_cmd=cmd)
+                self.assertEqual(code, 2)
+                self.assertIn("telemetry check failed", message)
+                self.assertEqual(self.tags(), set())
+
+    def test_a_release_carries_a_signed_attestation_that_verifies(self):
+        """missing-attestation: the tag is backed by a signed manifest of SHA, tree and gates."""
+        code, _ = release.tag(self.repo, self.log, "v1", "true", canary_cmd="true",
+                              invariant_cmd="true", telemetry_cmd="echo '{\"services\": {\"a\": 1}}'")
+        self.assertEqual(code, 0)
+        entry = self.log.read()["releases"][-1]
+        doc = json.loads(Path(entry["attestation"]).read_text())
+        self.assertEqual(doc["payload"]["sha"], self.sha())
+        self.assertEqual(set(doc["payload"]["checks"]), {"canary", "health", "invariant", "telemetry"})
+        self.assertEqual(release.verify(self.repo, self.log, "v1")[0], 0)
+
+    def test_a_tampered_attestation_fails_verification(self):
+        """Catches an edited manifest or a moved tag passing as attested."""
+        release.tag(self.repo, self.log, "v1", "true")
+        path = Path(self.log.read()["releases"][-1]["attestation"])
+        doc = json.loads(path.read_text())
+        doc["payload"]["checks"]["health"] = "forged"
+        path.write_text(json.dumps(doc))
+        code, message = release.verify(self.repo, self.log, "v1")
+        self.assertEqual(code, 3)
+        self.assertIn("signature", message)
+
+    def test_a_moved_tag_fails_verification(self):
+        release.tag(self.repo, self.log, "v1", "true")
+        commit(self.repo, "2")
+        git(self.repo, "tag", "-f", "release-v1")
+        code, message = release.verify(self.repo, self.log, "v1")
+        self.assertEqual(code, 3)
+        self.assertIn("no longer points", message)
+
+    def test_the_signing_key_is_owner_only(self):
+        release.tag(self.repo, self.log, "v1", "true")
+        key = self.log.path.parent / "release-key"
+        self.assertEqual(key.stat().st_mode & 0o777, 0o600)
 
     def test_rollback_needs_a_previous_release(self):
         release.tag(self.repo, self.log, "v1", "true")

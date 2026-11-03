@@ -68,9 +68,9 @@ export const RULE_VERDICTS = {
 // The gap Issues for mechanisms hyperbolic-core does not have. Any `gap` in
 // ADOPTION must be one of these. #405-#408 had closed every gap against the
 // cloud deploy pipeline; the owner's local-only decision (2026-10-29) removed
-// that pipeline (#503), so its rules are gaps again until the local release
-// proof lands (#504, Phase 1d).
-export const GAP_ISSUES = ["#504"];
+// that pipeline (#503), and the local release proof (#504, Phase 1d) put every
+// rule back on a real local mechanism, so no gap remains.
+export const GAP_ISSUES = [];
 
 // One hyperbolic-core mechanism per frozen 61a rule. Each entry names EXACTLY
 // ONE of:
@@ -103,16 +103,16 @@ export const ADOPTION = {
     note: "restore-drill restores every declared SQLite snapshot and attachment directory, proving database hash/integrity/row counts plus per-file attachment hashes against the manifest (ops/test_store_ops.py).",
   },
   "missing-attestation": {
-    gap: "#504",
-    note: "no signed local build manifest exists yet: the SHA binding in ops/release.py is a tag, not an attestation; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
+    path: "ops/release.py",
+    note: "release.py tag writes an HMAC-SHA256 signed manifest (release name, commit SHA, tree SHA, gate results) to var/attestations/ and verifies it before the tag is written; `release.py verify` refuses a tampered manifest or a moved tag (ops/test_release.py).",
   },
   "invariant-breach": {
-    gap: "#504",
-    note: "no local invariant observation exists yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
+    path: "ops/release.py",
+    note: "release.py tag --invariant runs after the health check (make release: backup plus restore drill, whose SQLite integrity_check, row counts and blob hashes must hold); a failure rolls back and tags nothing (ops/test_release.py).",
   },
   "missing-telemetry": {
-    gap: "#504",
-    note: "no local telemetry series exists to fail closed on; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
+    path: "ops/telemetry.py",
+    note: "telemetry.py reports every compose-declared service's state and health and exits non-zero when one is missing, stopped or unhealthy; release.py tag --telemetry fails closed on a missing or empty report and records its digest in the attestation (ops/test_telemetry.py, ops/test_release.py).",
   },
   "partial-green": {
     path: ".github/workflows/pr-verify.yml",
@@ -131,12 +131,12 @@ export const ADOPTION = {
     note: "hyperbolic-core's Release Mold is built/attacked/qualified by this proofbed itself: the frozen 61a contract transcribed with provenance, behavioral pins against the real topology, and targeted-mutation RED sensitivity recorded in the PR.",
   },
   "canary-missing": {
-    gap: "#504",
-    note: "no local release declares a canary yet; the cloud deploy pipeline that proved this was removed by the owner's local-only decision (#503); the local release proof is tracked by #504.",
+    path: "ops/canary.sh",
+    note: "canary.sh builds the candidate as a separate compose project on shifted loopback ports with its own state root, requires every service healthy via ops/telemetry.py, then tears it down; release.py tag --canary runs it first, and a failed canary deploys and tags nothing (ops/test_release.py).",
   },
   "clean-promote": {
     path: "docs/ops/stage61b-release-proofbed-lib.mjs",
-    note: "unreachable while the #504 gaps are open: the first gap in check order (missing-attestation) REFUSEs, so no release can claim clean-promote until a signed build manifest, invariant, telemetry and canary exist.",
+    note: "reachable: every earlier rule in check order names a real local mechanism (#504 closed the last gaps), so a release that passes canary, health, invariant and telemetry and carries a verified attestation can claim clean-promote.",
   },
 };
 
