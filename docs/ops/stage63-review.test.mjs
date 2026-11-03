@@ -1,7 +1,7 @@
 // node --test docs/ops/stage63-review.test.mjs (run from the repo root)
 //
 // S8 RED characterization (Issue #426): v5 review semantics from
-// agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96 —
+// agent-engineering-standard @ 2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8 —
 // tools/independent_review.py (Stage 59a: the frozen 15-rule review and
 // remediation contract) and tools/spec_critic.py (Stage 28: the fresh Spec
 // critic and its ready gate).
@@ -76,7 +76,7 @@ test("S8 · provenance names both review modules at the pinned SHA", () => {
     assert.match(provenance(), new RegExp(`tools/${module}\\.py`));
     assert.match(golden._provenance, new RegExp(`tools/${module}\\.py`));
   }
-  assert.match(golden._provenance, /1686e3b490380194cff78767b88c4e0288410e96/);
+  assert.match(golden._provenance, /2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8/);
 });
 
 test("S8 · cleanReviewRequest matches upstream clean_request and is a fresh copy", () => {

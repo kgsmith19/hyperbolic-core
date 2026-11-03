@@ -2,7 +2,7 @@
 //
 // S5 RED characterization (Issue #423): v5 continuity and context-rotation
 // semantics from agent-engineering-standard @
-// 1686e3b490380194cff78767b88c4e0288410e96 — tools/context_rotation.py
+// 2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8 — tools/context_rotation.py
 // (Stage 48), tools/context_budget.py (zero-compaction governor),
 // tools/handoff_acceptance.py (Stage 45 HAT/SAT) and tools/capsule.py (the
 // provider-neutral goal/scratch recovery packet).
@@ -67,8 +67,8 @@ test("S5 · provenance names all four continuity modules at the pinned SHA", () 
   for (const module of ["context_rotation", "context_budget", "handoff_acceptance", "capsule"]) {
     assert.match(provenance(), new RegExp(`tools/${module}\\.py`));
   }
-  assert.match(provenance(), /1686e3b490380194cff78767b88c4e0288410e96/);
-  assert.match(golden._provenance, /1686e3b490380194cff78767b88c4e0288410e96/);
+  assert.match(provenance(), /2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8/);
+  assert.match(golden._provenance, /2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8/);
 });
 
 test("S5 · the shared golden loader regenerates at standard.lock's commit, never a stale SHA", () => {
