@@ -1,6 +1,6 @@
 {
  "_generator": "docs/ops/stage63-repo-map-golden.py",
- "_provenance": "agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96: tools/repo_map.py",
+ "_provenance": "agent-engineering-standard @ 2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8: tools/repo_map.py",
  "_python": "3.12",
  "frozen": {
   "build": [
