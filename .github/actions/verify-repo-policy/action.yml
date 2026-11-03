@@ -261,3 +261,14 @@ runs:
         else
           echo "No comparable base for this event; skipping incremental whitespace check."
         fi
+
+    # #450: the monorepo layout guards and the local operations oracles
+    # (ops/test_*.py: release, backup/restore drill, stale paths, per-app
+    # metadata). Standard library only; they need git and python3.
+    - name: Policy · Monorepo layout and local operations oracles
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 ops/check_stale_paths.py
+        python3 ops/check_app_metadata.py
+        python3 -m unittest discover -s ops -p 'test_*.py'
