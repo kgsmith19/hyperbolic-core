@@ -185,33 +185,30 @@ test("unusable-backup: the local store manifest declares LifeOS document blobs e
 
 // --- Half 3: the disclosed gaps are real gaps, and the posture is honest ---
 
-test("the cloud pipeline's rules are honest gaps tracked by #504 after its removal (#503)", () => {
-  // Oracle change (#503): #405-#408 had mapped these rules to the cloud deploy
-  // pipeline. The owner's local-only decision removed that pipeline, so each
-  // is a declared gap again, never a silent claim, until #504 lands.
-  // #504 (local release proof) moved five of these onto real paths:
-  // ops/release.py (stale-artifact, broken-integration, failed-rollback) and
-  // ops/store_ops.py (unusable-backup, restore-rpo). The four left are
-  // honest gaps: no signed build manifest, invariant, telemetry or canary.
-  assert.deepEqual(gapsOf(ADOPTION), Object.fromEntries([
+test("the cloud pipeline's rules are back on real local mechanisms after its removal (#503, #504)", () => {
+  // Oracle change (#504): #503 removed the cloud deploy pipeline and turned
+  // its rules into gaps tracked by #504. The local release proof moved every
+  // one of them onto a real path under ops/, so no gap remains; each path is
+  // proven to exist by the Half 1 test above.
+  assert.deepEqual(gapsOf(ADOPTION), {});
+  assert.deepEqual(GAP_ISSUES, []);
+  for (const rule of [
+    "stale-artifact", "broken-integration", "failed-rollback", "unusable-backup", "restore-rpo",
     "missing-attestation", "invariant-breach", "missing-telemetry", "canary-missing",
-  ].map((rule) => [rule, "#504"])));
-  for (const rule of ["stale-artifact", "broken-integration", "failed-rollback", "unusable-backup", "restore-rpo"]) {
+  ]) {
     assert.ok(ADOPTION[rule].path?.startsWith("ops/"), `${rule} must name a real local mechanism`);
   }
-  assert.deepEqual(GAP_ISSUES, ["#504"]);
   for (const file of [
     ".github/workflows/deploy.yml",
     ".github/workflows/lifeos-deploy.yml",
     ".github/workflows/ops-restore-drill.yml",
     ".github/workflows/canary-observe.yml",
   ]) {
-    assert.ok(!existsSync(path.join(root, file)), `${file} is back: move its rule off the gap`);
+    assert.ok(!existsSync(path.join(root, file)), `${file} is back: the release proof is local-only`);
   }
 });
 
-test("the aggregate posture is honest: the first gap REFUSEs, so clean-promote is unreachable today", () => {
-  const first = earliestGap(ADOPTION, FROZEN_RULES);
-  assert.equal(first, "missing-attestation");
-  assert.equal(RULE_VERDICTS[first], "REFUSE");
+test("the aggregate posture is honest: no gap remains, so clean-promote is reachable", () => {
+  assert.equal(earliestGap(ADOPTION, FROZEN_RULES), null);
+  assert.equal(RULE_VERDICTS["clean-promote"], "PROMOTE");
 });

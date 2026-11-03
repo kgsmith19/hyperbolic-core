@@ -14,13 +14,17 @@ LABEL org.opencontainers.image.source="https://github.com/kgsmith19/hyperbolic-c
 LABEL org.opencontainers.image.description="network-checker: which-layer network diagnostic for LLM API connections"
 
 WORKDIR /app
-COPY backend/network_checker ./network_checker
+# Keep the repository layout: server.py serves ../../frontend relative to
+# backend/network_checker/, so the package lives under backend/ (#504).
+COPY backend/network_checker ./backend/network_checker
 COPY frontend ./frontend
 COPY AGENTS.md README.md ./
+WORKDIR /app/backend
 
 # SQLite is the source of truth (see README.md); keep it on a mountable
 # volume so a container restart doesn't lose history.
-ENV NETWORK_CHECKER_DB=/data/network-checker.db
+ENV NETWORK_CHECKER_DB=/data/network-checker.db \
+    NETWORK_CHECKER_HOST=0.0.0.0
 VOLUME ["/data"]
 EXPOSE 8787
 
