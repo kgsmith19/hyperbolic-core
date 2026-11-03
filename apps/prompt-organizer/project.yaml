@@ -1,0 +1,19 @@
+# Repository facts. The standard pin lives once, at the repo root.
+name: prompt-organizer
+type: static-ui-and-sql-backend
+manifest: tool.json
+
+commands:
+  test: node --test --test-concurrency=1 backend/tests/*.test.mjs frontend/tests/*.test.mjs
+  serve: python3 -m http.server 8812 --directory frontend
+  e2e: ./node_modules/.bin/playwright test --config apps/prompt-organizer/frontend/playwright.config.mjs
+
+ci:
+  # The merge gate is the root PR Gate; this app runs in its "Toolbelt" lane
+  # (.github/actions/verify-tests-toolbelt).
+  workflow: ../../.github/workflows/pr-verify.yml
+  lane: "Toolbelt"
+  required_check: "PR Gate"
+  triggers:
+    - pull_request
+    - merge_group

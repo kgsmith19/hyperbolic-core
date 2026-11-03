@@ -98,7 +98,7 @@ runs:
       working-directory: apps/idea-intake
       env:
         TOOLBELT_REQUIRE_POSTGRES: "1"
-      run: node --test --test-concurrency=1 "tests/*.test.mjs"
+      run: node --test --test-concurrency=1 "backend/tests/*.test.mjs"
 
     - name: Dependencies · Cache Playwright Chromium
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

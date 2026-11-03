@@ -1,0 +1,19 @@
+# Repository facts. The standard pin lives once, at the repo root.
+name: network-checker
+type: python-cli-and-static-dashboard
+manifest: tool.json
+
+commands:
+  verify: bash backend/tools/check.sh
+  serve: cd backend && python3 -m network_checker serve --no-open
+  e2e: ./node_modules/.bin/playwright test --config apps/network-checker/frontend/playwright.config.mjs
+
+ci:
+  # The merge gate is the root PR Gate; this app runs in its "Toolbelt" lane
+  # (.github/actions/verify-tests-toolbelt).
+  workflow: ../../.github/workflows/pr-verify.yml
+  lane: "Toolbelt"
+  required_check: "PR Gate"
+  triggers:
+    - pull_request
+    - merge_group

@@ -1,6 +1,7 @@
 # Monorepo audit (Phase 0 of #450, queue Q35)
 
-Status: audit only. No code, path, workflow or production change is made by this document.
+Status: Phase 0 audit (sections 1-6, kept as recorded at the snapshot below) plus the #450 closeout
+(section 7). The audit counts describe the tree before the lift; section 7 describes the tree after it.
 Snapshot: `origin/main` at `b6720f1` (after #513), 2026-10-30. Counts re-run on this tree. Commands are reproducible from the repo root.
 
 ## 1. Apps and components
@@ -62,3 +63,36 @@ grep -lE 'apps/toolbelt|toolbelt/apps' .github/workflows/*.yml
 ```
 
 No root `Makefile` or `compose.yaml` exists yet; that is Q59 (#504).
+
+## 7. Closeout (#450, 2026-11-03)
+
+Every phase is complete or owner-excluded. Each claim is checked by a script that runs in the root PR
+Gate's Repository Standards lane (`.github/actions/verify-repo-policy`) and in `make test`.
+
+| AC | State | Proof |
+|---|---|---|
+| AC1: no app inside another app | Met. The three nested apps were lifted to `apps/<name>/`. `apps/lifeos/{backend,frontend}`, `apps/agentic-command-center/frontend` and `apps/shell/frontend` are components, per section 1 | `ops/check_app_metadata.py` |
+| AC2: `apps/toolbelt` gone | Met. The directory does not exist | `test ! -e apps/toolbelt` |
+| AC3: no `.github/` below the root | Met | `ops/check_app_metadata.py` |
+| AC4: stale references are history only | Met. The allowed hits are listed below | `ops/check_stale_paths.py`, mutation-tested by `ops/test_check_stale_paths.py` |
+| AC5: every app passes its own tests on its moved paths | Met. This fixed a gap left by the lift: the Toolbelt lane ran Idea Intake's tests from `tests/*.test.mjs`, which matched 0 files after the move, so the lane passed with 0 of 88 tests. It now runs `backend/tests/*.test.mjs` | `.github/actions/verify-tests-toolbelt` |
+| AC6: each app has `project.yaml`, `AGENTS.md`, `CLAUDE.md` and README with real paths | Met. `project.yaml` was added for network-checker, prompt-organizer and idea-intake, and a README for idea-intake. LifeOS `project.yaml` no longer describes app-local workflows | `ops/check_app_metadata.py` |
+| AC7: registry rows, `tool.json` and deploy targets read back live | Owner-excluded. Under the local-only decision (2026-10-29) no live Supabase registry or deploy target exists to read back, and #503 removed the cloud deploy. `tool.json` paths are validated by `npm run manifests:check`. Moving the Supabase migrations to per-app SQLite is Phase 2 of the std queue, not a layout change | `npm run manifests:check -- --registry` |
+| AC8: leanness record per app | Met. Each finding carries a decision | `docs/planning/leanness.md`, `python3 ops/leanness.py --check` |
+| AC9: CI parity and auto-merge on affected paths | Met. Every app runs in a root PR Gate lane | `.github/workflows/pr-verify.yml` |
+
+### Allowed stale-path hits
+
+These are history, never edited to the new layout:
+
+- `docs/archived/**`: archived documents.
+- `supabase/migrations/**` and `apps/*/backend/supabase/migrations/**`: applied SQL migrations. They are immutable, so their comments keep the paths they were written against.
+- `docs/planning/0*.md`, `docs/planning/1*.md`, `docs/planning/issues/**`: the frozen pre-#450 planning record (2026-08). Its `[VERIFIED: path]` labels cite the tree as it was then.
+- `docs/planning/monorepo-audit.md`: this audit, whose sections 1-6 describe the old layout.
+- `ops/check_stale_paths.py` and its test: they name the patterns they look for.
+
+### Other repoints in the closeout
+
+- The LifeOS `gen:api` script reads the local backend (`http://127.0.0.1:8000/openapi.json`), not the retired Tailscale production host.
+- The LifeOS README says SQLite migrations, not Postgres.
+- The `stage63-standards.test.mjs` fixture uses `apps/network-checker` as its write root.
