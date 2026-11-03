@@ -1,0 +1,45 @@
+name: Verify Local Stack
+description: >-
+  #504 live proof: the whole local stack comes up from the root compose.yaml
+  with no cloud credentials, every service reports healthy, a backup restores
+  and verifies, and a canary on shifted ports passes and tears itself down.
+  The caller must have checked out the repository and must not hold cloud
+  secrets in the environment.
+
+runs:
+  using: composite
+  steps:
+    - name: Stack · Install Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 22
+
+    - name: Stack · Install workspace dependencies (broker policy generator)
+      shell: bash
+      run: npm ci --no-audit --no-fund
+
+    - name: Stack · make up
+      shell: bash
+      run: make up
+
+    - name: Stack · make telemetry
+      shell: bash
+      run: make telemetry
+
+    - name: Stack · make backup and restore-drill
+      shell: bash
+      run: make backup && make restore-drill && cat var/restore-drill.json
+
+    - name: Stack · make canary
+      shell: bash
+      run: make canary
+
+    - name: Stack · Logs on failure
+      if: failure()
+      shell: bash
+      run: docker compose logs --no-color --tail 200
+
+    - name: Stack · make down
+      if: always()
+      shell: bash
+      run: make down
