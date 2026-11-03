@@ -1,12 +1,30 @@
-# Local stack (#504, AC1): the services that run as servers on this machine.
-# No cloud credentials are needed; every secret is a local, generated value.
-# Not in compose yet: shell, idea-intake, prompt-organizer, agentic-command-
-# center, brain, lifeos, broker and llm-handler. Each is tracked in its own
-# Issue; see the Makefile and ops/stores.json for what backup already covers.
+# Local stack (#504, AC1): every sub-app that runs as a server on this
+# machine. No cloud credentials are needed; every secret is a local,
+# generated value, and every port binds to loopback only.
+#
+# State lives in ./var/<app> on the host (git-ignored), the same paths
+# ops/stores.json backs up, so `make backup` captures what the stack really
+# wrote. Stateful services run as the host user (HOST_UID/HOST_GID, set by the
+# Makefile) so those bind mounts stay readable and writable from both sides.
+#
+# Host ports default to the service's own port and can be shifted with the
+# HOST_* variables, which ops/canary.sh uses to run a canary beside the live
+# stack. ops/test_compose.py pins this file against every tool.json and the
+# exclusions below.
+#
+# Not in compose, each with its reason (ops/test_compose.py keeps this list
+# complete):
+#   - llm-handler: hard-requires a Supabase PostgREST URL, anon key and a
+#     GitHub intake PAT at startup (services/llm-handler/src/config.ts); both
+#     are cloud dependencies retired by the local-only decision (2026-10-29).
+#   - shell, idea-intake, prompt-organizer, agentic-command-center: browser
+#     front ends or CLIs with no long-running server of their own; they run
+#     from their own `npm run dev` / CLI, per their AGENTS.md.
 name: hyperbolic-core
 
 services:
   platform-api:
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     build:
       context: .
       dockerfile: services/platform-api/Dockerfile
@@ -15,9 +33,9 @@ services:
       - path: services/platform-api/.env
         required: false
     ports:
-      - "127.0.0.1:8400:8400"
+      - "127.0.0.1:${HOST_PLATFORM_API_PORT:-8400}:8400"
     volumes:
-      - platform-data:/data
+      - ${HYP_VAR:-./var}/platform:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "require('net').connect(8400,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
@@ -26,14 +44,15 @@ services:
       retries: 5
 
   network-checker:
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     build:
       context: apps/network-checker
       dockerfile: backend/Dockerfile
     command: ["serve", "--no-open"]
     ports:
-      - "127.0.0.1:8787:8787"
+      - "127.0.0.1:${HOST_NETWORK_CHECKER_PORT:-8787}:8787"
     volumes:
-      - network-checker-data:/data
+      - ${HYP_VAR:-./var}/network-checker:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys;urllib.request.urlopen('http://127.0.0.1:8787/',timeout=3);sys.exit(0)"]
@@ -41,6 +60,67 @@ services:
       timeout: 3s
       retries: 5
 
-volumes:
-  platform-data:
-  network-checker-data:
+  lifeos:
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    build:
+      context: apps/lifeos/backend
+      dockerfile: Dockerfile
+    environment:
+      LIFEOS_DB_PATH: /app/var/lifeos/lifeos.db
+      LIFEOS_BLOB_ROOT: /app/var/lifeos/blobs
+    env_file:
+      - path: apps/lifeos/backend/.env
+        required: false
+    ports:
+      - "127.0.0.1:${HOST_LIFEOS_PORT:-8000}:8000"
+    volumes:
+      - ${HYP_VAR:-./var}/lifeos:/app/var/lifeos
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=3)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  broker:
+    build:
+      context: .
+      dockerfile: services/broker/Dockerfile
+    environment:
+      BROKER_POLICY_PATH: /etc/broker/broker-policy.json
+    ports:
+      - "127.0.0.1:${HOST_BROKER_PORT:-8300}:8300"
+    volumes:
+      # Generated from every tool.json by `make policy` (npm run broker-policy:generate).
+      - ${HYP_VAR:-./var}/broker/broker-policy.json:/etc/broker/broker-policy.json:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8300/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  brain:
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    build:
+      context: .
+      dockerfile: services/brain/Dockerfile
+    environment:
+      HOME: /data/home
+    env_file:
+      - path: services/brain/.env
+        required: false
+    ports:
+      - "127.0.0.1:${HOST_BRAIN_PORT:-8100}:8100"
+    volumes:
+      - ${HYP_VAR:-./var}/brain:/data
+      - ${HYP_VAR:-./var}/brain-workspaces:/workspaces
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8100/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s

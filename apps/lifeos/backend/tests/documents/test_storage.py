@@ -73,3 +73,19 @@ def test_ref_for_rejects_a_non_digest() -> None:
 def test_blob_root_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LIFEOS_BLOB_ROOT", "/srv/lifeos/blobs")
     assert blob_root() == Path("/srv/lifeos/blobs")
+
+
+def test_default_blob_root_is_the_path_backup_and_restore_drill_read(monkeypatch) -> None:
+    """#504: the app's default blob root must equal ops/stores.json's attachments path,
+    or `make backup` would snapshot an empty directory while documents live elsewhere."""
+    import json
+    from pathlib import Path
+
+    from domains.documents import storage
+
+    monkeypatch.delenv("LIFEOS_BLOB_ROOT", raising=False)
+    stores = json.loads(
+        (Path(__file__).resolve().parents[5] / "ops" / "stores.json").read_text()
+    )["stores"]
+    lifeos = next(s for s in stores if s["app"] == "lifeos")
+    assert storage.blob_root() == Path(lifeos["attachments"][0]["file"])

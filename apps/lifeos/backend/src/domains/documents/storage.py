@@ -2,7 +2,8 @@
 (ADR 015).
 
 A content-addressed directory tree on the deploy box's filesystem, rooted at
-``LIFEOS_BLOB_ROOT`` (default ``var/blobs`` beside the process). Nothing here
+``LIFEOS_BLOB_ROOT`` (default ``var/lifeos/blobs`` beside the process, the path
+ops/stores.json backs up). Nothing here
 touches the database and nothing in the database holds file content — the
 entity holds a ref, the store holds the bytes, and ``delete`` is the half of
 ``forget()`` that the kernel cannot do (invariant 9).
@@ -33,12 +34,12 @@ KIND_TEXT = "txt"
 # `\Z`, not `$`: `$` also matches before a trailing newline, which would admit
 # `ab/<digest>.bin\n` — a "valid" ref naming a path the store never wrote.
 REF_PATTERN = re.compile(r"^[0-9a-f]{2}/[0-9a-f]{64}\.(bin|txt)\Z")
-DEFAULT_ROOT = "var/blobs"
+DEFAULT_ROOT = "var/lifeos/blobs"
 
 
 def blob_root() -> Path:
     """Where blobs live. ``LIFEOS_BLOB_ROOT`` overrides; the default is
-    relative to the process working directory (``/app/var/blobs`` in the
+    relative to the process working directory (``/app/var/lifeos/blobs`` in the
     container, which compose mounts as a volume)."""
     return Path(read_env("LIFEOS_BLOB_ROOT") or DEFAULT_ROOT).expanduser()
 
