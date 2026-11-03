@@ -72,8 +72,11 @@ export default function Today() {
   const change = useMutation({
     mutationFn: ({ id, progress }: { id: string; progress: Progress }) =>
       setIntentionProgress(id, progress),
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: ["intentions"] }),
+    // Refetch this view, and the Tomorrow plan, which shows the same intentions.
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["intentions", "today"] });
+      void queryClient.invalidateQueries({ queryKey: ["intentions", "plan"] });
+    },
   });
 
   if (view.isPending) return <Loading />;

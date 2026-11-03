@@ -73,6 +73,8 @@ describe("Today", () => {
       "11111111-0000-0000-0000-000000000001",
       "BLOCKED",
     );
+    // A successful change refetches the Today view, so the page shows the saved state.
+    await vi.waitFor(() => expect(getToday).toHaveBeenCalledTimes(2));
   });
 
   it("flags stale items instead of presenting them as current", async () => {
