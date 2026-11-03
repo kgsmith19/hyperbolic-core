@@ -30,6 +30,8 @@ ALLOWED = (
     "docs/planning/monorepo-audit.md",
     "ops/check_stale_paths.py",
     "ops/test_check_stale_paths.py",
+    "ops/check_app_metadata.py",
+    "ops/test_check_app_metadata.py",
 )
 
 

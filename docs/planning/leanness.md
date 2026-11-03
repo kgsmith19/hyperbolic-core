@@ -7,10 +7,10 @@ means more than one lockfile or manifest of the same kind inside one app.
 | App | Tracked files | Source lines | Declared dependencies | Largest source files |
 | --- | ---: | ---: | ---: | --- |
 | agentic-command-center | 108 | 17012 | 18 | `backend/gui/server.test.mjs` (1467); `backend/runner/runner.test.mjs` (930); `backend/gui/server.mjs` (888) |
-| idea-intake | 30 | 3282 | 0 | `backend/tools/migrate-forgepad.mjs` (582); `backend/tests/intake-guards.test.mjs` (468); `backend/tests/migrate-forgepad-mapping.test.mjs` (407) |
+| idea-intake | 32 | 3282 | 0 | `backend/tools/migrate-forgepad.mjs` (582); `backend/tests/intake-guards.test.mjs` (468); `backend/tests/migrate-forgepad-mapping.test.mjs` (407) |
 | lifeos | 244 | 30709 | 27 | `frontend/src/api/types.gen.ts` (1252); `backend/src/domains/bills/dispute.py` (967); `backend/tests/bills/test_verification.py` (936) |
-| network-checker | 138 | 14573 | 0 | `backend/network_checker/__main__.py` (249); `backend/tests/test_change.py` (249); `backend/tests/test_fix_scripts.py` (249) |
-| prompt-organizer | 80 | 7101 | 0 | `backend/tests/contract.test.mjs` (555); `backend/tests/get-prompt.test.mjs` (495); `backend/tests/seed.test.mjs` (464) |
+| network-checker | 139 | 14573 | 0 | `backend/network_checker/__main__.py` (249); `backend/tests/test_change.py` (249); `backend/tests/test_fix_scripts.py` (249) |
+| prompt-organizer | 81 | 7101 | 0 | `backend/tests/contract.test.mjs` (555); `backend/tests/get-prompt.test.mjs` (495); `backend/tests/seed.test.mjs` (464) |
 | shell | 108 | 14732 | 18 | `frontend/src/pages/ideas/editor.tsx` (663); `frontend/src/pages/ideas/editor.test.tsx` (510); `frontend/e2e/notifications.spec.ts` (452) |
 
 ## Findings and decisions

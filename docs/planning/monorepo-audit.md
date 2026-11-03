@@ -72,7 +72,7 @@ Gate's Repository Standards lane (`.github/actions/verify-repo-policy`) and in `
 | AC | State | Proof |
 |---|---|---|
 | AC1: no app inside another app | Met. The three nested apps were lifted to `apps/<name>/`. `apps/lifeos/{backend,frontend}`, `apps/agentic-command-center/frontend` and `apps/shell/frontend` are components, per section 1 | `ops/check_app_metadata.py` |
-| AC2: `apps/toolbelt` gone | Met. The directory does not exist | `test ! -e apps/toolbelt` |
+| AC2: `apps/toolbelt` gone | Met. The lift and the dissolution landed in #520 and #523; the directory does not exist, and its return fails the gate | `ops/check_app_metadata.py` (`DISSOLVED`) |
 | AC3: no `.github/` below the root | Met | `ops/check_app_metadata.py` |
 | AC4: stale references are history only | Met. The allowed hits are listed below | `ops/check_stale_paths.py`, mutation-tested by `ops/test_check_stale_paths.py` |
 | AC5: every app passes its own tests on its moved paths | Met. This fixed a gap left by the lift: the Toolbelt lane ran Idea Intake's tests from `tests/*.test.mjs`, which matched 0 files after the move, so the lane passed with 0 of 88 tests. It now runs `backend/tests/*.test.mjs` | `.github/actions/verify-tests-toolbelt` |
@@ -89,7 +89,7 @@ These are history, never edited to the new layout:
 - `supabase/migrations/**` and `apps/*/backend/supabase/migrations/**`: applied SQL migrations. They are immutable, so their comments keep the paths they were written against.
 - `docs/planning/0*.md`, `docs/planning/1*.md`, `docs/planning/issues/**`: the frozen pre-#450 planning record (2026-08). Its `[VERIFIED: path]` labels cite the tree as it was then.
 - `docs/planning/monorepo-audit.md`: this audit, whose sections 1-6 describe the old layout.
-- `ops/check_stale_paths.py` and its test: they name the patterns they look for.
+- `ops/check_stale_paths.py`, `ops/check_app_metadata.py` and their tests: they name the patterns and the dissolved path they guard against.
 
 ### Other repoints in the closeout
 

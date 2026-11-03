@@ -60,6 +60,12 @@ class AppMetadataTest(unittest.TestCase):
         files = {**app("demo"), "apps/demo/.github/workflows/ci.yml": "x\n"}
         self.assertTrue(any("nested .github/" in p for p in check_app_metadata.problems(tree(files))))
 
+    def test_the_dissolved_toolbelt_directory_is_reported(self):
+        """AC2: apps/toolbelt was removed by #520/#523; any return of it fails the gate."""
+        files = {**app("demo"), "apps/toolbelt/README.md": "category\n"}
+        self.assertIn("apps/toolbelt: dissolved category directory exists again",
+                      check_app_metadata.problems(tree(files)))
+
     def test_the_real_tree_passes(self):
         self.assertEqual(check_app_metadata.problems(), [])
 

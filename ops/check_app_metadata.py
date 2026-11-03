@@ -6,6 +6,8 @@ no app holds another app's project.yaml or AGENTS.md below its root (except
 declared sub-components); and no .github/ directory exists below the
 repository root.
 
+apps/toolbelt, the dissolved category, must not exist (AC2).
+
 Usage: python3 ops/check_app_metadata.py
 """
 
@@ -29,9 +31,13 @@ def _walk(path):
             yield from _walk(child)
 
 
+DISSOLVED = ("apps/toolbelt",)  # AC2: removed by #520/#523; must never return
+
+
 def problems(root=ROOT):
     root = Path(root)
-    found = []
+    found = [f"{path}: dissolved category directory exists again" for path in DISSOLVED
+             if (root / path).exists()]
     for app in sorted(p for p in (root / "apps").iterdir() if p.is_dir()):
         rel = app.relative_to(root).as_posix()
         for name in REQUIRED:

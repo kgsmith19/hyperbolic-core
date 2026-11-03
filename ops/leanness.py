@@ -43,9 +43,9 @@ DECISIONS = {
 
 
 def tracked(root):
-    out = subprocess.run(["git", "-C", str(root), "ls-files", "apps"], check=True,
-                         capture_output=True, text=True).stdout
-    return [line for line in out.splitlines() if line]
+    out = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "apps"], check=True,
+                         capture_output=True).stdout
+    return [name for name in out.decode().split("\0") if name]
 
 
 def line_count(path):
