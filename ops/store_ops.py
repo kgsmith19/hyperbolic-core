@@ -13,6 +13,7 @@ not exist yet is reported as skipped, never invented.
 import argparse
 import hashlib
 import json
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -31,6 +32,11 @@ def load_stores(path=STORES_FILE):
 def store_path(store, environ):
     """The env override wins, so the drill backs up what the app really uses."""
     return Path(environ.get(store["env"], ROOT / store["file"]))
+
+
+def attachment_path(attachment, environ):
+    """The env override wins for an explicit attachment directory too."""
+    return Path(environ.get(attachment["env"], ROOT / attachment["file"]))
 
 
 def sha256(path):
@@ -59,22 +65,76 @@ def snapshot(src_path, dst_path):
         src.close()
 
 
+def relative_file(path, root, description):
+    """Return a containment-safe, portable path relative to root."""
+    relative = path.relative_to(root)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise RuntimeError(f"{description} escapes attachment root")
+    return relative
+
+
+def attachment_snapshot(src_root, dst_root):
+    """Copy one declared directory and return its verifiable file manifest."""
+    if not src_root.is_dir():
+        raise RuntimeError(f"attachment root is not a directory: {src_root}")
+    dst_root.mkdir(parents=True, exist_ok=False)
+    files = []
+    for src in sorted(src_root.rglob("*")):
+        if src.is_symlink():
+            raise RuntimeError(f"attachment contains unsupported symlink: {src}")
+        if not src.is_file():
+            continue
+        relative = relative_file(src, src_root, "source attachment path")
+        dst = dst_root / relative
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        files.append({"path": relative.as_posix(), "sha256": sha256(dst), "bytes": dst.stat().st_size})
+    return files
+
+
+def manifest_path(root, relative, description):
+    """Resolve a manifest path only if it stays inside its declared root."""
+    candidate = Path(relative)
+    if candidate.is_absolute() or not candidate.parts or ".." in candidate.parts:
+        raise RuntimeError(f"{description} escapes attachment root")
+    resolved_root = root.resolve()
+    resolved = (root / candidate).resolve()
+    if not resolved.is_relative_to(resolved_root):
+        raise RuntimeError(f"{description} escapes attachment root")
+    return resolved
+
+
 def backup(out_dir, stores, environ):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    entries, skipped = [], []
+    entries, skipped, attachments, skipped_attachments = [], [], [], []
     for store in stores:
         src = store_path(store, environ)
         if not src.exists():
             skipped.append(store["app"])
-            continue
-        dst = out / f"{store['app']}.db"
-        counts = snapshot(src, dst)
-        entries.append({"app": store["app"], "file": dst.name, "sha256": sha256(dst), "rows": counts})
+        else:
+            dst = out / f"{store['app']}.db"
+            counts = snapshot(src, dst)
+            entries.append({"app": store["app"], "file": dst.name, "sha256": sha256(dst), "rows": counts})
+        for attachment in store.get("attachments", []):
+            attachment_src = attachment_path(attachment, environ)
+            label = f"{store['app']}:{attachment['name']}"
+            if not attachment_src.exists():
+                skipped_attachments.append(label)
+                continue
+            root = f"{store['app']}-{attachment['name']}"
+            attachments.append({
+                "app": store["app"],
+                "name": attachment["name"],
+                "root": root,
+                "files": attachment_snapshot(attachment_src, out / root),
+            })
     manifest = {
         "taken_at": datetime.now(timezone.utc).isoformat(),
         "stores": entries,
         "skipped": skipped,
+        "attachments": attachments,
+        "skipped_attachments": skipped_attachments,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     return manifest
@@ -84,11 +144,12 @@ def restore_drill(backup_dir, report_path=None, now=None):
     started = time.monotonic()
     backup_dir = Path(backup_dir)
     manifest = json.loads((backup_dir / "manifest.json").read_text())
-    if not manifest["stores"]:
-        raise RuntimeError("backup holds no stores; nothing to prove")
+    attachments = manifest.get("attachments", [])
+    if not manifest["stores"] and not attachments:
+        raise RuntimeError("backup holds no stores or attachments; nothing to prove")
     now = now or datetime.now(timezone.utc)
     taken = datetime.fromisoformat(manifest["taken_at"])
-    results = []
+    results, attachment_results = [], []
     with tempfile.TemporaryDirectory() as scratch:
         for entry in manifest["stores"]:
             src = backup_dir / entry["file"]
@@ -105,10 +166,27 @@ def restore_drill(backup_dir, report_path=None, now=None):
             finally:
                 conn.close()
             results.append({"app": entry["app"], "rows": sum(entry["rows"].values())})
+        for attachment in attachments:
+            source_root = manifest_path(backup_dir, attachment["root"], "attachment root")
+            restore_root = Path(scratch) / attachment["root"]
+            restore_root.mkdir(parents=True, exist_ok=False)
+            for entry in attachment["files"]:
+                src = manifest_path(source_root, entry["path"], "attachment path")
+                if not src.is_file() or sha256(src) != entry["sha256"]:
+                    raise RuntimeError(f"{attachment['app']}:{attachment['name']}: attachment hash does not match the manifest")
+                if src.stat().st_size != entry["bytes"]:
+                    raise RuntimeError(f"{attachment['app']}:{attachment['name']}: attachment byte count does not match the manifest")
+                restored = manifest_path(restore_root, entry["path"], "attachment path")
+                restored.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, restored)
+                if sha256(restored) != entry["sha256"]:
+                    raise RuntimeError(f"{attachment['app']}:{attachment['name']}: restored attachment hash does not match the manifest")
+            attachment_results.append({"app": attachment["app"], "name": attachment["name"], "files": len(attachment["files"])})
     report = {
         "rpo_seconds": int((now - taken).total_seconds()),
         "rto_seconds": round(time.monotonic() - started, 3),
         "restored": results,
+        "restored_attachments": attachment_results,
     }
     if report_path:
         Path(report_path).parent.mkdir(parents=True, exist_ok=True)

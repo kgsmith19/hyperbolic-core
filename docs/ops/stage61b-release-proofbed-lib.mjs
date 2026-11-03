@@ -100,7 +100,7 @@ export const ADOPTION = {
   },
   "unusable-backup": {
     path: "ops/store_ops.py",
-    note: "restore-drill restores every snapshot and proves its hash, integrity_check and row counts against the manifest (ops/test_store_ops.py).",
+    note: "restore-drill restores every declared SQLite snapshot and attachment directory, proving database hash/integrity/row counts plus per-file attachment hashes against the manifest (ops/test_store_ops.py).",
   },
   "missing-attestation": {
     gap: "#504",
