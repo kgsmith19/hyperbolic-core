@@ -357,7 +357,7 @@ jobs:
     # See repository-standards above: skip the closed-PR fallback trigger.
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - name: Setup · Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -380,6 +380,12 @@ jobs:
         if: steps.detect.outputs.shell != 'true'
         shell: bash
         run: echo "The platform surface was not touched by this change; nothing to verify."
+
+      # #504: the whole local stack, proven at the exact PR head on a clean
+      # runner with no cloud credentials.
+      - name: Proof · Local stack (make up, telemetry, backup, restore drill, canary)
+        if: steps.detect.outputs.stack == 'true'
+        uses: ./.github/actions/verify-local-stack
 
   lifeos:
     name: "LifeOS"

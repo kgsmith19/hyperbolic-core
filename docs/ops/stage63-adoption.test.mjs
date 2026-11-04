@@ -8,7 +8,7 @@
 //
 // Stage 63 slice S1 (#419): hyperbolic-core's context/docs/maps adoption
 // slice. It binds the frozen v5 context/docs/maps contract (four modules in
-// agent-engineering-standard @ 1686e3b490380194cff78767b88c4e0288410e96)
+// agent-engineering-standard @ 2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8)
 // to the hyperbolic-core runtime mechanisms that satisfy each element — and
 // HONESTLY discloses the elements that do not exist yet as gaps tracked in
 // their own slice Issues (#420–#428), rather than claiming a proof that is
@@ -98,7 +98,7 @@ test("S1 · handoff_acceptance frozen rules and triggers", () => {
 });
 
 test("S1 · provenance names the exact Standard SHA", () => {
-  assert.match(provenance(), /1686e3b490380194cff78767b88c4e0288410e96/);
+  assert.match(provenance(), /2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8/);
 });
 
 // --- Half 2: grounded mapping (every mapped element → one real on-disk path) ---

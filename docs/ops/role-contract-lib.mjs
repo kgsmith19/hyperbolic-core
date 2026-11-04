@@ -12,7 +12,7 @@
 
 import { pythonSemantics as py } from "./stage63-adoption-lib.mjs";
 
-const SHA = "1686e3b490380194cff78767b88c4e0288410e96";
+const SHA = "2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8";
 export const PROVENANCE = `agent-engineering-standard @ ${SHA}: tools/role_contract.py + tools/role_authority.py (std#300, std#301)`;
 
 // --- tools/role_authority.py: the rules role_contract reuses ----------------
