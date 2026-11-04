@@ -214,6 +214,12 @@ test("S3 · review-mold substrate is total: 59b binds all 15 frozen rules", asyn
   for (const rule of frozen.FROZEN_RULES) {
     const entry = frozen.ADOPTION[rule];
     assert.ok(entry, `59b rule ${rule} has no ADOPTION entry`);
+    // Oracle change (#547): a rule retired with the AI Review lane carries
+    // its Issue instead of a path.
+    if (entry.retired) {
+      assert.match(entry.retired, /^#\d+$/, `59b rule ${rule} retired without an Issue`);
+      continue;
+    }
     assert.ok(typeof entry.path === "string" && entry.path.length > 0,
       `59b rule ${rule} has no mechanism path`);
     assert.ok(onDisk(entry.path),

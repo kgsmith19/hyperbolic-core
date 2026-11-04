@@ -68,8 +68,8 @@ export const ADOPTION = {
     note: "ReviewInfrastructureError throws (missing credential, transport error, no tool call); the CLI exits 2, never green.",
   },
   "stale-head": {
-    path: ".github/workflows/llm-review-recheck.yml",
-    note: "review and recheck bind to the exact PR head; a moved head re-runs rather than trusting a stale verdict.",
+    path: ".github/workflows/pr-verify.yml",
+    note: "PR Gate arms auto-merge with expectedHeadOid, so a verdict for a moved head can never merge. (The review-recheck workflow was removed with AI Review, #547.)",
   },
   "same-provider": {
     path: "packages/review/src/config.ts",
@@ -84,8 +84,8 @@ export const ADOPTION = {
     note: "SCOPE LOCK judges resolution against the finding's ORIGINAL ask; holding a finding open on a stricter re-shaped ask is forbidden.",
   },
   "dispute": {
-    path: ".github/workflows/dev-agent-dispatch.yml",
-    note: "dev agent fixes, rebuts with citation-grounded reasoning, or proposes out-of-scope; only the reviewer can mark outOfScope, only in response to an explicit proposal.",
+    retired: "#547",
+    note: "retired with the AI Review lane by owner decision (2026-11-04): the dev-agent fix/rebut dialogue is removed; independent review and its dispute loop move to kgsmith19/hyper-agents (P05).",
   },
   "repeat-non-engage": {
     path: "packages/review/src/validate.ts",

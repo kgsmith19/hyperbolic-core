@@ -14,9 +14,9 @@ Docker, with SQLite for data. This page lists what is still external, and what h
 
 | Vendor | Used for | Authentication |
 | --- | --- | --- |
-| GitHub | Code, Issues, Actions (PR verification and AI Review) | GitHub Apps (`hyperbolic-core-dev`, the reviewer App) and the Actions `GITHUB_TOKEN` |
-| Infisical | Model keys and App credentials for AI Review and the dev agent only (`/review/`, `/dev-agent/`) | GitHub OIDC machine identities (see [`runbook.md`](runbook.md)) |
-| Anthropic, OpenAI | Model APIs: AI Review (reviewer family ≠ builder family) and product LLM features | API keys read at run time; never committed |
+| GitHub | Code, Issues, Actions (PR verification) | the Actions `GITHUB_TOKEN` (the reviewer and dev GitHub Apps are retired, #547) |
+| Infisical | Model keys for product LLM features; the `/review/` and `/dev-agent/` paths are retired with AI Review (#547) | GitHub OIDC machine identities |
+| Anthropic, OpenAI | Model APIs for product LLM features | API keys read at run time; never committed |
 
 ## Superseded (being removed)
 

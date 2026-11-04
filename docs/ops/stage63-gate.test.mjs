@@ -364,19 +364,16 @@ test("S9 · the PR Gate is the always-run aggregator, the sole required check, a
   assert.equal(parsedWorkflow.on.pull_request.paths, undefined, "no paths filter: the gate always reports");
 });
 
-test("S9 · the AI Review invocation satisfies review ownership: non-empty separated inputs, no paths filter", () => {
-  const step = parsedWorkflow.jobs["ai-review"].steps.find((s) => s.uses === "./.github/actions/verify-llm-review");
-  assert.ok(step, "ai-review calls the verify-llm-review action");
-  const record = {
-    called: true,
-    builder_provider_family: step.with.review_builder_provider,
-    reviewer_provider_family: step.with.review_provider,
-    reviewer_model: step.with.review_model,
-    paths_filter: parsedWorkflow.on.pull_request.paths ?? null,
-  };
-  assert.deepEqual(checkReviewOwnership(record), []);
-  assert.notEqual(record.builder_provider_family, record.reviewer_provider_family,
-    "builder and reviewer resolve from different variables; the runtime separation check is pinned by S8");
+test("S9 · no AI Review lane is invoked: review ownership has nothing to own (#547)", () => {
+  // Oracle change (#547): the owner removed the AI Review lane (2026-11-04);
+  // independent review moves to kgsmith19/hyper-agents. The ownership check
+  // now pins that no job calls a review action at all.
+  assert.equal(parsedWorkflow.jobs["ai-review"], undefined, "the ai-review job is back");
+  for (const [id, job] of Object.entries(parsedWorkflow.jobs)) {
+    for (const step of job.steps ?? []) {
+      assert.notEqual(step.uses, "./.github/actions/verify-llm-review", `${id} still calls verify-llm-review`);
+    }
+  }
 });
 
 const ownerLabelMirror = () => {

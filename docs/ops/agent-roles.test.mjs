@@ -71,29 +71,8 @@ function regexAfter(source, marker) {
   return new Function(`return ${literal};`)();
 }
 
-test("dev-agent-dispatch.yml's preflight resolves dev.provider anthropic and no model from the file", () => {
-  const rolesText = rolesFile();
-  const source = read(".github/workflows/dev-agent-dispatch.yml");
-  const block = regexAfter(source, "const devBlockMatch =").exec(rolesText.replace(/\r\n/g, "\n"));
-  assert.ok(block, "dev block not found");
-  assert.equal(regexAfter(source, "const providerMatch =").exec(block[1])[1].trim().toLowerCase(), "anthropic");
-  assert.equal(regexAfter(source, "const modelMatch =").exec(block[1]), null);
-});
-
-test("dev-agent-post.yml's preflight resolves dev.provider anthropic and no model from the file", () => {
-  const rolesText = rolesFile();
-  const source = read(".github/workflows/dev-agent-post.yml");
-  assert.equal(regexAfter(source, "const providerMatch =").exec(rolesText)[1].trim().toLowerCase(), "anthropic");
-  assert.equal(regexAfter(source, "const modelMatch =").exec(rolesText), null);
-});
-
-test("llm-review-dialogue.yml's footer reads dev anthropic, review openai, model from vars only", () => {
-  const rolesText = rolesFile();
-  const source = read(".github/workflows/llm-review-dialogue.yml");
-  assert.equal(regexAfter(source, "const devProviderMatch =").exec(rolesText)[1].trim().toLowerCase(), "anthropic");
-  assert.equal(regexAfter(source, "const reviewProviderMatch =").exec(rolesText)[1].trim().toLowerCase(), "openai");
-  assert.equal(regexAfter(source, "const reviewModelMatch =").exec(rolesText), null);
-});
+// Oracle change (#547): the dev-agent dispatch/post and review-dialogue
+// workflows were removed with AI Review, so their reader tests go with them.
 
 test("pr-verify.yml's Work State reads dev.provider anthropic", () => {
   const rolesText = rolesFile();

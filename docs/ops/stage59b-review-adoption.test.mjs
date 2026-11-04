@@ -51,6 +51,13 @@ test("all 15 frozen 59a rules are adopted exactly once", () => {
 
 test("every adopted mechanism exists on disk", () => {
   for (const [rule, entry] of Object.entries(ADOPTION)) {
+    // Oracle change (#547): a rule whose mechanism left with the AI Review
+    // lane is recorded as retired, with its Issue and reason, never silently.
+    if (entry.retired) {
+      assert.match(entry.retired, /^#\d+$/, `rule ${rule} retired without an Issue`);
+      assert.ok(entry.note, `rule ${rule} retired without a reason`);
+      continue;
+    }
     assert.ok(entry.path && entry.note, `rule ${rule} needs a path and a note`);
     assert.ok(
       existsSync(path.join(root, entry.path)),
@@ -166,28 +173,23 @@ test("outage fails closed by construction (structural pin; behavior in package s
   assert.match(read("packages/review/bin/review.mjs"), /2  the review did not happen/);
 });
 
-test("fix/rebut/recheck behavior is preserved, not replaced", () => {
-  const dispatch = read(".github/workflows/dev-agent-dispatch.yml");
-  assert.match(dispatch, /1\. FIX IT/);
-  assert.match(dispatch, /2\. REBUT IT/);
-  assert.match(dispatch, /3\. PROPOSE OUT OF SCOPE/);
-  assert.match(dispatch, /deliberation turn/);
+test("the AI Review lane is gone and the PR Gate needs no review (#547)", () => {
+  // Oracle change (#547): these replace the pins that kept the review lane
+  // and its fix/rebut/recheck loop in place. Owner decision 2026-11-04.
   for (const workflow of [
     "llm-review.yml",
     "llm-review-dialogue.yml",
     "llm-review-recheck.yml",
     "dev-agent-dispatch.yml",
+    "dev-agent-post.yml",
   ]) {
-    assert.ok(existsSync(path.join(root, ".github/workflows", workflow)), workflow);
+    assert.ok(!existsSync(path.join(root, ".github/workflows", workflow)), `${workflow} is back`);
   }
-});
-
-test("the review lane stays one input to the single PR Gate", () => {
   const verify = read(".github/workflows/pr-verify.yml");
-  assert.match(verify, /\n {4}needs: \[repository-standards\]\n/);
+  assert.doesNotMatch(verify, /\n  ai-review:\n/);
   assert.match(
     verify,
-    /needs: \[repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos, ai-review\]/,
+    /needs: \[repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos\]/,
   );
   const required = (read("project.yaml").match(/^\s*required: true/mg) ?? []).length;
   assert.equal(required, 1);

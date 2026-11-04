@@ -29,7 +29,7 @@ ci:
   # logic despite two trigger paths.
   #
   # Architecture: Repository Standards verifies the repository; each app
-  # lane verifies itself; AI Review independently evaluates the change; PR
+  # lane verifies itself; PR
   # Gate verifies that every one of those lanes succeeded and alone
   # controls merge authorization. By owner directive this repository
   # optimizes for clear ownership, parallel execution, and diagnostics over
@@ -59,14 +59,8 @@ ci:
   # this file, the exact failure mode that stranded PRs #118, #120 and #160
   # on stale required-check lists.
   #
-  # AI Review is mandatory in substance too, by explicit owner decision: it
-  # is in PR Gate's needs:, so a provider outage or a blocking finding stops
-  # auto-merge until resolved (the owner's ruleset bypass remains the
-  # escape hatch). It depends on Repository Standards, and ONLY Repository
-  # Standards, so the leaked-secret scan completes before diff content
-  # reaches an external model provider; it deliberately does not wait on
-  # the app lanes, which would serialize the pipeline for no security
-  # benefit.
+  # AI Review was removed by owner decision (2026-11-04, #547); independent
+  # review moves to kgsmith19/hyper-agents.
   #
   # `required:` below states the INTENDED branch-ruleset configuration --
   # it is a specification, not a live read of the ruleset, which an agent
@@ -128,14 +122,6 @@ ci:
       covers: apps/lifeos — lint (ruff, npm run lint; the only app with a linter configured, run early inside verify-tests-lifeos itself) ahead of its backend/frontend suites.
       # rolled into "PR Gate" below, not typed here individually
       required: false
-    - order: 2
-      path: .github/workflows/pr-verify.yml
-      standalone: .github/workflows/llm-review.yml
-      action: .github/actions/verify-llm-review
-      gate: "AI Review"
-      covers: whole repo, every PR — no path filter; adversarial LLM review of the diff against the Issue and AGENTS.md, provider-separated from the builder. Needs Repository Standards ONLY, so the leaked-secret scan finishes before diff content reaches an external provider. Mandatory in substance via PR Gate's needs — not separately typed into the branch ruleset. Stages its verdict as an artifact (always(), so a blocking or failed run is captured, not just a passing one) for .github/workflows/llm-review-dialogue.yml to post — this job stays read-only and never writes to the pull request itself.
-      # mandatory through PR Gate's needs:, not separately required
-      required: false
     - order: 3
       path: .github/workflows/pr-verify.yml
       gate: "PR Gate"
@@ -146,8 +132,7 @@ ci:
   workflow: .github/workflows/pr-verify.yml
   required_check: PR Gate
   # note:
-  #   No app carries a nested .github directory (AGENTS.md's Workflow Safety Invariant); the verify-tests-lifeos composite action above is LifeOS's real gate here, like every other app's lane. "Repository Standards" and the six app lanes are real, required-in-substance checks -- "PR Gate" cannot go green without them -- but only that one rollup name is typed into the branch ruleset, to keep the required-check list from drifting out of sync with this file. "AI Review" is likewise mandatory in substance through PR Gate's needs: rather than as a second required-check name; it fails closed on any infrastructure problem (missing credential, invalid provider config, API error, timeout) and never substitutes a default green verdict. There is no separate merge-policy workflow: merge orchestration lives entirely in the "PR Gate" job.
-  #   Two further workflows implement Issue #128's deferred review-dialogue design (Issue #231) and are deliberately NOT in the gates list above — neither produces a pull-request check row, so neither can be typed into a required-checks list. .github/workflows/llm-review-dialogue.yml (on: workflow_run, keyed to "PR Verification") reads AI Review's staged verdict artifact and posts it into the pull request as exactly one managed comment (marker "<!-- agent-engineering-standard:llm-review:v1 -->", updated in place per head) carrying a round counter, and — same discipline as PR Gate — holds pull-requests: write while performing no checkout and no shell over repository content. .github/workflows/dev-agent-dispatch.yml (on: repository_dispatch, fired by the dialogue workflow only for a blocking verdict on a same-repository PR) hands the findings to the developer agent resolved from the PR's dev provider or vars.DEV_PROVIDER, which fixes or rebuts them in place. Only provider "anthropic" is implemented today; any other value fails the job's own preflight closed rather than guessing at an unverified action/SDK shape. Owner-provisioned prerequisites: vars.LLM_REVIEW_ESCALATE_AFTER (round threshold, default 3); one of secrets.CLAUDE_CODE_OAUTH_TOKEN / secrets.ANTHROPIC_API_KEY; and, so the dispatched agent authenticates as the dev GitHub App rather than borrowing the vendor action's own bundled identity, vars.INFISICAL_DEV_IDENTITY_ID plus Infisical /dev/ (env prod): DEV_GITHUB_APP_ID / DEV_GITHUB_APP_PRIVATE_KEY — until provisioned, the dialogue workflow still posts findings and escalates to the owner immediately rather than waiting on a fixer that can never start. .github/workflows/llm-review-recheck.yml (on: repository_dispatch, fired by dev-agent-dispatch.yml's own last step when its dispatched head is still current at the end of its run — i.e. the agent replied without pushing a commit, so pull_request:synchronize never fired on its own) re-verifies the PR hasn't moved on again and, if not, re-runs the exact same verify-llm-review composite action AI Review uses — one source of review logic across every trigger path. Same trust shape as AI Review regardless of path: contents: read, pull-requests: read, id-token: write, never a write token. No owner-provisioned prerequisites beyond what AI Review itself already needs — it authenticates identically.
+  #   No app carries a nested .github directory (AGENTS.md's Workflow Safety Invariant); the verify-tests-lifeos composite action above is LifeOS's real gate here, like every other app's lane. "Repository Standards" and the six app lanes are real, required-in-substance checks -- "PR Gate" cannot go green without them -- but only that one rollup name is typed into the branch ruleset, to keep the required-check list from drifting out of sync with this file. There is no separate merge-policy workflow: merge orchestration lives entirely in the "PR Gate" job.
 vendors:
   # Full detail (auth, secret paths, cost, rotation) lives in
   # docs/ops/vendors.md; this block is the machine-declared summary.
