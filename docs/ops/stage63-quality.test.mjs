@@ -2,7 +2,7 @@
 //
 // S4 RED characterization (Issue #422): implementation-quality semantics
 // from agent-engineering-standard tools/quality_eval.py @
-// 1686e3b490380194cff78767b88c4e0288410e96. This oracle is deliberately
+// 2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8. This oracle is deliberately
 // offline and pure: it characterizes advisory evaluation semantics without
 // changing any PR Gate, workflow, deployment, or production behavior.
 
@@ -27,7 +27,7 @@ test("S4 · dimensions, severities, and finding fields are frozen", async () => 
     "id", "rule", "finding", "severity", "excerpt",
   ]);
   assert.match(provenance(), /tools\/quality_eval\.py/);
-  assert.match(provenance(), /1686e3b490380194cff78767b88c4e0288410e96/);
+  assert.match(provenance(), /2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8/);
 });
 
 test("S4 · missing or partial input stays deterministic and defaults to incorrect", async () => {
@@ -114,7 +114,7 @@ test("S4 · implementation-quality rows are grounded or honestly gapped", async 
 // "a"/"B", "é"/"f" and U+1F600/U+FFFF differently, so each set pins one ordering.
 
 test("S4 · quality golden is pinned to the Standard SHA and names quality_eval.py", () => {
-  assert.match(golden._provenance, /1686e3b490380194cff78767b88c4e0288410e96/);
+  assert.match(golden._provenance, /2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8/);
   assert.match(golden._provenance, /tools\/quality_eval\.py/);
   assert.equal(golden._python, "3.12");
 });

@@ -25,7 +25,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const read = (rel) => readFileSync(path.join(root, rel), "utf8");
 const golden = JSON.parse(read("docs/ops/stage63-repo-map-golden.json"));
 const source = JSON.parse(read(MAP_SOURCE));
-const SHA = "1686e3b490380194cff78767b88c4e0288410e96";
+const SHA = "2d9b6b857f3aa9362f2b6ba402f1f52ca252afb8";
 
 // A thrown error becomes {error, message}, the shape the golden records.
 const outcome = (call) => {
