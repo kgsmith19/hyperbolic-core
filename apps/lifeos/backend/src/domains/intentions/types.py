@@ -47,6 +47,9 @@ INTENTION_SCHEMA: dict[str, Any] = {
         # boolean, the same shape `focus` already has, not x-pii (it is
         # state, not free text about the operator's life).
         "done": {"type": "boolean"},
+        # #531: explicit progress state; DONE keeps `done` in step
+        # (domains.intentions.today). Optional, so existing rows stay valid.
+        "progress": {"type": "string", "enum": ["READY", "STARTED", "BLOCKED", "WAITING", "DONE"]},
     },
     "required": ["title", "kind", "status", "focus"],
     "additionalProperties": False,

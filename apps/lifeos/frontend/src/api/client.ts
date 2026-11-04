@@ -197,6 +197,40 @@ export function markIntentionDone(id: string) {
   });
 }
 
+// #531: the Today command center. Hand-declared, like PlannedIntention above.
+export type Progress = "READY" | "STARTED" | "BLOCKED" | "WAITING" | "DONE";
+
+export const PROGRESS: Progress[] = ["READY", "STARTED", "BLOCKED", "WAITING", "DONE"];
+
+export interface TodayItem {
+  intention_id: string;
+  title: string;
+  kind: string;
+  focus: boolean;
+  progress: Progress;
+  next_action: string | null;
+  floor: string | null;
+  updated_at: string;
+  stale: boolean;
+}
+
+export interface TodayView {
+  as_of: string;
+  one_offs: TodayItem[];
+  more_one_offs: number;
+  anchors: TodayItem[];
+  next_two_minute_action: string | null;
+}
+
+export const getToday = () => api<TodayView>("/intentions/today");
+
+export function setIntentionProgress(id: string, progress: Progress) {
+  return api<TodayItem>(`/intentions/${id}/progress`, {
+    method: "POST",
+    body: JSON.stringify({ progress }),
+  });
+}
+
 export type ChatCitations = {
   entity_ids: string[];
   event_ids: string[];

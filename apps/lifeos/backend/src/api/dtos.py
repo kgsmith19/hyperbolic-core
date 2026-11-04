@@ -49,6 +49,13 @@ class DecideIn(BaseModel):
     actor: str = DEFAULT_ACTOR
 
 
+class ProgressIn(BaseModel):
+    """#531: one intention progress change (validated by domains.intentions.today)."""
+
+    progress: str
+    actor: str = DEFAULT_ACTOR
+
+
 class ProposeActionIn(BaseModel):
     """M4-20's `proposeAction` (05-e-lifeos.md section 3): kind names a
     task class, summary is the exact text an operator reviews and

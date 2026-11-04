@@ -14,7 +14,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 import jsonschema
-from fastapi import Depends, FastAPI, File, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -28,6 +28,7 @@ from api.dtos import (
     DecideIn,
     DefineTypeIn,
     ForgetIn,
+    ProgressIn,
     ProposeActionIn,
     RelateIn,
 )
@@ -69,6 +70,14 @@ from domains.episodes.capture import guard_capture as guard_episode_capture
 from domains.health_connect.ingest import IngestResult, process_payload
 from domains.intentions.focus import guard_capture as guard_intention_capture
 from domains.intentions.planner import PlannedIntention, mark_done, plan_today
+from domains.intentions.today import (
+    ProgressChange,
+    TodayItem,
+    TodayView,
+    progress_history,
+    set_progress,
+    today,
+)
 from domains.ops.review import ReviewFeed, review_feed
 from kernel.access import AccessContext, ScopeError
 from kernel.env import read_env
@@ -622,3 +631,25 @@ def post_mark_intention_done(
     event through capture()'s own identity-match merge; every prior
     event, including the intention's own creation, is untouched."""
     return mark_done(context, intention_id, actor=body.actor)
+
+
+@app.get("/intentions/today")
+def get_intentions_today(context: Ctx) -> TodayView:
+    """#531: at most three open one-offs, anchors apart, the next two-minute
+    action, and a stale flag per item. Read-only."""
+    return today(context)
+
+
+@app.post("/intentions/{intention_id}/progress")
+def post_intention_progress(intention_id: UUID, body: ProgressIn, context: Ctx) -> TodayItem:
+    """#531: record READY/STARTED/BLOCKED/WAITING/DONE as one appended event."""
+    try:
+        return set_progress(context, intention_id, body.progress, actor=body.actor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/intentions/{intention_id}/progress")
+def get_intention_progress(intention_id: UUID, context: Ctx) -> list[ProgressChange]:
+    """#531: the audit history of progress changes, oldest first, from the event log."""
+    return progress_history(context, intention_id)
