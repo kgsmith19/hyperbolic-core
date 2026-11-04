@@ -144,9 +144,12 @@ test("partial-green: PR Gate's verdict is its own needs.*.result, so a non-succe
   const verify = read(".github/workflows/pr-verify.yml");
   assert.match(
     verify,
-    /needs: \[repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos, ai-review\]/,
+    // Oracle change (#547): the AI Review lane left PR Gate's needs.
+    /needs: \[repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos\]/,
   );
-  assert.match(verify, /needs\.\w/); // verdict computed from needs results
+  // Verdict computed from the needs results themselves. (Oracle change #547:
+  // the old /needs\.\w/ pin only ever matched a comment in the removed lane.)
+  assert.match(verify, /GATE_RESULTS: \$\{\{ toJSON\(needs\) \}\}/);
   // Exactly one required check in the ruleset spec.
   const required = (read("project.yaml").match(/^\s*required: true/mg) ?? []).length;
   assert.equal(required, 1);
@@ -161,7 +164,8 @@ test("open-issues: PR Gate fails closed on an open linked Issue with an unchecke
 test("expired-evidence: verification binds to the exact head, so a stale verdict is never trusted", () => {
   const verify = read(".github/workflows/pr-verify.yml");
   assert.match(verify, /expectedHeadOid/);
-  assert.ok(existsSync(path.join(root, ".github/workflows/llm-review-recheck.yml")));
+  // Oracle change (#547): the review-recheck workflow was removed with AI
+  // Review; exact-head binding is the PR Gate's expectedHeadOid arming.
 });
 
 test("mold-unqualified: this proofbed IS hyperbolic-core's built/attacked/qualified Release Mold", () => {

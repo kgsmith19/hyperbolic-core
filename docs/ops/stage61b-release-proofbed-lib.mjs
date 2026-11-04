@@ -120,7 +120,7 @@ export const ADOPTION = {
   },
   "expired-evidence": {
     path: ".github/workflows/pr-verify.yml",
-    note: "verification evidence binds to the exact head (expectedHeadOid arming, Stage 60b #389; llm-review-recheck re-runs a moved head); a stale verdict is never trusted. Canary-window freshness specifically arrives with #406/#407.",
+    note: "verification evidence binds to the exact head (expectedHeadOid arming, Stage 60b #389); a stale verdict is never trusted. Canary-window freshness specifically arrives with #406/#407.",
   },
   "restore-rpo": {
     path: "ops/store_ops.py",

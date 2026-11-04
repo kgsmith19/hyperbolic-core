@@ -40,9 +40,9 @@ const workflow = readFileSync(workflowPath, "utf8").replace(/\r\n/g, "\n");
 
 // The worker lanes PR Gate rolls up, keyed by job id. Every id here must
 // appear in the YAML with exactly this display name, must have no needs:
-// of its own (repository-standards and the app lanes) or exactly the one
-// documented dependency (ai-review on repository-standards), and must be
-// named in PR Gate's own needs: list and its runtime EXPECTED_GATE_JOBS.
+// of its own, and must be named in PR Gate's own needs: list and its
+// runtime EXPECTED_GATE_JOBS. Oracle change (#547): the AI Review lane was
+// removed by owner decision; independent review moves to hyper-agents.
 const EXPECTED_WORKERS = [
   "repository-standards",
   "toolbelt",
@@ -51,7 +51,6 @@ const EXPECTED_WORKERS = [
   "brain",
   "platform",
   "lifeos",
-  "ai-review",
 ];
 
 const EXPECTED_DISPLAY_NAMES = {
@@ -62,7 +61,6 @@ const EXPECTED_DISPLAY_NAMES = {
   brain: "Brain",
   platform: "Platform",
   lifeos: "LifeOS",
-  "ai-review": "AI Review",
   "pr-gate": "PR Gate",
 };
 
@@ -150,7 +148,7 @@ test("the topology matches EXPECTED_WORKERS exactly: no missing worker, no unexp
   assert.equal(scriptOccurrences, 1, "pr-verify.yml must contain exactly one `script: |` block");
 });
 
-test("dependency shape: only ai-review and pr-gate declare needs:, and each names exactly what it should", () => {
+test("dependency shape: only pr-gate declares needs:, and it names exactly every worker", () => {
   function jobSlice(id, nextId) {
     const start = workflow.indexOf(`\n  ${id}:\n`);
     assert.ok(start >= 0, `job "${id}" not found`);
@@ -160,11 +158,10 @@ test("dependency shape: only ai-review and pr-gate declare needs:, and each name
 
   const allIds = [...EXPECTED_WORKERS, "pr-gate"];
 
-  // repository-standards and every app lane (everything except ai-review
-  // and pr-gate) must have no needs: of their own -- they start at T=0,
-  // fully parallel, so a lane cannot accidentally wait on a sibling.
+  // repository-standards and every app lane must have no needs: of their
+  // own -- they start at T=0, fully parallel, so a lane cannot accidentally
+  // wait on a sibling.
   for (const id of EXPECTED_WORKERS) {
-    if (id === "ai-review") continue;
     const idx = allIds.indexOf(id);
     const slice = jobSlice(id, allIds[idx + 1]);
     assert.doesNotMatch(slice, /\n {4}needs:/, `job "${id}" must not declare needs: -- it runs from T=0`);
@@ -176,13 +173,6 @@ test("dependency shape: only ai-review and pr-gate declare needs:, and each name
   const accWindows = jobSlice("acc-windows", "brain");
   assert.doesNotMatch(accLinux, /needs:/, "ACC Linux must not depend on ACC Windows");
   assert.doesNotMatch(accWindows, /needs:/, "ACC Windows must not depend on ACC Linux");
-
-  // AI Review depends on Repository Standards, and ONLY Repository
-  // Standards: the leaked-secret scan must finish before diff content
-  // reaches an external model, but waiting on the app suites too would
-  // serialize the pipeline for no security benefit.
-  const aiReview = jobSlice("ai-review", "pr-gate");
-  assert.match(aiReview, /\n {4}needs: \[repository-standards\]\n/, "ai-review must need exactly [repository-standards]");
 
   // PR Gate needs every worker, in the documented set.
   const prGate = jobSlice("pr-gate", null);
@@ -593,10 +583,8 @@ test("PR Gate arms auto-merge only on a green verdict, and never past a hold, dr
 
     const GREEN = allSuccess();
     const RED = allSuccess({ toolbelt: { result: "failure" } });
-    // Repository Standards failing is the realistic path to ai-review coming
-    // back "skipped" (GitHub skips a job whose own needs: failed) -- this is
-    // the exact case the header comment documents as the intended behavior.
-    const SKIPPED = allSuccess({ "repository-standards": { result: "failure" }, "ai-review": { result: "skipped" } });
+    // A skipped lane must fail the gate exactly like a failed one.
+    const SKIPPED = allSuccess({ lifeos: { result: "skipped" } });
 
     let m = await run({ gates: GREEN });
     assert.ok(m.calls.includes("ARM"), "green verdict must arm auto-merge");

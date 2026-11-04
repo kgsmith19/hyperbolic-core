@@ -17,11 +17,6 @@
       "plane": "source"
     },
     {
-      "path": ".github/workflows/llm-review.yml",
-      "reason": "standalone AI Review trigger; dialogue and recheck live beside it",
-      "plane": "source"
-    },
-    {
       "path": ".github/workflows/pr-verify.yml",
       "reason": "the only pull_request workflow: native lanes plus PR Gate, the required check and merge orchestrator",
       "plane": "protected"

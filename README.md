@@ -34,15 +34,14 @@ are native to this repo.
 
 `.github/workflows/pr-verify.yml` is the **only** workflow that runs on a pull request, and it
 handles both verification and merge orchestration. Each job is a native job producing exactly one
-check row under its own bare name — **nine rows, one required**. Repository Standards verifies the
-repository, each app lane verifies itself, AI Review independently evaluates the change, and PR
+check row under its own bare name — **eight rows, one required**. Repository Standards verifies the
+repository, each app lane verifies itself, and PR
 Gate verifies that every lane succeeded and alone controls merge authorization:
 
 | Row | What it does | Required |
 | --- | --- | --- |
 | `Repository Standards` | leaked-credential scan, repo structure, PR description, exact-head consistency — repository integrity only | No |
 | `Toolbelt` / `ACC Linux` / `ACC Windows` / `Brain` / `Platform` / `LifeOS` | each app's complete, self-contained engineering verification, fully parallel | No |
-| `AI Review` | adversarial LLM review of the diff — `needs:` Repository Standards only | No |
 | `PR Gate` | rollup verdict **and** merge orchestration | **Yes** |
 
 One check row per job is a GitHub invariant with no suppression, but by owner directive this repo

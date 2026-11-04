@@ -423,62 +423,6 @@ jobs:
         run: echo "LifeOS was not touched by this change; nothing to verify."
 
   # =====================================================================
-  # AI Review -- adversarial LLM review, after the secret scan only
-  # =====================================================================
-  # Depends on Repository Standards and ONLY Repository Standards: the
-  # leaked-credential scan must complete before this repository's diff is
-  # sent to an external model provider, and nothing else about the app
-  # suites is a security precondition for reviewing. Deliberately no
-  # dependency on the app lanes -- waiting for them would serialize the
-  # pipeline just to conserve reviewer tokens on a doomed PR, and PR Gate
-  # already refuses to merge anything whose tests failed.
-  #
-  # No if: on this job. If Repository Standards fails, GitHub skips this
-  # job, needs.ai-review.result becomes "skipped", and PR Gate fails --
-  # exactly the intended fail-closed behavior.
-  #
-  # Mandatory in substance: this job is in PR Gate's needs, so a failed or
-  # skipped review blocks auto-merge. It is NOT separately listed in the
-  # ruleset's required checks -- "PR Gate" is the one required name. It
-  # fails closed on infrastructure problems (missing credential, invalid
-  # provider config, API error, timeout) and never substitutes a default
-  # green verdict; a weak or malformed model ANSWER, by contrast, is a
-  # pass (see packages/review).
-  ai-review:
-    name: "AI Review"
-    needs: [repository-standards]
-    # See repository-standards above: skip the closed-PR fallback trigger.
-    # (Redundant with the needs: skip cascade once repository-standards is
-    # itself skipped, but explicit here so this job's own trigger shape does
-    # not depend on a reader tracing that cascade through a sibling job.)
-    if: github.event.action != 'closed'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      pull-requests: read
-      id-token: write
-    steps:
-      - name: Setup · Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: ./.github/actions/verify-llm-review
-        with:
-          pr_number: ${{ github.event.pull_request.number }}
-          base_sha: ${{ github.event.pull_request.base.sha }}
-          head_sha: ${{ github.event.pull_request.head.sha }}
-          github_token: ${{ github.token }}
-          infisical_identity_id: ${{ vars.INFISICAL_REVIEW_IDENTITY_ID }}
-          infisical_project_slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
-          review_provider: ${{ vars.REVIEW_PROVIDER }}
-          review_model: ${{ vars.REVIEW_MODEL }}
-          review_builder_provider: ${{ vars.DEV_PROVIDER }}
-          dev_model: ${{ vars.DEV_MODEL }}
-
-  # =====================================================================
   # PR Gate -- the sole required check AND the sole merge authority
   # =====================================================================
   # This job is deliberately boring. It is both:
@@ -498,10 +442,9 @@ jobs:
   #       construction. Nothing else in this repository may call
   #       enablePullRequestAutoMerge.
   #
-  # AI Review is in needs: by owner decision -- it is mandatory in
-  # substance. An LLM provider outage or a blocking finding therefore
-  # stops auto-merge until resolved; the owner's ruleset bypass remains
-  # the escape hatch, and no agent may use it.
+  # AI Review was removed by owner decision (2026-11-04, #547): independent
+  # review moves to kgsmith19/hyper-agents. The gate is the app lanes plus
+  # Repository Standards.
   #
   # This job MUST stay last in this file, and its github-script step must
   # remain the only embedded script block here: the workflow contract test
@@ -517,7 +460,7 @@ jobs:
   # pull-request-authored code hold only the read-only workflow default.
   pr-gate:
     name: "PR Gate"
-    needs: [repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos, ai-review]
+    needs: [repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos]
     # always(), not the default: the default skips this job the moment a
     # needs: job fails, which would leave THIS row -- the one row the
     # ruleset actually requires -- permanently absent on exactly the pull
@@ -589,7 +532,7 @@ jobs:
             // step with the job ids above -- a lane present here but missing
             // from needs: fails the gate rather than being skipped silently,
             // and the workflow contract test holds the two lists equal.
-            const EXPECTED_GATE_JOBS = ["repository-standards", "toolbelt", "acc-linux", "acc-windows", "brain", "platform", "lifeos", "ai-review"];
+            const EXPECTED_GATE_JOBS = ["repository-standards", "toolbelt", "acc-linux", "acc-windows", "brain", "platform", "lifeos"];
 
             let gateResults;
             try {

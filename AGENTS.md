@@ -94,11 +94,8 @@ At the start of every new, resumed, or post-compaction controller session:
 
 1. Read this `AGENTS.md`, then `project.yaml`.
 2. Read your harness's project-level config if present (e.g. `CLAUDE.md`, `GEMINI.md`,
-   `.kilo/HARNESS.md`). All agent-authored PR/Issue interactions (comments, review
-   replies, PR operations) go through the dev-agent GitHub App identity via
-   `dev-agent-post.yml` / `dev-agent-dispatch.yml`, never the ambient credential —
-   git transport and read-only `gh` queries excepted. Deviating requires an explicit
-   owner exception.
+   `.kilo/HARNESS.md`). The dev-agent posting workflows were removed with AI Review
+   (#547); agent work moves to `kgsmith19/hyper-agents`.
 3. Identify the active GitHub Issue, branch, PR, and exact head.
 4. Detect whether the environment is already isolated (worktree, container).
 5. Run the affected PR Gate's local-equivalent commands (see `project.yaml`) before modifying
@@ -124,26 +121,12 @@ This repo supports dynamic per-PR agent role attribution across three model vend
   1. PR label (e.g. `dev:google`, `dev:anthropic`, `dev:openai`), OR
   2. PR body metadata (e.g. `<!-- dev-agent: provider=google model=antigravity -->`), OR
   3. The repository variable fallback (`vars.DEV_PROVIDER` and `vars.DEV_MODEL`).
-- **Review Role Assignment:** `AI Review` operates via `vars.REVIEW_PROVIDER` and `vars.REVIEW_MODEL`.
-- **Provider Separation Guard:** The active dev provider family and review provider family must
-  resolve to different provider companies: `anthropic → anthropic`, `openai → openai`, and
-  `google → google`. Therefore dev and review cannot both be assigned `google` on the same PR.
-  `repository-standards` (`.github/actions/verify-repo-policy`) and `ai-review`
-  (`.github/actions/verify-llm-review`) mechanically enforce this separation on every PR.
+- **Review role:** the `AI Review` lane was removed (#547). `agent-roles.yaml` keeps the `review`
+  role so `repository-standards` still checks that dev and review providers differ.
 - `dev.provider` and `review.provider` are different value spaces, not one enum reused twice.
   `dev.provider` names the coding-agent **tool/harness's company** (`anthropic | openai | google`).
   `review.provider` names the raw model **API family** the structured-output review call targets
-  (`anthropic | openai | google`). `AI Review` is one sandboxed LLM call via `packages/llm`
-  (see `packages/review/src/config.ts`); it never runs an agent harness, so `google` there is the
-  Gemini API — the same one `services/brain` and `services/llm-handler` call for product features.
-- **An interactive session driving the `dev` role in this repo posts PR/Issue comments via
-  `.github/workflows/dev-agent-post.yml` (`workflow_dispatch`), not directly through its own
-  ambient GitHub credential.** That credential resolves to whichever account is connected to the
-  session's own environment — today, absent a dedicated bot identity connected there, that is the
-  owner's personal account — and dispatching this workflow instead posts under the dev App's own
-  identity, with the same role/provider/model footer `dev-agent-dispatch.yml`'s CI-triggered
-  comments already carry. Same caveat as every rule in this section: an instruction, not a
-  technical lock — nothing stops a session from posting directly regardless.
+  (`anthropic | openai | google`), as consumed by `packages/review/src/config.ts`.
 
 ## Provider-neutral roles
 
@@ -307,7 +290,7 @@ exact bare name. Nothing there uses `workflow_call`; the real work lives in comp
 `.github/actions/`, which run *inside* the calling job and so add no rows of their own.
 
 The architecture, by explicit owner directive: **Repository Standards verifies the repository. Each
-app verifies itself. AI Review independently evaluates the change. PR Gate verifies that every
+app verifies itself. PR Gate verifies that every
 mandatory lane succeeded and alone controls merge authorization.** Nine rows total, only one
 required: `PR Gate`.
 
@@ -320,7 +303,6 @@ required: `PR Gate`.
 | 1 | `Brain` | `services/brain/**` | No — rolled into `PR Gate` |
 | 1 | `Platform` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `services/broker/**`, `services/platform-api/**`, `docs/ops/**` | No — rolled into `PR Gate` |
 | 1 | `LifeOS` | `apps/lifeos/**` — including its own lint | No — rolled into `PR Gate` |
-| 2 | `AI Review` | whole repo — adversarial LLM review of the diff against the Issue and this file; `needs:` Repository Standards only | No — rolled into `PR Gate` |
 | 3 | `PR Gate` | rollup **and** merge orchestration: `needs:` every lane above, `if: always()` | **Yes** |
 
 **One check row per job is a GitHub invariant with no suppression mechanism.** By owner directive
@@ -355,17 +337,6 @@ reporting (`skipped`, `cancelled`) turns the rollup **red, not green**. It is th
 the branch ruleset's required-status-checks list. One name instead of many is one fewer thing to
 drift out of sync with this file — the exact failure mode that stranded PRs #118, #120 and #160 on
 stale required-check lists.
-
-`AI Review` needs **Repository Standards, and only Repository Standards** — not the app lanes. The
-leaked-credential scan must finish before any diff content is sent to an external model provider;
-waiting on the app suites too would serialize the pipeline for no matching security benefit. By
-**explicit owner decision** `AI Review` **is** in `PR Gate`'s `needs:` — a reversal of this
-repository's earlier policy, made deliberately as part of this architecture. A provider outage,
-an Infisical failure, or a valid blocking finding therefore stops auto-merge on every PR until
-resolved; the owner's ruleset bypass remains the escape hatch, and no agent may use it on the
-owner's behalf. If Repository Standards fails, GitHub skips `AI Review` outright (its own `needs:`
-failed), which surfaces as `result: "skipped"` — and `PR Gate`'s allow-list treats that exactly
-like any other non-`"success"` result: a failure, never a silent pass.
 
 The `LifeOS` lane runs only LifeOS's own lint commands (`ruff check` for the backend, `npm run
 lint` for the frontend), early in each half of its suite, ahead of `mypy`/`pytest` and the
@@ -412,128 +383,21 @@ action in place, not a second gate, when another app adopts a linter.
 
 Each gate's real work lives in a composite action under `.github/actions/` — `verify-secrets`,
 `verify-repo-policy`, `verify-pr-description`, `verify-tests-toolbelt`, `verify-tests-acc`,
-`verify-tests-acc-windows`, `verify-tests-brain`, `verify-tests-shell`, `verify-tests-lifeos`,
-`verify-llm-review`. Each is also reused by the matching standalone
+`verify-tests-acc-windows`, `verify-tests-brain`, `verify-tests-shell`, `verify-tests-lifeos`. Each is also reused by the matching standalone
 workflow file (`secret-scan.yml`, `repo-policy.yml`, `template-lint.yml`, `toolbelt-ci.yml`,
-`acc-ci.yml`, `brain-ci.yml`, `shell-ci.yml`, `lifeos-ci.yml`, `llm-review.yml`) for that file's
+`acc-ci.yml`, `brain-ci.yml`, `shell-ci.yml`, `lifeos-ci.yml`) for that file's
 own `merge_group`/`push`/`workflow_dispatch` triggers, so every check has exactly one source of
 logic despite two trigger paths. A composite action's own `action.yml` must be on disk before it
 can be resolved, so **every job referencing one checks out the repository first** — omitting that
 fails with "Can't find 'action.yml' … Did you forget to run actions/checkout?".
 
-### Independent LLM Review
+### Independent review (removed, #547)
 
-`AI Review` runs an adversarial LLM reviewer (`packages/review`, built on this repo's own
-`@hyperbolic/llm`) against each PR's diff, its linked Issue, and this file. It is **not** GitHub's
-native code review: this repository does not use approving reviews, Request Changes, or
-CODEOWNERS review gating. GitHub runs the job and reports a status check — exactly its role for
-`Repository Standards`. The judgment lives in this repo's own tooling.
-
-- **Provider separation is enforced, not preferred.** The reviewer's provider family must differ
-  from the builder's; the gate fails closed when they match. Provider identifiers are
-  case-insensitive and canonicalized to lowercase at one boundary (`packages/review/src/config.ts`),
-  for comparison against canonical families. A repository variable like `REVIEW_PROVIDER=OPENAI`
-  cannot slip past validation on casing alone, and the separation guard prevents both roles from
-  resolving to the same provider company. **The builder identity is stated, never assumed** (Issue
-  #354): `vars.DEV_PROVIDER` and `vars.DEV_MODEL` are both required, and `verify-llm-review` names
-  an empty one and fails before Infisical is reached or any provider is called. An assumed builder
-  made separation hold by coincidence — the guessed default collided only with an `anthropic`
-  reviewer, so for every other reviewer family an unset `vars.DEV_PROVIDER` imported a credential
-  and reviewed a change whose author was never stated.
-- **The model receives a structured-output tool and nothing else** — no shell, filesystem-write,
-  or network access. Repository content under review is data, never instructions. Injected text
-  can at worst skew a verdict; it cannot execute anything or reach a credential.
-- **Every finding requires concrete evidence and a citation** to a specific acceptance criterion
-  or a named section of this file. Uncited, evidence-free findings are discarded and **cannot
-  block** — a confused model must never stall real work.
-- **One shot, then scope-locked (Issue #273).** Round one may raise whatever the diff and the
-  linked Issue support. Every round after that, a blocking finding must correspond to one already
-  in the PR conversation, judged against that finding's *original* wording — never a stricter or
-  larger version invented on a later pass. A regression in code pushed specifically in response to
-  a finding may still be raised; a fresh look at the rest of the diff may not. The reviewer's tone
-  softens once real evidence lands (say what's still missing against the original ask, or close
-  the finding) without loosening the underlying standard. This exists because PR #270's review
-  went three rounds, each demanding more without ever converging — round 1 wanted a root-cause
-  report, round 2 wanted API traces, round 3 wanted webhook delivery records the reviewer's own
-  token cannot retrieve.
-- **Round-one discipline and proportionality (Issue #281).** By explicit owner directive, round
-  one raises a blocking finding only when highly confident it is real and material — an uncertain
-  or minor issue is `advisory`, not `blocking` — because everything round one raises becomes the
-  ceiling every later round is locked to. Separately, every finding's ask is capped at what its own
-  `citation` actually requires: a finding may never demand evidence the PR author has no way to
-  produce, the same drift PR #270 hit. Once a reply supplies any substantive, on-topic response to a
-  finding's original ask, the reviewer now defaults to resolving it rather than holding out for a
-  fuller or more polished version of that same response.
-- **Resolution-by-citation (Issue #325).** The bar for resolving an already-blocking finding is its
-  own `citation`, never the reviewer's originally-suggested implementation, and every deliberation
-  turn in either direction records an explicit position — agree, disagree, or other — on the other
-  side's most recent evidence with citation-grounded rationale: `dev-agent-dispatch.yml` instructs
-  the dev agent's replies into that shape, and on a re-review round every finding the reviewer
-  keeps blocking must carry a `deliberation` engaging the dev's latest evidence with new
-  citation-grounded reasoning. `packages/review`'s validator enforces the reviewer's half
-  mechanically, in the fail-open direction only: a re-review-round blocking finding without one is
-  demoted to advisory and marked `resolvedByDefault` — re-asserting the original preferred fix
-  cannot keep a pull request blocked — extending Issue #281's default-to-resolve posture. Round-one
-  behavior and Issue #273's scope-lock are untouched.
-- **Fail-closed vs. fail-open:** infrastructure failure (missing credential, unset
-  `REVIEW_MODEL`, invalid provider configuration, API error, timeout) fails the gate; a weak or
-  malformed model answer does not.
-- Findings are published to the run's job summary, and also posted into the pull request as
-  **exactly one managed comment** (marker `<!-- agent-engineering-standard:llm-review:v1 -->`,
-  updated in place per head — never a new comment per run), by `llm-review-dialogue.yml` (Issue
-  #231). That workflow triggers on `workflow_run`, not `pull_request`, so it adds no PR check row,
-  and it holds `pull-requests: write` under the same discipline as `PR Gate`: no checkout, no shell
-  over repository content, only `actions/github-script` against a downloaded artifact and the API.
-  `AI Review` itself stays read-only — the artifact is the only thing that crosses the boundary,
-  and the PR number it names is verified against the triggering run's own head SHA before anything
-  is posted.
-- A finding may carry an optional **suggested fix** (Issue #326): `packages/review`'s schema and
-  prompt restrict it to small, unambiguous, mechanical corrections — never judgment calls — and
-  `llm-review-dialogue.yml` renders a present one as a GitHub-native suggestion block in a real,
-  line-anchored PR review comment (the pulls review-comment API), deduplicated per head via the
-  managed comment's own state. When line-anchoring is impossible (no usable line, or the API
-  rejects the anchor) it degrades to a fenced block inside the managed comment — never a failed
-  delivery. The reviewer only proposes: applying a suggestion is GitHub's own write-gated UI
-  action, and the reviewer App's permissions are unchanged (`Contents: Read-only`). minted
-  from `REVIEW_GITHUB_APP_ID`/`REVIEW_GITHUB_APP_PRIVATE_KEY` in Infisical's `/review/` path —
-  the same identity and secret path `verify-llm-review` already reads model provider keys from —
-  via `actions/create-github-app-token`, the identical mechanism `dev-agent-dispatch.yml` uses for
-  the dev identity. This is a visibility improvement, not a gate: `llm-review-dialogue.yml` only
-  *delivers* findings someone else already computed, so an unprovisioned or failing App credential
-  degrades to posting under `github-actions[bot]` instead (`continue-on-error: true` on both the
-  Infisical pull and the token mint), logged loudly via `core.warning` and the run summary, never
-  silently. Findings reaching the pull request is the invariant that must never break; which
-  identity they post under is not.
-- The comment carries a **round counter**: it increments when a new head still leaves a blocking
-  finding open, holds steady on a same-head re-run, and resets on a passing verdict. A blocking
-  finding wakes the developer agent via `repository_dispatch` (`dev-agent-dispatch.yml`) — the
-  documented exception to `GITHUB_TOKEN`'s recursion prevention, needing no PAT or long-lived
-  credential beyond the agent's own model key — which fixes the finding, pushes, and lets the
-  gates re-run, or rebuts it in the same comment thread, argued from the work item, this standard,
-  and the diff, objectively and never from taste. A comment-only reply pushes no commit, so
-  `pull_request:synchronize` never fires to retrigger `AI Review` on its own; `dev-agent-dispatch.yml`'s
-  own last step detects that its dispatched head is still current at the end of its run and fires a
-  second `repository_dispatch` (`llm-review-recheck.yml`), the same documented exception, which
-  re-runs the identical `verify-llm-review` composite action `AI Review` uses — one source of
-  review logic across both trigger paths — so a rebuttal or a deferral proposal gets scored without
-  waiting for an unrelated commit to happen to land.
-- After a configurable number of unresolved rounds (`vars.LLM_REVIEW_ESCALATE_AFTER`, default 10 —
-  raised from 9 by explicit owner directive, Issue #284, itself raised from 3 by Issue #281) with
-  the gate still red, the comment tags
-  `@kgsmith19` once and states the unresolved
-  disagreement plainly — the documented rare escape hatch, not the normal path. The same
-  escalation fires immediately, without waiting on the round threshold, if the agent-wake
-  credential is unprovisioned or the dispatch itself fails: a loop that cannot advance must not
-  stall silently behind a counter that will never tick. This matters more now that `AI Review` is
-  a `needs:` dependency of `PR Gate` (below) — an unresolved blocking finding stops auto-merge for
-  real, not just cosmetically, so a disagreement that cannot resolve itself must reach the owner
-  rather than stall.
-
-> [!IMPORTANT]
-> **No agent review may block the owner.** `AI Review` is mandatory in substance — it is a
-> dependency of `PR Gate`, the sole required check, so a red or skipped review does stop auto-merge
-> — but `main` protection retains owner bypass, so `kgsmith19` may merge over a red review at any
-> time. An agent MUST NOT re-litigate, reverse, or open an unsolicited Issue against that decision.
+The `AI Review` lane, its review-dialogue, recheck and dev-agent dispatch workflows were removed by
+owner decision on 2026-11-04. Independent review moves to `kgsmith19/hyper-agents` (its P05
+independent-review stage). `packages/review` remains as a library with its own tests; no workflow
+calls it. `PR Gate` rolls up Repository Standards and the app lanes only. The owner may merge over
+any red check at any time.
 
 Merge orchestration is the last step of `PR Gate` in `pr-verify.yml`. It never checks out, fetches,
 downloads, or executes PR-controlled code, and never direct-merges: for ready same-repository PRs
@@ -558,7 +422,7 @@ auto-merge — the only merge path this workflow ever arms — silently failing 
 while both directly-merged PRs in the same history succeeded. On a `closed`+merged event, `PR Gate`
 re-parses the same `Closes #N` reference it already uses for the Work State comment and, only if
 that Issue is still open, closes it itself with an auditable comment explaining why. It is a no-op
-whenever GitHub's own native linkage already did the job. All eight verification lanes carry
+whenever GitHub's own native linkage already did the job. All seven verification lanes carry
 `if: github.event.action != 'closed'`, so this event costs only `PR Gate`'s own near-instant
 fallback check — never a second run of the full suite, and never a second `AI Review` call.
 

@@ -32,7 +32,6 @@
     {"path": ".github/workflows/pr-verify.yml", "reason": "the only pull_request workflow: native lanes plus PR Gate, the required check and merge orchestrator", "plane": "protected"},
     {"path": ".github/actions", "reason": "composite actions holding each lane's real logic, reused by the standalone workflows"},
     {"path": ".github/workflows/issue-close-sweep.yml", "reason": "closes linked Issues on remote merge truth (merged_at), idempotently"},
-    {"path": ".github/workflows/llm-review.yml", "reason": "standalone AI Review trigger; dialogue and recheck live beside it"},
     {"path": ".github/PULL_REQUEST_TEMPLATE.md", "reason": "PR body contract the PR description lane enforces"},
     {"path": "docs/ops", "reason": "operator tooling and contract oracles: workflow tests, Stage 59-63 adoption bindings"},
     {"path": "docs/ops/stage63-adoption-lib.mjs", "reason": "Stage 63 v5 ports with Python semantics; ADOPTION map of every adopted element"},
