@@ -58,7 +58,11 @@ async function signIn(page: Page) {
   // PostgREST returns a scalar RPC's result as a bare JSON literal, not a
   // wrapper object, matching isOwnerSession's `data === true` check.
   await page.route("**/rest/v1/rpc/is_platform_owner**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: "true" }),
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: "true",
+    }),
   );
 }
 
@@ -359,4 +363,84 @@ test("capture posts schema-driven attributes", async ({ page }) => {
     type_name: "workout",
     attributes: { kind: "run", duration_min: 32 },
   });
+});
+
+test("today fits a phone and shows the day's context", async ({ page }) => {
+  // #531: the command center is mobile-first. A phone-width viewport must show
+  // every section without horizontal scrolling, and a stale source must say so.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+  await mockApi(page);
+  await page.route(`**${API}/intentions/today`, (route) =>
+    route.fulfill({
+      json: {
+        as_of: "2026-11-03T06:00:00Z",
+        one_offs: [
+          {
+            intention_id: "i1",
+            title: "File the insurance claim",
+            kind: "task",
+            area: "family",
+            focus: true,
+            progress: "READY",
+            next_action: "open the claim portal",
+            floor: null,
+            updated_at: "2026-11-03T06:00:00Z",
+            stale: false,
+          },
+        ],
+        more_one_offs: 0,
+        anchors: [],
+        next_two_minute_action: "open the claim portal",
+        balance: { god: 0, family: 1, work: 0, unassigned: 0 },
+        schedule: [
+          {
+            appointment_id: "a1",
+            title: "Standup",
+            starts_at: "2026-11-03T15:00:00Z",
+            all_day: false,
+          },
+        ],
+        upcoming: [],
+        more_upcoming: 0,
+        sources: [
+          {
+            job: "domains.calendar.ingest",
+            last_receipt_at: "2026-11-01T05:00:00Z",
+            last_status: "ok",
+            missed: true,
+          },
+        ],
+        unavailable: [],
+      },
+    }),
+  );
+  await page.goto("/life/today");
+  await expect(
+    page.getByRole("heading", { name: "Today", exact: true }),
+  ).toBeVisible();
+  for (const name of [
+    "Top priorities",
+    "Balance",
+    "Today's schedule",
+    "Coming up",
+    "Sources",
+  ]) {
+    await expect(page.getByRole("region", { name })).toBeVisible();
+  }
+  await expect(page.getByText("not run today")).toBeVisible();
+  const overflow = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+  // Touch targets: every progress button is at least 36px tall (min-h-9).
+  const heights = await page
+    .getByRole("group", { name: "Progress for File the insurance claim" })
+    .getByRole("button")
+    .evaluateAll((buttons) =>
+      buttons.map((b) => b.getBoundingClientRect().height),
+    );
+  expect(Math.min(...heights)).toBeGreaterThanOrEqual(36);
 });
