@@ -76,6 +76,17 @@ document it came from is the document path above. Erasing one does not erase the
 other, and a re-run over a still-present document will not re-write an erased
 candidate's fields.
 
+## Today command center — intention schema (#531)
+
+**One-time, per environment, after deploying the Today view.** The type registry has no redefinition path, so an
+existing database keeps the `intention` schema without `progress` and `area`, and refuses every progress change:
+
+```bash
+docker compose run --rm --no-deps api python -m scripts.migrate_intention_today
+```
+
+It prints `types_updated=1` on the first run and `types_updated=0` after that. No record changes; both fields are optional.
+
 ## Bill verification — what turns a candidate into a fact (ADR 017)
 
 **One-time, per environment, before the first run** (the type registry has no

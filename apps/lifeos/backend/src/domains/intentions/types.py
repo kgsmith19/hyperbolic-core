@@ -16,6 +16,11 @@ TYPE_NAME = "intention"
 
 KINDS = ("task", "project", "habit_quota", "research_errand", "recurring_commitment")
 
+# #531 slice 2: the life area an intention serves, for the Today balance line.
+# Optional and closed: an untagged intention counts as "unassigned", never as
+# a guessed area.
+AREAS = ("god", "family", "work")
+
 # What the priority-list import writes and what a human has not yet touched:
 # a candidate is an LLM-proposed row awaiting the operator's confirming
 # re-capture through the capture UI (status is theirs to overwrite).
@@ -50,6 +55,10 @@ INTENTION_SCHEMA: dict[str, Any] = {
         # #531: explicit progress state; DONE keeps `done` in step
         # (domains.intentions.today). Optional, so existing rows stay valid.
         "progress": {"type": "string", "enum": ["READY", "STARTED", "BLOCKED", "WAITING", "DONE"]},
+        # #531 slice 2: optional life area (AREAS). State, not free text, so
+        # not x-pii. An existing database needs
+        # `python -m scripts.migrate_intention_today` once.
+        "area": {"type": "string", "enum": list(AREAS)},
     },
     "required": ["title", "kind", "status", "focus"],
     "additionalProperties": False,

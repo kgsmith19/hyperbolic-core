@@ -161,6 +161,14 @@ def review_feed(
     )
 
 
+def job_health(ctx: AccessContext, now: datetime | None = None) -> list[JobHealth]:
+    """The live job-health flags alone, for surfaces that show sync status
+    without the review feed's date range (#531's Today view)."""
+    today = (now or datetime.now(UTC)).date()
+    receipts = _dated(optional_find(ctx, "execution_receipt"), "started_at")
+    return [_job_health(job, receipts, today) for job in KNOWN_JOBS]
+
+
 def review_context() -> AccessContext:
     """Exactly the read scopes the review feed needs -- no write scope on
     anything it reads, and it emits nothing of its own."""

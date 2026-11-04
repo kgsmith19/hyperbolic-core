@@ -16,6 +16,21 @@ anchors, plus the next two-minute action and an explicit progress state.
   this view agree.
 - An item untouched for ``STALE_AFTER`` is flagged stale. A still-unconfirmed
   candidate never appears here (the planner's rule).
+
+Slice 2 adds the day's context, every part of it a live read through kernel
+services (nothing here is stored, so titles are shown, never copied):
+
+- ``balance``: open one-offs plus anchors per life area (``AREAS``), with
+  untagged ones under ``unassigned``. A zero is shown, never hidden, so a
+  neglected area is visible.
+- ``schedule``: appointments starting on today's local date
+  (``LIFEOS_BRIEFING_TZ``, the briefing's own zone), in time order.
+- ``upcoming``: the next ``UPCOMING_LIMIT`` appointments in the following
+  ``UPCOMING_DAYS`` days, with the rest counted.
+- ``sources``: the scheduled jobs' health (``domains.ops.review``), so a
+  stale calendar or a failed run is reported, not hidden behind an empty list.
+- A section whose read scope the caller lacks is reported in ``unavailable``
+  and left empty, instead of failing the whole view.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -25,9 +40,12 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from domains.intentions.planner import _priority_key
-from domains.intentions.types import STATUS_CANDIDATE, TYPE_NAME
+from domains.intentions.types import AREAS, STATUS_CANDIDATE, TYPE_NAME
+from domains.ops.briefing import briefing_zone
+from domains.ops.common import optional_find, parse_when
+from domains.ops.review import JobHealth, job_health
 from kernel import services
-from kernel.access import AccessContext
+from kernel.access import AccessContext, has
 from kernel.events import DEFAULT_ACTOR
 from kernel.models import Entity
 
@@ -35,6 +53,9 @@ ONE_OFF_LIMIT = 3
 ANCHOR_KINDS = ("recurring_commitment", "habit_quota")
 PROGRESS = ("READY", "STARTED", "BLOCKED", "WAITING", "DONE")
 STALE_AFTER = timedelta(days=14)
+UPCOMING_DAYS = 7
+UPCOMING_LIMIT = 5
+UNASSIGNED = "unassigned"
 
 Progress = Literal["READY", "STARTED", "BLOCKED", "WAITING", "DONE"]
 
@@ -43,6 +64,7 @@ class TodayItem(BaseModel):
     intention_id: UUID
     title: str
     kind: str
+    area: str | None
     focus: bool
     progress: Progress
     next_action: str | None
@@ -57,6 +79,20 @@ class TodayView(BaseModel):
     more_one_offs: int
     anchors: list[TodayItem]
     next_two_minute_action: str | None
+    balance: dict[str, int]
+    schedule: list["Appointment"]
+    upcoming: list["Appointment"]
+    more_upcoming: int
+    sources: list[JobHealth]
+    unavailable: list[str]
+
+
+class Appointment(BaseModel):
+    appointment_id: UUID
+    # None once the title is erased (forget() strips x-pii): the slot stays.
+    title: str | None
+    starts_at: datetime
+    all_day: bool
 
 
 class ProgressChange(BaseModel):
@@ -78,6 +114,7 @@ def _item(e: Entity, now: datetime) -> TodayItem:
         intention_id=e.id,
         title=str(a.get("title", "")),
         kind=str(a.get("kind", "")),
+        area=a.get("area") if a.get("area") in AREAS else None,
         focus=bool(a.get("focus", False)),
         progress=progress_of(a),  # type: ignore[arg-type]
         next_action=a.get("next_action") if isinstance(a.get("next_action"), str) else None,
@@ -85,6 +122,43 @@ def _item(e: Entity, now: datetime) -> TodayItem:
         updated_at=e.updated_at,
         stale=now - e.updated_at > STALE_AFTER,
     )
+
+
+def _balance(entities: list[Entity]) -> dict[str, int]:
+    counts = dict.fromkeys((*AREAS, UNASSIGNED), 0)
+    for e in entities:
+        area = e.attributes.get("area")
+        counts[area if area in AREAS else UNASSIGNED] += 1
+    return counts
+
+
+def _appointments(
+    ctx: AccessContext, now: datetime
+) -> tuple[list[Appointment], list[Appointment], int]:
+    """Today's appointments and the next ones after today, on the local date."""
+    zone = briefing_zone()
+    day = now.astimezone(zone).date()
+    horizon = day + timedelta(days=UPCOMING_DAYS)
+    dated: list[Appointment] = []
+    for e in optional_find(ctx, "appointment"):
+        if str(e.attributes.get("status", "")).upper() == "CANCELLED":
+            continue
+        starts_at = parse_when(e.attributes.get("starts_at"))
+        if starts_at is None:
+            continue
+        title = e.attributes.get("title")
+        dated.append(
+            Appointment(
+                appointment_id=e.id,
+                title=title if isinstance(title, str) and title else None,
+                starts_at=starts_at,
+                all_day=e.attributes.get("all_day") is True,
+            )
+        )
+    dated.sort(key=lambda a: a.starts_at)
+    schedule = [a for a in dated if a.starts_at.astimezone(zone).date() == day]
+    later = [a for a in dated if day < a.starts_at.astimezone(zone).date() <= horizon]
+    return schedule, later[:UPCOMING_LIMIT], max(0, len(later) - UPCOMING_LIMIT)
 
 
 def today(ctx: AccessContext, now: datetime | None = None) -> TodayView:
@@ -105,12 +179,31 @@ def today(ctx: AccessContext, now: datetime | None = None) -> TodayView:
     next_action = next(
         (i.next_action for i in surfaced if i.next_action and i.progress != "BLOCKED"), None
     )
+    unavailable: list[str] = []
+    schedule: list[Appointment] = []
+    upcoming: list[Appointment] = []
+    more_upcoming = 0
+    if has(ctx, "calendar:read"):
+        schedule, upcoming, more_upcoming = _appointments(ctx, now)
+    else:
+        unavailable.append("calendar")
+    sources: list[JobHealth] = []
+    if has(ctx, "ops:read"):
+        sources = job_health(ctx, now)
+    else:
+        unavailable.append("sources")
     return TodayView(
         as_of=now,
         one_offs=surfaced,
         more_one_offs=max(0, len(open_one_offs) - ONE_OFF_LIMIT),
         anchors=[_item(e, now) for e in anchors],
         next_two_minute_action=next_action,
+        balance=_balance(open_one_offs + anchors),
+        schedule=schedule,
+        upcoming=upcoming,
+        more_upcoming=more_upcoming,
+        sources=sources,
+        unavailable=unavailable,
     )
 
 

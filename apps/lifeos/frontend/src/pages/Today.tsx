@@ -1,17 +1,23 @@
-// The Today command center (#531, first slice): at most three actionable
-// one-offs, the recurring anchors kept apart, the next two-minute action,
-// and an explicit progress state per item. Every status change is one
+// The Today command center (#531): at most three actionable one-offs, the
+// recurring anchors kept apart, the next two-minute action, and an explicit
+// progress state per item. Slice 2 adds the day's context: the
+// God/Family/Work balance, today's schedule, the next commitments, and the
+// health of every source, so a stale calendar is said out loud. Every status change is one
 // appended event on the backend (domains/intentions/today.py); this page
 // never edits history, it only refetches after a change. A stale item
 // (untouched for 14 days) says so instead of looking current.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  AREAS,
   getToday,
   PROGRESS,
   setIntentionProgress,
+  type Appointment,
   type Progress,
+  type SourceHealth,
   type TodayItem,
+  type TodayView,
 } from "../api/client";
 import { Empty } from "../components/BriefingSections";
 import { ErrorText, Loading } from "../components/QueryStatus";
@@ -31,7 +37,9 @@ function Item({
         <span className="font-medium">{item.title}</span>
         {item.focus && <span className="text-xs text-amber-600">focus</span>}
         {item.stale && (
-          <span className="text-xs text-red-600">stale: not updated in 14+ days</span>
+          <span className="text-xs text-red-600">
+            stale: not updated in 14+ days
+          </span>
         )}
       </div>
       {item.next_action && (
@@ -66,9 +74,170 @@ function Item({
   );
 }
 
+const AREA_LABELS = { god: "God", family: "Family", work: "Work" } as const;
+
+function Balance({ balance }: { balance: TodayView["balance"] }) {
+  return (
+    <section aria-labelledby="balance">
+      <h2 id="balance" className="text-lg font-medium">
+        Balance
+      </h2>
+      <ul className="mt-1 flex flex-wrap gap-2 text-sm">
+        {AREAS.map((area) => (
+          <li
+            key={area}
+            className={`rounded border px-2 py-1 ${
+              balance[area] === 0
+                ? "border-amber-400 text-amber-700"
+                : "border-zinc-200"
+            }`}
+          >
+            {AREA_LABELS[area]}: {balance[area]}
+            {balance[area] === 0 && (
+              <span className="sr-only"> (nothing open)</span>
+            )}
+          </li>
+        ))}
+        {balance.unassigned > 0 && (
+          <li className="rounded border border-zinc-200 px-2 py-1 text-zinc-500">
+            Unassigned: {balance.unassigned}
+          </li>
+        )}
+      </ul>
+    </section>
+  );
+}
+
+function when(appointment: Appointment, withDay: boolean): string {
+  const date = new Date(appointment.starts_at);
+  const day = date.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+  if (appointment.all_day) return withDay ? `${day}, all day` : "All day";
+  const time = date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return withDay ? `${day}, ${time}` : time;
+}
+
+function Appointments({
+  id,
+  heading,
+  items,
+  withDay,
+  more,
+  unavailable,
+  empty,
+}: {
+  id: string;
+  heading: string;
+  items: Appointment[];
+  withDay: boolean;
+  more: number;
+  unavailable: boolean;
+  empty: string;
+}) {
+  return (
+    <section aria-labelledby={id}>
+      <h2 id={id} className="text-lg font-medium">
+        {heading}
+      </h2>
+      {unavailable ? (
+        <p className="text-sm text-red-600">
+          Calendar not available to this session.
+        </p>
+      ) : items.length === 0 ? (
+        <Empty>{empty}</Empty>
+      ) : (
+        <ul className="mt-2 space-y-1">
+          {items.map((appointment) => (
+            <li
+              key={appointment.appointment_id}
+              className="flex flex-wrap gap-2 text-sm"
+            >
+              <span className="min-w-24 text-zinc-500">
+                {when(appointment, withDay)}
+              </span>
+              <span>{appointment.title ?? "(title erased)"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {more > 0 && (
+        <p className="mt-1 text-sm text-zinc-500">{more} more this week.</p>
+      )}
+    </section>
+  );
+}
+
+const JOB_LABELS: Record<string, string> = {
+  "domains.ops.briefing": "Morning briefing",
+  "domains.calendar.ingest": "Calendar sync",
+  "domains.calendar.autolink": "Calendar people links",
+};
+
+function Sources({
+  sources,
+  unavailable,
+}: {
+  sources: SourceHealth[];
+  unavailable: boolean;
+}) {
+  return (
+    <section aria-labelledby="sources">
+      <h2 id="sources" className="text-lg font-medium">
+        Sources
+      </h2>
+      {unavailable ? (
+        <p className="text-sm text-red-600">
+          Source status not available to this session.
+        </p>
+      ) : (
+        <ul className="mt-1 space-y-1 text-sm">
+          {sources.map((source) => {
+            const failed =
+              source.last_status !== null && source.last_status !== "ok";
+            const state =
+              source.last_receipt_at === null
+                ? "never run"
+                : failed
+                  ? `last run ${source.last_status}`
+                  : source.missed
+                    ? "not run today"
+                    : "up to date";
+            return (
+              <li key={source.job} className="flex flex-wrap gap-2">
+                <span>{JOB_LABELS[source.job] ?? source.job}</span>
+                <span
+                  className={
+                    failed || source.missed ? "text-red-600" : "text-green-700"
+                  }
+                >
+                  {state}
+                </span>
+                {source.last_receipt_at && (
+                  <span className="text-zinc-500">
+                    ({new Date(source.last_receipt_at).toLocaleString()})
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export default function Today() {
   const queryClient = useQueryClient();
-  const view = useQuery({ queryKey: ["intentions", "today"], queryFn: getToday });
+  const view = useQuery({
+    queryKey: ["intentions", "today"],
+    queryFn: getToday,
+  });
   const change = useMutation({
     mutationFn: ({ id, progress }: { id: string; progress: Progress }) =>
       setIntentionProgress(id, progress),
@@ -82,8 +251,20 @@ export default function Today() {
   if (view.isPending) return <Loading />;
   if (view.isError) return <ErrorText error={view.error} />;
 
-  const { one_offs, more_one_offs, anchors, next_two_minute_action, as_of } =
-    view.data;
+  const {
+    one_offs,
+    more_one_offs,
+    anchors,
+    next_two_minute_action,
+    as_of,
+    balance,
+    schedule,
+    upcoming,
+    more_upcoming,
+    sources,
+    unavailable,
+  } = view.data;
+  const calendarUnavailable = unavailable.includes("calendar");
   const onProgress = (id: string, progress: Progress) =>
     change.mutate({ id, progress });
 
@@ -151,6 +332,33 @@ export default function Today() {
           </ul>
         )}
       </section>
+
+      <Balance balance={balance} />
+
+      <Appointments
+        id="schedule"
+        heading="Today's schedule"
+        items={schedule}
+        withDay={false}
+        more={0}
+        unavailable={calendarUnavailable}
+        empty="Nothing on the calendar today."
+      />
+
+      <Appointments
+        id="upcoming"
+        heading="Coming up"
+        items={upcoming}
+        withDay
+        more={more_upcoming}
+        unavailable={calendarUnavailable}
+        empty="Nothing in the next week."
+      />
+
+      <Sources
+        sources={sources}
+        unavailable={unavailable.includes("sources")}
+      />
 
       {change.error && (
         <p role="alert" className="text-sm text-red-600">

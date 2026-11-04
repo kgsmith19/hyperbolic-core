@@ -200,12 +200,39 @@ export function markIntentionDone(id: string) {
 // #531: the Today command center. Hand-declared, like PlannedIntention above.
 export type Progress = "READY" | "STARTED" | "BLOCKED" | "WAITING" | "DONE";
 
-export const PROGRESS: Progress[] = ["READY", "STARTED", "BLOCKED", "WAITING", "DONE"];
+export const PROGRESS: Progress[] = [
+  "READY",
+  "STARTED",
+  "BLOCKED",
+  "WAITING",
+  "DONE",
+];
+
+// #531 slice 2: the life areas the balance line counts, in display order.
+export type Area = "god" | "family" | "work";
+
+export const AREAS: Area[] = ["god", "family", "work"];
+
+export interface Appointment {
+  appointment_id: string;
+  // null once the title is erased; the slot stays.
+  title: string | null;
+  starts_at: string;
+  all_day: boolean;
+}
+
+export interface SourceHealth {
+  job: string;
+  last_receipt_at: string | null;
+  last_status: string | null;
+  missed: boolean;
+}
 
 export interface TodayItem {
   intention_id: string;
   title: string;
   kind: string;
+  area: Area | null;
   focus: boolean;
   progress: Progress;
   next_action: string | null;
@@ -220,6 +247,12 @@ export interface TodayView {
   more_one_offs: number;
   anchors: TodayItem[];
   next_two_minute_action: string | null;
+  balance: Record<Area | "unassigned", number>;
+  schedule: Appointment[];
+  upcoming: Appointment[];
+  more_upcoming: number;
+  sources: SourceHealth[];
+  unavailable: string[];
 }
 
 export const getToday = () => api<TodayView>("/intentions/today");
