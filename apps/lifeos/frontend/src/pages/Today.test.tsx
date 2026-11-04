@@ -51,14 +51,18 @@ describe("Today", () => {
     expect(within(next).getByText("open the contacts app")).toBeInTheDocument();
   });
 
-  it("records a progress change and marks the current state", async () => {
-    vi.mocked(getToday).mockResolvedValue({
+  it("records a progress change and shows the saved state after the refetch", async () => {
+    const view = (progress: TodayItem["progress"]) => ({
       as_of: "2026-11-03T06:00:00Z",
-      one_offs: [item({ progress: "STARTED" })],
+      one_offs: [item({ progress })],
       more_one_offs: 0,
       anchors: [],
       next_two_minute_action: null,
     });
+    // The server's answer before and after the save: the page must show what it reads back.
+    vi.mocked(getToday)
+      .mockResolvedValueOnce(view("STARTED"))
+      .mockResolvedValue(view("BLOCKED"));
     vi.mocked(setIntentionProgress).mockResolvedValue(item({ progress: "BLOCKED" }));
     const user = setupUser();
     renderWithProviders(<Today />);
@@ -73,8 +77,17 @@ describe("Today", () => {
       "11111111-0000-0000-0000-000000000001",
       "BLOCKED",
     );
-    // A successful change refetches the Today view, so the page shows the saved state.
-    await vi.waitFor(() => expect(getToday).toHaveBeenCalledTimes(2));
+    // UI oracle: after the refetch the saved state is the pressed one.
+    await vi.waitFor(() =>
+      expect(within(group).getByRole("button", { name: "BLOCKED" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    expect(within(group).getByRole("button", { name: "STARTED" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("flags stale items instead of presenting them as current", async () => {
