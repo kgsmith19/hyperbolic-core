@@ -29,6 +29,8 @@ import socketserver
 import threading
 import urllib.parse
 import webbrowser
+from collections.abc import Callable
+from typing import Any
 from dataclasses import asdict
 
 from backend.server.configuration import load_env_file, load_lines, save_env_file
@@ -57,7 +59,7 @@ class ThreadedUIServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
 
 
-def _num(data: dict, key: str, default, cast=int):
+def _num(data: dict, key: str, default, cast: Callable[[Any], Any] = int):
     try:
         value = data.get(key, default)
         return cast(value if value is not None else default)

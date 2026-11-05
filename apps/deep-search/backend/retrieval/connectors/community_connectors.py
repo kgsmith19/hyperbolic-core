@@ -12,6 +12,7 @@ Fetch helpers turn hard-to-scrape discussion pages into readable text:
 from __future__ import annotations
 
 import html
+import importlib
 import json
 import re
 
@@ -255,7 +256,7 @@ def wayback_snapshot_url(url: str) -> str:
     """Return the closest Wayback Machine snapshot URL, or ''."""
     data = _get_json("https://archive.org/wayback/available", {"url": url}, timeout=8)
     try:
-        closest = data["archived_snapshots"]["closest"]
+        closest = (data or {})["archived_snapshots"]["closest"]
         if closest.get("available") and str(closest.get("status", "200")).startswith("2"):
             snap = closest["url"]
             return snap.replace("http://", "https://", 1)
@@ -303,7 +304,7 @@ def fetch_youtube_video(url: str, max_transcript_chars: int = 30000) -> dict | N
         pass
     transcript = ""
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi  # optional dependency
+        YouTubeTranscriptApi = importlib.import_module("youtube_transcript_api").YouTubeTranscriptApi  # optional dependency
         fetched = YouTubeTranscriptApi().fetch(vid)
         transcript = " ".join(s.text for s in fetched.snippets)
     except Exception:

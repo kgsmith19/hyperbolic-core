@@ -32,10 +32,10 @@ def _parse_query_lines(output_text: str, watchlist: list[str], existing: list[st
 def expand_topic_queries(
     topic: str,
     watchlist: list[str],
-    model: str = "gpt-4o-mini",
+    model: str | None = "gpt-4o-mini",
     reasoning_effort: str | None = None,
     cost_tracker=None,
-    conceal_process: bool = True,
+    conceal_process: bool | None = True,
     strictness: float = 0.9,
     force_direction: bool = True,
 ) -> list[str]:
@@ -71,7 +71,7 @@ def expand_topic_queries(
 def _expand_topic_queries_bare(
     topic: str,
     watchlist: list[str],
-    model: str,
+    model: str | None,
     reasoning_effort: str | None,
     cost_tracker,
     strictness: float = 0.9,
@@ -107,7 +107,7 @@ def _expand_topic_queries_bare(
 def _expand_topic_queries_chaffed(
     topic: str,
     watchlist: list[str],
-    model: str,
+    model: str | None,
     reasoning_effort: str | None,
     cost_tracker,
     decoy_count: int = 7,
@@ -154,11 +154,11 @@ def propose_gap_queries(
     topic: str,
     watchlist: list[str],
     evidence: list[dict],
-    model: str = "gpt-4o-mini",
+    model: str | None = "gpt-4o-mini",
     reasoning_effort: str | None = None,
     cost_tracker=None,
     max_queries: int = 3,
-    conceal_process: bool = True,
+    conceal_process: bool | None = True,
 ) -> list[str]:
     """Propose follow-up queries covering angles missing from collected evidence.
 

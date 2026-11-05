@@ -64,7 +64,7 @@ class SpendReport:
 class CostTracker:
     """Thread-safe cost and token accounting engine."""
 
-    def __init__(self, model: str = "gpt-4o-mini", max_spend_usd: float = 2.00):
+    def __init__(self, model: str | None = "gpt-4o-mini", max_spend_usd: float = 2.00):
         self.model = model if model in MODEL_PRICING else "gpt-4o-mini"
         self.max_spend_usd = max_spend_usd
         self.total_prompt_tokens = 0

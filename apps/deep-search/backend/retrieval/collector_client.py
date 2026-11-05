@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import threading
+from typing import Any
 from backend.privacy.watchlist_redactor import redact, assert_safe_to_send
 from backend.privacy.encrypted_scratchpad import SecureZeroBuffer
 from backend.privacy.quarantine_zone import SanitizedQuarantine
@@ -56,7 +57,7 @@ class CollectorClient:
                 pass
             self.process = None
 
-    def send_task(self, task: dict, watchlist: list[str]) -> dict:
+    def send_task(self, task: dict, watchlist: list[str]) -> Any:
         """Send a retrieval task to the collector process through the outbound safety guard."""
         # OUTBOUND SAFETY GUARD: Verify task payload contains zero watchlist terms
         assert_safe_to_send(task, watchlist)
@@ -65,11 +66,15 @@ class CollectorClient:
             if not self.process or self.process.poll() is not None:
                 self._start_process()
 
-            line = json.dumps(task)
-            self.process.stdin.write(line + "\n")
-            self.process.stdin.flush()
+            process = self.process
+            if process is None or process.stdin is None or process.stdout is None:
+                return {"status": "error", "error": "Collector process terminated unexpectedly."}
 
-            resp_line = self.process.stdout.readline()
+            line = json.dumps(task)
+            process.stdin.write(line + "\n")
+            process.stdin.flush()
+
+            resp_line = process.stdout.readline()
             if not resp_line:
                 return {"status": "error", "error": "Collector process terminated unexpectedly."}
 

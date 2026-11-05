@@ -19,6 +19,7 @@ try:
     HAS_CURL_CFFI = True
 except ImportError:
     import urllib.request
+    cffi_requests = None
     HAS_CURL_CFFI = False
 
 # Check lxml availability
@@ -26,6 +27,7 @@ try:
     from lxml import html as lxml_html
     HAS_LXML = True
 except ImportError:
+    lxml_html = None
     HAS_LXML = False
 
 
@@ -61,7 +63,7 @@ def search_bing(query: str, max_results: int = 10) -> list[dict]:
     }
     raw_html = ""
     try:
-        if HAS_CURL_CFFI:
+        if HAS_CURL_CFFI and cffi_requests is not None:
             with engine_health.throttle("bing"):
                 resp = cffi_requests.get(url, headers=headers, impersonate="chrome124", timeout=8)
             if resp.status_code == 200:
@@ -80,7 +82,7 @@ def search_bing(query: str, max_results: int = 10) -> list[dict]:
         return []
 
     items = []
-    if HAS_LXML:
+    if HAS_LXML and lxml_html is not None:
         try:
             tree = lxml_html.fromstring(raw_html)
             for li in tree.xpath('//li[contains(@class, "b_algo")]'):

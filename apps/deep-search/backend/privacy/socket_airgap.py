@@ -17,7 +17,7 @@ def _get_openai_ips() -> set[str]:
     try:
         for host in ("api.openai.com", "openai.com"):
             for item in socket.getaddrinfo(host, 443):
-                _OPENAI_IPS.add(item[4][0])
+                _OPENAI_IPS.add(str(item[4][0]))
     except Exception:
         pass
     return _OPENAI_IPS
@@ -36,7 +36,8 @@ def enforce_secret_core_socket_block(allow_openai: bool = False) -> None:
     if _ORIGINAL_SOCKET_CONNECT is not None:
         return
 
-    _ORIGINAL_SOCKET_CONNECT = socket.socket.connect
+    original_connect = socket.socket.connect
+    _ORIGINAL_SOCKET_CONNECT = original_connect
 
     def airgapped_connect(self, address):
         host, port = address[0], address[1]
@@ -44,21 +45,21 @@ def enforce_secret_core_socket_block(allow_openai: bool = False) -> None:
 
         # Loopback is always permitted for local IPC and local services
         if host_str in ("127.0.0.1", "localhost", "::1", "0.0.0.0"):
-            return _ORIGINAL_SOCKET_CONNECT(self, address)
+            return original_connect(self, address)
 
         # If allow_openai is enabled, permit connections to OpenAI hostnames or resolved IPs
         if _ALLOW_OPENAI and port in (443, 80):
             if "openai.com" in host_str:
-                return _ORIGINAL_SOCKET_CONNECT(self, address)
+                return original_connect(self, address)
             openai_ips = _get_openai_ips()
             if host_str in openai_ips:
-                return _ORIGINAL_SOCKET_CONNECT(self, address)
+                return original_connect(self, address)
             # Re-check resolution in case of dynamic DNS / Cloudflare anycast rotation
             try:
-                refreshed_ips = {item[4][0] for item in socket.getaddrinfo("api.openai.com", 443)}
+                refreshed_ips = {str(item[4][0]) for item in socket.getaddrinfo("api.openai.com", 443)}
                 _OPENAI_IPS.update(refreshed_ips)
                 if host_str in _OPENAI_IPS:
-                    return _ORIGINAL_SOCKET_CONNECT(self, address)
+                    return original_connect(self, address)
             except Exception:
                 pass
 

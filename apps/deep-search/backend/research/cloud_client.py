@@ -34,7 +34,7 @@ def _load_env_file():
 _load_env_file()
 
 
-def get_api_key(model: str = "gpt-4o-mini") -> str:
+def get_api_key(model: str | None = "gpt-4o-mini") -> str:
     """Return the configured API key for the given model, or "" when absent."""
     lowered = (model or "").lower()
     if lowered.startswith("claude"):
@@ -44,11 +44,11 @@ def get_api_key(model: str = "gpt-4o-mini") -> str:
     return os.environ.get("OPENAI_API_KEY", "").strip()
 
 
-def has_api_key(model: str = "gpt-4o-mini") -> bool:
+def has_api_key(model: str | None = "gpt-4o-mini") -> bool:
     return bool(get_api_key(model))
 
 
-def is_reasoning_model(model: str) -> bool:
+def is_reasoning_model(model: str | None) -> bool:
     """Models that accept a reasoning-effort parameter on the Responses API."""
     lowered = (model or "").lower()
     return any(k in lowered for k in ("o1", "o3", "o4", "gpt-5"))
@@ -56,7 +56,7 @@ def is_reasoning_model(model: str) -> bool:
 
 def invoke_model(
     prompt: str,
-    model: str = "gpt-4o-mini",
+    model: str | None = "gpt-4o-mini",
     reasoning_effort: str | None = None,
     cost_tracker: CostTracker | None = None,
     max_output_tokens: int | None = None,
@@ -105,14 +105,14 @@ def invoke_model(
     return output_text
 
 
-def _invoke_anthropic(prompt: str, model: str, cost_tracker: CostTracker | None = None, max_output_tokens: int | None = None) -> str:
+def _invoke_anthropic(prompt: str, model: str | None, cost_tracker: CostTracker | None = None, max_output_tokens: int | None = None) -> str:
     import anthropic
     api_key = get_api_key(model)
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not configured")
     client = anthropic.Anthropic(api_key=api_key)
     response = client.messages.create(
-        model=model,
+        model=model or "",
         max_tokens=max_output_tokens or 2048,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -132,7 +132,7 @@ def _invoke_anthropic(prompt: str, model: str, cost_tracker: CostTracker | None 
     return output_text
 
 
-def _invoke_google(prompt: str, model: str, cost_tracker: CostTracker | None = None, max_output_tokens: int | None = None) -> str:
+def _invoke_google(prompt: str, model: str | None, cost_tracker: CostTracker | None = None, max_output_tokens: int | None = None) -> str:
     import urllib.request
     import json
     api_key = get_api_key(model)
