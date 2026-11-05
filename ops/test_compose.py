@@ -24,6 +24,8 @@ EXCLUDED = {
     "apps/prompt-organizer": "prompt-organizer",
     "apps/shell": "shell",
     "apps/agentic-command-center": "agentic-command-center",
+    "apps/deep-search": "deep-search",
+    "apps/creative-studio": "creative-studio",
 }
 
 
