@@ -15,6 +15,7 @@ Covers:
 import json
 import os
 import unittest
+import unittest.mock
 from unittest.mock import MagicMock, patch
 
 from backend.retrieval import is_safe_url, validate_task_schema, extract_clean_content, RetrievalRouter, CollectorClient

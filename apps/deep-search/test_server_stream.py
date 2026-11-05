@@ -9,10 +9,12 @@ import json
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.request
+from typing import cast
 from unittest.mock import patch
 
-from backend.research.types import ResearchRun, SpendReport
+from backend.research.types import Evidence, ResearchRun, SpendReport
 from backend.server import web_server
 
 
@@ -29,7 +31,7 @@ def _fake_run_factory(messages, delay=0.0, result_status="success"):
             topic=topic,
             options=options,
             queries=[],
-            evidence=[
+            evidence=cast("list[Evidence]", [
                 {
                     "title": "Example source",
                     "url": "https://example.org/source",
@@ -37,7 +39,7 @@ def _fake_run_factory(messages, delay=0.0, result_status="success"):
                     "excerpt": "Excerpt text.",
                     "score": 87.5,
                 }
-            ],
+            ]),
             summary="Cloud or local summary.",
             spend=SpendReport(model=options.model),
             duration_sec=0.2,
@@ -71,6 +73,7 @@ class _ServerHarness:
         return self
 
     def __exit__(self, *exc):
+        assert self.httpd is not None and self._patcher is not None
         self.httpd.shutdown()
         self.httpd.server_close()
         self._patcher.stop()
@@ -213,7 +216,7 @@ class TestResearchStreamBrowser(unittest.TestCase):
 
                     # The final result renders and the status box clears.
                     page.wait_for_selector("#results-section", state="visible", timeout=10000)
-                    self.assertEqual(page.text_content("#result-status-badge").strip(), "Complete")
+                    self.assertEqual((page.text_content("#result-status-badge") or "").strip(), "Complete")
 
                     cancel_visible = page.is_visible("#cancel-btn")
                     self.assertFalse(cancel_visible)

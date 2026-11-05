@@ -573,7 +573,8 @@ class TestNonePayloadHardening(unittest.TestCase):
                 raw = h.get("url", "")
                 url = canonicalize_url(raw if isinstance(raw, str) else "")
                 if url:
-                    frontier.add_candidate(url=url, doi=h.get("doi") if isinstance(h.get("doi"), str) else "")
+                    doi = h.get("doi")
+                    frontier.add_candidate(url=url, doi=doi if isinstance(doi, str) else "")
         self.assertEqual(len(frontier.queue), 1)
 
         self.assertEqual(_bm25_priorities("topic", hits), [45.0, 45.0, 45.0])
