@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "updated": "2026-10-29",
+  "tools": [
+    {
+      "id": "gsap",
+      "name": "GSAP ScrollTrigger",
+      "category": "cinematic-scrolling",
+      "url": "https://gsap.com/scroll/",
+      "status": "candidate",
+      "license_review": "Review current GSAP standard license and restrictions",
+      "strength": "Complex pinned scenes; timeline choreography",
+      "risk": "License terms and implementation complexity",
+      "verified_in_project": false
+    },
+    {
+      "id": "motion",
+      "name": "Motion",
+      "category": "ui-motion",
+      "url": "https://motion.dev/",
+      "status": "candidate",
+      "license_review": "MIT; verify at adoption",
+      "strength": "React transitions and gestures",
+      "risk": "Overlap with GSAP",
+      "verified_in_project": false
+    },
+    {
+      "id": "d3",
+      "name": "D3.js",
+      "category": "visualization",
+      "url": "https://d3js.org/",
+      "status": "candidate",
+      "license_review": "ISC; verify at adoption",
+      "strength": "Data-driven SVG and diagrams",
+      "risk": "Steep API learning curve",
+      "verified_in_project": false
+    },
+    {
+      "id": "theatre",
+      "name": "Theatre.js",
+      "category": "scene-authoring",
+      "url": "https://www.theatrejs.com/",
+      "status": "experiment",
+      "license_review": "Verify current license",
+      "strength": "Visual animation sequencing",
+      "risk": "Integration and maturity",
+      "verified_in_project": false
+    },
+    {
+      "id": "scrollama",
+      "name": "Scrollama",
+      "category": "scrollytelling",
+      "url": "https://github.com/russellsamora/scrollama",
+      "status": "experiment",
+      "license_review": "Verify current license",
+      "strength": "IntersectionObserver-based narratives",
+      "risk": "Less cinematic control than GSAP",
+      "verified_in_project": false
+    },
+    {
+      "id": "lenis",
+      "name": "Lenis",
+      "category": "scroll-enhancement",
+      "url": "https://lenis.darkroom.engineering/",
+      "status": "optional",
+      "license_review": "Verify current license",
+      "strength": "Smooth scroll feel",
+      "risk": "Accessibility and performance",
+      "verified_in_project": false
+    },
+    {
+      "id": "three",
+      "name": "Three.js",
+      "category": "3d",
+      "url": "https://threejs.org/",
+      "status": "specialized",
+      "license_review": "MIT; verify at adoption",
+      "strength": "Immersive camera scenes",
+      "risk": "Complexity and GPU costs",
+      "verified_in_project": false
+    },
+    {
+      "id": "rive",
+      "name": "Rive",
+      "category": "interactive-illustration",
+      "url": "https://rive.app/",
+      "status": "specialized",
+      "license_review": "Check runtime/editor licensing",
+      "strength": "State-driven illustration",
+      "risk": "Tooling and asset pipeline",
+      "verified_in_project": false
+    },
+    {
+      "id": "lottie",
+      "name": "dotLottie",
+      "category": "animation",
+      "url": "https://dotlottie.io/",
+      "status": "specialized",
+      "license_review": "Check per-component licensing",
+      "strength": "Portable motion assets",
+      "risk": "Limited stateful behavior",
+      "verified_in_project": false
+    },
+    {
+      "id": "echarts",
+      "name": "Apache ECharts",
+      "category": "charts",
+      "url": "https://echarts.apache.org/",
+      "status": "candidate",
+      "license_review": "Apache-2.0; verify at adoption",
+      "strength": "Complex charts",
+      "risk": "Generic appearance without art direction",
+      "verified_in_project": false
+    },
+    {
+      "id": "observable-plot",
+      "name": "Observable Plot",
+      "category": "charts",
+      "url": "https://observablehq.com/plot/",
+      "status": "candidate",
+      "license_review": "ISC; verify at adoption",
+      "strength": "Concise analytical charts",
+      "risk": "Less freeform control",
+      "verified_in_project": false
+    },
+    {
+      "id": "mermaid",
+      "name": "Mermaid",
+      "category": "diagrams",
+      "url": "https://mermaid.js.org/",
+      "status": "candidate",
+      "license_review": "MIT; verify at adoption",
+      "strength": "Source-driven diagrams",
+      "risk": "Generic output without customization",
+      "verified_in_project": false
+    },
+    {
+      "id": "lucide",
+      "name": "Lucide",
+      "category": "icons",
+      "url": "https://lucide.dev/",
+      "status": "candidate",
+      "license_review": "ISC; verify at adoption",
+      "strength": "Clean adaptable icons",
+      "risk": "Overused without customization",
+      "verified_in_project": false
+    },
+    {
+      "id": "phosphor",
+      "name": "Phosphor Icons",
+      "category": "icons",
+      "url": "https://phosphoricons.com/",
+      "status": "candidate",
+      "license_review": "MIT; verify at adoption",
+      "strength": "Multiple weights",
+      "risk": "Need consistent visual policy",
+      "verified_in_project": false
+    },
+    {
+      "id": "playwright",
+      "name": "Playwright",
+      "category": "qa",
+      "url": "https://playwright.dev/",
+      "status": "required",
+      "license_review": "Apache-2.0; verify at adoption",
+      "strength": "Cross-browser screenshots and tests",
+      "risk": "Requires maintained test infrastructure",
+      "verified_in_project": false
+    },
+    {
+      "id": "axe",
+      "name": "axe-core",
+      "category": "accessibility",
+      "url": "https://github.com/dequelabs/axe-core",
+      "status": "required",
+      "license_review": "MPL-2.0; verify at adoption",
+      "strength": "Automated accessibility audits",
+      "risk": "Does not replace manual testing",
+      "verified_in_project": false
+    },
+    {
+      "id": "style-dictionary",
+      "name": "Style Dictionary",
+      "category": "tokens",
+      "url": "https://styledictionary.com/",
+      "status": "optional",
+      "license_review": "Apache-2.0; verify at adoption",
+      "strength": "Token transformation pipeline",
+      "risk": "Overengineering for small projects",
+      "verified_in_project": false
+    },
+    {
+      "id": "css-scroll",
+      "name": "CSS scroll-driven animations",
+      "category": "native-platform",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_scroll-driven_animations",
+      "status": "experiment",
+      "license_review": "Web platform feature",
+      "strength": "Low dependency scroll effects",
+      "risk": "Compatibility and fallback",
+      "verified_in_project": false
+    },
+    {
+      "id": "view-transitions",
+      "name": "View Transitions API",
+      "category": "native-platform",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API",
+      "status": "experiment",
+      "license_review": "Web platform feature",
+      "strength": "Scene and route transitions",
+      "risk": "Browser differences",
+      "verified_in_project": false
+    },
+    {
+      "id": "svg",
+      "name": "SVG",
+      "category": "native-platform",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/SVG",
+      "status": "core",
+      "license_review": "Web standard",
+      "strength": "Accessible scalable custom graphics",
+      "risk": "Complex scenes can become difficult to maintain",
+      "verified_in_project": false
+    }
+  ]
+}
