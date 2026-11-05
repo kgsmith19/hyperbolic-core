@@ -5,6 +5,7 @@ and token/cost accounting so every cloud call behaves identically.
 """
 
 import os
+from typing import Any
 
 import openai
 
@@ -72,7 +73,7 @@ def invoke_model(
         raise RuntimeError("OPENAI_API_KEY is not configured")
 
     client = openai.OpenAI(api_key=api_key)
-    kwargs = {"model": model, "input": prompt}
+    kwargs: dict[str, Any] = {"model": model, "input": prompt}
     if reasoning_effort and is_reasoning_model(model):
         kwargs["reasoning"] = {"effort": reasoning_effort}
     if max_output_tokens:
@@ -115,7 +116,8 @@ def _invoke_anthropic(prompt: str, model: str, cost_tracker: CostTracker | None 
         max_tokens=max_output_tokens or 2048,
         messages=[{"role": "user", "content": prompt}]
     )
-    output_text = "".join(block.text for block in response.content if hasattr(block, "text"))
+    texts = (getattr(block, "text", None) for block in response.content)
+    output_text = "".join(text for text in texts if isinstance(text, str))
     if cost_tracker:
         usage = getattr(response, "usage", None)
         p_tokens = getattr(usage, "input_tokens", 0) if usage else 0
