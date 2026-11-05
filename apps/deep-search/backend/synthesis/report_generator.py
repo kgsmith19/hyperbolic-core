@@ -28,7 +28,7 @@ def build_exhaustive_metrics_table(evidence: list[dict], watchlist: list[str]) -
     if not evidence:
         lines.append("| No items found | - | - | - | - |")
         return "\n".join(lines)
-    
+
     for idx, item in enumerate(evidence, start=1):
         if not isinstance(item, dict):
             continue
@@ -38,7 +38,7 @@ def build_exhaustive_metrics_table(evidence: list[dict], watchlist: list[str]) -
         score = item.get("score", 0.0)
         quality = item.get("quality", 0.0)
         metrics_str = f"RRF: {score}%, Quality: {quality:.2f}" if score else f"Quality: {quality:.2f}"
-        
+
         snippet = item.get("snippet", "")
         excerpt = item.get("excerpt", "")
         notes_list = []
@@ -47,10 +47,10 @@ def build_exhaustive_metrics_table(evidence: list[dict], watchlist: list[str]) -
         if not url:
             notes_list.append("Missing direct URL (secondary mention)")
         notes = "; ".join(notes_list) if notes_list else "Complete data"
-        
+
         url_md = f"[Source {idx}]({url})" if url else "No direct URL"
         lines.append(f"| **{title}** | {url_md} | `{lane}` | {metrics_str} | {notes} |")
-    
+
     return "\n".join(lines)
 
 
@@ -74,7 +74,7 @@ def build_structured_report(topic: str, evidence: list[dict], summary: str, watc
         url = redact(item.get("url") or "", watchlist)
         if title:
             lines.append(f"- **{title}**: {snippet} [Link]({url})" if url else f"- **{title}**: {snippet}")
-    
+
     lines += [
         "",
         "## 3. Objective Metrics & Summary Table",
