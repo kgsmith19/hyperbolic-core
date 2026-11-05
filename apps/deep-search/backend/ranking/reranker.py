@@ -10,6 +10,8 @@ Why not the LLM for rerank: cost and egress. This reranker is fully local,
 runs in milliseconds, and never sends evidence anywhere.
 """
 
+from typing import Any
+
 from backend.ranking.bm25_scorer import compute_bm25_scores
 from backend.ranking.dense_embedder import compute_dense_scores
 
@@ -54,7 +56,7 @@ def rerank_candidates(
     scored = []
     for idx, cand in enumerate(candidates):
         score = round(lexical_weight * n_bm25[idx] + dense_weight * n_dense[idx], 4)
-        out = dict(cand) if isinstance(cand, dict) else {"text": cand}
+        out: dict[str, Any] = dict(cand) if isinstance(cand, dict) else {"text": cand}
         out["rerank_score"] = score
         out["rerank_bm25"] = round(bm25[idx], 3)
         out["rerank_dense"] = round(dense[idx], 3)

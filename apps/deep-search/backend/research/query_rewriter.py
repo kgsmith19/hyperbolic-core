@@ -68,10 +68,10 @@ def multiquery_variants(topic: str, watchlist: list[str], max_variants: int = 3)
 def hyde_draft_queries(
     topic: str,
     watchlist: list[str],
-    model: str = "gpt-4o-mini",
+    model: str | None = "gpt-4o-mini",
     reasoning_effort: str | None = None,
     cost_tracker=None,
-    conceal_process: bool = True,
+    conceal_process: bool | None = True,
     max_queries: int = 2,
 ) -> list[str]:
     """Generate HyDE-style search queries from a hypothetical answer draft.

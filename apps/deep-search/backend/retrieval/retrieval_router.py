@@ -18,6 +18,8 @@ walled pages.
 
 import concurrent.futures
 import os
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 
@@ -162,9 +164,9 @@ class RetrievalRouter:
                     continue
         return aggregated
 
-    def _lane_jobs(self, query: str, lanes: dict) -> list[tuple[str, callable]]:
+    def _lane_jobs(self, query: str, lanes: dict) -> list[tuple[str, Callable[[], Any]]]:
         """Build (lane, thunk) jobs sized by each lane's result budget."""
-        jobs: list[tuple[str, callable]] = []
+        jobs: list[tuple[str, Callable[[], Any]]] = []
 
         def budget(name: str) -> int:
             try:
@@ -327,7 +329,8 @@ class RetrievalRouter:
 
         if allow_browser and (not text or len(text.strip()) < 100 or is_bot_or_js_barrier(text)):
             browser_res = self.fetch_with_browser(final_url)
-            if browser_res.get("status") == "ok" and browser_res.get("content") and not is_bot_or_js_barrier(browser_res.get("content")):
+            browser_content = browser_res.get("content")
+            if browser_res.get("status") == "ok" and isinstance(browser_content, str) and browser_content and not is_bot_or_js_barrier(browser_content):
                 return browser_res
             elif is_bot_or_js_barrier(text):
                 return {

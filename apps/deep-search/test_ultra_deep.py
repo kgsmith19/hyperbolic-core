@@ -8,6 +8,7 @@ through preview / server / CLI / planner / pipeline.
 
 import os
 import unittest
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 
@@ -284,7 +285,7 @@ class TestDeepWebRouterAndSynthesis(unittest.TestCase):
             "search_wikipedia": [{"source": "wikipedia"}],
             "search_hackernews": [{"source": "hackernews"}],
         }
-        handlers = {
+        handlers: dict[str, Any] = {
             name: (lambda _query, result=result: result)
             for name, result in connector_results.items()
         }

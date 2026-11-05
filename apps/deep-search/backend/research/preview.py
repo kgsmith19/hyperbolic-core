@@ -93,7 +93,7 @@ def _estimate_ai_spend(topic: str, options: SearchOptions) -> float:
     total = 0.0
     if options.ai_planning:
         concealer = CostTracker(model=options.concealer_model, max_spend_usd=options.max_spend_usd)
-        is_reasoning = any(k in options.concealer_model.lower() for k in ("o1", "o3", "o4"))
+        is_reasoning = any(k in (options.concealer_model or "").lower() for k in ("o1", "o3", "o4"))
         # Chaffed 8-topic prompt + 8-topic response block.
         p_tok = 900 + topic_tokens if options.conceal_process else 250 + topic_tokens
         c_tok = 700 if options.conceal_process else 200
@@ -110,7 +110,7 @@ def _estimate_ai_spend(topic: str, options: SearchOptions) -> float:
 
     if options.ai_summary:
         deep = CostTracker(model=options.deep_model, max_spend_usd=options.max_spend_usd)
-        is_reasoning = any(k in options.deep_model.lower() for k in ("o1", "o3", "o4"))
+        is_reasoning = any(k in (options.deep_model or "").lower() for k in ("o1", "o3", "o4"))
         docs_in_prompt = min(options.max_documents, 40)
         p_tok = 500 + topic_tokens + docs_in_prompt * 320
         c_tok = 800

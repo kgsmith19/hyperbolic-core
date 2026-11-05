@@ -24,7 +24,7 @@ def search_arxiv(query: str, max_results: int = 25) -> list[dict]:
                     t_elem = entry.find("atom:title", ns)
                     s_elem = entry.find("atom:summary", ns)
                     id_elem = entry.find("atom:id", ns)
-                    title = t_elem.text.strip().replace("\n", " ") if t_elem is not None else "Untitled arXiv Paper"
+                    title = t_elem.text.strip().replace("\n", " ") if t_elem is not None and t_elem.text else "Untitled arXiv Paper"
                     full_abstract = " ".join(s_elem.text.split()) if s_elem is not None and s_elem.text else ""
                     snippet = full_abstract[:300]
                     authors = ", ".join(
@@ -32,7 +32,7 @@ def search_arxiv(query: str, max_results: int = 25) -> list[dict]:
                         for a in entry.findall("atom:author", ns)[:4]
                     )
                     published = (entry.findtext("atom:published", default="", namespaces=ns) or "")[:4]
-                    link = id_elem.text.strip() if id_elem is not None else ""
+                    link = id_elem.text.strip() if id_elem is not None and id_elem.text else ""
                     results.append({
                         "title": title,
                         "url": link,

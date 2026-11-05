@@ -495,6 +495,7 @@ class TestApiEndpoints(unittest.TestCase):
         self.assertEqual(opts.max_documents, 1500)
         self.assertGreaterEqual(opts.max_duration_min, 120)
         self.assertEqual(opts.breadth, 12)
+        assert opts.source_lanes is not None
         self.assertIn("community", opts.source_lanes)
         self.assertEqual(opts.rerank_keep, 1500)
         explicit = self.web_server._options_from_payload({"preset": "marathon", "max_documents": 50})

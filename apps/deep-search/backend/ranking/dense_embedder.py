@@ -4,6 +4,7 @@ Computes semantic similarity using local ONNX FastEmbed (BAAI/bge-small-en-v1.5)
 with pure NumPy subword n-gram fallback for zero-dependency execution.
 """
 
+from collections.abc import Sequence
 import collections
 import math
 import re
@@ -17,7 +18,7 @@ except Exception:
     _EMBEDDER = None
 
 
-def compute_dense_scores(query: str, corpus: list[str]) -> list[float]:
+def compute_dense_scores(query: str, corpus: Sequence[str | None]) -> list[float]:
     """Compute dense embedding cosine similarity scores using FastEmbed."""
     if not corpus:
         return []

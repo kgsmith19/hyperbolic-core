@@ -84,7 +84,7 @@ def search_openalex(query: str, per_page: int = 25) -> list[dict]:
 
 
 def expand_citations(
-    work_id: str,
+    work_id: str | None,
     direction: str = "references",
     per_page: int = 10,
 ) -> list[dict]:

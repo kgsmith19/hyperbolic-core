@@ -28,6 +28,7 @@ import re
 import threading
 import urllib.parse
 import uuid
+from typing import Any
 
 from backend.frontier.priority_frontier import ResearchFrontier
 from backend.frontier.url_canonicalizer import canonicalize_url
@@ -46,7 +47,7 @@ def _cancelled(cancel_token) -> bool:
     return bool(cancel_token is not None and cancel_token.is_set())
 
 
-def _snippet_from_content(content: str) -> str:
+def _snippet_from_content(content: str | None) -> str:
     if not isinstance(content, str) or not content:
         return ""
     snippet_text = content
@@ -487,7 +488,7 @@ class _Explorer:
         return added
 
     def _search_one(self, text: str, prefer: list[str] | None, prefix: str = "search"):
-        task = {"task_id": _task_id(prefix), "action": "search", "connector": "all", "query": text}
+        task: dict[str, Any] = {"task_id": _task_id(prefix), "action": "search", "connector": "all", "query": text}
         lanes = self._lane_budget(prefer)
         if lanes:
             task["lanes"] = lanes
@@ -570,8 +571,10 @@ class _Explorer:
         netloc = urllib.parse.urlparse(frontier_item.url).netloc
         fetched_title = fetch_res.get("title") if isinstance(fetch_res.get("title"), str) else ""
         title = self.titles.get(frontier_item.url) or cand.get("title") or fetched_title or f"Source at {netloc}"
-        lane = fetch_res.get("lane") if isinstance(fetch_res.get("lane"), str) and fetch_res.get("lane") else (
-            cand.get("lane") or classify_lane(frontier_item.url, frontier_item.source_url))
+        fetch_lane = fetch_res.get("lane")
+        cand_lane = cand.get("lane")
+        lane = fetch_lane if isinstance(fetch_lane, str) and fetch_lane else (
+            cand_lane if isinstance(cand_lane, str) and cand_lane else classify_lane(frontier_item.url, frontier_item.source_url))
         meta = dict(cand.get("meta") or {})
         if isinstance(fetch_res.get("meta"), dict):
             meta.update(fetch_res["meta"])
