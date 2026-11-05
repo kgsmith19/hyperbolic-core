@@ -2,11 +2,9 @@ name: Verify Tests Deep Search
 description: >-
   Deep Search's lane. Installs the core and collector requirements together,
   because the test suite patches collector-only modules (curl_cffi), then runs
-  pyflakes-level lint (ruff E9,F: syntax errors, undefined names, unused code)
-  and the unit suite. Type checking is not configured here: basic-mode pyright
-  reports 99 errors across the app today, recorded in
-  docs/planning/leanness/deep-search.md. Assumes the caller already checked out
-  the repository.
+  pyflakes-level lint (ruff E9,F: syntax errors, undefined names, unused code),
+  basic-mode pyright (zero errors required), then the unit suite. Assumes the
+  caller already checked out the repository.
 
 runs:
   using: composite
@@ -21,16 +19,29 @@ runs:
       working-directory: apps/deep-search
       run: |
         set -euo pipefail
-        python -m pip install -r requirements-core.txt -r requirements-collector.txt "ruff==0.17.3"
+        python -m pip install -r requirements-core.txt -r requirements-collector.txt "ruff==0.17.3" "pyright==1.1.390"
 
     - name: Lint · ruff E9,F (syntax, undefined names, unused code)
       shell: bash
       working-directory: apps/deep-search
       run: ruff check --select E9,F .
 
+    - name: Types · basic-mode pyright (zero errors)
+      shell: bash
+      working-directory: apps/deep-search
+      run: python -m pyright --level error
+
+    - name: Cache · FastEmbed model (BAAI/bge-small-en-v1.5)
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/fastembed-cache
+        key: fastembed-bge-small-en-v1.5-${{ runner.os }}-v1
+
     - name: Tests · unittest suite
       shell: bash
       working-directory: apps/deep-search
+      env:
+        FASTEMBED_CACHE_PATH: ${{ runner.temp }}/fastembed-cache
       run: >-
         python -m unittest test_safe_research.py test_bounded_contexts.py
         test_ai_search_expansion.py test_deep_expansion.py
