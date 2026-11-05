@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "concepts": [
+    {
+      "id": "concept-01",
+      "name": "Pinned narrative chapters",
+      "status": "idea",
+      "demo": null,
+      "quality_review": "not-tested"
+    },
+    {
+      "id": "concept-02",
+      "name": "Morphing diagram to timeline",
+      "status": "idea",
+      "demo": null,
+      "quality_review": "not-tested"
+    },
+    {
+      "id": "concept-03",
+      "name": "Interactive architecture map",
+      "status": "idea",
+      "demo": null,
+      "quality_review": "not-tested"
+    },
+    {
+      "id": "concept-04",
+      "name": "Editorial kinetic typography",
+      "status": "idea",
+      "demo": null,
+      "quality_review": "not-tested"
+    },
+    {
+      "id": "concept-05",
+      "name": "Data-driven network reveal",
+      "status": "idea",
+      "demo": null,
+      "quality_review": "not-tested"
+    },
+    {
+      "id": "concept-06",
+      "name": "Before-after visual comparison",
+      "status": "idea",
+      "demo": null,
+      "quality_review": "not-tested"
+    },
+    {
+      "id": "concept-07",
+      "name": "Branching decision documentary",
+      "status": "idea",
+      "demo": null,
+      "quality_review": "not-tested"
+    },
+    {
+      "id": "concept-08",
+      "name": "Cinematic case-file narrative",
+      "status": "idea",
+      "demo": null,
+      "quality_review": "not-tested"
+    },
+    {
+      "id": "concept-09",
+      "name": "Responsive annotated illustration",
+      "status": "idea",
+      "demo": null,
+      "quality_review": "not-tested"
+    },
+    {
+      "id": "concept-10",
+      "name": "Accessible motionless story mode",
+      "status": "idea",
+      "demo": null,
+      "quality_review": "not-tested"
+    }
+  ]
+}

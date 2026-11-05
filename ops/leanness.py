@@ -29,6 +29,8 @@ DUP_KINDS = ("package-lock.json", "uv.lock", "pyproject.toml", "tsconfig.json")
 # Decision per finding key ("<app>:<kind>:<path>"). Owner stand-in decisions,
 # 2026-11-03; revisit when the file changes materially.
 DECISIONS = {
+    'deep-search:oversized:apps/deep-search/frontend/css/components.css': 'Deferred: split by component along its existing sections with the next UI change in this file; a standalone split is churn with no test gain.',
+    'deep-search:oversized:apps/deep-search/backend/research/explorer.py': 'Deferred: split along its existing round seams with the next behavior change in this file; a standalone split is churn with no test gain.',
     'agentic-command-center:oversized:apps/agentic-command-center/backend/gui/server.test.mjs': 'Keep: one test file per unit under test; splitting moves assertions without adding coverage.',
     'agentic-command-center:oversized:apps/agentic-command-center/backend/runner/runner.test.mjs': 'Keep: one test file per unit under test; splitting moves assertions without adding coverage.',
     'agentic-command-center:oversized:apps/agentic-command-center/backend/hooks/lane.test.mjs': 'Keep: one test file per unit under test; splitting moves assertions without adding coverage.',

@@ -1,0 +1,16 @@
+# Repository facts. The standard pin lives once, at the repo root.
+name: creative-studio
+type: documentation-and-registry
+
+commands:
+  verify: python3 scripts/validate.py
+
+ci:
+  # The merge gate is the root PR Gate; this app runs in its own "Creative Studio" lane
+  # (.github/actions/verify-tests-creative-studio).
+  workflow: ../../.github/workflows/pr-verify.yml
+  lane: "Creative Studio"
+  required_check: "PR Gate"
+  triggers:
+    - pull_request
+    - merge_group

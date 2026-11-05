@@ -1,0 +1,23 @@
+# ==========================================
+# Secret Core Container (Air-Gapped)
+# Network Mode: NONE (--network none)
+# ==========================================
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-core.txt .
+RUN pip install --no-cache-dir -r requirements-core.txt
+
+COPY deep_search.py ./
+COPY backend/ ./backend/
+COPY frontend/ ./frontend/
+
+# Run with strictly no network access
+ENV PYTHONUNBUFFERED=1
+ENTRYPOINT ["python", "deep_search.py"]
+CMD ["--topic", "topic.txt", "--watchlist", "watchlist.txt"]

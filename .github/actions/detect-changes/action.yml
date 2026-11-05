@@ -31,6 +31,12 @@ outputs:
   lifeos:
     description: "true when apps/lifeos/** is relevant"
     value: ${{ steps.detect.outputs.lifeos }}
+  deep_search:
+    description: "true when apps/deep-search/** is relevant"
+    value: ${{ steps.detect.outputs.deep_search }}
+  creative_studio:
+    description: "true when apps/creative-studio/** is relevant"
+    value: ${{ steps.detect.outputs.creative_studio }}
   stack:
     description: "true when compose.yaml, the Makefile, ops/** or any Dockerfile is relevant (#504 local stack proof)"
     value: ${{ steps.detect.outputs.stack }}
@@ -51,7 +57,7 @@ runs:
         # changed" here would silently skip real verification.
         if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
           echo "Base commit ${BASE_SHA} not available locally; running every suite to be safe."
-          for app in toolbelt acc brain shell lifeos stack; do
+          for app in toolbelt acc brain shell lifeos deep_search creative_studio stack; do
             echo "${app}=true" >> "$GITHUB_OUTPUT"
           done
           exit 0
@@ -66,7 +72,7 @@ runs:
         # rather than trivially passing against untouched apps.
         if grep -qE '^\.github/(workflows/|actions/)' <<< "${changed}"; then
           echo "CI plumbing changed; running every suite."
-          for app in toolbelt acc brain shell lifeos stack; do
+          for app in toolbelt acc brain shell lifeos deep_search creative_studio stack; do
             echo "${app}=true" >> "$GITHUB_OUTPUT"
           done
           exit 0
@@ -88,4 +94,6 @@ runs:
         relevant brain    '^(services/brain/|package\.json$|package-lock\.json$)'
         relevant shell    '^(apps/shell/|packages/|services/llm-handler/|services/broker/|services/platform-api/|docs/ops/|standard\.lock$)'
         relevant lifeos   '^apps/lifeos/'
+        relevant deep_search    '^apps/deep-search/'
+        relevant creative_studio '^apps/creative-studio/'
         relevant stack    '^(compose\.yaml$|Makefile$|ops/|(apps|services)/.*Dockerfile$)'

@@ -423,6 +423,70 @@ jobs:
         run: echo "LifeOS was not touched by this change; nothing to verify."
 
   # =====================================================================
+  # Deep Search -- apps/deep-search's own lane (#551). Relevance from detect-changes.
+  # =====================================================================
+  deep-search:
+    name: "Deep Search"
+    # See repository-standards above: skip the closed-PR fallback trigger.
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect · Is Deep Search touched by this change?
+        id: detect
+        uses: ./.github/actions/detect-changes
+        with:
+          base_sha: ${{ github.event.pull_request.base.sha }}
+
+      - name: Tests · Deep Search
+        if: steps.detect.outputs.deep_search == 'true'
+        uses: ./.github/actions/verify-tests-deep-search
+
+      - name: Tests · Not applicable to this change
+        if: steps.detect.outputs.deep_search != 'true'
+        shell: bash
+        run: echo "Deep Search was not touched by this change; nothing to verify."
+
+  # =====================================================================
+  # Creative Studio -- apps/creative-studio's own lane (#551). Relevance from detect-changes.
+  # =====================================================================
+  creative-studio:
+    name: "Creative Studio"
+    # See repository-standards above: skip the closed-PR fallback trigger.
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect · Is Creative Studio touched by this change?
+        id: detect
+        uses: ./.github/actions/detect-changes
+        with:
+          base_sha: ${{ github.event.pull_request.base.sha }}
+
+      - name: Validate · Creative Studio
+        if: steps.detect.outputs.creative_studio == 'true'
+        uses: ./.github/actions/verify-tests-creative-studio
+
+      - name: Validate · Not applicable to this change
+        if: steps.detect.outputs.creative_studio != 'true'
+        shell: bash
+        run: echo "Creative Studio was not touched by this change; nothing to verify."
+
+  # =====================================================================
   # PR Gate -- the sole required check AND the sole merge authority
   # =====================================================================
   # This job is deliberately boring. It is both:
@@ -460,7 +524,7 @@ jobs:
   # pull-request-authored code hold only the read-only workflow default.
   pr-gate:
     name: "PR Gate"
-    needs: [repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos]
+    needs: [repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos, deep-search, creative-studio]
     # always(), not the default: the default skips this job the moment a
     # needs: job fails, which would leave THIS row -- the one row the
     # ruleset actually requires -- permanently absent on exactly the pull
@@ -532,7 +596,7 @@ jobs:
             // step with the job ids above -- a lane present here but missing
             // from needs: fails the gate rather than being skipped silently,
             // and the workflow contract test holds the two lists equal.
-            const EXPECTED_GATE_JOBS = ["repository-standards", "toolbelt", "acc-linux", "acc-windows", "brain", "platform", "lifeos"];
+            const EXPECTED_GATE_JOBS = ["repository-standards", "toolbelt", "acc-linux", "acc-windows", "brain", "platform", "lifeos", "deep-search", "creative-studio"];
 
             let gateResults;
             try {

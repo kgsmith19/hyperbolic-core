@@ -20,6 +20,11 @@
 #   - shell, idea-intake, prompt-organizer, agentic-command-center: browser
 #     front ends or CLIs with no long-running server of their own; they run
 #     from their own `npm run dev` / CLI, per their AGENTS.md.
+#   - deep-search: a local research engine with its own UI server
+#     (`python deep_search.py --ui`) and its own docker-compose.yml, which
+#     runs a SearXNG collector. It is not yet wired into this stack; that is
+#     a follow-up to #551, and it runs from its own AGENTS.md commands until then.
+#   - creative-studio: documentation and a registry validator; no server.
 name: hyperbolic-core
 
 services:

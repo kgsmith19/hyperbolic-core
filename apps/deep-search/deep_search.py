@@ -1,0 +1,213 @@
+"""Deep Search CLI and UI entrypoint.
+
+One search with explicit options. No mode enum, no barrel re-exports.
+"""
+
+import argparse
+import os
+import sys
+
+from backend.privacy import SafetyError
+from backend.research import SearchOptions, preview, run_search, resume_search
+from backend.research.presets import ALL_LANES, DEFAULT_LANES, PRESETS, preset_values
+from backend.retrieval.meta import start_searxng_service
+from backend.server import load_env_file, load_lines, start_ui_server
+
+load_env_file()
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run a guarded deep search with explicit options.")
+    parser.add_argument("--topic", default="topic.txt", help="Path to non-sensitive topic file")
+    parser.add_argument("--run-id", default="default", help="Local durable run identifier")
+    parser.add_argument("--resume", default="", help="Resume a local durable run identifier")
+    parser.add_argument("--ledger-root", default="research_runs", help="Local durable ledger directory")
+    parser.add_argument("--watchlist", default="watchlist.txt", help="Path to local sensitive watchlist file")
+    parser.add_argument("--preset", choices=sorted(PRESETS), default=None,
+                        help="Depth preset: scout (~3 min), standard (~12 min), deep (~45 min), marathon (hours). Explicit flags override it.")
+    parser.add_argument("--max-depth", type=int, default=None, help="Maximum link/citation hops (default 4, or the preset)")
+    parser.add_argument("--max-docs", type=int, default=None, help="Maximum documents to keep (default 40, or the preset)")
+    parser.add_argument("--concurrency", type=int, default=None, help="Concurrent collector workers (default 4, or the preset)")
+    parser.add_argument("--max-duration-min", type=float, default=None, help="Run budget in minutes (default 15, up to 720)")
+    parser.add_argument("--max-per-domain", type=int, default=None, help="Maximum documents per domain (hubs get more)")
+    parser.add_argument("--max-gap-rounds", type=int, default=None, help="Reflection rounds (0 disables follow-up rounds)")
+    parser.add_argument("--breadth", type=int, default=None, help="Research angles / sub-questions in the plan (1 = topic only)")
+    parser.add_argument("--academic-weight", type=float, default=0.5, help="Share of research vs discussion sources, 0..1 (default 0.5)")
+    parser.add_argument("--lanes", default=None, help=f"Comma-separated source lanes ({','.join(ALL_LANES)}). Defaults to the preset lanes; 'classic' disables lane routing.")
+    parser.add_argument("--queries-per-round", type=int, default=None, help="Follow-up queries per reflection round")
+    parser.add_argument("--llm-gap-rounds", type=int, default=None, help="Reflection rounds allowed to consult the model (needs --ai-planning)")
+    parser.add_argument("--no-leads", action="store_true", help="Disable lead-following (entity snowball) queries")
+    parser.add_argument("--no-chunk", action="store_true", help="Disable passage chunking of long documents")
+    parser.add_argument("--no-rerank", action="store_true", help="Disable local stage-2 rerank before synthesis")
+    parser.add_argument("--rerank-keep", type=int, default=12, help="Top-N candidates kept by the reranker")
+    parser.add_argument("--no-citations", action="store_true", help="Disable OpenAlex citation-edge expansion")
+    parser.add_argument("--citation-per-doc", type=int, default=5, help="Citation edges followed per academic hit")
+    parser.add_argument("--no-graph", action="store_true", help="Disable concept-graph frontier prioritization")
+    parser.add_argument("--no-rewrite", action="store_true", help="Disable local multiquery variants")
+    parser.add_argument("--no-hyde", action="store_true", help="Disable HyDE hypothetical-answer draft queries")
+    parser.add_argument("--no-verify", action="store_true", help="Disable cross-source claim verification")
+    parser.add_argument("--concealer-model", default="gpt-4o-mini", help="Cheap model that hides process and expands topics")
+    parser.add_argument("--deep-model", default="gpt-4o", help="Deep model that writes the final brief")
+    parser.add_argument("--blind-watchlist", action="store_true", help="Pseudonymize watchlist terms (weaker recall)")
+    parser.add_argument("--decoys", type=int, default=0, help="Number of k-anonymity decoy queries")
+    parser.add_argument("--ai-planning", action="store_true", help="Expand the topic into extra query angles")
+    parser.add_argument("--llm-process", choices=["hide", "show"], default="show", help="show (default) = send the bare topic and evidence. hide = optional privacy layer: conceal the research among chaffed decoy topics. Watchlist never leaves in either mode.")
+    parser.add_argument("--no-conceal-process", action="store_true", help="Alias for --llm-process show. Send the bare topic to the model (no chaffed decoy topics).")
+    parser.add_argument("--ai-summary", action="store_true", default=None, help="Write the AI report (default when OPENAI_API_KEY is set)")
+    parser.add_argument("--no-ai-summary", action="store_true", help="Write the local extractive report instead of the AI report")
+    parser.add_argument("--openai-model", default="gpt-4o-mini", help="OpenAI model for planning or summary")
+    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default=None, help="Reasoning effort for o-series models")
+    parser.add_argument("--max-spend", type=float, default=2.00, help="Maximum spending cap in USD")
+    parser.add_argument("--low-information-gain-rounds", type=int, default=0, help="Opt-in consecutive low-gain batch limit")
+    parser.add_argument("--low-information-gain-min-documents", type=int, default=0, help="Minimum evidence before low-gain stopping")
+    parser.add_argument("--preview", action="store_true", help="Print SearchPreview and exit")
+    parser.add_argument("--check-key", action="store_true", help="Verify the OpenAI key with one minimal live call and exit")
+    parser.add_argument("--yes", action="store_true", help="Skip confirm for weaker-recall options")
+    parser.add_argument("--ui", action="store_true", help="Launch local browser UI")
+    return parser
+
+
+def build_options(args) -> SearchOptions:
+    base = {"max_depth": 4, "max_documents": 40, "concurrency": 4, "max_duration_min": 15.0, "max_per_domain": 6,
+            "max_gap_rounds": 3, "breadth": 1, "queries_per_round": 4, "llm_gap_rounds": 1, "results_per_lane": 8}
+    base.update(preset_values(getattr(args, "preset", None)))
+
+    def pick(value, key):
+        return base[key] if value is None else value
+
+    lanes_arg = getattr(args, "lanes", None)
+    if lanes_arg == "classic":
+        lanes = None
+    elif lanes_arg:
+        lanes = [lane.strip() for lane in lanes_arg.split(",") if lane.strip() in ALL_LANES] or None
+    else:
+        lanes = list(DEFAULT_LANES) if getattr(args, "preset", None) else None
+    max_docs = pick(args.max_docs, "max_documents")
+    return SearchOptions(
+        max_depth=pick(args.max_depth, "max_depth"),
+        max_documents=max_docs,
+        concurrency=pick(args.concurrency, "concurrency"),
+        max_duration_min=pick(args.max_duration_min, "max_duration_min"),
+        max_per_domain=pick(args.max_per_domain, "max_per_domain"),
+        max_gap_rounds=pick(args.max_gap_rounds, "max_gap_rounds"),
+        breadth=pick(getattr(args, "breadth", None), "breadth"),
+        academic_weight=getattr(args, "academic_weight", 0.5),
+        source_lanes=lanes,
+        results_per_lane=base["results_per_lane"],
+        queries_per_round=pick(getattr(args, "queries_per_round", None), "queries_per_round"),
+        llm_gap_rounds=pick(getattr(args, "llm_gap_rounds", None), "llm_gap_rounds"),
+        follow_leads=not getattr(args, "no_leads", False),
+        chunk_documents=not args.no_chunk,
+        rerank_results=not args.no_rerank,
+        rerank_keep=max(args.rerank_keep, max_docs) if getattr(args, "preset", None) else args.rerank_keep,
+        citation_expansion=not args.no_citations,
+        citation_per_doc=args.citation_per_doc,
+        graph_prioritization=not args.no_graph,
+        query_rewrite=not args.no_rewrite,
+        hyde_queries=not args.no_hyde,
+        claim_verification=not args.no_verify,
+        blind_watchlist=args.blind_watchlist,
+        decoy_queries=args.decoys,
+        ai_planning=args.ai_planning,
+        llm_process="show" if args.no_conceal_process else args.llm_process,
+        ai_summary=(False if getattr(args, "no_ai_summary", False)
+                    else True if args.ai_summary
+                    else bool(os.environ.get("OPENAI_API_KEY", "").strip())),
+        model=args.openai_model,
+        concealer_model=args.concealer_model,
+        deep_model=args.deep_model,
+        reasoning_effort=args.reasoning_effort,
+        max_spend_usd=args.max_spend,
+        low_information_gain_rounds=args.low_information_gain_rounds,
+        low_information_gain_min_documents=args.low_information_gain_min_documents,
+    )
+
+
+def print_preview(topic: str, options: SearchOptions) -> None:
+    p = preview(topic, options)
+    print(f"Hops: {p.expected_hops}")
+    print(f"Sources: {p.expected_sources}")
+    print(f"Duration: {p.expected_duration_sec:.0f}s ({p.expected_duration_sec / 60:.1f} min)")
+    print(f"Spend: {p.expected_cost_display}")
+    print(f"Requires confirm: {p.requires_confirm}")
+    if p.warnings:
+        print("Tradeoffs:")
+        for warning in p.warnings:
+            print(f"  - {warning}")
+
+
+def print_progress(msg: str) -> None:
+    print(msg)
+
+
+def main() -> None:
+    try:
+        start_searxng_service("127.0.0.1", 8080)
+    except Exception as err:
+        print(f"SearXNG service not started: {err}", file=sys.stderr)
+
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.check_key:
+        from backend.research.cloud_client import get_api_key, check_openai_key
+
+        if not get_api_key():
+            print("OPENAI_API_KEY is not set. Add it to .env or the UI settings.", file=sys.stderr)
+            return
+        print(f"Pinging OpenAI ({args.openai_model}) with a minimal call...")
+        try:
+            report = check_openai_key(model=args.openai_model)
+        except Exception as err:
+            print(f"Key check FAILED: {type(err).__name__}: {err}", file=sys.stderr)
+            return
+        print(f"Key OK. model={report['model']} reply={report['output_text']!r}")
+        print(
+            f"Tokens: {report['prompt_tokens']} in / {report['completion_tokens']} out "
+            f"(~${report['estimated_cost_usd']:.6f})"
+        )
+        return
+
+    if args.ui:
+        start_ui_server()
+        return
+
+    topic_lines = load_lines(args.topic)
+    topic = " ".join(topic_lines).strip()
+    watchlist = load_lines(args.watchlist)
+    if args.resume:
+        run = resume_search(args.resume, watchlist, progress_callback=print_progress, ledger_root=args.ledger_root)
+        print(f"Run: {run.run_id}\nStatus: {run.status}\nStop reason: {run.stop_reason}\nLedger: {run.ledger_path}")
+        return
+    if not topic:
+        print("Topic is empty.", file=sys.stderr)
+        return
+
+    options = build_options(args)
+    estimate = preview(topic, options)
+
+    if args.preview:
+        print_preview(topic, options)
+        return
+
+    if estimate.requires_confirm and not args.yes:
+        print_preview(topic, options)
+        answer = input("This combination reduces recall. Proceed? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("Aborted.")
+            return
+
+    try:
+        run = run_search(topic, watchlist, options, run_id=args.run_id, progress_callback=print_progress, ledger_root=args.ledger_root)
+    except SafetyError:
+        print("Blocked by local safety guard")
+        return
+
+    print(f"Run: {run.run_id}\nStatus: {run.status}\nStop reason: {run.stop_reason}\nLedger: {run.ledger_path}")
+    print(f"Sources: {len(run.evidence)}")
+    if run.archive_path:
+        print(f"Report: {run.archive_path}")
+
+
+if __name__ == "__main__":
+    main()

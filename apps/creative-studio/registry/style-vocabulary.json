@@ -1,0 +1,39 @@
+{
+  "personality": [
+    "bold",
+    "editorial",
+    "memorable",
+    "unconventional",
+    "purposeful"
+  ],
+  "avoid_by_default": [
+    "neon glow",
+    "generic purple gradient",
+    "glass cards",
+    "repetitive rounded tiles",
+    "constant pulsing"
+  ],
+  "typography": {
+    "principles": [
+      "expressive hierarchy",
+      "readable body text",
+      "licensed fonts",
+      "intentional whitespace"
+    ]
+  },
+  "color": {
+    "principles": [
+      "semantic roles",
+      "high contrast",
+      "few accents",
+      "project-specific palettes"
+    ]
+  },
+  "icons": {
+    "principles": [
+      "coherent stroke and weight",
+      "custom when necessary",
+      "accessible labels"
+    ]
+  }
+}

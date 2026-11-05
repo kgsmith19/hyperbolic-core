@@ -43,6 +43,8 @@ const workflow = readFileSync(workflowPath, "utf8").replace(/\r\n/g, "\n");
 // of its own, and must be named in PR Gate's own needs: list and its
 // runtime EXPECTED_GATE_JOBS. Oracle change (#547): the AI Review lane was
 // removed by owner decision; independent review moves to hyper-agents.
+// Oracle change (#551): Deep Search and Creative Studio become app lanes, the
+// same shape as every other app.
 const EXPECTED_WORKERS = [
   "repository-standards",
   "toolbelt",
@@ -51,6 +53,8 @@ const EXPECTED_WORKERS = [
   "brain",
   "platform",
   "lifeos",
+  "deep-search",
+  "creative-studio",
 ];
 
 const EXPECTED_DISPLAY_NAMES = {
@@ -61,6 +65,8 @@ const EXPECTED_DISPLAY_NAMES = {
   brain: "Brain",
   platform: "Platform",
   lifeos: "LifeOS",
+  "deep-search": "Deep Search",
+  "creative-studio": "Creative Studio",
   "pr-gate": "PR Gate",
 };
 

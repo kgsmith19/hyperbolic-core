@@ -7,9 +7,11 @@ means more than one lockfile or manifest of the same kind inside one app.
 | App | Tracked files | Source lines | Declared dependencies | Largest source files |
 | --- | ---: | ---: | ---: | --- |
 | agentic-command-center | 108 | 17012 | 18 | `backend/gui/server.test.mjs` (1467); `backend/runner/runner.test.mjs` (930); `backend/gui/server.mjs` (888) |
+| creative-studio | 27 | 42 | 0 | `demos/three-things-matter/index.html` (19); `scripts/validate.py` (14); `demos/editorial-lab-02/cinematic-atlas/index.html` (1) |
+| deep-search | 124 | 19324 | 0 | `frontend/css/components.css` (2055); `backend/research/explorer.py` (835); `frontend/js/app.js` (774) |
 | idea-intake | 32 | 3282 | 0 | `backend/tools/migrate-forgepad.mjs` (582); `backend/tests/intake-guards.test.mjs` (468); `backend/tests/migrate-forgepad-mapping.test.mjs` (407) |
-| lifeos | 244 | 30709 | 27 | `frontend/src/api/types.gen.ts` (1252); `backend/src/domains/bills/dispute.py` (967); `backend/tests/bills/test_verification.py` (936) |
-| network-checker | 139 | 14573 | 0 | `backend/network_checker/__main__.py` (249); `backend/tests/test_change.py` (249); `backend/tests/test_fix_scripts.py` (249) |
+| lifeos | 254 | 32454 | 27 | `frontend/src/api/types.gen.ts` (1252); `backend/src/domains/bills/dispute.py` (967); `backend/tests/bills/test_verification.py` (936) |
+| network-checker | 140 | 14605 | 0 | `backend/network_checker/__main__.py` (249); `backend/tests/test_change.py` (249); `backend/tests/test_fix_scripts.py` (249) |
 | prompt-organizer | 81 | 7101 | 0 | `backend/tests/contract.test.mjs` (555); `backend/tests/get-prompt.test.mjs` (495); `backend/tests/seed.test.mjs` (464) |
 | shell | 108 | 14732 | 18 | `frontend/src/pages/ideas/editor.tsx` (663); `frontend/src/pages/ideas/editor.test.tsx` (510); `frontend/e2e/notifications.spec.ts` (452) |
 
@@ -22,6 +24,8 @@ means more than one lockfile or manifest of the same kind inside one app.
 | `agentic-command-center:oversized:apps/agentic-command-center/backend/gui/server.mjs` | 888 | Deferred: split along its existing seams with the next behavior change in this file; a standalone split is churn with no test gain. |
 | `agentic-command-center:oversized:apps/agentic-command-center/backend/hooks/lane.test.mjs` | 849 | Keep: one test file per unit under test; splitting moves assertions without adding coverage. |
 | `agentic-command-center:duplicate-config:package-lock.json` | 2 | Keep: the backend root and frontend/ are two separate npm projects outside the root workspaces; ACC Linux and ACC Windows install each. |
+| `deep-search:oversized:apps/deep-search/frontend/css/components.css` | 2055 | Deferred: split by component along its existing sections with the next UI change in this file; a standalone split is churn with no test gain. |
+| `deep-search:oversized:apps/deep-search/backend/research/explorer.py` | 835 | Deferred: split along its existing round seams with the next behavior change in this file; a standalone split is churn with no test gain. |
 | `lifeos:oversized:apps/lifeos/frontend/src/api/types.gen.ts` | 1252 | Keep: generated from the backend OpenAPI schema; never edited by hand. |
 | `lifeos:oversized:apps/lifeos/backend/src/domains/bills/dispute.py` | 967 | Deferred: split along its existing seams with the next behavior change in this file; a standalone split is churn with no test gain. |
 | `lifeos:oversized:apps/lifeos/backend/tests/bills/test_verification.py` | 936 | Keep: one test file per unit under test; splitting moves assertions without adding coverage. |
