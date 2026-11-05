@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>Deep Search</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%238fd2e4' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%232d6fb5' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%23182b6e'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/css/theme.css">
+    <link rel="stylesheet" href="/css/layout.css">
+    <link rel="stylesheet" href="/css/components.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<div class="shell">
+    <header class="topbar">
+        <button type="button" class="icon-btn rail-toggle" id="rail-toggle" aria-controls="rail" aria-expanded="false" aria-label="Show history">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+        <a class="brand" href="/" aria-label="Deep Search home">
+            <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span class="brand-name">Deep Search</span>
+        </a>
+        <nav class="topnav" aria-label="Primary">
+            <button type="button" class="nav-btn" id="nav-new">New search</button>
+        </nav>
+        <div class="topbar-end">
+            <span class="engine-pill" id="engine-pill" title="Which engines are available">Local engines</span>
+            <button type="button" class="icon-btn" id="open-settings" aria-label="Settings and API keys">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <aside class="rail" id="rail" aria-label="Research history">
+        <div class="rail-head">
+            <h2>History</h2>
+            <button type="button" class="link-btn" id="refresh-history">Refresh</button>
+        </div>
+        <div id="active-runs" class="rail-section" hidden>
+            <h3>Running now</h3>
+            <ul id="active-runs-list" class="rail-list"></ul>
+        </div>
+        <div class="rail-section">
+            <h3>Reports <span class="count" id="reports-count-badge">0</span></h3>
+            <input type="search" id="history-filter" class="rail-search" placeholder="Filter reports" aria-label="Filter reports">
+            <ul id="reports-list" class="rail-list">
+                <li class="rail-empty">Finished searches appear here.</li>
+            </ul>
+        </div>
+    </aside>
+
+    <main id="main" class="main" tabindex="-1">
+
+        <!-- Re-attach banner -->
+        <div class="banner" id="reattach-banner" hidden>
+            <span id="reattach-text">A search is still running.</span>
+            <button type="button" class="btn btn-small" id="reattach-btn">Watch it live</button>
+        </div>
+
+        <!-- ============ COMPOSER ============ -->
+        <section class="view" id="view-compose" aria-labelledby="compose-title">
+            <div class="compose-head">
+                <h1 id="compose-title">What are you researching?</h1>
+                <p class="lede">Deep Search plans the angles, reads papers, forums, videos, and expert writing, follows citations and leads, then writes a cited report. Runs can last minutes or hours.</p>
+            </div>
+
+            <div class="field field-topic">
+                <label for="topic" class="visually-hidden">What are you researching?</label>
+                <textarea id="topic" rows="3" placeholder="Ask a question or describe what you want to understand, e.g. Does creatine improve cognition in healthy adults, and what do lifters actually report?"></textarea>
+                <div class="topic-foot">
+                    <div class="examples" id="examples" aria-label="Example topics">
+                        <span class="examples-label">Try</span>
+                        <button type="button" class="example">Best evidence-based ways to fall asleep faster</button>
+                        <button type="button" class="example">Solid-state battery breakthroughs and what engineers think of them</button>
+                        <button type="button" class="example">Is retrieval-augmented generation better than fine-tuning for niche domains?</button>
+                    </div>
+                    <span class="char-count" id="topic-count" aria-live="polite"></span>
+                </div>
+            </div>
+
+            <fieldset class="block">
+                <legend class="block-title">How deep should it go?</legend>
+                <div class="presets" id="presets" role="radiogroup" aria-label="Depth">
+                    <!-- filled by app.js from /api/presets -->
+                </div>
+            </fieldset>
+
+            <fieldset class="block">
+                <legend class="block-title">Where should it look?</legend>
+                <div class="mix">
+                    <div class="mix-labels">
+                        <span class="mix-end mix-end-research"><strong>Research</strong><small>papers, reviews, institutions</small></span>
+                        <output id="mix-value" for="academic-weight" class="mix-value">50 / 50</output>
+                        <span class="mix-end mix-end-community"><strong>Community</strong><small>forums, Reddit, videos, experts</small></span>
+                    </div>
+                    <input type="range" id="academic-weight" min="0" max="100" step="5" value="50" aria-label="Research versus community balance" aria-valuetext="50% research, 50% community">
+                </div>
+                <div class="lanes" id="lanes" aria-label="Source lanes">
+                    <!-- lane chips rendered by app.js -->
+                </div>
+            </fieldset>
+
+            <div class="block toggles">
+                <label class="switch">
+                    <input type="checkbox" id="plan-first" checked>
+                    <span class="switch-ui" aria-hidden="true"></span>
+                    <span class="switch-text"><strong>Review the plan first</strong><small>See and edit the research questions before anything runs.</small></span>
+                </label>
+                <label class="switch">
+                    <input type="checkbox" id="ai-planning">
+                    <span class="switch-ui" aria-hidden="true"></span>
+                    <span class="switch-text"><strong>AI planning and follow-ups</strong><small id="ai-planning-note">Smarter questions and gap-finding. Sends the topic to OpenAI.</small></span>
+                </label>
+                <label class="switch">
+                    <input type="checkbox" id="ai-summary" checked>
+                    <span class="switch-ui" aria-hidden="true"></span>
+                    <span class="switch-text"><strong>AI-written report</strong><small>Section-by-section narrative with citations. Sends source excerpts to OpenAI.</small></span>
+                </label>
+            </div>
+
+            <details class="disclosure" id="research-plan">
+                <summary><span>Fine-tune</span><small>Hops, sources, time, rounds, models, spend</small></summary>
+                <div class="disclosure-body" id="params-body">
+                    <div class="grid-fields">
+                        <div class="field">
+                            <label for="max-duration-min">Time budget (minutes)</label>
+                            <input type="number" id="max-duration-min" min="1" max="720" value="15">
+                            <small>Commercial tools stop around 30. Up to 720 here.</small>
+                        </div>
+                        <div class="field">
+                            <label for="max-docs">Sources to keep</label>
+                            <input type="number" id="max-docs" min="5" max="5000" value="90">
+                        </div>
+                        <div class="field">
+                            <label for="max-depth">Link and citation hops</label>
+                            <input type="number" id="max-depth" min="0" max="10" value="2">
+                        </div>
+                        <div class="field">
+                            <label for="max-gap-rounds">Reflection rounds</label>
+                            <input type="number" id="max-gap-rounds" min="0" max="100" value="3">
+                            <small>Each round reviews findings and chases gaps and new leads.</small>
+                        </div>
+                        <div class="field">
+                            <label for="breadth">Research angles</label>
+                            <input type="number" id="breadth" min="1" max="12" value="6">
+                        </div>
+                        <div class="field">
+                            <label for="queries-per-round">New searches per round</label>
+                            <input type="number" id="queries-per-round" min="1" max="20" value="5">
+                        </div>
+                        <div class="field">
+                            <label for="concurrency">Parallel readers</label>
+                            <input type="number" id="concurrency" min="1" max="16" value="6">
+                            <small>More is faster, but sites block aggressive readers.</small>
+                        </div>
+                        <div class="field">
+                            <label for="max-spend">AI spend cap ($)</label>
+                            <input type="number" id="max-spend" min="0.1" max="200" step="0.1" value="2.00">
+                        </div>
+                    </div>
+                    <div class="check-grid">
+                        <label class="check"><input type="checkbox" id="follow-leads" checked><span>Follow new leads (names, terms, and entities the sources keep mentioning)</span></label>
+                        <label class="check"><input type="checkbox" id="citation-expansion" checked><span>Follow citation chains (references and cited-by)</span></label>
+                        <label class="check"><input type="checkbox" id="claim-verification" checked><span>Cross-check claims across independent sources</span></label>
+                        <label class="check"><input type="checkbox" id="rerank-results" checked><span>Rerank sources before writing</span></label>
+                        <label class="check"><input type="checkbox" id="query-rewrite" checked><span>Add keyword variants of the topic</span></label>
+                        <label class="check"><input type="checkbox" id="hyde-queries" checked><span>Draft-answer searches (needs AI planning)</span></label>
+                    </div>
+                    <div class="grid-fields">
+                        <div class="field">
+                            <label for="concealer-model">Planning model</label>
+                            <select id="concealer-model"></select>
+                        </div>
+                        <div class="field">
+                            <label for="deep-model">Report model</label>
+                            <select id="deep-model"></select>
+                        </div>
+                        <div class="field">
+                            <label for="reasoning-effort">Reasoning effort</label>
+                            <select id="reasoning-effort">
+                                <option value="low">Low</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details class="disclosure disclosure-privacy" id="privacy-panel">
+                <summary><span>Privacy layer</span><small id="privacy-summary">Off. Searches run in the open.</small></summary>
+                <div class="disclosure-body">
+                    <p class="hint">Optional. Use it when the topic touches something confidential. Private words never leave this computer in any mode.</p>
+                    <div class="field">
+                        <label for="watchlist">Private words <small>one per line</small></label>
+                        <textarea id="watchlist" rows="3" placeholder="Project names, client names, internal codes"></textarea>
+                    </div>
+                    <div class="check-grid">
+                        <label class="check"><input type="checkbox" id="blind-watchlist"><span>Replace private words with placeholders in searches (weaker results)</span></label>
+                        <label class="check"><input type="checkbox" id="conceal-process"><span>Hide the research from the AI among decoy topics</span></label>
+                    </div>
+                    <div class="field field-inline">
+                        <label for="decoy-queries">Decoy searches</label>
+                        <input type="number" id="decoy-queries" min="0" max="8" value="0">
+                        <small>Fake searches that make yours harder to single out. They find nothing useful.</small>
+                    </div>
+                    <label class="check confirm-box" id="confirm-weaker-wrap" hidden>
+                        <input type="checkbox" id="confirm-weaker-recall">
+                        <span>I accept weaker results in exchange for this privacy.</span>
+                    </label>
+                </div>
+            </details>
+
+            <div class="launch">
+                <div class="estimate" id="pre-run-estimate-card" aria-live="polite">
+                    <div class="estimate-line" id="estimate-line">Up to 15 min · up to 90 sources · 6 angles · 3 rounds</div>
+                    <div class="estimate-cost" id="est-spend">Free · runs locally</div>
+                    <details class="estimate-more">
+                        <summary>What this run will do</summary>
+                        <ul id="estimate-steps-breakdown"></ul>
+                    </details>
+                </div>
+                <div class="launch-actions">
+                    <button type="button" id="run-btn" class="btn btn-primary btn-large">Start search</button>
+                </div>
+            </div>
+            <div id="compose-error" class="inline-error" role="alert" hidden></div>
+        </section>
+
+        <!-- ============ PLAN REVIEW ============ -->
+        <section class="view" id="view-plan" hidden aria-labelledby="plan-title">
+            <div class="view-head">
+                <div>
+                    <p class="crumb"><button type="button" class="link-btn" id="plan-back">Back to the topic</button></p>
+                    <h1 id="plan-title">Review the research plan</h1>
+                    <p class="lede" id="plan-topic"></p>
+                </div>
+            </div>
+            <p class="hint" id="plan-note">Each question becomes its own line of investigation. Edit the wording, add or remove searches, switch questions off, or add your own.</p>
+            <ol class="plan-list" id="plan-list"></ol>
+            <button type="button" class="btn btn-ghost" id="plan-add">Add a question</button>
+            <div class="launch launch-plan">
+                <div class="estimate-line" id="plan-estimate"></div>
+                <div class="launch-actions">
+                    <button type="button" class="btn" id="plan-regenerate">Redraft</button>
+                    <button type="button" class="btn btn-primary btn-large" id="plan-start">Start search</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============ LIVE RUN ============ -->
+        <section class="view" id="view-run" hidden aria-labelledby="run-title">
+            <section id="live-progress" aria-label="Research progress">
+                <div class="run-head">
+                    <div class="run-head-text">
+                        <p class="run-kicker"><span class="pulse" aria-hidden="true"></span><span id="progress-title">Researching</span></p>
+                        <h1 id="run-title"></h1>
+                    </div>
+                    <div class="run-head-actions">
+                        <button type="button" id="cancel-btn" class="btn btn-stop" hidden>Stop and write report</button>
+                    </div>
+                </div>
+
+                <ol class="stepper" id="stepper">
+                    <li class="progress-stage" data-stage="plan"><span class="dot"></span><span>Plan</span></li>
+                    <li class="progress-stage" data-stage="search"><span class="dot"></span><span>Search</span></li>
+                    <li class="progress-stage" data-stage="read"><span class="dot"></span><span>Read</span></li>
+                    <li class="progress-stage" data-stage="reflect"><span class="dot"></span><span>Reflect</span></li>
+                    <li class="progress-stage" data-stage="synthesize"><span class="dot"></span><span>Cross-check</span></li>
+                    <li class="progress-stage" data-stage="report"><span class="dot"></span><span>Report</span></li>
+                </ol>
+
+                <div class="meters">
+                    <div class="meter">
+                        <div class="meter-top"><span>Sources kept</span><strong id="m-sources">0 / 0</strong></div>
+                        <div class="bar"><div class="bar-fill" id="m-sources-bar"></div></div>
+                    </div>
+                    <div class="meter">
+                        <div class="meter-top"><span>Time</span><strong id="progress-elapsed">0:00</strong></div>
+                        <div class="bar"><div class="bar-fill bar-fill-time" id="m-time-bar"></div></div>
+                    </div>
+                    <div class="meter">
+                        <div class="meter-top"><span>Round</span><strong id="m-round">—</strong></div>
+                        <div class="bar"><div class="bar-fill bar-fill-round" id="m-round-bar"></div></div>
+                    </div>
+                </div>
+
+                <dl class="counters">
+                    <div><dt>Searches</dt><dd id="c-searches">0</dd></div>
+                    <div><dt>Candidates</dt><dd id="c-candidates">0</dd></div>
+                    <div><dt>Pages read</dt><dd id="c-fetched">0</dd></div>
+                    <div><dt>Blocked or off-topic</dt><dd id="c-failed">0</dd></div>
+                    <div><dt>In queue</dt><dd id="c-queue">0</dd></div>
+                    <div><dt>Learnings</dt><dd id="c-learnings">0</dd></div>
+                </dl>
+
+                <p class="now" id="status-box" role="status" aria-live="polite"></p>
+                <p id="progress-detail" class="visually-hidden" aria-hidden="true"></p>
+                <span id="progress-sources" hidden></span>
+            </section>
+
+            <div class="run-grid">
+                <section class="panel panel-sounding" aria-labelledby="sounding-title">
+                    <div class="panel-head">
+                        <h2 id="sounding-title">Sounding</h2>
+                        <p class="panel-sub">Every source, plotted by how deep it was found.</p>
+                    </div>
+                    <div class="sounding" id="sounding" role="img" aria-label="Chart of sources by depth over time"></div>
+                    <div class="mixbar-wrap">
+                        <div class="mixbar-top"><span>Source mix</span><span id="mix-actual" class="muted"></span></div>
+                        <div class="mixbar" id="mixbar" aria-hidden="true"></div>
+                        <ul class="legend" id="lane-legend"></ul>
+                    </div>
+                </section>
+
+                <section class="panel panel-feed" aria-labelledby="feed-title">
+                    <div class="panel-head panel-head-tabs">
+                        <h2 id="feed-title" class="visually-hidden">Live activity</h2>
+                        <div class="seg" role="tablist" aria-label="Live panels">
+                            <button type="button" role="tab" class="seg-btn active" aria-selected="true" data-live-tab="sources" id="lt-sources">Sources <span class="count" id="lt-sources-count">0</span></button>
+                            <button type="button" role="tab" class="seg-btn" aria-selected="false" data-live-tab="learnings" id="lt-learnings">Learnings <span class="count" id="lt-learnings-count">0</span></button>
+                            <button type="button" role="tab" class="seg-btn" aria-selected="false" data-live-tab="activity" id="lt-activity">Activity</button>
+                            <button type="button" role="tab" class="seg-btn" aria-selected="false" data-live-tab="questions" id="lt-questions">Questions</button>
+                        </div>
+                    </div>
+                    <ol class="feed" id="live-sources" data-live-panel="sources"></ol>
+                    <ol class="feed" id="live-learnings" data-live-panel="learnings" hidden></ol>
+                    <ol class="feed feed-log" id="live-activity" data-live-panel="activity" hidden></ol>
+                    <ol class="feed" id="live-questions" data-live-panel="questions" hidden></ol>
+                </section>
+            </div>
+        </section>
+
+        <!-- ============ RESULTS ============ -->
+        <section class="view" id="results-section" hidden aria-labelledby="results-title">
+            <div class="results-head">
+                <div>
+                    <p class="crumb"><span id="result-status-badge" class="status">Complete</span><span id="result-when" class="muted"></span></p>
+                    <h1 id="results-title"></h1>
+                    <div id="metrics-bar" class="metrics"></div>
+                </div>
+                <div class="results-actions">
+                    <button type="button" class="btn" id="copy-report">Copy report</button>
+                    <a class="btn" id="download-report" href="#" download>Download .md</a>
+                    <button type="button" class="btn btn-primary" id="dig-deeper-btn">Dig deeper</button>
+                </div>
+            </div>
+
+            <div id="run-warnings" class="notes" hidden></div>
+
+            <div class="tabs" role="tablist" aria-label="Results">
+                <button type="button" role="tab" class="tab active" aria-selected="true" data-tab="report" id="tab-report">Report</button>
+                <button type="button" role="tab" class="tab" aria-selected="false" data-tab="sources" id="tab-sources">Sources <span class="count" id="tab-sources-count">0</span></button>
+                <button type="button" role="tab" class="tab" aria-selected="false" data-tab="learnings" id="tab-learnings">Research log <span class="count" id="tab-learnings-count">0</span></button>
+                <button type="button" role="tab" class="tab" aria-selected="false" data-tab="next" id="tab-next">Next digs <span class="count" id="tab-next-count">0</span></button>
+                <button type="button" role="tab" class="tab" aria-selected="false" data-tab="method" id="tab-method">Method</button>
+            </div>
+
+            <div class="tabpanel" data-panel="report" role="tabpanel" aria-labelledby="tab-report">
+                <div class="report-layout">
+                    <nav class="toc" id="report-toc" aria-label="Report sections"></nav>
+                    <article class="prose" id="summary-container"></article>
+                </div>
+            </div>
+
+            <div class="tabpanel" data-panel="sources" role="tabpanel" aria-labelledby="tab-sources" hidden>
+                <div class="source-tools">
+                    <input type="search" id="source-filter" placeholder="Filter sources" aria-label="Filter sources">
+                    <div class="chips" id="source-lane-filter" aria-label="Filter by lane"></div>
+                    <label class="sort">Sort
+                        <select id="source-sort">
+                            <option value="rank">Best match</option>
+                            <option value="quality">Source quality</option>
+                            <option value="depth">Depth found</option>
+                        </select>
+                    </label>
+                </div>
+                <ol class="source-list" id="evidence-container"></ol>
+            </div>
+
+            <div class="tabpanel" data-panel="learnings" role="tabpanel" aria-labelledby="tab-learnings" hidden>
+                <p class="hint">Findings the engine pulled out between rounds, in the order it learned them. These steered the follow-up searches.</p>
+                <ol class="log-list" id="learnings-container"></ol>
+            </div>
+
+            <div class="tabpanel" data-panel="next" role="tabpanel" aria-labelledby="tab-next" hidden>
+                <p class="hint">Leads this run surfaced but did not exhaust. A follow-up search skips every source already read here.</p>
+                <ul class="next-list" id="followups-container"></ul>
+                <div class="field next-custom">
+                    <label for="custom-dig">Or dig into something specific</label>
+                    <div class="row">
+                        <input type="text" id="custom-dig" placeholder="A narrower question, a name, a claim to verify">
+                        <button type="button" class="btn btn-primary" id="custom-dig-btn">Dig deeper</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tabpanel" data-panel="method" role="tabpanel" aria-labelledby="tab-method" hidden>
+                <div id="queries-container"></div>
+                <div id="report-link-container"></div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
+    <form method="dialog" class="dialog-body" id="settings-form">
+        <div class="dialog-head">
+            <h2 id="settings-title">Settings</h2>
+            <button type="submit" value="cancel" class="icon-btn" aria-label="Close settings">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+        </div>
+        <p class="hint">Everything works without keys. Keys unlock AI planning, AI-written reports, and extra indexes. They are saved to the local <code>.env</code> file.</p>
+        <div class="field">
+            <label for="openai-key">OpenAI API key</label>
+            <input type="password" id="openai-key" placeholder="sk-…" autocomplete="off">
+        </div>
+        <div class="field">
+            <label for="brave-key">Brave Search API key <small>extra web index</small></label>
+            <input type="password" id="brave-key" placeholder="BSA…" autocomplete="off">
+        </div>
+        <div class="field">
+            <label for="s2-key">Semantic Scholar API key <small>higher rate limits for papers</small></label>
+            <input type="password" id="s2-key" placeholder="optional" autocomplete="off">
+        </div>
+        <div class="grid-fields">
+            <div class="field">
+                <label for="searxng-url">Local search (SearXNG) URL</label>
+                <input type="text" id="searxng-url" placeholder="http://127.0.0.1:8080">
+            </div>
+            <div class="field">
+                <label for="local-llm-url">Local model URL</label>
+                <input type="text" id="local-llm-url" placeholder="http://127.0.0.1:11434/v1">
+            </div>
+        </div>
+        <div class="dialog-foot">
+            <span id="settings-status-msg" class="save-msg" role="status"></span>
+            <button type="button" class="btn btn-primary" id="save-settings">Save settings</button>
+        </div>
+    </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="/js/markdown.js"></script>
+<script src="/js/api_client.js"></script>
+<script src="/js/state_manager.js"></script>
+<script src="/js/ui_renderer.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
