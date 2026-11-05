@@ -1,0 +1,18 @@
+# Repository facts. The standard pin lives once, at the repo root.
+name: deep-search
+type: python-local-research-engine
+
+commands:
+  verify: python -m unittest test_safe_research.py test_bounded_contexts.py test_ai_search_expansion.py test_deep_expansion.py test_durable_research_ledger.py test_evidence_independence.py test_ultra_deep.py test_server_stream.py test_deep_research.py
+  lint: ruff check --select E9,F .
+  serve: python deep_search.py --ui
+
+ci:
+  # The merge gate is the root PR Gate; this app runs in its own "Deep Search" lane
+  # (.github/actions/verify-tests-deep-search).
+  workflow: ../../.github/workflows/pr-verify.yml
+  lane: "Deep Search"
+  required_check: "PR Gate"
+  triggers:
+    - pull_request
+    - merge_group

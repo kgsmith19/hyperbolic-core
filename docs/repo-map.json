@@ -32,6 +32,16 @@
       "plane": "source"
     },
     {
+      "path": "apps/creative-studio",
+      "reason": "Creative Studio: editorial creative standard and registry (docs and one validator); its own lane",
+      "plane": "source"
+    },
+    {
+      "path": "apps/deep-search",
+      "reason": "Deep Search: local deep-research engine (Python); its own lane, lint and unittest suite",
+      "plane": "source"
+    },
+    {
       "path": "apps/idea-intake",
       "reason": "Idea Intake app: captures ideas, optimizes them, and files each as one GitHub Issue",
       "plane": "source"

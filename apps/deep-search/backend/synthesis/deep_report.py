@@ -87,7 +87,6 @@ def _sentences_for(evidence: list, idxs: list[int], focus: str, max_items: int, 
             text = text[len(title):].lstrip(" :.-|")
         text = re.sub(r"\b(read more|related|advertisement|sponsored)\s*[:.]?\s*", " ", text, flags=re.I)
         quality = float(_get(item, "quality", 0.5) or 0.5)
-        lane = _get(item, "lane", "") or ""
         doc_best = []
         for sent in split_sentences(text)[:120]:
             sent = _clean_sentence(re.sub(r"^-?\s*\[\d+ pts\]\s*", "", sent.strip(" -•*")))

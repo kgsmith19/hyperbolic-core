@@ -25,7 +25,6 @@ import http.server
 import json
 import mimetypes
 import os
-import re
 import socketserver
 import threading
 import urllib.parse

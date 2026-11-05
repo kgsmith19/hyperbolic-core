@@ -1,0 +1,38 @@
+name: Verify Tests Deep Search
+description: >-
+  Deep Search's lane. Installs the core and collector requirements together,
+  because the test suite patches collector-only modules (curl_cffi), then runs
+  pyflakes-level lint (ruff E9,F: syntax errors, undefined names, unused code)
+  and the unit suite. Type checking is not configured here: basic-mode pyright
+  reports 99 errors across the app today, recorded in
+  docs/planning/leanness/deep-search.md. Assumes the caller already checked out
+  the repository.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup · Configure Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: "3.12"
+
+    - name: Setup · Install core and collector requirements
+      shell: bash
+      working-directory: apps/deep-search
+      run: |
+        set -euo pipefail
+        python -m pip install -r requirements-core.txt -r requirements-collector.txt "ruff==0.17.3"
+
+    - name: Lint · ruff E9,F (syntax, undefined names, unused code)
+      shell: bash
+      working-directory: apps/deep-search
+      run: ruff check --select E9,F .
+
+    - name: Tests · unittest suite
+      shell: bash
+      working-directory: apps/deep-search
+      run: >-
+        python -m unittest test_safe_research.py test_bounded_contexts.py
+        test_ai_search_expansion.py test_deep_expansion.py
+        test_durable_research_ledger.py test_evidence_independence.py
+        test_ultra_deep.py test_server_stream.py test_deep_research.py

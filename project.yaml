@@ -9,6 +9,8 @@ apps:
   - apps/lifeos
   - apps/agentic-command-center
   - apps/shell
+  - apps/deep-search
+  - apps/creative-studio
 
 services:
   - services/brain
@@ -120,6 +122,20 @@ ci:
       action: .github/actions/{detect-changes,verify-tests-lifeos}
       gate: "LifeOS"
       covers: apps/lifeos — lint (ruff, npm run lint; the only app with a linter configured, run early inside verify-tests-lifeos itself) ahead of its backend/frontend suites.
+      # rolled into "PR Gate" below, not typed here individually
+      required: false
+    - order: 1
+      path: .github/workflows/pr-verify.yml
+      action: .github/actions/{detect-changes,verify-tests-deep-search}
+      gate: "Deep Search"
+      covers: apps/deep-search — ruff E9,F lint and the unittest suite; skips in seconds via detect-changes when untouched. Type checking is not yet configured (docs/planning/leanness/deep-search.md).
+      # rolled into "PR Gate" below, not typed here individually
+      required: false
+    - order: 1
+      path: .github/workflows/pr-verify.yml
+      action: .github/actions/{detect-changes,verify-tests-creative-studio}
+      gate: "Creative Studio"
+      covers: apps/creative-studio — the registry validator (scripts/validate.py); skips in seconds via detect-changes when untouched.
       # rolled into "PR Gate" below, not typed here individually
       required: false
     - order: 3

@@ -4,13 +4,11 @@ Verifies that each bounded context package in `backend/` functions independently
 with clear interfaces and invariant preservation.
 """
 
-import argparse
 import os
 import unittest
 from unittest.mock import MagicMock, patch
 
 from backend.privacy import (
-    enforce_secret_core_socket_block,
     SafetyError,
     redact,
     assert_safe_to_send,
@@ -21,10 +19,8 @@ from backend.privacy import (
     calculate_shannon_entropy,
     SecureZeroBuffer,
     EphemeralEncryptedScratch,
-    SanitizedQuarantine,
 )
 from backend.frontier import (
-    FrontierItem,
     ResearchFrontier,
     canonicalize_url,
 )
@@ -36,20 +32,15 @@ from backend.ranking import (
 )
 from backend.retrieval.meta import (
     decode_bing_url,
-    is_port_in_use,
 )
 from backend.retrieval import (
     is_safe_url,
     is_bot_or_js_barrier,
-    extract_clean_content,
     validate_task_schema,
 )
 from backend.synthesis import (
     LocalSynthesizer,
     write_report,
-)
-from backend.research import (
-    expand_topic_queries,
 )
 from backend.research.cost_estimator import (
     CostTracker,
@@ -57,11 +48,6 @@ from backend.research.cost_estimator import (
 )
 from backend.research.cancellation import (
     cancellation_manager,
-    CancellationToken,
-)
-from backend.server import (
-    load_lines,
-    load_env_file,
 )
 
 
@@ -733,8 +719,7 @@ class TestDeepSearchCLI(unittest.TestCase):
 
     def test_cli_has_no_mode_flag(self):
         import deep_search
-        parser = argparse.ArgumentParser()
-        # Rebuild from module helper if present, else parse -h via main parser factory
+
         built = deep_search.build_parser()
         help_text = built.format_help()
         self.assertNotIn("--mode", help_text)

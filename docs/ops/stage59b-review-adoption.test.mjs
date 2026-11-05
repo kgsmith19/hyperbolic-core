@@ -189,7 +189,7 @@ test("the AI Review lane is gone and the PR Gate needs no review (#547)", () => 
   assert.doesNotMatch(verify, /\n  ai-review:\n/);
   assert.match(
     verify,
-    /needs: \[repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos\]/,
+    /needs: \[repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos, deep-search, creative-studio\]/,
   );
   const required = (read("project.yaml").match(/^\s*required: true/mg) ?? []).length;
   assert.equal(required, 1);

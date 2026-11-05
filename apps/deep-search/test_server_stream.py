@@ -12,7 +12,7 @@ import unittest
 import urllib.request
 from unittest.mock import patch
 
-from backend.research.types import ResearchRun, SearchOptions, SpendReport
+from backend.research.types import ResearchRun, SpendReport
 from backend.server import web_server
 
 

@@ -303,6 +303,8 @@ required: `PR Gate`.
 | 1 | `Brain` | `services/brain/**` | No — rolled into `PR Gate` |
 | 1 | `Platform` | `apps/shell/**`, `packages/**`, `services/llm-handler/**`, `services/broker/**`, `services/platform-api/**`, `docs/ops/**` | No — rolled into `PR Gate` |
 | 1 | `LifeOS` | `apps/lifeos/**` — including its own lint | No — rolled into `PR Gate` |
+| 1 | `Deep Search` | `apps/deep-search/**` — ruff `E9,F` lint and its unittest suite | No — rolled into `PR Gate` |
+| 1 | `Creative Studio` | `apps/creative-studio/**` — the registry validator | No — rolled into `PR Gate` |
 | 3 | `PR Gate` | rollup **and** merge orchestration: `needs:` every lane above, `if: always()` | **Yes** |
 
 **One check row per job is a GitHub invariant with no suppression mechanism.** By owner directive

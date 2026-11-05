@@ -9,8 +9,7 @@ Enforces maximum spend limits (kill switch) and provides real-time cost estimati
 """
 
 import math
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 
 class SpendLimitExceededError(Exception):

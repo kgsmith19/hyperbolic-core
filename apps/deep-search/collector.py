@@ -21,6 +21,16 @@ from backend.retrieval import (
 )
 from backend.server import load_env_file
 
+# The public facade: these names are re-exported on purpose (tests and the IPC entrypoint use them).
+__all__ = [
+    "RetrievalRouter",
+    "extract_clean_content",
+    "is_bot_or_js_barrier",
+    "is_safe_url",
+    "run_ipc_loop",
+    "validate_task_schema",
+]
+
 # Initialize environment
 load_env_file()
 

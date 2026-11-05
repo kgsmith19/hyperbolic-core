@@ -1,4 +1,3 @@
-import time
 import unittest
 
 from backend.research.independence import simhash, hamming, HAMMING_THRESHOLD

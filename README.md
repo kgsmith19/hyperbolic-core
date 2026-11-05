@@ -16,6 +16,8 @@ Standard](https://github.com/kgsmith19/agent-engineering-standard).
 | [`apps/agentic-command-center`](apps/agentic-command-center) | Local coding-agent guard rail, control panel, and bounded task runner | `ACC Linux` + `ACC Windows` |
 | [`apps/lifeos`](apps/lifeos) | Personal life-management system — typed entity graph, append-only event log | `LifeOS` (its lint runs as a step there too) |
 | [`apps/shell`](apps/shell) | Unified React/Vite front end composing every zone behind one owner login | `Platform` |
+| [`apps/deep-search`](apps/deep-search) | Local deep-research engine: multi-round, multi-source research runs | `Deep Search` |
+| [`apps/creative-studio`](apps/creative-studio) | Creative standard, research and registry for editorial visual work (docs and one validator) | `Creative Studio` |
 | [`tool.json`, `supabase/`, `tests/spine/`](supabase) | Root spine — the shared `core` schema and the manifest and registration contract every app registers through | `Toolbelt` |
 | [`services/brain`](services/brain) | Long-lived autonomous-coding orchestrator — daemon, DAG scheduler, task/result contracts | `Brain` |
 | [`services/llm-handler`](services/llm-handler) | Deployed general-purpose LLM service behind the Shell | covered by `Platform` |
@@ -41,7 +43,7 @@ Gate verifies that every lane succeeded and alone controls merge authorization:
 | Row | What it does | Required |
 | --- | --- | --- |
 | `Repository Standards` | leaked-credential scan, repo structure, PR description, exact-head consistency — repository integrity only | No |
-| `Toolbelt` / `ACC Linux` / `ACC Windows` / `Brain` / `Platform` / `LifeOS` | each app's complete, self-contained engineering verification, fully parallel | No |
+| `Toolbelt` / `ACC Linux` / `ACC Windows` / `Brain` / `Platform` / `LifeOS` / `Deep Search` / `Creative Studio` | each app's complete, self-contained engineering verification, fully parallel | No |
 | `PR Gate` | rollup verdict **and** merge orchestration | **Yes** |
 
 One check row per job is a GitHub invariant with no suppression, but by owner directive this repo

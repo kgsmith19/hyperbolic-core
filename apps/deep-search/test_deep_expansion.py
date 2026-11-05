@@ -6,7 +6,6 @@ graph, local reranker, and the pipeline wiring (chunk/rerank/citation
 options flow through preview, server payload parsing, and explorer).
 """
 
-import os
 import unittest
 from unittest.mock import MagicMock, patch
 

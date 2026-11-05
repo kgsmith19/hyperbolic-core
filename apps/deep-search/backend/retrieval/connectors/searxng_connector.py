@@ -5,7 +5,6 @@ graceful fallback to the built-in meta-search aggregator.
 """
 
 import os
-import sys
 import httpx
 from backend.retrieval.meta.meta_search_aggregator import aggregate_meta_search
 

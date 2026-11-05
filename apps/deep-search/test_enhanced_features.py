@@ -5,10 +5,9 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from backend.research.cloud_client import get_api_key, has_api_key, invoke_model
-from backend.research.cost_estimator import CostTracker, MODEL_PRICING
+from backend.research.cost_estimator import MODEL_PRICING
 from backend.research.types import SearchOptions
 from backend.research.query_planner import expand_topic_queries
-from backend.research.research_plan import model_plan
 from backend.synthesis.report_generator import build_exhaustive_metrics_table, build_structured_report, write_report
 from backend.server.web_server import _options_from_payload
 

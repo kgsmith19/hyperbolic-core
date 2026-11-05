@@ -58,7 +58,7 @@ class LocalSynthesizer:
             f"You are an air-gapped research analyst. Provide an executive summary with inline source citations for the topic.\n\n"
             f"Topic: {topic}\n\n"
             f"Evidence:\n" + "\n\n".join(sources_text) + "\n\n"
-            f"Write a concise executive summary citing sources with [1], [2], etc."
+            "Write a concise executive summary citing sources with [1], [2], etc."
         )
 
         payload = {

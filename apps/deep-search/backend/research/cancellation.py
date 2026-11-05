@@ -5,7 +5,6 @@ and active multi-hop exploration workers.
 """
 
 import threading
-from typing import Optional
 
 
 # Type alias for clarity

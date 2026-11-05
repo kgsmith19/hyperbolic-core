@@ -83,8 +83,8 @@ def _expand_topic_queries_bare(
     direction_note = ""
     if force_direction:
         direction_note = (
-            f" Maintain strict adherence to the exact direction and scope of the topic "
-            f"without assuming an alternative topic is what is sought."
+            " Maintain strict adherence to the exact direction and scope of the topic "
+            "without assuming an alternative topic is what is sought."
         )
 
     prompt = (

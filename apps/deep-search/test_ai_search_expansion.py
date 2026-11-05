@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from backend.research.cloud_client import check_openai_key
-from backend.research.cost_estimator import CostTracker, MODEL_PRICING
+from backend.research.cost_estimator import CostTracker
 from backend.research.explorer import _bm25_priorities
 from backend.research.query_planner import expand_topic_queries, propose_gap_queries
 from backend.research.types import SearchOptions

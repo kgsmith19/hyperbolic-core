@@ -145,7 +145,7 @@ test("partial-green: PR Gate's verdict is its own needs.*.result, so a non-succe
   assert.match(
     verify,
     // Oracle change (#547): the AI Review lane left PR Gate's needs.
-    /needs: \[repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos\]/,
+    /needs: \[repository-standards, toolbelt, acc-linux, acc-windows, brain, platform, lifeos, deep-search, creative-studio\]/,
   );
   // Verdict computed from the needs results themselves. (Oracle change #547:
   // the old /needs\.\w/ pin only ever matched a comment in the removed lane.)
