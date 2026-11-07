@@ -27,3 +27,11 @@ is tests-only. `deep-search` runs its own UI server and is not yet in the root s
   file is in `ops/`, so the stack proof runs on this PR's head.
 - Acceptance criteria 3 to 7 of #559 stay open until that run and the remaining
   app smoke proofs are recorded.
+
+## Gate status log
+
+- 2026-11-07 19:20 UTC: PR #564 first run (42405708652). Lanes cancelled when the
+  `owner:queue-exempt` label event started a second run. `ACC Linux` stayed
+  in progress with no result.
+- 2026-11-07: a PR description edit did not start a new run. This commit re-triggers
+  the gate so the Platform lane (`verify-local-stack`) runs on a fresh head.
