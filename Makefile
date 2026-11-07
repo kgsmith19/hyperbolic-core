@@ -12,7 +12,7 @@ NAME ?=
 export HOST_UID ?= $(shell id -u)
 export HOST_GID ?= $(shell id -g)
 
-.PHONY: up down init policy test backup restore-drill canary telemetry release verify rollback status
+.PHONY: up down init policy test backup restore-drill canary telemetry readiness release verify rollback status
 
 up: policy init
 	@mkdir -p var/platform var/network-checker var/lifeos/blobs var/brain/home var/brain-workspaces
@@ -68,6 +68,11 @@ canary: policy init
 # One JSON health report for every running service; fails if any is unhealthy.
 telemetry:
 	python3 ops/telemetry.py
+
+# Writes var/local-readiness.md, including every declared app/service and the
+# observed state of the root Compose services. It is read-only.
+readiness:
+	python3 ops/readiness.py
 
 # The full local release (#504, AC3): canary, deploy, then health, invariant
 # (backup plus restore drill) and telemetry. Any failure after the deploy
