@@ -5,28 +5,16 @@ import re
 import unittest
 from pathlib import Path
 
+from local_stack import composed_components, excluded_components
+
 ROOT = Path(__file__).resolve().parent.parent
 COMPOSE = (ROOT / "compose.yaml").read_text()
 STORES = json.loads((ROOT / "ops" / "stores.json").read_text())["stores"]
 
 # A tool.json directory (or an app with a server) maps to a compose service,
 # or is excluded with its reason in compose.yaml's header.
-SERVICE_FOR = {
-    "services/platform-api": "platform-api",
-    "services/broker": "broker",
-    "services/brain": "brain",
-    "apps/network-checker": "network-checker",
-    "apps/lifeos": "lifeos",
-}
-EXCLUDED = {
-    "services/llm-handler": "llm-handler",
-    "apps/idea-intake": "idea-intake",
-    "apps/prompt-organizer": "prompt-organizer",
-    "apps/shell": "shell",
-    "apps/agentic-command-center": "agentic-command-center",
-    "apps/deep-search": "deep-search",
-    "apps/creative-studio": "creative-studio",
-}
+SERVICE_FOR = {component.path: component.name for component in composed_components()}
+EXCLUDED = {component.path: component.name for component in excluded_components()}
 
 
 def service_blocks():

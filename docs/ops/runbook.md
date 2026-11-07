@@ -23,6 +23,26 @@ updated: 2026-10-29
 >
 > Whatever the VPS last ran keeps running untouched; nothing in this repository deploys to it any more.
 
+## Local first-use path
+
+From a clean clone, run:
+
+```sh
+npm ci
+make up
+make readiness
+make telemetry
+make test
+```
+
+`make readiness` writes `var/local-readiness.md`. It lists every declared app and service,
+the local URL or next command, the observed Compose state where one exists, and the smallest
+next action. It deliberately reports separate or cloud-dependent components as such instead of
+pretending they started. It is read-only and never reads credentials.
+
+Use `make down` to stop the root stack. `make backup` then `make restore-drill` verifies local
+state before a release experiment.
+
 CI has no cloud dependency for review any more. The AI Review lane, its dialogue, recheck and
 dev-agent workflows, and the two GitHub App identities they posted as (the reviewer App and
 `hyperbolic-core-dev`) were removed by owner decision on 2026-11-04 (#547). Independent review
