@@ -22,6 +22,9 @@ KERNEL_MIGRATIONS = [
     # Reconciliation receipt infrastructure (#588). Reviewed against invariant 1:
     # it records source-sync process metadata, not life-domain data.
     "0003_sync_receipts.sql",
+    # Rollback of applied sync batches (#589). Reviewed against invariant 1: it
+    # records which kernel receipts were applied and rolled back, not life data.
+    "0004_sync_rollback.sql",
 ]
 
 
