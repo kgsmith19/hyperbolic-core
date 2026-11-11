@@ -13,6 +13,7 @@
 // originated proposal (M4-20, domains/agents/proposals.py) carries whatever
 // kind label the caller chose, so this listing tells the two apart by kind,
 // not by state alone, before ever calling the gated route.
+import { Button } from "@hyperbolic/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 
@@ -38,10 +39,11 @@ function GatedDraft({ proposalId }: { proposalId: string }) {
     queryKey: ["draft", proposalId],
     queryFn: () => getApprovedDraft(proposalId),
   });
-  if (draft.isPending) return <p className="text-sm text-zinc-400">Loading…</p>;
+  if (draft.isPending)
+    return <p className="text-sm text-text-muted">Loading…</p>;
   if (draft.isError) return <ErrorText error={draft.error} />;
   return (
-    <p className="whitespace-pre-wrap rounded bg-zinc-50 p-2 text-sm text-zinc-700">
+    <p className="whitespace-pre-wrap rounded bg-bg-subtle p-2 text-sm text-text-secondary">
       {draft.data.body}
     </p>
   );
@@ -62,20 +64,18 @@ function Proposal({ view }: { view: ProposalView }) {
   });
 
   return (
-    <li className="rounded-lg border border-zinc-200 bg-white p-3">
+    <li className="rounded-lg border border-border bg-surface p-3">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-medium">{view.kind}</span>
-        <span className="text-zinc-500 uppercase">{view.state}</span>
+        <span className="text-text-muted uppercase">{view.state}</span>
         {view.unresolved_count > 0 && (
-          <span className="text-amber-600">
-            {view.unresolved_count} unresolved
-          </span>
+          <span className="text-warn">{view.unresolved_count} unresolved</span>
         )}
         {view.subject_ids.map((id) => (
           <Link
             key={id}
             to={`/entities/${id}`}
-            className="text-blue-700 hover:underline"
+            className="text-info hover:underline"
           >
             {id.slice(0, 8)}
           </Link>
@@ -84,27 +84,28 @@ function Proposal({ view }: { view: ProposalView }) {
 
       {view.state === "proposed" && (
         <>
-          <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700">
+          <p className="mt-2 whitespace-pre-wrap text-sm text-text-secondary">
             {view.body}
           </p>
           <div className="mt-3 flex gap-2">
-            <button
+            <Button
               onClick={() => approve.mutate()}
               disabled={approve.isPending}
-              className="rounded bg-zinc-900 px-3 py-1 text-sm text-white disabled:opacity-50"
+              size="sm"
             >
               Approve
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={() => reject.mutate()}
               disabled={reject.isPending}
-              className="rounded border border-red-300 px-3 py-1 text-sm text-red-700 hover:bg-red-50"
+              variant="destructive"
+              size="sm"
             >
               Reject
-            </button>
+            </Button>
           </div>
           {(approve.error ?? reject.error) && (
-            <p className="mt-2 text-sm text-red-600">
+            <p className="mt-2 text-sm text-danger">
               {String(approve.error ?? reject.error)}
             </p>
           )}

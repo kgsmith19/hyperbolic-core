@@ -1,3 +1,4 @@
+import { Button, Input, Select } from "@hyperbolic/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useState, type SubmitEvent } from "react";
 import { Link } from "react-router";
@@ -27,25 +28,18 @@ export default function Browse() {
   return (
     <div className="space-y-4">
       <form onSubmit={onSubmit} className="flex gap-2">
-        <input
-          name="text"
-          placeholder="Search…"
-          className="flex-1 rounded border border-zinc-300 px-2 py-1.5"
-        />
-        <select
-          name="type_name"
-          className="rounded border border-zinc-300 px-2 py-1.5"
-        >
+        <Input name="text" placeholder="Search…" className="flex-1" />
+        <Select name="type_name" wrapperClassName="w-48 shrink-0">
           <option value="">All types</option>
           {types.data?.map((t) => (
             <option key={t.name} value={t.name}>
               {t.name}
             </option>
           ))}
-        </select>
-        <button type="submit" className="rounded bg-zinc-900 px-3 text-white">
+        </Select>
+        <Button type="submit" className="shrink-0">
           Search
-        </button>
+        </Button>
       </form>
 
       {results.isPending && <Loading />}
@@ -55,10 +49,10 @@ export default function Browse() {
           <li key={entity.id}>
             <Link
               to={`/entities/${entity.id}`}
-              className="block rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-400"
+              className="block rounded-lg border border-border bg-surface p-3 hover:border-border-strong"
             >
               <span className="font-medium">{entity.name ?? entity.id}</span>
-              <span className="mt-1 block truncate text-xs text-zinc-500">
+              <span className="mt-1 block truncate text-xs text-text-muted">
                 {JSON.stringify(entity.attributes)}
               </span>
             </Link>
@@ -66,7 +60,7 @@ export default function Browse() {
         ))}
       </ul>
       {results.data?.length === 0 && (
-        <p className="text-sm text-zinc-500">No results.</p>
+        <p className="text-sm text-text-muted">No results.</p>
       )}
     </div>
   );

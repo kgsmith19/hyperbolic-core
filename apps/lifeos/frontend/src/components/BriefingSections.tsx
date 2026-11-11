@@ -31,7 +31,7 @@ function displayName(entity: EntityView["entity"], id: string): string {
 
 function Gone({ id, noun }: { id: string; noun: string }) {
   return (
-    <li className="rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-500">
+    <li className="rounded-lg border border-border bg-surface p-3 text-sm text-text-muted">
       This {noun} ({id.slice(0, 8)}) is no longer available.
     </li>
   );
@@ -39,20 +39,20 @@ function Gone({ id, noun }: { id: string; noun: string }) {
 
 function Pending() {
   return (
-    <li className="rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-400">
+    <li className="rounded-lg border border-border bg-surface p-3 text-sm text-text-muted">
       Loading…
     </li>
   );
 }
 
 export function Empty({ children }: { children: string }) {
-  return <p className="text-sm text-zinc-500">{children}</p>;
+  return <p className="text-sm text-text-muted">{children}</p>;
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
-      <h2 className="mb-1 text-sm font-semibold uppercase text-zinc-500">
+      <h2 className="mb-1 text-sm font-semibold uppercase text-text-muted">
         {title}
       </h2>
       {children}
@@ -78,18 +78,18 @@ export function FocusIntentions({ items }: { items: Resolved[] }) {
               <li key={id}>
                 <Link
                   to={`/entities/${id}`}
-                  className="block rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-400"
+                  className="block rounded-lg border border-border bg-surface p-3 hover:border-border-strong"
                 >
                   <span className="text-sm font-medium">
                     {displayName(entity, id)}
                   </span>
                   {asString(entity.attributes.next_action) && (
-                    <span className="mt-0.5 block text-xs text-zinc-600">
+                    <span className="mt-0.5 block text-xs text-text-secondary">
                       Next: {asString(entity.attributes.next_action)}
                     </span>
                   )}
                   {asString(entity.attributes.floor) && (
-                    <span className="mt-0.5 block text-xs text-zinc-500">
+                    <span className="mt-0.5 block text-xs text-text-muted">
                       Floor: {asString(entity.attributes.floor)}
                     </span>
                   )}
@@ -124,9 +124,9 @@ export function Appointments({ items }: { items: Resolved[] }) {
               <li key={id}>
                 <Link
                   to={`/entities/${id}`}
-                  className="flex gap-3 rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-400"
+                  className="flex gap-3 rounded-lg border border-border bg-surface p-3 hover:border-border-strong"
                 >
-                  <span className="w-24 shrink-0 text-sm tabular-nums text-zinc-500">
+                  <span className="w-24 shrink-0 text-sm tabular-nums text-text-muted">
                     {timeLabel(entity.attributes)}
                   </span>
                   <span className="text-sm">
@@ -134,7 +134,7 @@ export function Appointments({ items }: { items: Resolved[] }) {
                       {displayName(entity, id)}
                     </span>
                     {asString(entity.attributes.location) && (
-                      <span className="mt-0.5 block text-xs text-zinc-500">
+                      <span className="mt-0.5 block text-xs text-text-muted">
                         {asString(entity.attributes.location)}
                       </span>
                     )}
@@ -156,7 +156,7 @@ export function Episodes({ line }: { line?: string }) {
   if (!line) return null;
   return (
     <Section title="Episodes">
-      <p className="text-sm text-zinc-600">{line}</p>
+      <p className="text-sm text-text-secondary">{line}</p>
     </Section>
   );
 }
@@ -167,7 +167,7 @@ export function GateStatus({ gate }: { gate?: Gate }) {
   if (!gate) return null;
   return (
     <Section title="Utility gate">
-      <p className="text-sm text-zinc-600">
+      <p className="text-sm text-text-secondary">
         {gate.met ? "Met" : "Open"} — check-in days per week:{" "}
         {gate.weeks.join(" · ")}
       </p>

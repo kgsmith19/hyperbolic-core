@@ -65,11 +65,11 @@ function Topbar({
         data-slot="palette-trigger"
         onClick={onOpenPalette}
         aria-label="Open command palette"
-        className="ml-2 flex h-8 max-w-sm flex-1 items-center gap-2 rounded-lg border border-border-strong bg-bg-subtle px-2.5 text-sm text-text-muted outline-none transition-colors hover:text-text-secondary focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="ml-2 flex h-8 min-w-0 max-w-sm flex-1 items-center gap-2 rounded-lg border border-border-strong bg-bg-subtle px-2.5 text-sm text-text-muted outline-none transition-colors hover:text-text-secondary focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         <Search className="size-4 shrink-0" />
         <span className="flex-1 text-left">Search</span>
-        <kbd className="rounded border border-border bg-surface px-1 font-mono text-xs text-text-muted">
+        <kbd className="hidden rounded border border-border bg-surface px-1 font-mono text-xs text-text-muted sm:inline">
           Ctrl K
         </kbd>
       </button>
@@ -88,7 +88,7 @@ function Topbar({
             className="flex items-center gap-2 border-l border-border pl-2.5"
           >
             <span
-              className="max-w-32 truncate text-xs text-text-secondary"
+              className="hidden max-w-32 truncate text-xs text-text-secondary sm:inline"
               title={session.userId}
             >
               {session.userId}

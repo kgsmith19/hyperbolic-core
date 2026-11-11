@@ -1,3 +1,4 @@
+import { Button } from "@hyperbolic/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
 
@@ -28,18 +29,18 @@ export default function EntityDetail() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">{entity.name ?? entity.id}</h1>
-        <p className="text-sm text-zinc-500">{types.join(" · ")}</p>
+        <p className="text-sm text-text-muted">{types.join(" · ")}</p>
       </div>
 
       <section>
-        <h2 className="mb-1 text-sm font-semibold uppercase text-zinc-500">
+        <h2 className="mb-1 text-sm font-semibold uppercase text-text-muted">
           Attributes
         </h2>
-        <dl className="rounded-lg border border-zinc-200 bg-white p-3">
+        <dl className="rounded-lg border border-border bg-surface p-3">
           {Object.entries(entity.attributes).map(([key, value]) => (
             <div key={key} className="flex gap-2 py-0.5 text-sm">
               <dt className="w-40 shrink-0 font-medium">{key}</dt>
-              <dd className="break-all text-zinc-700">
+              <dd className="break-all text-text-secondary">
                 {JSON.stringify(value)}
               </dd>
             </div>
@@ -49,7 +50,7 @@ export default function EntityDetail() {
 
       {(edges_out.length > 0 || edges_in.length > 0) && (
         <section>
-          <h2 className="mb-1 text-sm font-semibold uppercase text-zinc-500">
+          <h2 className="mb-1 text-sm font-semibold uppercase text-text-muted">
             Edges
           </h2>
           <ul className="space-y-1 text-sm">
@@ -58,7 +59,7 @@ export default function EntityDetail() {
                 → {edge.relation}{" "}
                 <Link
                   to={`/entities/${edge.to_entity}`}
-                  className="text-blue-700 hover:underline"
+                  className="text-info hover:underline"
                 >
                   {edge.to_entity}
                 </Link>
@@ -69,7 +70,7 @@ export default function EntityDetail() {
                 ←{" "}
                 <Link
                   to={`/entities/${edge.from_entity}`}
-                  className="text-blue-700 hover:underline"
+                  className="text-info hover:underline"
                 >
                   {edge.from_entity}
                 </Link>{" "}
@@ -81,7 +82,7 @@ export default function EntityDetail() {
       )}
 
       <section>
-        <h2 className="mb-1 text-sm font-semibold uppercase text-zinc-500">
+        <h2 className="mb-1 text-sm font-semibold uppercase text-text-muted">
           History
         </h2>
         {events.isError && <ErrorText error={events.error} />}
@@ -89,10 +90,10 @@ export default function EntityDetail() {
           {events.data?.map((event) => (
             <li
               key={event.id}
-              className="rounded border border-zinc-200 bg-white px-2 py-1"
+              className="rounded border border-border bg-surface px-2 py-1"
             >
               <span className="font-medium">{event.event_type}</span>
-              <span className="ml-2 text-zinc-500">
+              <span className="ml-2 text-text-muted">
                 {new Date(event.recorded_at).toLocaleString()} · {event.actor}
               </span>
             </li>
@@ -100,8 +101,8 @@ export default function EntityDetail() {
         </ol>
       </section>
 
-      <section className="border-t border-zinc-200 pt-3">
-        <button
+      <section className="border-t border-border pt-3">
+        <Button
           onClick={() => {
             if (
               window.confirm(
@@ -110,18 +111,18 @@ export default function EntityDetail() {
             )
               forget.mutate();
           }}
-          className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
+          variant="destructive"
         >
           Forget (erase PII)
-        </button>
+        </Button>
         {forget.isSuccess && (
-          <p className="mt-2 text-sm text-zinc-600">
+          <p className="mt-2 text-sm text-text-secondary">
             Erased {forget.data.fields.join(", ")} across{" "}
             {forget.data.events_redacted} event(s).
           </p>
         )}
         {forget.isError && (
-          <p className="mt-2 text-sm text-red-600">{String(forget.error)}</p>
+          <p className="mt-2 text-sm text-danger">{String(forget.error)}</p>
         )}
       </section>
     </div>

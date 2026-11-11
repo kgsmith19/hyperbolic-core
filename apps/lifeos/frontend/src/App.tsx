@@ -9,8 +9,14 @@
 // than a route inside the Shell's own router.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect } from "react";
-import { BrowserRouter, Route, Routes, useLocation } from "react-router";
-import { Chrome } from "@hyperbolic/ui";
+import {
+  BrowserRouter,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router";
+import { Chrome, cn } from "@hyperbolic/ui";
 
 import { computeGateDecision } from "./lib/auth-gate";
 import { useLifeOsSession } from "./lib/session";
@@ -43,7 +49,11 @@ function Gate() {
   // path, read fresh on every render since this component re-renders on
   // every navigation.
   const routerLocation = useLocation();
-  const decision = computeGateDecision(status, window.location.pathname, window.location.search);
+  const decision = computeGateDecision(
+    status,
+    window.location.pathname,
+    window.location.search,
+  );
 
   useEffect(() => {
     if (decision.kind === "redirect-to-shell-login") {
@@ -73,7 +83,11 @@ function Gate() {
           DOM for any status other than "signed-in" (see the branch above),
           so its mere presence is what an e2e assertion checks for "gated
           content actually rendered, not a false-positive Chrome shell". */}
-      <div data-app-data="lifeos-zone">
+      <div
+        data-app-data="lifeos-zone"
+        className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-6"
+      >
+        <LifeOSNav />
         <Suspense fallback={<Loading />}>
           <Routes>
             <Route path="/" element={<Browse />} />
@@ -88,6 +102,46 @@ function Gate() {
         </Suspense>
       </div>
     </Chrome>
+  );
+}
+
+// LifeOS's own sections (#562 design alignment). The shared Chrome sidebar
+// lists zones; this row is the in-zone navigation, styled like the Shell's
+// sidebar items so LifeOS reads as one more hyperbolic-core app.
+const SECTIONS = [
+  { to: "/", label: "Browse" },
+  { to: "/today", label: "Today" },
+  { to: "/tomorrow", label: "Tomorrow" },
+  { to: "/capture", label: "Capture" },
+  { to: "/chat", label: "Chat" },
+  { to: "/review", label: "Review" },
+  { to: "/approvals", label: "Approvals" },
+] as const;
+
+function LifeOSNav() {
+  return (
+    <nav
+      aria-label="LifeOS sections"
+      className="-mx-1 flex flex-wrap gap-1 border-b border-border pb-3"
+    >
+      {SECTIONS.map((section) => (
+        <NavLink
+          key={section.to}
+          to={section.to}
+          end={section.to === "/"}
+          className={({ isActive }) =>
+            cn(
+              "rounded-lg px-3 py-1.5 text-sm transition-colors",
+              isActive
+                ? "bg-bg-subtle font-medium text-text"
+                : "text-text-secondary hover:bg-bg-subtle hover:text-text",
+            )
+          }
+        >
+          {section.label}
+        </NavLink>
+      ))}
+    </nav>
   );
 }
 

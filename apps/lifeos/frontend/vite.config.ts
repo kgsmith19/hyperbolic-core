@@ -59,5 +59,26 @@ export default defineConfig({
     // Component tests idle on real timers (userEvent, Testing Library polling),
     // so a busy machine — not a slow test — is what blows the 5s default.
     testTimeout: 20000,
+    // Pages now render @hyperbolic/ui primitives (#562 design alignment).
+    // Vitest externalizes node_modules by default, so the package's built CJS
+    // would `require("react")` from packages/ui and get the ROOT copy -- the
+    // same duplicate-React failure `resolve.dedupe` fixes for the browser
+    // build ("Cannot read properties of null (reading 'useContext')").
+    // Pre-bundling it (esbuild, as the browser build does) turns its CJS into
+    // ESM whose `react` imports go through Vite, where dedupe applies.
+    deps: {
+      optimizer: {
+        client: {
+          enabled: true,
+          include: [
+            "@hyperbolic/ui",
+            "react",
+            "react/jsx-runtime",
+            "react-dom",
+            "react-dom/client",
+          ],
+        },
+      },
+    },
   },
 });

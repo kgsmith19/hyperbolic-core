@@ -54,6 +54,7 @@ from domains.bills.dispute import (
 from domains.bills.types import GRANT_VIA_LOCAL_DEV, GRANT_VIA_OWNER_SESSION, TYPE_BILL, TYPE_EOB
 from domains.bills.verify import BillForgetResult, forget_bill, is_bill_record
 from domains.bills.verify import guard_capture as guard_bill_capture
+from domains.bootstrap import define_builtin_types
 from domains.documents.capture import (
     MAX_UPLOAD_BYTES,
     DocumentErased,
@@ -67,6 +68,7 @@ from domains.documents.capture import (
 )
 from domains.documents.capture import guard_capture as guard_document_capture
 from domains.episodes.capture import guard_capture as guard_episode_capture
+from domains.episodes.types import define_episode_types
 from domains.health_connect.ingest import IngestResult, process_payload
 from domains.intentions.focus import guard_capture as guard_intention_capture
 from domains.intentions.planner import PlannedIntention, mark_done, plan_today
@@ -100,6 +102,8 @@ from kernel.services import (
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     auth_settings()  # fail fast on misconfigured auth before serving traffic
+    define_builtin_types()  # every page usable on a fresh install (#562)
+    define_episode_types(AccessContext.all())  # pull-only cell: defined from this declared surface
     yield
 
 

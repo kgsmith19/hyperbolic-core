@@ -13,7 +13,13 @@
 // The episodes line and the gate are both values the briefing computed, not
 // ids, so neither resolves anything. Keys an old-composition briefing left behind
 // (open_review_ids, latest_checkin_id) are ignored: feelings are pull-only.
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@hyperbolic/ui";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import {
   getEntity,
@@ -85,30 +91,29 @@ function TodaysPlan() {
               key={item.intention_id}
               className="flex flex-wrap items-center gap-2 text-sm"
             >
-              <span className={item.done ? "text-zinc-400 line-through" : ""}>
+              <span className={item.done ? "text-text-muted line-through" : ""}>
                 {item.title}
               </span>
-              {item.focus && (
-                <span className="text-xs text-amber-600">focus</span>
-              )}
+              {item.focus && <span className="text-xs text-warn">focus</span>}
               {item.next_action && (
-                <span className="text-zinc-500">{item.next_action}</span>
+                <span className="text-text-muted">{item.next_action}</span>
               )}
               {!item.done && (
-                <button
+                <Button
                   onClick={() => markDone.mutate(item.intention_id)}
                   disabled={markDone.isPending}
-                  className="rounded border border-zinc-300 px-2 py-0.5 text-xs disabled:opacity-50"
+                  variant="outline"
+                  size="sm"
                 >
                   Mark done
-                </button>
+                </Button>
               )}
             </li>
           ))}
         </ul>
       )}
       {markDone.error && (
-        <p className="mt-2 text-sm text-red-600">{String(markDone.error)}</p>
+        <p className="mt-2 text-sm text-danger">{String(markDone.error)}</p>
       )}
     </section>
   );
@@ -151,7 +156,7 @@ export default function Tomorrow() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Tomorrow Cockpit</h1>
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-text-muted">
           {attributes
             ? // The briefing's own date, so the page never claims a day the
               // briefing does not cover.
