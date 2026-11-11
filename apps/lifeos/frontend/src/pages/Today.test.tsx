@@ -73,7 +73,7 @@ describe("Today", () => {
     renderWithProviders(<Today />);
 
     const priorities = await screen.findByRole("region", {
-      name: "Top priorities",
+      name: /Top priorities/,
     });
     expect(
       within(priorities).getByText("Call the dentist"),
@@ -82,6 +82,7 @@ describe("Today", () => {
       within(priorities).queryByText("Morning walk"),
     ).not.toBeInTheDocument();
     expect(screen.getByText(/4 more open/)).toBeInTheDocument();
+    expect(screen.getByText("2 of 3")).toBeInTheDocument();
     const anchors = screen.getByRole("region", { name: "Daily anchors" });
     expect(within(anchors).getByText("Morning walk")).toBeInTheDocument();
     const next = screen.getByRole("region", { name: "Next two-minute action" });
@@ -196,6 +197,9 @@ describe("Today", () => {
     });
     renderWithProviders(<Today />);
 
+    const user = setupUser();
+    await user.click(await screen.findByText("Life balance"));
+    await user.click(screen.getByText("Upcoming commitments"));
     const balance = await screen.findByRole("region", { name: "Balance" });
     expect(within(balance).getByText(/God: 0/)).toHaveTextContent(
       "(nothing open)",
@@ -242,6 +246,8 @@ describe("Today", () => {
       ],
     });
     renderWithProviders(<Today />);
+    const user = setupUser();
+    await user.click(await screen.findByText("Source health and sync details"));
     const sources = await screen.findByRole("region", { name: "Sources" });
     expect(within(sources).getByText("up to date")).toBeInTheDocument();
     expect(within(sources).getByText("last run failed")).toBeInTheDocument();
@@ -268,6 +274,8 @@ describe("Today", () => {
     expect(
       within(schedule).queryByText(/Nothing on the calendar/),
     ).not.toBeInTheDocument();
+    const user = setupUser();
+    await user.click(await screen.findByText("Source health and sync details"));
     expect(screen.getByText(/Source status not available/)).toBeInTheDocument();
   });
 });
