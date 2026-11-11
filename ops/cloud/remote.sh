@@ -8,6 +8,7 @@
 #   ops/cloud/remote.sh rollback           make the previous release live again
 #   ops/cloud/remote.sh smoke              authenticated user journey via the edge
 #   ops/cloud/remote.sh backup             run the nightly backup now
+#   ops/cloud/remote.sh live-sha           print the commit the live release was built from
 #
 # Needs: cloudflared, ssh, git, and an Infisical machine identity
 # (INFISICAL_PROJECT_ID plus INFISICAL_TOKEN or INFISICAL_CLIENT_ID/SECRET).
@@ -122,8 +123,12 @@ case "$cmd" in
       on_host "bash $rel.stage/ops/cloud/host/deploy.sh $sha; rc=\$?; rm -rf $rel.stage; exit \$rc"
     "$0" smoke
     ;;
-  rollback) on_host "bash \$(readlink -f $BASE/previous)/ops/cloud/host/deploy.sh --rollback" ;;
+  # A rollback is deliberate: hold Core Deploy's scheduled catch-up until the
+  # next explicit deploy (push, manual run or remote.sh deploy) clears it.
+  rollback) on_host "bash \$(readlink -f $BASE/previous)/ops/cloud/host/deploy.sh --rollback && touch $BASE/deploy-hold" ;;
   backup) on_host "$BASE/current/ops/cloud/host/backup.sh" ;;
+  # "<sha>" or "<sha> hold" (a rollback holds the scheduled catch-up).
+  live-sha) on_host "printf '%s' \"\$(cat $BASE/current/.release-sha)\"; test -e $BASE/deploy-hold && printf ' hold'; echo" ;;
   smoke)
     # The owner's journey, run on the host against the edge: sign in, owner
     # check, registry, LifeOS write + read-back, Brain health and run list.

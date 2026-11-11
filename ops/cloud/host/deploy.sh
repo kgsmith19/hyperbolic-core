@@ -76,6 +76,7 @@ if start "$rel"; then
   if [[ -n "$cur" && "$cur" != "$rel" ]]; then ln -sfn "$cur" "$BASE/previous"; fi
   ln -sfn "$rel" "$BASE/current"
   echo "$(date -u +%FT%TZ) deploy $sha ok" >> "$BASE/releases.log"
+  rm -f "$BASE/deploy-hold"   # an explicit deploy resumes the scheduled catch-up
   # Keep the five newest releases.
   ls -1dt "$BASE"/releases/*/ | tail -n +6 | while read -r old; do
     [[ "$(readlink -f "$old")" == "$(readlink -f "$BASE/current")" ]] || rm -rf "$old"
