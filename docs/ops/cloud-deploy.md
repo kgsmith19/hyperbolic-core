@@ -11,6 +11,9 @@ Browser ─► Cloudflare Access ("Hyperbolic Core", policy "Owner Only", 24 h s
            broker · network-checker             (internal; not routed at all)
 ```
 
+Live since 2026-11-11 (Hetzner server id 175630450, `nbg1`; tunnel id
+`8b2840d2-3214-454a-8077-3f35b938a0ad`). Verification evidence is on #562.
+
 ## What runs where
 
 | Piece | Where | Notes |
