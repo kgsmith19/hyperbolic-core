@@ -48,6 +48,14 @@ prepare_env() {  # <release dir on host>
     sed -n 's/.*password: \([^ ]*\).*/\1/p' <<<"$out" | secret_put /platform/core PLATFORM_OWNER_PASSWORD
     unset out
   fi
+  # Cloudflare Access single sign-on: the core app's AUD tag (#562).
+  secret_get /platform/core CF_ACCESS_AUD | on_host "python3 -c '
+import sys
+path = \"$BASE/env/platform-api.env\"
+aud = sys.stdin.read().strip()
+lines = [l for l in open(path).read().splitlines() if not l.startswith(\"PLATFORM_CF_ACCESS_AUD=\")]
+open(path, \"w\").write(\"\\n\".join(lines + [\"PLATFORM_CF_ACCESS_AUD=\" + aud]) + \"\\n\")
+'"
   platform_env="$(on_host "cat $BASE/env/platform-api.env")"
   val() { sed -n "s/^$1=//p" <<<"$platform_env"; }
   # build.env: public values only (compiled into the browser bundle).

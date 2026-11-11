@@ -1,0 +1,8 @@
+# Exact-fingerprint exceptions for gitleaks (commit:file:rule:line). Each
+# entry is one specific, reviewed, non-secret finding in history; never a pattern.
+#
+# #562: the AUD tag of the Cloudflare Access app "Hyperbolic Core" was briefly
+# committed in compose.cloud.yaml. It is a public identifier (Cloudflare sends
+# it in every Access JWT's `aud` claim), not a credential; generic-api-key
+# flags it on entropy alone. It now lives in Infisical (prod:/platform/core/CF_ACCESS_AUD).
+ed0c739d6ab3492732456f96064f0cf987dac87f:compose.cloud.yaml:generic-api-key:24

@@ -18,10 +18,9 @@ services:
     environment:
       # Single sign-on (#562): the owner's Cloudflare Access login signs them
       # into the platform (grant_type=cloudflare_access, src/cf-access.ts).
-      # Public identifiers: the Zero Trust team domain and the AUD tag of the
-      # "Hyperbolic Core" Access app (infra/cloudflare output core_aud).
+      # The Access app's AUD tag (PLATFORM_CF_ACCESS_AUD) is written into the
+      # host's platform-api env by ops/cloud/remote.sh from Infisical.
       PLATFORM_CF_ACCESS_TEAM_DOMAIN: spring-smoke-421e.cloudflareaccess.com
-      PLATFORM_CF_ACCESS_AUD: f79894f3b34d46b4b97b5c7a9cf651415e303e520d76ad93eb00d1858bf87bf2
 
   network-checker:
     ports: !reset []
