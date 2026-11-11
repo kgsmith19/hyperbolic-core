@@ -81,7 +81,7 @@ describe("Today", () => {
     expect(
       within(priorities).queryByText("Morning walk"),
     ).not.toBeInTheDocument();
-    expect(screen.getByText(/4 more open/)).toBeInTheDocument();
+    expect(screen.getByText(/4 more open/)).toBeInTheDocument();\n    expect(screen.getByText("2 of 3")).toBeInTheDocument();
     const anchors = screen.getByRole("region", { name: "Daily anchors" });
     expect(within(anchors).getByText("Morning walk")).toBeInTheDocument();
     const next = screen.getByRole("region", { name: "Next two-minute action" });
@@ -196,7 +196,7 @@ describe("Today", () => {
     });
     renderWithProviders(<Today />);
 
-    const balance = await screen.findByRole("region", { name: "Balance" });
+    const user = setupUser();\n    await user.click(screen.getByText("Life balance"));\n    await user.click(screen.getByText("Upcoming commitments"));\n    const balance = await screen.findByRole("region", { name: "Balance" });
     expect(within(balance).getByText(/God: 0/)).toHaveTextContent(
       "(nothing open)",
     );
@@ -242,7 +242,7 @@ describe("Today", () => {
       ],
     });
     renderWithProviders(<Today />);
-    const sources = await screen.findByRole("region", { name: "Sources" });
+    const user = setupUser();\n    await user.click(screen.getByText("Source health and sync details"));\n    const sources = await screen.findByRole("region", { name: "Sources" });
     expect(within(sources).getByText("up to date")).toBeInTheDocument();
     expect(within(sources).getByText("last run failed")).toBeInTheDocument();
     expect(within(sources).getByText("never run")).toBeInTheDocument();
@@ -268,6 +268,6 @@ describe("Today", () => {
     expect(
       within(schedule).queryByText(/Nothing on the calendar/),
     ).not.toBeInTheDocument();
-    expect(screen.getByText(/Source status not available/)).toBeInTheDocument();
+    const user = setupUser();\n    await user.click(screen.getByText("Source health and sync details"));\n    expect(screen.getByText(/Source status not available/)).toBeInTheDocument();
   });
 });
