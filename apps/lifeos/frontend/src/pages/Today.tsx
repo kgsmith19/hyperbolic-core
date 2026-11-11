@@ -156,12 +156,12 @@ function Appointments({
           {items.map((appointment) => (
             <li
               key={appointment.appointment_id}
-              className="flex flex-wrap gap-2 text-sm"
+              className="flex min-w-0 flex-wrap gap-2 text-sm"
             >
               <span className="min-w-24 text-zinc-500">
                 {when(appointment, withDay)}
               </span>
-              <span>{appointment.title ?? "(title erased)"}</span>
+              <span className="min-w-0 break-words">{appointment.title ?? "(title erased)"}</span>
             </li>
           ))}
         </ul>
@@ -269,7 +269,7 @@ export default function Today() {
     change.mutate({ id, progress });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 pb-10">
+    <div className="mx-auto min-w-0 max-w-3xl space-y-5 break-words pb-10">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
         <p className="text-sm text-zinc-500">
