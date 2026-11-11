@@ -421,12 +421,17 @@ test("today fits a phone and shows the day's context", async ({ page }) => {
   ).toBeVisible();
   for (const name of [
     "Top priorities",
-    "Balance",
     "Today's schedule",
-    "Coming up",
-    "Sources",
   ]) {
-    await expect(page.getByRole("region", { name })).toBeVisible();
+    await expect(page.getByRole("region", { name: name === "Top priorities" ? /Top priorities/ : name })).toBeVisible();
+  }
+  for (const [summary, region] of [
+    ["Life balance", "Balance"],
+    ["Upcoming commitments", "Coming up"],
+    ["Source health and sync details", "Sources"],
+  ] as const) {
+    await page.getByText(summary, { exact: true }).click();
+    await expect(page.getByRole("region", { name: region })).toBeVisible();
   }
   await expect(page.getByText("not run today")).toBeVisible();
   const overflow = await page.evaluate(
