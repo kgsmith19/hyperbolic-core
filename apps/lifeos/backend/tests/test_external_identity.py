@@ -43,7 +43,7 @@ def test_invalid_identifiers_rejected(source: str, external_id: str) -> None:
         ExternalIdentity(source, external_id, UUID("00000000-0000-4000-8000-000000000001"))
 
 
-@pytest.mark.parametrize("source,external_id", [(" ops", "P-02"), ("ops", " P-02"), ("ops ", "P-02")])
+@pytest.mark.parametrize(\n    "source,external_id",\n    [(" ops", "P-02"), ("ops", " P-02"), ("ops ", "P-02")],\n)
 def test_lookup_rejects_unnormalized_identifiers(source: str, external_id: str) -> None:
     crosswalk = IdentityCrosswalk()
     with pytest.raises(ValueError, match="normalized"):
