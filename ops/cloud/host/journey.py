@@ -92,10 +92,12 @@ step("Brain authenticated API (cost)", lambda: "ok" if call("GET", "/api/brain/c
 
 
 def brain_provider():
-    base = ["docker", "compose", "-p", "hyperbolic-core", "exec", "-T", "brain"]
-    iso = subprocess.run(base + ["node", "services/brain/scripts/isolation-check.mjs"], capture_output=True, text=True)
+    base = ["docker", "exec", "hyperbolic-core-brain-1"]
+    # The same probe as services/brain/scripts/isolation-check.mjs (not shipped in the image).
+    read_key = "require('fs').readFileSync('/run/secrets/brain/anthropic-api-key','utf8').trim().length>0||process.exit(1)"
+    iso = subprocess.run(base + ["node", "-e", read_key], capture_output=True, text=True)
     assert iso.returncode == 0, "brain cannot read its own key file"
-    other = subprocess.run(["docker", "compose", "-p", "hyperbolic-core", "exec", "-T", "platform-api", "node",
+    other = subprocess.run(["docker", "exec", "hyperbolic-core-platform-api-1", "node",
                             "-e", "require('fs').readFileSync('/run/secrets/brain/anthropic-api-key')"],
                            capture_output=True, text=True)
     assert other.returncode != 0, "another container can read the Brain key"
