@@ -39,6 +39,10 @@ for bills, which this domain does not touch or need):
    no write, no persistence; advisory and read-only by construction, not
    merely by convention.
 
+## Bill due-date forecast (#590)
+
+`domains.bills.forecast.forecast(rows, window_start=, window_end=, as_of=, available_balance=)` is a pure function over ledger rows (`BillLedgerRow`). It does no I/O, reads no kernel state, and emits no payment, transfer or dispute. Money is `Decimal` only (floats are refused). Payment status comes from each row's status and evidence, never from a balance. Unknown amounts and duplicate `(bill_id, due_date)` rows are excluded and flagged, never summed. Coverage is checked only against a fresh balance.
+
 ## Types
 
 - **account** — `account_key` (identity, sha256 of `source|external_ref`,
