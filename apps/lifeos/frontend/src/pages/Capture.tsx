@@ -1,3 +1,4 @@
+import { Button, Input, Select, Textarea } from "@hyperbolic/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState, type SubmitEvent } from "react";
 import { useNavigate } from "react-router";
@@ -63,11 +64,11 @@ export default function Capture() {
     <form onSubmit={onSubmit} className="space-y-4">
       <label className="block text-sm">
         Type
-        <select
+        <Select
           value={typeName}
           onChange={(event) => setTypeName(event.target.value)}
           required
-          className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5"
+          className="mt-1 w-full"
         >
           <option value="">Choose a type…</option>
           {types.data?.map((t) => (
@@ -75,7 +76,7 @@ export default function Capture() {
               {t.name} ({t.domain})
             </option>
           ))}
-        </select>
+        </Select>
       </label>
 
       {typeName && fields && (
@@ -83,22 +84,22 @@ export default function Capture() {
           {Object.entries(fields).map(([name, field]) => (
             <label key={name} className="block text-sm">
               {name}
-              {required.has(name) && <span className="text-red-500"> *</span>}
+              {required.has(name) && <span className="text-danger"> *</span>}
               {field.type === "string" ||
               field.type === "number" ||
               field.type === "integer" ? (
-                <input
+                <Input
                   name={name}
                   required={required.has(name)}
                   inputMode={field.type === "string" ? undefined : "decimal"}
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5"
+                  className="mt-1 w-full"
                 />
               ) : (
-                <textarea
+                <Textarea
                   name={name}
                   required={required.has(name)}
                   placeholder='JSON, e.g. ["a", "b"]'
-                  className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 font-mono text-xs"
+                  className="mt-1 w-full font-mono text-xs"
                   rows={2}
                 />
               )}
@@ -110,27 +111,23 @@ export default function Capture() {
       {typeName && !fields && (
         <label className="block text-sm">
           Attributes (JSON)
-          <textarea
+          <Textarea
             name="attributes"
             defaultValue="{}"
-            className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 font-mono text-xs"
+            className="mt-1 w-full font-mono text-xs"
             rows={6}
           />
         </label>
       )}
 
       {(error ?? capture.error) && (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {error ?? String(capture.error)}
         </p>
       )}
-      <button
-        type="submit"
-        disabled={!typeName || capture.isPending}
-        className="rounded bg-zinc-900 px-4 py-1.5 text-white disabled:opacity-50"
-      >
+      <Button type="submit" disabled={!typeName || capture.isPending}>
         Capture
-      </button>
+      </Button>
     </form>
   );
 }

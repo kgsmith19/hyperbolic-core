@@ -6,6 +6,7 @@
 // most recent expected slot. Read-only, like every other page in this
 // zone that doesn't have its own decide action — nothing here writes
 // anything.
+import { Button, Input } from "@hyperbolic/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useState, type SubmitEvent } from "react";
 import { Link } from "react-router";
@@ -29,9 +30,9 @@ function defaultRange(): { start: string; end: string } {
 }
 
 function statusColor(status: string): string {
-  if (status === "ok") return "text-emerald-700";
-  if (status === "failed") return "text-red-600";
-  return "text-amber-600";
+  if (status === "ok") return "text-success";
+  if (status === "failed") return "text-danger";
+  return "text-warn";
 }
 
 export default function Review() {
@@ -53,37 +54,21 @@ export default function Review() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Review</h1>
-        <p className="text-sm text-zinc-500">
-          Briefings, scheduled-job receipts, and job health for a date
-          range.
+        <p className="text-sm text-text-muted">
+          Briefings, scheduled-job receipts, and job health for a date range.
         </p>
       </div>
 
       <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col text-sm text-zinc-600">
+        <label className="flex flex-col text-sm text-text-secondary">
           Start
-          <input
-            type="date"
-            name="start"
-            defaultValue={range.start}
-            className="rounded border border-zinc-300 px-2 py-1.5"
-          />
+          <Input type="date" name="start" defaultValue={range.start} />
         </label>
-        <label className="flex flex-col text-sm text-zinc-600">
+        <label className="flex flex-col text-sm text-text-secondary">
           End
-          <input
-            type="date"
-            name="end"
-            defaultValue={range.end}
-            className="rounded border border-zinc-300 px-2 py-1.5"
-          />
+          <Input type="date" name="end" defaultValue={range.end} />
         </label>
-        <button
-          type="submit"
-          className="rounded bg-zinc-900 px-3 py-1.5 text-sm text-white"
-        >
-          Apply
-        </button>
+        <Button type="submit">Apply</Button>
       </form>
 
       {feed.isPending ? (
@@ -93,23 +78,25 @@ export default function Review() {
       ) : (
         <>
           <section>
-            <h2 className="text-sm font-medium text-zinc-700">Job health</h2>
+            <h2 className="text-sm font-medium text-text-secondary">
+              Job health
+            </h2>
             <ul className="mt-2 space-y-1">
               {feed.data.job_health.map((h) => (
                 <li
                   key={h.job}
                   className="flex flex-wrap items-center gap-2 text-sm"
                 >
-                  <span className="font-mono text-zinc-600">{h.job}</span>
+                  <span className="font-mono text-text-secondary">{h.job}</span>
                   {h.missed ? (
-                    <span className="text-red-600">missed today</span>
+                    <span className="text-danger">missed today</span>
                   ) : (
                     <span className={statusColor(h.last_status ?? "")}>
                       last run {h.last_status ?? "unknown"}
                     </span>
                   )}
                   {h.last_receipt_at && (
-                    <span className="text-zinc-400">{h.last_receipt_at}</span>
+                    <span className="text-text-muted">{h.last_receipt_at}</span>
                   )}
                 </li>
               ))}
@@ -117,7 +104,9 @@ export default function Review() {
           </section>
 
           <section>
-            <h2 className="text-sm font-medium text-zinc-700">Briefings</h2>
+            <h2 className="text-sm font-medium text-text-secondary">
+              Briefings
+            </h2>
             {feed.data.briefings.length === 0 ? (
               <Empty>No briefings in this range.</Empty>
             ) : (
@@ -126,11 +115,11 @@ export default function Review() {
                   <li key={b.briefing_id} className="text-sm">
                     <Link
                       to={`/entities/${b.briefing_id}`}
-                      className="text-blue-700 hover:underline"
+                      className="text-info hover:underline"
                     >
                       {b.date}
                     </Link>
-                    <span className="ml-2 text-zinc-500">
+                    <span className="ml-2 text-text-muted">
                       {b.focus_intention_ids.length} focus,{" "}
                       {b.appointment_ids.length} appointment
                       {b.appointment_ids.length === 1 ? "" : "s"}
@@ -142,7 +131,7 @@ export default function Review() {
           </section>
 
           <section>
-            <h2 className="text-sm font-medium text-zinc-700">
+            <h2 className="text-sm font-medium text-text-secondary">
               Execution receipts
             </h2>
             {feed.data.receipts.length === 0 ? (
@@ -154,9 +143,11 @@ export default function Review() {
                     key={r.receipt_id}
                     className="flex flex-wrap items-center gap-2 text-sm"
                   >
-                    <span className="font-mono text-zinc-600">{r.job}</span>
+                    <span className="font-mono text-text-secondary">
+                      {r.job}
+                    </span>
                     <span className={statusColor(r.status)}>{r.status}</span>
-                    <span className="text-zinc-400">{r.started_at}</span>
+                    <span className="text-text-muted">{r.started_at}</span>
                   </li>
                 ))}
               </ul>

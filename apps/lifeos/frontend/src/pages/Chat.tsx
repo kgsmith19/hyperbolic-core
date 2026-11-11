@@ -1,3 +1,4 @@
+import { Button, Input } from "@hyperbolic/ui";
 import { useState, type SubmitEvent } from "react";
 import { Link } from "react-router";
 
@@ -78,19 +79,19 @@ export default function Chat() {
             <div
               className={`inline-block max-w-[85%] whitespace-pre-wrap rounded-lg border px-3 py-2 text-left text-sm ${
                 turn.role === "user"
-                  ? "border-zinc-300 bg-zinc-100"
-                  : "border-zinc-200 bg-white"
+                  ? "border-border bg-bg-subtle"
+                  : "border-border bg-surface"
               }`}
             >
               {turn.content}
               {turn.citations && turn.citations.entity_ids.length > 0 && (
-                <p className="mt-2 border-t border-zinc-100 pt-1 text-xs text-zinc-500">
+                <p className="mt-2 border-t border-border pt-1 text-xs text-text-muted">
                   Sources:{" "}
                   {turn.citations.entity_ids.map((id) => (
                     <Link
                       key={id}
                       to={`/entities/${id}`}
-                      className="mr-1 text-blue-700 hover:underline"
+                      className="mr-1 text-info hover:underline"
                     >
                       {id.slice(0, 8)}
                     </Link>
@@ -104,34 +105,30 @@ export default function Chat() {
         ))}
         {pending !== null && (
           <li>
-            <div className="inline-block max-w-[85%] whitespace-pre-wrap rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm">
+            <div className="inline-block max-w-[85%] whitespace-pre-wrap rounded-lg border border-border bg-surface px-3 py-2 text-sm">
               {pending || "…"}
             </div>
           </li>
         )}
       </ol>
-      {activity && <p className="text-xs text-zinc-500">{activity}</p>}
+      {activity && <p className="text-xs text-text-muted">{activity}</p>}
       {error && (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       )}
       <form onSubmit={(event) => void onSubmit(event)} className="flex gap-2">
-        <input
+        <Input
           name="question"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           placeholder="Ask about your data…"
           autoComplete="off"
-          className="flex-1 rounded border border-zinc-300 px-2 py-1.5"
+          className="flex-1"
         />
-        <button
-          type="submit"
-          disabled={pending !== null}
-          className="rounded bg-zinc-900 px-3 text-white disabled:opacity-50"
-        >
+        <Button type="submit" disabled={pending !== null}>
           Send
-        </button>
+        </Button>
       </form>
     </div>
   );

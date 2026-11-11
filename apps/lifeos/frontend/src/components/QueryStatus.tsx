@@ -3,9 +3,9 @@
 // Approvals, Tomorrow, and the route-chunk Suspense fallback in App.
 
 export function Loading() {
-  return <p className="text-sm text-zinc-500">Loading…</p>;
+  return <p className="text-sm text-text-muted">Loading…</p>;
 }
 
 export function ErrorText({ error }: { error: unknown }) {
-  return <p className="text-sm text-red-600">{String(error)}</p>;
+  return <p className="text-sm text-danger">{String(error)}</p>;
 }

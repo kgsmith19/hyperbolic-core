@@ -1,1 +1,7 @@
+/* LifeOS CSS entry. Adoption rule step 1 (docs/planning/09-design-system.md
+ * section 8), exactly as the Shell does it: tailwindcss first, then
+ * @hyperbolic/ui's tokens. Without the tokens import the shared chrome and
+ * primitives render unstyled (no tokens, fonts, or utility scan of the
+ * package), which is how LifeOS looked out of place under core.kylegsmith.com. */
 @import "tailwindcss";
+@import "@hyperbolic/ui/styles/tokens.css";

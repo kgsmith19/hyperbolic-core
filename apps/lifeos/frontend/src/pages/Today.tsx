@@ -6,6 +6,7 @@
 // appended event on the backend (domains/intentions/today.py); this page
 // never edits history, it only refetches after a change. A stale item
 // (untouched for 14 days) says so instead of looking current.
+import { Button } from "@hyperbolic/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -32,21 +33,23 @@ function Item({
   busy: boolean;
 }) {
   return (
-    <li className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+    <li className="rounded-xl border border-border bg-surface p-4 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{item.title}</span>
-        {item.focus && <span className="text-xs text-amber-600">focus</span>}
+        {item.focus && <span className="text-xs text-warn">focus</span>}
         {item.stale && (
-          <span className="text-xs text-red-600">
+          <span className="text-xs text-danger">
             stale: not updated in 14+ days
           </span>
         )}
       </div>
       {item.next_action && (
-        <p className="mt-1 text-sm text-zinc-600">Next: {item.next_action}</p>
+        <p className="mt-1 text-sm text-text-secondary">
+          Next: {item.next_action}
+        </p>
       )}
       {item.floor && (
-        <p className="text-sm text-zinc-500">Floor: {item.floor}</p>
+        <p className="text-sm text-text-muted">Floor: {item.floor}</p>
       )}
       <div
         className="mt-3 flex flex-wrap gap-1"
@@ -54,20 +57,18 @@ function Item({
         aria-label={`Progress for ${item.title}`}
       >
         {PROGRESS.map((progress) => (
-          <button
+          <Button
             key={progress}
             type="button"
             aria-pressed={item.progress === progress}
             disabled={busy || item.progress === progress}
             onClick={() => onProgress(item.intention_id, progress)}
-            className={`min-h-9 rounded border px-2 text-xs ${
-              item.progress === progress
-                ? "border-zinc-900 bg-zinc-900 text-white"
-                : "border-zinc-300"
-            } disabled:opacity-60`}
+            variant={item.progress === progress ? "default" : "outline"}
+            size="sm"
+            className="min-h-9 disabled:opacity-100"
           >
             {progress}
-          </button>
+          </Button>
         ))}
       </div>
     </li>
@@ -87,9 +88,7 @@ function Balance({ balance }: { balance: TodayView["balance"] }) {
           <li
             key={area}
             className={`rounded border px-2 py-1 ${
-              balance[area] === 0
-                ? "border-amber-400 text-amber-700"
-                : "border-zinc-200"
+              balance[area] === 0 ? "border-warn text-warn" : "border-border"
             }`}
           >
             {AREA_LABELS[area]}: {balance[area]}
@@ -99,7 +98,7 @@ function Balance({ balance }: { balance: TodayView["balance"] }) {
           </li>
         ))}
         {balance.unassigned > 0 && (
-          <li className="rounded border border-zinc-200 px-2 py-1 text-zinc-500">
+          <li className="rounded border border-border px-2 py-1 text-text-muted">
             Unassigned: {balance.unassigned}
           </li>
         )}
@@ -146,7 +145,7 @@ function Appointments({
         {heading}
       </h2>
       {unavailable ? (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           Calendar not available to this session.
         </p>
       ) : items.length === 0 ? (
@@ -158,7 +157,7 @@ function Appointments({
               key={appointment.appointment_id}
               className="flex flex-wrap gap-2 text-sm"
             >
-              <span className="min-w-24 text-zinc-500">
+              <span className="min-w-24 text-text-muted">
                 {when(appointment, withDay)}
               </span>
               <span>{appointment.title ?? "(title erased)"}</span>
@@ -167,7 +166,7 @@ function Appointments({
         </ul>
       )}
       {more > 0 && (
-        <p className="mt-1 text-sm text-zinc-500">{more} more this week.</p>
+        <p className="mt-1 text-sm text-text-muted">{more} more this week.</p>
       )}
     </section>
   );
@@ -192,7 +191,7 @@ function Sources({
         Sources
       </h2>
       {unavailable ? (
-        <p className="text-sm text-red-600">
+        <p className="text-sm text-danger">
           Source status not available to this session.
         </p>
       ) : (
@@ -213,13 +212,13 @@ function Sources({
                 <span>{JOB_LABELS[source.job] ?? source.job}</span>
                 <span
                   className={
-                    failed || source.missed ? "text-red-600" : "text-green-700"
+                    failed || source.missed ? "text-danger" : "text-success"
                   }
                 >
                   {state}
                 </span>
                 {source.last_receipt_at && (
-                  <span className="text-zinc-500">
+                  <span className="text-text-muted">
                     ({new Date(source.last_receipt_at).toLocaleString()})
                   </span>
                 )}
@@ -272,12 +271,12 @@ export default function Today() {
     <div className="mx-auto max-w-3xl space-y-5 pb-10">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-text-muted">
           As of {new Date(as_of).toLocaleString()}
         </p>
       </div>
 
-      <section aria-labelledby="next-action" className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+      <section aria-labelledby="next-action" className="rounded-xl border border-border bg-bg-subtle p-4">
         <h2 id="next-action" className="text-lg font-medium">
           Next two-minute action
         </h2>
@@ -290,7 +289,7 @@ export default function Today() {
 
       <section aria-labelledby="priorities">
         <h2 id="priorities" className="text-lg font-semibold">
-          Top priorities <span className="ml-2 text-sm font-normal text-zinc-500">{one_offs.length} of 3</span>
+          Top priorities <span className="ml-2 text-sm font-normal text-text-muted">{one_offs.length} of 3</span>
         </h2>
         {one_offs.length === 0 ? (
           <Empty>No open one-off priorities.</Empty>
@@ -307,13 +306,13 @@ export default function Today() {
           </ul>
         )}
         {more_one_offs > 0 && (
-          <p className="mt-2 text-sm text-zinc-500">
+          <p className="mt-2 text-sm text-text-muted">
             {more_one_offs} more open, see the Tomorrow plan.
           </p>
         )}
       </section>
 
-      <section aria-labelledby="anchors" className="rounded-xl border border-zinc-200 p-4">
+      <section aria-labelledby="anchors" className="rounded-xl border border-border p-4">
         <h2 id="anchors" className="text-lg font-medium">
           Daily anchors
         </h2>
@@ -333,7 +332,7 @@ export default function Today() {
         )}
       </section>
 
-      <details className="rounded-xl border border-zinc-200 p-4">
+      <details className="rounded-xl border border-border p-4">
         <summary className="cursor-pointer font-medium">Life balance</summary>
         <div className="mt-3"><Balance balance={balance} /></div>
       </details>
@@ -348,7 +347,7 @@ export default function Today() {
         empty="Nothing on the calendar today."
       />
 
-      <details className="rounded-xl border border-zinc-200 p-4">
+      <details className="rounded-xl border border-border p-4">
         <summary className="cursor-pointer font-medium">Upcoming commitments</summary>
         <div className="mt-3"><Appointments
         id="upcoming"
@@ -361,7 +360,7 @@ export default function Today() {
         /></div>
       </details>
 
-      <details className="rounded-xl border border-zinc-200 p-4">
+      <details className="rounded-xl border border-border p-4">
         <summary className="cursor-pointer font-medium">Source health and sync details</summary>
         <div className="mt-3"><Sources
           sources={sources}
@@ -370,7 +369,7 @@ export default function Today() {
       </details>
 
       {change.error && (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="text-sm text-danger">
           Could not save the change: {String(change.error)}
         </p>
       )}
