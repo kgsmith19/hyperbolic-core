@@ -198,7 +198,7 @@ describe("Today", () => {
     renderWithProviders(<Today />);
 
     const user = setupUser();
-    await user.click(screen.getByText("Life balance"));
+    await user.click(await screen.findByText("Life balance"));
     await user.click(screen.getByText("Upcoming commitments"));
     const balance = await screen.findByRole("region", { name: "Balance" });
     expect(within(balance).getByText(/God: 0/)).toHaveTextContent(
@@ -247,7 +247,7 @@ describe("Today", () => {
     });
     renderWithProviders(<Today />);
     const user = setupUser();
-    await user.click(screen.getByText("Source health and sync details"));
+    await user.click(await screen.findByText("Source health and sync details"));
     const sources = await screen.findByRole("region", { name: "Sources" });
     expect(within(sources).getByText("up to date")).toBeInTheDocument();
     expect(within(sources).getByText("last run failed")).toBeInTheDocument();
@@ -275,7 +275,7 @@ describe("Today", () => {
       within(schedule).queryByText(/Nothing on the calendar/),
     ).not.toBeInTheDocument();
     const user = setupUser();
-    await user.click(screen.getByText("Source health and sync details"));
+    await user.click(await screen.findByText("Source health and sync details"));
     expect(screen.getByText(/Source status not available/)).toBeInTheDocument();
   });
 });
