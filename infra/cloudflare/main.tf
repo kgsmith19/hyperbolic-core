@@ -154,3 +154,15 @@ data "cloudflare_zero_trust_tunnel_cloudflared_token" "prod" {
   account_id = var.account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.prod.id
 }
+
+# --- Login methods ---
+# Email one-time PIN: the owner signs in with their email and a 6-digit code
+# (docs/ops/login.md). The Owner Only policy still decides who may enter;
+# the PIN only proves control of the address. The existing "Cloudflare"
+# account login stays available alongside it.
+resource "cloudflare_zero_trust_access_identity_provider" "otp" {
+  account_id = var.account_id
+  name       = "One-time PIN"
+  type       = "onetimepin"
+  config     = {}
+}

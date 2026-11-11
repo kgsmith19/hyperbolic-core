@@ -20,6 +20,13 @@ export interface Table {
   /** When set, the only columns the owner may insert / update (column grants). */
   ownerInsertColumns?: string[];
   ownerUpdateColumns?: string[];
+  /**
+   * PostgREST-style embeds this table supports (one level), keyed by the name
+   * a `select` uses: `rel(cols)` or `alias:rel(cols)`. `table` is in the same
+   * profile; rows join where child[foreign] = parent[local]. `one` embeds
+   * return an object or null (a to-one via a foreign-key column), others an array.
+   */
+  embeds?: Record<string, { table: string; local: string; foreign: string; one?: boolean }>;
 }
 
 const CRUD: Op[] = ["select", "insert", "update", "delete"];
@@ -118,6 +125,8 @@ export const CATALOG: Record<string, Record<string, Table>> = {
       owner: ["select", "insert", "update", "delete"], service: [],
       ownerInsertColumns: ["parent_idea_id", "title", "problem", "target_repo", "confidence", "notes", "outcome", "source"],
       ownerUpdateColumns: ["confidence", "outcome", "status", "notes", "problem", "source", "title", "target_repo", "updated_at"],
+      // `parent:parent_idea_id(...)` (apps/shell/frontend/src/lib/intake.ts).
+      embeds: { parent_idea_id: { table: "idea", local: "parent_idea_id", foreign: "id", one: true } },
     },
     optimization: {
       sqlite: "intake_optimization",
@@ -134,6 +143,12 @@ export const CATALOG: Record<string, Record<string, Table>> = {
       owner: ["select", "insert", "update"], service: [],
       ownerInsertColumns: ["user_id", "title", "id", "body", "created_at", "is_active"],
       ownerUpdateColumns: ["title", "body", "is_active"],
+      // `tag(tag),prompt_version(version_no),configuration(...)` (apps/shell/frontend/src/lib/prompts.ts).
+      embeds: {
+        tag: { table: "tag", local: "id", foreign: "prompt_id" },
+        prompt_version: { table: "prompt_version", local: "id", foreign: "prompt_id" },
+        configuration: { table: "configuration", local: "id", foreign: "prompt_id" },
+      },
     },
     prompt_version: {
       sqlite: "prompt_prompt_version",
