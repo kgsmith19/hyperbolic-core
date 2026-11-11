@@ -440,7 +440,7 @@ test("today fits a phone and shows the day's context", async ({ page }) => {
       document.documentElement.clientWidth,
   );
   if (overflow > 0) {
-    const offenders = await page.evaluate(() => [...document.querySelectorAll("*")]
+    const offenders = await page.evaluate(() => Array.from(document.querySelectorAll("*"))
       .filter((element) => element.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
       .map((element) => ({ tag: element.tagName, className: typeof element.className === "string" ? element.className : "", right: Math.round(element.getBoundingClientRect().right) }))
       .slice(0, 12));
