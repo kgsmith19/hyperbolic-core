@@ -40,7 +40,9 @@ prepare_env() {  # <release dir on host>
   if ! on_host "test -s $BASE/env/platform-api.env"; then
     log "first deploy: generating platform identity (owner = Owner Only email)"
     owner_email="$(secret_get /platform/core OWNER_EMAIL)"
-    out="$(on_host "docker run --rm -u \$(id -u):\$(id -g) -v $rel/services/platform-api:/w:ro -v $BASE/env:/out -w /w node:22-slim \
+    # Runs the platform's own init inside its image (it needs the workspace deps).
+    out="$(on_host "cd $rel && docker build -q -f services/platform-api/Dockerfile -t hyperbolic-core-platform-init . >/dev/null &&
+      docker run --rm -u \$(id -u):\$(id -g) -v $BASE/env:/out hyperbolic-core-platform-init \
       node src/cli.ts init --env /out/platform-api.env --email '$owner_email' --public-url http://platform.localhost:8400")"
     sed -n 's/.*password: \([^ ]*\).*/\1/p' <<<"$out" | secret_put /platform/core PLATFORM_OWNER_PASSWORD
     unset out
