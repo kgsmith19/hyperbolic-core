@@ -1,0 +1,103 @@
+# Hyperbolic Core production deploy (#562): ships main to hyperbolic-core-prod
+# at https://core.kylegsmith.com, through the Cloudflare Tunnel (no inbound
+# ports), with ops/cloud/remote.sh. The host-side step backs up every store,
+# builds, starts with `up --wait`, smoke-checks, and restores the last good
+# release on any failure; remote.sh then runs the owner journey.
+#
+# Runs on every push to main that touches the deployed stack (merges arrive
+# only through the PR Gate), and by hand for a redeploy or rollback.
+#
+# Credentials: GitHub OIDC -> the existing Infisical identity `shell-deploy`
+# (its trusted subjects include this repo's `ops-edge-production`
+# environment; docs/ops/naming.md records why that name is kept). No
+# repository secrets. Owner gate: add required reviewers to the
+# `ops-edge-production` environment in Settings -> Environments.
+name: Core Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "services/**"
+      - "packages/**"
+      - "compose.yaml"
+      - "compose.cloud.yaml"
+      - "ops/cloud/**"
+      - "ops/store_ops.py"
+      - "ops/stores.json"
+      - "ops/telemetry.py"
+      - "package-lock.json"
+      - ".github/workflows/core-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "deploy (the selected ref) or rollback (to the previous release)"
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: core-deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy hyperbolic-core-prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: ops-edge-production
+      url: https://core.kylegsmith.com
+    env:
+      INFISICAL_PROJECT_ID: 246790d5-245f-4f4a-a730-5dda5e882b05
+      INFISICAL_IDENTITY_ID: 95190a93-0c60-4eb1-8946-70f45efde089
+    steps:
+      - name: Setup · Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup · Configure Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup · Install workspace dependencies (broker policy generator)
+        run: npm ci --no-audit --no-fund
+
+      - name: Setup · Install cloudflared
+        run: |
+          set -euo pipefail
+          curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared noble main" | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
+          sudo apt-get update -qq && sudo apt-get install -y -qq cloudflared
+          cloudflared --version
+
+      - name: Auth · Infisical via GitHub OIDC
+        run: |
+          set -euo pipefail
+          jwt="$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://github.com/kgsmith19" |
+            python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')"
+          token="$(curl -fsS -X POST https://app.infisical.com/api/v1/auth/oidc-auth/login \
+            -H 'Content-Type: application/json' \
+            -d "{\"identityId\":\"$INFISICAL_IDENTITY_ID\",\"jwt\":\"$jwt\"}" |
+            python3 -c 'import sys,json;print(json.load(sys.stdin)["accessToken"])')"
+          echo "::add-mask::$token"
+          echo "INFISICAL_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Deploy · Ship, start, smoke (auto-restores on failure)
+        if: github.event_name == 'push' || inputs.action == 'deploy'
+        run: ops/cloud/remote.sh deploy "$GITHUB_SHA"
+
+      - name: Rollback · Make the previous release live again
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'rollback'
+        run: |
+          ops/cloud/remote.sh rollback
+          ops/cloud/remote.sh smoke

@@ -26,7 +26,13 @@ integration, the resource is aliased or deferred instead.
 | systemd units | none (new) | `hyperbolic-core.service`, `hyperbolic-core-{backup,monitor}.{service,timer}` | **created** |
 | Docs | "local-only platform" wording (AGENTS.md, vendors, hosting decision) | parent platform + cloud host | updated; historical #503/#504 records kept as written |
 
+| GitHub deploy workflow / environment | none (new) | `Core Deploy` (`core-deploy.yml`) / `ops-edge-production` | **created**; the environment keeps a legacy name |
+
 ## Deferred, with reasons
+
+- **GitHub environment `ops-edge-production`**: the existing Infisical identity `shell-deploy`
+  trusts that environment name through GitHub OIDC. Reusing it adds no new access. A rename to
+  `hyperbolic-core-production` needs an owner-approved change to the identity's trusted subject.
 
 - **`lifeos-prod`**: may hold the only copy of old LifeOS data, so it is not touched before migration
   and owner approval.

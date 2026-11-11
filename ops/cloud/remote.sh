@@ -20,6 +20,7 @@ HOST=ssh-core.kylegsmith.com
 BASE=/srv/hyperbolic-core
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 umask 077
+mkdir -p "$HOME/.ssh"
 secret_get /platform/core DEPLOY_SSH_PRIVATE_KEY > "$work/key"
 TUNNEL_SERVICE_TOKEN_ID="$(secret_get /platform/core OPS_ACCESS_CLIENT_ID)"
 TUNNEL_SERVICE_TOKEN_SECRET="$(secret_get /platform/core OPS_ACCESS_CLIENT_SECRET)"

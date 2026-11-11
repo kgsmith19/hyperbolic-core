@@ -51,6 +51,20 @@ compose network. The browser reaches the platform same-origin at `/platform`, so
 
 Nothing secret is committed, printed, or passed on a command line: scripts move values on stdin.
 
+## Automatic deploys (GitHub Actions)
+
+`.github/workflows/core-deploy.yml` (**Core Deploy**) deploys every push to `main` that touches
+the deployed stack. Merges reach `main` only through the PR Gate. It runs the same
+`ops/cloud/remote.sh deploy <sha>` as an operator would, so the host-side backup, the smoke check
+and the automatic restore of the last good release all apply. Run it by hand (Actions → Core
+Deploy → Run workflow) to redeploy a ref or to roll back.
+
+- **Credentials:** GitHub OIDC → the existing Infisical identity `shell-deploy`, which trusts this
+  repo's `ops-edge-production` environment. There are no repository secrets.
+- **Optional owner gate:** add required reviewers to the `ops-edge-production` environment
+  (Settings → Environments). Deploys then wait for approval.
+- **Concurrency:** one deploy at a time (`core-deploy-production`), never cancelled mid-flight.
+
 ## Operating it
 
 All commands run from a repository checkout with an Infisical machine identity
