@@ -19,6 +19,9 @@ KERNEL_MIGRATIONS = [
     # Source-sync bookkeeping (#572). Reviewed against invariant 1: it is kernel
     # infrastructure for applied source state, not a life-domain table.
     "0002_sync_applied_state.sql",
+    # Reconciliation receipt infrastructure (#588). Reviewed against invariant 1:
+    # it records source-sync process metadata, not life-domain data.
+    "0003_sync_receipts.sql",
 ]
 
 
