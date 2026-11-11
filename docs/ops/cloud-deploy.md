@@ -128,8 +128,8 @@ under `/srv/hyperbolic-core/releases/`; `current` and `previous` are symlinks.
 | Cloudflare DNS, Tunnel, Access (Zero Trust free, ≤ 50 users) | US$0 |
 | **New spend** | **≈ US$12** |
 
-Model usage (Anthropic) is billed separately per use. `lifeos-prod` (CPX11, Ashburn, ≈ US$20.49)
-is still running and billed; it is kept until its data is checked (see #562).
+Model usage (Anthropic) is billed separately per use. The legacy `lifeos-prod` VPS (≈US$20.49/month)
+was deleted on 2026-11-11 (#566), so the net hosting cost went down.
 
 ## Owner responsibilities
 

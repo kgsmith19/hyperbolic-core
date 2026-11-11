@@ -26,6 +26,6 @@ Docker, with SQLite for data. Since 2026-11-11 (#562) the same stack also runs o
 | Vendor | Was used for | Status |
 | --- | --- | --- |
 | Supabase | Postgres, PostgREST and Auth for the platform and LifeOS | Each sub-app moves to SQLite on localhost (std queue, Phase 2) |
-| Hetzner VPS `lifeos-prod` | The old LifeOS production host | Idle since #503; kept until its data is checked, then a decommission proposal (#562 follow-up) |
+| Hetzner VPS `lifeos-prod` | The old LifeOS production host (Tailscale-only) | Deleted 2026-11-11 (#566); its state is archived in `/srv/hyperbolic-core/backups/lifeos-prod-archive-20261111` and restic |
 | Tailscale | Private access to the VPS; CI relay | Removed with the cloud workflows (#503) |
 | Google (Gemini) | Model API | Superseded earlier; not provisioned |
