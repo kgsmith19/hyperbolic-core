@@ -318,3 +318,31 @@ describe("LoginPage: submitting", () => {
     resolveSignIn();
   });
 });
+
+describe("Cloudflare Access single sign-on (#562)", () => {
+  function renderWithAccess(onAccessSignIn: () => Promise<boolean>) {
+    return render(
+      <MemoryRouter initialEntries={["/login?return=%2Ftools"]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage status="signed-out" onSignIn={vi.fn()} onAccessSignIn={onAccessSignIn} />} />
+          <Route path="/tools" element={<div data-testid="tools-page">tools</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+  }
+
+  it("signs in through Access before any form appears, then returns to the requested page", async () => {
+    const sso = vi.fn().mockResolvedValue(true);
+    renderWithAccess(sso);
+    expect(screen.queryByTestId("login-form")).toBeNull();
+    expect(await screen.findByTestId("tools-page")).toBeTruthy();
+    expect(sso).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the password form when Access is not available", async () => {
+    const sso = vi.fn().mockResolvedValue(false);
+    renderWithAccess(sso);
+    expect(await screen.findByTestId("login-form")).toBeTruthy();
+    expect(sso).toHaveBeenCalledTimes(1);
+  });
+});

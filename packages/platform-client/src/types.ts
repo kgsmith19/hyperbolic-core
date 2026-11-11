@@ -58,6 +58,15 @@ export interface PlatformAuth {
    */
   signInWithPassword(email: string, password: string): Promise<PlatformSession>;
   /**
+   * Single sign-on behind Cloudflare Access (#562): exchanges the identity
+   * Cloudflare Access attaches to this same-origin request
+   * (`Cf-Access-Jwt-Assertion`, verified by platform-api) for a platform
+   * session. Rejects when Access is not in front of the platform, the grant
+   * is not configured, or the Access identity is not the owner. Optional so
+   * existing test doubles of this interface stay valid.
+   */
+  signInWithCloudflareAccess?(): Promise<PlatformSession>;
+  /**
    * Returns the current session, refreshing it first if it is expired.
    * Resolves `null` (never throws) when there is no session, when a
    * required refresh cannot complete (IdP unreachable, refresh rejected),

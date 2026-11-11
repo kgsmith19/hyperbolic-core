@@ -113,6 +113,8 @@ export type ShellSession = ShellSessionState & {
   session: PlatformSession | null;
   /** The Shell's one login surface (ADR-03) calls this; rethrows on failure. */
   signIn: (email: string, password: string) => Promise<void>;
+  /** Cloudflare Access single sign-on; resolves false (never throws) when it is unavailable. */
+  signInWithAccess: () => Promise<boolean>;
   signOut: () => void;
 };
 
@@ -188,6 +190,21 @@ export function useShellSession(): ShellSession {
     }
   }, []);
 
+  const signInWithAccess = useCallback(async () => {
+    const sso = platformClient.auth.signInWithCloudflareAccess;
+    if (!sso) return false;
+    const requestRevision = ++revision.current;
+    try {
+      const next = await sso.call(platformClient.auth);
+      if (revision.current === requestRevision) {
+        setAuthState({ status: "signed-in", session: next });
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const signOut = useCallback(() => {
     // Flip to signed-out immediately, before the network round trip
     // resolves: never let a slow or failed signOut() leave the app
@@ -199,5 +216,5 @@ export function useShellSession(): ShellSession {
     platformClient.auth.signOut().catch(() => {});
   }, []);
 
-  return { ...authState, signIn, signOut };
+  return { ...authState, signIn, signInWithAccess, signOut };
 }

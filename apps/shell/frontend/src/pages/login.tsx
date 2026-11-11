@@ -20,6 +20,12 @@ import { sanitizeReturnPath } from "../lib/return-path";
 interface LoginPageProps {
   status: SessionStatus;
   onSignIn: (email: string, password: string) => Promise<void>;
+  /**
+   * Cloudflare Access single sign-on (#562), tried once before the form is
+   * shown. Resolves false when Access is not in front of this deployment
+   * (local dev), so the password form remains the fallback.
+   */
+  onAccessSignIn?: () => Promise<boolean>;
   replaceDocument?: (href: string) => void;
 }
 
@@ -27,13 +33,14 @@ function replaceBrowserDocument(href: string): void {
   window.location.replace(href);
 }
 
-function LoginPage({ status, onSignIn, replaceDocument = replaceBrowserDocument }: LoginPageProps) {
+function LoginPage({ status, onSignIn, onAccessSignIn, replaceDocument = replaceBrowserDocument }: LoginPageProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [accessTried, setAccessTried] = useState(!onAccessSignIn);
   const replacedDocumentTarget = useRef<string | null>(null);
 
   const returnTo = sanitizeReturnPath(new URLSearchParams(location.search).get("return"));
@@ -51,7 +58,24 @@ function LoginPage({ status, onSignIn, replaceDocument = replaceBrowserDocument 
     }
   }, [replaceDocument, returnKind, returnTo, status]);
 
-  if (status === "checking") {
+  useEffect(() => {
+    if (status !== "signed-out" || accessTried || !onAccessSignIn) return;
+    let cancelled = false;
+    onAccessSignIn().then((ok) => {
+      if (cancelled) return;
+      if (ok) {
+        if (returnKind === "document") replaceReturnDocumentOnce();
+        else navigate(returnTo, { replace: true });
+      } else {
+        setAccessTried(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, accessTried, onAccessSignIn]);
+
+  if (status === "checking" || (status === "signed-out" && !accessTried)) {
     // Session status isn't resolved yet -- mirrors
     // components/protected-layout.tsx's own "loading" branch. Avoids a
     // flash of the login form for an operator who is actually already

@@ -23,7 +23,7 @@ function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage status={auth.status} onSignIn={auth.signIn} />} />
+      <Route path="/login" element={<LoginPage status={auth.status} onSignIn={auth.signIn} onAccessSignIn={auth.signInWithAccess} />} />
       <Route element={<ProtectedLayout auth={auth} onSignOut={auth.signOut} />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/acc/*" element={<AccPage />} />

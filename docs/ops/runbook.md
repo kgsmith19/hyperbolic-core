@@ -2,7 +2,7 @@
 title: Platform Operations Runbook
 status: active
 owner: Kyle
-updated: 2026-10-29
+updated: 2026-11-11
 ---
 
 # Platform Operations Runbook
@@ -21,7 +21,10 @@ updated: 2026-10-29
 >   (`.github/actions/verify-local-stack`);
 > - per-app SQLite migrations: the std queue, Phase 2.
 >
-> Whatever the VPS last ran keeps running untouched; nothing in this repository deploys to it any more.
+> **Update 2026-11-11 (#562):** the same stack now also runs in the cloud on `hyperbolic-core-prod`
+> behind Cloudflare Tunnel + Access at https://core.kylegsmith.com, deployed by the Core Deploy
+> workflow. Tailscale stays retired; Cloudflare is the only access path. See `docs/ops/cloud-deploy.md`.
+> The old VPS `lifeos-prod` is untouched, pending #566.
 
 ## Local first-use path
 

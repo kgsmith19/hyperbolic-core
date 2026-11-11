@@ -27,11 +27,14 @@ Live since 2026-11-11 (Hetzner server id 175630450, `nbg1`; tunnel id
 | State | `/srv/hyperbolic-core/var` (bind mounts) | SQLite (WAL) + LifeOS blobs; survives restarts, redeploys and reboots |
 | Runtime env | `/srv/hyperbolic-core/env` (0700) | platform identity, LifeOS/Brain env, Brain key file, restic credentials |
 
-Authentication is two layers: Cloudflare Access (identity: the owner's email, one-time PIN), then
-the platform's own owner sign-in (email = the same owner email; password in Infisical
-`prod:/platform/core/PLATFORM_OWNER_PASSWORD`). Tokens are ES256 JWTs; their issuer stays the
-internal `http://platform.localhost:8400/auth/v1`, which LifeOS and Brain verify against inside the
-compose network. The browser reaches the platform same-origin at `/platform`, so no CORS is needed.
+**Sign-in** (details in `docs/ops/login.md`): Cloudflare Access, with a one-time PIN to the owner
+email, then single sign-on into the platform. platform-api verifies the `Cf-Access-Jwt-Assertion`
+(RS256, the team's certs, issuer, the core app's AUD, expiry) and issues an owner session when the
+email is the platform owner's (`grant_type=cloudflare_access`, `services/platform-api/src/cf-access.ts`).
+The platform password (Infisical `prod:/platform/core/PLATFORM_OWNER_PASSWORD`) is the break-glass
+fallback. Platform JWTs are ES256; their issuer stays the internal
+`http://platform.localhost:8400/auth/v1`, which LifeOS and Brain verify inside the compose network.
+The browser reaches the platform same-origin at `/platform`, so no CORS is needed.
 
 ## Credentials (Infisical project `hyperbolic-core`, env `prod`)
 
@@ -125,7 +128,7 @@ is still running and billed; it is kept until its data is checked (see #562).
 - Keep the Cloudflare account, the `kylegsmith.com` registration and the Hetzner account in good standing.
 - Approve any change to the Access policy, any new paid resource, and any destructive action.
 - Rotate tokens yearly (`docs/ops/cloudflare-agent-access.md#rotation`); the ops service token expires after 8760 h.
-- Sign-in is Access one-time PIN to the owner email, then the platform password from Infisical.
+- Sign-in is one step: the Access one-time PIN to the owner email, then single sign-on (`docs/ops/login.md`).
 
 ## Known limitations
 
