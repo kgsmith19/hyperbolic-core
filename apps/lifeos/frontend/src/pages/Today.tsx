@@ -32,7 +32,7 @@ function Item({
   busy: boolean;
 }) {
   return (
-    <li className="rounded border border-zinc-200 p-3">
+    <li className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{item.title}</span>
         {item.focus && <span className="text-xs text-amber-600">focus</span>}
@@ -49,7 +49,7 @@ function Item({
         <p className="text-sm text-zinc-500">Floor: {item.floor}</p>
       )}
       <div
-        className="mt-2 flex flex-wrap gap-1"
+        className="mt-3 flex flex-wrap gap-1"
         role="group"
         aria-label={`Progress for ${item.title}`}
       >
@@ -269,15 +269,15 @@ export default function Today() {
     change.mutate({ id, progress });
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-3xl space-y-5 pb-10">
       <div>
-        <h1 className="text-xl font-semibold">Today</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
         <p className="text-sm text-zinc-500">
           As of {new Date(as_of).toLocaleString()}
         </p>
       </div>
 
-      <section aria-labelledby="next-action">
+      <section aria-labelledby="next-action" className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
         <h2 id="next-action" className="text-lg font-medium">
           Next two-minute action
         </h2>
@@ -289,8 +289,8 @@ export default function Today() {
       </section>
 
       <section aria-labelledby="priorities">
-        <h2 id="priorities" className="text-lg font-medium">
-          Top priorities
+        <h2 id="priorities" className="text-lg font-semibold">
+          Top priorities <span className="ml-2 text-sm font-normal text-zinc-500">{one_offs.length} of 3</span>
         </h2>
         {one_offs.length === 0 ? (
           <Empty>No open one-off priorities.</Empty>
@@ -313,7 +313,7 @@ export default function Today() {
         )}
       </section>
 
-      <section aria-labelledby="anchors">
+      <section aria-labelledby="anchors" className="rounded-xl border border-zinc-200 p-4">
         <h2 id="anchors" className="text-lg font-medium">
           Daily anchors
         </h2>
@@ -333,7 +333,7 @@ export default function Today() {
         )}
       </section>
 
-      <Balance balance={balance} />
+      <details className="rounded-xl border border-zinc-200 p-4">\n        <summary className="cursor-pointer font-medium">Life balance</summary>\n        <div className="mt-3"><Balance balance={balance} /></div>\n      </details>
 
       <Appointments
         id="schedule"
