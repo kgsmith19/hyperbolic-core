@@ -439,6 +439,13 @@ test("today fits a phone and shows the day's context", async ({ page }) => {
       document.documentElement.scrollWidth -
       document.documentElement.clientWidth,
   );
+  if (overflow > 0) {
+    const offenders = await page.evaluate(() => [...document.querySelectorAll("*")]
+      .filter((element) => element.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
+      .map((element) => ({ tag: element.tagName, className: typeof element.className === "string" ? element.className : "", right: Math.round(element.getBoundingClientRect().right) }))
+      .slice(0, 12));
+    console.log("Mobile horizontal overflow offenders:", JSON.stringify(offenders));
+  }
   expect(overflow).toBeLessThanOrEqual(0);
   // Touch targets: every progress button is at least 36px tall (min-h-9).
   const heights = await page
