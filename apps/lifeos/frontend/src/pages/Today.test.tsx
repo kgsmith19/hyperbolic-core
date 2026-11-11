@@ -73,7 +73,7 @@ describe("Today", () => {
     renderWithProviders(<Today />);
 
     const priorities = await screen.findByRole("region", {
-      name: "Top priorities",
+      name: /Top priorities/,
     });
     expect(
       within(priorities).getByText("Call the dentist"),
