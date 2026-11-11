@@ -1,0 +1,120 @@
+# Cloud deployment: hyperbolic-core-prod (#562)
+
+Owner decision 2026-11-11: Hyperbolic Core runs persistently in the cloud, independent of the
+owner's computers, at **https://core.kylegsmith.com**.
+
+```
+Browser ─► Cloudflare Access ("Hyperbolic Core", policy "Owner Only", 24 h session)
+        ─► Cloudflare Tunnel "hyperbolic-core-prod" (outbound-only, cloudflared checks the Access JWT)
+        ─► 127.0.0.1:8080 edge (Caddy: production Shell + LifeOS UI + same-origin API proxy)
+        ─► platform-api · lifeos · brain        (compose network only; no host ports)
+           broker · network-checker             (internal; not routed at all)
+```
+
+## What runs where
+
+| Piece | Where | Notes |
+| --- | --- | --- |
+| Host | Hetzner Cloud **CX33** `hyperbolic-core-prod`, Ubuntu 24.04, `nbg1` | 4 vCPU / 8 GB / 80 GB; provider backups on; delete + rebuild protection |
+| Firewall | `hyperbolic-core-prod-fw` | **No inbound rules.** sshd listens on 127.0.0.1 only |
+| Edge | compose service `edge` (`apps/shell/Dockerfile`, `ops/cloud/Caddyfile`) | `/` Shell, `/life/` LifeOS UI, `/platform/*` platform-api, `/life/api/*` LifeOS, `/api/brain/*` Brain (SSE) |
+| Stack | `compose.yaml` + `compose.cloud.yaml`, project `hyperbolic-core` | Same images as local; the overlay drops every host port but edge's loopback 8080 |
+| Tunnel connector | `cloudflared` systemd service on the host | Separate from compose, so the operator channel survives a broken app release |
+| Operator SSH | `ssh-core.kylegsmith.com` through the tunnel | Access app "Hyperbolic Core Ops": service token `hyperbolic-core-ops` or the owner |
+| State | `/srv/hyperbolic-core/var` (bind mounts) | SQLite (WAL) + LifeOS blobs; survives restarts, redeploys and reboots |
+| Runtime env | `/srv/hyperbolic-core/env` (0700) | platform identity, LifeOS/Brain env, Brain key file, restic credentials |
+
+Authentication is two layers: Cloudflare Access (identity: the owner's email, one-time PIN), then
+the platform's own owner sign-in (email = the same owner email; password in Infisical
+`prod:/platform/core/PLATFORM_OWNER_PASSWORD`). Tokens are ES256 JWTs; their issuer stays the
+internal `http://platform.localhost:8400/auth/v1`, which LifeOS and Brain verify against inside the
+compose network. The browser reaches the platform same-origin at `/platform`, so no CORS is needed.
+
+## Credentials (Infisical project `hyperbolic-core`, env `prod`)
+
+| Path / key | Used by | Written by |
+| --- | --- | --- |
+| `/CLOUDFLARE_API_TOKEN` | `infra/cloudflare/cf.sh` | owner (scoped token `hyperbolic-core-deployer`) |
+| `/platform/cloudflare/TF_STATE_PASSPHRASE` | OpenTofu state encryption | first setup |
+| `/platform/core-tunnel/TUNNEL_TOKEN` | cloudflared on the host (cloud-init) | `cf.sh publish-secrets` |
+| `/platform/core/OPS_ACCESS_CLIENT_ID`, `OPS_ACCESS_CLIENT_SECRET` | operator SSH through Access | `cf.sh publish-secrets` |
+| `/platform/core/DEPLOY_SSH_PRIVATE_KEY`, `DEPLOY_SSH_PUBLIC_KEY` | operator SSH as `deploy` | `provision.sh` (once) |
+| `/platform/core/OWNER_EMAIL` | Access policy check, platform owner | first setup (from the Owner Only policy) |
+| `/platform/core/PLATFORM_OWNER_PASSWORD` | the owner's app sign-in; `remote.sh smoke` | `remote.sh deploy` (first run) |
+| `/providers/hetzner/HETZNER_API_TOKEN` | `provision.sh` | existing |
+| `/brain/BRAIN_ANTHROPIC_API_KEY` | Brain only (ADR-05 file mount + ACC vault) | existing |
+| `/platform/lifeos-deploy/ANTHROPIC_API_KEY`, `LIFEOS_BRIEFING_TZ` | LifeOS | existing |
+| `/platform/backup/RESTIC_PASSWORD`, `STORAGEBOX_SSH_KEY` | nightly restic | existing |
+
+Nothing secret is committed, printed, or passed on a command line: scripts move values on stdin.
+
+## Operating it
+
+All commands run from a repository checkout with an Infisical machine identity
+(`INFISICAL_PROJECT_ID` plus `INFISICAL_TOKEN` or `INFISICAL_CLIENT_ID`/`INFISICAL_CLIENT_SECRET`),
+`cloudflared`, `ssh`, and `tofu` (OpenTofu 1.10+) on PATH.
+
+| Task | Command |
+| --- | --- |
+| Deploy a commit (default `HEAD`) | `ops/cloud/remote.sh deploy <ref>` |
+| Roll back to the previous release | `ops/cloud/remote.sh rollback` (again to undo) |
+| Owner journey smoke test | `ops/cloud/remote.sh smoke` |
+| Shell on the host | `ops/cloud/remote.sh ssh` (or `ssh … <command>`) |
+| Backup now | `ops/cloud/remote.sh backup` |
+| Cloudflare inspect / change | `infra/cloudflare/cf.sh preflight|plan|apply|verify` |
+| Create the host (once) | `ops/cloud/provision.sh` |
+
+`deploy` ships `git archive <sha>` over SSH, refreshes the env files from Infisical, then runs
+`ops/cloud/host/deploy.sh` on the host: pre-deploy SQLite backup → broker policy → `docker compose
+build` → `up --wait` → `ops/cloud/host/smoke.sh`. If any step fails, the last good release is
+started again automatically, and `releases.log` records both. The five newest releases are kept
+under `/srv/hyperbolic-core/releases/`; `current` and `previous` are symlinks.
+
+## Reliability
+
+- **Restart/reboot**: every service has `restart: unless-stopped` and a health check;
+  `hyperbolic-core.service` starts the live release at boot; `cloudflared` is its own systemd
+  service. Unattended security upgrades may reboot at 04:30 UTC.
+- **Monitoring**: `hyperbolic-core-monitor.timer` (5 min) checks service health
+  (`ops/telemetry.py`), the edge, cloudflared, disk (< 85 %) and memory. Read it with
+  `journalctl -t hyperbolic-core -p warning`. Cloudflare reports tunnel health in `cf.sh verify`.
+- **Backups**:
+  1. Hetzner provider backups (daily image, 7 kept).
+  2. `hyperbolic-core-backup.timer` at 03:17 UTC runs `ops/store_ops.py backup` (online SQLite
+     backup + blobs, checksummed) and a **restore drill** of that snapshot. It keeps 7 locally,
+     then sends the snapshot plus `env/` to the Storage Box `hyperbolic-backups` with restic
+     (encrypted; keeps 7 daily, 4 weekly and 6 monthly).
+  3. A pre-deploy snapshot before every release (3 kept).
+- **Restore**: `restic -r sftp:storagebox:hyperbolic-core restore latest --target /tmp/r` (env from
+  `/srv/hyperbolic-core/env/restic.env`). Then stop the stack, copy the `*.db` files and `blobs/`
+  into `/srv/hyperbolic-core/var/<app>/`, and run `sudo systemctl start hyperbolic-core`.
+  `ops/store_ops.py restore-drill <dir>` proves a snapshot first.
+
+## Cost (2026-11)
+
+| Item | Monthly |
+| --- | --- |
+| Hetzner CX33 (nbg1) | US$9.99 |
+| Hetzner provider backups (+20 %) | US$2.00 |
+| Storage Box BX11 `hyperbolic-backups` | already paid (shared) |
+| Cloudflare DNS, Tunnel, Access (Zero Trust free, ≤ 50 users) | US$0 |
+| **New spend** | **≈ US$12** |
+
+Model usage (Anthropic) is billed separately per use. `lifeos-prod` (CPX11, Ashburn, ≈ US$20.49)
+is still running and billed; it is kept until its data is checked (see #562).
+
+## Owner responsibilities
+
+- Keep the Cloudflare account, the `kylegsmith.com` registration and the Hetzner account in good standing.
+- Approve any change to the Access policy, any new paid resource, and any destructive action.
+- Rotate tokens yearly (`docs/ops/cloudflare-agent-access.md#rotation`); the ops service token expires after 8760 h.
+- Sign-in is Access one-time PIN to the owner email, then the platform password from Infisical.
+
+## Known limitations
+
+- **ACC** (Agentic Command Center) is a process on the operator's own machine; its Shell tile shows
+  "Unreachable" in the cloud by design.
+- **Idea Intake submit** depends on llm-handler, which needs the retired Supabase stack; it is not deployed.
+- **Brain** runs with its provider key and authenticated API. Coding runs that push to GitHub also
+  need a repository credential, which is not provisioned (follow-up).
+- **network-checker** and **broker** run but are not routed to the browser (internal only).

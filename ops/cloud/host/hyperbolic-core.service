@@ -1,0 +1,19 @@
+# Starts the live release after a reboot (#562). Containers also carry
+# `restart: unless-stopped`; this unit makes the boot order explicit.
+[Unit]
+Description=Hyperbolic Core (docker compose, live release)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=deploy
+Environment=HYP_VAR=/srv/hyperbolic-core/var COMPOSE_PROJECT_NAME=hyperbolic-core COMPOSE_FILE=compose.yaml:compose.cloud.yaml
+WorkingDirectory=/srv/hyperbolic-core/current
+ExecStart=/bin/sh -c 'export HOST_UID=$(id -u) HOST_GID=$(id -g); set -a; . /srv/hyperbolic-core/env/build.env; exec docker compose up -d --wait --wait-timeout 300'
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

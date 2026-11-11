@@ -1,7 +1,9 @@
 # Hosting and access decision record (#559 AC7)
 
-Status: recommendation only. Nothing here provisions infrastructure or spends money.
-Date: 2026-11-07. Costs are unverified: confirm them on the vendor pricing page before buying.
+Status: **superseded on 2026-11-11** by the owner's cloud decision on #562: Hetzner CX33
+`hyperbolic-core-prod` (EU, ≈US$12/month with provider backups) behind Cloudflare Tunnel + Access,
+without the home-machine step. The live design is `docs/ops/cloud-deploy.md`. The 2026-11-07
+comparison below is kept as the record of what was weighed.
 
 ## Options compared
 
