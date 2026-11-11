@@ -348,7 +348,9 @@ export default function Today() {
         empty="Nothing on the calendar today."
       />
 
-      <Appointments
+      <details className="rounded-xl border border-zinc-200 p-4">
+        <summary className="cursor-pointer font-medium">Upcoming commitments</summary>
+        <div className="mt-3"><Appointments
         id="upcoming"
         heading="Coming up"
         items={upcoming}
@@ -356,12 +358,16 @@ export default function Today() {
         more={more_upcoming}
         unavailable={calendarUnavailable}
         empty="Nothing in the next week."
-      />
+        /></div>
+      </details>
 
-      <Sources
-        sources={sources}
-        unavailable={unavailable.includes("sources")}
-      />
+      <details className="rounded-xl border border-zinc-200 p-4">
+        <summary className="cursor-pointer font-medium">Source health and sync details</summary>
+        <div className="mt-3"><Sources
+          sources={sources}
+          unavailable={unavailable.includes("sources")}
+        /></div>
+      </details>
 
       {change.error && (
         <p role="alert" className="text-sm text-red-600">
