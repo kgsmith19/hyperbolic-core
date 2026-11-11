@@ -333,7 +333,10 @@ export default function Today() {
         )}
       </section>
 
-      <details className="rounded-xl border border-zinc-200 p-4">\n        <summary className="cursor-pointer font-medium">Life balance</summary>\n        <div className="mt-3"><Balance balance={balance} /></div>\n      </details>
+      <details className="rounded-xl border border-zinc-200 p-4">
+        <summary className="cursor-pointer font-medium">Life balance</summary>
+        <div className="mt-3"><Balance balance={balance} /></div>
+      </details>
 
       <Appointments
         id="schedule"
