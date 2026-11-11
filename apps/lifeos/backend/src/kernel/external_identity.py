@@ -50,6 +50,8 @@ class IdentityCrosswalk:
     def resolve(self, source: str, external_id: str) -> UUID | None:
         if not source.strip() or not external_id.strip():
             raise ValueError("source and external_id must be nonblank")
+        if source != source.strip() or external_id != external_id.strip():
+            raise ValueError("identifiers must be normalized before lookup")
         return self._by_external.get((source, external_id))
 
     def aliases(self, canonical_id: UUID) -> frozenset[tuple[str, str]]:
