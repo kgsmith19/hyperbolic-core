@@ -56,11 +56,19 @@ Nothing secret is committed, printed, or passed on a command line: scripts move 
 
 ## Automatic deploys (GitHub Actions)
 
-`.github/workflows/core-deploy.yml` (**Core Deploy**) deploys every push to `main` that touches
-the deployed stack. Merges reach `main` only through the PR Gate. It runs the same
-`ops/cloud/remote.sh deploy <sha>` as an operator would, so the host-side backup, the smoke check
-and the automatic restore of the last good release all apply. Run it by hand (Actions → Core
-Deploy → Run workflow) to redeploy a ref or to roll back.
+`.github/workflows/core-deploy.yml` (**Core Deploy**) keeps the host on `main` with no manual steps:
+
+- **On push to `main`** when the stack changes (merges made by a person).
+- **Every 15 minutes** as a catch-up. PR Gate's auto-merge lands commits with the Actions token,
+  and GitHub starts no workflow for pushes made with that token, so this scheduled run is what
+  ships an auto-merged PR, within about 15 minutes. It deploys only when `main` differs from the
+  live release (`ops/cloud/remote.sh live-sha`).
+- **By hand** (Actions → Core Deploy → Run workflow) to deploy a ref, or to roll back. A rollback
+  sets a hold that stops the scheduled catch-up from re-deploying `main` over it. The next
+  explicit deploy clears the hold.
+
+Each deploy runs the same `ops/cloud/remote.sh deploy <sha>` an operator would, so the host-side
+backup, the smoke check, the automatic restore of the last good release and the owner journey all apply.
 
 - **Credentials:** GitHub OIDC → the existing Infisical identity `shell-deploy`, which trusts this
   repo's `ops-edge-production` environment. There are no repository secrets.
@@ -120,8 +128,8 @@ under `/srv/hyperbolic-core/releases/`; `current` and `previous` are symlinks.
 | Cloudflare DNS, Tunnel, Access (Zero Trust free, ≤ 50 users) | US$0 |
 | **New spend** | **≈ US$12** |
 
-Model usage (Anthropic) is billed separately per use. `lifeos-prod` (CPX11, Ashburn, ≈ US$20.49)
-is still running and billed; it is kept until its data is checked (see #562).
+Model usage (Anthropic) is billed separately per use. The legacy `lifeos-prod` VPS (≈US$20.49/month)
+was deleted on 2026-11-11 (#566), so the net hosting cost went down.
 
 ## Owner responsibilities
 

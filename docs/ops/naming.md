@@ -13,7 +13,7 @@ integration, the resource is aliased or deferred instead.
 | Primary server | none (new) | `hyperbolic-core-prod` | **created** with labels `platform=hyperbolic-core, env=prod` |
 | Firewall | none (new) | `hyperbolic-core-prod-fw` | **created** |
 | Hetzner SSH key | none (new) | `hyperbolic-core-prod-deploy` | **created** |
-| Old server | `lifeos-prod` | (retire) | **deferred**: unchanged until its data is checked and the owner approves a decommission |
+| Old server | `lifeos-prod` | (retired) | **deleted 2026-11-11** with owner approval (#566); its only local state is archived on `hyperbolic-core-prod` and in restic |
 | Storage Box | `hyperbolic-backups` | same | none (already platform-named) |
 | Infisical project | `hyperbolic-core` (slug `hyperbolic-core-aeme2`) | same | none |
 | Infisical paths | existing `/platform/*`, `/brain`, `/providers/*` | same | new keys under `/platform/core`, `/platform/core-tunnel`, `/platform/cloudflare`; **no existing path renamed** (identities and workflows depend on them) |
@@ -34,8 +34,6 @@ integration, the resource is aliased or deferred instead.
   trusts that environment name through GitHub OIDC. Reusing it adds no new access. A rename to
   `hyperbolic-core-production` needs an owner-approved change to the identity's trusted subject.
 
-- **`lifeos-prod`**: may hold the only copy of old LifeOS data, so it is not touched before migration
-  and owner approval.
 - **Infisical secret paths** such as `/platform/lifeos-deploy`: renaming them would break the
   OIDC identities scoped to those paths, for no functional gain.
 - **GitHub repository names**: unchanged. Cosmetic renames carry redirect and integration risk.

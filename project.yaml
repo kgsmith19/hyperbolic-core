@@ -153,7 +153,7 @@ vendors:
   # Full detail (auth, secret paths, cost, rotation) lives in
   # docs/ops/vendors.md; this block is the machine-declared summary.
   - name: Hetzner
-    purpose: "ACTIVE since 2026-11-11 (#562): CX33 hyperbolic-core-prod runs the stack behind Cloudflare (ops/cloud/); Storage Box hyperbolic-backups holds restic backups. lifeos-prod is legacy, pending #566."
+    purpose: "ACTIVE since 2026-11-11 (#562): CX33 hyperbolic-core-prod runs the stack behind Cloudflare (ops/cloud/); Storage Box hyperbolic-backups holds restic backups. The legacy lifeos-prod VPS was deleted on 2026-11-11 (#566)."
     cost_eur_month: 11
     auth: API token in Infisical (/providers/hetzner); no inbound ports on the host
     docs: "docs/ops/cloud-deploy.md"
