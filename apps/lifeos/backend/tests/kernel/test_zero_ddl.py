@@ -16,6 +16,9 @@ SRC = ROOT / "src"
 # against invariant 1 before this list grows.
 KERNEL_MIGRATIONS = [
     "0001_init.sql",
+    # Source-sync bookkeeping (#572). Reviewed against invariant 1: it is kernel
+    # infrastructure for applied source state, not a life-domain table.
+    "0002_sync_applied_state.sql",
 ]
 
 
