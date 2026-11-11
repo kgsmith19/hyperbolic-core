@@ -16,57 +16,17 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$here"
 
-INFISICAL_API="${INFISICAL_API:-https://app.infisical.com}"
 CF_API="https://api.cloudflare.com/client/v4"
 ACCOUNT_ID="$(sed -n '/variable "account_id"/,/}/s/.*default *= *"\(.*\)"/\1/p' variables.tf)"
 ZONE_ID="$(sed -n '/variable "zone_id"/,/}/s/.*default *= *"\(.*\)"/\1/p' variables.tf)"
 CORE_HOST="core.kylegsmith.com"
 
-die() { echo "cf.sh: $*" >&2; exit 1; }
-log() { echo "cf.sh: $*" >&2; }
 
-infisical_token() {
-  if [[ -n "${INFISICAL_TOKEN:-}" ]]; then echo "$INFISICAL_TOKEN"; return; fi
-  [[ -n "${INFISICAL_CLIENT_ID:-}" && -n "${INFISICAL_CLIENT_SECRET:-}" ]] ||
-    die "set INFISICAL_TOKEN or INFISICAL_CLIENT_ID/INFISICAL_CLIENT_SECRET"
-  curl -fsS -X POST "$INFISICAL_API/api/v1/auth/universal-auth/login" \
-    -H 'Content-Type: application/json' \
-    -d "$(python3 -c 'import json,os;print(json.dumps({"clientId":os.environ["INFISICAL_CLIENT_ID"],"clientSecret":os.environ["INFISICAL_CLIENT_SECRET"]}))')" |
-    python3 -c 'import sys,json;print(json.load(sys.stdin)["accessToken"])'
-}
-
-# secret_get <path> <key>
-secret_get() {
-  curl -fsS "$INFISICAL_API/api/v3/secrets/raw/$2?workspaceId=$INFISICAL_PROJECT_ID&environment=prod&secretPath=$1" \
-    -H "Authorization: Bearer $INF_TOKEN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["secret"]["secretValue"])'
-}
-
-# secret_put <path> <key>  (value on stdin; updates, or creates when missing)
-secret_put() {
-  python3 - "$1" "$2" <<'PY'
-import json, os, sys, urllib.error, urllib.request
-path, key = sys.argv[1], sys.argv[2]
-value = sys.stdin.read().rstrip("\n")
-body = json.dumps({"workspaceId": os.environ["INFISICAL_PROJECT_ID"], "environment": "prod",
-                   "secretPath": path, "secretValue": value, "type": "shared"}).encode()
-url = f'{os.environ["INFISICAL_API"]}/api/v3/secrets/raw/{key}'
-headers = {"Authorization": "Bearer " + os.environ["INF_TOKEN"], "Content-Type": "application/json"}
-for method in ("PATCH", "POST"):
-    try:
-        urllib.request.urlopen(urllib.request.Request(url, data=body, headers=headers, method=method))
-        print(f"cf.sh: stored {path}/{key}", file=sys.stderr)
-        break
-    except urllib.error.HTTPError as err:
-        status = err.code
-else:
-    sys.exit(f"cf.sh: could not store {path}/{key} (HTTP {status})")
-PY
-}
+# Infisical login and secret_get/secret_put (stdin/stdout only) are shared
+# with the host tooling.
+. "$here/../../ops/cloud/lib.sh"
 
 load_credentials() {
-  [[ -n "${INFISICAL_PROJECT_ID:-}" ]] || die "INFISICAL_PROJECT_ID is not set"
-  export INFISICAL_API INFISICAL_PROJECT_ID
-  INF_TOKEN="$(infisical_token)"; export INF_TOKEN
   CLOUDFLARE_API_TOKEN="$(secret_get / CLOUDFLARE_API_TOKEN)"; export CLOUDFLARE_API_TOKEN
   TF_VAR_owner_email="$(secret_get /platform/core OWNER_EMAIL)"; export TF_VAR_owner_email
   TF_VAR_state_passphrase="$(secret_get /platform/cloudflare TF_STATE_PASSPHRASE)"; export TF_VAR_state_passphrase
@@ -132,6 +92,7 @@ apply() {
 }
 
 publish_secrets() {
+  set -o pipefail
   load_credentials
   tofu init -input=false >/dev/null
   tofu output -raw tunnel_token | secret_put /platform/core-tunnel TUNNEL_TOKEN

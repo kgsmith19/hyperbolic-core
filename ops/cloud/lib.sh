@@ -24,10 +24,16 @@ secret_get() {  # <path> <KEY>
 }
 
 secret_put() {  # <path> <KEY>, value on stdin; creates the folder path if needed
-  python3 - "$1" "$2" <<'PY'
+  # The program goes in -c, not a heredoc, so stdin stays the secret value.
+  python3 -c "$_SECRET_PUT_PY" "$1" "$2"
+}
+
+_SECRET_PUT_PY='
 import json, os, sys, urllib.error, urllib.request
 path, key = sys.argv[1], sys.argv[2]
 value = sys.stdin.read().rstrip("\n")
+if not value:
+    sys.exit(f"refusing to store an empty value for {path}/{key}")
 api, tok, proj = os.environ["INFISICAL_API"], os.environ["INF_TOKEN"], os.environ["INFISICAL_PROJECT_ID"]
 h = {"Authorization": "Bearer " + tok, "Content-Type": "application/json"}
 def call(method, url, body):
@@ -45,5 +51,4 @@ for method in ("PATCH", "POST"):
         status = err.code
 else:
     sys.exit(f"could not store {path}/{key} (HTTP {status})")
-PY
-}
+'
