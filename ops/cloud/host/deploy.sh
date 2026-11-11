@@ -31,9 +31,9 @@ start() {  # <release dir>
   cd "$r"
   set -a; . "$BASE/env/build.env"; set +a   # PLATFORM_ANON_KEY (public), PUBLIC_ORIGIN
   mkdir -p "$HYP_VAR"/{platform,network-checker,lifeos/blobs,brain/home,brain-workspaces,broker}
-  # The broker's deny-by-default policy, generated from every tool.json.
-  docker run --rm -u "$HOST_UID:$HOST_GID" -v "$r:/w:ro" -v "$HYP_VAR/broker:/out" -w /w node:22-slim \
-    node packages/manifest-tools/generate-broker-policy.mjs --out /out/broker-policy.json >/dev/null
+  # The broker's deny-by-default policy, generated from every tool.json by
+  # ops/cloud/remote.sh (it needs the workspace deps) and shipped here.
+  [[ -s "$HYP_VAR/broker/broker-policy.json" ]] || { log "missing $HYP_VAR/broker/broker-policy.json"; return 1; }
   docker compose build --pull
   docker compose up -d --wait --wait-timeout 300 --remove-orphans
   "$r/ops/cloud/host/smoke.sh"
