@@ -108,6 +108,7 @@ case "$cmd" in
     git -C "$repo" worktree remove --force "$work/src"
     on_host "mkdir -p $BASE/var/broker"
     put_file "$BASE/var/broker/broker-policy.json" < "$work/broker-policy.json"
+    on_host "chmod 0644 $BASE/var/broker/broker-policy.json"   # public policy; the broker runs as its own user
     git -C "$repo" archive --format=tar "$sha" |
       on_host "bash $rel.stage/ops/cloud/host/deploy.sh $sha; rc=\$?; rm -rf $rel.stage; exit \$rc"
     "$0" smoke
