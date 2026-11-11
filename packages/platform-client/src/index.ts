@@ -205,6 +205,39 @@ export function createPlatformClient(config: PlatformClientConfig): PlatformClie
       return ownerSession;
     },
 
+    async signInWithCloudflareAccess() {
+      const res = await globalThis.fetch(
+        `${config.platformUrl.replace(/\/+$/, "")}/auth/v1/token?grant_type=cloudflare_access`,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { apikey: config.anonKey, "content-type": "application/json" },
+          body: "{}",
+        }
+      );
+      if (!res.ok) {
+        throw new Error(`platform-client: Cloudflare Access sign-in was refused (${res.status})`);
+      }
+      const tokens = (await res.json()) as { access_token?: string; refresh_token?: string };
+      if (!tokens.access_token || !tokens.refresh_token) {
+        throw new Error("platform-client: Cloudflare Access sign-in returned no session");
+      }
+      const { data, error } = await supabase.auth.setSession({
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+      });
+      const session = toPlatformSession(data.session);
+      if (error || !session) {
+        throw error ?? new Error("platform-client: Cloudflare Access sign-in returned no session");
+      }
+      // Same fail-closed owner check as signInWithPassword (Finding #47).
+      const ownerSession = await enforceOwner(supabase, config, session);
+      if (!ownerSession) {
+        throw new Error("platform-client: Cloudflare Access identity is not the platform owner; session revoked");
+      }
+      return ownerSession;
+    },
+
     async getSession() {
       try {
         const { data, error } = await supabase.auth.getSession();

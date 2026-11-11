@@ -11,11 +11,12 @@ import { Auth } from "../src/auth.ts";
 import { initEnv } from "../src/cli.ts";
 import { loadConfig } from "../src/config.ts";
 import { Signer } from "../src/jwt.ts";
+import type { AccessVerifier } from "../src/cf-access.ts";
 import { createPlatformServer } from "../src/server.ts";
 
 export const PASSWORD = "correct horse battery staple";
 
-export async function startPlatform() {
+export async function startPlatform(options: { access?: AccessVerifier } = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "platform-api-"));
   const { env } = initEnv({ email: "owner@example.test", password: PASSWORD, publicUrl: "http://127.0.0.1:0" });
   const config = loadConfig({ ...env, PLATFORM_DB_PATH: path.join(dir, "platform.db"), PLATFORM_ACCESS_TTL_SECONDS: "60" });
@@ -24,7 +25,7 @@ export async function startPlatform() {
   migrate(db, config.migrationsDir);
   const signer = new Signer(config.privateKeyPem);
   const auth = new Auth(db, config, signer);
-  const server = createPlatformServer(db, config, auth, signer);
+  const server = createPlatformServer(db, config, auth, signer, options.access ?? null);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 

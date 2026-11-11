@@ -1,0 +1,50 @@
+#cloud-config
+# hyperbolic-core-prod first boot (#562). Rendered by ops/cloud/provision.sh,
+# which substitutes __DEPLOY_PUBKEY__ and __TUNNEL_TOKEN__ (never committed).
+# Result: Docker + cloudflared + restic, a `deploy` user reachable only
+# through the Cloudflare Tunnel (sshd listens on loopback), no public ports.
+hostname: hyperbolic-core-prod
+package_update: true
+package_upgrade: true
+packages: [ca-certificates, curl, gnupg, git, jq, python3, sqlite3, restic, unattended-upgrades]
+users:
+  - default
+  - name: deploy
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
+    ssh_authorized_keys: [__DEPLOY_PUBKEY__]
+write_files:
+  - path: /etc/ssh/sshd_config.d/10-hyperbolic-core.conf
+    content: |
+      # Reached only via cloudflared (ssh-core.kylegsmith.com, Access-protected).
+      ListenAddress 127.0.0.1
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+      AllowUsers deploy
+  - path: /etc/docker/daemon.json
+    content: |
+      {"log-driver": "json-file", "log-opts": {"max-size": "10m", "max-file": "5"}, "live-restore": true}
+  - path: /etc/apt/apt.conf.d/52hyperbolic-unattended
+    content: |
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "04:30";
+runcmd:
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list
+  - curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg
+  - echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared noble main" > /etc/apt/sources.list.d/cloudflared.list
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin cloudflared
+  - usermod -aG docker deploy
+  - systemctl enable --now docker
+  - cloudflared service install __TUNNEL_TOKEN__
+  - systemctl enable --now cloudflared
+  - install -d -o deploy -g deploy -m 0750 /srv/hyperbolic-core /srv/hyperbolic-core/releases /srv/hyperbolic-core/var /srv/hyperbolic-core/backups
+  - install -d -o deploy -g deploy -m 0700 /srv/hyperbolic-core/env
+  - systemctl daemon-reload
+  - systemctl restart ssh.socket ssh || systemctl restart ssh
+  - touch /var/lib/hyperbolic-core-bootstrapped

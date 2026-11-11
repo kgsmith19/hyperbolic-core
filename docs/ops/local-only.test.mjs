@@ -1,6 +1,8 @@
-// The cloud ops surface stays removed (#503; owner decision 2026-10-29: the
+// The old cloud ops surface stays removed (#503; owner decision 2026-10-29: the
 // platform is local-only). Each assertion names a path #503 deleted, so a
 // revert or a re-add of any of them fails here, not silently in production.
+// The one cloud host added on 2026-11-11 (#562) lives under ops/cloud/ and
+// infra/cloudflare/ with new names; it reuses none of these paths.
 
 import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";

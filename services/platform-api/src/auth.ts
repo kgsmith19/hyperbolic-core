@@ -103,6 +103,11 @@ export class Auth {
     return row && ok ? this.#session() : null;
   }
 
+  /** A session for an identity Cloudflare Access already verified (cf-access.ts); only the owner's email. */
+  accessGrant(identity: { email: string } | null): Session | null {
+    return identity && identity.email === this.#config.ownerEmail ? this.#session() : null;
+  }
+
   refreshGrant(refreshToken: unknown): Session | null {
     if (typeof refreshToken !== "string" || refreshToken.length < 16) return null;
     const used = this.#db

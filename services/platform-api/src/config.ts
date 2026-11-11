@@ -19,6 +19,9 @@ export interface PlatformConfig {
   ownerEmail: string;
   /** scrypt$<N>$<salt b64>$<hash b64> */
   ownerPasswordHash: string;
+  /** Cloudflare Access SSO (#562): both set enables the `cloudflare_access` grant. */
+  cfAccessTeamDomain?: string;
+  cfAccessAudience?: string;
   accessTtlSeconds: number;
   /** Browser origins allowed to call this service (local frontends). */
   allowedOrigins: string[];
@@ -59,6 +62,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, serviceDir = pa
     ownerId,
     ownerEmail: required(env, "PLATFORM_OWNER_EMAIL").toLowerCase(),
     ownerPasswordHash: required(env, "PLATFORM_OWNER_PASSWORD_HASH"),
+    cfAccessTeamDomain: env.PLATFORM_CF_ACCESS_TEAM_DOMAIN || undefined,
+    cfAccessAudience: env.PLATFORM_CF_ACCESS_AUD || undefined,
     accessTtlSeconds: Number(env.PLATFORM_ACCESS_TTL_SECONDS ?? "3600"),
     registryRoot: path.resolve(env.PLATFORM_REGISTRY_ROOT ?? path.join(serviceDir, "../..")),
     allowedOrigins: (env.PLATFORM_ALLOWED_ORIGINS ?? "http://127.0.0.1:5173,http://localhost:5173")

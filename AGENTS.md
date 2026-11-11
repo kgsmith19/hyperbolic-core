@@ -32,6 +32,10 @@ any found is dead config to delete, never to move to the root (#503 removed the 
 By owner decision (2026-10-29) the platform is local-only: every sub-app, LifeOS included, is an
 equal sub-app that runs on localhost or in Docker with SQLite. Supabase, Tailscale and Hetzner are
 superseded, and no workflow here deploys anywhere (#503). Local operations land with #504.
+Owner decision 2026-11-11 (#562) adds one cloud host on top of that local model: the same Compose
+stack runs on `hyperbolic-core-prod` (Hetzner) behind Cloudflare Tunnel + Access at
+`https://core.kylegsmith.com`. Runbook: `docs/ops/cloud-deploy.md`; Cloudflare automation:
+`docs/ops/cloudflare-agent-access.md`; names: `docs/ops/naming.md`.
 
 ## ⚠️ Two legacy copies of the old Supabase publishable key remain
 

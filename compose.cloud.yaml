@@ -1,0 +1,67 @@
+# Cloud overlay for hyperbolic-core-prod (#562). Used as
+#   docker compose -f compose.yaml -f compose.cloud.yaml ...
+# (ops/cloud/deploy.sh sets COMPOSE_FILE). It adds `edge` (the production
+# Shell + same-origin proxy) and removes every host port except edge's
+# loopback 8080, which only the host's cloudflared reaches. Nothing in this
+# stack listens on a public interface.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  platform-api:
+    ports: !reset []
+    logging: *logging
+    labels: { hyperbolic-core.app: platform-api }
+    environment:
+      # Single sign-on (#562): the owner's Cloudflare Access login signs them
+      # into the platform (grant_type=cloudflare_access, src/cf-access.ts).
+      # The Access app's AUD tag (PLATFORM_CF_ACCESS_AUD) is written into the
+      # host's platform-api env by ops/cloud/remote.sh from Infisical.
+      PLATFORM_CF_ACCESS_TEAM_DOMAIN: spring-smoke-421e.cloudflareaccess.com
+
+  network-checker:
+    ports: !reset []
+    logging: *logging
+    labels: { hyperbolic-core.app: network-checker }
+
+  lifeos:
+    ports: !reset []
+    logging: *logging
+    labels: { hyperbolic-core.app: lifeos }
+    environment:
+      # Same-origin mount behind edge: https://core.kylegsmith.com/life/api
+      LIFEOS_ROOT_PATH: /life/api
+
+  broker:
+    ports: !reset []
+    logging: *logging
+    labels: { hyperbolic-core.app: broker }
+
+  brain:
+    ports: !reset []
+    logging: *logging
+    labels: { hyperbolic-core.app: brain }
+    volumes:
+      # ADR-05: the Brain's own Anthropic key, rendered at deploy time to a
+      # file only this container mounts (services/brain/AGENTS.md).
+      - ${HYP_ENV:-/srv/hyperbolic-core/env}/brain-anthropic-api-key:/run/secrets/brain/anthropic-api-key:ro
+
+  edge:
+    build:
+      context: .
+      dockerfile: apps/shell/Dockerfile
+      args:
+        PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://core.kylegsmith.com}
+        VITE_PLATFORM_ANON_KEY: ${PLATFORM_ANON_KEY:-local}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      platform-api: { condition: service_healthy }
+      lifeos: { condition: service_healthy }
+      brain: { condition: service_healthy }
+    restart: unless-stopped
+    logging: *logging
+    labels: { hyperbolic-core.app: shell }

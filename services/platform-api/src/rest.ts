@@ -1,5 +1,7 @@
 // The PostgREST subset the clients use (#508): GET/POST/PATCH/DELETE on
-// /rest/v1/<table> with Accept-Profile/Content-Profile, `select` column lists,
+// /rest/v1/<table> with Accept-Profile/Content-Profile, `select` column lists
+// plus one level of embedding for the relations a table declares (`rel(cols)`,
+// `alias:rel(cols)`, with `rel.order` / `rel.limit`; #562),
 // eq/neq/gt/gte/lt/lte/like/ilike/in/is filters, `order`, `limit`, `offset`
 // and Prefer return=representation|minimal. Anything outside the subset is a
 // 400, never a silently different query.
@@ -91,13 +93,99 @@ function column(table: Table, name: string): string {
 
 const quote = (name: string) => `"${name}"`;
 
-export function selectedColumns(table: Table, select: string | null): string[] {
-  if (select === null || select.trim() === "*") return Object.keys(table.columns);
-  return select.split(",").map((part) => {
-    const name = part.trim();
-    if (name.includes("(") || name.includes(":")) throw new ApiError(400, "PGRST100", "embedding and aliases are not supported by the local platform");
-    return column(table, name);
-  });
+export interface Embed {
+  /** The key in each returned row. */
+  key: string;
+  /** The declared relation name (Table.embeds key) the select used. */
+  rel: string;
+  columns: string[];
+}
+
+/** Top-level comma split that leaves `rel(a,b)` intact. */
+function splitSelect(select: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < select.length; i++) {
+    const ch = select[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      parts.push(select.slice(start, i));
+      start = i + 1;
+    }
+    if (depth < 0) throw new ApiError(400, "PGRST100", "unbalanced parentheses in select");
+  }
+  if (depth !== 0) throw new ApiError(400, "PGRST100", "unbalanced parentheses in select");
+  parts.push(select.slice(start));
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+export function parseSelect(table: Table, select: string | null, profile: string | null): { columns: string[]; embeds: Embed[] } {
+  if (select === null || select.trim() === "*") return { columns: Object.keys(table.columns), embeds: [] };
+  const columns: string[] = [];
+  const embeds: Embed[] = [];
+  for (const part of splitSelect(select)) {
+    const match = /^(?:([a-z_][a-z0-9_]*):)?([a-z_][a-z0-9_]*)\((.*)\)$/.exec(part);
+    if (!match) {
+      if (part.includes(":") || part.includes("(")) throw new ApiError(400, "PGRST100", `unsupported select item '${part}'`);
+      columns.push(column(table, part));
+      continue;
+    }
+    const [, alias, rel = "", inner = ""] = match;
+    const relation = table.embeds?.[rel];
+    if (!relation) throw new ApiError(400, "PGRST200", `Could not find a relationship for '${rel}' in the schema cache`);
+    const child = resolveTable(profile, relation.table);
+    embeds.push({ key: alias ?? rel, rel, columns: parseSelect(child, inner || "*", profile).columns });
+  }
+  return { columns, embeds };
+}
+
+export function selectedColumns(table: Table, select: string | null, profile: string | null = null): string[] {
+  const parsed = parseSelect(table, select, profile);
+  if (parsed.embeds.length) throw new ApiError(400, "PGRST100", "embedding is only supported on reads");
+  return parsed.columns;
+}
+
+/** Fills each row's embeds (rows carry the raw local-key columns too). */
+function attachEmbeds(
+  db: DatabaseSync,
+  principal: Principal | null,
+  profile: string | null,
+  table: Table,
+  embeds: Embed[],
+  params: URLSearchParams,
+  raws: Record<string, unknown>[],
+  out: Record<string, unknown>[],
+): void {
+  for (const embed of embeds) {
+    const relation = table.embeds![embed.rel]!;
+    const child = resolveTable(profile, relation.table);
+    authorize(child, "select", principal);
+    const keys = [...new Set(raws.map((row) => row[relation.local]).filter((value) => value !== null && value !== undefined))] as SQLInputValue[];
+    const wanted = [...new Set([...embed.columns, relation.foreign])];
+    const children = keys.length
+      ? (db
+          .prepare(
+            `select ${wanted.map(quote).join(", ")} from ${child.sqlite} where ${quote(relation.foreign)} in (${keys.map(() => "?").join(", ")})` +
+              orderClause(child, params.get(`${embed.key}.order`)),
+          )
+          .all(...keys) as Record<string, unknown>[])
+      : [];
+    const rawLimit = params.get(`${embed.key}.limit`);
+    const limit = rawLimit === null ? null : Number(rawLimit);
+    if (limit !== null && (!Number.isInteger(limit) || limit < 0)) throw new ApiError(400, "PGRST100", `${embed.key}.limit must be a non-negative integer`);
+    const groups = new Map<unknown, Record<string, unknown>[]>();
+    for (const row of children) {
+      const group = groups.get(row[relation.foreign]) ?? [];
+      group.push(fromRow(child, row, embed.columns));
+      groups.set(row[relation.foreign], group);
+    }
+    raws.forEach((raw, i) => {
+      const group = groups.get(raw[relation.local]) ?? [];
+      out[i]![embed.key] = relation.one ? (group[0] ?? null) : limit === null ? group : group.slice(0, limit);
+    });
+  }
 }
 
 export function whereClause(table: Table, params: URLSearchParams): { sql: string; args: SQLInputValue[] } {
@@ -105,6 +193,7 @@ export function whereClause(table: Table, params: URLSearchParams): { sql: strin
   const args: SQLInputValue[] = [];
   for (const [key, raw] of params) {
     if (RESERVED.has(key)) continue;
+    if (/^[a-z_][a-z0-9_]*\.(order|limit)$/.test(key)) continue; // embed modifiers (attachEmbeds)
     const name = column(table, key);
     const type = table.columns[name] as ColumnType;
     const dot = raw.indexOf(".");
@@ -187,17 +276,21 @@ export interface RestRequest {
 export function handleRest(db: DatabaseSync, principal: Principal | null, ownerId: string, req: RestRequest): { status: number; body: unknown } {
   const table = resolveTable(req.profile, req.table);
   const returnRows = /return=representation/.test(req.prefer);
-  const columns = selectedColumns(table, req.params.get("select"));
-  const project = (rows: Record<string, unknown>[]) => rows.map((row) => fromRow(table, row, columns));
-
   if (req.method === "GET" || req.method === "HEAD") {
     authorize(table, "select", principal);
+    const { columns, embeds } = parseSelect(table, req.params.get("select"), req.profile);
+    const fetched = [...new Set([...columns, ...embeds.map((embed) => table.embeds![embed.rel]!.local)])];
     const where = whereClause(table, req.params);
     const rows = db
-      .prepare(`select ${columns.map(quote).join(", ")} from ${table.sqlite}${where.sql}${orderClause(table, req.params.get("order"))}${pageClause(req.params)}`)
+      .prepare(`select ${fetched.map(quote).join(", ")} from ${table.sqlite}${where.sql}${orderClause(table, req.params.get("order"))}${pageClause(req.params)}`)
       .all(...where.args) as Record<string, unknown>[];
-    return { status: 200, body: project(rows) };
+    const out = rows.map((row) => fromRow(table, row, columns));
+    attachEmbeds(db, principal, req.profile, table, embeds, req.params, rows, out);
+    return { status: 200, body: out };
   }
+
+  const columns = selectedColumns(table, req.params.get("select"), req.profile);
+  const project = (rows: Record<string, unknown>[]) => rows.map((row) => fromRow(table, row, columns));
 
   if (req.method === "POST") {
     const role = authorize(table, "insert", principal);

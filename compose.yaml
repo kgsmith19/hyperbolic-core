@@ -37,6 +37,9 @@ services:
       # Written locally by `make init` (node src/cli.ts init). Never committed.
       - path: services/platform-api/.env
         required: false
+        # raw: values such as the scrypt hash contain `$`, which Compose would
+        # otherwise interpolate (and mangle) (#562).
+        format: raw
     ports:
       - "127.0.0.1:${HOST_PLATFORM_API_PORT:-8400}:8400"
     networks:
@@ -80,6 +83,9 @@ services:
     env_file:
       - path: apps/lifeos/backend/.env
         required: false
+        # raw: values such as the scrypt hash contain `$`, which Compose would
+        # otherwise interpolate (and mangle) (#562).
+        format: raw
     ports:
       - "127.0.0.1:${HOST_LIFEOS_PORT:-8000}:8000"
     volumes:
@@ -121,6 +127,9 @@ services:
     env_file:
       - path: services/brain/.env
         required: false
+        # raw: values such as the scrypt hash contain `$`, which Compose would
+        # otherwise interpolate (and mangle) (#562).
+        format: raw
     ports:
       - "127.0.0.1:${HOST_BRAIN_PORT:-8100}:8100"
     volumes:

@@ -1,0 +1,8 @@
+[Unit]
+Description=Hyperbolic Core monitor
+After=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+ExecStart=/srv/hyperbolic-core/current/ops/cloud/host/monitor.sh

@@ -1,0 +1,68 @@
+# hyperbolic-core edge (#562). Reached only by cloudflared on the host
+# (127.0.0.1:8080), after Cloudflare Access and cloudflared's own Access JWT
+# check. Routes the one origin to the internal services; anything not listed
+# here (broker, network-checker, databases, admin) is unreachable.
+{
+	admin off
+	auto_https off
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+:8080 {
+	encode zstd gzip
+	log {
+		output stdout
+		format json
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	respond /edge/healthz "ok" 200
+
+	# platform-api: auth (/auth/v1), data (/rest/v1), health. Prefix stripped.
+	handle_path /platform/* {
+		reverse_proxy platform-api:8400
+	}
+
+	# LifeOS: strips /life/api itself (LIFEOS_ROOT_PATH).
+	handle /life/api/* {
+		reverse_proxy lifeos:8000
+	}
+
+	# Brain HTTP + SSE (/api/brain/*). flush_interval -1 streams events.
+	handle /api/brain/* {
+		reverse_proxy brain:8100 {
+			flush_interval -1
+		}
+	}
+
+	# LifeOS UI bundle (vite base /life/), its own SPA fallback.
+	redir /life /life/ 308
+	# A `handle` (not handle_path) so Caddy orders it by path length after
+	# the more specific /life/api/* block above.
+	handle /life/* {
+		uri strip_prefix /life
+		root * /srv/life
+		try_files {path} /index.html
+		header /index.html Cache-Control "no-store"
+		file_server
+	}
+
+	# The production Shell: hashed assets cached, index.html never.
+	handle {
+		root * /srv/shell
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		try_files {path} /index.html
+		header /index.html Cache-Control "no-store"
+		file_server
+	}
+}

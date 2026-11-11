@@ -6,6 +6,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { DatabaseSync } from "node:sqlite";
 
 import type { Auth } from "./auth.ts";
+import { AccessVerifier } from "./cf-access.ts";
 import type { PlatformConfig } from "./config.ts";
 import type { Signer } from "./jwt.ts";
 import { ApiError, handleRest } from "./rest.ts";
@@ -43,7 +44,15 @@ function bearer(req: IncomingMessage): string | undefined {
   return header?.startsWith("Bearer ") ? header.slice(7).trim() : undefined;
 }
 
-export function createPlatformServer(db: DatabaseSync, config: PlatformConfig, auth: Auth, signer: Signer): Server {
+export function createPlatformServer(
+  db: DatabaseSync,
+  config: PlatformConfig,
+  auth: Auth,
+  signer: Signer,
+  access: AccessVerifier | null = config.cfAccessTeamDomain && config.cfAccessAudience
+    ? new AccessVerifier({ teamDomain: config.cfAccessTeamDomain, audience: config.cfAccessAudience })
+    : null,
+): Server {
   return createServer(async (req, res) => {
     const origin = req.headers.origin;
     const cors: Record<string, string> =
@@ -69,7 +78,13 @@ export function createPlatformServer(db: DatabaseSync, config: PlatformConfig, a
         const body = ((await readJson(req)) ?? {}) as Record<string, unknown>;
         const grant = url.searchParams.get("grant_type");
         const session =
-          grant === "password" ? auth.passwordGrant(body.email, body.password) : grant === "refresh_token" ? auth.refreshGrant(body.refresh_token) : undefined;
+          grant === "password"
+            ? auth.passwordGrant(body.email, body.password)
+            : grant === "refresh_token"
+              ? auth.refreshGrant(body.refresh_token)
+              : grant === "cloudflare_access" && access
+                ? auth.accessGrant(await access.verify(req.headers["cf-access-jwt-assertion"]))
+                : undefined;
         if (session === undefined) return send(res, 400, { error: "unsupported_grant_type", error_description: `grant_type ${grant} is not supported` }, cors);
         if (session === null) return send(res, 400, { error: "invalid_grant", error_description: "Invalid login credentials" }, cors);
         return send(res, 200, session, cors);

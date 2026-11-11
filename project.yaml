@@ -153,25 +153,25 @@ vendors:
   # Full detail (auth, secret paths, cost, rotation) lives in
   # docs/ops/vendors.md; this block is the machine-declared summary.
   - name: Hetzner
-    purpose: "RETIRED (owner decision 2026-10-29, local-only; cloud workflows removed by #503). The VPS keeps whatever it last ran; nothing here deploys to it."
-    cost_eur_month: 0
-    auth: none (retired; no SSH or API path remains in this repo)
-    docs: "docs/ops/vendors.md#hetzner"
+    purpose: "ACTIVE since 2026-11-11 (#562): CX33 hyperbolic-core-prod runs the stack behind Cloudflare (ops/cloud/); Storage Box hyperbolic-backups holds restic backups. lifeos-prod is legacy, pending #566."
+    cost_eur_month: 11
+    auth: API token in Infisical (/providers/hetzner); no inbound ports on the host
+    docs: "docs/ops/cloud-deploy.md"
   - name: Tailscale
-    purpose: "RETIRED (owner decision 2026-10-29, local-only; removed with the cloud workflows by #503). No deploy transport or CI identity uses it now."
+    purpose: "RETIRED for good (owner decision 2026-11-11, #562): Cloudflare Tunnel + Access is the only access path for browsers, operators and CI. Nothing in this repo uses Tailscale."
     cost_eur_month: 0
     auth: none (retired)
     docs: "docs/ops/vendors.md#tailscale"
   - name: Infisical
-    purpose: "sole secret store for the former cloud pipelines. Not needed for local work; secret revocation for retired vendors is not yet done."
+    purpose: "sole secret store: cloud deploy (Core Deploy via GitHub OIDC), Cloudflare automation, runtime keys. Not needed for local work."
     cost_eur_month: 0
     auth: OIDC (GitHub Actions identity token exchange) — no static API key
     docs: "docs/ops/vendors.md#infisical"
   - name: Cloudflare
-    purpose: "RETIRED (planned edge never built; superseded 2026-10-29, local-only; cloud plumbing removed by #503)."
+    purpose: "ACTIVE since 2026-11-11 (#562): DNS for kylegsmith.com, Tunnel hyperbolic-core-prod, Access (owner-only login and single sign-on into the platform). Managed as code in infra/cloudflare/."
     cost_eur_month: 0
-    auth: none (retired)
-    docs: "docs/ops/vendors.md#cloudflare-planned--168170"
+    auth: scoped API token in Infisical (/CLOUDFLARE_API_TOKEN); tunnel token separately
+    docs: "docs/ops/cloudflare-agent-access.md"
   - name: Supabase
     purpose: "SUPERSEDED (owner decision 2026-10-29, local-only; removed with the cloud workflows by #503). Each sub-app runs on SQLite on localhost; the hosted registry rows are retired in Phase 4 (D5, #450), which still needs owner-approved production steps."
     cost_eur_month: 0
