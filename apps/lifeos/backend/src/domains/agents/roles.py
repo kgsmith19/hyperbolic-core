@@ -52,6 +52,8 @@ PERMISSION_CLASS: dict[str, ActionClass] = {
     "update_bills_sheet": ActionClass.REVERSIBLE_MUTATION,
     "flag_declined_autopay": ActionClass.REVERSIBLE_MUTATION,
     "draft_dispute_packet": ActionClass.DRAFT,
+    # LifeOS extension (owner decision, Q3): a launch is its own draft, not a dispute packet.
+    "launch_two_minute_action": ActionClass.DRAFT,
     "check_calendar_conflicts": ActionClass.OBSERVATION,
     "generate_packing_checklist": ActionClass.DRAFT,
     "read_emails": ActionClass.OBSERVATION,
@@ -96,6 +98,13 @@ REFERENCE_GRANTS: dict[Role, frozenset[str]] = {
 }
 
 
+# Grants added on top of the reference, each one a recorded owner decision.
+# Kept apart from REFERENCE_GRANTS so the deviation from the 2050 reference stays visible.
+LIFEOS_EXTENSION_GRANTS: dict[Role, frozenset[str]] = {
+    Role.FINANCIAL_OPERATIONS: frozenset({"launch_two_minute_action"}),
+}
+
+
 @dataclass(frozen=True, slots=True)
 class Decision:
     allowed: bool
@@ -131,10 +140,12 @@ def build_registry(grants: Mapping[str, Iterable[str]]) -> RoleRegistry:
 
 
 def default_registry() -> RoleRegistry:
-    """The reference's nine roles, validated through the same path as any registry."""
-    return build_registry(
-        {role.value: permissions for role, permissions in REFERENCE_GRANTS.items()}
-    )
+    """The reference's nine roles plus the recorded LifeOS extensions, validated as one registry."""
+    merged = {
+        role: frozenset(perms) | LIFEOS_EXTENSION_GRANTS.get(role, frozenset())
+        for role, perms in REFERENCE_GRANTS.items()
+    }
+    return build_registry({role.value: perms for role, perms in merged.items()})
 
 
 def revoke(registry: RoleRegistry, role: Role, permission: str) -> RoleRegistry:

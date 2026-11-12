@@ -105,7 +105,7 @@ def test_a_launch_is_recorded_under_the_financial_role_and_draft_permission() ->
     results = launch(CTX, default_registry(), _rows(_row(bill, date(2026, 11, 5))), AS_OF)
 
     assert ROLE is Role.FINANCIAL_OPERATIONS
-    assert PERMISSION == "draft_dispute_packet"
+    assert PERMISSION == "launch_two_minute_action"
     assert results[0].receipt.role == Role.FINANCIAL_OPERATIONS.value
     assert results[0].receipt.permission == PERMISSION
 
