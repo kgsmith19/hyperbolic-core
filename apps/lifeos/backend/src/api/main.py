@@ -25,12 +25,15 @@ from api.chat import router as chat_router
 from api.dtos import (
     ApproveIn,
     CaptureIn,
+    CompleteIn,
     DecideIn,
     DefineTypeIn,
     ForgetIn,
     ProgressIn,
     ProposeActionIn,
     RelateIn,
+    RescheduleIn,
+    SnoozeIn,
 )
 from domains.agents.proposals import (
     approve_agent_proposal,
@@ -71,6 +74,7 @@ from domains.episodes.capture import guard_capture as guard_episode_capture
 from domains.episodes.types import define_episode_types
 from domains.health_connect.ingest import IngestResult, process_payload
 from domains.intentions.focus import guard_capture as guard_intention_capture
+from domains.intentions.needs_me import NeedsMeItem, complete, needs_me, reschedule, snooze
 from domains.intentions.planner import PlannedIntention, mark_done, plan_today
 from domains.intentions.today import (
     ProgressChange,
@@ -649,6 +653,40 @@ def post_intention_progress(intention_id: UUID, body: ProgressIn, context: Ctx) 
     """#531: record READY/STARTED/BLOCKED/WAITING/DONE as one appended event."""
     try:
         return set_progress(context, intention_id, body.progress, actor=body.actor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/needs-me")
+def get_needs_me(context: Ctx) -> list[NeedsMeItem]:
+    """#532 Needs Me: open items in order (soonest deadline, then priority), with
+    snoozed items hidden until their date. Read-only; never invents a next action."""
+    return needs_me(context)
+
+
+@app.post("/intentions/{intention_id}/snooze")
+def post_intention_snooze(intention_id: UUID, body: SnoozeIn, context: Ctx) -> NeedsMeItem:
+    """#532: hide one item until a date after today. Repeating it writes nothing."""
+    try:
+        return snooze(context, intention_id, body.until, actor=body.actor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/intentions/{intention_id}/reschedule")
+def post_intention_reschedule(intention_id: UUID, body: RescheduleIn, context: Ctx) -> NeedsMeItem:
+    """#532: set a deadline; the source is required, so a date is never unsourced."""
+    try:
+        return reschedule(context, intention_id, body.deadline, body.source, actor=body.actor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/intentions/{intention_id}/complete")
+def post_intention_complete(intention_id: UUID, body: CompleteIn, context: Ctx) -> NeedsMeItem:
+    """#532: mark done only with evidence. A status change alone never completes."""
+    try:
+        return complete(context, intention_id, body.evidence, actor=body.actor)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

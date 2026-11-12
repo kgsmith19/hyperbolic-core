@@ -1,6 +1,6 @@
 """Request DTOs. Responses reuse kernel models directly — the API adds nothing."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -46,6 +46,28 @@ class ApproveIn(BaseModel):
 
 
 class DecideIn(BaseModel):
+    actor: str = DEFAULT_ACTOR
+
+
+class SnoozeIn(BaseModel):
+    """#532 Needs Me: hide an item until this date (must be after today)."""
+
+    until: date
+    actor: str = DEFAULT_ACTOR
+
+
+class RescheduleIn(BaseModel):
+    """#532 Needs Me: set the deadline and name where it came from."""
+
+    deadline: date
+    source: str
+    actor: str = DEFAULT_ACTOR
+
+
+class CompleteIn(BaseModel):
+    """#532 Needs Me: completion needs evidence (your confirmation or a named source)."""
+
+    evidence: str
     actor: str = DEFAULT_ACTOR
 
 
