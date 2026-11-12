@@ -42,6 +42,10 @@ on:
         type: choice
         options: [deploy, rollback]
         default: deploy
+      migrate:
+        description: "Also run the Needs Me intention schema migration after a deploy (idempotent; needs ops-edge-production approval)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -116,6 +120,15 @@ jobs:
       - name: Deploy · Ship, start, smoke (auto-restores on failure)
         if: steps.decide.outputs.deploy == 'true' && (github.event_name != 'workflow_dispatch' || inputs.action == 'deploy')
         run: ops/cloud/remote.sh deploy "$GITHUB_SHA"
+
+      # One-time, idempotent LifeOS schema migration (#532). Manual runs only,
+      # off by default. It runs after the deploy above, inside the live lifeos
+      # container from the release just shipped, and sits behind the
+      # ops-edge-production reviewers like every other step in this job.
+      - name: Migrate · LifeOS intention schema (manual, opt-in)
+        if: github.event_name == 'workflow_dispatch' && inputs.migrate && inputs.action == 'deploy'
+        run: |
+          ops/cloud/remote.sh ssh "cd /srv/hyperbolic-core/current && COMPOSE_PROJECT_NAME=hyperbolic-core HYP_VAR=/srv/hyperbolic-core/var docker compose exec -T -w /app/apps/lifeos/backend lifeos python -m scripts.migrate_intention_needs_me"
 
       - name: Rollback · Make the previous release live again
         if: github.event_name == 'workflow_dispatch' && inputs.action == 'rollback'
