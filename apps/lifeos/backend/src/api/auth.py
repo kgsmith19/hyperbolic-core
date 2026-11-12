@@ -129,7 +129,11 @@ def _authenticate_agent(request: Request, token: str) -> AccessContext:
         unverified = jwt.decode(token, options={"verify_signature": False})
     except AgentTokenError as exc:
         raise AuthError(f"invalid agent token: {exc}") from exc
-    request.state.claims = {"sub": unverified.get("sub")}
+    claims: dict[str, Any] = {"sub": unverified.get("sub")}
+    if "roles" in unverified:
+        # Already shape-checked by verify(); only an `agents:request` token has one.
+        claims["roles"] = tuple(unverified["roles"])
+    request.state.claims = claims
     return context
 
 
@@ -231,3 +235,13 @@ def _context_from(claims: dict[str, Any]) -> AccessContext:
             "wildcard scopes are not grantable; the owner token carries no scopes claim"
         )
     return AccessContext.of(*scopes)
+
+
+def request_roles(request: Request) -> tuple[str, ...] | None:
+    """The role allowlist verified for this request (#596), or None when the
+    caller carries none (an owner session, or auth disabled). An agent token
+    with `agents:request` always carries one, enforced at mint and verify."""
+    claims = getattr(request.state, "claims", None)
+    if isinstance(claims, dict) and "roles" in claims:
+        return tuple(claims["roles"])
+    return None

@@ -8,7 +8,14 @@ environment or the repo .env. Prints the token, or with `--install` writes
 it into the repo .env as LIFEOS_AGENT_TOKEN where the server's env fallback
 finds it — the path the guards `lifeos-mcp-setup.ps1` one-click uses, so no
 token material ever needs copying. Refuses any scope that is not
-`<domain>:read`; re-run with the new domain's scope when one lands.
+`<domain>:read` or one of the exact exceptions; re-run with the new domain's
+scope when one lands.
+
+A controller token for the agent request route (#596) takes `--scope
+agents:request` plus one `--role` per allowed role, e.g. `--agent claude-code
+--scope agents:request --role financial_operations --role reliability_engineer`.
+Minting a controller token is an owner-approved step; this script never runs on
+its own.
 """
 
 import argparse
@@ -41,7 +48,14 @@ def main() -> int:
         action="append",
         required=True,
         dest="scopes",
-        help="a '<domain>:read' scope; repeat per domain",
+        help="a '<domain>:read' scope or an exact exception; repeat per scope",
+    )
+    parser.add_argument(
+        "--role",
+        action="append",
+        default=[],
+        dest="roles",
+        help="a role this agents:request token may ask as; repeat per role",
     )
     parser.add_argument("--agent", default="claude-desktop", help="token subject suffix")
     parser.add_argument("--days", type=int, default=30, help="days until expiry")
@@ -60,7 +74,9 @@ def main() -> int:
         )
         return 2
     try:
-        token = mint(decode_key(key), args.scopes, agent=args.agent, days=args.days)
+        token = mint(
+            decode_key(key), args.scopes, agent=args.agent, days=args.days, roles=args.roles
+        )
     except AgentTokenError as exc:
         print(str(exc), file=sys.stderr)
         return 2
