@@ -76,6 +76,14 @@ class ProgressIn(BaseModel):
 
     progress: str
     actor: str = DEFAULT_ACTOR
+    evidence: str | None = None
+
+
+class DoneIn(BaseModel):
+    """#Q5: mark an intention done. Moving into DONE needs completion evidence."""
+
+    actor: str = DEFAULT_ACTOR
+    evidence: str | None = None
 
 
 class ProposeActionIn(BaseModel):

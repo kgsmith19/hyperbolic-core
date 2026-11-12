@@ -39,6 +39,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from domains.intentions.evidence import clean_evidence, require_evidence
 from domains.intentions.types import STATUS_CANDIDATE, TYPE_NAME
 from kernel import services
 from kernel.access import AccessContext
@@ -92,7 +93,10 @@ def plan_today(ctx: AccessContext) -> list[PlannedIntention]:
 
 
 def mark_done(
-    ctx: AccessContext, intention_id: UUID, actor: str = DEFAULT_ACTOR
+    ctx: AccessContext,
+    intention_id: UUID,
+    actor: str = DEFAULT_ACTOR,
+    evidence: str | None = None,
 ) -> PlannedIntention:
     """Append one entity.updated event recording done=True for this
     intention. Every existing field survives unchanged (capture()'s own
@@ -101,5 +105,9 @@ def mark_done(
     if TYPE_NAME not in view.types:
         raise ValueError(f"entity {intention_id} is not an {TYPE_NAME}")
     attributes: dict[str, Any] = {**view.entity.attributes, "done": True}
+    proof = clean_evidence(evidence)
+    if proof is not None:
+        attributes["completion_evidence"] = proof
+    require_evidence(view.entity.attributes, attributes)
     result = services.capture(ctx, TYPE_NAME, attributes, actor=actor)
     return _view(services.get_entity(ctx, result.entity_id).entity)
