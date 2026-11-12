@@ -1,9 +1,10 @@
 name: Verify Queue Guard
 description: >-
   Queue v2 guard (#445; kgsmith19/agent-engineering-standard#287): every
-  Issue this pull request closes must belong to the ACTIVE item of the
-  owner's execution queue (agent-engineering-standard#277), unless the
-  owner applied owner:queue-exempt. The rule is std's
+  Issue this pull request closes must be on the owner's execution queue
+  (agent-engineering-standard#277) in any live status (std #331), unless
+  the owner applied owner:queue-exempt. Fix a refusal with
+  `python3 tools/work_queue.py claim OWNER/REPO#N` in std. The rule is std's
   `tools/work_queue.py guard --pr-event`; this action fetches std's three
   queue modules from std main (the queue's own home) and runs it isolated.
   Read-only, and fails closed: an unreachable std or queue fails the lane.
@@ -16,7 +17,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Queue guard · Every closing Issue is on the active queue item
+    - name: Queue guard · Every closing Issue is on the queue
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
@@ -27,7 +28,9 @@ runs:
         # code; pinning would let this repo enforce stale queue rules.
         base="${STANDARD_BASE_URL:-https://raw.githubusercontent.com/kgsmith19/agent-engineering-standard/main/tools}"
         dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/queue-guard.XXXXXX")"
-        for module in queue_core.py queue_store.py work_queue.py; do
+        # conventions.py (std #333) lets the guard derive the Issue from an
+        # issue/<n>- branch or a "(#N)" title when the body has no Closes line.
+        for module in queue_core.py queue_store.py work_queue.py conventions.py; do
           curl --fail --silent --show-error --max-time 30 -o "$dir/$module" "$base/$module"
         done
         python3 -I "$dir/work_queue.py" guard --pr-event "$GITHUB_EVENT_PATH"

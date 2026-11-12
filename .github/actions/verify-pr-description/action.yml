@@ -1,7 +1,8 @@
 name: Verify PR Description
 description: >-
   Confirms a pull request's body includes every required
-  PULL_REQUEST_TEMPLATE.md section and a closing-issue reference. A no-op
+  PULL_REQUEST_TEMPLATE.md section and links an Issue (a Closes line, or an
+  Issue derivable from an issue/<n>- branch or a "(#N)" title; std #333). A no-op
   when there is no pull request context. Shared by pr-verify.yml's
   "Repository Standards" job and template-lint.yml's own
   merge_group/push/workflow_dispatch triggers, so the actual check has
@@ -30,26 +31,39 @@ runs:
         PR_NUMBER: ${{ inputs.pr_number }}
       run: |
         set -euo pipefail
-        PR_BODY="$(curl --fail --silent \
+        dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/pr-description.XXXXXX")"
+        curl --fail --silent \
           -H "Authorization: Bearer ${GH_TOKEN}" \
           -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" \
-          | python3 -c 'import json,sys; print(json.load(sys.stdin).get("body") or "")')"
+          "https://api.github.com/repos/${REPO}/pulls/${PR_NUMBER}" > "$dir/pr.json"
+        python3 -I -c 'import json,sys; pr=json.load(open(sys.argv[1])); open(sys.argv[2],"w").write(pr.get("body") or ""); open(sys.argv[3],"w").write(pr["head"]["ref"]); open(sys.argv[4],"w").write(pr.get("title") or "")' \
+          "$dir/pr.json" "$dir/body.md" "$dir/head_ref" "$dir/title"
+        status=0
         missing=()
         for heading in "## 📋 Summary" "## 🔗 Related Issue" "## 🔨 Changes" "## 🧪 Verification" "## ✅ Scope Check"; do
-          if ! grep -qF -- "$heading" <<< "$PR_BODY"; then
+          if ! grep -qF -- "$heading" "$dir/body.md"; then
             missing+=("$heading")
           fi
         done
-        if ! grep -qiE '(closes|fixes|resolves)[[:space:]]+#[0-9]+' <<< "$PR_BODY"; then
-          missing+=("a Closes/Fixes/Resolves #<issue-number> reference")
-        fi
         if [ "${#missing[@]}" -gt 0 ]; then
           echo "PR body is missing required template sections:" >&2
           printf '  - %s\n' "${missing[@]}" >&2
-          exit 1
+          echo "Add them without touching existing text: python3 tools/conventions.py repair-pr --body-file BODY --template .github/PULL_REQUEST_TEMPLATE.md (agent-engineering-standard)" >&2
+          status=1
         fi
-        echo "PR body includes every required template section."
+        # The linked Issue (std #333): the body's 'Closes #N' line, else an
+        # issue/<n>- branch, else a title ending "(#N)". One rule, from std main
+        # (unpinned, like the queue guard). Unreachable std fails closed.
+        base="${STANDARD_BASE_URL:-https://raw.githubusercontent.com/kgsmith19/agent-engineering-standard/main/tools}"
+        curl --fail --silent --show-error --max-time 30 -o "$dir/conventions.py" "$base/conventions.py"
+        if ! python3 -I "$dir/conventions.py" check-pr --body-file "$dir/body.md" \
+            --head-ref "$(cat "$dir/head_ref")" --title "$(cat "$dir/title")"; then
+          status=1
+        fi
+        if [ "$status" -eq 0 ]; then
+          echo "PR body includes every required template section."
+        fi
+        exit "$status"
 
     - name: Lint · Not applicable outside pull_request events
       if: inputs.pr_number == ''
