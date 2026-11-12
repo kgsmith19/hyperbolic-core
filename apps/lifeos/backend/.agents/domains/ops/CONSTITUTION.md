@@ -53,5 +53,17 @@ Owns: `src/domains/ops/**`, `tests/ops/**`.
   only when every listed automation qualifies (never for an empty list).
   Observations carry `sha256:` digests, never output text. It disables
   nothing, reads no automation and stores nothing.
+- The notification delivery policy (`domains.ops.notify_policy`, issue #593,
+  part of #575) is pure: no transport, push, device bridge, network,
+  scheduling or persistence.
+  - A category not opted in is dropped. Revocation drops everything, urgent
+    included.
+  - Quiet hours (wrapping midnight) and protected family anchors hold
+    non-urgent notices; urgent notices pass.
+  - A sent notice waits for acknowledgement, retries after the timeout, and is
+    dropped once the attempt budget is spent. Acknowledged, failed or dropped
+    notices are never sent again.
+  - Only a device acknowledgement counts as delivered; invalid transitions are
+    refused. Notices carry a dedupe key and a category, never message text.
 - Behavior changes land with tests in `tests/ops/` (integration against the
   kernel, unit for pure assembly logic).
