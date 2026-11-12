@@ -22,7 +22,8 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflow = readFileSync(path.join(root, ".github/workflows/pr-verify.yml"), "utf8").replace(/\r\n/g, "\n");
 const actionPath = path.join(root, ".github/actions/verify-queue-guard/action.yml");
-const MODULES = ["queue_core.py", "queue_store.py", "work_queue.py"];
+// conventions.py (std #333) lets the guard derive the Issue from the branch or title.
+const MODULES = ["queue_core.py", "queue_store.py", "work_queue.py", "conventions.py"];
 
 function job(name) {
   const start = workflow.indexOf(`\n  ${name}:\n`);
