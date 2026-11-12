@@ -44,5 +44,14 @@ Owns: `src/domains/ops/**`, `tests/ops/**`.
   only — never a cause, reason or narrative field. It writes nothing, no LLM
   is involved, and it runs under read scopes only (`wellbeing:read`,
   `health_connect:read`, `intentions:read`).
+- The dual-run parity scorecard (`domains.ops.parity`, issue #594, part of
+  #576) is a pure function. Per automation, the most recent N consecutive
+  days must each have exactly one legacy and one local observation with equal
+  digests. A gap or too few days is insufficient, and a differing digest, a
+  missing side or a duplicate side is a dated mismatch. An eligible automation
+  also needs an owner sign-off dated within the streak, and cutover is allowed
+  only when every listed automation qualifies (never for an empty list).
+  Observations carry `sha256:` digests, never output text. It disables
+  nothing, reads no automation and stores nothing.
 - Behavior changes land with tests in `tests/ops/` (integration against the
   kernel, unit for pure assembly logic).
