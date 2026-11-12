@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from kernel.events import DEFAULT_ACTOR
 
@@ -103,3 +103,14 @@ class ForgetIn(BaseModel):
 
     fields: list[str] | None = None
     actor: str = DEFAULT_ACTOR
+
+
+class AgentRequestIn(BaseModel):
+    """#596: ask the role gate once. There is deliberately no `approved` and no
+    `requested_by`: any extra field, those two included, is refused (422)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str
+    permission: str
+    idempotency_key: str

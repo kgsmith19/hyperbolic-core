@@ -19,10 +19,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from api.auth import AuthError, AuthUnavailableError, authenticate, principal
+from api.auth import (
+    AuthError,
+    AuthUnavailableError,
+    authenticate,
+    principal,
+    request_roles,
+)
 from api.auth import settings as auth_settings
 from api.chat import router as chat_router
 from api.dtos import (
+    AgentRequestIn,
     ApproveIn,
     CaptureIn,
     CompleteIn,
@@ -45,6 +52,10 @@ from domains.agents.proposals import (
 )
 from domains.agents.proposals import guard_capture as guard_agent_proposal_capture
 from domains.agents.receipts import guard_capture as guard_receipt_capture
+from domains.agents.requests import RequestRefused, parse_role
+from domains.agents.requests import guard_capture as guard_request_capture
+from domains.agents.requests import request as request_gate_decision
+from domains.agents.roles import default_registry
 from domains.bills.dispute import (
     AuthorityRefused,
     DecisionResult,
@@ -235,6 +246,11 @@ def auth_unavailable(request: Request, exc: AuthUnavailableError) -> JSONRespons
     return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
+@app.exception_handler(RequestRefused)
+def request_refused(request: Request, exc: RequestRefused) -> JSONResponse:
+    return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+
 @app.exception_handler(ScopeError)
 def scope_error(request: Request, exc: ScopeError) -> JSONResponse:
     return JSONResponse(status_code=403, content={"detail": str(exc)})
@@ -380,6 +396,7 @@ def post_capture(body: CaptureIn, context: Ctx) -> CaptureResult:
     guard_episode_capture(context, body.type_name, body.attributes)
     guard_intention_capture(context, body.type_name, body.attributes)
     guard_receipt_capture(body.type_name)
+    guard_request_capture(body.type_name)
     guard_agent_proposal_capture(body.type_name, body.attributes)
     return capture(
         context,
@@ -443,6 +460,37 @@ def post_propose_action(body: ProposeActionIn, request: Request, context: Ctx) -
     """
     subject, _verified = principal(request)
     return propose_action(context, body.kind, body.summary, body.payload, proposed_by=subject)
+
+
+@app.post("/agents/requests")
+def post_agent_request(body: AgentRequestIn, request: Request, context: Ctx) -> dict[str, Any]:
+    """#596: a controller asks the role gate for one decision. Needs only the
+    `agents:request` scope. Who asked comes from the verified token, the role
+    must be in that token's allowlist, `approved` cannot be sent, and an allowed
+    receipt executes nothing. A retry with the same key returns the original."""
+    subject, _verified = principal(request)
+    result = request_gate_decision(
+        context,
+        default_registry(),
+        parse_role(body.role),
+        body.permission,
+        body.idempotency_key,
+        requested_by=subject,
+        allowed_roles=request_roles(request),
+    )
+    receipt = result.receipt
+    return {
+        "receipt_key": receipt.receipt_key,
+        "role": receipt.role,
+        "permission": receipt.permission,
+        "action_class": receipt.action_class,
+        "allowed": receipt.allowed,
+        "reason": receipt.reason,
+        "recorded_at": receipt.recorded_at,
+        "duplicate": receipt.duplicate,
+        "requested_by": result.requested_by,
+        "executed": False,
+    }
 
 
 @app.post("/action-proposals/{proposal_id}/approve")
