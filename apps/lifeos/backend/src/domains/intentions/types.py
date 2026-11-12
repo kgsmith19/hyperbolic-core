@@ -59,11 +59,28 @@ INTENTION_SCHEMA: dict[str, Any] = {
         # not x-pii. An existing database needs
         # `python -m scripts.migrate_intention_today` once.
         "area": {"type": "string", "enum": list(AREAS)},
+        # #532 Needs Me (first slice). All optional, so existing rows stay valid.
+        # Dates are ISO YYYY-MM-DD and are state, not free text, so not x-pii.
+        "deadline": {"type": "string", "maxLength": 10},
+        "snoozed_until": {"type": "string", "maxLength": 10},
+        # Free text the operator writes about their own life: x-pii, erasable.
+        "deadline_source": {"type": "string", "maxLength": 200},
+        "starter": {"type": "string", "maxLength": 200},
+        "prerequisites": {"type": "string", "maxLength": 500},
+        "completion_evidence": {"type": "string", "maxLength": 500},
     },
     "required": ["title", "kind", "status", "focus"],
     "additionalProperties": False,
     "x-identity": ["title"],
-    "x-pii": ["floor", "next_action", "source"],
+    "x-pii": [
+        "floor",
+        "next_action",
+        "source",
+        "deadline_source",
+        "starter",
+        "prerequisites",
+        "completion_evidence",
+    ],
 }
 
 _TYPES = {TYPE_NAME: INTENTION_SCHEMA}
