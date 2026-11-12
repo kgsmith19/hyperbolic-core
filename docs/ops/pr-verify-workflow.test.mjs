@@ -306,6 +306,89 @@ test("PR Gate arms auto-merge with expectedHeadOid bound to the live head SHA (S
   assert.equal(armCalls[0].variables.sha, liveSha, "expectedHeadOid must equal the live PR head SHA");
 });
 
+async function runGateWith(pull, updates) {
+  const prGate = (await import(`file://${loadPrGateModule()}`)).default;
+  const github = {
+    paginate: async () => [],
+    rest: {
+      pulls: {
+        get: async () => ({ data: pull }),
+        update: async (args) => {
+          updates.push(args);
+          return {};
+        },
+        updateBranch: async () => ({}),
+      },
+      issues: {
+        get: async (a) => ({ data: { number: a.issue_number, state: "closed", body: "" } }),
+        listEventsForTimeline: async () => ({ data: [] }),
+        listComments: async () => ({ data: [] }),
+        createComment: async () => {},
+        updateComment: async () => {},
+        removeLabel: async () => {},
+      },
+      repos: {
+        getContent: async () => ({
+          data: {
+            encoding: "base64",
+            content: Buffer.from("dev:\n  provider: anthropic\n  model: x\n", "utf8").toString("base64"),
+          },
+        }),
+      },
+    },
+    graphql: async () => ({}),
+  };
+  const core = {
+    info() {},
+    warning() {},
+    error() {},
+    setFailed() {},
+    summary: { addHeading() {}, addRaw() {}, write: async () => {} },
+  };
+  const context = {
+    repo: { owner: "kgsmith19", repo: "hyperbolic-core" },
+    payload: {
+      action: "opened",
+      pull_request: { number: 42 },
+      repository: { owner: { login: "kgsmith19" }, default_branch: "main" },
+    },
+  };
+  const gates = {};
+  for (const id of EXPECTED_WORKERS) gates[id] = { result: "success" };
+  await prGate(context, github, core, { env: { GATE_RESULTS: JSON.stringify(gates) } });
+}
+
+function pullWith(ref, title, body) {
+  return {
+    number: 42,
+    node_id: "PR_x",
+    title,
+    draft: false,
+    mergeable_state: "clean",
+    labels: [],
+    head: { sha: "f".repeat(40), ref, repo: { full_name: "kgsmith19/hyperbolic-core" } },
+    base: { sha: "c".repeat(40), ref: "main", repo: { full_name: "kgsmith19/hyperbolic-core" } },
+    body,
+  };
+}
+
+test("conventions autofix (std #333): a derivable Issue gets a Closes line under the Related heading", async () => {
+  const updates = [];
+  await runGateWith(pullWith("issue/77-x", "t", "## 📋 Summary\nx\n\n## 🔗 Related Issue\n\n## 🔨 Changes"), updates);
+  assert.equal(updates.length, 1, "exactly one body update");
+  assert.match(updates[0].body, /## 🔗 Related Issue\n\nCloses #77\n/);
+  const fromTitle = [];
+  await runGateWith(pullWith("ccr-x", "Fix it (#9)", "no link"), fromTitle);
+  assert.match(fromTitle[0].body, /Closes #9\n$/);
+});
+
+test("conventions autofix (std #333): an existing Closes line or an underivable Issue writes nothing", async () => {
+  const updates = [];
+  await runGateWith(pullWith("issue/77-x", "t", "Closes #5"), updates);
+  await runGateWith(pullWith("ccr-x", "no number", "no link"), updates);
+  assert.deepEqual(updates, []);
+});
+
 test("control-plane shape: no pull_request_target anywhere (Stage 60b unsafe-target)", () => {
   assert.doesNotMatch(workflow, /pull_request_target/, "no job may trigger on pull_request_target");
 });
