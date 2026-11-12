@@ -4,6 +4,7 @@ import pytest
 
 import domains.agents.roles as roles
 from domains.agents.roles import (
+    LIFEOS_EXTENSION_GRANTS,
     PERMISSION_CLASS,
     REFERENCE_GRANTS,
     ActionClass,
@@ -25,7 +26,11 @@ def test_exactly_nine_roles_with_nonempty_reference_grants() -> None:
     assert len(registry.grants) == 9
     assert set(registry.grants) == set(Role)
     assert all(registry.grants[role] for role in Role)
-    assert dict(registry.grants) == dict(REFERENCE_GRANTS)
+    expected = {
+        role: REFERENCE_GRANTS[role] | LIFEOS_EXTENSION_GRANTS.get(role, frozenset())
+        for role in Role
+    }
+    assert dict(registry.grants) == expected
 
 
 def test_a_registry_missing_a_role_is_refused() -> None:
@@ -58,6 +63,16 @@ def test_a_registry_granting_an_unknown_permission_is_refused() -> None:
 
     with pytest.raises(ValueError, match="unknown permission"):
         build_registry(grants)
+
+
+def test_the_default_registry_adds_only_the_recorded_launch_extension() -> None:
+    registry = default_registry()
+
+    assert "launch_two_minute_action" in registry.grants[Role.FINANCIAL_OPERATIONS]
+    assert REFERENCE_GRANTS[Role.FINANCIAL_OPERATIONS] == frozenset(
+        {"update_bills_sheet", "flag_declined_autopay", "draft_dispute_packet"}
+    )
+    assert PERMISSION_CLASS["launch_two_minute_action"] is ActionClass.DRAFT
 
 
 def test_every_granted_permission_maps_to_exactly_one_action_class() -> None:

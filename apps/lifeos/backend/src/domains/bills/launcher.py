@@ -31,8 +31,8 @@ from kernel.events import DEFAULT_ACTOR
 
 LaunchKind = Literal["confirm_amount", "resolve_autopay_failure", "confirm_payment"]
 ROLE = Role.FINANCIAL_OPERATIONS
-# A launch packages a draft for the operator, so it sits in the draft action class.
-PERMISSION = "draft_dispute_packet"
+# A launch is its own draft action (owner decision Q3), not a dispute packet.
+PERMISSION = "launch_two_minute_action"
 ESTIMATED_MINUTES = 2
 
 
