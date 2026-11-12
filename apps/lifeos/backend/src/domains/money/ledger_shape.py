@@ -18,6 +18,10 @@ Rules (from #595):
   Failed and declined read as unpaid (still owed). AutoPay reads as scheduled:
   it is owed, and the row carries an ``autopay_scheduled`` flag.
 - Blank rows are skipped.
+- Header columns may be named by an exact alias (case and surrounding or repeated
+  whitespace ignored), never by fuzzy match. A column matched by two header cells
+  is ambiguous and refused. The resolved column-to-header mapping is returned on
+  the result so the caller can record which header text was used, never a value.
 """
 
 import re
@@ -29,6 +33,16 @@ from decimal import Decimal, InvalidOperation
 from domains.bills.forecast import BillLedgerRow, PaymentStatus
 
 REQUIRED_COLUMNS = ("id", "due date", "amount", "payment method", "status", "evidence")
+# Exact, reviewed aliases per required column. Fuzzy matching is deliberately absent:
+# a column the owner did not name in this list is not guessed at.
+ALIASES: dict[str, tuple[str, ...]] = {
+    "id": ("id", "bill id", "bill"),
+    "due date": ("due date", "due", "date due", "due on"),
+    "amount": ("amount", "amount due", "total"),
+    "payment method": ("payment method", "method", "pay method"),
+    "status": ("status", "payment status"),
+    "evidence": ("evidence", "proof", "evidence id"),
+}
 _ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 
 
@@ -52,6 +66,8 @@ class Rejected:
 class ShapeResult:
     rows: tuple[ShapedRow, ...]
     rejected: tuple[Rejected, ...]
+    # (required column, header text it matched), in REQUIRED_COLUMNS order.
+    header_map: tuple[tuple[str, str], ...] = ()
 
 
 def _parse_amount(cell: str) -> Decimal | None:
@@ -77,13 +93,20 @@ def _parse_date(cell: str) -> date | None:
         return None
 
 
+def _normalize(cell: str) -> str:
+    return " ".join(cell.split()).lower()
+
+
 def _header_index(header: Sequence[str]) -> dict[str, int]:
-    normalized = [cell.strip().lower() for cell in header]
+    normalized = [_normalize(cell) for cell in header]
     index: dict[str, int] = {}
     for column in REQUIRED_COLUMNS:
-        if column not in normalized:
+        matches = [i for i, cell in enumerate(normalized) if cell in ALIASES[column]]
+        if not matches:
             raise LedgerHeaderError(f"ledger header is missing the {column!r} column")
-        index[column] = normalized.index(column)
+        if len(matches) > 1:
+            raise LedgerHeaderError(f"ledger header names the {column!r} column more than once")
+        index[column] = matches[0]
     return index
 
 
@@ -109,6 +132,7 @@ def shape_ledger(table: Sequence[Sequence[str]]) -> ShapeResult:
     if not table:
         raise LedgerHeaderError("ledger table is empty")
     index = _header_index(table[0])
+    header_map = tuple((column, _normalize(table[0][index[column]])) for column in REQUIRED_COLUMNS)
 
     shaped: list[ShapedRow] = []
     rejected: list[Rejected] = []
@@ -145,4 +169,4 @@ def shape_ledger(table: Sequence[Sequence[str]]) -> ShapeResult:
             )
         )
 
-    return ShapeResult(rows=tuple(shaped), rejected=tuple(rejected))
+    return ShapeResult(rows=tuple(shaped), rejected=tuple(rejected), header_map=header_map)

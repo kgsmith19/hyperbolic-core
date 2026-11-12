@@ -11,6 +11,9 @@ WORKDIR /app/apps/lifeos/backend
 COPY pyproject.toml ./
 COPY src ./src
 COPY db ./db
+# The one-time Needs Me schema migration (run by an owner-approved Core Deploy step).
+# Only its own modules are copied: no other operator script ships in the image.
+COPY scripts/__init__.py scripts/type_redefinition.py scripts/migrate_intention_needs_me.py ./scripts/
 RUN pip install . && useradd --system lifeos
 ENV PYTHONPATH=/app/apps/lifeos/backend/src
 WORKDIR /app

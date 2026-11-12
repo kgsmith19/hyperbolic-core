@@ -111,3 +111,50 @@ def test_blank_rows_are_skipped_without_a_rejection() -> None:
 def test_empty_table_is_refused() -> None:
     with pytest.raises(LedgerHeaderError, match="empty"):
         shape_ledger([])
+
+
+@pytest.mark.parametrize(
+    ("alias", "column"),
+    [
+        ("Bill ID", "id"),
+        ("Due", "due date"),
+        ("Date  Due", "due date"),
+        ("Total", "amount"),
+        ("Method", "payment method"),
+        ("Payment Status", "status"),
+        ("Proof", "evidence"),
+    ],
+)
+def test_an_exact_alias_resolves_to_its_required_column(alias: str, column: str) -> None:
+    header = [alias if name.lower() == column else name for name in HEADER]
+
+    result = shape_ledger([header, ["bill-1", "2026-11-20", "10", "manual", "unpaid", ""]])
+
+    assert result.rows[0].row.bill_id == "bill-1"
+    assert dict(result.header_map)[column] == " ".join(alias.split()).lower()
+
+
+def test_a_fuzzy_name_is_not_guessed_at() -> None:
+    header = ["ID", "Payment due", "Amount", "Payment method", "Status", "Evidence"]
+
+    with pytest.raises(LedgerHeaderError, match="due date"):
+        shape_ledger([header, ["x", "2026-11-20", "10", "manual", "unpaid", ""]])
+
+
+def test_two_header_cells_matching_one_column_are_refused_as_ambiguous() -> None:
+    header = [*HEADER, "Due"]
+
+    with pytest.raises(LedgerHeaderError, match="more than once"):
+        shape_ledger([header, ["x", "2026-11-20", "10", "manual", "unpaid", "", "2026-11-21"]])
+
+
+def test_header_map_records_the_header_text_and_no_ledger_values() -> None:
+    result = shape_ledger(
+        _table(["secret-bill-id", "2026-11-20", "1234.56", "manual", "paid", "txn-private"])
+    )
+
+    rendered = repr(result.header_map)
+    assert "secret-bill-id" not in rendered
+    assert "1234.56" not in rendered
+    assert "txn-private" not in rendered
+    assert dict(result.header_map)["amount"] == "amount"

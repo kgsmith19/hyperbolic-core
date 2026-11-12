@@ -4,3 +4,9 @@
 !pyproject.toml
 !src
 !db
+# The one-time Needs Me migration's three modules only, never the rest of scripts/.
+!scripts
+scripts/*
+!scripts/__init__.py
+!scripts/type_redefinition.py
+!scripts/migrate_intention_needs_me.py
