@@ -43,6 +43,7 @@ from domains.agents.proposals import (
     reject_agent_proposal,
 )
 from domains.agents.proposals import guard_capture as guard_agent_proposal_capture
+from domains.agents.receipts import guard_capture as guard_receipt_capture
 from domains.bills.dispute import (
     AuthorityRefused,
     DecisionResult,
@@ -208,7 +209,7 @@ class _StripRootPathMiddleware:
         if prefix and prefix_matches:
             scope = dict(scope)
             scope["root_path"] = scope.get("root_path", "") + prefix
-            scope["path"] = path[len(prefix):] or "/"
+            scope["path"] = path[len(prefix) :] or "/"
         await self.app(scope, receive, send)
 
 
@@ -377,6 +378,7 @@ def post_capture(body: CaptureIn, context: Ctx) -> CaptureResult:
     guard_document_capture(body.type_name, body.attributes)
     guard_episode_capture(context, body.type_name, body.attributes)
     guard_intention_capture(context, body.type_name, body.attributes)
+    guard_receipt_capture(body.type_name)
     guard_agent_proposal_capture(body.type_name, body.attributes)
     return capture(
         context,
@@ -632,9 +634,7 @@ def get_intentions_plan(context: Ctx) -> list[PlannedIntention]:
 
 
 @app.post("/intentions/{intention_id}/done")
-def post_mark_intention_done(
-    intention_id: UUID, body: DecideIn, context: Ctx
-) -> PlannedIntention:
+def post_mark_intention_done(intention_id: UUID, body: DecideIn, context: Ctx) -> PlannedIntention:
     """LO-3d: marks one intention done. Appends a single `entity.updated`
     event through capture()'s own identity-match merge; every prior
     event, including the intention's own creation, is untouched."""
