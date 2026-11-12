@@ -40,7 +40,16 @@ runs:
           "$dir/pr.json" "$dir/body.md" "$dir/head_ref" "$dir/title"
         status=0
         missing=()
-        for heading in "## 📋 Summary" "## 🔗 Related Issue" "## 🔨 Changes" "## 🧪 Verification" "## ✅ Scope Check"; do
+        # The template is the single source of the required sections; the
+        # fixed list is only a fallback when it is absent from the checkout.
+        headings=()
+        if [ -f .github/PULL_REQUEST_TEMPLATE.md ]; then
+          mapfile -t headings < <(grep -E '^## ' .github/PULL_REQUEST_TEMPLATE.md)
+        fi
+        if [ "${#headings[@]}" -eq 0 ]; then
+          headings=("## 📋 Summary" "## 🔗 Related Issue" "## 🔨 Changes" "## 🧪 Verification" "## ✅ Scope Check")
+        fi
+        for heading in "${headings[@]}"; do
           if ! grep -qF -- "$heading" "$dir/body.md"; then
             missing+=("$heading")
           fi
