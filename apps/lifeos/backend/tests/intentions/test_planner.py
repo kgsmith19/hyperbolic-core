@@ -149,7 +149,7 @@ def test_mark_done_sets_done_and_preserves_every_other_field(seed_ctx: AccessCon
     seed(seed_ctx, title, kind="habit_quota", floor="one push-up", next_action="do it now")
     view = by_title(plan_today(seed_ctx), title)
 
-    updated = mark_done(seed_ctx, view.intention_id)
+    updated = mark_done(seed_ctx, view.intention_id, evidence="confirmed by the owner")
 
     assert updated.done is True
     assert updated.kind == "habit_quota"
@@ -165,7 +165,7 @@ def test_mark_done_appends_exactly_one_new_event_never_edits_the_old_one(
     view = by_title(plan_today(seed_ctx), title)
     before = event_count()
 
-    mark_done(seed_ctx, view.intention_id)
+    mark_done(seed_ctx, view.intention_id, evidence="confirmed by the owner")
 
     assert event_count() == before + 1
 
@@ -175,7 +175,7 @@ def test_mark_done_is_reflected_in_the_next_plan_read(seed_ctx: AccessContext) -
     seed(seed_ctx, title)
     view = by_title(plan_today(seed_ctx), title)
 
-    mark_done(seed_ctx, view.intention_id)
+    mark_done(seed_ctx, view.intention_id, evidence="confirmed by the owner")
 
     assert by_title(plan_today(seed_ctx), title).done is True
 
@@ -204,7 +204,7 @@ def test_re_importing_an_already_known_title_preserves_its_done_state(
     title = a_title("reimport")
     seed(seed_ctx, title)
     view = by_title(plan_today(seed_ctx), title)
-    mark_done(seed_ctx, view.intention_id)
+    mark_done(seed_ctx, view.intention_id, evidence="confirmed by the owner")
     assert by_title(plan_today(seed_ctx), title).done is True
 
     # `title` is already known, so run_import's own existing-title skip

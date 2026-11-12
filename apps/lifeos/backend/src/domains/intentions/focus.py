@@ -10,6 +10,7 @@ dispatch precedent) and in-process writers capture through
 
 from typing import Any
 
+from domains.intentions.evidence import guard_done_capture
 from domains.intentions.types import TYPE_NAME
 from kernel import services
 from kernel.access import AccessContext
@@ -45,6 +46,7 @@ def guard_capture(ctx: AccessContext, type_name: str, attributes: dict[str, Any]
     authority attached — nothing grants, sends, or scores on it (INT1 is
     display-only) — and one re-capture repairs it.
     """
+    guard_done_capture(ctx, type_name, attributes)
     if type_name != TYPE_NAME or attributes.get("focus") is not True:
         return
     focused = services.find(ctx, type_name=TYPE_NAME, filters={"focus": True})

@@ -28,6 +28,7 @@ from api.dtos import (
     CompleteIn,
     DecideIn,
     DefineTypeIn,
+    DoneIn,
     ForgetIn,
     ProgressIn,
     ProposeActionIn,
@@ -634,11 +635,14 @@ def get_intentions_plan(context: Ctx) -> list[PlannedIntention]:
 
 
 @app.post("/intentions/{intention_id}/done")
-def post_mark_intention_done(intention_id: UUID, body: DecideIn, context: Ctx) -> PlannedIntention:
+def post_mark_intention_done(intention_id: UUID, body: DoneIn, context: Ctx) -> PlannedIntention:
     """LO-3d: marks one intention done. Appends a single `entity.updated`
     event through capture()'s own identity-match merge; every prior
     event, including the intention's own creation, is untouched."""
-    return mark_done(context, intention_id, actor=body.actor)
+    try:
+        return mark_done(context, intention_id, actor=body.actor, evidence=body.evidence)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/intentions/today")
@@ -650,9 +654,12 @@ def get_intentions_today(context: Ctx) -> TodayView:
 
 @app.post("/intentions/{intention_id}/progress")
 def post_intention_progress(intention_id: UUID, body: ProgressIn, context: Ctx) -> TodayItem:
-    """#531: record READY/STARTED/BLOCKED/WAITING/DONE as one appended event."""
+    """#531: record READY/STARTED/BLOCKED/WAITING/DONE as one appended event.
+    Moving into DONE needs completion evidence (Q5)."""
     try:
-        return set_progress(context, intention_id, body.progress, actor=body.actor)
+        return set_progress(
+            context, intention_id, body.progress, actor=body.actor, evidence=body.evidence
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

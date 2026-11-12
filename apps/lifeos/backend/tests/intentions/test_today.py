@@ -102,7 +102,7 @@ def test_progress_change_appends_one_event_and_keeps_history(
     assert item.progress == "STARTED"
     assert event_count() == before + 1
     set_progress(seed_ctx, eid, "BLOCKED")
-    set_progress(seed_ctx, eid, "DONE")
+    set_progress(seed_ctx, eid, "DONE", evidence="confirmed by the owner")
     history = [c.progress for c in progress_history(seed_ctx, eid)]
     assert history == ["READY", "STARTED", "BLOCKED", "DONE"]
     done = services.get_entity(seed_ctx, eid).entity.attributes
@@ -112,7 +112,7 @@ def test_progress_change_appends_one_event_and_keeps_history(
 def test_done_one_offs_leave_the_day(seed_ctx: AccessContext, marker: str) -> None:
     title = f"{marker}-finish"
     seed(seed_ctx, title)
-    set_progress(seed_ctx, entity_id(seed_ctx, title), "DONE")
+    set_progress(seed_ctx, entity_id(seed_ctx, title), "DONE", evidence="confirmed by the owner")
     all_titles = {i.title for i in today(seed_ctx).one_offs}
     assert title not in all_titles
 

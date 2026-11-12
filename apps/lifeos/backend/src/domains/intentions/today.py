@@ -39,6 +39,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from domains.intentions.evidence import clean_evidence, require_evidence
 from domains.intentions.planner import _priority_key
 from domains.intentions.types import AREAS, STATUS_CANDIDATE, TYPE_NAME
 from domains.ops.briefing import briefing_zone
@@ -208,9 +209,16 @@ def today(ctx: AccessContext, now: datetime | None = None) -> TodayView:
 
 
 def set_progress(
-    ctx: AccessContext, intention_id: UUID, progress: str, actor: str = DEFAULT_ACTOR
+    ctx: AccessContext,
+    intention_id: UUID,
+    progress: str,
+    actor: str = DEFAULT_ACTOR,
+    evidence: str | None = None,
 ) -> TodayItem:
-    """Record one progress change as an appended event; refuse anything off the list."""
+    """Record one progress change as an appended event; refuse anything off the list.
+
+    Moving into DONE needs completion evidence (Q5); see domains.intentions.evidence.
+    """
     if progress not in PROGRESS:
         raise ValueError(f"progress must be one of {', '.join(PROGRESS)}")
     view = services.get_entity(ctx, intention_id)
@@ -221,6 +229,10 @@ def set_progress(
         "progress": progress,
         "done": progress == "DONE",
     }
+    proof = clean_evidence(evidence)
+    if proof is not None:
+        attributes["completion_evidence"] = proof
+    require_evidence(view.entity.attributes, attributes)
     result = services.capture(ctx, TYPE_NAME, attributes, actor=actor)
     return _item(services.get_entity(ctx, result.entity_id).entity, datetime.now(UTC))
 
