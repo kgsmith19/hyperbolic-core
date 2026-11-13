@@ -149,8 +149,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Explicit and read-only (#445): the workflow default plus issues: read,
-    # which the queue guard needs to read the PR timeline when checking the
-    # owner provenance of owner:queue-exempt. No write grant, ever.
+    # which the queue guard uses to read the PR and the queue. No write grant,
+    # ever.
     permissions:
       contents: read
       pull-requests: read
@@ -189,8 +189,8 @@ jobs:
           github_token: ${{ github.token }}
 
       # Queue v2 guard (#445): the PR must close only Issues on the active
-      # item of the owner's execution queue (or carry the owner-applied
-      # owner:queue-exempt label). Rule and code live in std.
+      # item of the execution queue (or carry queue:exempt, which any agent
+      # may apply, std #338). Rule and code live in std.
       - name: Standards · Work matches the execution queue
         uses: ./.github/actions/verify-queue-guard
         with:
