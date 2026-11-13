@@ -47,7 +47,16 @@ _ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 
 
 class LedgerHeaderError(ValueError):
-    """The ledger header is missing a required column; nothing is shaped."""
+    """The ledger header is missing a required column; nothing is shaped.
+
+    ``column`` names the required column at fault (empty for an empty table) and
+    ``problem`` is ``missing``, ``duplicated`` or ``empty``: enough for a receipt, with
+    no header or ledger text."""
+
+    def __init__(self, message: str, column: str = "", problem: str = "empty") -> None:
+        super().__init__(message)
+        self.column = column
+        self.problem = problem
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,9 +112,13 @@ def _header_index(header: Sequence[str]) -> dict[str, int]:
     for column in REQUIRED_COLUMNS:
         matches = [i for i, cell in enumerate(normalized) if cell in ALIASES[column]]
         if not matches:
-            raise LedgerHeaderError(f"ledger header is missing the {column!r} column")
+            raise LedgerHeaderError(
+                f"ledger header is missing the {column!r} column", column, "missing"
+            )
         if len(matches) > 1:
-            raise LedgerHeaderError(f"ledger header names the {column!r} column more than once")
+            raise LedgerHeaderError(
+                f"ledger header names the {column!r} column more than once", column, "duplicated"
+            )
         index[column] = matches[0]
     return index
 
