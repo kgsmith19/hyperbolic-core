@@ -50,6 +50,7 @@ The browser reaches the platform same-origin at `/platform`, so no CORS is neede
 | `/providers/hetzner/HETZNER_API_TOKEN` | `provision.sh` | existing |
 | `/brain/BRAIN_ANTHROPIC_API_KEY` | Brain only (ADR-05 file mount + ACC vault) | existing |
 | `/platform/lifeos-deploy/ANTHROPIC_API_KEY`, `LIFEOS_BRIEFING_TZ` | LifeOS | existing |
+| `/platform/lifeos-deploy/LIFEOS_AGENT_JWT_PUBLIC_KEY` (optional; absent = agent tokens refused) | LifeOS controller-token verification (#596) | hyper-agents `lifeos.controller_tokens.renew` (never rotates) |
 | `/platform/backup/RESTIC_PASSWORD`, `STORAGEBOX_SSH_KEY` | nightly restic | existing |
 
 Nothing secret is committed, printed, or passed on a command line: scripts move values on stdin.

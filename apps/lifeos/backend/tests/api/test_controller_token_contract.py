@@ -68,23 +68,27 @@ def external_token(agent: str, roles: list[str], days: int = 30) -> str:
     return jwt.encode(claims, decode_key(_PRIVATE_B64), algorithm="ES256")
 
 
-def ask(token: str, role: str, permission: str) -> int:
+def ask(token: str, role: str, permission: str) -> tuple[int, dict[str, object]]:
     response = client.post(
         "/agents/requests",
         json={"role": role, "permission": permission, "idempotency_key": f"c-{uuid4().hex}"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    return response.status_code
+    return response.status_code, response.json()
 
 
 def test_an_externally_minted_controller_token_verifies_with_the_vault_key_format() -> None:
     token = external_token("claude-code", ["reliability_engineer", "financial_operations"])
     context = verify(token, decode_key(_PUBLIC_B64))
-    assert AGENTS_REQUEST_SCOPE in context.scopes
+    assert context.scopes == frozenset({AGENTS_REQUEST_SCOPE})  # exactly the one scope
 
 
 def test_the_route_allows_a_low_risk_request_and_denies_another_role() -> None:
     claude = external_token("claude-code", ["financial_operations", "reliability_engineer"])
     chatgpt = external_token("chatgpt", ["communications", "household_operations"])
-    assert ask(claude, "reliability_engineer", "query_telemetry") == 200
-    assert ask(chatgpt, "financial_operations", "draft_dispute_packet") == 403
+    status, body = ask(claude, "reliability_engineer", "query_telemetry")
+    assert status == 200, body
+    assert body["allowed"] is True and body["executed"] is False
+    assert body["requested_by"] == "agent:claude-code"
+    status, body = ask(chatgpt, "financial_operations", "draft_dispute_packet")
+    assert status == 403, body

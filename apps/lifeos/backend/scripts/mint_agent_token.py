@@ -14,11 +14,14 @@ scope when one lands.
 A controller token for the agent request route (#596) takes `--scope
 agents:request` plus one `--role` per allowed role, e.g. `--agent claude-code
 --scope agents:request --role financial_operations --role reliability_engineer`.
-The two standing controller tokens (CLAUDE_CODE_TOKEN, CHATGPT_TOKEN) are minted,
-stored in the vault (/lifeos/agents) and renewed by the hyper-agents op
-`lifeos.controller_tokens.renew` in the token format pinned by
-tests/api/test_controller_token_contract.py; this script stays for one-off
-local tokens and never runs on its own.
+The two standing controller tokens (CLAUDE_CODE_TOKEN, CHATGPT_TOKEN) are minted
+and renewed by the hyper-agents op `lifeos.controller_tokens.renew`, in the token
+format pinned by tests/api/test_controller_token_contract.py. The vault layout:
+tokens and the private key at /lifeos/agents, the public key at
+/platform/lifeos-deploy (read by ops/cloud/remote.sh into lifeos.env). The op
+creates a key pair only when neither half exists and never rotates one, so the
+deployed public key stays valid. This script stays for one-off local tokens and
+never runs on its own.
 """
 
 import argparse

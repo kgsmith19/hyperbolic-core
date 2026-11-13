@@ -61,21 +61,24 @@ open(path, \"w\").write(\"\\n\".join(lines + [\"PLATFORM_CF_ACCESS_AUD=\" + aud]
   val() { sed -n "s/^$1=//p" <<<"$platform_env"; }
   # build.env: public values only (compiled into the browser bundle).
   printf 'PUBLIC_ORIGIN=https://core.kylegsmith.com\nPLATFORM_ANON_KEY=%s\n' "$(val PLATFORM_ANON_KEY)" | put_file "$BASE/env/build.env"
+  # Verifies controller tokens (#596). Fetched on its own line so a vault failure aborts the
+  # deploy (set -e) instead of writing an empty key; only an absent key (404) is empty, and
+  # then the API refuses agent tokens (fail closed). Written by hyper-agents'
+  # lifeos.controller_tokens.renew, which never rotates an existing key pair.
+  agent_public_key="$(secret_get_optional /platform/lifeos-deploy LIFEOS_AGENT_JWT_PUBLIC_KEY)"
   {
     echo "LIFEOS_PLATFORM_URL=http://platform.localhost:8400"
     echo "LIFEOS_OWNER_USER_ID=$(val PLATFORM_OWNER_ID)"
     echo "ANTHROPIC_API_KEY=$(secret_get /platform/lifeos-deploy ANTHROPIC_API_KEY)"
     echo "LIFEOS_BRIEFING_TZ=$(secret_get /platform/lifeos-deploy LIFEOS_BRIEFING_TZ)"
-    # Verifies controller tokens (#596). hyper-agents' lifeos.controller_tokens.renew op keeps
-    # the key pair and tokens in the vault; absent means agent tokens are refused (fail closed).
-    echo "LIFEOS_AGENT_JWT_PUBLIC_KEY=$(secret_get_optional /platform/lifeos-deploy LIFEOS_AGENT_JWT_PUBLIC_KEY)"
+    echo "LIFEOS_AGENT_JWT_PUBLIC_KEY=$agent_public_key"
   } | put_file "$BASE/env/lifeos.env"
   {
     echo "PLATFORM_URL=http://platform.localhost:8400"
     echo "PLATFORM_ANON_KEY=$(val PLATFORM_ANON_KEY)"
     echo "PLATFORM_SERVICE_KEY=$(val PLATFORM_SERVICE_KEY)"
   } | put_file "$BASE/env/brain.env"
-  unset platform_env
+  unset platform_env agent_public_key
   # Brain's provider: the ACC vault holds its own Anthropic key (ADR-05).
   on_host "mkdir -p $BASE/var/brain/acc-root && { test -f $BASE/var/brain/acc-root/policy.json || cp $rel/apps/agentic-command-center/backend/policy.json $BASE/var/brain/acc-root/policy.json; }"
   secret_get /brain BRAIN_ANTHROPIC_API_KEY | put_file "$BASE/env/brain-anthropic-api-key"
